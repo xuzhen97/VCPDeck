@@ -113,6 +113,10 @@ VCPDeck      = 你的驾驶台（TODO、机器调度、流程编排、聊天协�
 - 知识向量检索 → VCPToolBox 的 RAG 记忆系统负责
 - 插件生态管理 → VCPToolBox 的 Plugin 系统负责
 
+## 技术栈
+
+技术选型详情见 [`docs/tech-stack.md`](docs/tech-stack.md)。
+
 ## 后续扩展方向
 
 - **移动端** — 延伸到手机，随时随地查看 TODO、跟 Agent 对话、审核结果
