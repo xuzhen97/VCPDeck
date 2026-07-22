@@ -10,11 +10,11 @@ Your personal AI collaboration cockpit.
 ## Setup
 
 ```bash
-node ./run.cjs config show
+node ./vcpdeck.cjs config show
 ```
 
 ## First Steps
 
 ```bash
-node ./run.cjs --help
+node ./vcpdeck.cjs --help
 ```

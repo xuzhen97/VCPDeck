@@ -2,10 +2,18 @@ const esbuild = require("esbuild");
 const path = require("path");
 
 esbuild.buildSync({
-  entryPoints: [path.join(__dirname, "..", "dist", "index.js")],
-  bundle: true,
-  platform: "node",
-  target: "node18",
-  outfile: path.join(__dirname, "..", "..", "..", "skills", "vcpdeck", "dist", "vcpdeck.cjs"),
-  banner: { js: "#!/usr/bin/env node" },
+	entryPoints: [path.join(__dirname, "..", "dist", "index.js")],
+	bundle: true,
+	platform: "node",
+	target: "node18",
+	outfile: path.join(
+		__dirname,
+		"..",
+		"..",
+		"..",
+		"skills",
+		"vcpdeck",
+		"vcpdeck.cjs",
+	),
+	banner: { js: "#!/usr/bin/env node" },
 });

@@ -1,4 +1,4 @@
 node_modules/
 dist/
 *.tsbuildinfo
-skills/vcpdeck/dist/
+skills/vcpdeck/vcpdeck.cjs
