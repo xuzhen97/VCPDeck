@@ -1,0 +1,13 @@
+{
+  "name": "@vcpdeck/client",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@vcpdeck/shared": "workspace:*",
+    "socket.io-client": "^4.7.5"
+  }
+}
