@@ -22,21 +22,18 @@ export class JobService {
     command: string,
     timeout?: number,
   ): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
-    const jobId = randomUUID();
-    await this.prisma.client.upsert({
+    // Verify client exists and is online
+    const client = await this.prisma.client.findUnique({
       where: { id: clientId },
-      update: {},
-      create: {
-        id: clientId,
-        hostname: "",
-        os: "",
-        cpuModel: "",
-        totalMemMB: 0,
-        totalDiskMB: 0,
-        clientVersion: "",
-        capabilities: "[]",
-      },
     });
+    if (!client) {
+      throw new Error(`Client "${clientId}" not found — register the client first`);
+    }
+    if (!client.online) {
+      throw new Error(`Client "${clientId}" is offline`);
+    }
+
+    const jobId = randomUUID();
     await this.prisma.job.create({
       data: {
         id: jobId,

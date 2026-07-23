@@ -1,4 +1,12 @@
-import { Controller, Inject, Post, Get, Body, Param } from "@nestjs/common";
+import {
+  BadRequestException,
+  Controller,
+  Inject,
+  Post,
+  Get,
+  Body,
+  Param,
+} from "@nestjs/common";
 import { JobService } from "../job/job.service.js";
 import { ClientService } from "../client/client.service.js";
 import { EventsGateway } from "./events.gateway.js";
@@ -14,15 +22,23 @@ export class EventsController {
 
   @Post("jobs")
   async createJob(@Body() body: JobCreate) {
-    const { result, dispatch } = await this.jobService.create(
-      body.clientId,
-      body.command,
-      body.timeout,
-    );
+    let jobStatus: { jobId: string; status: string } | null = null;
+    let dispatch: any = null;
+    try {
+      const r = await this.jobService.create(
+        body.clientId,
+        body.command,
+        body.timeout,
+      );
+      jobStatus = r.result;
+      dispatch = r.dispatch;
+    } catch (e: any) {
+      throw new BadRequestException(e.message);
+    }
     if (dispatch) {
       this.gateway.sendDispatch(dispatch);
     }
-    return result;
+    return jobStatus;
   }
 
   @Post("jobs/:jobId/cancel")
