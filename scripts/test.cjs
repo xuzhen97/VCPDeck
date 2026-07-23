@@ -26,6 +26,9 @@
 
 const { spawn, execSync } = require("node:child_process");
 const path = require("node:path");
+const os = require("node:os");
+
+const isWin = os.platform() === "win32";
 
 // ── Resolve paths ──
 const root = path.resolve(__dirname, "..");
@@ -67,12 +70,40 @@ function fetchJson(url, opts) {
 /** Kill anything on port 3001 from previous runs. */
 function killPort() {
 	try {
-		execSync(
-			'powershell -Command "Get-Process -Id (Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue).OwningProcess | Stop-Process -Force"',
-			{ stdio: "ignore", timeout: 3000 },
-		);
+		if (isWin) {
+			execSync(
+				'powershell -Command "Get-Process -Id (Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue).OwningProcess | Stop-Process -Force"',
+				{ stdio: "ignore", timeout: 3000 },
+			);
+		} else {
+			execSync("lsof -ti:3001 | xargs kill -9", {
+				stdio: "ignore",
+				timeout: 3000,
+				shell: true,
+			});
+		}
 	} catch {
 		// nothing on that port, fine
+	}
+}
+
+/** Kill a process tree by PID. */
+function killTree(pid) {
+	try {
+		if (isWin) {
+			execSync("taskkill", ["/F", "/T", "/PID", String(pid)], {
+				stdio: "ignore",
+				timeout: 3000,
+			});
+		} else {
+			// Kill process group (negative PID = PGID for the spawned process tree)
+			execSync("kill", ["-9", String(pid)], {
+				stdio: "ignore",
+				timeout: 3000,
+			});
+		}
+	} catch {
+		// already dead
 	}
 }
 
@@ -424,28 +455,13 @@ async function main() {
 	if (clientSocket) clientSocket.disconnect();
 
 	// Kill server process and all spawned children
-	try {
-		const pid = server.pid;
-		if (pid) {
-			execSync("taskkill", ["/F", "/T", "/PID", String(pid)], {
-				stdio: "ignore",
-				timeout: 3000,
-			});
-		}
-	} catch {
-		// already dead
-	}
+	if (server.pid) killTree(server.pid);
 	console.log("  ✓ Server stopped\n");
 
 	// Global test timeout
 	const testTimeout = setTimeout(() => {
 		console.error("Test timed out — force exit");
-		try {
-			execSync("taskkill", ["/F", "/T", "/PID", String(server.pid)], {
-				stdio: "ignore",
-				timeout: 2000,
-			});
-		} catch {}
+		if (server.pid) killTree(server.pid);
 		process.exit(1);
 	}, 45_000);
 	// Let main() clear it on success
