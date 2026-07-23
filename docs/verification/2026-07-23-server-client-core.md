@@ -163,6 +163,42 @@ node -e "fetch('http://localhost:3001/api/jobs/<jobId>/cancel',{method:'POST'}).
 | Job 取消 | `node -e "fetch(...POST /api/jobs/:id/cancel)"` | SIGTERM → SIGKILL → 确认 |
 | 断线重连 | 停止 client → 重启 | server 恢复 job 状态 |
 
+## 实现总结
+
+### 已实现（对应设计文档 §1-6）
+
+| 模块 | 覆盖范围 | 状态 |
+|---|---|---|
+| Shared 类型 | 事件常量、JobStatus 枚举、所有交互接口 | ✅ |
+| Server 架构 | NestJS 分层：Gateway(薄路由) + Service(业务+Prisma) + Scheduler(并发) | ✅ |
+| SQLite 持久化 | Client 注册/心跳、Job CRUD + output 累积 + Prisma 迁移 | ✅ |
+| Client 注册 | PSK 认证 → upsert 机器信息 → online 标记 | ✅ |
+| 心跳 | 30s 定时上报 cpu/mem 指标 | ✅ |
+| Job 创建 | REST POST → pending → scheduler 出队 → dispatch | ✅ |
+| Job 执行 | spawn 子进程 → stdout/stderr 流式推送 → output 持久化 | ✅ |
+| Job 取消 | POST cancel → SIGTERM → 5s → SIGKILL → 三态确认 | ✅ |
+| 并发控制 | maxConcurrent=3，running 降级时自动出队 | ✅ |
+| 断线重连 | 标记 disconnected → 重连 status:report → 恢复 running | ✅ |
+| 日志查看 | `node scripts/logs.cjs` 实时订阅 job:stdout/stderr | ✅ |
+| REST API | GET/POST 共 5 个端点 | ✅ |
+| 集成测试 | 14 个测试点，`node scripts/test.cjs` 一键运行 | ✅ |
+
+### 设计文档要求但本次未实现
+
+| 功能 | 原因 |
+|---|---|
+| 文件操作（FileRef + Storage 抽象） | 后续独立实现 |
+| FRP 隧道管理 | 后续独立实现 |
+| Job 输出历史分页/过滤 | `GET /api/jobs` 固定 100 条 |
+| PSK 轮换/分发机制 | 目前写死环境变量 |
+| Client 命令白名单/沙箱 | 目前无限制 |
+
+### 已知限制
+
+- 断线期间 client 不缓冲输出，中间数据丢失
+- `GET /api/clients` 只返回在线 client
+- 无前端 UI，所有操作通过 REST + CLI
+
 ## 边界
 
 - Client 与 Server 在同一台机器验证，暂不涉及跨网络
