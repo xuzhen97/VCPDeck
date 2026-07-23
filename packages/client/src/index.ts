@@ -13,6 +13,15 @@ import {
 const SERVER_URL = process.env.VCPDECK_SERVER || "http://localhost:3001";
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
 
+function main() {
+  connect();
+}
+
+// Auto-run when executed directly: node dist/index.js
+if (require.main === module) {
+  main();
+}
+
 export function connect(): Socket {
   const socket: Socket = io(SERVER_URL, {
     auth: { psk: PSK },
@@ -33,7 +42,7 @@ export function connect(): Socket {
     socket.emit(Events.STATUS_REPORT, report);
   });
 
-  const heartbeatTimer = setInterval(() => {
+  setInterval(() => {
     if (socket.connected) {
       socket.emit(Events.HEARTBEAT, getHeartbeat(getRunningJobIds()));
     }

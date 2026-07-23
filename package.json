@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build": "pnpm -r build",
+    "start": "node scripts/up.cjs",
     "dev": "pnpm -r --parallel dev",
     "lint": "pnpm -r lint"
   },

@@ -2,40 +2,42 @@
 
 > 基于 `docs/server-client-interaction-design.md` 及实现计划 `docs/superpowers/plans/2026-07-23-server-client-core.md`
 
-## 前提
+## 一键启动（推荐）
 
-两个终端窗口，都在项目根目录 `D:\VCPHub\VCPDeck`。
+```bash
+cd D:/VCPHub/VCPDeck && pnpm start
+```
+
+自动启动 Server + Client，日志带 `[server]` / `[client]` 前缀。停止用 `Ctrl+C`。
+
+Server 首次运行会自动执行 `prisma db push` 建库建表。Client 有自动重连，Server 未就绪时会自动等待。
 
 ---
 
-## 1. 启动 Server
+## 分步启动（需要两个终端）
+
+### 1. 启动 Server
+
+终端 1：
 
 ```bash
 cd packages/server && pnpm start
 ```
 
-首次运行时会自动执行 `prisma db push` 创建 SQLite 数据库和表结构，然后启动 server。
-
 预期输出：
 
 ```
-SQLite database dev.db created at file:./prisma/dev.db
 Your database is now in sync with your Prisma schema.
-[Nest] ... [NestApplication] Nest application successfully started
+[Nest] ... Nest application successfully started
 VCPDeck server listening on http://localhost:3001
 ```
 
----
-
-## 2. 启动 Client
+### 2. 启动 Client
 
 终端 2：
 
 ```bash
-cd packages/client && node -e "
-const { connect } = require('./dist/index.js');
-const socket = connect();
-"
+cd packages/client && pnpm start
 ```
 
 预期输出：
