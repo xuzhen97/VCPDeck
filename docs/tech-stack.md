@@ -12,7 +12,7 @@
 | 实时通信 | Socket.IO | 双向，内置心跳/重连 |
 | 远程执行 | Socket.IO + job 队列 | server → client 指令下发 |
 | CLI | Node.js (无框架) | `vcpdeck xxx` 命令 |
-| Pi 集成 | Skill (SKILL.md + run.cjs) | `pi install git:github.com/...` |
+| Pi 集成 | Skill (SKILL.md + vcpdeck.cjs) | `pi install git:github.com/...` |
 
 ## 模块
 
@@ -60,7 +60,7 @@ React + Vite SPA。页面：Dashboard（TODO 面板）、Machines（机器管理
 
 ### skills/vcpdeck
 
-Pi Agent Skill。`SKILL.md` 描述触发条件，`run.cjs` 加载 bundled CLI。Pi agent 在工作流中直接调用驾驶台能力。
+Pi Agent Skill。`SKILL.md` 描述触发条件，`vcpdeck.cjs` 为可直接执行的 bundled CLI 入口。Pi agent 在工作流中直接调用驾驶台能力。
 
 ## 安装 / 卸载
 
