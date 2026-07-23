@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 skills/vcpdeck/vcpdeck.cjs
+packages/server/generated/
+packages/server/prisma/dev.db
+packages/server/.env

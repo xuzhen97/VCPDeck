@@ -23,6 +23,20 @@ export class JobService {
     timeout?: number,
   ): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
     const jobId = randomUUID();
+    await this.prisma.client.upsert({
+      where: { id: clientId },
+      update: {},
+      create: {
+        id: clientId,
+        hostname: "",
+        os: "",
+        cpuModel: "",
+        totalMemMB: 0,
+        totalDiskMB: 0,
+        clientVersion: "",
+        capabilities: "[]",
+      },
+    });
     await this.prisma.job.create({
       data: {
         id: jobId,
