@@ -9,5 +9,8 @@
   "dependencies": {
     "@vcpdeck/shared": "workspace:*",
     "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1"
   }
 }
