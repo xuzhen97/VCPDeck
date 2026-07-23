@@ -59,6 +59,18 @@ Socket.IO 是唯一的交互通道。
 
 **原则**：Socket.IO 只传指令和数据，不传文件本体。文件通过 Storage 抽象获取 URL，client / frontend 直接下载。
 
+**连接模型**：每个 Client（远程机器）与 Server 建立 **一个** Socket.IO 连接。
+该机器上的所有 Job（不论并发多少）都**复用同一个连接**，通过事件体内的 `jobId` 字段区分。
+
+```
+1 台机器 = 1 个 socket
+        ├── job-1 (echo hello)   ── job:stdout { jobId:"1", text:"hello" }
+        ├── job-2 (tail -f log)  ── job:stdout { jobId:"2", text:"..." }
+        └── job-3 (sleep 60)     ── job:done   { jobId:"3", exitCode:0 }
+```
+
+Server → 消费者（前端/日志查看器）同理：一个 Socket.IO 连接收到所有 job 的事件，消费者按 `jobId` 过滤展示。
+
 | 通道 | 方向 | 用途 |
 |---|---|---|
 | `connection` | client → server | 建立连接，带 PSK 握手 |

@@ -86,9 +86,25 @@ node -e "fetch('http://localhost:3001/api/jobs/<jobId>').then(r=>r.json()).then(
 [client] [vcpdeck] job dispatch: <jobId> — echo hello world
 ```
 
-client 会 spawn 子进程执行命令，stdout 流式回传并存储在 server 的 `Job.output` 字段。
+client 会 spawn 子进程执行命令，stdout/stderr 通过 `job:stdout` / `job:stderr` 事件**实时推送**，同时累积存储在 server 的 `Job.output` 字段。
 
-检查 output：
+### 实时查看日志
+
+开一个新终端，运行日志查看器（**创建 job 之前就开着，能看到实时流**）：
+
+```bash
+node scripts/logs.cjs
+```
+
+如果要只看某个 job：
+
+```bash
+node scripts/logs.cjs <jobId>
+```
+
+日志查看器会显示所有 `job:stdout` / `job:stderr` 事件，以及 job 状态变更。`Ctrl+C` 退出。
+
+### 事后查看 output
 
 ```bash
 node -e "fetch('http://localhost:3001/api/jobs/<jobId>').then(r=>r.json()).then(j=>console.log(j.output))"
@@ -142,6 +158,7 @@ node -e "fetch('http://localhost:3001/api/jobs/<jobId>/cancel',{method:'POST'}).
 | 创建 job | `node -e "fetch(...POST /api/jobs)"` | `{ jobId, status }` |
 | 查看 job（含 output） | `node -e "fetch(.../api/jobs/:id)"` | job 详情 + `output` 字段 |
 | 列出 jobs | `node -e "fetch(.../api/jobs)"` | job 列表 |
+| Job 执行（实时日志） | `node scripts/logs.cjs` | job:stdout / job:stderr 实时推送 |
 | Job 执行 | 创建 job 后 | client 执行并流式回传输出 |
 | Job 取消 | `node -e "fetch(...POST /api/jobs/:id/cancel)"` | SIGTERM → SIGKILL → 确认 |
 | 断线重连 | 停止 client → 重启 | server 恢复 job 状态 |
