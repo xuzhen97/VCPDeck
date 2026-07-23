@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Client {
+  id              String    @id
+  hostname        String
+  os              String
+  cpuModel        String
+  totalMemMB      Int
+  totalDiskMB     Int
+  clientVersion   String
+  capabilities    String    @default("[]")
+  online          Boolean   @default(false)
+  lastHeartbeatAt DateTime?
+  connectedAt     DateTime?
+  socketId        String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  jobs            Job[]
+}
+
+model Job {
+  id         String    @id
+  clientId   String
+  client     Client    @relation(fields: [clientId], references: [id])
+  command    String
+  status     String    @default("pending")
+  exitCode   Int?
+  output     String    @default("")
+  timeout    Int?
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+  updatedAt  DateTime  @updatedAt
+}
