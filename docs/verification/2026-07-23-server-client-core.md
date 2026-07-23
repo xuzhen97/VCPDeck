@@ -2,19 +2,7 @@
 
 > 基于 `docs/server-client-interaction-design.md` 及实现计划 `docs/superpowers/plans/2026-07-23-server-client-core.md`
 
-## 一键启动（推荐）
-
-```bash
-cd D:/VCPHub/VCPDeck && pnpm start
-```
-
-自动启动 Server + Client，日志带 `[server]` / `[client]` 前缀。停止用 `Ctrl+C`。
-
-Server 首次运行会自动执行 `prisma db push` 建库建表。Client 有自动重连，Server 未就绪时会自动等待。
-
----
-
-## 分步启动（需要两个终端）
+## 启动 Server 和 Client
 
 ### 1. 启动 Server
 
@@ -131,7 +119,7 @@ node -e "fetch('http://localhost:3001/api/jobs/<jobId>/cancel',{method:'POST'}).
 
 | 功能 | 操作 | 预期结果 |
 |---|---|---|
-| 服务启动 | `pnpm start`（根目录） | NestJS 正常启动 + Client 连接 |
+| 服务启动 | `cd packages/server && pnpm start` | NestJS 正常启动 |
 | 注册 | client 自动 | server 日志 `[ws] registered: xxx (hostname)` |
 | 心跳 | client 自动每 30s | server 无报错 |
 | 列出 clients | `node -e "fetch(.../api/clients)"` | 数组，含 hostname/os/capabilities |
