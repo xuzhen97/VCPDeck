@@ -1,15 +1,15 @@
-import { Controller, Post, Get, Body, Param } from "@nestjs/common";
-import type { JobService } from "../job/job.service.js";
-import type { ClientService } from "../client/client.service.js";
-import type { EventsGateway } from "./events.gateway.js";
+import { Controller, Inject, Post, Get, Body, Param } from "@nestjs/common";
+import { JobService } from "../job/job.service.js";
+import { ClientService } from "../client/client.service.js";
+import { EventsGateway } from "./events.gateway.js";
 import type { JobCreate } from "@vcpdeck/shared";
 
 @Controller("api")
 export class EventsController {
   constructor(
-    private readonly jobService: JobService,
-    private readonly clientService: ClientService,
-    private readonly gateway: EventsGateway,
+    @Inject(JobService) private readonly jobService: JobService,
+    @Inject(ClientService) private readonly clientService: ClientService,
+    @Inject(EventsGateway) private readonly gateway: EventsGateway,
   ) {}
 
   @Post("jobs")

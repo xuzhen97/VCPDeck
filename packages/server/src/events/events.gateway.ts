@@ -1,19 +1,15 @@
+import { Inject } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
-  type OnGatewayConnection,
-  type OnGatewayDisconnect,
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
-import type { ClientService } from "../client/client.service.js";
-import type { JobService } from "../job/job.service.js";
-import {
-  Events,
-  JobStatus,
-} from "@vcpdeck/shared";
+import { ClientService } from "../client/client.service.js";
+import { JobService } from "../job/job.service.js";
+import { Events, JobStatus } from "@vcpdeck/shared";
 import type {
   MachineRegister,
   Heartbeat,
@@ -30,15 +26,13 @@ import type {
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
 
 @WebSocketGateway({ cors: { origin: "*" } })
-export class EventsGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
-{
+export class EventsGateway {
   @WebSocketServer()
   server!: Server;
 
   constructor(
-    private readonly clientService: ClientService,
-    private readonly jobService: JobService,
+    @Inject(ClientService) private readonly clientService: ClientService,
+    @Inject(JobService) private readonly jobService: JobService,
   ) {}
 
   // ── Connection lifecycle ──
@@ -53,7 +47,6 @@ export class EventsGateway
   }
 
   async handleDisconnect(client: Socket) {
-    // Must read clientId before markOfflineBySocketId clears socketId
     const clientId = await this.clientService.getClientIdBySocketId(client.id);
     if (clientId) {
       await this.jobService.markDisconnected(clientId);
@@ -84,7 +77,6 @@ export class EventsGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: StatusReport,
   ) {
-    // Re-bind socketId on reconnect
     await this.clientService.register(
       {
         clientId: data.clientId,
@@ -105,7 +97,6 @@ export class EventsGateway
       data,
     );
 
-    // Broadcast job updates for reconciled jobs
     for (const r of data.jobs) {
       this.server.emit(Events.JOB_UPDATE, {
         jobId: r.jobId,
@@ -119,7 +110,6 @@ export class EventsGateway
       } satisfies JobUpdate);
     }
 
-    // Dispatch queued jobs that now have capacity
     for (const d of dispatches) {
       this.sendDispatch(d);
     }

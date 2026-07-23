@@ -1,12 +1,14 @@
-import { Injectable } from "@nestjs/common";
-import type { PrismaService } from "../prisma/prisma.service.js";
+import { Inject, Injectable } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service.js";
 import type { DispatchPayload } from "@vcpdeck/shared";
 
 const MAX_CONCURRENT_JOBS = 3;
 
 @Injectable()
 export class JobScheduler {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
 
   async tryDispatch(clientId: string): Promise<DispatchPayload | null> {
     const runningCount = await this.prisma.job.count({

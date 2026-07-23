@@ -1,6 +1,6 @@
-import { Injectable } from "@nestjs/common";
-import type { PrismaService } from "../prisma/prisma.service.js";
-import type { JobScheduler } from "./job.scheduler.js";
+import { Inject, Injectable } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service.js";
+import { JobScheduler } from "./job.scheduler.js";
 import { JobStatus } from "@vcpdeck/shared";
 import type {
   JobCreateResult,
@@ -13,8 +13,8 @@ import { randomUUID } from "node:crypto";
 @Injectable()
 export class JobService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly scheduler: JobScheduler,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(JobScheduler) private readonly scheduler: JobScheduler,
   ) {}
 
   async create(

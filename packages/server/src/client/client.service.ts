@@ -1,10 +1,12 @@
-import { Injectable } from "@nestjs/common";
-import type { PrismaService } from "../prisma/prisma.service.js";
+import { Inject, Injectable } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service.js";
 import type { MachineRegister, Heartbeat, ClientInfo } from "@vcpdeck/shared";
 
 @Injectable()
 export class ClientService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
 
   async register(dto: MachineRegister, socketId: string) {
     await this.prisma.client.upsert({
