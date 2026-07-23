@@ -6,3 +6,6 @@ packages/server/generated/
 packages/server/prisma/dev.db
 packages/server/.env
 packages/server/prisma/.env
+.gitnexus/
+.claude/
+CLAUDE.md
