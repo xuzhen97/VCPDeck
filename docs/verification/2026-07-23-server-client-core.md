@@ -10,15 +10,17 @@
 
 ## 1. 启动 Server
 
-终端 1：
-
 ```bash
-cd packages/server && node dist/main.js
+cd packages/server && pnpm start
 ```
+
+首次运行时会自动执行 `prisma db push` 创建 SQLite 数据库和表结构，然后启动 server。
 
 预期输出：
 
 ```
+SQLite database dev.db created at file:./prisma/dev.db
+Your database is now in sync with your Prisma schema.
 [Nest] ... [NestApplication] Nest application successfully started
 VCPDeck server listening on http://localhost:3001
 ```

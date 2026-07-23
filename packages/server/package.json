@@ -5,7 +5,8 @@
   "main": "./dist/main.js",
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/main.ts"
+    "start": "prisma db push && node dist/main.js",
+    "dev": "prisma db push && tsx watch src/main.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
