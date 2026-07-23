@@ -130,6 +130,7 @@ export interface JobInfo {
   command: string;
   status: JobStatus;
   exitCode: number | null;
+  output: string;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;

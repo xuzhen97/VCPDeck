@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Controller,
   Inject,
+  NotFoundException,
   Post,
   Get,
   Body,
@@ -63,5 +64,12 @@ export class EventsController {
   @Get("jobs")
   async listJobs() {
     return this.jobService.list();
+  }
+
+  @Get("jobs/:jobId")
+  async getJob(@Param("jobId") jobId: string) {
+    const job = await this.jobService.findById(jobId);
+    if (!job) throw new NotFoundException(`Job "${jobId}" not found`);
+    return job;
   }
 }

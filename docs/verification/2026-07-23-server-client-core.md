@@ -66,6 +66,16 @@ node -e "fetch('http://localhost:3001/api/jobs').then(r=>r.json()).then(console.
 
 预期：返回所有 job，刚创建的 job 状态为 `running` 或 `done`。
 
+### 3d. 查看单个 Job（含 output）
+
+用步骤 3b 返回的 `jobId`：
+
+```bash
+node -e "fetch('http://localhost:3001/api/jobs/<jobId>').then(r=>r.json()).then(console.log)"
+```
+
+预期：返回 job 详情，包含 `output` 字段（stdout + stderr 累积内容）。
+
 ---
 
 ## 4. 验收 Job 执行
@@ -76,7 +86,13 @@ node -e "fetch('http://localhost:3001/api/jobs').then(r=>r.json()).then(console.
 [client] [vcpdeck] job dispatch: <jobId> — echo hello world
 ```
 
-client 会 spawn 子进程执行命令，stdout 流式回传 server。
+client 会 spawn 子进程执行命令，stdout 流式回传并存储在 server 的 `Job.output` 字段。
+
+检查 output：
+
+```bash
+node -e "fetch('http://localhost:3001/api/jobs/<jobId>').then(r=>r.json()).then(j=>console.log(j.output))"
+```
 
 ---
 
@@ -124,6 +140,7 @@ node -e "fetch('http://localhost:3001/api/jobs/<jobId>/cancel',{method:'POST'}).
 | 心跳 | client 自动每 30s | server 无报错 |
 | 列出 clients | `node -e "fetch(.../api/clients)"` | 数组，含 hostname/os/capabilities |
 | 创建 job | `node -e "fetch(...POST /api/jobs)"` | `{ jobId, status }` |
+| 查看 job（含 output） | `node -e "fetch(.../api/jobs/:id)"` | job 详情 + `output` 字段 |
 | 列出 jobs | `node -e "fetch(.../api/jobs)"` | job 列表 |
 | Job 执行 | 创建 job 后 | client 执行并流式回传输出 |
 | Job 取消 | `node -e "fetch(...POST /api/jobs/:id/cancel)"` | SIGTERM → SIGKILL → 确认 |

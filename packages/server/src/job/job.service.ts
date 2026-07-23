@@ -159,15 +159,38 @@ export class JobService {
       orderBy: { createdAt: "desc" },
       take: 100,
     });
-    return jobs.map((j) => ({
-      jobId: j.id,
-      clientId: j.clientId,
-      command: j.command,
-      status: j.status as JobStatus,
-      exitCode: j.exitCode,
-      createdAt: j.createdAt.toISOString(),
-      startedAt: j.startedAt?.toISOString() ?? null,
-      finishedAt: j.finishedAt?.toISOString() ?? null,
-    }));
+    return jobs.map(toJobInfo);
   }
+
+  async findById(jobId: string): Promise<JobInfo | null> {
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+    });
+    if (!job) return null;
+    return toJobInfo(job);
+  }
+}
+
+function toJobInfo(j: {
+  id: string;
+  clientId: string;
+  command: string;
+  status: string;
+  exitCode: number | null;
+  output: string;
+  createdAt: Date;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+}): JobInfo {
+  return {
+    jobId: j.id,
+    clientId: j.clientId,
+    command: j.command,
+    status: j.status as JobStatus,
+    exitCode: j.exitCode,
+    output: j.output,
+    createdAt: j.createdAt.toISOString(),
+    startedAt: j.startedAt?.toISOString() ?? null,
+    finishedAt: j.finishedAt?.toISOString() ?? null,
+  };
 }
