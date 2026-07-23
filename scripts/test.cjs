@@ -24,7 +24,7 @@
  *  14. 拒绝未知 client           — 无 clientId 时返回 400
  */
 
-const { spawn } = require("node:child_process");
+const { spawn, execSync } = require("node:child_process");
 const path = require("node:path");
 
 // ── Resolve paths ──
@@ -64,9 +64,24 @@ function fetchJson(url, opts) {
 	return fetch(url, opts).then((r) => r.json());
 }
 
+/** Kill anything on port 3001 from previous runs. */
+function killPort() {
+	try {
+		execSync(
+			'powershell -Command "Get-Process -Id (Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue).OwningProcess | Stop-Process -Force"',
+			{ stdio: "ignore", timeout: 3000 },
+		);
+	} catch {
+		// nothing on that port, fine
+	}
+}
+
 // ── Main ──
 async function main() {
 	console.log("\n=== VCPDeck Integration Test ===\n");
+
+	killPort();
+	await sleep(1000);
 
 	// 1. Start server
 	console.log("[setup] Starting server...");
@@ -407,21 +422,29 @@ async function main() {
 	// ─────────────────────────────
 	console.log("\n--- Cleanup ---");
 	if (clientSocket) clientSocket.disconnect();
-	server.kill("SIGTERM");
-	// Force kill after 2s
-	const killTimer = setTimeout(() => {
-		try {
-			server.kill("SIGKILL");
-		} catch {}
-	}, 2000);
-	server.on("close", () => clearTimeout(killTimer));
+
+	// Kill server process and all spawned children
+	try {
+		const pid = server.pid;
+		if (pid) {
+			execSync("taskkill", ["/F", "/T", "/PID", String(pid)], {
+				stdio: "ignore",
+				timeout: 3000,
+			});
+		}
+	} catch {
+		// already dead
+	}
 	console.log("  ✓ Server stopped\n");
 
 	// Global test timeout
 	const testTimeout = setTimeout(() => {
 		console.error("Test timed out — force exit");
 		try {
-			server.kill("SIGKILL");
+			execSync("taskkill", ["/F", "/T", "/PID", String(server.pid)], {
+				stdio: "ignore",
+				timeout: 2000,
+			});
 		} catch {}
 		process.exit(1);
 	}, 45_000);
