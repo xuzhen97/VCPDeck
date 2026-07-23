@@ -46,6 +46,14 @@ export class ClientService {
     });
   }
 
+  /** Re-bind socketId on reconnect without overwriting machine info. */
+  async bindSocket(clientId: string, socketId: string) {
+    await this.prisma.client.update({
+      where: { id: clientId },
+      data: { online: true, socketId, connectedAt: new Date() },
+    });
+  }
+
   async getClientIdBySocketId(socketId: string): Promise<string | null> {
     const c = await this.prisma.client.findFirst({ where: { socketId } });
     return c?.id ?? null;

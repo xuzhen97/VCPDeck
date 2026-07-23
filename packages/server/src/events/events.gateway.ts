@@ -77,19 +77,7 @@ export class EventsGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: StatusReport,
   ) {
-    await this.clientService.register(
-      {
-        clientId: data.clientId,
-        hostname: "",
-        os: "",
-        cpuModel: "",
-        totalMemMB: 0,
-        totalDiskMB: 0,
-        clientVersion: "",
-        capabilities: [],
-      },
-      client.id,
-    );
+    await this.clientService.bindSocket(data.clientId, client.id);
     client.join(data.clientId);
 
     const dispatches = await this.jobService.reconcileOnReconnect(
