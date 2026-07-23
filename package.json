@@ -4,6 +4,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "start": "node scripts/up.cjs",
+    "test": "node scripts/test.cjs",
     "dev": "pnpm -r --parallel dev",
     "lint": "pnpm -r lint"
   },
