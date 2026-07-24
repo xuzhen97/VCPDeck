@@ -1,6 +1,6 @@
-import { Injectable, type CanActivate, type ExecutionContext, UnauthorizedException } from "@nestjs/common";
-import type { Reflector } from "@nestjs/core";
-import type { PrismaService } from "../prisma/prisma.service.js";
+import { Injectable, Inject, type CanActivate, type ExecutionContext, UnauthorizedException } from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
+import { PrismaService } from "../prisma/prisma.service.js";
 import { IS_PUBLIC_KEY } from "./public.decorator.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { ActorContext } from "@vcpdeck/shared";
@@ -12,8 +12,8 @@ function sha256(s: string): string {
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
-    private readonly reflector: Reflector,
-    private readonly prisma: PrismaService,
+    @Inject(Reflector) private readonly reflector: Reflector,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

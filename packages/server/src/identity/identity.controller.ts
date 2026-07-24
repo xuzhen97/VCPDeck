@@ -1,11 +1,13 @@
-import { Controller, Get, Post, Param, Body, ForbiddenException } from "@nestjs/common";
-import type { IdentityService } from "./identity.service.js";
+import { Controller, Get, Post, Param, Body, ForbiddenException, Inject } from "@nestjs/common";
+import { IdentityService } from "./identity.service.js";
 import { Actor } from "../auth/actor.decorator.js";
 import type { ActorContext, CreateIdentityRequest, IdentityInfo } from "@vcpdeck/shared";
 
 @Controller("api/identities")
 export class IdentityController {
-  constructor(private readonly identityService: IdentityService) {}
+  constructor(
+    @Inject(IdentityService) private readonly identityService: IdentityService,
+  ) {}
 
   private checkAdmin(actor: ActorContext) {
     if (!actor.isAdmin) {

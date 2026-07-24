@@ -1,6 +1,6 @@
-import { Controller, Post, Get, Put, Delete, Body, Res, Param } from "@nestjs/common";
+import { Controller, Post, Get, Put, Delete, Body, Res, Param, Inject } from "@nestjs/common";
 import type { Response } from "express";
-import type { AuthService } from "./auth.service.js";
+import { AuthService } from "./auth.service.js";
 import { Public } from "./public.decorator.js";
 import { Actor } from "./actor.decorator.js";
 import type {
@@ -19,7 +19,9 @@ const SESSION_TTL = parseInt(process.env.VCPDECK_SESSION_TTL_SECONDS || "604800"
 
 @Controller("api/auth")
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    @Inject(AuthService) private readonly authService: AuthService,
+  ) {}
 
   @Public()
   @Post("login")

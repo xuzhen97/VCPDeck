@@ -3,7 +3,6 @@ import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module.js";
 import cookieParser from "cookie-parser";
 import { PrismaService } from "./prisma/prisma.service.js";
-import { AuthGuard } from "./auth/auth.guard.js";
 import { randomUUID } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 
@@ -38,11 +37,7 @@ async function bootstrap() {
   app.use(cookieParser());
   app.enableCors({ origin: FRONTEND_ORIGIN, credentials: true });
 
-  const prisma = app.get(PrismaService);
-  const authGuard = app.get(AuthGuard);
-  app.useGlobalGuards(authGuard);
-
-  await bootstrapAdmin(prisma);
+  await bootstrapAdmin(app.get(PrismaService));
 
   await app.listen(3001);
   console.log("VCPDeck server listening on http://localhost:3001");
