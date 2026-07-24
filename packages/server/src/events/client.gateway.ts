@@ -25,7 +25,7 @@ import type {
 
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
 
-@WebSocketGateway({ namespace: "/client", cors: { origin: "*" } })
+@WebSocketGateway({ namespace: "/client", cors: { origin: process.env.VCPDECK_CORS_ORIGIN || "http://localhost:5173" } })
 export class ClientGateway {
   @WebSocketServer()
   server!: Server;
@@ -128,23 +128,50 @@ export class ClientGateway {
   async handleJobDone(@MessageBody() data: JobDone) {
     const raw = data as any;
     const type: string = raw.type;
-    const result: Record<string, unknown> =
-      type === "exec" ? { exitCode: raw.exitCode } : raw.result;
 
+    if (type === "exec") {
+      // ── Exec error 终态（基础设施失败） ──
+      if (raw.error) {
+        const errorCode: string = raw.error.code || "EXEC_FAILED";
+        const errorMessage: string = raw.error.message || "";
+        await this.jobService.markDone(data.jobId, type, { errorCode, errorMessage });
+        this.server.emit(Events.JOB_UPDATE, {
+          jobId: data.jobId,
+          type,
+          status: JobStatus.ERROR,
+          errorCode,
+          errorMessage,
+          result: undefined,
+        } satisfies JobUpdate);
+        return;
+      }
+
+      // ── Exec 正常退出 ──
+      const exitCode = raw.exitCode ?? 1;
+      const result = { exitCode };
+      const status = exitCode === 0 ? JobStatus.DONE : JobStatus.ERROR;
+      const next = await this.jobService.markDone(data.jobId, type, result);
+
+      this.server.emit(Events.JOB_UPDATE, {
+        jobId: data.jobId,
+        type,
+        status,
+        result,
+      } satisfies JobUpdate);
+
+      if (next) this.sendDispatch(next);
+      return;
+    }
+
+    // ── 其他 Job 类型 ──
+    const result: Record<string, unknown> = raw.result;
     const next = await this.jobService.markDone(data.jobId, type, result);
-
-    const status =
-      type === "exec" && (result as any).exitCode !== 0
-        ? JobStatus.ERROR
-        : JobStatus.DONE;
-
     this.server.emit(Events.JOB_UPDATE, {
       jobId: data.jobId,
       type,
-      status,
+      status: JobStatus.DONE,
       result,
     } satisfies JobUpdate);
-
     if (next) this.sendDispatch(next);
   }
 
@@ -169,13 +196,28 @@ export class ClientGateway {
   // ── Public API (called by controller) ──
   sendDispatch(d: DispatchPayload) {
     if (d.type === "exec") {
-      const execPayload = d.payload as { command: string };
-      this.server.to(d.clientId).emit(Events.JOB_DISPATCH, {
-        jobId: d.jobId,
-        type: "exec" as const,
-        command: execPayload.command,
-        timeout: d.timeout,
-      } satisfies JobDispatch);
+      const p = d.payload as Record<string, unknown>;
+      if (p.mode === "script") {
+        this.server.to(d.clientId).emit(Events.JOB_DISPATCH, {
+          jobId: d.jobId,
+          type: "exec" as const,
+          mode: "script" as const,
+          executable: p.executable as string,
+          args: p.args as string[],
+          script: p.script as string,
+          cwd: p.cwd as string | undefined,
+          timeout: d.timeout,
+        } satisfies JobDispatch);
+      } else {
+        this.server.to(d.clientId).emit(Events.JOB_DISPATCH, {
+          jobId: d.jobId,
+          type: "exec" as const,
+          mode: "command" as const,
+          command: ((p as any).command ?? "") as string,
+          cwd: p.cwd as string | undefined,
+          timeout: d.timeout,
+        } satisfies JobDispatch);
+      }
     } else {
       this.server.to(d.clientId).emit(Events.JOB_DISPATCH, {
         jobId: d.jobId,
