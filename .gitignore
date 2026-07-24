@@ -8,4 +8,5 @@ packages/server/.env
 packages/server/prisma/.env
 .gitnexus/
 .claude/
+.pi-subagents/
 CLAUDE.md

@@ -3,11 +3,7 @@ import { Events } from "@vcpdeck/shared";
 import type { StatusReport } from "@vcpdeck/shared";
 import { CLIENT_ID, getRegisterInfo } from "./register.js";
 import { getHeartbeat } from "./heartbeat.js";
-import {
-	killJob,
-	getRunningJobIds,
-	getStatusReport,
-} from "./executor.js";
+import { killJob, getRunningJobIds, getStatusReport } from "./executor.js";
 import { dispatch } from "./dispatcher.js";
 
 const SERVER_URL = process.env.VCPDECK_SERVER || "http://localhost:3001";
