@@ -25,8 +25,8 @@ import type {
 
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
 
-@WebSocketGateway({ cors: { origin: "*" } })
-export class EventsGateway {
+@WebSocketGateway({ namespace: "/client", cors: { origin: "*" } })
+export class ClientGateway {
   @WebSocketServer()
   server!: Server;
 

@@ -10,7 +10,7 @@ import {
 } from "@nestjs/common";
 import { JobService } from "../job/job.service.js";
 import { ClientService } from "../client/client.service.js";
-import { EventsGateway } from "./events.gateway.js";
+import { ClientGateway } from "./client.gateway.js";
 import { Actor } from "../auth/actor.decorator.js";
 import { Public } from "../auth/public.decorator.js";
 import type { JobCreate, DispatchPayload, ActorContext } from "@vcpdeck/shared";
@@ -20,7 +20,7 @@ export class EventsController {
   constructor(
     @Inject(JobService) private readonly jobService: JobService,
     @Inject(ClientService) private readonly clientService: ClientService,
-    @Inject(EventsGateway) private readonly gateway: EventsGateway,
+    @Inject(ClientGateway) private readonly gateway: ClientGateway,
   ) {}
 
   @Public()
