@@ -1,4 +1,4 @@
-const BASE = "http://localhost:3001";
+const BASE = "";
 
 async function request<T>(
 	method: string,
