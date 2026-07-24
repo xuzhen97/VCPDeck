@@ -13,29 +13,61 @@ interface ActiveJob {
 	jobId: string;
 	process: ChildProcess;
 	startTime: number;
+	cancelling?: boolean;
 }
 
 const activeJobs = new Map<string, ActiveJob>();
 
-export function executeExec(
-	job: {
-		jobId: string;
-		command: string;
-		timeout?: number;
-	},
-	socket: Socket,
-) {
-	const child = spawn(job.command, {
-		shell: true,
-		timeout: job.timeout,
-	});
+/** 幂等终态：只执行一次 action */
+function settle(jobId: string, action: () => void) {
+	if (!activeJobs.has(jobId)) return; // 已终态，忽略
+	activeJobs.delete(jobId);
+	action();
+}
 
+type ExecJob =
+	| {
+			jobId: string;
+			mode: "command";
+			command: string;
+			cwd?: string;
+			timeout?: number;
+	  }
+	| {
+			jobId: string;
+			mode: "script";
+			executable: string;
+			args: string[];
+			script: string;
+			cwd?: string;
+			timeout?: number;
+	  };
+
+export function executeExec(job: ExecJob, socket: Socket) {
+	let child: ChildProcess;
+
+	if (job.mode === "command") {
+		child = spawn(job.command, {
+			shell: true,
+			cwd: job.cwd,
+			timeout: job.timeout,
+		});
+	} else {
+		child = spawn(job.executable, job.args, {
+			shell: false,
+			cwd: job.cwd,
+			timeout: job.timeout,
+		});
+	}
+
+	// ── 注册 activeJob ──
 	activeJobs.set(job.jobId, {
 		jobId: job.jobId,
 		process: child,
 		startTime: Date.now(),
 	});
 
+	// ── stdout ──
 	child.stdout?.on("data", (data: Buffer) => {
 		socket.emit(Events.JOB_STDOUT, {
 			jobId: job.jobId,
@@ -43,6 +75,7 @@ export function executeExec(
 		} satisfies JobOutput);
 	});
 
+	// ── stderr ──
 	child.stderr?.on("data", (data: Buffer) => {
 		socket.emit(Events.JOB_STDERR, {
 			jobId: job.jobId,
@@ -50,28 +83,65 @@ export function executeExec(
 		} satisfies JobOutput);
 	});
 
+	// ── close（幂等） ──
 	child.on("close", (code) => {
-		activeJobs.delete(job.jobId);
-		socket.emit(Events.JOB_DONE, {
-			jobId: job.jobId,
-			type: "exec" as const,
-			exitCode: code ?? 1,
-		} satisfies JobDone);
+		// 先捕获 cancelling 标记，settle 会删除 map 条目
+		const wasCancelling = activeJobs.get(job.jobId)?.cancelling ?? false;
+		settle(job.jobId, () => {
+			if (wasCancelling) {
+				socket.emit(Events.JOB_CANCELLED, { jobId: job.jobId } satisfies JobCancelled);
+				return;
+			}
+			socket.emit(Events.JOB_DONE, {
+				jobId: job.jobId,
+				type: "exec" as const,
+				exitCode: code ?? 1,
+			} satisfies JobDone);
+		});
 	});
 
+	// ── spawn error（幂等） ──
 	child.on("error", (err) => {
-		if (!activeJobs.has(job.jobId)) return;
-		activeJobs.delete(job.jobId);
-		socket.emit(Events.JOB_STDERR, {
-			jobId: job.jobId,
-			text: err.message,
-		} satisfies JobOutput);
-		socket.emit(Events.JOB_DONE, {
-			jobId: job.jobId,
-			type: "exec" as const,
-			exitCode: 1,
-		} satisfies JobDone);
+		settle(job.jobId, () => {
+			socket.emit(Events.JOB_DONE, {
+				jobId: job.jobId,
+				type: "exec" as const,
+				error: {
+					code: "EXEC_SPAWN_FAILED",
+					message: safeSpawnErrorMessage(err.message),
+				},
+			} satisfies JobDone);
+		});
 	});
+
+	// ── script 模式：写 stdin ──
+	if (job.mode === "script") {
+		child.stdin?.on("error", () => {
+			settle(job.jobId, () => {
+					try {
+						child.kill("SIGTERM");
+					} catch {
+						/* ignore */
+					}
+					socket.emit(Events.JOB_DONE, {
+						jobId: job.jobId,
+						type: "exec" as const,
+						error: {
+							code: "EXEC_STDIN_FAILED",
+						message: "Failed to write script to stdin",
+					},
+				} satisfies JobDone);
+			});
+		});
+		child.stdin?.end(job.script, "utf8");
+	}
+}
+
+/** 去除 spawn error 中的明显本地路径 */
+function safeSpawnErrorMessage(msg: string): string {
+	return msg
+		.replace(/[A-Za-z]:\\[^\s"]*/g, "<path>")
+		.replace(/\/[^\s"]*/g, "<path>");
 }
 
 export function killJob(jobId: string, socket: Socket) {
@@ -85,6 +155,7 @@ export function killJob(jobId: string, socket: Socket) {
 	}
 
 	try {
+		active.cancelling = true;
 		active.process.kill("SIGTERM");
 
 		const killTimer = setTimeout(() => {
@@ -99,7 +170,7 @@ export function killJob(jobId: string, socket: Socket) {
 
 		active.process.on("close", () => {
 			clearTimeout(killTimer);
-			socket.emit(Events.JOB_CANCELLED, { jobId } satisfies JobCancelled);
+			// 幂等：close 事件中已通过 settle 处理
 		});
 	} catch (err: any) {
 		socket.emit(Events.JOB_CANCEL_FAILED, {
