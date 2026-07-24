@@ -26,16 +26,18 @@ model Client {
 }
 
 model Job {
-  id         String    @id
-  clientId   String
-  client     Client    @relation(fields: [clientId], references: [id])
-  command    String
-  status     String    @default("pending")
-  exitCode   Int?
-  output     String    @default("")
-  timeout    Int?
-  createdAt  DateTime  @default(now())
-  startedAt  DateTime?
-  finishedAt DateTime?
-  updatedAt  DateTime  @updatedAt
+  id           String    @id
+  clientId     String
+  client       Client    @relation(fields: [clientId], references: [id])
+  type         String    @default("exec")
+  status       String    @default("pending")
+  payload      String    @default("{}")
+  result       String?
+  errorCode    String?
+  errorMessage String?
+  timeout      Int?
+  createdAt    DateTime  @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  updatedAt    DateTime  @updatedAt
 }
