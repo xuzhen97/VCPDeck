@@ -130,12 +130,14 @@ function killTree(pid) {
 }
 
 // ── Main ──
-	let _exitCode = 0;
+let _exitCode = 0;
 
-	// 记录 exit code 替代 process.exit，由 finally 统一退出
-	const done = (code) => { _exitCode = code; };
+// 记录 exit code 替代 process.exit，由 finally 统一退出
+const done = (code) => {
+	_exitCode = code;
+};
 
-	async function main() {
+async function main() {
 	console.log("\n=== VCPDeck Integration Test ===\n");
 
 	killPort();
@@ -808,14 +810,16 @@ function killTree(pid) {
 
 	console.log(`\n  ${passed}/${total} passed, ${failed} failed\n`);
 
-		done(failed > 0 ? 1 : 0);
-	}
+	done(failed > 0 ? 1 : 0);
+}
 
-	// ── Run with guaranteed cleanup ──
-	main().catch((err) => {
+// ── Run with guaranteed cleanup ──
+main()
+	.catch((err) => {
 		console.error("Test error:", err.message);
 		done(1);
-	}).then(() => {
+	})
+	.then(() => {
 		if (clientSocket) clientSocket.disconnect();
 		if (_serverProcess?.pid) killTree(_serverProcess.pid);
 		_serverProcess = null;
