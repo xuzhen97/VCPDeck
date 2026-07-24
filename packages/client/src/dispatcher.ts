@@ -7,13 +7,38 @@ export function dispatch(job: JobDispatch, socket: Socket) {
 		case "exec": {
 			const execJob = job as {
 				jobId: string;
-				command: string;
+				type: "exec";
+				mode: "command" | "script";
+				command?: string;
+				executable?: string;
+				args?: string[];
+				script?: string;
+				cwd?: string;
 				timeout?: number;
 			};
+
+			if (execJob.mode === "script") {
+				return executeExec(
+					{
+						jobId: execJob.jobId,
+						mode: "script",
+						executable: execJob.executable!,
+						args: execJob.args!,
+						script: execJob.script!,
+						cwd: execJob.cwd,
+						timeout: execJob.timeout,
+					},
+					socket,
+				);
+			}
+
+			// command 模式（默认）
 			return executeExec(
 				{
 					jobId: execJob.jobId,
-					command: execJob.command,
+					mode: "command",
+					command: execJob.command!,
+					cwd: execJob.cwd,
 					timeout: execJob.timeout,
 				},
 				socket,
