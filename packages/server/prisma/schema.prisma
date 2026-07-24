@@ -39,5 +39,43 @@ model Job {
   createdAt    DateTime  @default(now())
   startedAt    DateTime?
   finishedAt   DateTime?
+  createdByIdentityId String?
+  createdByName       String?
+  createdVia          String?
   updatedAt    DateTime  @updatedAt
+}
+
+model Identity {
+  id           String         @id
+  username     String         @unique
+  displayName  String
+  passwordHash String
+  isAdmin      Boolean        @default(false)
+  disabledAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  credentials  Credential[]
+  sessions     AuthSession[]
+}
+
+model Credential {
+  id         String    @id
+  identityId String
+  identity   Identity  @relation(fields: [identityId], references: [id])
+  label      String
+  tokenHash  String    @unique
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model AuthSession {
+  id          String    @id
+  identityId  String
+  identity    Identity  @relation(fields: [identityId], references: [id])
+  sessionHash String    @unique
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
 }
