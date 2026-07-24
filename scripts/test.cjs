@@ -129,6 +129,162 @@ function killTree(pid) {
 	}
 }
 
+// ── Exec command/script 测试 ──
+
+async function testExecCommandLegacy(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: { clientId, type: "exec", payload: { command: "echo hello-world" }, timeout: 10000 },
+	});
+	if (res.status !== 201) return fail("exec command legacy", `status ${res.status}`);
+	const body = await res.json();
+	if (!body.jobId) return fail("exec command legacy", "no jobId");
+	await sleep(1500);
+	pass("exec command legacy", `jobId=${body.jobId}`);
+}
+
+async function testExecCommandExplicit(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: { clientId, type: "exec", payload: { mode: "command", command: "echo explicit-cmd" }, timeout: 10000 },
+	});
+	if (res.status !== 201) return fail("exec command explicit", `status ${res.status}`);
+	const body = await res.json();
+	await sleep(1500);
+	pass("exec command explicit", `jobId=${body.jobId}`);
+}
+
+async function testExecScriptNode(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId, type: "exec",
+			payload: { mode: "script", executable: process.execPath, args: ["-"], script: 'console.log("hello-via-stdin")', timeout: 10000 },
+		},
+	});
+	if (res.status !== 201) return fail("exec script node", `status ${res.status}`);
+	const body = await res.json();
+	await sleep(1500);
+	pass("exec script node", `jobId=${body.jobId}`);
+}
+
+async function testExecScriptNodeUnicode(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId, type: "exec",
+			payload: {
+				mode: "script", executable: process.execPath, args: ["-"],
+				script: 'console.log("\u4f60\u597d \ud83c\udf89"); console.log(\'single\\\'s q\');',
+				timeout: 10000,
+			},
+		},
+	});
+	if (res.status !== 201) return fail("exec script node unicode", `status ${res.status}`);
+	await sleep(1500);
+	pass("exec script node unicode", `jobId=${(await res.json()).jobId}`);
+}
+
+async function testExecScriptEmptyArgsAndScript(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId, type: "exec",
+			payload: { mode: "script", executable: process.execPath, args: [], script: "", timeout: 10000 },
+		},
+	});
+	if (res.status !== 201) return fail("exec script empty args/script", `status ${res.status}`);
+	await sleep(1500);
+	pass("exec script empty args/script", `jobId=${(await res.json()).jobId}`);
+}
+
+async function testExecInvalidPayloadMixed(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId, type: "exec",
+			payload: { mode: "command", command: "x", executable: "python" },
+			timeout: 10000,
+		},
+	});
+	if (res.status === 400) return pass("exec invalid mixed payload", "400 as expected");
+	fail("exec invalid mixed payload", `expected 400, got ${res.status}`);
+}
+
+async function testExecInvalidPayloadBadTimeout(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId, type: "exec",
+			payload: { command: "echo ok" },
+			timeout: -5,
+		},
+	});
+	if (res.status === 400) return pass("exec invalid bad timeout", "400 as expected");
+	fail("exec invalid bad timeout", `expected 400, got ${res.status}`);
+}
+
+async function testExecSpawnFailed(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId, type: "exec",
+			payload: { mode: "script", executable: "no-such-interpreter-xyz", args: ["-"], script: "1", timeout: 5000 },
+		},
+	});
+	if (res.status !== 201) return fail("exec spawn failed create", `status ${res.status}`);
+	const body = await res.json();
+	// 等待 dispatch 发出，然后模拟客户端错误
+	await sleep(500);
+	clientSocket.emit(Events.JOB_DONE, {
+		jobId: body.jobId,
+		type: "exec",
+		error: { code: "EXEC_SPAWN_FAILED", message: "ENOENT" },
+	});
+	await sleep(500);
+	const check = await api("GET", `/api/jobs/${body.jobId}`);
+	const j = await check.json();
+	if (j.status === "error" && j.errorCode === "EXEC_SPAWN_FAILED") return pass("exec spawn failed", j.errorCode);
+	fail("exec spawn failed", `status=${j.status} errorCode=${j.errorCode}`);
+}
+
+async function testExecCommandCwd(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId, type: "exec",
+			payload: { mode: "command", command: isWin ? "cd" : "pwd", cwd: os.tmpdir(), timeout: 10000 },
+		},
+	});
+	if (res.status !== 201) return fail("exec command cwd", `status ${res.status}`);
+	await sleep(1500);
+	pass("exec command cwd", "accepted");
+}
+
+async function testExecCancel(clientId) {
+	// 先填满并发槽：创建 3 个 Job 且 mock client 不处理，它们持续 running
+	// 这样后续 Job 进入 pending，cancel 可在服务端直接完成
+	await api("POST", "/api/jobs", { json: { clientId, type: "exec", payload: { command: "echo" }, timeout: 60000 } });
+	await api("POST", "/api/jobs", { json: { clientId, type: "exec", payload: { command: "echo" }, timeout: 60000 } });
+	await api("POST", "/api/jobs", { json: { clientId, type: "exec", payload: { command: "echo" }, timeout: 60000 } });
+
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId, type: "exec",
+			payload: { mode: "script", executable: process.execPath, args: ["-"], script: "setTimeout(()=>{},30000)", timeout: 20000 },
+		},
+	});
+	if (res.status !== 201) return fail("exec cancel create", `status ${res.status}`);
+	const body = await res.json();
+	await sleep(500);
+	const cancelRes = await api("POST", `/api/jobs/${body.jobId}/cancel`);
+	if (cancelRes.status !== 201) return fail("exec cancel request", `status ${cancelRes.status}`);
+	pass("exec cancel", "cancel request accepted");
+}
+
+async function testExecScriptQuotes(clientId) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId, type: "exec",
+			payload: { mode: "script", executable: process.execPath, args: ["-"], script: 'console.log("a\\"b\\"c"); console.log(\'d\\\\e\');', timeout: 10000 },
+		},
+	});
+	if (res.status !== 201) return fail("exec script quotes", `status ${res.status}`);
+	await sleep(1500);
+	pass("exec script quotes", `jobId=${(await res.json()).jobId}`);
+}
+
 // ── Main ──
 let _exitCode = 0;
 
@@ -371,7 +527,7 @@ async function main() {
 	const userLoginName = `user-${ts}`;
 	{
 		// Login as the created user
-		const _loginRes = await api("POST", "/api/auth/login", {
+		await api("POST", "/api/auth/login", {
 			json: { username: userLoginName, password: "pass123" },
 			noCookie: true,
 		});
@@ -467,7 +623,7 @@ async function main() {
 	console.log("\n--- REST endpoints (with auth) ---");
 
 	{
-		const { status, body } = await apiJson("GET", "/api/clients");
+		const { body } = await apiJson("GET", "/api/clients");
 		if (Array.isArray(body)) {
 			pass("GET /api/clients returns array", `length=${body.length}`);
 		} else {
@@ -770,6 +926,28 @@ async function main() {
 		}
 	} catch (e) {
 		fail("Reject unknown client", e.message);
+	}
+
+
+	// ── Exec command/script tests ──
+	console.log("\n--- Exec Command/Script ---");
+
+	const { body: _clients } = await apiJson("GET", "/api/clients");
+	const execClientId = _clients[0]?.clientId;
+	if (!execClientId) {
+		fail("exec client lookup", "no online client");
+	} else {
+		await testExecCommandLegacy(execClientId);
+		await testExecCommandExplicit(execClientId);
+		await testExecCommandCwd(execClientId);
+		await testExecScriptNode(execClientId);
+		await testExecScriptNodeUnicode(execClientId);
+		await testExecScriptQuotes(execClientId);
+		await testExecScriptEmptyArgsAndScript(execClientId);
+		await testExecInvalidPayloadMixed(execClientId);
+		await testExecInvalidPayloadBadTimeout(execClientId);
+		await testExecSpawnFailed(execClientId);
+		await testExecCancel(execClientId);
 	}
 
 	// 19. Logout
