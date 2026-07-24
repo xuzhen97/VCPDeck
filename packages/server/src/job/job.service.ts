@@ -7,6 +7,7 @@ import type {
   DispatchPayload,
   StatusReport,
   JobInfo,
+  ActorContext,
 } from "@vcpdeck/shared";
 import { randomUUID } from "node:crypto";
 
@@ -25,12 +26,15 @@ export class JobService {
     @Inject(JobScheduler) private readonly scheduler: JobScheduler,
   ) {}
 
-  async create(params: {
-    clientId: string;
-    type: string;
-    payload: Record<string, unknown>;
-    timeout?: number;
-  }): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
+  async create(
+    params: {
+      clientId: string;
+      type: string;
+      payload: Record<string, unknown>;
+      timeout?: number;
+    },
+    actor: ActorContext,
+  ): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
     const client = await this.prisma.client.findUnique({
       where: { id: params.clientId },
     });
@@ -50,6 +54,9 @@ export class JobService {
         status: "pending",
         payload: JSON.stringify(params.payload),
         timeout: params.timeout ?? null,
+        createdByIdentityId: actor.identityId,
+        createdByName: actor.displayName,
+        createdVia: actor.source,
       },
     });
 
@@ -146,7 +153,7 @@ export class JobService {
     return dispatches;
   }
 
-  async cancel(jobId: string): Promise<{
+  async cancel(jobId: string, _actor: ActorContext): Promise<{ // ponytail: actor 预留，后续 cancel 时记录到 JobEvent
     cancelled: boolean;
     needsDispatch: boolean;
     clientId?: string;
@@ -198,6 +205,9 @@ function toJobInfo(j: {
   createdAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
+  createdByIdentityId: string | null;
+  createdByName: string | null;
+  createdVia: string | null;
 }): JobInfo {
   return {
     jobId: j.id,
@@ -211,5 +221,8 @@ function toJobInfo(j: {
     createdAt: j.createdAt.toISOString(),
     startedAt: j.startedAt?.toISOString() ?? null,
     finishedAt: j.finishedAt?.toISOString() ?? null,
+    createdByIdentityId: j.createdByIdentityId ?? null,
+    createdByName: j.createdByName ?? null,
+    createdVia: j.createdVia ?? null,
   };
 }

@@ -167,6 +167,9 @@ export interface JobInfo {
 	createdAt: string;
 	startedAt: string | null;
 	finishedAt: string | null;
+	createdByIdentityId: string | null;
+	createdByName: string | null;
+	createdVia: string | null;
 }
 
 // ── Job error ──

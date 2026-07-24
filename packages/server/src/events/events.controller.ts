@@ -11,7 +11,9 @@ import {
 import { JobService } from "../job/job.service.js";
 import { ClientService } from "../client/client.service.js";
 import { EventsGateway } from "./events.gateway.js";
-import type { JobCreate, DispatchPayload } from "@vcpdeck/shared";
+import { Actor } from "../auth/actor.decorator.js";
+import { Public } from "../auth/public.decorator.js";
+import type { JobCreate, DispatchPayload, ActorContext } from "@vcpdeck/shared";
 
 @Controller("api")
 export class EventsController {
@@ -21,17 +23,26 @@ export class EventsController {
     @Inject(EventsGateway) private readonly gateway: EventsGateway,
   ) {}
 
+  @Public()
+  @Get("health")
+  health() {
+    return { ok: true };
+  }
+
   @Post("jobs")
-  async createJob(@Body() body: JobCreate) {
+  async createJob(@Body() body: JobCreate, @Actor() actor: ActorContext) {
     let result: { jobId: string; status: string; type: string } | null = null;
     let dispatch: DispatchPayload | null = null;
     try {
-      const r = await this.jobService.create({
-        clientId: body.clientId,
-        type: body.type || "exec",
-        payload: body.payload || {},
-        timeout: body.timeout,
-      });
+      const r = await this.jobService.create(
+        {
+          clientId: body.clientId,
+          type: body.type || "exec",
+          payload: body.payload || {},
+          timeout: body.timeout,
+        },
+        actor,
+      );
       result = r.result;
       dispatch = r.dispatch;
     } catch (e: any) {
@@ -44,9 +55,9 @@ export class EventsController {
   }
 
   @Post("jobs/:jobId/cancel")
-  async cancelJob(@Param("jobId") jobId: string) {
+  async cancelJob(@Param("jobId") jobId: string, @Actor() actor: ActorContext) {
     const { cancelled, needsDispatch, clientId } =
-      await this.jobService.cancel(jobId);
+      await this.jobService.cancel(jobId, actor);
     if (cancelled) {
       return { jobId, status: "cancelled" };
     }
