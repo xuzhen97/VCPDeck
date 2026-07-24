@@ -11,7 +11,7 @@ import {
 import { JobService } from "../job/job.service.js";
 import { ClientService } from "../client/client.service.js";
 import { EventsGateway } from "./events.gateway.js";
-import type { JobCreate } from "@vcpdeck/shared";
+import type { JobCreate, DispatchPayload } from "@vcpdeck/shared";
 
 @Controller("api")
 export class EventsController {
@@ -23,15 +23,16 @@ export class EventsController {
 
   @Post("jobs")
   async createJob(@Body() body: JobCreate) {
-    let jobStatus: { jobId: string; status: string } | null = null;
-    let dispatch: any = null;
+    let result: { jobId: string; status: string; type: string } | null = null;
+    let dispatch: DispatchPayload | null = null;
     try {
-      const r = await this.jobService.create(
-        body.clientId,
-        body.command,
-        body.timeout,
-      );
-      jobStatus = r.result;
+      const r = await this.jobService.create({
+        clientId: body.clientId,
+        type: body.type || "exec",
+        payload: body.payload || {},
+        timeout: body.timeout,
+      });
+      result = r.result;
       dispatch = r.dispatch;
     } catch (e: any) {
       throw new BadRequestException(e.message);
@@ -39,7 +40,7 @@ export class EventsController {
     if (dispatch) {
       this.gateway.sendDispatch(dispatch);
     }
-    return jobStatus;
+    return result;
   }
 
   @Post("jobs/:jobId/cancel")

@@ -2,6 +2,14 @@ import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import type { DispatchPayload } from "@vcpdeck/shared";
 
+function safeJsonParse<T>(raw: string, fallback: T): T {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
 const MAX_CONCURRENT_JOBS = 3;
 
 @Injectable()
@@ -30,7 +38,8 @@ export class JobScheduler {
     return {
       jobId: pending.id,
       clientId: pending.clientId,
-      command: pending.command,
+      type: pending.type,
+      payload: safeJsonParse(pending.payload, {}),
       timeout: pending.timeout ?? undefined,
     };
   }

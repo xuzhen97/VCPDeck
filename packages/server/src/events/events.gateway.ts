@@ -86,15 +86,23 @@ export class EventsGateway {
     );
 
     for (const r of data.jobs) {
-      this.server.emit(Events.JOB_UPDATE, {
-        jobId: r.jobId,
-        status:
-          r.status === "running"
-            ? JobStatus.RUNNING
+      const status =
+        r.status === "running"
+          ? JobStatus.RUNNING
+          : r.status === "waiting_input"
+            ? JobStatus.WAITING_INPUT
             : r.status === "done"
               ? JobStatus.DONE
-              : JobStatus.ERROR,
-        exitCode: r.exitCode ?? undefined,
+              : JobStatus.ERROR;
+
+      // Fetch job to get type (best-effort, might be null during reconnect)
+      const job = await this.jobService.findById(r.jobId);
+
+      this.server.emit(Events.JOB_UPDATE, {
+        jobId: r.jobId,
+        type: job?.type ?? "exec",
+        status,
+        result: r.exitCode != null ? { exitCode: r.exitCode } : undefined,
       } satisfies JobUpdate);
     }
 
@@ -118,20 +126,35 @@ export class EventsGateway {
 
   @SubscribeMessage(Events.JOB_DONE)
   async handleJobDone(@MessageBody() data: JobDone) {
-    const next = await this.jobService.markDone(data.jobId, data.exitCode);
+    const raw = data as any;
+    const type: string = raw.type;
+    const result: Record<string, unknown> =
+      type === "exec" ? { exitCode: raw.exitCode } : raw.result;
+
+    const next = await this.jobService.markDone(data.jobId, type, result);
+
+    const status =
+      type === "exec" && (result as any).exitCode !== 0
+        ? JobStatus.ERROR
+        : JobStatus.DONE;
+
     this.server.emit(Events.JOB_UPDATE, {
       jobId: data.jobId,
-      status: data.exitCode === 0 ? JobStatus.DONE : JobStatus.ERROR,
-      exitCode: data.exitCode,
+      type,
+      status,
+      result,
     } satisfies JobUpdate);
+
     if (next) this.sendDispatch(next);
   }
 
   @SubscribeMessage(Events.JOB_CANCELLED)
   async handleJobCancelled(@MessageBody() data: JobCancelled) {
     const next = await this.jobService.markCancelled(data.jobId);
+    const job = await this.jobService.findById(data.jobId);
     this.server.emit(Events.JOB_UPDATE, {
       jobId: data.jobId,
+      type: job?.type ?? "exec",
       status: JobStatus.CANCELLED,
     } satisfies JobUpdate);
     if (next) this.sendDispatch(next);
@@ -145,13 +168,26 @@ export class EventsGateway {
 
   // ── Public API (called by controller) ──
   sendDispatch(d: DispatchPayload) {
-    this.server.to(d.clientId).emit(Events.JOB_DISPATCH, {
-      jobId: d.jobId,
-      command: d.command,
-      timeout: d.timeout,
-    } satisfies JobDispatch);
+    if (d.type === "exec") {
+      const execPayload = d.payload as { command: string };
+      this.server.to(d.clientId).emit(Events.JOB_DISPATCH, {
+        jobId: d.jobId,
+        type: "exec" as const,
+        command: execPayload.command,
+        timeout: d.timeout,
+      } satisfies JobDispatch);
+    } else {
+      this.server.to(d.clientId).emit(Events.JOB_DISPATCH, {
+        jobId: d.jobId,
+        type: d.type,
+        payload: d.payload,
+        timeout: d.timeout,
+      } satisfies JobDispatch);
+    }
+
     this.server.emit(Events.JOB_UPDATE, {
       jobId: d.jobId,
+      type: d.type,
       status: JobStatus.RUNNING,
     } satisfies JobUpdate);
   }
