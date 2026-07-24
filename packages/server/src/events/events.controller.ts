@@ -15,6 +15,68 @@ import { Actor } from "../auth/actor.decorator.js";
 import { Public } from "../auth/public.decorator.js";
 import type { JobCreate, DispatchPayload, ActorContext } from "@vcpdeck/shared";
 
+const INVALID_JOB_PAYLOAD = "INVALID_JOB_PAYLOAD";
+
+function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const mode = payload.mode;
+  const command = payload.command;
+  const executable = payload.executable;
+  const args = payload.args;
+  const script = payload.script;
+  const cwd = payload.cwd;
+
+  // ── 旧 payload 兼容：缺少 mode 且存在 command → command 模式 ──
+  if (mode === undefined && command !== undefined) {
+    const normalized: Record<string, unknown> = { mode: "command", command };
+    if (cwd !== undefined) normalized.cwd = cwd;
+    return normalized;
+  }
+
+  // ── command 模式 ──
+  if (mode === "command") {
+    if (command === undefined || typeof command !== "string" || command === "") {
+      throw Object.assign(new Error("command must be a non-empty string"), { code: INVALID_JOB_PAYLOAD });
+    }
+    if (executable !== undefined || args !== undefined || script !== undefined) {
+      throw Object.assign(new Error("command mode must not include executable/args/script"), { code: INVALID_JOB_PAYLOAD });
+    }
+    const normalized: Record<string, unknown> = { mode: "command", command };
+    if (cwd !== undefined) {
+      if (typeof cwd !== "string" || cwd === "") throw Object.assign(new Error("cwd must be a non-empty string"), { code: INVALID_JOB_PAYLOAD });
+      normalized.cwd = cwd;
+    }
+    return normalized;
+  }
+
+  // ── script 模式 ──
+  if (mode === "script") {
+    if (executable === undefined || typeof executable !== "string" || executable === "") {
+      throw Object.assign(new Error("executable must be a non-empty string"), { code: INVALID_JOB_PAYLOAD });
+    }
+    if (!Array.isArray(args)) {
+      throw Object.assign(new Error("args must be an array of strings"), { code: INVALID_JOB_PAYLOAD });
+    }
+    if (args.some((a) => typeof a !== "string")) {
+      throw Object.assign(new Error("args must be an array of strings"), { code: INVALID_JOB_PAYLOAD });
+    }
+    if (script === undefined || typeof script !== "string") {
+      throw Object.assign(new Error("script must be a string"), { code: INVALID_JOB_PAYLOAD });
+    }
+    if (command !== undefined) {
+      throw Object.assign(new Error("script mode must not include command"), { code: INVALID_JOB_PAYLOAD });
+    }
+    const normalized: Record<string, unknown> = { mode: "script", executable, args, script };
+    if (cwd !== undefined) {
+      if (typeof cwd !== "string" || cwd === "") throw Object.assign(new Error("cwd must be a non-empty string"), { code: INVALID_JOB_PAYLOAD });
+      normalized.cwd = cwd;
+    }
+    return normalized;
+  }
+
+  // ── 非法 mode ──
+  throw Object.assign(new Error(`Unknown exec mode: ${mode}`), { code: INVALID_JOB_PAYLOAD });
+}
+
 @Controller("api")
 export class EventsController {
   constructor(
@@ -34,11 +96,30 @@ export class EventsController {
     let result: { jobId: string; status: string; type: string } | null = null;
     let dispatch: DispatchPayload | null = null;
     try {
+      const type = body.type || "exec";
+      let payload = body.payload || {};
+
+      // ── 仅对 exec 类型做校验与规范化 ──
+      if (type === "exec") {
+        try {
+          payload = normalizeAndValidateExecPayload(payload);
+        } catch (e: any) {
+          throw new BadRequestException({ code: e.code || INVALID_JOB_PAYLOAD, message: e.message });
+        }
+      }
+
+      // ── timeout 校验 ──
+      if (body.timeout !== undefined) {
+        if (typeof body.timeout !== "number" || !Number.isFinite(body.timeout) || body.timeout <= 0 || !Number.isInteger(body.timeout)) {
+          throw new BadRequestException({ code: INVALID_JOB_PAYLOAD, message: "timeout must be a positive integer" });
+        }
+      }
+
       const r = await this.jobService.create(
         {
           clientId: body.clientId,
-          type: body.type || "exec",
-          payload: body.payload || {},
+          type,
+          payload,
           timeout: body.timeout,
         },
         actor,
@@ -46,7 +127,7 @@ export class EventsController {
       result = r.result;
       dispatch = r.dispatch;
     } catch (e: any) {
-      throw new BadRequestException(e.message);
+      throw new BadRequestException(e.message || e);
     }
     if (dispatch) {
       this.gateway.sendDispatch(dispatch);
