@@ -183,3 +183,78 @@ export interface FileRef {
 	expiresAt: number;
 	headers?: Record<string, string>;
 }
+
+// ── 认证 ──
+
+export interface ActorContext {
+	identityId: string;
+	displayName: string;
+	isAdmin: boolean;
+	credentialId: string | null;
+	sessionId: string | null;
+	source: "web" | "cli";
+	requestId: string;
+}
+
+export const AuthErrorCode = {
+	AUTH_REQUIRED: "AUTH_REQUIRED",
+	AUTH_INVALID: "AUTH_INVALID",
+	AUTH_EXPIRED: "AUTH_EXPIRED",
+	AUTH_REVOKED: "AUTH_REVOKED",
+	IDENTITY_DISABLED: "IDENTITY_DISABLED",
+	FORBIDDEN: "FORBIDDEN",
+} as const;
+
+export interface LoginRequest {
+	username: string;
+	password: string;
+}
+
+export interface LoginResponse {
+	identity: {
+		id: string;
+		username: string;
+		displayName: string;
+		isAdmin: boolean;
+	};
+}
+
+export interface IdentityInfo {
+	id: string;
+	username: string;
+	displayName: string;
+	isAdmin: boolean;
+	disabledAt: string | null;
+	createdAt: string;
+}
+
+export interface CreateIdentityRequest {
+	username: string;
+	password: string;
+	displayName: string;
+}
+
+export interface UpdateMeRequest {
+	username?: string;
+	password?: string;
+	currentPassword: string;
+}
+
+export interface CreateTokenRequest {
+	label: string;
+}
+
+export interface TokenInfo {
+	id: string;
+	label: string;
+	lastUsedAt: string | null;
+	expiresAt: string | null;
+	revokedAt: string | null;
+	createdAt: string;
+}
+
+export interface CreateTokenResponse {
+	id: string;
+	token: string;
+	label: string;
+}
