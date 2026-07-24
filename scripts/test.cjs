@@ -14,14 +14,14 @@
  *   4. Client 注册               — 发送 register 事件
  *   5. Client 信息字段           — hostname / os 正确
  *   6. Client online 状态        — online=true
- *   7. 创建 Job                  — POST /api/jobs 返回 jobId
- *   8. Client 收到 dispatch      — job:dispatch 事件到达
- *   9. Job 执行完成              — stdout → done, 状态变为 done
- *  10. 取消请求被接受            — POST /api/jobs/:id/cancel 返回 cancelling
- *  11. Client 收到 cancel        — job:cancel 事件到达
- *  12. Job 最终 cancelled        — 状态变为 cancelled
- *  13. Heartbeat 更新            — lastHeartbeatAt 变更
- *  14. 拒绝未知 client           — 无 clientId 时返回 400
+ *   7. 创建 Job (type:exec+payload) — POST /api/jobs 返回 jobId
+ *   8. Client 收到 typed dispatch   — job:dispatch 事件带 type+command
+ *   9. Job 执行完成               — stdout → done, 类型+结构化结果
+ *  10. 取消请求被接受             — POST /api/jobs/:id/cancel 返回 cancelling
+ *  11. Client 收到 cancel         — job:cancel 事件到达
+ *  12. Job 最终 cancelled         — 状态变为 cancelled
+ *  13. Heartbeat 更新             — lastHeartbeatAt 变更
+ *  14. 拒绝未知 client            — 无 clientId 时返回 400
  */
 
 const { spawn, execSync } = require("node:child_process");
@@ -265,7 +265,8 @@ async function main() {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					clientId: realClientId,
-					command: "echo hello world",
+					type: "exec",
+					payload: { command: "echo hello world" },
 				}),
 			});
 
@@ -280,7 +281,7 @@ async function main() {
 			if (dispatchReceived) {
 				pass(
 					"Client receives job:dispatch",
-					`command=${dispatchReceived.command}`,
+					`type=${dispatchReceived.type}, jobId=${dispatchReceived.jobId.slice(0, 8)}...`,
 				);
 
 				clientSocket.emit(Events.JOB_STDOUT, {
@@ -289,6 +290,7 @@ async function main() {
 				});
 				clientSocket.emit(Events.JOB_DONE, {
 					jobId: dispatchReceived.jobId,
+					type: "exec",
 					exitCode: 0,
 				});
 
@@ -341,7 +343,11 @@ async function main() {
 			const job = await fetchJson(`${BASE}/api/jobs`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ clientId: realClientId, command: "sleep 60" }),
+				body: JSON.stringify({
+					clientId: realClientId,
+					type: "exec",
+					payload: { command: "sleep 60" },
+				}),
 			});
 
 			if (!job.jobId) throw new Error("Job not created");
@@ -435,7 +441,8 @@ async function main() {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				clientId: "nonexistent-client",
-				command: "echo bad",
+				type: "exec",
+				payload: { command: "echo bad" },
 			}),
 		});
 		const body = await res.json();
