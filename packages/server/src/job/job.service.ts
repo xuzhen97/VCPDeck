@@ -83,14 +83,23 @@ export class JobService {
     type: string,
     result: Record<string, unknown>,
   ): Promise<DispatchPayload | null> {
-    const effectiveStatus =
-      type === "exec" && (result as any).exitCode !== 0 ? "error" : "done";
+    let effectiveStatus: string;
+
+    if (type === "exec" && result.errorCode) {
+      effectiveStatus = "error";
+    } else if (type === "exec" && (result as any).exitCode !== 0 && (result as any).exitCode !== undefined) {
+      effectiveStatus = "error";
+    } else {
+      effectiveStatus = "done";
+    }
 
     const job = await this.prisma.job.update({
       where: { id: jobId },
       data: {
         status: effectiveStatus,
         result: JSON.stringify(result),
+        errorCode: (result.errorCode as string) ?? null,
+        errorMessage: (result.errorMessage as string) ?? null,
         finishedAt: new Date(),
       },
     });
