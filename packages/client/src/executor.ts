@@ -2,7 +2,6 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { Socket } from "socket.io-client";
 import { Events } from "@vcpdeck/shared";
 import type {
-  JobDispatch,
   JobOutput,
   JobDone,
   JobCancelled,
@@ -18,7 +17,11 @@ interface ActiveJob {
 
 const activeJobs = new Map<string, ActiveJob>();
 
-export function executeJob(job: JobDispatch, socket: Socket) {
+export function executeExec(job: {
+  jobId: string;
+  command: string;
+  timeout?: number;
+}, socket: Socket) {
   const child = spawn(job.command, {
     shell: true,
     timeout: job.timeout,
@@ -48,6 +51,7 @@ export function executeJob(job: JobDispatch, socket: Socket) {
     activeJobs.delete(job.jobId);
     socket.emit(Events.JOB_DONE, {
       jobId: job.jobId,
+      type: "exec" as const,
       exitCode: code ?? 1,
     } satisfies JobDone);
   });
@@ -61,6 +65,7 @@ export function executeJob(job: JobDispatch, socket: Socket) {
     } satisfies JobOutput);
     socket.emit(Events.JOB_DONE, {
       jobId: job.jobId,
+      type: "exec" as const,
       exitCode: 1,
     } satisfies JobDone);
   });
