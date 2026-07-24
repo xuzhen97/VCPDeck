@@ -63,14 +63,30 @@ export interface Heartbeat {
 }
 
 // ── Job payloads ──
-// ── Job dispatch（Server → Client，判别联合） ──
-export type JobDispatch =
+// ── Exec job dispatch（Server → Client） ──
+export type ExecJobDispatch =
 	| {
 			jobId: string;
 			type: "exec";
+			mode: "command";
 			command: string;
+			cwd?: string;
 			timeout?: number;
 	  }
+	| {
+			jobId: string;
+			type: "exec";
+			mode: "script";
+			executable: string;
+			args: string[];
+			script: string;
+			cwd?: string;
+			timeout?: number;
+	  };
+
+// ── Job dispatch（Server → Client，判别联合） ──
+export type JobDispatch =
+	| ExecJobDispatch
 	| {
 			jobId: string;
 			type: string;
@@ -83,10 +99,24 @@ export interface JobOutput {
 	text: string;
 }
 
+// ── Exec job done（Client → Server） ──
+export type ExecJobDone =
+	| {
+			jobId: string;
+			type: "exec";
+			exitCode: number;
+	  }
+	| {
+			jobId: string;
+			type: "exec";
+			error: JobError;
+	  };
+
 // ── Job done（Client → Server，判别联合） ──
 export type JobDone =
-	| { jobId: string; type: "exec"; exitCode: number }
+	| ExecJobDone
 	| { jobId: string; type: string; result: Record<string, unknown> };
+
 
 export interface JobUpdate {
 	jobId: string;
