@@ -112,14 +112,16 @@ function killPort() {
 function killTree(pid) {
 	try {
 		if (isWin) {
-			execSync("taskkill", ["/F", "/T", "/PID", String(pid)], {
+			execSync(`taskkill /F /T /PID ${pid}`, {
 				stdio: "ignore",
 				timeout: 3000,
+				shell: true,
 			});
 		} else {
-			execSync("kill", ["-9", String(pid)], {
+			execSync(`kill -9 ${pid}`, {
 				stdio: "ignore",
 				timeout: 3000,
+				shell: true,
 			});
 		}
 	} catch {
@@ -128,7 +130,12 @@ function killTree(pid) {
 }
 
 // ── Main ──
-async function main() {
+	let _exitCode = 0;
+
+	// 记录 exit code 替代 process.exit，由 finally 统一退出
+	const done = (code) => { _exitCode = code; };
+
+	async function main() {
 	console.log("\n=== VCPDeck Integration Test ===\n");
 
 	killPort();
@@ -136,7 +143,7 @@ async function main() {
 
 	// 1. Start server
 	console.log("[setup] Starting server...");
-	const server = spawn("pnpm", ["start"], {
+	_serverProcess = spawn("pnpm", ["start"], {
 		cwd: serverDir,
 		stdio: ["ignore", "pipe", "pipe"],
 		shell: true,
@@ -147,10 +154,10 @@ async function main() {
 		},
 	});
 	let serverOutput = "";
-	server.stdout.on("data", (d) => {
+	_serverProcess.stdout.on("data", (d) => {
 		serverOutput += d.toString();
 	});
-	server.stderr.on("data", (d) => {
+	_serverProcess.stderr.on("data", (d) => {
 		serverOutput += d.toString();
 	});
 
@@ -167,8 +174,9 @@ async function main() {
 	if (!serverReady) {
 		console.error("[setup] Server failed to start");
 		console.error(serverOutput);
-		server.kill();
-		process.exit(1);
+		if (_serverProcess?.pid) killTree(_serverProcess.pid);
+		done(1);
+		return;
 	}
 	console.log("  ✓ Server started\n");
 
@@ -785,28 +793,6 @@ async function main() {
 	}
 
 	// ─────────────────────────────
-	// Cleanup
-	// ─────────────────────────────
-	console.log("\n--- Cleanup ---");
-	if (clientSocket) clientSocket.disconnect();
-
-	// Kill server process and all spawned children
-	if (server.pid) killTree(server.pid);
-	console.log("  ✓ Server stopped\n");
-
-	// Global test timeout
-	const testTimeout = setTimeout(() => {
-		console.error("Test timed out — force exit");
-		if (server.pid) killTree(server.pid);
-		process.exit(1);
-	}, 45_000);
-	const origExit = process.exit;
-	process.exit = (code) => {
-		clearTimeout(testTimeout);
-		origExit(code);
-	};
-
-	// ─────────────────────────────
 	// Report
 	// ─────────────────────────────
 	console.log("=== Test Report ===\n");
@@ -822,10 +808,17 @@ async function main() {
 
 	console.log(`\n  ${passed}/${total} passed, ${failed} failed\n`);
 
-	process.exit(failed > 0 ? 1 : 0);
-}
+		done(failed > 0 ? 1 : 0);
+	}
 
-main().catch((err) => {
-	console.error("Test error:", err.message);
-	process.exit(1);
-});
+	// ── Run with guaranteed cleanup ──
+	main().catch((err) => {
+		console.error("Test error:", err.message);
+		done(1);
+	}).then(() => {
+		if (clientSocket) clientSocket.disconnect();
+		if (_serverProcess?.pid) killTree(_serverProcess.pid);
+		_serverProcess = null;
+		killPort();
+		process.exit(_exitCode);
+	});
