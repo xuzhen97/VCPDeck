@@ -7,8 +7,8 @@ import { JobModule } from "../job/job.module.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
 
 @Module({
-  imports: [ClientModule, JobModule, PrismaModule],
-  providers: [ClientGateway, AppGateway],
-  controllers: [EventsController],
+	imports: [ClientModule, JobModule, PrismaModule],
+	providers: [ClientGateway, AppGateway],
+	controllers: [EventsController],
 })
 export class EventsModule {}

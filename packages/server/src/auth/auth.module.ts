@@ -6,13 +6,13 @@ import { AuthGuard } from "./auth.guard.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
 
 @Module({
-  imports: [PrismaModule],
-  providers: [
-    AuthService,
-    AuthGuard,
-    { provide: APP_GUARD, useClass: AuthGuard },
-  ],
-  controllers: [AuthController],
-  exports: [AuthService, AuthGuard],
+	imports: [PrismaModule],
+	providers: [
+		AuthService,
+		AuthGuard,
+		{ provide: APP_GUARD, useClass: AuthGuard },
+	],
+	controllers: [AuthController],
+	exports: [AuthService, AuthGuard],
 })
 export class AuthModule {}

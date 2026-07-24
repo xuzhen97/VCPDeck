@@ -5,6 +5,6 @@ import { AuthModule } from "./auth/auth.module.js";
 import { IdentityModule } from "./identity/identity.module.js";
 
 @Module({
-  imports: [PrismaModule, AuthModule, IdentityModule, EventsModule],
+	imports: [PrismaModule, AuthModule, IdentityModule, EventsModule],
 })
 export class AppModule {}

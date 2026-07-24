@@ -4,8 +4,8 @@ import { IdentityController } from "./identity.controller.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
 
 @Module({
-  imports: [PrismaModule],
-  providers: [IdentityService],
-  controllers: [IdentityController],
+	imports: [PrismaModule],
+	providers: [IdentityService],
+	controllers: [IdentityController],
 })
 export class IdentityModule {}
