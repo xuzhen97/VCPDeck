@@ -10,6 +10,14 @@ import type {
 } from "@vcpdeck/shared";
 import { randomUUID } from "node:crypto";
 
+function safeJsonParse<T>(raw: string, fallback: T): T {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
 @Injectable()
 export class JobService {
   constructor(
@@ -17,62 +25,65 @@ export class JobService {
     @Inject(JobScheduler) private readonly scheduler: JobScheduler,
   ) {}
 
-  async create(
-    clientId: string,
-    command: string,
-    timeout?: number,
-  ): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
-    // Verify client exists and is online
+  async create(params: {
+    clientId: string;
+    type: string;
+    payload: Record<string, unknown>;
+    timeout?: number;
+  }): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
     const client = await this.prisma.client.findUnique({
-      where: { id: clientId },
+      where: { id: params.clientId },
     });
     if (!client) {
-      throw new Error(`Client "${clientId}" not found — register the client first`);
+      throw new Error(`Client "${params.clientId}" not found — register the client first`);
     }
     if (!client.online) {
-      throw new Error(`Client "${clientId}" is offline`);
+      throw new Error(`Client "${params.clientId}" is offline`);
     }
 
     const jobId = randomUUID();
     await this.prisma.job.create({
       data: {
         id: jobId,
-        clientId,
-        command,
+        clientId: params.clientId,
+        type: params.type,
         status: "pending",
-        timeout: timeout ?? null,
+        payload: JSON.stringify(params.payload),
+        timeout: params.timeout ?? null,
       },
     });
 
-    const dispatch = await this.scheduler.tryDispatch(clientId);
+    const dispatch = await this.scheduler.tryDispatch(params.clientId);
 
     return {
       result: {
         jobId,
         status: dispatch ? JobStatus.RUNNING : JobStatus.PENDING,
+        type: params.type,
       },
       dispatch,
     };
   }
 
-  async appendOutputRaw(jobId: string, text: string) {
+  async appendOutputRaw(jobId: string, _text: string) {
+    // ponytail: stdout/stderr 暂不持久化，仅实时转发。后续加 output spool 时在此实现。
     const job = await this.prisma.job.findUnique({ where: { id: jobId } });
     if (!job) return;
-    await this.prisma.job.update({
-      where: { id: jobId },
-      data: { output: job.output + text },
-    });
   }
 
   async markDone(
     jobId: string,
-    exitCode: number,
+    type: string,
+    result: Record<string, unknown>,
   ): Promise<DispatchPayload | null> {
+    const effectiveStatus =
+      type === "exec" && (result as any).exitCode !== 0 ? "error" : "done";
+
     const job = await this.prisma.job.update({
       where: { id: jobId },
       data: {
-        status: exitCode === 0 ? "done" : "error",
-        exitCode,
+        status: effectiveStatus,
+        result: JSON.stringify(result),
         finishedAt: new Date(),
       },
     });
@@ -89,7 +100,7 @@ export class JobService {
 
   async markDisconnected(clientId: string) {
     await this.prisma.job.updateMany({
-      where: { clientId, status: "running" },
+      where: { clientId, status: { in: ["running", "waiting_input"] } },
       data: { status: "disconnected" },
     });
   }
@@ -106,11 +117,15 @@ export class JobService {
       });
       if (!job || job.clientId !== clientId) continue;
 
-      if (r.status === "running") {
-        if (job.status === "disconnected" || job.status === "running") {
+      if (r.status === "running" || r.status === "waiting_input") {
+        if (
+          job.status === "disconnected" ||
+          job.status === "running" ||
+          job.status === "waiting_input"
+        ) {
           await this.prisma.job.update({
             where: { id: r.jobId },
-            data: { status: "running" },
+            data: { status: r.status },
           });
         }
       } else {
@@ -119,7 +134,7 @@ export class JobService {
           where: { id: r.jobId },
           data: {
             status: newStatus,
-            exitCode: r.exitCode ?? 1,
+            result: JSON.stringify({ exitCode: r.exitCode ?? 1 }),
             finishedAt: new Date(),
           },
         });
@@ -139,7 +154,7 @@ export class JobService {
     const job = await this.prisma.job.findUnique({ where: { id: jobId } });
     if (!job) throw new Error(`Job "${jobId}" not found`);
 
-    if (job.status === "pending") {
+    if (job.status === "pending" || job.status === "waiting_input") {
       await this.prisma.job.update({
         where: { id: jobId },
         data: { status: "cancelled", finishedAt: new Date() },
@@ -174,10 +189,12 @@ export class JobService {
 function toJobInfo(j: {
   id: string;
   clientId: string;
-  command: string;
+  type: string;
   status: string;
-  exitCode: number | null;
-  output: string;
+  payload: string;
+  result: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
   createdAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
@@ -185,10 +202,12 @@ function toJobInfo(j: {
   return {
     jobId: j.id,
     clientId: j.clientId,
-    command: j.command,
+    type: j.type,
     status: j.status as JobStatus,
-    exitCode: j.exitCode,
-    output: j.output,
+    payload: safeJsonParse(j.payload, {}),
+    result: j.result ? safeJsonParse(j.result, null) : null,
+    errorCode: j.errorCode,
+    errorMessage: j.errorMessage,
     createdAt: j.createdAt.toISOString(),
     startedAt: j.startedAt?.toISOString() ?? null,
     finishedAt: j.finishedAt?.toISOString() ?? null,

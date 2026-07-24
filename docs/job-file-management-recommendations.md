@@ -1,12 +1,17 @@
-# Job 模型兼容 Client 文件管理的设计建议
+# Job 模型兼容 Client 文件管理与 Pi Agent 的设计建议
 
-> 状态：建议稿  
-> 适用范围：VCPDeck Server、Client、Shared 协议与后续 Storage/File 模块  
-> 依据：当前代码实现与 [`server-client-interaction-design.md`](./server-client-interaction-design.md)
+> 状态：建议稿
+>
+> 适用范围：VCPDeck Server、Client、Shared 协议，以及后续 Storage/File、
+> Pi Agent 与审计模块
+>
+> 依据：当前代码实现、
+> [`server-client-interaction-design.md`](./server-client-interaction-design.md)
+> 与 Pi SDK/Session 文档
 
 ## 1. 结论
 
-当前 Job 模型对后续 Client 文件管理是**生命周期兼容、数据模型不兼容**。
+当前 Job 模型对后续 Client 文件管理和 Pi Agent 都是**生命周期兼容、数据模型不兼容**。
 
 可以继续复用：
 
@@ -15,6 +20,7 @@
 - 每个 Client 的排队与并发控制
 - 超时、取消、断线与重连核对
 - Job 查询与状态广播
+- 以 `jobId` 作为远程操作的统一审计入口
 
 不能直接复用：
 
@@ -22,12 +28,16 @@
 - 通过 Shell 执行所有操作的 Client executor
 - 只用 stdout、stderr、`exitCode` 表达结果的模型
 - 把所有输出拼接到数据库 `output` 字符串的持久化方式
+- 将一次 Pi Session、每次 Tool Call 或终端连接直接等同于 Job
 
 建议采用：
 
-> **Typed Job 负责远程文件操作的控制面，Storage + FileRef 负责文件字节的数据面。**
+> **Job 是 VCPDeck 统一的远程执行与审计信封；Typed Job 描述不同操作；
+> Storage + FileRef 负责文件字节；AgentRun、JobEvent、Pi Session 和
+> Artifact 记录 Pi Agent 的执行证据。**
 
-不要新建一套脱离 Job 生命周期的 FileTask 系统，也不要把正式文件管理实现为拼接 Shell 命令。
+不要新建脱离 Job 生命周期的 FileTask 或 AgentTask 状态机，也不要把
+正式文件管理和 Pi Agent 简单实现为不可观测的 Shell 命令。
 
 ---
 
@@ -97,7 +107,7 @@ Client 注册信息也只声明 `capabilities: ["exec"]`，说明当前实际能
 ## 3. 文件操作兼容性
 
 | 操作 | 直接使用当前 command Job | Typed Job | 独立文件数据通道 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 列目录 `list` | 仅适合临时原型 | 适合 | 不需要 |
 | 获取元数据 `stat` | 仅适合临时原型 | 适合 | 不需要 |
 | 创建目录 `mkdir` | 不推荐 | 适合 | 不需要 |
@@ -312,7 +322,8 @@ Client：fs.rename
 Client -> Server：结构化完成结果
 ```
 
-跨 Client 的移动不是单机原子操作，应编排为：源 Client 下载、目标 Client 上传、确认成功后删除源文件。首版可以只支持复制，不承诺跨 Client 原子移动。
+跨 Client 的移动不是单机原子操作，应编排为：源 Client 下载、目标 Client
+上传、确认成功后删除源文件。首版可以只支持复制，不承诺跨 Client 原子移动。
 
 ---
 
@@ -322,7 +333,9 @@ Client -> Server：结构化完成结果
 
 > Socket.IO 只传 FileRef，文件本体由 Client / Frontend 按照 FileRef 直接操作。
 
-但其中“读取远程文件”的流程存在跨机器问题：Client 返回的 `localPath` 属于 Client 文件系统，Server 的 `Storage Service` 无法直接执行 `store(localPath)`。
+但其中“读取远程文件”的流程存在跨机器问题：Client 返回的 `localPath`
+属于 Client 文件系统，Server 的 `Storage Service` 无法直接执行
+`store(localPath)`。
 
 应改为：
 
@@ -332,7 +345,9 @@ Client -> Server：结构化完成结果
 4. Client 仅向 Server 报告对象 ID、大小、摘要和完成状态。
 5. Server 再为 Frontend/Pi 签发 GET FileRef。
 
-同时，文档中使用了 `job:read-file`，但事件汇总没有定义该事件。建议不要为每种操作无限新增 Socket.IO 事件，而是继续使用统一 `job:dispatch`，通过 `type` 和结构化 payload 区分操作。
+同时，文档中使用了 `job:read-file`，但事件汇总没有定义该事件。建议不要
+为每种操作无限新增 Socket.IO 事件，而是继续使用统一 `job:dispatch`，通过
+`type` 和结构化 payload 区分操作。
 
 ---
 
@@ -340,7 +355,8 @@ Client -> Server：结构化完成结果
 
 ### 8.1 Socket 与 Job 归属校验
 
-当前 Job stdout、stderr、done、cancelled 事件主要根据 payload 中的 `jobId` 更新数据库。文件能力上线前，Server 必须验证：
+当前 Job stdout、stderr、done、cancelled 事件主要根据 payload 中的
+`jobId` 更新数据库。文件能力上线前，Server 必须验证：
 
 ```text
 当前 Socket 绑定的 clientId === Job.clientId
@@ -513,7 +529,7 @@ Server 在创建和下发 Job 时必须检查 capability。只声明 `exec` 的�
 - 提前实现多个 Storage adapter
 - 在没有实际需求前实现断点续传和内容去重
 
-当前最小且可持续的演进路径是：
+当前文件管理最小且可持续的演进路径是：
 
 ```text
 现有 exec Job
@@ -522,3 +538,608 @@ Server 在创建和下发 Job 时必须检查 capability。只声明 `exec` 的�
     -> 单一 Local Storage + FileRef
     -> 按需求增加传输与存储能力
 ```
+
+---
+
+## 13. Client Pi Agent 的总体判断
+
+在目标 Client 上运行 Pi Agent 时，继续使用 Job 系统是合理的，而且符合 VCPDeck“统一调度、统一审计、出现问题后可追溯和修复”的愿景。
+
+但必须重新明确 Job 的领域含义：
+
+> Job 是一次具有明确目标、目标 Client、权限、生命周期和结果的远程操作。
+
+因此，以下都可以是 Typed Job：
+
+```text
+exec
+file.list
+file.upload
+agent.run
+deploy
+diagnose
+```
+
+Pi Agent 是 `agent.run` Job 的一种执行器，而不是 Job 本身。Job 负责回答：
+
+- 谁在什么时间、通过什么入口发起任务
+- 为什么运行 Agent，初始目标是什么
+- 调度到了哪台 Client、哪个项目和工作目录
+- 使用了哪个 Pi 版本、模型和权限策略
+- 运行经过了哪些阶段、工具和人工输入
+- 修改了哪些文件，产生了哪些 diff、测试报告和 commit
+- 为什么结束、失败或被取消
+- 失败后由哪个新 Job 继续诊断或修复
+
+这使 Job 能成为全链路日志和事故追溯的稳定索引，而不依赖 Pi 的内部实现细节。
+
+---
+
+## 14. 一次性与交互式 Agent Job
+
+建议同一个 `agent.run` 类型支持两种模式：
+
+```ts
+type AgentJobMode = "one-shot" | "interactive";
+```
+
+### 14.1 一次性任务
+
+适用场景：
+
+- 自动诊断和修复代码
+- 运行测试、构建或巡检
+- 生成报告
+- 自动部署前检查
+- Workflow 中的无人值守步骤
+
+示例 payload：
+
+```json
+{
+  "type": "agent.run",
+  "clientId": "client-a",
+  "payload": {
+    "mode": "one-shot",
+    "cwd": "D:/VCPHub/VCPDeck",
+    "prompt": "诊断失败测试并修复，完成后运行验证"
+  }
+}
+```
+
+建议结束语义：
+
+```text
+Pi 当前任务完成并进入 idle -> Job done
+Pi 返回不可恢复错误       -> Job error
+达到时间或资源限制         -> Job error/cancelled，并记录 stopReason
+用户主动取消               -> Job cancelled
+```
+
+一次性 Job 可以包含多个 Pi Turn 和 Tool Call，但它们仍属于同一个目标，不应拆成多个 Job。
+
+### 14.2 交互式任务
+
+适用场景：
+
+- 用户与 Pi 持续调查问题
+- Agent 先分析，用户批准后再修改
+- 用户中途补充信息或改变当前步骤
+- 远程结对编程
+- 从失败任务的证据继续调查
+
+示例 payload：
+
+```json
+{
+  "type": "agent.run",
+  "clientId": "client-a",
+  "payload": {
+    "mode": "interactive",
+    "cwd": "D:/VCPHub/VCPDeck",
+    "prompt": "调查 Job 调度竞态，先分析，不要修改"
+  }
+}
+```
+
+Pi 完成当前回合时，交互式 Job 不应自动结束，而应等待后续输入。只有以下情况结束：
+
+- 用户明确完成任务
+- 用户取消任务
+- 达到明确的空闲超时
+- Client 或 Server 按策略关闭
+- 策略明确允许 Agent 自动确认目标完成
+
+首版建议由用户明确完成交互式 Job，避免 Agent 回答一次就错误关闭整个调查任务。
+
+---
+
+## 15. Job、AgentRun、Pi Session、JobEvent 与 Artifact
+
+推荐关系：
+
+```text
+TODO / Workflow
+  └── Job：一次可调度、可审计的目标
+        ├── AgentRun：一次实际执行尝试
+        │     └── Pi Session：Agent 上下文和消息树
+        ├── JobEvent：追加式执行时间线
+        ├── Artifact：Session、diff、日志和测试报告
+        └── Attachment：终端或 Web UI 的临时连接
+```
+
+### 15.1 Job
+
+Job 保存稳定的业务事实：
+
+- 发起者和来源
+- 目标 Client
+- Job 类型和目标
+- 项目、仓库和工作目录
+- 权限与资源限制
+- 调度和最终状态
+- 父子 Job 与修复关系
+- 最终摘要和结果引用
+
+### 15.2 AgentRun
+
+AgentRun 表示 Job 的一次实际执行尝试。一个 Job 可能因为断线、Worker 崩溃或显式重试产生多个 AgentRun，历史不能被覆盖。
+
+最小字段建议：
+
+```ts
+interface AgentRun {
+  id: string;
+  jobId: string;
+  attempt: number;
+  clientId: string;
+  sessionId: string | null;
+  traceId: string;
+  cwd: string;
+  piVersion: string;
+  provider: string;
+  model: string;
+  status: string;
+  stopReason: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+```
+
+首版可以只执行一次，但持久化模型不应假设一个 Job 永远只有一次尝试。
+
+### 15.3 Pi Session
+
+Pi Session 管理：
+
+- 用户与 Agent 消息
+- Tool Call 与 Tool Result
+- 模型、token 和 cost
+- 分支、fork 与 compaction
+- Agent 的持续上下文
+
+Pi Session 不应代替 Job，因为它不完整覆盖 Server 调度、Client 连接、授权、重试、Storage 和父子任务链路。
+
+建议保存：
+
+```text
+AgentRun.sessionId
+AgentRun.sessionArtifactId
+```
+
+不要只保存 Client 本地 Session 文件绝对路径。完整 Session JSONL 应作为受控 Artifact 上传，供审计、恢复或后续修复使用。
+
+Compaction 只改变模型当前上下文，不应删除原始审计事件或原 Session JSONL。
+
+### 15.4 JobEvent
+
+Pi 的消息、Turn、Tool Call 和人工输入应成为同一个 Job 下的追加式事件，而不是分别创建 Job。
+
+建议首批事件：
+
+```text
+job.dispatched
+run.started
+agent.started
+user.message
+assistant.message.completed
+turn.started
+tool.started
+tool.completed
+artifact.created
+run.completed
+run.failed
+run.cancelled
+```
+
+只有当一个子操作需要独立 Client、调度、授权、取消或重试时，才创建子 Job，例如在另一台 Client 部署或执行集成测试。
+
+### 15.5 Artifact
+
+以下大内容不应直接塞进 Job 或 JobEvent：
+
+- 完整 Pi Session JSONL
+- 大型 stdout/stderr
+- Git diff/patch
+- 测试和构建报告
+- 截图或诊断包
+- Agent 生成的文件
+
+它们应通过 Storage + FileRef 保存为 Artifact，并关联 `jobId` 和 `runId`。
+
+---
+
+## 16. 交互终端与 Attachment
+
+终端连接只是用户访问 Agent Job 的临时 Attachment，不等于 Job，也不等于 Pi Session。
+
+推荐关系：
+
+```text
+Agent Job
+  └── Pi Session
+        ├── CLI Terminal Attachment
+        ├── Web Terminal Attachment
+        └── Read-only Observer Attachment
+```
+
+应明确区分：
+
+| 操作 | 语义 |
+| --- | --- |
+| `attach` | 连接并查看已有事件与实时输出 |
+| `detach` | 离开界面，Job 和 Session 继续存在 |
+| `abort turn` | 中止当前 Pi Turn，Session 仍可继续 |
+| `cancel` | 终止 AgentRun，Job 进入 cancelled |
+| `finish` | 用户确认目标完成，Job 进入 done |
+| `close session` | Session 不再接受输入，但历史和 Artifact 保留 |
+
+浏览器关闭、SSH 断开或网络中断默认只应触发 `detach`，不能隐式取消 Job。
+
+### 16.1 推荐：结构化终端界面
+
+首选方案是由 VCPDeck 渲染终端风格界面，但底层使用结构化协议：
+
+```text
+VCPDeck UI/CLI
+  -> Server
+  -> Client Agent Worker
+  -> Pi SDK AgentSession
+```
+
+用户输入被映射为：
+
+```text
+prompt
+steer
+follow-up
+abort
+```
+
+Pi SDK 事件再转换为 JobEvent。这样可以稳定区分用户消息、Agent 消息、工具调用和结果，也便于审计、脱敏、权限控制、Web/移动端复用和历史回放。
+
+### 16.2 可选：原生 PTY
+
+以后若确实需要完整 Pi TUI，可增加：
+
+```text
+xterm.js/Terminal
+  -> WebSocket
+  -> Client PTY
+  -> Pi TUI
+```
+
+但 PTY 字节流包含 ANSI 控制字符，不能可靠表达消息、Tool Call 和审计语义。因此：
+
+> PTY 只负责显示和输入，Pi SDK、extension 或 sidecar 产生的结构化事件仍是审计事实来源。
+
+首版不建议同时实现 SDK 集成和跨平台 PTY。
+
+---
+
+## 17. Agent Job 状态与并发
+
+交互式任务需要区分 Agent 正在执行和等待用户输入。建议在现有状态中增加：
+
+```text
+waiting_input
+```
+
+状态流：
+
+```text
+pending -> running -> done/error/cancelled
+                    -> waiting_input -> running
+                                     -> done/cancelled
+```
+
+语义：
+
+- `running`：Agent 正在推理、执行工具或处理输入。
+- `waiting_input`：当前回合结束，Session 仍可继续。
+- `disconnected`：Client 不可达，Server 不能确认实际执行状态。
+
+`waiting_input` 不应占用普通执行并发槽，否则少量等待用户的 Session 会阻塞一次性任务。建议分别限制：
+
+```text
+maxConcurrentAgentRuns
+maxInteractiveSessions
+interactiveIdleTimeout
+```
+
+首版可以延续当前调度器的简单模型：只让 `running` 计入执行并发，`waiting_input` 只计入 Session 数量。
+
+---
+
+## 18. Pi 集成方式
+
+VCPDeck 与 Pi 都使用 Node.js/TypeScript，且审计需要结构化事件，因此推荐：
+
+```text
+VCPDeck Client 主进程
+  └── Agent Worker 子进程
+        └── Pi SDK AgentSession
+```
+
+推荐理由：
+
+- Pi SDK 提供 `AgentSession`、持久化 `SessionManager` 和事件订阅。
+- 可获得 Agent、Turn、Message、Tool、Retry 和 Compaction 生命周期。
+- 可以调用 `prompt()`、`steer()`、`followUp()` 和 `abort()`。
+- Worker 崩溃不会拖垮 Client 心跳和网关连接。
+- 可以为 Worker 限制工作目录、工具、环境变量和资源。
+
+不要把 `pi -p` 的 stdout 作为正式集成协议。它适合原型，但会丢失结构化 Tool Call、Session 和生命周期信息。
+
+取消 Agent Job 时建议：
+
+1. 调用 `session.abort()` 中止当前 Agent Turn。
+2. 给 Worker 一个短暂清理窗口，刷新事件和 Session。
+3. 超时后终止 Worker 子进程。
+4. 保存取消事件和已有 Artifact。
+
+Client capability 可增加：
+
+```ts
+capabilities: ["exec", "file.read", "file.write", "agent.pi"]
+```
+
+Server 创建和下发 `agent.run` 前必须检查 `agent.pi` 能力以及协议版本。
+
+---
+
+## 19. Agent 全链路审计
+
+### 19.1 JobEvent 最小模型
+
+建议使用追加式事件，而不是继续更新单个 `output` 字符串：
+
+```ts
+interface JobEvent {
+  id: string;
+  jobId: string;
+  runId: string;
+  sequence: number;
+  type: string;
+  timestamp: string;
+  receivedAt: string;
+  traceId: string;
+  spanId?: string;
+  parentSpanId?: string;
+  level: "debug" | "info" | "warn" | "error";
+  payload?: unknown;
+  artifactId?: string;
+}
+```
+
+其中：
+
+- `sequence` 恢复单个 Run 内的顺序。
+- `timestamp` 是事件产生时间。
+- `receivedAt` 是 Server 接收时间，用于识别时钟漂移和延迟。
+- `traceId/spanId` 为以后接入 OpenTelemetry 保留稳定关联。
+- 对 `(runId, sequence)` 建唯一约束，实现幂等补传。
+
+### 19.2 实时流与持久化审计分离
+
+Pi 会产生大量 text delta 和工具输出 delta。建议：
+
+```text
+实时体验：message.delta / tool.output.delta
+持久化审计：message.completed / tool.started / tool.completed
+大型内容：Artifact
+```
+
+不需要把每个 token delta 写入数据库。实时 delta 丢失后，完整消息、JobEvent 和 Session Artifact 仍应支持事后回放。
+
+### 19.3 断线期间不能丢审计事件
+
+现有“断线期间不缓冲输出”的策略不适用于 `agent.run`。建议 Client 为每个 AgentRun 建立本地事件 spool：
+
+1. 事件按递增 `sequence` 追加到本地。
+2. Client 向 Server 批量发送。
+3. Server 持久化后确认最后收到的 sequence。
+4. Client 只删除已确认事件。
+5. 重连后从最后未确认位置继续补传。
+6. Server 按 `(runId, sequence)` 去重。
+
+这提供“至少一次传输 + 幂等去重”，不需要提前实现复杂的 exactly-once 系统。
+
+### 19.4 人工输入必须审计
+
+每次用户输入应记录：
+
+```ts
+interface AgentInputEvent {
+  jobId: string;
+  runId: string;
+  sessionId: string;
+  actorId: string;
+  source: "web" | "terminal" | "api" | "workflow";
+  mode: "prompt" | "steer" | "follow-up";
+  content: string;
+  timestamp: string;
+}
+```
+
+否则事后无法判断问题来自初始目标、Agent 自主行为，还是用户中途改变方向或批准了危险操作。
+
+---
+
+## 20. 失败追溯与 Agent 修复链
+
+失败后的修复不应覆盖原 Job。应创建新的关联 Job：
+
+```text
+job-100：原始任务，error
+  └── job-101：第一次修复，error
+        └── job-102：第二次修复，done
+```
+
+建议 Job 增加：
+
+```text
+rootJobId
+parentJobId
+causedByEventId
+```
+
+修复 Agent 应获得受控的证据包：
+
+- 原始目标和人工输入
+- 原 Job 的结构化时间线
+- 失败 Tool Call、错误码和输出 Artifact
+- Client OS、Pi 版本、模型和工具配置
+- 仓库 remote、branch 和起始 commit SHA
+- 原 Job 产生的 diff、commit 和测试结果
+- 原 Pi Session JSONL 或其受控摘要
+
+修复 Job 应从明确的代码基线开始，先复现失败，再修改、验证并保存新的
+diff/commit。可以 fork 原 Pi Session，但必须创建新的 Job 和 AgentRun，
+不能覆盖原 Session 或原审计记录。
+
+---
+
+## 21. Agent 审计的安全与隐私
+
+应记录：
+
+- 发起者、目标 Client、cwd、仓库和起始 commit
+- Pi 版本、模型、thinking level、工具列表
+- Tool Call 名称和脱敏参数
+- 工具结果、exitCode、时长和错误码
+- 修改文件列表、diff、测试和构建结果
+- token、cost、stopReason、重试和取消时间
+
+不应直接记录：
+
+- API Key、OAuth Token 和 PSK
+- `.env`、私钥和完整环境变量
+- FileRef 签名 URL 和敏感 headers
+- 未脱敏的命令参数
+- 文件完整内容，除非作为有权限和保留期的 Artifact
+- 模型隐藏思维过程
+
+审计重点应是：Agent 收到什么、调用什么工具、修改什么、获得什么结果以及最终做出什么可观察行为，而不是依赖隐藏推理。
+
+交互式 Agent 还应定义控制权：首版建议同一时间只有一个可写 Attachment，其他连接只读观察；控制权转移和审批留到有明确需求时增加。
+
+---
+
+## 22. Pi Agent 分阶段落地建议
+
+### Agent 阶段一：一次性任务
+
+实现：
+
+- `agent.run + mode=one-shot`
+- Agent Worker + Pi SDK
+- 持久化 Pi Session
+- 基础 AgentRun 和 JobEvent
+- 最终消息、Session、patch 和测试报告 Artifact
+- Client capability 与 Socket/Job 归属校验
+
+### Agent 阶段二：结构化交互
+
+增加：
+
+- `mode=interactive`
+- `waiting_input`
+- `attach/detach`
+- `prompt/steer/follow-up/abort turn`
+- 历史事件回放
+- 空闲 Session 限额与超时
+
+### Agent 阶段三：可靠审计与修复
+
+增加：
+
+- Client 本地事件 spool 与 sequence 补传
+- `rootJobId/parentJobId/causedByEventId`
+- 修复 Job 的证据包
+- Git 基线、diff、commit 和验证结果
+- Artifact 权限、保留期和脱敏
+
+### Agent 阶段四：按需求增强
+
+仅在有明确需求后增加：
+
+- 工具和危险操作审批
+- 多用户控制权转移
+- 原生 Pi TUI/PTY
+- OpenTelemetry Collector
+- 跨 Client 子 Job 编排
+- 成本预算、Turn 限制和更复杂的恢复策略
+
+---
+
+## 23. Pi Agent 验收标准
+
+### 一次性任务
+
+- `agent.run` 不通过解析普通 stdout 获取结构化状态。
+- Job 能查询到 Client、cwd、Pi Session、模型、开始/结束时间和最终结果。
+- Tool Call 和 Tool Result 能按时间线回放。
+- 代码修改、测试报告和 Session 以 Artifact 保存。
+- 取消时先中止 Agent，再安全终止 Worker。
+
+### 交互式任务
+
+- 当前 Turn 结束后进入 `waiting_input`，不会自动关闭 Job。
+- 用户可 detach 后重新 attach，并恢复历史和实时输出。
+- 终端断开不取消 Job。
+- 每次人工输入都记录 actor、来源、时间和输入模式。
+- `waiting_input` 不占用 Agent 执行并发槽。
+
+### 审计与恢复
+
+- 每个事件可通过 `jobId/runId/traceId` 关联。
+- Client 断线后可按 sequence 补传且 Server 能幂等去重。
+- Pi Session compaction 不删除原始审计证据。
+- 原 Job、失败 Job 和修复 Job 的因果关系可查询。
+- 敏感凭据、签名 URL 和隐藏思维不会进入普通日志。
+
+---
+
+## 24. 统一演进路径
+
+最终建议的最小演进顺序：
+
+```text
+现有 command Job
+  -> Typed Job：exec / file.* / agent.run
+  -> JobEvent + Artifact
+  -> 文件管理：Client fs handler + Storage/FileRef
+  -> Pi 一次性任务：Agent Worker + Pi SDK
+  -> Pi 结构化交互：Session + waiting_input + Attachment
+  -> 可靠事件补传与失败修复链
+  -> 有需求后再接 PTY、审批和 OpenTelemetry
+```
+
+核心原则：
+
+> **Job 管目标、调度和审计；AgentRun 管一次执行；Pi Session 管上下文；
+> JobEvent 管时间线；Artifact 管大证据；Attachment 管临时交互。**
+
+这样，一次性 Pi 任务、终端交互、文件操作和后续自动修复可以共享同一套
+Job 主线，同时保持各模块职责清晰。
