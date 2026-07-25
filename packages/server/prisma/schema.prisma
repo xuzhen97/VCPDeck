@@ -79,3 +79,10 @@ model AuthSession {
   revokedAt   DateTime?
   createdAt   DateTime  @default(now())
 }
+
+model StorageBackendConfig {
+  id        Int      @id @default(autoincrement())
+  kind      String   @default("local")
+  config    String   @default("{}")
+  updatedAt DateTime @updatedAt
+}
