@@ -1,6 +1,8 @@
 import type { Socket } from "socket.io-client";
 import type { JobDispatch } from "@vcpdeck/shared";
 import { executeExec } from "./executor.js";
+import { handleFileOp } from "./file-handler.js";
+import { handleTransfer } from "./transfer-handler.js";
 
 export function dispatch(job: JobDispatch, socket: Socket) {
 	switch (job.type) {
@@ -51,10 +53,17 @@ export function dispatch(job: JobDispatch, socket: Socket) {
 		case "file.mkdir":
 		case "file.delete":
 		case "file.move":
-		case "file.download":
-		case "file.upload":
+			return handleFileOp(
+				{ jobId: job.jobId, type: job.type, payload: (job as any).payload ?? {} },
+				socket,
+			);
+		case "file.export":
+		case "file.import":
+			return handleTransfer(
+				{ jobId: job.jobId, type: job.type, payload: (job as any).payload ?? {} },
+				socket,
+			);
 		case "agent.run":
-			// ponytail: 扩展点在 switch，后续每个 type 收敛到独立 handler 文件
 			throw new Error(`Job type "${job.type}" not yet implemented`);
 		default:
 			throw new Error(`Unknown job type: ${(job as any).type}`);
