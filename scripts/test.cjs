@@ -115,6 +115,16 @@ async function apiRaw(method, path, body, opts = {}) {
 	return res;
 }
 
+/** Clean up database from previous runs so bootstrapAdmin creates fresh admin. */
+function cleanDb() {
+	const dbPath = path.join(serverDir, "prisma", "dev.db");
+	try {
+		require("node:fs").unlinkSync(dbPath);
+	} catch {
+		// file doesn't exist or is locked — db push will recreate
+	}
+}
+
 /** Kill anything on port 3001 from previous runs. */
 function killPort() {
 	try {
@@ -589,7 +599,14 @@ async function storageUploadAndVerify() {
 	const { status: tokStatus, body: tokenRes } = await apiJson(
 		"POST",
 		"/api/storage/upload-token",
-		{ json: { jobId: "test-storage", clientId: "test", filename: "storage-test.txt", size: TEST_FILE_CONTENT.length } },
+		{
+			json: {
+				jobId: "test-storage",
+				clientId: "test",
+				filename: "storage-test.txt",
+				size: TEST_FILE_CONTENT.length,
+			},
+		},
 	);
 	if (tokStatus !== 200 && tokStatus !== 201) {
 		return fail("Storage upload token", `status ${tokStatus}`);
@@ -608,12 +625,21 @@ async function storageUploadAndVerify() {
 	});
 	const putBody = await putRes.json().catch(() => null);
 	if (putRes.status !== 200 || !putBody?.key) {
-		return fail("Storage upload", `status=${putRes.status} body=${JSON.stringify(putBody)}`);
+		return fail(
+			"Storage upload",
+			`status=${putRes.status} body=${JSON.stringify(putBody)}`,
+		);
 	}
 	if (putBody.key !== keyFromUrl) {
-		return fail("Storage upload key match", `urlKey=${keyFromUrl} storedKey=${putBody.key}`);
+		return fail(
+			"Storage upload key match",
+			`urlKey=${keyFromUrl} storedKey=${putBody.key}`,
+		);
 	}
-	pass("Storage upload", `key=${putBody.key.slice(0, 20)}..., size=${putBody.size}`);
+	pass(
+		"Storage upload",
+		`key=${putBody.key.slice(0, 20)}..., size=${putBody.size}`,
+	);
 
 	// 3. 获取下载令牌
 	const { status: dlTokStatus, body: dlTokenRes } = await apiJson(
@@ -634,7 +660,10 @@ async function storageUploadAndVerify() {
 	const getRes = await fetch(`${BASE}${downloadUrl}`, { redirect: "manual" });
 	const content = await getRes.text();
 	if (getRes.status !== 200 || content !== TEST_FILE_CONTENT) {
-		return fail("Storage download", `status=${getRes.status} contentLen=${content.length} expectedLen=${TEST_FILE_CONTENT.length}`);
+		return fail(
+			"Storage download",
+			`status=${getRes.status} contentLen=${content.length} expectedLen=${TEST_FILE_CONTENT.length}`,
+		);
 	}
 	pass("Storage download", `content matches, ${content.length} bytes`);
 
@@ -652,6 +681,7 @@ const done = (code) => {
 async function main() {
 	console.log("\n=== VCPDeck Integration Test ===\n");
 
+	cleanDb();
 	killPort();
 	await sleep(1000);
 
@@ -1358,7 +1388,15 @@ async function main() {
 		const { status: tokStatus, body: tokenRes } = await apiJson(
 			"POST",
 			"/api/storage/upload-token",
-			{ json: { jobId: "test-expired", clientId: "test", filename: "expired.txt", size: 5, ttlSeconds: 1 } },
+			{
+				json: {
+					jobId: "test-expired",
+					clientId: "test",
+					filename: "expired.txt",
+					size: 5,
+					ttlSeconds: 1,
+				},
+			},
 		);
 		if (tokStatus === 200 || tokStatus === 201) {
 			const expiredUrl = tokenRes.url;
@@ -1369,7 +1407,10 @@ async function main() {
 			if (putRes.status === 403) {
 				pass("Storage upload expired sig", "403");
 			} else {
-				fail("Storage upload expired sig", `expected 403, got ${putRes.status}`);
+				fail(
+					"Storage upload expired sig",
+					`expected 403, got ${putRes.status}`,
+				);
 			}
 		}
 	}
@@ -1379,7 +1420,14 @@ async function main() {
 		const { status: tokStatus, body: tokenRes } = await apiJson(
 			"POST",
 			"/api/storage/upload-token",
-			{ json: { jobId: "test-bad", clientId: "test", filename: "bad.txt", size: 5 } },
+			{
+				json: {
+					jobId: "test-bad",
+					clientId: "test",
+					filename: "bad.txt",
+					size: 5,
+				},
+			},
 		);
 		if (tokStatus === 200 || tokStatus === 201) {
 			const tamperedUrl = tokenRes.url.replace(/sig=([^&]+)/, "sig=deadbeef");
@@ -1411,12 +1459,17 @@ async function main() {
 				{ json: { key: testKey } },
 			);
 			if (dlTokStatus === 200 || dlTokStatus === 201) {
-				const getRes = await fetch(`${BASE}${dlTokenRes.url}`, { redirect: "manual" });
+				const getRes = await fetch(`${BASE}${dlTokenRes.url}`, {
+					redirect: "manual",
+				});
 				// 文件已删除，应返回错误
 				if (getRes.status >= 400) {
 					pass("Storage download deleted file", `status=${getRes.status}`);
 				} else {
-					fail("Storage download deleted file", `expected error, got ${getRes.status}`);
+					fail(
+						"Storage download deleted file",
+						`expected error, got ${getRes.status}`,
+					);
 				}
 			}
 		} catch {
@@ -1426,7 +1479,9 @@ async function main() {
 
 	// 54. DELETE without auth → 401
 	{
-		const { status } = await apiJson("DELETE", `/api/storage/some-key`, { noCookie: true });
+		const { status } = await apiJson("DELETE", `/api/storage/some-key`, {
+			noCookie: true,
+		});
 		if (status === 401) {
 			pass("Storage delete no auth", "401");
 		} else {
