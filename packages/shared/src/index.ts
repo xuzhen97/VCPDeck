@@ -25,8 +25,8 @@ export enum JobType {
 	FILE_MKDIR = "file.mkdir",
 	FILE_DELETE = "file.delete",
 	FILE_MOVE = "file.move",
-	FILE_DOWNLOAD = "file.download",
-	FILE_UPLOAD = "file.upload",
+	FILE_EXPORT = "file.export",
+	FILE_IMPORT = "file.import",
 	AGENT_RUN = "agent.run",
 }
 
