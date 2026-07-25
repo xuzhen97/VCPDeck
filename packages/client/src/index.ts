@@ -6,7 +6,7 @@ import { getHeartbeat } from "./heartbeat.js";
 import { killJob, getRunningJobIds, getStatusReport } from "./executor.js";
 import { dispatch } from "./dispatcher.js";
 
-const SERVER_URL = process.env.VCPDECK_SERVER || "http://localhost:3001";
+const SERVER_URL = (process.env.VCPDECK_SERVER || "http://localhost:3001") + "/client";
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
 
 function main() {
