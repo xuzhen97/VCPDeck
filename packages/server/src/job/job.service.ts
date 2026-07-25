@@ -8,8 +8,31 @@ import type {
   StatusReport,
   JobInfo,
   ActorContext,
+  FileRef,
 } from "@vcpdeck/shared";
+import { FileService } from "../file/file.service.js";
 import { randomUUID } from "node:crypto";
+
+const FILE_READ_TYPES = ["file.list", "file.stat", "file.readText", "file.export"];
+const FILE_WRITE_TYPES = [
+	"file.writeText",
+	"file.mkdir",
+	"file.delete",
+	"file.move",
+	"file.import",
+];
+
+function parseCapabilities(raw: unknown): string[] {
+	if (Array.isArray(raw)) return raw as string[];
+	if (typeof raw === "string") {
+		try {
+			return JSON.parse(raw) as string[];
+		} catch {
+			return [];
+		}
+	}
+	return [];
+}
 
 function safeJsonParse<T>(raw: string, fallback: T): T {
   try {
@@ -24,6 +47,7 @@ export class JobService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(JobScheduler) private readonly scheduler: JobScheduler,
+    @Inject(FileService) private readonly fileService: FileService,
   ) {}
 
   async create(
@@ -45,14 +69,73 @@ export class JobService {
       throw new Error(`Client "${params.clientId}" is offline`);
     }
 
+    // Capability 校验
+    const caps = parseCapabilities(client.capabilities);
+    if (FILE_READ_TYPES.includes(params.type) && !caps.includes("file.read")) {
+      throw Object.assign(
+        new Error(`Client "${params.clientId}" lacks "file.read" capability`),
+        { statusCode: 400 },
+      );
+    }
+    if (FILE_WRITE_TYPES.includes(params.type) && !caps.includes("file.write")) {
+      throw Object.assign(
+        new Error(`Client "${params.clientId}" lacks "file.write" capability`),
+        { statusCode: 400 },
+      );
+    }
+
     const jobId = randomUUID();
+
+    // 文件传输编排
+    let finalPayload = { ...params.payload };
+    if (params.type === "file.export") {
+      const p = params.payload as { path: string; rootDir: string };
+      const { fileId, key, uploadUrl, expiresAt } =
+        await this.fileService.createPending(jobId, params.clientId, {
+          jobId,
+          clientId: params.clientId,
+          filename:
+            p.path.split(/[/\\]/).pop() || "file",
+          size: 0,
+        });
+      finalPayload = {
+        ...finalPayload,
+        uploadRef: {
+          id: fileId,
+          key,
+          url: uploadUrl,
+          method: "PUT" as const,
+          expiresAt,
+        },
+      };
+    } else if (params.type === "file.import") {
+      const p = params.payload as {
+        targetPath: string;
+        rootDir: string;
+        fileId: string;
+      };
+      const dl = await this.fileService.createDownloadToken(p.fileId);
+      finalPayload = {
+        ...finalPayload,
+        downloadRef: {
+          id: p.fileId,
+          key: "",
+          url: dl.downloadUrl,
+          method: "GET" as const,
+          expiresAt: 0,
+        },
+        size: dl.size,
+        sha256: dl.sha256,
+      };
+    }
+
     await this.prisma.job.create({
       data: {
         id: jobId,
         clientId: params.clientId,
         type: params.type,
         status: "pending",
-        payload: JSON.stringify(params.payload),
+        payload: JSON.stringify(finalPayload),
         timeout: params.timeout ?? null,
         createdByIdentityId: actor.identityId,
         createdByName: actor.displayName,
