@@ -89,7 +89,9 @@ export function executeExec(job: ExecJob, socket: Socket) {
 		const wasCancelling = activeJobs.get(job.jobId)?.cancelling ?? false;
 		settle(job.jobId, () => {
 			if (wasCancelling) {
-				socket.emit(Events.JOB_CANCELLED, { jobId: job.jobId } satisfies JobCancelled);
+				socket.emit(Events.JOB_CANCELLED, {
+					jobId: job.jobId,
+				} satisfies JobCancelled);
 				return;
 			}
 			socket.emit(Events.JOB_DONE, {
@@ -118,16 +120,16 @@ export function executeExec(job: ExecJob, socket: Socket) {
 	if (job.mode === "script") {
 		child.stdin?.on("error", () => {
 			settle(job.jobId, () => {
-					try {
-						child.kill("SIGTERM");
-					} catch {
-						/* ignore */
-					}
-					socket.emit(Events.JOB_DONE, {
-						jobId: job.jobId,
-						type: "exec" as const,
-						error: {
-							code: "EXEC_STDIN_FAILED",
+				try {
+					child.kill("SIGTERM");
+				} catch {
+					/* ignore */
+				}
+				socket.emit(Events.JOB_DONE, {
+					jobId: job.jobId,
+					type: "exec" as const,
+					error: {
+						code: "EXEC_STDIN_FAILED",
 						message: "Failed to write script to stdin",
 					},
 				} satisfies JobDone);

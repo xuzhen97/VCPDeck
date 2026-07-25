@@ -117,7 +117,6 @@ export type JobDone =
 	| ExecJobDone
 	| { jobId: string; type: string; result: Record<string, unknown> };
 
-
 export interface JobUpdate {
 	jobId: string;
 	type: string;
