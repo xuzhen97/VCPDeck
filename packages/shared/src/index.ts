@@ -290,3 +290,9 @@ export interface CreateTokenResponse {
 	token: string;
 	label: string;
 }
+
+// ── 存储后端类型 ──
+export const StorageProviderKind = {
+	LOCAL: "local",
+} as const;
+export type StorageProviderKind = (typeof StorageProviderKind)[keyof typeof StorageProviderKind];
