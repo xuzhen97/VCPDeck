@@ -86,3 +86,18 @@ model StorageBackendConfig {
   config    String   @default("{}")
   updatedAt DateTime @updatedAt
 }
+
+model File {
+  id          String    @id
+  key         String    @unique
+  jobId       String
+  clientId    String
+  filename    String
+  mimeType    String?
+  size        Int
+  sha256      String
+  status      String    @default("pending")
+  storageKind String    @default("local")
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
