@@ -826,9 +826,14 @@ async function testFileExport(clientId, rootDir, filePath) {
 			timeout: 10000,
 		},
 	});
-	if (wkRes.status !== 201) return fail("file.export: write prep", `status ${wkRes.status}`);
+	if (wkRes.status !== 201)
+		return fail("file.export: write prep", `status ${wkRes.status}`);
 	const wkBody = await wkRes.json();
-	try { await waitForJobUpdate(wkBody.jobId); } catch (e) { return fail("file.export: write prep", e.message); }
+	try {
+		await waitForJobUpdate(wkBody.jobId);
+	} catch (e) {
+		return fail("file.export: write prep", e.message);
+	}
 
 	// 2. 导出文件
 	const res = await api("POST", "/api/jobs", {
@@ -839,13 +844,15 @@ async function testFileExport(clientId, rootDir, filePath) {
 			timeout: 30000,
 		},
 	});
-	if (res.status !== 201) return fail("file.export", `create failed: ${res.status}`);
+	if (res.status !== 201)
+		return fail("file.export", `create failed: ${res.status}`);
 	const body = await res.json();
 
 	let exportResult = null;
 	try {
 		const up = await waitForJobUpdate(body.jobId, 30000);
-		if (up.status !== "done") return fail("file.export", `status=${up.status} error=${up.errorCode}`);
+		if (up.status !== "done")
+			return fail("file.export", `status=${up.status} error=${up.errorCode}`);
 		exportResult = up.result;
 	} catch (e) {
 		return fail("file.export", e.message);
@@ -862,12 +869,18 @@ async function testFileExport(clientId, rootDir, filePath) {
 		json: { key: exportResult.key },
 	});
 	if (dlRes.status !== 200 && dlRes.status !== 201)
-		return fail("file.export: download verify", `download-token failed: ${dlRes.status}`);
+		return fail(
+			"file.export: download verify",
+			`download-token failed: ${dlRes.status}`,
+		);
 	const dlBody = await dlRes.json();
 	const getRes = await fetch(`${BASE}${dlBody.url}`, { redirect: "manual" });
 	const downloaded = await getRes.text();
 	if (downloaded === testContent)
-		pass("file.export: content verify", `content matches (${downloaded.length} bytes)`);
+		pass(
+			"file.export: content verify",
+			`content matches (${downloaded.length} bytes)`,
+		);
 	else
 		fail(
 			"file.export: content verify",
@@ -894,7 +907,8 @@ async function testFileImport(
 			timeout: 30000,
 		},
 	});
-	if (res.status !== 201) return fail("file.import", `create failed: ${res.status}`);
+	if (res.status !== 201)
+		return fail("file.import", `create failed: ${res.status}`);
 	const body = await res.json();
 
 	try {
@@ -915,7 +929,8 @@ async function testFileImport(
 			timeout: 10000,
 		},
 	});
-	if (rdRes.status !== 201) return fail("file.import: read verify", `create failed: ${rdRes.status}`);
+	if (rdRes.status !== 201)
+		return fail("file.import: read verify", `create failed: ${rdRes.status}`);
 	const rdBody = await rdRes.json();
 	try {
 		const up = await waitForJobUpdate(rdBody.jobId);

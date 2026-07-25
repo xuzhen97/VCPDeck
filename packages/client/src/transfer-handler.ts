@@ -8,8 +8,7 @@ import { Events, FileErrorCode } from "@vcpdeck/shared";
 import type { JobDone, FileRef } from "@vcpdeck/shared";
 import { resolveSafePath } from "./file-handler.js";
 
-const SERVER_BASE =
-	process.env.VCPDECK_SERVER || "http://localhost:3001";
+const SERVER_BASE = process.env.VCPDECK_SERVER || "http://localhost:3001";
 
 /** 将相对 URL 转为绝对 URL */
 function absUrl(path: string): string {
@@ -115,7 +114,9 @@ async function handleExport(
 	fileStream.pipe(countingStream);
 
 	// safe: uploadRef.url 由 Server 签发并校验签名，非任意 URL
-	const webStream = Readable.toWeb(countingStream) as ReadableStream<Uint8Array>;
+	const webStream = Readable.toWeb(
+		countingStream,
+	) as ReadableStream<Uint8Array>;
 	const res = await fetch(absUrl(uploadRef.url), {
 		method: "PUT",
 		body: webStream,
