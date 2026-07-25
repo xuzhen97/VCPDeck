@@ -7,6 +7,13 @@ import { StorageModule } from "./storage/storage.module.js";
 import { FileModule } from "./file/file.module.js";
 
 @Module({
-	imports: [PrismaModule, AuthModule, IdentityModule, EventsModule, StorageModule, FileModule],
+	imports: [
+		PrismaModule,
+		AuthModule,
+		IdentityModule,
+		EventsModule,
+		StorageModule,
+		FileModule,
+	],
 })
 export class AppModule {}

@@ -116,10 +116,12 @@ for (const step of steps) {
 	console.log(`  -H "Content-Type: application/json" \\`);
 	console.log(`  -d '${JSON.stringify(step.body, null, 2)}'`);
 	console.log(`\n  curl command (replace <client-id> with actual):`);
-	console.log(`    curl -s -X POST ${baseUrl}/api/jobs -H "Content-Type: application/json" -d '${JSON.stringify(step.body)}'`.replace(
-		"<client-id>",
-		"YOUR_CLIENT_ID",
-	));
+	console.log(
+		`    curl -s -X POST ${baseUrl}/api/jobs -H "Content-Type: application/json" -d '${JSON.stringify(step.body)}'`.replace(
+			"<client-id>",
+			"YOUR_CLIENT_ID",
+		),
+	);
 }
 
 console.log("\n\n=== 预期结果 ===");

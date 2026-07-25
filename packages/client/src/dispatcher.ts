@@ -54,13 +54,21 @@ export function dispatch(job: JobDispatch, socket: Socket) {
 		case "file.delete":
 		case "file.move":
 			return handleFileOp(
-				{ jobId: job.jobId, type: job.type, payload: (job as any).payload ?? {} },
+				{
+					jobId: job.jobId,
+					type: job.type,
+					payload: (job as any).payload ?? {},
+				},
 				socket,
 			);
 		case "file.export":
 		case "file.import":
 			return handleTransfer(
-				{ jobId: job.jobId, type: job.type, payload: (job as any).payload ?? {} },
+				{
+					jobId: job.jobId,
+					type: job.type,
+					payload: (job as any).payload ?? {},
+				},
 				socket,
 			);
 		case "agent.run":

@@ -58,7 +58,14 @@ export async function handleTransfer(
 			const downloadRef = payload.downloadRef as FileRef;
 			const expectedSha256 = payload.sha256 as string;
 
-			await handleImport(jobId, targetPath, rootDir, downloadRef, expectedSha256, socket);
+			await handleImport(
+				jobId,
+				targetPath,
+				rootDir,
+				downloadRef,
+				expectedSha256,
+				socket,
+			);
 			return;
 		}
 
@@ -77,9 +84,7 @@ export async function handleTransfer(
 			jobId,
 			type,
 			code,
-			code === FileErrorCode.PATH_NOT_FOUND
-				? "Path not found"
-				: err.message,
+			code === FileErrorCode.PATH_NOT_FOUND ? "Path not found" : err.message,
 		);
 	}
 }

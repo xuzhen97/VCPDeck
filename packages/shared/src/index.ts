@@ -210,31 +210,89 @@ export interface JobError {
 
 // ── FileRef ──
 export interface FileRef {
-	id: string;                      // DB File 表主键
-	key: string;                     // Storage 对象路径
-	url: string;                     // 预签名 URL
+	id: string; // DB File 表主键
+	key: string; // Storage 对象路径
+	url: string; // 预签名 URL
 	method: "GET" | "PUT";
 	expiresAt: number;
 	headers?: Record<string, string>;
 }
 
 // ── File job payload ──
-export interface FileListPayload { path: string; rootDir: string }
-export interface FileStatPayload { path: string; rootDir: string }
-export interface FileReadTextPayload { path: string; rootDir: string; maxBytes?: number }
-export interface FileWriteTextPayload { path: string; rootDir: string; content: string }
-export interface FileMkdirPayload { path: string; rootDir: string }
-export interface FileDeletePayload { path: string; rootDir: string; recursive?: boolean }
-export interface FileMovePayload {	source: string; destination: string; rootDir: string; overwrite?: boolean }
-export interface FileExportPayload { path: string; rootDir: string; uploadRef: FileRef }
-export interface FileImportPayload { targetPath: string; rootDir: string; downloadRef: FileRef; size: number; sha256: string }
+export interface FileListPayload {
+	path: string;
+	rootDir: string;
+}
+export interface FileStatPayload {
+	path: string;
+	rootDir: string;
+}
+export interface FileReadTextPayload {
+	path: string;
+	rootDir: string;
+	maxBytes?: number;
+}
+export interface FileWriteTextPayload {
+	path: string;
+	rootDir: string;
+	content: string;
+}
+export interface FileMkdirPayload {
+	path: string;
+	rootDir: string;
+}
+export interface FileDeletePayload {
+	path: string;
+	rootDir: string;
+	recursive?: boolean;
+}
+export interface FileMovePayload {
+	source: string;
+	destination: string;
+	rootDir: string;
+	overwrite?: boolean;
+}
+export interface FileExportPayload {
+	path: string;
+	rootDir: string;
+	uploadRef: FileRef;
+}
+export interface FileImportPayload {
+	targetPath: string;
+	rootDir: string;
+	downloadRef: FileRef;
+	size: number;
+	sha256: string;
+}
 
 // ── File job result ──
-export interface FileListResult { entries: { name: string; kind: "file" | "dir"; size: number; mtime: string }[] }
-export interface FileStatResult { name: string; kind: "file" | "dir"; size: number; mtime: string }
-export interface FileReadTextResult { content: string; size: number }
-export interface FileChangeResult { path: string }
-export interface FileTransferResult { fileId: string; key: string; size: number; sha256: string }
+export interface FileListResult {
+	entries: {
+		name: string;
+		kind: "file" | "dir";
+		size: number;
+		mtime: string;
+	}[];
+}
+export interface FileStatResult {
+	name: string;
+	kind: "file" | "dir";
+	size: number;
+	mtime: string;
+}
+export interface FileReadTextResult {
+	content: string;
+	size: number;
+}
+export interface FileChangeResult {
+	path: string;
+}
+export interface FileTransferResult {
+	fileId: string;
+	key: string;
+	size: number;
+	sha256: string;
+}
 
 // ── File 稳定错误码 ──
 export const FileErrorCode = {

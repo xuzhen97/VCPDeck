@@ -8,7 +8,6 @@ import type {
   StatusReport,
   JobInfo,
   ActorContext,
-  FileRef,
 } from "@vcpdeck/shared";
 import { FileService } from "../file/file.service.js";
 import { randomUUID } from "node:crypto";
@@ -168,9 +167,9 @@ export class JobService {
   ): Promise<DispatchPayload | null> {
     let effectiveStatus: string;
 
-    if (type === "exec" && result.errorCode) {
+    if (result?.errorCode) {
       effectiveStatus = "error";
-    } else if (type === "exec" && (result as any).exitCode !== 0 && (result as any).exitCode !== undefined) {
+    } else if (type === "exec" && (result as any)?.exitCode !== 0 && (result as any)?.exitCode !== undefined) {
       effectiveStatus = "error";
     } else {
       effectiveStatus = "done";

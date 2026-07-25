@@ -24,10 +24,7 @@ export async function resolveSafePath(
 		.replace(/\\/g, "/")
 		.toLowerCase();
 
-	if (
-		!resolved.startsWith(resolvedRoot + "/") &&
-		resolved !== resolvedRoot
-	) {
+	if (!resolved.startsWith(resolvedRoot + "/") && resolved !== resolvedRoot) {
 		throw {
 			code: FileErrorCode.PATH_NOT_ALLOWED,
 			message: "Path escapes rootDir",
@@ -36,9 +33,7 @@ export async function resolveSafePath(
 
 	// realpath 防 symlink 逃逸（仅在文件已存在时有效）
 	try {
-		const real = (await realpath(resolved))
-			.replace(/\\/g, "/")
-			.toLowerCase();
+		const real = (await realpath(resolved)).replace(/\\/g, "/").toLowerCase();
 		if (!real.startsWith(resolvedRoot + "/") && real !== resolvedRoot) {
 			throw {
 				code: FileErrorCode.PATH_NOT_ALLOWED,
@@ -175,10 +170,7 @@ export async function handleFileOp(
 				return;
 			}
 			case "file.move": {
-				const src = await resolveSafePath(
-					rootDir,
-					payload.source as string,
-				);
+				const src = await resolveSafePath(rootDir, payload.source as string);
 				const dest = await resolveSafePath(
 					rootDir,
 					payload.destination as string,
@@ -220,9 +212,7 @@ export async function handleFileOp(
 			jobId,
 			type,
 			code,
-			code === FileErrorCode.PATH_NOT_FOUND
-				? "Path not found"
-				: err.message,
+			code === FileErrorCode.PATH_NOT_FOUND ? "Path not found" : err.message,
 		);
 	}
 }

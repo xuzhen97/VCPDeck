@@ -590,6 +590,228 @@ async function testExecCancel(clientId) {
 	}
 }
 
+// ── File ops test helpers ──
+async function testFileMkdir(clientId, rootDir, dirName) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.mkdir",
+			payload: { path: dirName, rootDir },
+			timeout: 10000,
+		},
+	});
+	if (res.status !== 201) return fail("file.mkdir", `status ${res.status}`);
+	const body = await res.json();
+	try {
+		const up = await waitForJobUpdate(body.jobId);
+		if (up.status === "done") return pass("file.mkdir", `dir=${dirName}`);
+		fail("file.mkdir", `status=${up.status} error=${up.errorCode}`);
+	} catch (e) {
+		fail("file.mkdir", e.message);
+	}
+}
+
+async function testFileList(clientId, rootDir, dirName) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.list",
+			payload: { path: dirName, rootDir },
+			timeout: 10000,
+		},
+	});
+	if (res.status !== 201) return fail("file.list", `status ${res.status}`);
+	const body = await res.json();
+	try {
+		const up = await waitForJobUpdate(body.jobId);
+		if (up.status === "done" && up.result?.entries)
+			return pass("file.list", `${up.result.entries.length} entries`);
+		fail("file.list", `status=${up.status} error=${up.errorCode}`);
+	} catch (e) {
+		fail("file.list", e.message);
+	}
+	return body.jobId;
+}
+
+async function testFileStat(clientId, rootDir, path) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.stat",
+			payload: { path, rootDir },
+			timeout: 10000,
+		},
+	});
+	if (res.status !== 201) return fail("file.stat", `status ${res.status}`);
+	const body = await res.json();
+	try {
+		const up = await waitForJobUpdate(body.jobId);
+		if (up.status === "done" && up.result?.name)
+			return pass(
+				"file.stat",
+				`${up.result.name} kind=${up.result.kind} size=${up.result.size}`,
+			);
+		fail("file.stat", `status=${up.status} error=${up.errorCode}`);
+	} catch (e) {
+		fail("file.stat", e.message);
+	}
+}
+
+async function testFileWriteText(clientId, rootDir, filePath, content) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.writeText",
+			payload: { path: filePath, rootDir, content },
+			timeout: 10000,
+		},
+	});
+	if (res.status !== 201) return fail("file.writeText", `status ${res.status}`);
+	const body = await res.json();
+	try {
+		const up = await waitForJobUpdate(body.jobId);
+		if (up.status === "done") return pass("file.writeText", `${content.length} bytes`);
+		fail("file.writeText", `status=${up.status} error=${up.errorCode}`);
+	} catch (e) {
+		fail("file.writeText", e.message);
+	}
+}
+
+async function testFileReadText(clientId, rootDir, filePath, expectedContent) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.readText",
+			payload: { path: filePath, rootDir },
+			timeout: 10000,
+		},
+	});
+	if (res.status !== 201) return fail("file.readText", `status ${res.status}`);
+	const body = await res.json();
+	try {
+		const up = await waitForJobUpdate(body.jobId);
+		if (up.status === "done" && up.result?.content === expectedContent)
+			return pass("file.readText", `content matches, ${up.result.size} bytes`);
+		fail(
+			"file.readText",
+			`status=${up.status} error=${up.errorCode} got="${up.result?.content?.slice(0, 40)}"`,
+		);
+	} catch (e) {
+		fail("file.readText", e.message);
+	}
+}
+
+async function testFileMove(clientId, rootDir, source, destination) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.move",
+			payload: { source, destination, rootDir },
+			timeout: 10000,
+		},
+	});
+	if (res.status !== 201) return fail("file.move", `status ${res.status}`);
+	const body = await res.json();
+	try {
+		const up = await waitForJobUpdate(body.jobId);
+		if (up.status === "done") return pass("file.move", `${source} -> ${destination}`);
+		fail("file.move", `status=${up.status} error=${up.errorCode}`);
+	} catch (e) {
+		fail("file.move", e.message);
+	}
+}
+
+async function testFileDelete(clientId, rootDir, path, recursive) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.delete",
+			payload: { path, rootDir, recursive },
+			timeout: 10000,
+		},
+	});
+	if (res.status !== 201) return fail("file.delete", `status ${res.status}`);
+	const body = await res.json();
+	try {
+		const up = await waitForJobUpdate(body.jobId);
+		if (up.status === "done") return pass("file.delete", `path=${path} recursive=${!!recursive}`);
+		fail("file.delete", `status=${up.status} error=${up.errorCode}`);
+	} catch (e) {
+		fail("file.delete", e.message);
+	}
+}
+
+async function testFilePathEscape(clientId, rootDir) {
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.readText",
+			payload: { path: "../../../etc/passwd", rootDir },
+			timeout: 10000,
+		},
+	});
+	if (res.status !== 201) return fail("file path escape", `status ${res.status}`);
+	const body = await res.json();
+	try {
+		const up = await waitForJobUpdate(body.jobId);
+		if (up.status === "error" && up.errorCode === "PATH_NOT_ALLOWED")
+			return pass("file path escape", "PATH_NOT_ALLOWED");
+		fail(
+			"file path escape",
+			`status=${up.status} errorCode=${up.errorCode}`,
+		);
+	} catch (e) {
+		fail("file path escape", e.message);
+	}
+}
+
+async function testFileCapabilityRejection() {
+	// 用 mock socket 注册一个只有 exec 能力的 client，尝试创建 file job
+	const mockId = "test-no-file-cap-" + Date.now();
+	const mockSocket = io(`${BASE}/client`, { auth: { psk: PSK } });
+	try {
+		await new Promise((resolve, reject) => {
+			mockSocket.on("connect", resolve);
+			mockSocket.on("connect_error", reject);
+			setTimeout(() => reject(new Error("mock connect timeout")), 5000);
+		});
+		await new Promise((resolve) => {
+			mockSocket.emit(Events.REGISTER, {
+				clientId: mockId,
+				hostname: "test-no-file",
+				os: "test",
+				cpuModel: "test-cpu",
+				totalMemMB: 1024,
+				totalDiskMB: 10240,
+				clientVersion: "0.0.0",
+				capabilities: ["exec"],
+			});
+			mockSocket.on("ack", () => resolve());
+			setTimeout(resolve, 1000);
+		});
+		await sleep(500);
+		const res = await api("POST", "/api/jobs", {
+			json: {
+				clientId: mockId,
+				type: "file.list",
+				payload: { path: ".", rootDir: "/tmp" },
+				timeout: 10000,
+			},
+		});
+		if (res.status === 400) {
+			const body = await res.json().catch(() => ({}));
+			if (body.message?.includes("file.read"))
+				return pass("file capability rejection", "400: lacks file.read");
+			return fail("file capability rejection", `body=${JSON.stringify(body)}`);
+		}
+		fail("file capability rejection", `expected 400, got ${res.status}`);
+	} catch (e) {
+		fail("file capability rejection", e.message);
+	} finally {
+		mockSocket.disconnect();
+	}
+}
+
 // ── Storage test helpers ──
 const TEST_FILE_CONTENT = "Hello from VCPDeck storage test!\n";
 
@@ -1346,6 +1568,29 @@ async function main() {
 		await testExecScriptNonZeroExit(REAL_CLIENT_ID);
 		await testExecScriptCwd(REAL_CLIENT_ID);
 		await testExecCancel(REAL_CLIENT_ID);
+
+		// ── File ops 集成测试 ──
+		console.log("\n--- File Ops Integration ---");
+		const fileTestRoot = os.tmpdir();
+		const fileTestDir = "vcpdeck-test-" + Date.now();
+		const testFilePath = `${fileTestDir}/hello.txt`;
+		const testMovedPath = `${fileTestDir}/hello-renamed.txt`;
+		const testContent = "Hello VCPDeck file ops!";
+
+		await testFileMkdir(REAL_CLIENT_ID, fileTestRoot, fileTestDir);
+		await testFileList(REAL_CLIENT_ID, fileTestRoot, fileTestDir);
+		await testFileStat(REAL_CLIENT_ID, fileTestRoot, fileTestDir);
+		await testFileWriteText(REAL_CLIENT_ID, fileTestRoot, testFilePath, testContent);
+		await testFileReadText(REAL_CLIENT_ID, fileTestRoot, testFilePath, testContent);
+		await testFileMove(REAL_CLIENT_ID, fileTestRoot, testFilePath, testMovedPath);
+		await testFileStat(REAL_CLIENT_ID, fileTestRoot, testMovedPath);
+		await testFileDelete(REAL_CLIENT_ID, fileTestRoot, fileTestDir, true);
+
+		// 安全测试
+		await testFilePathEscape(REAL_CLIENT_ID, fileTestRoot);
+
+		// 能力拒绝测试
+		await testFileCapabilityRejection();
 	} catch (e) {
 		fail("Exec test section", e.message);
 	} finally {

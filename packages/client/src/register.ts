@@ -31,6 +31,6 @@ export function getRegisterInfo(): MachineRegister {
     totalMemMB: Math.round(os.totalmem() / 1024 / 1024),
     totalDiskMB: 0, // ponytail: skip disk check, add when needed
     clientVersion: "0.0.0",
-    capabilities: ["exec"],
+    capabilities: ["exec", "file.read", "file.write"],
   };
 }

@@ -164,6 +164,22 @@ export class ClientGateway {
     }
 
     // ── 其他 Job 类型 ──
+    // ── 非 exec error 终态 ──
+    if (raw.error) {
+      const errorCode: string = raw.error.code || "IO_ERROR";
+      const errorMessage: string = raw.error.message || "";
+      await this.jobService.markDone(data.jobId, type, { errorCode, errorMessage });
+      this.server.emit(Events.JOB_UPDATE, {
+        jobId: data.jobId,
+        type,
+        status: JobStatus.ERROR,
+        errorCode,
+        errorMessage,
+        result: undefined,
+      } satisfies JobUpdate);
+      return;
+    }
+
     const result: Record<string, unknown> = raw.result;
     const next = await this.jobService.markDone(data.jobId, type, result);
     this.server.emit(Events.JOB_UPDATE, {
