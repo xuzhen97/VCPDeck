@@ -43,6 +43,19 @@ async function bootstrap() {
 
 	await bootstrapAdmin(app.get(PrismaService));
 
+	// seed 默认存储配置
+	const prisma = app.get(PrismaService);
+	const storageCount = await prisma.storageBackendConfig.count();
+	if (storageCount === 0) {
+		await prisma.storageBackendConfig.create({
+			data: {
+				kind: "local",
+				config: JSON.stringify({ baseDir: "./data/storage" }),
+			},
+		});
+		console.log("[bootstrap] default storage backend: local");
+	}
+
 	await app.listen(3001);
 	console.log("VCPDeck server listening on http://localhost:3001");
 }
