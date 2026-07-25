@@ -4,8 +4,9 @@ import { EventsModule } from "./events/events.module.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { IdentityModule } from "./identity/identity.module.js";
 import { StorageModule } from "./storage/storage.module.js";
+import { FileModule } from "./file/file.module.js";
 
 @Module({
-	imports: [PrismaModule, AuthModule, IdentityModule, EventsModule, StorageModule],
+	imports: [PrismaModule, AuthModule, IdentityModule, EventsModule, StorageModule, FileModule],
 })
 export class AppModule {}
