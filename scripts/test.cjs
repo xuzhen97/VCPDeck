@@ -34,6 +34,7 @@ const ADMIN_PASSWORD = "test123";
 
 // ── Test state ──
 let clientSocket;
+let _serverProcess = null;
 let cookie = ""; // shared session cookie across REST tests
 let cliToken = "";
 const results = [];
@@ -118,7 +119,8 @@ function killTree(pid) {
 				shell: true,
 			});
 		} else {
-			execSync(`kill -9 ${pid}`, {
+			// 先杀子进程再杀父进程，避免孤儿
+			execSync(`pkill -P ${pid} 2>/dev/null; kill -9 ${pid} 2>/dev/null`, {
 				stdio: "ignore",
 				timeout: 3000,
 				shell: true,
@@ -599,7 +601,6 @@ async function main() {
 	if (!serverReady) {
 		console.error("[setup] Server failed to start");
 		console.error(serverOutput);
-		if (_serverProcess?.pid) killTree(_serverProcess.pid);
 		done(1);
 		return;
 	}
