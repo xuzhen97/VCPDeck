@@ -51,6 +51,18 @@ export class StorageController {
 		return { url: ref.url, expiresAt: ref.expiresAt };
 	}
 
+	/** 签发下载令牌 */
+	@Post("download-token")
+	async createDownloadToken(
+		@Body() body: { key: string; ttlSeconds?: number },
+	) {
+		const ref = await this.storageService.createDownloadToken(
+			body.key,
+			body.ttlSeconds ?? DEFAULT_TTL,
+		);
+		return { url: ref.url, expiresAt: ref.expiresAt };
+	}
+
 	/** 接收文件上传（预签名 URL） */
 	@Public()
 	@Put("upload/:key(*)")

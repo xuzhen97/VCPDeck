@@ -4,7 +4,7 @@
 >
 > 运行：`node scripts/test.cjs`
 >
-> 自动启动 Server 进程 + 连接 mock client + 启动真实 Client → 执行 49 个用例 → 清理退出。
+> 自动启动 Server 进程 + 连接 mock client + 启动真实 Client → 执行 56 个用例 → 清理退出。
 
 ---
 
@@ -172,12 +172,28 @@
 
 ---
 
-## 14. 退出 / 清理（2 项）
+## 14. Storage 存储系统（7 项）
 
 | # | 名称 | 验证点 |
 |---|------|--------|
-| 48 | Logout | POST /api/auth/logout 成功 |
-| 49 | Session invalid after logout | 退出后 /api/auth/me 返回 `401` |
+| 48 | Storage upload-token no auth | 无 cookie 请求 → `401` |
+| 49 | Storage full upload→download flow | 签发令牌→PUT 上传→GET 下载→内容一致，key 一致 |
+| 50 | Storage upload expired sig | 过期的 pre-signed URL → `403` |
+| 51 | Storage upload bad sig | 篡改签名 → `403` |
+| 52 | Storage delete | DELETE 已上传文件 → `200`，文件已清理 |
+| 53 | Storage download deleted file | 下载已删除文件 → 4xx/5xx 错误 |
+| 54 | Storage delete no auth | 无 cookie DELETE → `401` |
+
+**Mock/Real:** HTTP（无 WebSocket / 真实 Client 依赖）
+
+---
+
+## 15. 退出 / 清理（2 项）
+
+| # | 名称 | 验证点 |
+|---|------|--------|
+| 55 | Logout | POST /api/auth/logout 成功 |
+| 56 | Session invalid after logout | 退出后 /api/auth/me 返回 `401` |
 
 ---
 
@@ -186,7 +202,7 @@
 ```
 node scripts/test.cjs
   ├── Start Server（子进程，pnpm start）
-  ├── HTTP tests（auth, REST, validation）
+  ├── HTTP tests（auth, REST, validation, storage）
   ├── Mock Client（Socket.IO → /client 命名空间）
   │   ├── 注册、心跳
   │   ├── Job 生命周期（手动 emit JOB_DONE）
@@ -243,6 +259,6 @@ node scripts/test.cjs
 | Exec | 并发超过 MAX_CONCURRENT_JOBS（3） | 当前排队但未独立验证排队行为 |
 | Client | 重连（disconnect → reconnect） | 模拟断开再重连较复杂 |
 | Client | 心跳超时断线 | 需要等 30s+ |
-| File Job | `file.*` 类型 | 尚未实现 |
+| File Job | `file.*` 类型 | 尚未实现（Storage 预签名 URL 传输链路已测试，client 侧 `file.*` handler 待实现） |
 | REST | Job 分页、过滤 | `/api/jobs` 当前返回最近 100 条 |
 | WebSocket | Frontend 命名空间（app gateway） | 当前只测了 `/client` |

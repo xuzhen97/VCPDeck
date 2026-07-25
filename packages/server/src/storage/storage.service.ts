@@ -41,9 +41,7 @@ export class StorageService implements OnModuleInit {
 
 		const ProviderClass = STORAGE_PROVIDERS[kind];
 		if (!ProviderClass) {
-			this.logger.warn(
-				`Unknown storage kind "${kind}", falling back to local`,
-			);
+			this.logger.warn(`Unknown storage kind "${kind}", falling back to local`);
 			const Fallback = STORAGE_PROVIDERS["local"];
 			this.provider = new Fallback(config);
 			return;
@@ -59,8 +57,7 @@ export class StorageService implements OnModuleInit {
 	}
 
 	getProvider(): StorageProvider {
-		if (!this.provider)
-			throw new Error("Storage provider not initialized");
+		if (!this.provider) throw new Error("Storage provider not initialized");
 		return this.provider;
 	}
 
@@ -85,6 +82,23 @@ export class StorageService implements OnModuleInit {
 		};
 	}
 
+	/** 签发下载令牌（内部/管理面板调用） */
+	createDownloadToken(
+		key: string,
+		ttlSeconds = 3600,
+	): { url: string; expiresAt: number } {
+		const p = this.getProvider();
+		const queryString = p.signDownloadUrl(key, ttlSeconds);
+		const expiresAt = parseInt(
+			new URLSearchParams(queryString).get("expires") || "0",
+			10,
+		);
+		return {
+			url: `/api/storage/download/${key}?${queryString}`,
+			expiresAt,
+		};
+	}
+
 	/** 接收文件流并存储 */
 	async receiveUpload(
 		key: string,
@@ -94,22 +108,25 @@ export class StorageService implements OnModuleInit {
 	): Promise<FileEntry> {
 		const p = this.getProvider();
 		if (!p.verifyUploadSignature(key, expiresAt, sig)) {
-			throw Object.assign(
-				new Error("Invalid or expired upload signature"),
-				{ statusCode: 403 },
-			);
+			throw Object.assign(new Error("Invalid or expired upload signature"), {
+				statusCode: 403,
+			});
 		}
 
 		const pending = this.pendingUploads.get(key);
 		if (!pending) {
 			// 签名有效但内存缓存丢失（服务重启），从签名恢复最小元数据
 			// ponytail: 丢失 jobId/clientId，后续 File 表解决
-			return p.uploadToKey(stream, {
-				jobId: "",
-				clientId: "",
-				filename: key.split("/").pop() || key,
-				size: 0,
-			}, key);
+			return p.uploadToKey(
+				stream,
+				{
+					jobId: "",
+					clientId: "",
+					filename: key.split("/").pop() || key,
+					size: 0,
+				},
+				key,
+			);
 		}
 
 		this.pendingUploads.delete(key);
@@ -124,10 +141,9 @@ export class StorageService implements OnModuleInit {
 	): Promise<{ stream: Readable; meta: FileEntry }> {
 		const p = this.getProvider();
 		if (!p.verifyDownloadSignature(key, expiresAt, sig)) {
-			throw Object.assign(
-				new Error("Invalid or expired download signature"),
-				{ statusCode: 403 },
-			);
+			throw Object.assign(new Error("Invalid or expired download signature"), {
+				statusCode: 403,
+			});
 		}
 		return p.download(key);
 	}

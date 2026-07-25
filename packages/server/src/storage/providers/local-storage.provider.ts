@@ -20,9 +20,7 @@ export class LocalStorageProvider implements StorageProvider {
 	private readonly signSecret: string;
 
 	constructor(config: Record<string, unknown> = {}) {
-		this.baseDir = resolve(
-			(config.baseDir as string) || "./data/storage",
-		);
+		this.baseDir = resolve((config.baseDir as string) || "./data/storage");
 		this.signSecret = (config.signSecret as string) || randomUUID();
 	}
 
@@ -46,9 +44,7 @@ export class LocalStorageProvider implements StorageProvider {
 		};
 	}
 
-	async download(
-		key: string,
-	): Promise<{ stream: Readable; meta: FileEntry }> {
+	async download(key: string): Promise<{ stream: Readable; meta: FileEntry }> {
 		const filePath = resolve(this.baseDir, key);
 		const st = await stat(filePath);
 		const filename = key.split("/").pop() || key;
@@ -77,9 +73,7 @@ export class LocalStorageProvider implements StorageProvider {
 
 	signDownloadUrl(key: string, expiresInSeconds: number): string {
 		const expiresAt = Date.now() + expiresInSeconds * 1000;
-		const sig = this.sign(
-			`${SIGN_DOWNLOAD_PREFIX}:${key}:${expiresAt}`,
-		);
+		const sig = this.sign(`${SIGN_DOWNLOAD_PREFIX}:${key}:${expiresAt}`);
 		return `expires=${expiresAt}&sig=${sig}`;
 	}
 
@@ -95,36 +89,23 @@ export class LocalStorageProvider implements StorageProvider {
 		sig: string,
 	): boolean {
 		if (Date.now() > expiresAt) return false;
-		const expected = this.sign(
-			`${SIGN_DOWNLOAD_PREFIX}:${key}:${expiresAt}`,
-		);
+		const expected = this.sign(`${SIGN_DOWNLOAD_PREFIX}:${key}:${expiresAt}`);
 		return expected === sig;
 	}
 
-	verifyUploadSignature(
-		key: string,
-		expiresAt: number,
-		sig: string,
-	): boolean {
+	verifyUploadSignature(key: string, expiresAt: number, sig: string): boolean {
 		if (Date.now() > expiresAt) return false;
-		const expected = this.sign(
-			`${SIGN_UPLOAD_PREFIX}:${key}:${expiresAt}`,
-		);
+		const expected = this.sign(`${SIGN_UPLOAD_PREFIX}:${key}:${expiresAt}`);
 		return expected === sig;
 	}
 
 	// ── internal ──
 	private makeKey(meta: FileMeta): string {
-		const safeFilename = meta.filename.replace(
-			/[\\/:*?"<>|]/g,
-			"_",
-		);
+		const safeFilename = meta.filename.replace(/[\\/:*?"<>|]/g, "_");
 		return `${randomUUID()}/${safeFilename}`;
 	}
 
 	private sign(payload: string): string {
-		return createHmac("sha256", this.signSecret)
-			.update(payload)
-			.digest("hex");
+		return createHmac("sha256", this.signSecret).update(payload).digest("hex");
 	}
 }

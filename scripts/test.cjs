@@ -89,6 +89,32 @@ async function apiJson(method, path, opts = {}) {
 	return { status: res.status, body };
 }
 
+/** HTTP request with raw body (no JSON encoding). */
+async function apiRaw(method, path, body, opts = {}) {
+	const headers = { ...(opts.headers || {}) };
+	if (opts.bearer) {
+		headers["Authorization"] = `Bearer ${opts.bearer}`;
+	}
+	if (!opts.noCookie && cookie) {
+		headers["Cookie"] = cookie;
+	}
+
+	const res = await fetch(`${BASE}${path}`, {
+		method,
+		headers,
+		body,
+		redirect: "manual",
+	});
+
+	const setCookie = res.headers.get("set-cookie");
+	if (setCookie) {
+		const m = setCookie.match(/vcpdeck_session=([^;]+)/);
+		if (m) cookie = `vcpdeck_session=${m[1]}`;
+	}
+
+	return res;
+}
+
 /** Kill anything on port 3001 from previous runs. */
 function killPort() {
 	try {
@@ -552,6 +578,67 @@ async function testExecCancel(clientId) {
 	} catch (e) {
 		fail("exec cancel", e.message);
 	}
+}
+
+// ── Storage test helpers ──
+const TEST_FILE_CONTENT = "Hello from VCPDeck storage test!\n";
+
+/** 上传文件并验证 key 一致，返回 { key, uploadUrl, signedDownloadUrl } */
+async function storageUploadAndVerify() {
+	// 1. 获取上传令牌
+	const { status: tokStatus, body: tokenRes } = await apiJson(
+		"POST",
+		"/api/storage/upload-token",
+		{ json: { jobId: "test-storage", clientId: "test", filename: "storage-test.txt", size: TEST_FILE_CONTENT.length } },
+	);
+	if (tokStatus !== 200 && tokStatus !== 201) {
+		return fail("Storage upload token", `status ${tokStatus}`);
+	}
+	const uploadUrl = tokenRes.url;
+	if (!uploadUrl || !uploadUrl.startsWith("/api/storage/upload/")) {
+		return fail("Storage upload token", `bad url: ${uploadUrl}`);
+	}
+	const keyMatch = uploadUrl.match(/\/api\/storage\/upload\/([^?]+)/);
+	const keyFromUrl = keyMatch ? keyMatch[1] : null;
+	pass("Storage upload token", `key=${keyFromUrl}`);
+
+	// 2. PUT 上传
+	const putRes = await apiRaw("PUT", uploadUrl, TEST_FILE_CONTENT, {
+		headers: { "Content-Type": "text/plain" },
+	});
+	const putBody = await putRes.json().catch(() => null);
+	if (putRes.status !== 200 || !putBody?.key) {
+		return fail("Storage upload", `status=${putRes.status} body=${JSON.stringify(putBody)}`);
+	}
+	if (putBody.key !== keyFromUrl) {
+		return fail("Storage upload key match", `urlKey=${keyFromUrl} storedKey=${putBody.key}`);
+	}
+	pass("Storage upload", `key=${putBody.key.slice(0, 20)}..., size=${putBody.size}`);
+
+	// 3. 获取下载令牌
+	const { status: dlTokStatus, body: dlTokenRes } = await apiJson(
+		"POST",
+		"/api/storage/download-token",
+		{ json: { key: putBody.key } },
+	);
+	if (dlTokStatus !== 200 && dlTokStatus !== 201) {
+		return fail("Storage download token", `status ${dlTokStatus}`);
+	}
+	const downloadUrl = dlTokenRes.url;
+	if (!downloadUrl || !downloadUrl.startsWith("/api/storage/download/")) {
+		return fail("Storage download token", `bad url: ${downloadUrl}`);
+	}
+	pass("Storage download token", `url=${downloadUrl.slice(0, 50)}...`);
+
+	// 4. GET 下载
+	const getRes = await fetch(`${BASE}${downloadUrl}`, { redirect: "manual" });
+	const content = await getRes.text();
+	if (getRes.status !== 200 || content !== TEST_FILE_CONTENT) {
+		return fail("Storage download", `status=${getRes.status} contentLen=${content.length} expectedLen=${TEST_FILE_CONTENT.length}`);
+	}
+	pass("Storage download", `content matches, ${content.length} bytes`);
+
+	return { key: putBody.key, uploadUrl, signedDownloadUrl: downloadUrl };
 }
 
 // ── Main ──
@@ -1233,6 +1320,118 @@ async function main() {
 		fail("Exec test section", e.message);
 	} finally {
 		stopRealClient();
+	}
+
+	// ── Storage 存储系统测试 ──
+	console.log("\n--- Storage ---");
+
+	// Ensure admin cookie
+	await api("POST", "/api/auth/login", {
+		json: { username: "admin", password: ADMIN_PASSWORD },
+		noCookie: true,
+	});
+
+	// 48. upload-token without auth → 401
+	{
+		const { status } = await apiJson("POST", "/api/storage/upload-token", {
+			json: { jobId: "x", clientId: "x", filename: "x", size: 1 },
+			noCookie: true,
+		});
+		if (status === 401) {
+			pass("Storage upload-token no auth", "401");
+		} else {
+			fail("Storage upload-token no auth", `expected 401, got ${status}`);
+		}
+	}
+
+	// 49. Full upload → download → delete flow
+	let testKey = null;
+	try {
+		const result = await storageUploadAndVerify();
+		if (result?.key) testKey = result.key;
+	} catch (e) {
+		fail("Storage full flow", e.message);
+	}
+
+	// 50. Upload with expired signature → 403
+	{
+		const { status: tokStatus, body: tokenRes } = await apiJson(
+			"POST",
+			"/api/storage/upload-token",
+			{ json: { jobId: "test-expired", clientId: "test", filename: "expired.txt", size: 5, ttlSeconds: 1 } },
+		);
+		if (tokStatus === 200 || tokStatus === 201) {
+			const expiredUrl = tokenRes.url;
+			await sleep(2000); // 等待过期
+			const putRes = await apiRaw("PUT", expiredUrl, "hello", {
+				headers: { "Content-Type": "text/plain" },
+			});
+			if (putRes.status === 403) {
+				pass("Storage upload expired sig", "403");
+			} else {
+				fail("Storage upload expired sig", `expected 403, got ${putRes.status}`);
+			}
+		}
+	}
+
+	// 51. Upload with tampered signature → 403
+	{
+		const { status: tokStatus, body: tokenRes } = await apiJson(
+			"POST",
+			"/api/storage/upload-token",
+			{ json: { jobId: "test-bad", clientId: "test", filename: "bad.txt", size: 5 } },
+		);
+		if (tokStatus === 200 || tokStatus === 201) {
+			const tamperedUrl = tokenRes.url.replace(/sig=([^&]+)/, "sig=deadbeef");
+			const putRes = await apiRaw("PUT", tamperedUrl, "hello", {
+				headers: { "Content-Type": "text/plain" },
+			});
+			if (putRes.status === 403) {
+				pass("Storage upload bad sig", "403");
+			} else {
+				fail("Storage upload bad sig", `expected 403, got ${putRes.status}`);
+			}
+		}
+	}
+
+	// 52. DELETE with admin auth → ok
+	if (testKey) {
+		const { status } = await apiJson("DELETE", `/api/storage/${testKey}`);
+		if (status === 200) {
+			pass("Storage delete", "200");
+		} else {
+			fail("Storage delete", `expected 200, got ${status}`);
+		}
+
+		// 53. Download deleted file → error
+		try {
+			const { status: dlTokStatus, body: dlTokenRes } = await apiJson(
+				"POST",
+				"/api/storage/download-token",
+				{ json: { key: testKey } },
+			);
+			if (dlTokStatus === 200 || dlTokStatus === 201) {
+				const getRes = await fetch(`${BASE}${dlTokenRes.url}`, { redirect: "manual" });
+				// 文件已删除，应返回错误
+				if (getRes.status >= 400) {
+					pass("Storage download deleted file", `status=${getRes.status}`);
+				} else {
+					fail("Storage download deleted file", `expected error, got ${getRes.status}`);
+				}
+			}
+		} catch {
+			pass("Storage download deleted file", "error as expected");
+		}
+	}
+
+	// 54. DELETE without auth → 401
+	{
+		const { status } = await apiJson("DELETE", `/api/storage/some-key`, { noCookie: true });
+		if (status === 401) {
+			pass("Storage delete no auth", "401");
+		} else {
+			fail("Storage delete no auth", `expected 401, got ${status}`);
+		}
 	}
 
 	// 19. Logout
