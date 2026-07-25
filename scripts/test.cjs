@@ -670,7 +670,8 @@ async function testFileWriteText(clientId, rootDir, filePath, content) {
 	const body = await res.json();
 	try {
 		const up = await waitForJobUpdate(body.jobId);
-		if (up.status === "done") return pass("file.writeText", `${content.length} bytes`);
+		if (up.status === "done")
+			return pass("file.writeText", `${content.length} bytes`);
 		fail("file.writeText", `status=${up.status} error=${up.errorCode}`);
 	} catch (e) {
 		fail("file.writeText", e.message);
@@ -714,7 +715,8 @@ async function testFileMove(clientId, rootDir, source, destination) {
 	const body = await res.json();
 	try {
 		const up = await waitForJobUpdate(body.jobId);
-		if (up.status === "done") return pass("file.move", `${source} -> ${destination}`);
+		if (up.status === "done")
+			return pass("file.move", `${source} -> ${destination}`);
 		fail("file.move", `status=${up.status} error=${up.errorCode}`);
 	} catch (e) {
 		fail("file.move", e.message);
@@ -734,7 +736,8 @@ async function testFileDelete(clientId, rootDir, path, recursive) {
 	const body = await res.json();
 	try {
 		const up = await waitForJobUpdate(body.jobId);
-		if (up.status === "done") return pass("file.delete", `path=${path} recursive=${!!recursive}`);
+		if (up.status === "done")
+			return pass("file.delete", `path=${path} recursive=${!!recursive}`);
 		fail("file.delete", `status=${up.status} error=${up.errorCode}`);
 	} catch (e) {
 		fail("file.delete", e.message);
@@ -750,16 +753,14 @@ async function testFilePathEscape(clientId, rootDir) {
 			timeout: 10000,
 		},
 	});
-	if (res.status !== 201) return fail("file path escape", `status ${res.status}`);
+	if (res.status !== 201)
+		return fail("file path escape", `status ${res.status}`);
 	const body = await res.json();
 	try {
 		const up = await waitForJobUpdate(body.jobId);
 		if (up.status === "error" && up.errorCode === "PATH_NOT_ALLOWED")
 			return pass("file path escape", "PATH_NOT_ALLOWED");
-		fail(
-			"file path escape",
-			`status=${up.status} errorCode=${up.errorCode}`,
-		);
+		fail("file path escape", `status=${up.status} errorCode=${up.errorCode}`);
 	} catch (e) {
 		fail("file path escape", e.message);
 	}
@@ -809,6 +810,130 @@ async function testFileCapabilityRejection() {
 		fail("file capability rejection", e.message);
 	} finally {
 		mockSocket.disconnect();
+	}
+}
+
+async function testFileExport(clientId, rootDir, filePath) {
+	console.log("\n--- File Export (client -> storage) ---");
+	const testContent = `export-test-${Date.now()}`;
+
+	// 1. 先在客户端写文件
+	const wkRes = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.writeText",
+			payload: { path: filePath, rootDir, content: testContent },
+			timeout: 10000,
+		},
+	});
+	if (wkRes.status !== 201) return fail("file.export: write prep", `status ${wkRes.status}`);
+	const wkBody = await wkRes.json();
+	try { await waitForJobUpdate(wkBody.jobId); } catch (e) { return fail("file.export: write prep", e.message); }
+
+	// 2. 导出文件
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.export",
+			payload: { path: filePath, rootDir },
+			timeout: 30000,
+		},
+	});
+	if (res.status !== 201) return fail("file.export", `create failed: ${res.status}`);
+	const body = await res.json();
+
+	let exportResult = null;
+	try {
+		const up = await waitForJobUpdate(body.jobId, 30000);
+		if (up.status !== "done") return fail("file.export", `status=${up.status} error=${up.errorCode}`);
+		exportResult = up.result;
+	} catch (e) {
+		return fail("file.export", e.message);
+	}
+
+	if (!exportResult?.key) return fail("file.export", "no key in result");
+	pass(
+		"file.export",
+		`fileId=${(exportResult.fileId || "").slice(0, 8)}... size=${exportResult.size} sha256=${(exportResult.sha256 || "").slice(0, 12)}...`,
+	);
+
+	// 3. 通过 Storage 下载验证内容
+	const dlRes = await api("POST", "/api/storage/download-token", {
+		json: { key: exportResult.key },
+	});
+	if (dlRes.status !== 200 && dlRes.status !== 201)
+		return fail("file.export: download verify", `download-token failed: ${dlRes.status}`);
+	const dlBody = await dlRes.json();
+	const getRes = await fetch(`${BASE}${dlBody.url}`, { redirect: "manual" });
+	const downloaded = await getRes.text();
+	if (downloaded === testContent)
+		pass("file.export: content verify", `content matches (${downloaded.length} bytes)`);
+	else
+		fail(
+			"file.export: content verify",
+			`expected "${testContent}", got "${downloaded}"`,
+		);
+
+	return exportResult;
+}
+
+async function testFileImport(
+	clientId,
+	rootDir,
+	targetPath,
+	fileId,
+	expectedContent,
+) {
+	console.log("\n--- File Import (storage -> client) ---");
+
+	const res = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.import",
+			payload: { targetPath, rootDir, fileId },
+			timeout: 30000,
+		},
+	});
+	if (res.status !== 201) return fail("file.import", `create failed: ${res.status}`);
+	const body = await res.json();
+
+	try {
+		const up = await waitForJobUpdate(body.jobId, 30000);
+		if (up.status !== "done")
+			return fail("file.import", `status=${up.status} error=${up.errorCode}`);
+		pass("file.import", `path=${up.result?.path} size=${up.result?.size}`);
+	} catch (e) {
+		return fail("file.import", e.message);
+	}
+
+	// 验证导入后的文件内容
+	const rdRes = await api("POST", "/api/jobs", {
+		json: {
+			clientId,
+			type: "file.readText",
+			payload: { path: targetPath, rootDir },
+			timeout: 10000,
+		},
+	});
+	if (rdRes.status !== 201) return fail("file.import: read verify", `create failed: ${rdRes.status}`);
+	const rdBody = await rdRes.json();
+	try {
+		const up = await waitForJobUpdate(rdBody.jobId);
+		if (up.status === "done") {
+			const got = up.result?.content || "";
+			if (
+				got === expectedContent ||
+				(typeof expectedContent === "string" && got.startsWith(expectedContent))
+			)
+				return pass("file.import: content verify", "content matches");
+			return fail(
+				"file.import: content verify",
+				`expected prefix "${expectedContent}", got "${got.slice(0, 40)}"`,
+			);
+		}
+		fail("file.import: content verify", `status=${up.status}`);
+	} catch (e) {
+		fail("file.import: content verify", e.message);
 	}
 }
 
@@ -1580,9 +1705,24 @@ async function main() {
 		await testFileMkdir(REAL_CLIENT_ID, fileTestRoot, fileTestDir);
 		await testFileList(REAL_CLIENT_ID, fileTestRoot, fileTestDir);
 		await testFileStat(REAL_CLIENT_ID, fileTestRoot, fileTestDir);
-		await testFileWriteText(REAL_CLIENT_ID, fileTestRoot, testFilePath, testContent);
-		await testFileReadText(REAL_CLIENT_ID, fileTestRoot, testFilePath, testContent);
-		await testFileMove(REAL_CLIENT_ID, fileTestRoot, testFilePath, testMovedPath);
+		await testFileWriteText(
+			REAL_CLIENT_ID,
+			fileTestRoot,
+			testFilePath,
+			testContent,
+		);
+		await testFileReadText(
+			REAL_CLIENT_ID,
+			fileTestRoot,
+			testFilePath,
+			testContent,
+		);
+		await testFileMove(
+			REAL_CLIENT_ID,
+			fileTestRoot,
+			testFilePath,
+			testMovedPath,
+		);
 		await testFileStat(REAL_CLIENT_ID, fileTestRoot, testMovedPath);
 		await testFileDelete(REAL_CLIENT_ID, fileTestRoot, fileTestDir, true);
 
@@ -1591,6 +1731,28 @@ async function main() {
 
 		// 能力拒绝测试
 		await testFileCapabilityRejection();
+
+		// 文件传输测试（export + import 全链路）—— 先重建测试目录
+		await testFileMkdir(REAL_CLIENT_ID, fileTestRoot, fileTestDir);
+		const exportPath = `${fileTestDir}/to-export.txt`;
+		const exportResult = await testFileExport(
+			REAL_CLIENT_ID,
+			fileTestRoot,
+			exportPath,
+		);
+
+		if (exportResult?.fileId) {
+			// 删除本地文件后，通过 import 拉回
+			await testFileDelete(REAL_CLIENT_ID, fileTestRoot, exportPath, false);
+			const importPath = `${fileTestDir}/imported-back.txt`;
+			await testFileImport(
+				REAL_CLIENT_ID,
+				fileTestRoot,
+				importPath,
+				exportResult.fileId,
+				"export-test-",
+			);
+		}
 	} catch (e) {
 		fail("Exec test section", e.message);
 	} finally {

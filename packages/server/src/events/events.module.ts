@@ -4,10 +4,11 @@ import { AppGateway } from "./app.gateway.js";
 import { EventsController } from "./events.controller.js";
 import { ClientModule } from "../client/client.module.js";
 import { JobModule } from "../job/job.module.js";
+import { FileModule } from "../file/file.module.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
 
 @Module({
-	imports: [ClientModule, JobModule, PrismaModule],
+	imports: [ClientModule, JobModule, FileModule, PrismaModule],
 	providers: [ClientGateway, AppGateway],
 	controllers: [EventsController],
 })

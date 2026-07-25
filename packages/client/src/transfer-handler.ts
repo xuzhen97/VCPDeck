@@ -2,11 +2,20 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { stat, rename, unlink } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
-import { PassThrough } from "node:stream";
+import { Readable, PassThrough } from "node:stream";
 import type { Socket } from "socket.io-client";
 import { Events, FileErrorCode } from "@vcpdeck/shared";
 import type { JobDone, FileRef } from "@vcpdeck/shared";
 import { resolveSafePath } from "./file-handler.js";
+
+const SERVER_BASE =
+	process.env.VCPDECK_SERVER || "http://localhost:3001";
+
+/** 将相对 URL 转为绝对 URL */
+function absUrl(path: string): string {
+	if (path.startsWith("http://") || path.startsWith("https://")) return path;
+	return `${SERVER_BASE}${path}`;
+}
 
 function emitDone(
 	socket: Socket,
@@ -106,10 +115,12 @@ async function handleExport(
 	fileStream.pipe(countingStream);
 
 	// safe: uploadRef.url 由 Server 签发并校验签名，非任意 URL
-	const res = await fetch(uploadRef.url, {
+	const webStream = Readable.toWeb(countingStream) as ReadableStream<Uint8Array>;
+	const res = await fetch(absUrl(uploadRef.url), {
 		method: "PUT",
-		body: countingStream as unknown as ReadableStream,
-	});
+		body: webStream,
+		duplex: "half",
+	} as any);
 	if (!res.ok) {
 		emitError(
 			socket,
@@ -144,7 +155,7 @@ async function handleImport(
 
 	try {
 		// safe: downloadRef.url 由 Server 签发并校验签名，非任意 URL
-		const res = await fetch(downloadRef.url, { method: "GET" });
+		const res = await fetch(absUrl(downloadRef.url), { method: "GET" });
 		if (!res.ok) {
 			emitError(
 				socket,
@@ -158,8 +169,10 @@ async function handleImport(
 
 		const countingStream = new PassThrough();
 		countingStream.on("data", (chunk: Buffer) => hash.update(chunk));
-		const bodyStream = res.body as unknown as NodeJS.ReadableStream;
-		bodyStream.pipe(countingStream);
+		// fetch body 是 web ReadableStream，转为 Node stream 后再 pipe
+		const webBody = res.body as ReadableStream<Uint8Array>;
+		const nodeBody = Readable.fromWeb(webBody as any);
+		nodeBody.pipe(countingStream);
 		await pipeline(countingStream, createWriteStream(tmpPath));
 
 		const sha256 = hash.digest("hex");
