@@ -53,7 +53,7 @@ export class StorageController {
 
 	/** 接收文件上传（预签名 URL） */
 	@Public()
-	@Put("upload/:key")
+	@Put("upload/:key(*)")
 	@HttpCode(200)
 	async receiveUpload(
 		@Param("key") key: string,
@@ -72,7 +72,7 @@ export class StorageController {
 
 	/** 下载文件（预签名 URL） */
 	@Public()
-	@Get("download/:key")
+	@Get("download/:key(*)")
 	async download(
 		@Param("key") key: string,
 		@Query("expires") expires: string,
@@ -97,7 +97,7 @@ export class StorageController {
 	}
 
 	/** 删除文件 */
-	@Delete(":key")
+	@Delete(":key(*)")
 	async delete(@Param("key") key: string) {
 		await this.storageService.delete(key);
 		return { ok: true };

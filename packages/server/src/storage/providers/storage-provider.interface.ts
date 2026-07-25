@@ -21,6 +21,9 @@ export interface StorageProvider {
 	/** 服务端主动上传（如下发脚本前暂存） */
 	upload(stream: Readable, meta: FileMeta): Promise<FileEntry>;
 
+	/** 上传到指定 key（预签名 URL 回调用） */
+	uploadToKey(stream: Readable, meta: FileMeta, key: string): Promise<FileEntry>;
+
 	/** 服务端主动下载 */
 	download(key: string): Promise<{ stream: Readable; meta: FileEntry }>;
 

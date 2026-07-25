@@ -104,16 +104,16 @@ export class StorageService implements OnModuleInit {
 		if (!pending) {
 			// 签名有效但内存缓存丢失（服务重启），从签名恢复最小元数据
 			// ponytail: 丢失 jobId/clientId，后续 File 表解决
-			return p.upload(stream, {
+			return p.uploadToKey(stream, {
 				jobId: "",
 				clientId: "",
 				filename: key.split("/").pop() || key,
 				size: 0,
-			});
+			}, key);
 		}
 
 		this.pendingUploads.delete(key);
-		return p.upload(stream, pending.meta);
+		return p.uploadToKey(stream, pending.meta, key);
 	}
 
 	/** 验证下载签名并返回文件流 + 元数据 */

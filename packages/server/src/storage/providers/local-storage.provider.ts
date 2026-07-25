@@ -27,7 +27,14 @@ export class LocalStorageProvider implements StorageProvider {
 	}
 
 	async upload(stream: Readable, meta: FileMeta): Promise<FileEntry> {
-		const key = this.makeKey(meta);
+		return this.uploadToKey(stream, meta, this.makeKey(meta));
+	}
+
+	async uploadToKey(
+		stream: Readable,
+		meta: FileMeta,
+		key: string,
+	): Promise<FileEntry> {
 		const filePath = resolve(this.baseDir, key);
 		await mkdir(dirname(filePath), { recursive: true });
 		await pipeline(stream, createWriteStream(filePath));
