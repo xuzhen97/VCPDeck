@@ -1,6 +1,6 @@
 # Server 管理 Client 文件体系 — 设计文档
 
-> 状态：已确认，待实现
+> 状态：✅ 已实现（2026-08-04）
 >
 > 参考：[README.md](../../README.md)、[job-file-management-recommendations.md](../../job-file-management-recommendations.md)
 
