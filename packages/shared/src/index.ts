@@ -115,7 +115,8 @@ export type ExecJobDone =
 // ── Job done（Client → Server，判别联合） ──
 export type JobDone =
 	| ExecJobDone
-	| { jobId: string; type: string; result: Record<string, unknown> };
+	| { jobId: string; type: string; result: Record<string, unknown> }
+	| { jobId: string; type: string; error: JobError };
 
 export interface JobUpdate {
 	jobId: string;
