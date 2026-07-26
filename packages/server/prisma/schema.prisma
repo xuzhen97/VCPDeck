@@ -23,6 +23,7 @@ model Client {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   jobs            Job[]
+  frpMappings     FrpMapping[]
 }
 
 model Job {
@@ -78,6 +79,22 @@ model AuthSession {
   expiresAt   DateTime
   revokedAt   DateTime?
   createdAt   DateTime  @default(now())
+}
+
+model FrpMapping {
+  id           String   @id
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id])
+  name         String
+  proxyType    String   @default("tcp")
+  localIp      String   @default("127.0.0.1")
+  localPort    Int
+  remotePort   Int?
+  customDomain String?
+  status       String   @default("inactive")
+  publicUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model StorageBackendConfig {
