@@ -5,9 +5,11 @@
     "build": "pnpm -r build",
     "test": "node scripts/test.cjs",
     "dev": "pnpm -r --parallel dev",
-    "lint": "pnpm -r lint"
+    "lint": "pnpm -r lint",
+    "download:frp": "npx tsx scripts/download-frp.ts"
   },
   "devDependencies": {
+    "@types/node": "^26.1.1",
     "typescript": "^7.0.2"
   },
   "pnpm": {
