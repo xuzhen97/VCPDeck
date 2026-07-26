@@ -114,4 +114,19 @@ export class StorageController {
 		await this.storageService.delete(key);
 		return { ok: true };
 	}
+
+	/** 查看当前存储后端配置 */
+	@Get("config")
+	async getConfig() {
+		return this.storageService.getBackendConfig();
+	}
+
+	/** 切换存储后端 */
+	@Put("config")
+	async updateConfig(
+		@Body() body: { kind?: string; config?: Record<string, unknown> },
+	) {
+		await this.storageService.updateBackendConfig(body);
+		return this.storageService.getBackendConfig();
+	}
 }

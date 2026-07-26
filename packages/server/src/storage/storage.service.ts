@@ -1,4 +1,4 @@
-import { Injectable, type OnModuleInit, Logger } from "@nestjs/common";
+import { Injectable, type OnModuleInit, Logger, Inject } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
 import { STORAGE_PROVIDERS } from "./providers/providers.registry.js";
@@ -22,7 +22,7 @@ export class StorageService implements OnModuleInit {
 	private provider: StorageProvider | null = null;
 	private pendingUploads = new Map<string, PendingUpload>();
 
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
 	async onModuleInit() {
 		await this.loadProvider();
@@ -151,5 +151,48 @@ export class StorageService implements OnModuleInit {
 	/** 删除文件 */
 	async delete(key: string): Promise<void> {
 		return this.getProvider().delete(key);
+	}
+
+	/** 获取存储后端配置（供 REST 端点使用） */
+	async getBackendConfig() {
+		const row = await this.prisma.storageBackendConfig.findFirst();
+		let config: Record<string, unknown> = {};
+		try {
+			config = JSON.parse(row?.config || "{}");
+		} catch {
+			this.logger.warn("Invalid storage config JSON in DB");
+		}
+		return {
+			kind: row?.kind || "local",
+			config,
+			updatedAt: row?.updatedAt?.toISOString() || null,
+		};
+	}
+
+	/** 更新存储后端配置并热切换 */
+	async updateBackendConfig(body: {
+		kind?: string;
+		config?: Record<string, unknown>;
+	}) {
+		if (body.kind) {
+			await this.prisma.storageBackendConfig.upsert({
+				where: { id: 1 },
+				create: {
+					id: 1,
+					kind: body.kind,
+					config: JSON.stringify(body.config ?? {}),
+				},
+				update: { kind: body.kind },
+			});
+		}
+		if (body.config) {
+			await this.prisma.storageBackendConfig.upsert({
+				where: { id: 1 },
+				create: { id: 1, kind: "local", config: JSON.stringify(body.config) },
+				update: { config: JSON.stringify(body.config) },
+			});
+		}
+		// 热切换 provider
+		await this.reload();
 	}
 }
