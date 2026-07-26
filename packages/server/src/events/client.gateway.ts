@@ -10,6 +10,7 @@ import type { Server, Socket } from "socket.io";
 import { ClientService } from "../client/client.service.js";
 import { JobService } from "../job/job.service.js";
 import { FileService } from "../file/file.service.js";
+import { FrpService } from "../frp/frp.service.js";
 import { Events, JobStatus } from "@vcpdeck/shared";
 import type {
   MachineRegister,
@@ -35,6 +36,7 @@ export class ClientGateway {
     @Inject(ClientService) private readonly clientService: ClientService,
     @Inject(JobService) private readonly jobService: JobService,
     @Inject(FileService) private readonly fileService: FileService,
+    @Inject(FrpService) private readonly frpService: FrpService,
   ) {}
 
   // ── Connection lifecycle ──
@@ -52,6 +54,7 @@ export class ClientGateway {
     const clientId = await this.clientService.getClientIdBySocketId(client.id);
     if (clientId) {
       await this.jobService.markDisconnected(clientId);
+      await this.frpService.markInactiveByClientId(clientId);
     }
     await this.clientService.markOfflineBySocketId(client.id);
     console.log(`[ws] disconnected: ${clientId ?? client.id}`);
@@ -183,6 +186,36 @@ export class ClientGateway {
     }
 
     const result: Record<string, unknown> = raw.result;
+
+    // ── FRP 回调 ──
+    if (type === "frp.create" || type === "frp.delete") {
+      const mappingId = result?.mappingId as string | undefined;
+      const status = result?.status as string ?? (raw.error ? "error" : "active");
+      if (mappingId) {
+        await this.frpService.updateStatus(mappingId, status);
+      }
+      const next = await this.jobService.markDone(data.jobId, type, result ?? {});
+      this.server.emit(Events.JOB_UPDATE, {
+        jobId: data.jobId,
+        type,
+        status: raw.error ? JobStatus.ERROR : JobStatus.DONE,
+        result: raw.result,
+      } satisfies JobUpdate);
+      if (next) this.sendDispatch(next);
+      return;
+    }
+
+    if (type === "frp.list") {
+      const next = await this.jobService.markDone(data.jobId, type, result ?? {});
+      this.server.emit(Events.JOB_UPDATE, {
+        jobId: data.jobId,
+        type,
+        status: JobStatus.DONE,
+        result: raw.result,
+      } satisfies JobUpdate);
+      if (next) this.sendDispatch(next);
+      return;
+    }
 
     // file.export 完成后确认上传 → File 记录 completed
     if (type === "file.export" && result?.fileId && result?.sha256) {
