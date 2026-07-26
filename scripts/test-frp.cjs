@@ -743,7 +743,9 @@ async function main() {
 		_frpsProcess = null;
 	}
 	await sleep(1000);
-	try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch {}
+	try {
+		fs.rmSync(TMP_DIR, { recursive: true, force: true });
+	} catch {}
 	pass("Cleanup complete", "tmp files removed");
 
 	// ── Report ──

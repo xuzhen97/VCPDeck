@@ -10,5 +10,7 @@ packages/server/prisma/.env
 .claude/
 .pi-subagents/
 CLAUDE.md
+# Build artifacts
+.tmp/
 # Storage files
 packages/server/data/
