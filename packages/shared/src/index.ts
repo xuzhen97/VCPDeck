@@ -28,6 +28,9 @@ export enum JobType {
 	FILE_EXPORT = "file.export",
 	FILE_IMPORT = "file.import",
 	AGENT_RUN = "agent.run",
+	FRP_CREATE = "frp.create",
+	FRP_DELETE = "frp.delete",
+	FRP_LIST = "frp.list",
 }
 
 // ── Job status ──
@@ -386,3 +389,84 @@ export const StorageProviderKind = {
 } as const;
 export type StorageProviderKind =
 	(typeof StorageProviderKind)[keyof typeof StorageProviderKind];
+
+// ── FRP 端口映射 ──
+
+export const FrpJobType = {
+	FRP_CREATE: "frp.create",
+	FRP_DELETE: "frp.delete",
+	FRP_LIST: "frp.list",
+} as const;
+export type FrpJobType = (typeof FrpJobType)[keyof typeof FrpJobType];
+
+/** frp.create payload（Server → Client） */
+export interface FrpCreatePayload {
+	mappingId: string;
+	name: string;
+	proxyType: "tcp" | "http" | "https";
+	localIp: string;
+	localPort: number;
+	remotePort: number;
+	customDomain?: string;
+	frpsInfo: {
+		serverAddr: string;
+		serverPort: number;
+		authToken: string;
+	};
+}
+
+/** frp.delete payload（Server → Client） */
+export interface FrpDeletePayload {
+	mappingId: string;
+	name: string;
+}
+
+/** frp.create / frp.delete 的 JOB_DONE 结果 */
+export interface FrpCreateResult {
+	mappingId: string;
+	status: "active" | "error";
+}
+
+export interface FrpDeleteResult {
+	mappingId: string;
+	deleted: boolean;
+}
+
+/** frp.list 的 JOB_DONE 结果 */
+export interface FrpListResult {
+	mappings: {
+		id: string;
+		name: string;
+		proxyType: string;
+		localPort: number;
+		remotePort: number | null;
+		status: string;
+	}[];
+}
+
+/** REST API 返回的映射信息 */
+export interface FrpMappingInfo {
+	id: string;
+	clientId: string;
+	name: string;
+	proxyType: string;
+	localIp: string;
+	localPort: number;
+	remotePort: number | null;
+	customDomain: string | null;
+	status: string;
+	publicUrl: string | null;
+	createdAt: string;
+	updatedAt: string;
+}
+
+/** 创建映射 REST 请求体 */
+export interface FrpMappingCreateRequest {
+	clientId: string;
+	name: string;
+	proxyType: "tcp" | "http" | "https";
+	localIp?: string;
+	localPort: number;
+	remotePort?: number;
+	customDomain?: string;
+}
