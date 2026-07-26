@@ -6,7 +6,8 @@
     "test": "node scripts/test.cjs",
     "dev": "pnpm -r --parallel dev",
     "lint": "pnpm -r lint",
-    "download:frp": "npx tsx scripts/download-frp.ts"
+    "download:frp": "npx tsx scripts/download-frp.ts",
+    "test:frp": "node scripts/test-frp.cjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
