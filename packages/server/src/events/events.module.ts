@@ -11,6 +11,7 @@ import { FrpModule } from "../frp/frp.module.js";
 @Module({
 	imports: [ClientModule, JobModule, FileModule, PrismaModule, forwardRef(() => FrpModule)],
 	providers: [ClientGateway, AppGateway],
+	exports: [ClientGateway],
 	controllers: [EventsController],
 })
 export class EventsModule {}
