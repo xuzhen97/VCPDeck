@@ -3,6 +3,11 @@ import type { JobDispatch } from "@vcpdeck/shared";
 import { executeExec } from "./executor.js";
 import { handleFileOp } from "./file-handler.js";
 import { handleTransfer } from "./transfer-handler.js";
+import {
+	handleFrpCreate,
+	handleFrpDelete,
+	handleFrpList,
+} from "./frpc-daemon.js";
 
 export function dispatch(job: JobDispatch, socket: Socket) {
 	switch (job.type) {
@@ -71,6 +76,18 @@ export function dispatch(job: JobDispatch, socket: Socket) {
 				},
 				socket,
 			);
+		case "frp.create":
+			return handleFrpCreate(
+				{ ...(job as any).payload, _jobId: job.jobId },
+				socket,
+			);
+		case "frp.delete":
+			return handleFrpDelete(
+				{ ...(job as any).payload, _jobId: job.jobId },
+				socket,
+			);
+		case "frp.list":
+			return handleFrpList({ _jobId: job.jobId }, socket);
 		case "agent.run":
 			throw new Error(`Job type "${job.type}" not yet implemented`);
 		default:
