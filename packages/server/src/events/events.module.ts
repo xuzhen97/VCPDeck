@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 import { ClientGateway } from "./client.gateway.js";
 import { AppGateway } from "./app.gateway.js";
 import { EventsController } from "./events.controller.js";
@@ -6,9 +6,10 @@ import { ClientModule } from "../client/client.module.js";
 import { JobModule } from "../job/job.module.js";
 import { FileModule } from "../file/file.module.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
+import { FrpModule } from "../frp/frp.module.js";
 
 @Module({
-	imports: [ClientModule, JobModule, FileModule, PrismaModule],
+	imports: [ClientModule, JobModule, FileModule, PrismaModule, forwardRef(() => FrpModule)],
 	providers: [ClientGateway, AppGateway],
 	controllers: [EventsController],
 })
