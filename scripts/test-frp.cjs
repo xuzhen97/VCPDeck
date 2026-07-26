@@ -504,7 +504,10 @@ async function testFrpsDashboardProxyGone(proxyType, proxyName) {
 		if (res.ok) {
 			const body = await res.json().catch(() => ({}));
 			if (body.status === "offline") {
-				pass(`frps Dashboard: proxy ${proxyName} offline`, "offline after delete");
+				pass(
+					`frps Dashboard: proxy ${proxyName} offline`,
+					"offline after delete",
+				);
 				return true;
 			}
 			fail(
@@ -734,12 +737,13 @@ async function main() {
 	// ── Cleanup ──
 	console.log("\n--- Cleanup ---");
 	stopRealClient();
+	if (_serverProcess?.pid) killTree(_serverProcess.pid);
 	if (_frpsProcess) {
 		killTree(_frpsProcess.pid);
 		_frpsProcess = null;
 	}
 	await sleep(1000);
-	fs.rmSync(TMP_DIR, { recursive: true, force: true });
+	try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch {}
 	pass("Cleanup complete", "tmp files removed");
 
 	// ── Report ──
@@ -761,6 +765,7 @@ async function main() {
 	);
 
 	if (failed > 0) process.exit(1);
+	process.exit(0);
 }
 
 // ── Entry ──
@@ -768,6 +773,7 @@ main().catch((err) => {
 	console.error("Test harness error:", err);
 	// Cleanup
 	stopRealClient();
+	if (_serverProcess?.pid) killTree(_serverProcess.pid);
 	if (_frpsProcess) killTree(_frpsProcess.pid);
 	try {
 		fs.rmSync(TMP_DIR, { recursive: true, force: true });
