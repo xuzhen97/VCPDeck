@@ -23,19 +23,19 @@ export const CLIENT_ID =
 	process.env.VCPDECK_CLIENT_ID || loadOrCreateClientId();
 
 export function getRegisterInfo(): MachineRegister {
-const cpus = os.cpus();
-const caps: string[] = ["exec", "file.read", "file.write"];
-if (isFrpAvailable()) {
-caps.push("frp");
-}
-return {
-clientId: CLIENT_ID,
-hostname: os.hostname(),
-os: `${os.platform()} ${os.release()}`,
-cpuModel: cpus[0]?.model || "unknown",
-totalMemMB: Math.round(os.totalmem() / 1024 / 1024),
-totalDiskMB: 0, // ponytail: skip disk check, add when needed
-clientVersion: "0.0.0",
-capabilities: caps,
-};
+	const cpus = os.cpus();
+	const caps: string[] = ["exec", "file.read", "file.write"];
+	if (isFrpAvailable()) {
+		caps.push("frp");
+	}
+	return {
+		clientId: CLIENT_ID,
+		hostname: os.hostname(),
+		os: `${os.platform()} ${os.release()}`,
+		cpuModel: cpus[0]?.model || "unknown",
+		totalMemMB: Math.round(os.totalmem() / 1024 / 1024),
+		totalDiskMB: 0, // ponytail: skip disk check, add when needed
+		clientVersion: "0.0.0",
+		capabilities: caps,
+	};
 }

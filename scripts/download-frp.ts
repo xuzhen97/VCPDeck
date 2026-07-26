@@ -131,12 +131,17 @@ async function downloadPlatform(platform: string): Promise<void> {
 	console.log(`[${platform}] frps → ${frpsDest}`);
 }
 
+function normalizePlatform(p: string): string {
+	if (p.startsWith("win32")) return p.replace("win32", "win");
+	return p;
+}
+
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	const platformArg = args.find((a) => a.startsWith("--platform="));
 	const platforms = platformArg
-		? platformArg.replace("--platform=", "").split(",")
-		: [`${process.platform}-${process.arch}`];
+		? platformArg.replace("--platform=", "").split(",").map(normalizePlatform)
+		: [normalizePlatform(`${process.platform}-${process.arch}`)];
 
 	console.log(`下载 frp v${FRP_VERSION} for: ${platforms.join(", ")}`);
 

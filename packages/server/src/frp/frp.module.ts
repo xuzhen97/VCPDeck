@@ -5,9 +5,9 @@ import { PrismaModule } from "../prisma/prisma.module.js";
 import { EventsModule } from "../events/events.module.js";
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => EventsModule)],
-  providers: [FrpService],
-  controllers: [FrpController],
-  exports: [FrpService],
+	imports: [PrismaModule, forwardRef(() => EventsModule)],
+	providers: [FrpService],
+	controllers: [FrpController],
+	exports: [FrpService],
 })
 export class FrpModule {}

@@ -1,0 +1,4 @@
+2026-07-26 15:24:59.685 [I] [frps/root.go:105] frps uses config file: D:\VCPHub\VCPDeck\.tmp\frp-test-1785050695726\frps-test.toml
+2026-07-26 15:24:59.764 [I] [server/service.go:237] frps tcp listen on 0.0.0.0:59256
+2026-07-26 15:24:59.764 [I] [frps/root.go:114] frps started successfully
+2026-07-26 15:24:59.764 [I] [server/service.go:351] dashboard listen on 0.0.0.0:30004

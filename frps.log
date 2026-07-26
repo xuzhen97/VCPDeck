@@ -1,0 +1,6 @@
+2026-07-26 15:25:49.440 [I] [frps/root.go:105] frps uses config file: D:/VCPHub/VCPDeck/.tmp/test-frps/frps.toml
+2026-07-26 15:25:49.492 [I] [server/service.go:237] frps tcp listen on 0.0.0.0:17000
+2026-07-26 15:25:49.493 [I] [frps/root.go:114] frps started successfully
+2026-07-26 15:25:49.493 [I] [server/service.go:351] dashboard listen on 0.0.0.0:17500
+2026-07-26 15:25:52.593 [I] [server/dashboard_api.go:107] Http request: [/api/serverinfo]
+2026-07-26 15:25:52.593 [I] [server/dashboard_api.go:100] Http response [/api/serverinfo]: code [200]
