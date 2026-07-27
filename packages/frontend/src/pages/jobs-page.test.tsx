@@ -74,21 +74,46 @@ it("explains list limits and only offers reliable exec cancellation", async () =
 	expect(screen.queryByText(/hidden/)).not.toBeInTheDocument();
 	await userEvent.click(screen.getByRole("button", { name: "取消任务" }));
 	expect(cancel).toHaveBeenCalledWith("exec-running", expect.any(AbortSignal));
-	expect(wait).toHaveBeenCalledWith("exec-running", { signal: expect.any(AbortSignal) });
+	expect(wait).toHaveBeenCalledWith("exec-running", {
+		signal: expect.any(AbortSignal),
+	});
 });
 
 it("stops cancellation polling when the page unmounts", async () => {
 	let rejectWait: ((reason: unknown) => void) | undefined;
-	const wait = vi.fn((_jobId: string, options?: WaitJobOptions) => new Promise<JobInfo>((_resolve, reject) => {
-		rejectWait = reject;
-		options?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
-	}));
+	const wait = vi.fn(
+		(_jobId: string, options?: WaitJobOptions) =>
+			new Promise<JobInfo>((_resolve, reject) => {
+				rejectWait = reject;
+				options?.signal?.addEventListener(
+					"abort",
+					() => reject(new DOMException("Aborted", "AbortError")),
+					{ once: true },
+				);
+			}),
+	);
 	const client = {
 		auth: { me: async () => identity },
-		jobs: { list: vi.fn().mockResolvedValue([job({})]), cancel: vi.fn().mockResolvedValue({ jobId: "j1", status: "cancelling" }), wait },
+		jobs: {
+			list: vi.fn().mockResolvedValue([job({})]),
+			cancel: vi.fn().mockResolvedValue({ jobId: "j1", status: "cancelling" }),
+			wait,
+		},
 	} as unknown as VcpDeckClient;
-	const view = render(<StrictMode><MemoryRouter><SdkProvider client={client}><AuthProvider><JobsPage /></AuthProvider></SdkProvider></MemoryRouter></StrictMode>);
-	await userEvent.click(await screen.findByRole("button", { name: "取消任务" }));
+	const view = render(
+		<StrictMode>
+			<MemoryRouter>
+				<SdkProvider client={client}>
+					<AuthProvider>
+						<JobsPage />
+					</AuthProvider>
+				</SdkProvider>
+			</MemoryRouter>
+		</StrictMode>,
+	);
+	await userEvent.click(
+		await screen.findByRole("button", { name: "取消任务" }),
+	);
 	await waitFor(() => expect(wait).toHaveBeenCalled());
 	const signal = wait.mock.calls[0]?.[1]?.signal;
 	expect(signal?.aborted).toBe(false);
