@@ -10,25 +10,25 @@
 
 | 功能域 | Server | Client | Frontend | CLI | Skill | 对接结论 |
 |---|---|---|---|---|---|---|
-| 健康检查 | 已实现 | 不涉及 | 未接入 | 骨架 | 骨架 | 可直接对接 |
+| 健康检查 | 已实现 | 不涉及 | SDK 已接入 | 骨架 | 骨架 | 可直接使用 |
 | Cookie 登录/退出 | 已实现 | 不涉及 | 已实现 | 不适用 | 不适用 | 可直接使用 |
-| Bearer Token | 已实现 | 不涉及 | Token 管理已实现 | 未实现 | 未实现 | CLI/Skill 可直接对接 API |
+| Bearer Token | 已实现 | 不涉及 | Token 管理已实现 | 未实现 | 未实现 | CLI/Skill 可直接复用 SDK |
 | 身份管理 | 已实现 | 不涉及 | 已实现 | 未实现 | 未实现 | 可直接使用，需 admin |
-| 在线 Client 列表 | 已实现 | 已实现 | 未实现 | 未实现 | 未实现 | 可直接对接，仅返回在线 Client |
-| Job 创建/查询/取消 | 已实现 | 已实现 | 未实现 | 未实现 | 未实现 | 可用，取消仅对运行中的 exec 可靠 |
-| 命令执行 | 已实现 | 已实现 | 未实现 | 未实现 | 未实现 | 可用，但 REST 看不到实时输出 |
-| 脚本执行 | 已实现 | 已实现 | 未实现 | 未实现 | 未实现 | 可用，但 REST 看不到实时输出 |
-| 轻量文件操作 | 已实现 | 已实现 | 未实现 | 未实现 | 未实现 | 可用，但有路径安全限制，见 §7.7 |
-| 文件导出 | 已实现 | 已实现 | 未实现 | 未实现 | 未实现 | 可直接对接 |
-| 文件导入 | 部分实现 | 已实现 | 未实现 | 未实现 | 未实现 | 只能使用现有 `fileId`，见 §8.3 |
-| Storage 预签名上传/下载 | 已实现 | 已实现 | 未实现 | 未实现 | 未实现 | 可用 |
-| Storage 后端配置 | 已实现 | 不涉及 | 未实现 | 未实现 | 未实现 | 可用，但响应可能含敏感配置 |
-| 阿里云盘 OAuth | 已实现 | 不涉及 | 未实现 | 未实现 | 未实现 | 可对接，需特别防止凭证泄露 |
-| FRP 映射 | 已实现 | 已实现 | 未实现 | 未实现 | 未实现 | 创建/查询可用；删除有已知缺陷 |
+| 在线 Client 列表 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | 仅返回在线 Client |
+| Job 创建/查询/取消 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | 取消仅对运行中的 exec 可靠 |
+| 命令执行 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | REST 无实时输出，Frontend 展示诚实摘要 |
+| 脚本执行 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | REST 无实时输出，Frontend 展示诚实摘要 |
+| 轻量文件操作 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | 使用 `file.roots`，仍有路径安全限制，见 §7.7 |
+| 文件导出 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | Frontend 可导出下载 |
+| 文件导入 | 部分实现 | 已实现 | 未提供入口 | 未实现 | 未实现 | 只能使用现有 `fileId`，见 §8.3 |
+| Storage 预签名上传/下载 | 已实现 | 已实现 | 下载用于文件导出 | 未实现 | 未实现 | 本地上传后 import 尚无闭环 |
+| Storage 后端配置 | 已实现 | 不涉及 | 已实现（仅写安全字段） | 未实现 | 未实现 | 不读取 raw config |
+| 阿里云盘 OAuth | 已实现 | 不涉及 | 已实现 | 未实现 | 未实现 | 只展示安全状态，授权 URL 校验 origin |
+| FRP 映射 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | 创建/查询可用；删除仍有已知缺陷 |
 | Job WebSocket 实时输出 | 部分实现 | 已实现 | 未实现 | 未实现 | 未实现 | 暂不作为对接方案 |
 | `agent.run` | 仅有类型占位 | 未实现 | 未实现 | 未实现 | 未实现 | 不得调用 |
 
-当前 Frontend 已有登录、个人信息、Token 和身份管理页面。`packages/cli/src/index.ts` 与 `skills/vcpdeck/SKILL.md` 仍是骨架。
+当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘和账号设置。`packages/cli/src/index.ts` 与 `skills/vcpdeck/SKILL.md` 仍是骨架。
 
 > **安全提示：** 当前任意已认证身份都等价于远程机器操作员，可执行 shell、操作文件并修改 Storage/FRP；Job 也不按身份隔离。只向可信操作者发放账号和 Token。
 
@@ -1185,21 +1185,30 @@ GET /api/frp/mappings/:id
 
 ---
 
-## 11. Frontend 对接建议
+## 11. Frontend 与 SDK 现状
 
-### 11.1 复用现有基础
+### 11.1 复用 `@vcpdeck/sdk`
 
-现有 `packages/frontend/src/api.ts` 已实现 Cookie 请求、认证、Token 和身份接口。继续复用一个 request 函数，不需要新增 SDK 或状态管理框架。
+`packages/sdk` 提供框架无关的 REST 客户端，统一 Cookie/Bearer 认证、错误归一化、业务 API 和 Job 轮询。Frontend 通过 `SdkProvider` 复用同一实例，不另写 fetch 或轮询逻辑；CLI/Skill 后续也应直接复用该包。
 
-建议按以下顺序扩展：
+```ts
+import { VcpDeckClient } from "@vcpdeck/sdk";
 
-1. **统一错误处理**：保留 HTTP status、可选 code 和安全 message；401 清空身份并跳登录；
-2. **Machines 页面**：在线 Client 列表、capability 标签、最后心跳；
-3. **Jobs 页面**：最近 100 条、详情、状态和取消；
-4. **执行表单**：command/script 模式，显示“当前不提供实时输出”；
-5. **文件页面**：受控 root 选择、目录列表、文本读写、危险确认；
-6. **Storage/阿里云盘设置**：只使用安全状态字段，不渲染原始 config；
-7. **FRP 页面**：创建、状态轮询、删除确认和已知缺陷提示。
+const sdk = new VcpDeckClient({
+  baseUrl: "http://localhost:3001",
+  auth: { type: "bearer", token: process.env.VCPDECK_TOKEN! },
+});
+
+const clients = await sdk.clients.list();
+const job = await sdk.jobs.create({
+  clientId: clients[0].clientId,
+  type: "exec",
+  payload: { mode: "command", command: "node --version" },
+});
+const terminal = await sdk.jobs.wait(job.jobId);
+```
+
+浏览器使用 Cookie 时改为 `auth: { type: "cookie" }` 和相对 `baseUrl`。`VcpDeckApiError` 保留 HTTP `status`、稳定 `code`（若 Server 提供）和安全 `message`。
 
 ### 11.2 页面行为
 
@@ -1214,16 +1223,18 @@ GET /api/frp/mappings/:id
 
 ### 11.3 Frontend Definition of Done
 
-- [ ] Cookie 登录、登出、401 跳转正确；
-- [ ] 可查看在线 Client 与 capabilities；
-- [ ] 可创建、查询、轮询和取消 exec Job；
-- [ ] 正确区分 `done/error/cancelled/disconnected`；
-- [ ] 页面卸载后无残留轮询；
-- [ ] 文件操作使用受控 root，并对危险操作二次确认；
-- [ ] export 可下载；import UI 明确当前 fileId 来源限制；
-- [ ] 阿里云盘配置/OAuth 流程不显示或记录 Token；
-- [ ] FRP 创建可轮询状态，删除显示限制提示；
-- [ ] 加载、空列表、离线、无 capability 和错误状态均有明确 UI。
+- [x] Cookie 登录、登出、401 跳转正确；
+- [x] 可查看在线 Client 与 capabilities；
+- [x] 可创建、查询、轮询和取消 exec Job；
+- [x] 正确区分 `done/error/cancelled/disconnected`；
+- [x] 页面卸载时中止资源和 Job 轮询；
+- [x] 文件操作使用 `file.roots`，并对删除/覆盖要求精确目标确认；
+- [x] export 可下载；不提供缺少 `fileId` 闭环的本地 import UI；
+- [x] 阿里云盘配置/OAuth 只读取安全状态，不读取 raw config；
+- [x] FRP 创建可轮询状态，删除显示 Client 清理未确认；
+- [x] 加载、空列表和错误状态有明确 UI。
+
+仍未实现实时 stdout/stderr、本地上传后 import、离线 Client 历史和 `agent.run`；这些限制不能由 Frontend 伪造或绕过。
 
 ---
 
@@ -1397,7 +1408,8 @@ bearerToken
 | 轻量文件操作 | `packages/client/src/file-handler.ts` |
 | 文件传输 | `packages/client/src/transfer-handler.ts` |
 | frpc 管理 | `packages/client/src/frpc-daemon.ts` |
-| Frontend API 现状 | `packages/frontend/src/api.ts` |
+| 框架无关 SDK | `packages/sdk/src/` |
+| Frontend API 与页面 | `packages/frontend/src/api/`, `packages/frontend/src/pages/` |
 | CLI 骨架 | `packages/cli/src/index.ts` |
 | Skill 骨架 | `skills/vcpdeck/SKILL.md` |
 | 通用集成测试 | `scripts/test.cjs` |

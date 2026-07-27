@@ -1,5 +1,5 @@
 import type { JobInfo } from "@vcpdeck/shared";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
@@ -70,12 +70,21 @@ export function JobsPage({ clientId }: { clientId?: string }) {
 
 function JobRow({ job, onChanged }: { job: JobInfo; onChanged: () => void }) {
 	const sdk = useSdk();
+	const controller = useRef<AbortController>();
+	useEffect(() => () => controller.current?.abort(), []);
 	const cancellable =
 		job.type === "exec" && ["pending", "running"].includes(job.status);
 	async function cancel() {
-		await sdk.jobs.cancel(job.jobId);
-		await sdk.jobs.wait(job.jobId);
-		onChanged();
+		controller.current?.abort();
+		const next = new AbortController();
+		controller.current = next;
+		try {
+			await sdk.jobs.cancel(job.jobId, next.signal);
+			await sdk.jobs.wait(job.jobId, { signal: next.signal });
+			onChanged();
+		} catch (reason) {
+			if (!next.signal.aborted) throw reason;
+		}
 	}
 	return (
 		<article className="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">

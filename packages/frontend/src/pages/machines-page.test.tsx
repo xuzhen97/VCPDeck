@@ -2,7 +2,7 @@ import type { VcpDeckClient } from "@vcpdeck/sdk";
 import type { ClientInfo } from "@vcpdeck/shared";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
 import { AuthProvider } from "@/auth-context";
 import { MachinesPage } from "./machines-page";
@@ -41,9 +41,11 @@ describe("MachinesPage", () => {
 		);
 	});
 
-	it("shows an honest empty state", async () => {
-		renderPage(async () => []);
+	it("shows an honest empty state without reloading after auth settles", async () => {
+		const list = vi.fn().mockResolvedValue([]);
+		renderPage(list);
 		expect(await screen.findByText("当前没有在线机器")).toBeVisible();
+		expect(list).toHaveBeenCalledTimes(1);
 		expect(
 			screen.getByText("Server 只提供在线 Client，离线历史不会显示在此处。"),
 		).toBeVisible();

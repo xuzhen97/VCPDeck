@@ -1,6 +1,7 @@
-import type { VcpDeckClient } from "@vcpdeck/sdk";
+import type { VcpDeckClient, WaitJobOptions } from "@vcpdeck/sdk";
 import type { IdentityInfo, JobInfo } from "@vcpdeck/shared";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { expect, it, vi } from "vitest";
@@ -72,6 +73,27 @@ it("explains list limits and only offers reliable exec cancellation", async () =
 	expect(screen.getAllByText("命令：node --version")).toHaveLength(2);
 	expect(screen.queryByText(/hidden/)).not.toBeInTheDocument();
 	await userEvent.click(screen.getByRole("button", { name: "取消任务" }));
-	expect(cancel).toHaveBeenCalledWith("exec-running");
-	expect(wait).toHaveBeenCalledWith("exec-running");
+	expect(cancel).toHaveBeenCalledWith("exec-running", expect.any(AbortSignal));
+	expect(wait).toHaveBeenCalledWith("exec-running", { signal: expect.any(AbortSignal) });
+});
+
+it("stops cancellation polling when the page unmounts", async () => {
+	let rejectWait: ((reason: unknown) => void) | undefined;
+	const wait = vi.fn((_jobId: string, options?: WaitJobOptions) => new Promise<JobInfo>((_resolve, reject) => {
+		rejectWait = reject;
+		options?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+	}));
+	const client = {
+		auth: { me: async () => identity },
+		jobs: { list: vi.fn().mockResolvedValue([job({})]), cancel: vi.fn().mockResolvedValue({ jobId: "j1", status: "cancelling" }), wait },
+	} as unknown as VcpDeckClient;
+	const view = render(<StrictMode><MemoryRouter><SdkProvider client={client}><AuthProvider><JobsPage /></AuthProvider></SdkProvider></MemoryRouter></StrictMode>);
+	await userEvent.click(await screen.findByRole("button", { name: "取消任务" }));
+	await waitFor(() => expect(wait).toHaveBeenCalled());
+	const signal = wait.mock.calls[0]?.[1]?.signal;
+	expect(signal?.aborted).toBe(false);
+	view.unmount();
+	expect(signal?.aborted).toBe(true);
+	rejectWait?.(new DOMException("Aborted", "AbortError"));
+	await Promise.resolve();
 });

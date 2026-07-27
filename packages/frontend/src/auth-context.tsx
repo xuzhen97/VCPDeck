@@ -1,6 +1,7 @@
 import type { IdentityInfo, LoginRequest } from "@vcpdeck/shared";
 import {
 	createContext,
+	useCallback,
 	useContext,
 	useEffect,
 	useMemo,
@@ -42,29 +43,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		return () => controller.abort();
 	}, [sdk]);
 
+	const login = useCallback(async (input: LoginRequest) => {
+		const response = await sdk.auth.login(input);
+		setIdentity(response.identity as IdentityInfo);
+		setPhase("authenticated");
+	}, [sdk]);
+	const logout = useCallback(async () => {
+		try {
+			await sdk.auth.logout();
+		} finally {
+			setIdentity(null);
+			setPhase("unauthenticated");
+		}
+	}, [sdk]);
+	const handleUnauthorized = useCallback(() => {
+		setIdentity(null);
+		setPhase("unauthenticated");
+	}, []);
 	const value = useMemo<AuthState>(
-		() => ({
-			identity,
-			phase,
-			async login(input) {
-				const response = await sdk.auth.login(input);
-				setIdentity(response.identity as IdentityInfo);
-				setPhase("authenticated");
-			},
-			async logout() {
-				try {
-					await sdk.auth.logout();
-				} finally {
-					setIdentity(null);
-					setPhase("unauthenticated");
-				}
-			},
-			handleUnauthorized() {
-				setIdentity(null);
-				setPhase("unauthenticated");
-			},
-		}),
-		[identity, phase, sdk],
+		() => ({ identity, phase, login, logout, handleUnauthorized }),
+		[handleUnauthorized, identity, login, logout, phase],
 	);
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
