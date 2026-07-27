@@ -23,11 +23,32 @@ export function createFilesApi(jobs: Pick<JobsApi, "create" | "wait">) {
 
 	return {
 		roots: async (clientId: string, signal?: AbortSignal) =>
-			(await run<FileRootsResult>({ clientId, type: "file.roots", payload: {} }, signal)).roots,
-		list: (clientId: string, rootDir: string, path: string, signal?: AbortSignal) =>
-			run<FileListResult>({ clientId, type: "file.list", payload: { rootDir, path } }, signal),
-		stat: (clientId: string, rootDir: string, path: string, signal?: AbortSignal) =>
-			run<FileStatResult>({ clientId, type: "file.stat", payload: { rootDir, path } }, signal),
+			(
+				await run<FileRootsResult>(
+					{ clientId, type: "file.roots", payload: {} },
+					signal,
+				)
+			).roots,
+		list: (
+			clientId: string,
+			rootDir: string,
+			path: string,
+			signal?: AbortSignal,
+		) =>
+			run<FileListResult>(
+				{ clientId, type: "file.list", payload: { rootDir, path } },
+				signal,
+			),
+		stat: (
+			clientId: string,
+			rootDir: string,
+			path: string,
+			signal?: AbortSignal,
+		) =>
+			run<FileStatResult>(
+				{ clientId, type: "file.stat", payload: { rootDir, path } },
+				signal,
+			),
 		readText: (
 			clientId: string,
 			rootDir: string,
@@ -36,24 +57,34 @@ export function createFilesApi(jobs: Pick<JobsApi, "create" | "wait">) {
 			signal?: AbortSignal,
 		) =>
 			run<FileReadTextResult>(
-				{ clientId, type: "file.readText", payload: { rootDir, path, maxBytes } },
+				{
+					clientId,
+					type: "file.readText",
+					payload: { rootDir, path, maxBytes },
+				},
 				signal,
 			),
 		writeText: (
 			clientId: string,
 			payload: { rootDir: string; path: string; content: string },
 			signal?: AbortSignal,
-		) => run<FileChangeResult>({ clientId, type: "file.writeText", payload }, signal),
+		) =>
+			run<FileChangeResult>(
+				{ clientId, type: "file.writeText", payload },
+				signal,
+			),
 		mkdir: (
 			clientId: string,
 			payload: { rootDir: string; path: string },
 			signal?: AbortSignal,
-		) => run<FileChangeResult>({ clientId, type: "file.mkdir", payload }, signal),
+		) =>
+			run<FileChangeResult>({ clientId, type: "file.mkdir", payload }, signal),
 		delete: (
 			clientId: string,
 			payload: { rootDir: string; path: string; recursive?: boolean },
 			signal?: AbortSignal,
-		) => run<FileChangeResult>({ clientId, type: "file.delete", payload }, signal),
+		) =>
+			run<FileChangeResult>({ clientId, type: "file.delete", payload }, signal),
 		move: (
 			clientId: string,
 			payload: {
@@ -63,12 +94,17 @@ export function createFilesApi(jobs: Pick<JobsApi, "create" | "wait">) {
 				overwrite?: boolean;
 			},
 			signal?: AbortSignal,
-		) => run<FileChangeResult>({ clientId, type: "file.move", payload }, signal),
+		) =>
+			run<FileChangeResult>({ clientId, type: "file.move", payload }, signal),
 		export: (
 			clientId: string,
 			payload: { rootDir: string; path: string },
 			signal?: AbortSignal,
-		) => run<FileTransferResult>({ clientId, type: "file.export", payload }, signal),
+		) =>
+			run<FileTransferResult>(
+				{ clientId, type: "file.export", payload },
+				signal,
+			),
 		import: (
 			clientId: string,
 			payload: { rootDir: string; targetPath: string; fileId: string },

@@ -70,7 +70,8 @@ export class VcpDeckClient {
 			response = await this.fetcher(`${this.baseUrl}${path}`, {
 				method,
 				signal,
-				credentials: this.options.auth.type === "cookie" ? "include" : undefined,
+				credentials:
+					this.options.auth.type === "cookie" ? "include" : undefined,
 				headers: {
 					...(body === undefined ? {} : { "Content-Type": "application/json" }),
 					...(this.options.auth.type === "bearer"

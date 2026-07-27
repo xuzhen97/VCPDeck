@@ -4,7 +4,11 @@ import { type VcpDeckApiError, VcpDeckClient } from "./client.js";
 describe("VcpDeckClient", () => {
 	it("uses browser cookie credentials", async () => {
 		const fetcher = vi.fn(async () => Response.json({ ok: true }));
-		const client = new VcpDeckClient({ baseUrl: "", auth: { type: "cookie" }, fetch: fetcher });
+		const client = new VcpDeckClient({
+			baseUrl: "",
+			auth: { type: "cookie" },
+			fetch: fetcher,
+		});
 
 		await client.request("GET", "/api/health");
 
@@ -27,7 +31,9 @@ describe("VcpDeckClient", () => {
 		expect(fetcher).toHaveBeenCalledWith(
 			"http://localhost:3001/api/health",
 			expect.objectContaining({
-				headers: expect.objectContaining({ Authorization: "Bearer vcp_secret" }),
+				headers: expect.objectContaining({
+					Authorization: "Bearer vcp_secret",
+				}),
 			}),
 		);
 	});

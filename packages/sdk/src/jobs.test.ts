@@ -13,7 +13,11 @@ describe("jobs", () => {
 		const request = vi
 			.fn()
 			.mockResolvedValueOnce({ jobId: "j1", status: JobStatus.DISCONNECTED })
-			.mockResolvedValueOnce({ jobId: "j1", status: JobStatus.DONE, result: { exitCode: 0 } });
+			.mockResolvedValueOnce({
+				jobId: "j1",
+				status: JobStatus.DONE,
+				result: { exitCode: 0 },
+			});
 		const promise = createJobsApi({ request } as never).wait("j1");
 
 		await vi.advanceTimersByTimeAsync(1000);
@@ -45,7 +49,9 @@ describe("files", () => {
 			}),
 		};
 
-		await expect(createFilesApi(jobs as never).roots("c1")).resolves.toEqual(["C:\\"]);
+		await expect(createFilesApi(jobs as never).roots("c1")).resolves.toEqual([
+			"C:\\",
+		]);
 		expect(jobs.create).toHaveBeenCalledWith(
 			{ clientId: "c1", type: "file.roots", payload: {} },
 			undefined,

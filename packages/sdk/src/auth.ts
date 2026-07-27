@@ -16,16 +16,31 @@ export function createAuthApi(client: Pick<VcpDeckClient, "request">) {
 		login: (input: LoginRequest, signal?: AbortSignal) =>
 			client.request<LoginResponse>("POST", "/api/auth/login", input, signal),
 		logout: (signal?: AbortSignal) =>
-			client.request<{ ok: true }>("POST", "/api/auth/logout", undefined, signal),
+			client.request<{ ok: true }>(
+				"POST",
+				"/api/auth/logout",
+				undefined,
+				signal,
+			),
 		me: (signal?: AbortSignal) =>
 			client.request<IdentityInfo>("GET", "/api/auth/me", undefined, signal),
 		updateMe: (input: UpdateMeRequest, signal?: AbortSignal) =>
 			client.request<{ ok: true }>("PUT", "/api/auth/me", input, signal),
 		tokens: {
 			list: (signal?: AbortSignal) =>
-				client.request<TokenInfo[]>("GET", "/api/auth/tokens", undefined, signal),
+				client.request<TokenInfo[]>(
+					"GET",
+					"/api/auth/tokens",
+					undefined,
+					signal,
+				),
 			create: (input: CreateTokenRequest, signal?: AbortSignal) =>
-				client.request<CreateTokenResponse>("POST", "/api/auth/tokens", input, signal),
+				client.request<CreateTokenResponse>(
+					"POST",
+					"/api/auth/tokens",
+					input,
+					signal,
+				),
 			revoke: (id: string, signal?: AbortSignal) =>
 				client.request<{ ok: true }>(
 					"DELETE",
@@ -41,7 +56,12 @@ export function createAuthApi(client: Pick<VcpDeckClient, "request">) {
 export function createIdentitiesApi(client: Pick<VcpDeckClient, "request">) {
 	return {
 		list: (signal?: AbortSignal) =>
-			client.request<IdentityInfo[]>("GET", "/api/identities", undefined, signal),
+			client.request<IdentityInfo[]>(
+				"GET",
+				"/api/identities",
+				undefined,
+				signal,
+			),
 		create: (input: CreateIdentityRequest, signal?: AbortSignal) =>
 			client.request<IdentityInfo>("POST", "/api/identities", input, signal),
 		disable: (id: string, signal?: AbortSignal) =>

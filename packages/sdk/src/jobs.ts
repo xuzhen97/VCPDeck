@@ -40,7 +40,9 @@ export function createJobsApi(client: Pick<VcpDeckClient, "request">) {
 				signal,
 			),
 		async wait(jobId: string, options: WaitJobOptions = {}): Promise<JobInfo> {
-			const delays = options.delays?.length ? options.delays : [1000, 2000, 5000];
+			const delays = options.delays?.length
+				? options.delays
+				: [1000, 2000, 5000];
 			for (let attempt = 0; ; attempt++) {
 				const delay = delays[Math.min(attempt, delays.length - 1)] ?? 5000;
 				await sleep(delay, options.signal);

@@ -19,7 +19,12 @@ export function createFrpApi(client: Pick<VcpDeckClient, "request">) {
 				signal,
 			),
 		create: (input: FrpMappingCreateRequest, signal?: AbortSignal) =>
-			client.request<FrpMappingInfo>("POST", "/api/frp/mappings", input, signal),
+			client.request<FrpMappingInfo>(
+				"POST",
+				"/api/frp/mappings",
+				input,
+				signal,
+			),
 		delete: (id: string, signal?: AbortSignal) =>
 			client.request<{ id: string; deleted: true }>(
 				"DELETE",

@@ -39,13 +39,15 @@ export function createAliyunDriveApi(client: Pick<VcpDeckClient, "request">) {
 				signal,
 			),
 		startOAuth: (signal?: AbortSignal) =>
-			client.request<{ state: string; authorizationUrl: string; expiresAt: number }>(
-				"POST",
-				"/api/aliyundrive/oauth/start",
-				undefined,
-				signal,
-			),
-		completeOAuth: (input: { state: string; code: string }, signal?: AbortSignal) =>
+			client.request<{
+				state: string;
+				authorizationUrl: string;
+				expiresAt: number;
+			}>("POST", "/api/aliyundrive/oauth/start", undefined, signal),
+		completeOAuth: (
+			input: { state: string; code: string },
+			signal?: AbortSignal,
+		) =>
 			client.request<{ authorized: true; expiresAt: number }>(
 				"POST",
 				"/api/aliyundrive/oauth/complete",
