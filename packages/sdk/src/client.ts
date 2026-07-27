@@ -1,3 +1,11 @@
+import { createAliyunDriveApi } from "./aliyundrive.js";
+import { createAuthApi, createIdentitiesApi } from "./auth.js";
+import { createClientsApi } from "./clients.js";
+import { createFilesApi } from "./files.js";
+import { createFrpApi } from "./frp.js";
+import { createJobsApi } from "./jobs.js";
+import { createStorageApi } from "./storage.js";
+
 export type AuthMode = { type: "cookie" } | { type: "bearer"; token: string };
 
 /** VCPDeck 客户端配置。 */
@@ -24,10 +32,30 @@ export class VcpDeckApiError extends Error {
 export class VcpDeckClient {
 	private readonly fetcher: typeof globalThis.fetch;
 	private readonly baseUrl: string;
+	readonly jobs;
+	readonly files;
+	readonly auth;
+	readonly identities;
+	readonly clients;
+	readonly storage;
+	readonly aliyundrive;
+	readonly frp;
+	readonly health = {
+		get: (signal?: AbortSignal) =>
+			this.request<{ ok: true }>("GET", "/api/health", undefined, signal),
+	};
 
 	constructor(private readonly options: VcpDeckClientOptions) {
 		this.fetcher = options.fetch ?? globalThis.fetch;
 		this.baseUrl = options.baseUrl.replace(/\/$/, "");
+		this.jobs = createJobsApi(this);
+		this.files = createFilesApi(this.jobs);
+		this.auth = createAuthApi(this);
+		this.identities = createIdentitiesApi(this);
+		this.clients = createClientsApi(this);
+		this.storage = createStorageApi(this);
+		this.aliyundrive = createAliyunDriveApi(this);
+		this.frp = createFrpApi(this);
 	}
 
 	/** 发起 REST 请求并归一化失败响应。 */
