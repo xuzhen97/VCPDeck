@@ -4,6 +4,7 @@ import { useAuth } from "@/auth-context";
 import { LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
 import { DashboardPage } from "@/pages/dashboard-page";
+import { FrpPage } from "@/pages/frp-page";
 import { JobDetailPage } from "@/pages/job-detail-page";
 import { JobsPage } from "@/pages/jobs-page";
 import { LoginPage } from "@/pages/login-page";
@@ -11,7 +12,6 @@ import { MachinesPage } from "@/pages/machines-page";
 import { MachineWorkspace } from "@/pages/machine-workspace";
 
 const placeholders = {
-	frp: { title: "FRP", description: "端口映射管理。" },
 	storage: { title: "存储", description: "存储与阿里云盘状态。" },
 	settings: { title: "设置", description: "个人资料、Token 与身份管理。" },
 };
@@ -48,7 +48,7 @@ export function AppRoutes() {
 				/>
 				<Route path="/jobs" element={<JobsPage />} />
 				<Route path="/jobs/:jobId" element={<JobDetailPage />} />
-				<Route path="/frp/*" element={<PlaceholderPage page="frp" />} />
+				<Route path="/frp" element={<FrpPage />} />
 				<Route path="/storage/*" element={<PlaceholderPage page="storage" />} />
 				<Route
 					path="/settings/*"
