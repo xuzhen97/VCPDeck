@@ -16,17 +16,23 @@ import type { Socket } from "socket.io-client";
 import { Events, FileErrorCode } from "@vcpdeck/shared";
 import type { JobDone } from "@vcpdeck/shared";
 
+const isWin = platform() === "win32";
+const normPath = (p: string) => {
+	const s = resolve(p).replace(/\\/g, "/");
+	return isWin ? s.toLowerCase() : s;
+};
+
 /** 路径安全校验 + 规范化 */
 export async function resolveSafePath(
 	rootDir: string,
 	userPath: string,
 ): Promise<string> {
-	const resolvedRoot = resolve(rootDir).replace(/\\/g, "/").toLowerCase();
-	const resolved = resolve(resolvedRoot, userPath)
-		.replace(/\\/g, "/")
-		.toLowerCase();
+	const resolvedRoot = normPath(rootDir);
+	const resolved = normPath(resolve(resolvedRoot, userPath));
 
-	if (!resolved.startsWith(resolvedRoot + "/") && resolved !== resolvedRoot) {
+	// root = "/" 时前缀就是 "/"，不用补斜杠
+	const prefix = resolvedRoot.endsWith("/") ? resolvedRoot : resolvedRoot + "/";
+	if (!resolved.startsWith(prefix) && resolved !== resolvedRoot) {
 		throw {
 			code: FileErrorCode.PATH_NOT_ALLOWED,
 			message: "Path escapes rootDir",
@@ -35,8 +41,8 @@ export async function resolveSafePath(
 
 	// realpath 防 symlink 逃逸（仅在文件已存在时有效）
 	try {
-		const real = (await realpath(resolved)).replace(/\\/g, "/").toLowerCase();
-		if (!real.startsWith(resolvedRoot + "/") && real !== resolvedRoot) {
+		const real = normPath(await realpath(resolved));
+		if (!real.startsWith(prefix) && real !== resolvedRoot) {
 			throw {
 				code: FileErrorCode.PATH_NOT_ALLOWED,
 				message: "Symlink escapes rootDir",
