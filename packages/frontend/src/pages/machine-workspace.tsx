@@ -7,6 +7,8 @@ import { ErrorState, LoadingState } from "@/components/async-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
+import { ExecutePanel } from "@/pages/execute-panel";
+import { JobsPage } from "@/pages/jobs-page";
 
 const tabs = [
 	["overview", "概览"], ["execute", "执行"], ["files", "文件"], ["frp", "FRP"], ["jobs", "任务记录"],
@@ -32,7 +34,10 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 			<PageHeading title={client.hostname} description={`${client.os} · ${client.clientId}`} actions={<StatusChip label="在线" tone="success" />} />
 			<div className="flex flex-wrap gap-2">{client.capabilities.map((capability) => <StatusChip key={capability} label={capability} />)}</div>
 			<nav aria-label="机器工作区" className="flex gap-5 overflow-x-auto border-b border-border/70">{tabs.map(([key, label]) => <NavLink key={key} to={`${base}/${key}`} className={({ isActive }) => `min-h-11 border-b-2 px-1 py-3 text-sm ${isActive ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}>{label}</NavLink>)}</nav>
-			{tab === "overview" ? <Card><CardContent className="pt-6 text-sm text-muted-foreground">该机器当前在线。选择标签页开始操作。</CardContent></Card> : <Card><CardContent className="pt-6 text-sm text-muted-foreground">{tabs.find(([key]) => key === tab)?.[1] ?? "未知页面"}将在对应阶段接入。</CardContent></Card>}
+			{tab === "overview" && <Card><CardContent className="pt-6 text-sm text-muted-foreground">该机器当前在线。选择标签页开始操作。</CardContent></Card>}
+			{tab === "execute" && <ExecutePanel clientId={client.clientId} />}
+			{tab === "jobs" && <JobsPage clientId={client.clientId} />}
+			{!["overview", "execute", "jobs"].includes(tab) && <Card><CardContent className="pt-6 text-sm text-muted-foreground">{tabs.find(([key]) => key === tab)?.[1] ?? "未知页面"}将在对应阶段接入。</CardContent></Card>}
 		</div>
 	);
 }
