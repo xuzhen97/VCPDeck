@@ -123,13 +123,23 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 									? String(err.errorCode)
 									: null;
 							const errMsg =
-								err && typeof err === "object" && "errorMessage" in err && err.errorMessage
+								err &&
+								typeof err === "object" &&
+								"errorMessage" in err &&
+								err.errorMessage
 									? String(err.errorMessage)
 									: null;
 							return err !== undefined ? (
-								<div role="alert" className="mb-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+								<div
+									role="alert"
+									className="mb-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400"
+								>
 									无法读取目录
-									{errCode && <code className="ml-2 rounded bg-red-500/20 px-1">{errCode}</code>}
+									{errCode && (
+										<code className="ml-2 rounded bg-red-500/20 px-1">
+											{errCode}
+										</code>
+									)}
 									{errMsg && <span className="ml-2 opacity-80">{errMsg}</span>}
 								</div>
 							) : null;

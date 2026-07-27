@@ -29,7 +29,11 @@ function dirent(name: string, isDir: boolean) {
 	return { name, isDirectory: () => isDir, isFile: () => !isDir } as any;
 }
 
-function stats(size: number, isDir: boolean, mtime = new Date("2026-01-01T00:00:00Z")) {
+function stats(
+	size: number,
+	isDir: boolean,
+	mtime = new Date("2026-01-01T00:00:00Z"),
+) {
 	return {
 		size,
 		isDirectory: () => isDir,
@@ -45,8 +49,8 @@ function mockSocket() {
 
 // realpath 的 Node 类型签名包含 Buffer，统一用字符串 mock
 function mockRealpathIdentity() {
-	vi.mocked(fs.realpath).mockImplementation(
-		(p: unknown) => Promise.resolve(p as string),
+	vi.mocked(fs.realpath).mockImplementation((p: unknown) =>
+		Promise.resolve(p as string),
 	);
 }
 
@@ -102,7 +106,11 @@ describe("handleFileOp — file.list", () => {
 
 		const socket = mockSocket();
 		await handleFileOp(
-			{ jobId: "j1", type: "file.list", payload: { rootDir: "D:\\", path: "." } },
+			{
+				jobId: "j1",
+				type: "file.list",
+				payload: { rootDir: "D:\\", path: "." },
+			},
 			socket,
 		);
 
@@ -136,7 +144,11 @@ describe("handleFileOp — file.list", () => {
 
 		const socket = mockSocket();
 		await handleFileOp(
-			{ jobId: "j2", type: "file.list", payload: { rootDir: "C:\\", path: "." } },
+			{
+				jobId: "j2",
+				type: "file.list",
+				payload: { rootDir: "C:\\", path: "." },
+			},
 			socket,
 		);
 
@@ -168,7 +180,11 @@ describe("handleFileOp — file.list", () => {
 
 		const socket = mockSocket();
 		await handleFileOp(
-			{ jobId: "j3", type: "file.list", payload: { rootDir: "C:\\", path: "." } },
+			{
+				jobId: "j3",
+				type: "file.list",
+				payload: { rootDir: "C:\\", path: "." },
+			},
 			socket,
 		);
 
