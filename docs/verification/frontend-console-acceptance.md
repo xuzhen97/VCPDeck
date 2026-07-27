@@ -5,6 +5,8 @@
 > 验收方式：按顺序执行，每项在 `结果` 栏勾选。发现问题时记录页面、操作、实际结果、浏览器 Console 和 Network 请求。
 >
 > 重要边界：本文只验收当前已实现能力，不把实时 stdout/stderr、本地上传后 import、离线 Client 历史或 `agent.run` 作为通过条件。
+>
+> 命令环境：Windows 使用 **PowerShell 7 或 Windows PowerShell 5.1**；Linux/macOS 使用 **Bash**。请在仓库根目录打开终端。除明确分平台的命令外，`pnpm` 命令两端通用。
 
 ---
 
@@ -40,9 +42,9 @@
 
 ### 1.1 安装、测试和构建
 
-在项目根目录执行：
+以下命令在 Windows PowerShell 与 Linux/macOS Bash 中相同：
 
-```bash
+```text
 pnpm install
 pnpm --filter @vcpdeck/sdk test
 pnpm --filter @vcpdeck/frontend test
@@ -71,13 +73,25 @@ pnpm build
 
 > **破坏性操作：** 会清空开发环境的身份、Token、Job、FRP 和 Storage 配置。仅在确认允许重置时执行。
 
-先停止 Server，再执行：
+先停止 Server，再按当前平台执行。
+
+**Windows PowerShell：**
+
+```powershell
+Remove-Item -Force -ErrorAction SilentlyContinue `
+  "packages/server/prisma/dev.db", `
+  "packages/server/prisma/dev.db-journal", `
+  "packages/server/prisma/dev.db-shm", `
+  "packages/server/prisma/dev.db-wal"
+```
+
+**Linux/macOS Bash：**
 
 ```bash
 rm -f "packages/server/prisma/dev.db" \
-      "packages/server/prisma/dev.db-journal" \
-      "packages/server/prisma/dev.db-shm" \
-      "packages/server/prisma/dev.db-wal"
+  "packages/server/prisma/dev.db-journal" \
+  "packages/server/prisma/dev.db-shm" \
+  "packages/server/prisma/dev.db-wal"
 ```
 
 本文后续示例账号：
@@ -89,7 +103,19 @@ rm -f "packages/server/prisma/dev.db" \
 
 ### 1.3 启动 Server
 
-新终端执行：
+新终端按当前平台执行。
+
+**Windows PowerShell：**
+
+```powershell
+Set-Location "packages/server"
+$env:VCPDECK_ADMIN_PASSWORD = "dev123456"
+$env:VCPDECK_FRONTEND_ORIGIN = "http://localhost:5173"
+$env:VCPDECK_PSK = "vcpdeck-dev-psk"
+pnpm start
+```
+
+**Linux/macOS Bash：**
 
 ```bash
 cd "packages/server"
@@ -112,8 +138,17 @@ VCPDeck server listening on http://localhost:3001
 
 健康检查：
 
+**Windows PowerShell：**
+
+```powershell
+Invoke-RestMethod "http://localhost:3001/api/health" |
+  ConvertTo-Json -Compress
+```
+
+**Linux/macOS Bash：**
+
 ```bash
-curl "http://localhost:3001/api/health"
+curl --fail --silent --show-error "http://localhost:3001/api/health"
 ```
 
 预期：
@@ -129,7 +164,18 @@ curl "http://localhost:3001/api/health"
 
 ### 1.4 启动 Client
 
-新终端执行：
+新终端按当前平台执行。
+
+**Windows PowerShell：**
+
+```powershell
+Set-Location "packages/client"
+$env:VCPDECK_SERVER = "http://localhost:3001"
+$env:VCPDECK_PSK = "vcpdeck-dev-psk"
+pnpm start
+```
+
+**Linux/macOS Bash：**
 
 ```bash
 cd "packages/client"
@@ -162,7 +208,16 @@ file.write
 
 ### 1.5 启动 Frontend
 
-新终端执行：
+新终端按当前平台执行。
+
+**Windows PowerShell：**
+
+```powershell
+Set-Location "packages/frontend"
+pnpm dev
+```
+
+**Linux/macOS Bash：**
 
 ```bash
 cd "packages/frontend"
@@ -759,14 +814,32 @@ remotePort: 留空或填可用端口
 - [ ] Storage 签名 URL 的持久化记录；
 - [ ] 未脱敏的原始 Job payload。
 
-源码扫描：
+源码扫描（推荐安装 [ripgrep](https://github.com/BurntSushi/ripgrep)，命令 `rg` 在两端相同）：
+
+```text
+rg "storage\.getConfig|/api/storage/config.*GET|console\.(log|debug).*token|localStorage.*token" "packages/frontend/src" "packages/sdk/src"
+```
+
+Windows 未安装 ripgrep 时，可使用 PowerShell 原生命令：
+
+```powershell
+Get-ChildItem "packages/frontend/src", "packages/sdk/src" -Recurse -File |
+  Select-String -Pattern `
+    'storage\.getConfig', `
+    '/api/storage/config.*GET', `
+    'console\.(log|debug).*token', `
+    'localStorage.*token'
+```
+
+Linux/macOS 未安装 ripgrep 时，可使用 `grep`：
 
 ```bash
-rg "storage\.getConfig|/api/storage/config.*GET|console\.(log|debug).*token|localStorage.*token" \
+grep -RInE \
+  'storage\.getConfig|/api/storage/config.*GET|console\.(log|debug).*token|localStorage.*token' \
   "packages/frontend/src" "packages/sdk/src"
 ```
 
-预期：没有违规匹配。
+预期：没有违规匹配；`rg`/`grep` 在零匹配时返回非零退出码是正常行为。
 
 ---
 
@@ -790,9 +863,56 @@ rg "storage\.getConfig|/api/storage/config.*GET|console\.(log|debug).*token|loca
 
 ## 14. 自动化回归
 
-人工验收完成后，在没有手工启动的 Server/Client 占用端口时，**串行**执行：
+人工验收完成后，先关闭手工启动的 Server、Client 和 Frontend 终端。
+
+检查常用端口是否仍被监听。
+
+**Windows PowerShell：**
+
+```powershell
+Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+  Where-Object LocalPort -In 3001, 5173, 5174 |
+  Select-Object LocalAddress, LocalPort, OwningProcess
+```
+
+若确认这些 PID 都是本次验收进程，可停止它们：
+
+```powershell
+Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+  Where-Object LocalPort -In 3001, 5173, 5174 |
+  Select-Object -ExpandProperty OwningProcess -Unique |
+  ForEach-Object { Stop-Process -Id $_ -Force }
+```
+
+**Linux Bash：**
 
 ```bash
+ss -ltnp | grep -E ':(3001|5173|5174)\b'
+```
+
+若确认列出的 PID 都是本次验收进程，可停止它们：
+
+```bash
+pids=$(ss -ltnp | grep -E ':(3001|5173|5174)\b' | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
+[ -z "$pids" ] || kill $pids
+```
+
+**macOS Bash/Zsh：**
+
+```bash
+lsof -nP -iTCP:3001 -iTCP:5173 -iTCP:5174 -sTCP:LISTEN
+```
+
+若确认列出的 PID 都是本次验收进程，可停止它们：
+
+```bash
+pids=$(lsof -tiTCP:3001 -tiTCP:5173 -tiTCP:5174 -sTCP:LISTEN)
+[ -z "$pids" ] || kill $pids
+```
+
+然后在仓库根目录串行执行。以下命令在 Windows PowerShell 与 Linux/macOS Bash 中相同：
+
+```text
 pnpm --filter @vcpdeck/sdk test
 pnpm --filter @vcpdeck/frontend test
 pnpm --filter @vcpdeck/sdk build
