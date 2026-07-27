@@ -6,7 +6,11 @@
     "outDir": "dist",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "noEmit": true
+    "noEmit": true,
+    "types": ["vite/client", "vitest/globals"],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src"],
   "references": [

@@ -1,19 +1,16 @@
-import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 const sourceDir = fileURLToPath(new URL("./src", import.meta.url));
 
 export default defineConfig({
-	plugins: [tailwindcss()],
 	resolve: {
 		alias: {
 			"@": sourceDir,
 		},
 	},
-	server: {
-		proxy: {
-			"/api": "http://localhost:3001",
-		},
+	test: {
+		environment: "jsdom",
+		setupFiles: ["./src/test-setup.ts"],
 	},
 });
