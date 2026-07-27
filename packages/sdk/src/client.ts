@@ -46,7 +46,7 @@ export class VcpDeckClient {
 	};
 
 	constructor(private readonly options: VcpDeckClientOptions) {
-		this.fetcher = options.fetch ?? globalThis.fetch;
+		this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
 		this.baseUrl = options.baseUrl.replace(/\/$/, "");
 		this.jobs = createJobsApi(this);
 		this.files = createFilesApi(this.jobs);
