@@ -3,11 +3,12 @@ import { ConsoleShell } from "@/app/console-shell";
 import { useAuth } from "@/auth-context";
 import { LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
+import { DashboardPage } from "@/pages/dashboard-page";
 import { LoginPage } from "@/pages/login-page";
+import { MachinesPage } from "@/pages/machines-page";
+import { MachineWorkspace } from "@/pages/machine-workspace";
 
-const placeholders: Record<string, { title: string; description: string }> = {
-	dashboard: { title: "概览", description: "控制台数据接入将在下一阶段完成。" },
-	machines: { title: "机器", description: "在线机器工作区。" },
+const placeholders = {
 	jobs: { title: "任务", description: "最近任务记录。" },
 	frp: { title: "FRP", description: "端口映射管理。" },
 	storage: { title: "存储", description: "存储与阿里云盘状态。" },
@@ -16,9 +17,7 @@ const placeholders: Record<string, { title: string; description: string }> = {
 
 function PlaceholderPage({ page }: { page: keyof typeof placeholders }) {
 	const content = placeholders[page];
-	return (
-		<PageHeading title={content.title} description={content.description} />
-	);
+	return <PageHeading title={content.title} description={content.description} />;
 }
 
 /** 应用认证路由。 */
@@ -38,14 +37,9 @@ export function AppRoutes() {
 	return (
 		<ConsoleShell identity={auth.identity} onLogout={auth.logout}>
 			<Routes>
-				<Route
-					path="/dashboard"
-					element={<PlaceholderPage page="dashboard" />}
-				/>
-				<Route
-					path="/machines/*"
-					element={<PlaceholderPage page="machines" />}
-				/>
+				<Route path="/dashboard" element={<DashboardPage />} />
+				<Route path="/machines" element={<MachinesPage />} />
+				<Route path="/machines/:clientId/:tab?" element={<MachineWorkspace />} />
 				<Route path="/jobs/*" element={<PlaceholderPage page="jobs" />} />
 				<Route path="/frp/*" element={<PlaceholderPage page="frp" />} />
 				<Route path="/storage/*" element={<PlaceholderPage page="storage" />} />
