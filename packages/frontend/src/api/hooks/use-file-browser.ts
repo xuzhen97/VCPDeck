@@ -19,9 +19,15 @@ export function useFileBrowser(clientId: string) {
 	useEffect(() => {
 		const controller = new AbortController();
 		setLoading(true);
-		sdk.files.roots(clientId, controller.signal).then(setRoots).catch((reason: unknown) => {
-			if (!controller.signal.aborted) setError(reason);
-		}).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+		sdk.files
+			.roots(clientId, controller.signal)
+			.then(setRoots)
+			.catch((reason: unknown) => {
+				if (!controller.signal.aborted) setError(reason);
+			})
+			.finally(() => {
+				if (!controller.signal.aborted) setLoading(false);
+			});
 		return () => controller.abort();
 	}, [clientId, sdk]);
 
@@ -30,16 +36,52 @@ export function useFileBrowser(clientId: string) {
 		const controller = new AbortController();
 		setLoading(true);
 		setError(undefined);
-		sdk.files.list(clientId, selectedRoot, path, controller.signal).then((result) => {
-			setEntries(result.entries);
-			setSelectedEntry(undefined);
-		}).catch((reason: unknown) => { if (!controller.signal.aborted) setError(reason); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+		sdk.files
+			.list(clientId, selectedRoot, path, controller.signal)
+			.then((result) => {
+				setEntries(result.entries);
+				setSelectedEntry(undefined);
+			})
+			.catch((reason: unknown) => {
+				if (!controller.signal.aborted) setError(reason);
+			})
+			.finally(() => {
+				if (!controller.signal.aborted) setLoading(false);
+			});
 		return () => controller.abort();
 	}, [clientId, path, revision, sdk, selectedRoot]);
 
-	const selectRoot = useCallback((root: string) => { setSelectedRoot(root); setPath("."); }, []);
-	const enter = useCallback((name: string) => setPath((current) => current === "." ? name : `${current}/${name}`), []);
-	const up = useCallback(() => setPath((current) => current === "." || !current.includes("/") ? "." : current.slice(0, current.lastIndexOf("/"))), []);
+	const selectRoot = useCallback((root: string) => {
+		setSelectedRoot(root);
+		setPath(".");
+	}, []);
+	const enter = useCallback(
+		(name: string) =>
+			setPath((current) => (current === "." ? name : `${current}/${name}`)),
+		[],
+	);
+	const up = useCallback(
+		() =>
+			setPath((current) =>
+				current === "." || !current.includes("/")
+					? "."
+					: current.slice(0, current.lastIndexOf("/")),
+			),
+		[],
+	);
 	const refresh = useCallback(() => setRevision((value) => value + 1), []);
-	return { roots, selectedRoot, path, entries, selectedEntry, loading, error, selectRoot, enter, up, refresh, select: setSelectedEntry };
+	return {
+		roots,
+		selectedRoot,
+		path,
+		entries,
+		selectedEntry,
+		loading,
+		error,
+		selectRoot,
+		enter,
+		up,
+		refresh,
+		select: setSelectedEntry,
+	};
 }
