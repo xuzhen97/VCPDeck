@@ -18,7 +18,9 @@ const placeholders = {
 
 function PlaceholderPage({ page }: { page: keyof typeof placeholders }) {
 	const content = placeholders[page];
-	return <PageHeading title={content.title} description={content.description} />;
+	return (
+		<PageHeading title={content.title} description={content.description} />
+	);
 }
 
 /** 应用认证路由。 */
@@ -40,7 +42,10 @@ export function AppRoutes() {
 			<Routes>
 				<Route path="/dashboard" element={<DashboardPage />} />
 				<Route path="/machines" element={<MachinesPage />} />
-				<Route path="/machines/:clientId/:tab?" element={<MachineWorkspace />} />
+				<Route
+					path="/machines/:clientId/:tab?"
+					element={<MachineWorkspace />}
+				/>
 				<Route path="/jobs" element={<JobsPage />} />
 				<Route path="/jobs/:jobId" element={<JobDetailPage />} />
 				<Route path="/frp/*" element={<PlaceholderPage page="frp" />} />

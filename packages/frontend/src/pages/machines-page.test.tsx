@@ -24,7 +24,9 @@ function renderPage(list: () => Promise<ClientInfo[]>) {
 	return render(
 		<MemoryRouter>
 			<SdkProvider client={client}>
-				<AuthProvider><MachinesPage /></AuthProvider>
+				<AuthProvider>
+					<MachinesPage />
+				</AuthProvider>
 			</SdkProvider>
 		</MemoryRouter>,
 	);
@@ -33,35 +35,58 @@ function renderPage(list: () => Promise<ClientInfo[]>) {
 describe("MachinesPage", () => {
 	it("shows loading state", () => {
 		renderPage(() => new Promise(() => undefined));
-		expect(screen.getByText("正在加载在线机器…")).toHaveAttribute("aria-busy", "true");
+		expect(screen.getByText("正在加载在线机器…")).toHaveAttribute(
+			"aria-busy",
+			"true",
+		);
 	});
 
 	it("shows an honest empty state", async () => {
 		renderPage(async () => []);
 		expect(await screen.findByText("当前没有在线机器")).toBeVisible();
-		expect(screen.getByText("Server 只提供在线 Client，离线历史不会显示在此处。")).toBeVisible();
+		expect(
+			screen.getByText("Server 只提供在线 Client，离线历史不会显示在此处。"),
+		).toBeVisible();
 	});
 
 	it("shows retryable errors", async () => {
-		renderPage(async () => { throw new Error("offline"); });
-		expect(await screen.findByRole("alert")).toHaveTextContent("无法加载在线机器");
+		renderPage(async () => {
+			throw new Error("offline");
+		});
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			"无法加载在线机器",
+		);
 		expect(screen.getByRole("button", { name: "重试" })).toBeVisible();
 	});
 
 	it("renders capabilities and workspace links", async () => {
-		renderPage(async () => [{
-			clientId: "client-1",
-			hostname: "workstation",
-			os: "win32",
-			capabilities: ["exec", "file.read", "frp"],
-			online: true,
-			lastHeartbeatAt: "2026-07-26T00:00:00.000Z",
-		}]);
+		renderPage(async () => [
+			{
+				clientId: "client-1",
+				hostname: "workstation",
+				os: "win32",
+				capabilities: ["exec", "file.read", "frp"],
+				online: true,
+				lastHeartbeatAt: "2026-07-26T00:00:00.000Z",
+			},
+		]);
 
-		expect(await screen.findByRole("heading", { name: "workstation" })).toBeVisible();
-		for (const capability of ["exec", "file.read", "frp"]) expect(screen.getByText(capability)).toBeVisible();
-		expect(screen.getByRole("link", { name: "执行" })).toHaveAttribute("href", "/machines/client-1/execute");
-		expect(screen.getByRole("link", { name: "文件" })).toHaveAttribute("href", "/machines/client-1/files");
-		expect(screen.getByRole("link", { name: "FRP" })).toHaveAttribute("href", "/machines/client-1/frp");
+		expect(
+			await screen.findByRole("heading", { name: "workstation" }),
+		).toBeVisible();
+		for (const capability of ["exec", "file.read", "frp"])
+			expect(screen.getByText(capability)).toBeVisible();
+		expect(screen.getByRole("link", { name: "执行" })).toHaveAttribute(
+			"href",
+			"/machines/client-1/execute",
+		);
+		expect(screen.getByRole("link", { name: "文件" })).toHaveAttribute(
+			"href",
+			"/machines/client-1/files",
+		);
+		expect(screen.getByRole("link", { name: "FRP" })).toHaveAttribute(
+			"href",
+			"/machines/client-1/frp",
+		);
 	});
 });

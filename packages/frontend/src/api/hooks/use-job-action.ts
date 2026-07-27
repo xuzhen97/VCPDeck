@@ -2,7 +2,12 @@ import type { JobCreate, JobInfo } from "@vcpdeck/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSdk } from "@/api/context";
 
-export type JobActionPhase = "idle" | "creating" | "waiting" | "complete" | "error";
+export type JobActionPhase =
+	| "idle"
+	| "creating"
+	| "waiting"
+	| "complete"
+	| "error";
 
 /** 创建并等待一个远程 Job；卸载只停止本地等待。 */
 export function useJobAction() {
@@ -14,28 +19,33 @@ export function useJobAction() {
 
 	useEffect(() => () => controller.current?.abort(), []);
 
-	const run = useCallback(async (input: JobCreate) => {
-		controller.current?.abort();
-		const next = new AbortController();
-		controller.current = next;
-		setJob(undefined);
-		setError(undefined);
-		setPhase("creating");
-		try {
-			const created = await sdk.jobs.create(input, next.signal);
-			setPhase("waiting");
-			const completed = await sdk.jobs.wait(created.jobId, { signal: next.signal });
-			setJob(completed);
-			setPhase("complete");
-			return completed;
-		} catch (reason) {
-			if (!next.signal.aborted) {
-				setError(reason);
-				setPhase("error");
+	const run = useCallback(
+		async (input: JobCreate) => {
+			controller.current?.abort();
+			const next = new AbortController();
+			controller.current = next;
+			setJob(undefined);
+			setError(undefined);
+			setPhase("creating");
+			try {
+				const created = await sdk.jobs.create(input, next.signal);
+				setPhase("waiting");
+				const completed = await sdk.jobs.wait(created.jobId, {
+					signal: next.signal,
+				});
+				setJob(completed);
+				setPhase("complete");
+				return completed;
+			} catch (reason) {
+				if (!next.signal.aborted) {
+					setError(reason);
+					setPhase("error");
+				}
+				throw reason;
 			}
-			throw reason;
-		}
-	}, [sdk]);
+		},
+		[sdk],
+	);
 
 	const reset = useCallback(() => {
 		controller.current?.abort();

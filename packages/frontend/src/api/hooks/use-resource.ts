@@ -17,19 +17,23 @@ export function useResource<T>(load: (signal: AbortSignal) => Promise<T>) {
 		setError(undefined);
 		if (hasData.current) setRefreshing(true);
 		else setLoading(true);
-		load(controller.signal).then((value) => {
-			hasData.current = true;
-			setData(value);
-		}).catch((reason: unknown) => {
-			if (controller.signal.aborted) return;
-			if (reason instanceof VcpDeckApiError && reason.status === 401) handleUnauthorized();
-			setError(reason);
-		}).finally(() => {
-			if (!controller.signal.aborted) {
-				setLoading(false);
-				setRefreshing(false);
-			}
-		});
+		load(controller.signal)
+			.then((value) => {
+				hasData.current = true;
+				setData(value);
+			})
+			.catch((reason: unknown) => {
+				if (controller.signal.aborted) return;
+				if (reason instanceof VcpDeckApiError && reason.status === 401)
+					handleUnauthorized();
+				setError(reason);
+			})
+			.finally(() => {
+				if (!controller.signal.aborted) {
+					setLoading(false);
+					setRefreshing(false);
+				}
+			});
 		return () => controller.abort();
 	}, [load, revision, handleUnauthorized]);
 
