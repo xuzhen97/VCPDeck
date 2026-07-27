@@ -31,6 +31,7 @@ export enum JobType {
 	FRP_CREATE = "frp.create",
 	FRP_DELETE = "frp.delete",
 	FRP_LIST = "frp.list",
+	FILE_ROOTS = "file.roots",
 }
 
 // ── Job status ──
@@ -266,6 +267,11 @@ export interface FileImportPayload {
 	downloadRef: FileRef;
 	size: number;
 	sha256: string;
+}
+
+// ── File roots result ──
+export interface FileRootsResult {
+	roots: string[];
 }
 
 // ── File job result ──

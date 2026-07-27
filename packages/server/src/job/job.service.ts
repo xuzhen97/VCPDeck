@@ -12,7 +12,7 @@ import type {
 import { FileService } from "../file/file.service.js";
 import { randomUUID } from "node:crypto";
 
-const FILE_READ_TYPES = ["file.list", "file.stat", "file.readText", "file.export"];
+const FILE_READ_TYPES = ["file.list", "file.stat", "file.readText", "file.export", "file.roots"];
 const FILE_WRITE_TYPES = [
 	"file.writeText",
 	"file.mkdir",

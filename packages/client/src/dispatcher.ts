@@ -58,6 +58,7 @@ export function dispatch(job: JobDispatch, socket: Socket) {
 		case "file.mkdir":
 		case "file.delete":
 		case "file.move":
+		case "file.roots":
 			return handleFileOp(
 				{
 					jobId: job.jobId,
