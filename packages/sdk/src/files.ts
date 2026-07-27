@@ -1,12 +1,11 @@
-import {
-	JobStatus,
-	type FileChangeResult,
-	type FileListResult,
-	type FileReadTextResult,
-	type FileRootsResult,
-	type FileStatResult,
-	type FileTransferResult,
-	type JobCreate,
+import type {
+	FileChangeResult,
+	FileListResult,
+	FileReadTextResult,
+	FileRootsResult,
+	FileStatResult,
+	FileTransferResult,
+	JobCreate,
 } from "@vcpdeck/shared";
 import type { createJobsApi } from "./jobs.js";
 
@@ -17,7 +16,7 @@ export function createFilesApi(jobs: Pick<JobsApi, "create" | "wait">) {
 	async function run<T>(input: JobCreate, signal?: AbortSignal): Promise<T> {
 		const created = await jobs.create(input, signal);
 		const job = await jobs.wait(created.jobId, { signal });
-		if (job.status !== JobStatus.DONE) throw job;
+		if (job.status !== "done") throw job;
 		return job.result as T;
 	}
 

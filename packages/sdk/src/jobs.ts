@@ -1,9 +1,4 @@
-import {
-	JobStatus,
-	type JobCreate,
-	type JobCreateResult,
-	type JobInfo,
-} from "@vcpdeck/shared";
+import type { JobCreate, JobCreateResult, JobInfo } from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
 
 /** Job 等待选项。 */
@@ -12,11 +7,7 @@ export interface WaitJobOptions {
 	delays?: readonly number[];
 }
 
-const TERMINAL_STATUSES = new Set<JobStatus>([
-	JobStatus.DONE,
-	JobStatus.ERROR,
-	JobStatus.CANCELLED,
-]);
+const TERMINAL_STATUSES = new Set(["done", "error", "cancelled"]);
 
 /** 创建 Job REST API。 */
 export function createJobsApi(client: Pick<VcpDeckClient, "request">) {
