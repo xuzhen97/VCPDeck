@@ -120,7 +120,7 @@ export async function handleFileOp(
 			case "file.list": {
 				const safe = await resolveSafePath(rootDir, payload.path as string);
 				const dirents = await readdir(safe, { withFileTypes: true });
-				const entries = await Promise.all(
+				const results = await Promise.allSettled(
 					dirents.map(async (d) => {
 						const st = await stat(resolve(safe, d.name));
 						return {
@@ -131,6 +131,14 @@ export async function handleFileOp(
 						};
 					}),
 				);
+				const entries = results
+					.filter((r): r is PromiseFulfilledResult<{
+						name: string;
+						kind: "dir" | "file";
+						size: number;
+						mtime: string;
+					}> => r.status === "fulfilled")
+					.map((r) => r.value);
 				emitDone(socket, jobId, type, { entries });
 				return;
 			}
