@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
 import { ExecutePanel } from "@/pages/execute-panel";
+import { FilesPanel } from "@/pages/files-panel";
 import { JobsPage } from "@/pages/jobs-page";
 
 const tabs = [
@@ -89,8 +90,9 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				</Card>
 			)}
 			{tab === "execute" && <ExecutePanel clientId={client.clientId} />}
+			{tab === "files" && <FilesPanel clientId={client.clientId} />}
 			{tab === "jobs" && <JobsPage clientId={client.clientId} />}
-			{!["overview", "execute", "jobs"].includes(tab) && (
+			{!["overview", "execute", "files", "jobs"].includes(tab) && (
 				<Card>
 					<CardContent className="pt-6 text-sm text-muted-foreground">
 						{tabs.find(([key]) => key === tab)?.[1] ?? "未知页面"}
