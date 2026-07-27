@@ -16,7 +16,9 @@ const placeholders: Record<string, { title: string; description: string }> = {
 
 function PlaceholderPage({ page }: { page: keyof typeof placeholders }) {
 	const content = placeholders[page];
-	return <PageHeading title={content.title} description={content.description} />;
+	return (
+		<PageHeading title={content.title} description={content.description} />
+	);
 }
 
 /** 应用认证路由。 */
@@ -25,18 +27,32 @@ export function AppRoutes() {
 
 	if (auth.phase === "checking") return <LoadingState label="正在验证身份…" />;
 	if (auth.phase === "unauthenticated" || !auth.identity) {
-		return <Routes><Route path="/login" element={<LoginPage />} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes>;
+		return (
+			<Routes>
+				<Route path="/login" element={<LoginPage />} />
+				<Route path="*" element={<Navigate to="/login" replace />} />
+			</Routes>
+		);
 	}
 
 	return (
 		<ConsoleShell identity={auth.identity} onLogout={auth.logout}>
 			<Routes>
-				<Route path="/dashboard" element={<PlaceholderPage page="dashboard" />} />
-				<Route path="/machines/*" element={<PlaceholderPage page="machines" />} />
+				<Route
+					path="/dashboard"
+					element={<PlaceholderPage page="dashboard" />}
+				/>
+				<Route
+					path="/machines/*"
+					element={<PlaceholderPage page="machines" />}
+				/>
 				<Route path="/jobs/*" element={<PlaceholderPage page="jobs" />} />
 				<Route path="/frp/*" element={<PlaceholderPage page="frp" />} />
 				<Route path="/storage/*" element={<PlaceholderPage page="storage" />} />
-				<Route path="/settings/*" element={<PlaceholderPage page="settings" />} />
+				<Route
+					path="/settings/*"
+					element={<PlaceholderPage page="settings" />}
+				/>
 				<Route path="*" element={<Navigate to="/dashboard" replace />} />
 			</Routes>
 		</ConsoleShell>

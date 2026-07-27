@@ -25,7 +25,9 @@ describe("ConsoleShell", () => {
 			</MemoryRouter>,
 		);
 
-		const navigation = within(screen.getByRole("navigation", { name: "主导航" }));
+		const navigation = within(
+			screen.getByRole("navigation", { name: "主导航" }),
+		);
 		for (const label of ["概览", "机器", "任务", "FRP", "存储", "设置"]) {
 			expect(navigation.getByRole("link", { name: label })).toBeVisible();
 		}
@@ -45,7 +47,10 @@ describe("ConsoleShell", () => {
 
 		const confirm = screen.getByRole("button", { name: "确认删除" });
 		expect(confirm).toBeDisabled();
-		await userEvent.type(screen.getByLabelText("输入目标以确认"), "D:/work/data");
+		await userEvent.type(
+			screen.getByLabelText("输入目标以确认"),
+			"D:/work/data",
+		);
 		await userEvent.click(confirm);
 
 		expect(onConfirm).toHaveBeenCalledOnce();

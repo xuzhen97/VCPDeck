@@ -7,7 +7,9 @@ export default function App() {
 	return (
 		<BrowserRouter>
 			<SdkProvider>
-				<AuthProvider><AppRoutes /></AuthProvider>
+				<AuthProvider>
+					<AppRoutes />
+				</AuthProvider>
 			</SdkProvider>
 		</BrowserRouter>
 	);

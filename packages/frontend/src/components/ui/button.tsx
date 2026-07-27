@@ -9,7 +9,8 @@ const buttonVariants = cva(
 		variants: {
 			variant: {
 				default: "bg-primary text-primary-foreground hover:brightness-110",
-				secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+				secondary:
+					"bg-secondary text-secondary-foreground hover:bg-secondary/80",
 				outline: "border border-border bg-background/50 hover:bg-secondary/70",
 				ghost: "hover:bg-secondary/70",
 				destructive: "bg-destructive text-white hover:brightness-110",
@@ -33,5 +34,10 @@ export function Button({
 }: ComponentProps<"button"> &
 	VariantProps<typeof buttonVariants> & { asChild?: boolean }) {
 	const Component = asChild ? Slot : "button";
-	return <Component className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+	return (
+		<Component
+			className={cn(buttonVariants({ variant, size }), className)}
+			{...props}
+		/>
+	);
 }

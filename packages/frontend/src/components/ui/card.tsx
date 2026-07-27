@@ -2,7 +2,9 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 export function Card({ className, ...props }: ComponentProps<"div">) {
-	return <div className={cn("vcpdeck-panel rounded-2xl", className)} {...props} />;
+	return (
+		<div className={cn("vcpdeck-panel rounded-2xl", className)} {...props} />
+	);
 }
 
 export function CardHeader({ className, ...props }: ComponentProps<"div">) {
@@ -14,7 +16,9 @@ export function CardTitle({ className, ...props }: ComponentProps<"h2">) {
 }
 
 export function CardDescription({ className, ...props }: ComponentProps<"p">) {
-	return <p className={cn("text-sm text-muted-foreground", className)} {...props} />;
+	return (
+		<p className={cn("text-sm text-muted-foreground", className)} {...props} />
+	);
 }
 
 export function CardContent({ className, ...props }: ComponentProps<"div">) {

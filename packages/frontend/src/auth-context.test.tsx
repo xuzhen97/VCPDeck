@@ -38,23 +38,34 @@ describe("authentication routes", () => {
 		renderApp(client);
 
 		expect(screen.getByText("正在验证身份…")).toBeVisible();
-		expect(await screen.findByRole("navigation", { name: "主导航" })).toBeVisible();
+		expect(
+			await screen.findByRole("navigation", { name: "主导航" }),
+		).toBeVisible();
 	});
 
 	it("shows login when the initial identity check fails", async () => {
 		const client = {
-			auth: { me: vi.fn().mockRejectedValue(new Error("unauthorized")), logout: vi.fn() },
+			auth: {
+				me: vi.fn().mockRejectedValue(new Error("unauthorized")),
+				logout: vi.fn(),
+			},
 		} as unknown as VcpDeckClient;
 
 		renderApp(client);
 
-		expect(await screen.findByRole("heading", { name: "登录 VCPDeck" })).toBeVisible();
+		expect(
+			await screen.findByRole("heading", { name: "登录 VCPDeck" }),
+		).toBeVisible();
 	});
 
 	it("navigates to dashboard after login", async () => {
 		const login = vi.fn().mockResolvedValue({ identity });
 		const client = {
-			auth: { me: vi.fn().mockRejectedValue(new Error("unauthorized")), login, logout: vi.fn() },
+			auth: {
+				me: vi.fn().mockRejectedValue(new Error("unauthorized")),
+				login,
+				logout: vi.fn(),
+			},
 		} as unknown as VcpDeckClient;
 
 		renderApp(client, "/login");
@@ -62,7 +73,12 @@ describe("authentication routes", () => {
 		await userEvent.type(screen.getByLabelText("密码"), "secret");
 		await userEvent.click(screen.getByRole("button", { name: "登录" }));
 
-		await waitFor(() => expect(screen.getByRole("navigation", { name: "主导航" })).toBeVisible());
-		expect(login).toHaveBeenCalledWith({ username: "admin", password: "secret" });
+		await waitFor(() =>
+			expect(screen.getByRole("navigation", { name: "主导航" })).toBeVisible(),
+		);
+		expect(login).toHaveBeenCalledWith({
+			username: "admin",
+			password: "secret",
+		});
 	});
 });
