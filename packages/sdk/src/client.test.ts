@@ -6,11 +6,16 @@ describe("VcpDeckClient", () => {
 		const originalFetch = globalThis.fetch;
 		const fetchMock = vi.fn(function (this: unknown) {
 			if (this !== globalThis) throw new TypeError("Illegal invocation");
-			return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+			return Promise.resolve(
+				new Response(JSON.stringify({ ok: true }), { status: 200 }),
+			);
 		});
 		globalThis.fetch = fetchMock as typeof fetch;
 		try {
-			const client = new VcpDeckClient({ baseUrl: "https://deck.example", auth: { type: "cookie" } });
+			const client = new VcpDeckClient({
+				baseUrl: "https://deck.example",
+				auth: { type: "cookie" },
+			});
 			await expect(client.health.get()).resolves.toEqual({ ok: true });
 		} finally {
 			globalThis.fetch = originalFetch;

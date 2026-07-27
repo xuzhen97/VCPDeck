@@ -43,11 +43,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		return () => controller.abort();
 	}, [sdk]);
 
-	const login = useCallback(async (input: LoginRequest) => {
-		const response = await sdk.auth.login(input);
-		setIdentity(response.identity as IdentityInfo);
-		setPhase("authenticated");
-	}, [sdk]);
+	const login = useCallback(
+		async (input: LoginRequest) => {
+			const response = await sdk.auth.login(input);
+			setIdentity(response.identity as IdentityInfo);
+			setPhase("authenticated");
+		},
+		[sdk],
+	);
 	const logout = useCallback(async () => {
 		try {
 			await sdk.auth.logout();
