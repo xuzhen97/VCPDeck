@@ -5,13 +5,15 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "@vcpdeck/shared": "workspace:*",
     "socket.io-client": "^4.7.5"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1"
+    "@types/node": "^26.1.1",
+    "vitest": "^3.2.7"
   }
 }

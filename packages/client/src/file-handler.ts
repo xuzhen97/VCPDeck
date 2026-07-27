@@ -132,12 +132,16 @@ export async function handleFileOp(
 					}),
 				);
 				const entries = results
-					.filter((r): r is PromiseFulfilledResult<{
-						name: string;
-						kind: "dir" | "file";
-						size: number;
-						mtime: string;
-					}> => r.status === "fulfilled")
+					.filter(
+						(
+							r,
+						): r is PromiseFulfilledResult<{
+							name: string;
+							kind: "dir" | "file";
+							size: number;
+							mtime: string;
+						}> => r.status === "fulfilled",
+					)
 					.map((r) => r.value);
 				emitDone(socket, jobId, type, { entries });
 				return;
