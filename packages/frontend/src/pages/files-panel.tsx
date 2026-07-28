@@ -1,6 +1,10 @@
 import {
+	ChevronLeft,
+	ChevronRight,
+	File,
 	Folder,
 	FolderPlus,
+	LoaderCircle,
 	Maximize2,
 	Minimize2,
 	RefreshCw,
@@ -12,7 +16,14 @@ import { useFileBrowser } from "@/api/hooks/use-file-browser";
 import { ConfirmTargetDialog } from "@/components/confirm-target-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 type FileEntry = {
 	name: string;
 	kind: "file" | "dir";
@@ -25,6 +36,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 	const browser = useFileBrowser(clientId);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+	const [newDirectoryOpen, setNewDirectoryOpen] = useState(false);
 	const [newDirectory, setNewDirectory] = useState("");
 	const [destination, setDestination] = useState("");
 	const [contextMenu, setContextMenu] = useState<{
@@ -45,6 +57,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 	const fullTarget = browser.selectedRoot
 		? joinDisplayPath(browser.selectedRoot, relativePath)
 		: relativePath;
+	const breadcrumbs = browser.path === "." ? [] : browser.path.split("/");
 
 	async function createDirectory() {
 		if (!browser.selectedRoot || !newDirectory.trim()) return;
@@ -54,6 +67,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 				: `${browser.path}/${newDirectory.trim()}`;
 		await sdk.files.mkdir(clientId, { rootDir: browser.selectedRoot, path });
 		setNewDirectory("");
+		setNewDirectoryOpen(false);
 		browser.refresh();
 	}
 
@@ -106,10 +120,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 	});
 
 	return (
-		<div className="space-y-4">
-			<p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
-				文件能力仅面向可信操作者；当前 Client 的 symlink 边界仍有已知风险。
-			</p>
+		<div>
 			<div className="grid min-h-[34rem] gap-4 lg:grid-cols-[13rem_1fr]">
 				{/* 左侧：文件根 */}
 				<Card>
@@ -138,29 +149,47 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 
 				{/* 右侧：文件列表 */}
 				<Card>
-					<CardHeader>
-						<div className="flex items-center justify-between">
-							<CardTitle>
-								{browser.selectedRoot
-									? joinDisplayPath(
-											browser.selectedRoot,
-											browser.path === "." ? "" : browser.path,
-										)
-									: "选择文件根"}
-							</CardTitle>
-							{browser.selectedRoot && (
-								<Button
-									size="icon"
-									variant="ghost"
-									aria-label="刷新目录"
-									onClick={browser.refresh}
+					<CardHeader className="border-b border-border/60 px-5 py-3">
+						{browser.selectedRoot ? (
+							<nav
+								aria-label="当前目录"
+								className="flex min-w-0 items-center gap-1 overflow-x-auto text-sm"
+							>
+								<button
+									type="button"
+									aria-label={`转到 ${browser.selectedRoot}`}
+									className="shrink-0 rounded-md px-2 py-1 font-mono font-semibold hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+									onClick={() => browser.goTo(".")}
 								>
-									<RefreshCw />
-								</Button>
-							)}
-						</div>
+									{browser.selectedRoot}
+								</button>
+								{breadcrumbs.map((segment, index) => {
+									const target = breadcrumbs.slice(0, index + 1).join("/");
+									const current = index === breadcrumbs.length - 1;
+									return (
+										<span
+											key={target}
+											className="flex shrink-0 items-center gap-1"
+										>
+											<ChevronRight className="size-3.5 text-muted-foreground" />
+											<button
+												type="button"
+												aria-label={`转到 ${segment}`}
+												aria-current={current ? "page" : undefined}
+												className={`rounded-md px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${current ? "font-semibold text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}
+												onClick={() => browser.goTo(target)}
+											>
+												{segment}
+											</button>
+										</span>
+									);
+								})}
+							</nav>
+						) : (
+							<CardTitle className="text-base">选择文件根</CardTitle>
+						)}
 					</CardHeader>
-					<CardContent>
+					<CardContent className="pt-3">
 						{(() => {
 							const err = browser.error;
 							const errCode =
@@ -191,26 +220,43 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 						})()}
 						{browser.selectedRoot && (
 							<>
-								<div className="mb-4 flex gap-2">
-									<Button variant="outline" onClick={browser.up}>
-										上一级
-									</Button>
-									<Input
-										aria-label="新目录名称"
-										placeholder="新建目录…"
-										value={newDirectory}
-										onChange={(event) => setNewDirectory(event.target.value)}
-									/>
+								<div className="mb-3 flex items-center gap-1">
 									<Button
-										variant="outline"
-										disabled={!newDirectory.trim()}
-										onClick={createDirectory}
+										size="sm"
+										variant="ghost"
+										className="w-9 px-0"
+										aria-label="上一级"
+										title="上一级"
+										onClick={browser.up}
 									>
-										<FolderPlus />
-										新建
+										<ChevronLeft className="size-4" />
+									</Button>
+									<Button
+										size="sm"
+										variant="ghost"
+										className="w-9 px-0"
+										aria-label="刷新目录"
+										title="刷新目录"
+										onClick={browser.refresh}
+									>
+										<RefreshCw className="size-4" />
+									</Button>
+									<Button
+										size="sm"
+										variant="ghost"
+										className="w-9 px-0"
+										aria-label="新建文件夹"
+										title="新建文件夹"
+										onClick={() => setNewDirectoryOpen(true)}
+									>
+										<FolderPlus className="size-4" />
 									</Button>
 								</div>
-								<div className="divide-y divide-border/60">
+								<div
+									data-testid="file-list-region"
+									aria-busy={browser.loading}
+									className={`relative min-h-32 divide-y divide-border/60 ${browser.loading ? "pointer-events-none" : ""}`}
+								>
 									{sorted.map((item) => {
 										const selected =
 											browser.selectedEntry?.name === item.name &&
@@ -220,15 +266,15 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 												key={item.name}
 												role="button"
 												tabIndex={0}
-												className={`flex min-h-11 w-full cursor-pointer items-center justify-between gap-4 px-2 py-2 text-left select-none ${
-													selected ? "bg-accent" : "hover:bg-accent/50"
+												className={`flex min-h-11 w-full cursor-pointer items-center justify-between gap-4 rounded-md px-2 py-2 text-left transition-colors select-none ${
+													selected
+														? "bg-secondary text-foreground"
+														: "hover:bg-secondary/60"
 												}`}
-												onClick={() => {
-													browser.select(item);
-													if (item.kind === "file") openViewer(item);
-												}}
+												onClick={() => browser.select(item)}
 												onDoubleClick={() => {
 													if (item.kind === "dir") browser.enter(item.name);
+													else openViewer(item);
 												}}
 												onContextMenu={(e) => {
 													e.preventDefault();
@@ -240,15 +286,18 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 													});
 												}}
 												onKeyDown={(e) => {
-													if (e.key === "Enter" && item.kind === "dir")
-														browser.enter(item.name);
+													if (e.key !== "Enter") return;
+													if (item.kind === "dir") browser.enter(item.name);
+													else openViewer(item);
 												}}
 											>
-												<span className="flex items-center gap-2 truncate">
-													<Folder
-														className={`size-4 shrink-0 ${item.kind === "file" ? "opacity-40" : ""}`}
-													/>
-													{item.name}
+												<span className="flex min-w-0 items-center gap-2">
+													{item.kind === "dir" ? (
+														<Folder className="size-4 shrink-0 text-primary" />
+													) : (
+														<File className="size-4 shrink-0 text-muted-foreground" />
+													)}
+													<span className="truncate">{item.name}</span>
 												</span>
 												<span className="shrink-0 text-xs text-muted-foreground">
 													{item.kind === "dir" ? "目录" : formatSize(item.size)}
@@ -256,6 +305,17 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 											</div>
 										);
 									})}
+									{browser.loading && (
+										<div
+											role="status"
+											aria-label="正在读取目录"
+											aria-live="polite"
+											className="absolute inset-0 flex items-center justify-center gap-2 rounded-lg bg-background/80 text-sm text-muted-foreground backdrop-blur-[2px]"
+										>
+											<LoaderCircle className="size-5 animate-spin text-primary" />
+											<span>正在读取目录…</span>
+										</div>
+									)}
 								</div>
 							</>
 						)}
@@ -274,7 +334,9 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 					}}
 				>
 					<div
-						className="absolute z-50 min-w-36 rounded-lg border border-border bg-popover p-1 shadow-lg"
+						role="menu"
+						aria-label={`${contextMenu.entry.name} 操作`}
+						className="absolute z-50 min-w-40 rounded-lg border border-border bg-background p-1.5 text-foreground shadow-2xl ring-1 ring-black/10"
 						style={{ left: contextMenu.x, top: contextMenu.y }}
 					>
 						{contextMenu.entry.kind === "file" && (
@@ -323,6 +385,49 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 					</div>
 				</div>
 			)}
+
+			<Dialog
+				open={newDirectoryOpen}
+				onOpenChange={(open) => {
+					setNewDirectoryOpen(open);
+					if (!open) setNewDirectory("");
+				}}
+			>
+				<DialogContent>
+					<form
+						onSubmit={(event) => {
+							event.preventDefault();
+							void createDirectory();
+						}}
+					>
+						<DialogTitle>新建文件夹</DialogTitle>
+						<DialogDescription>在当前目录中创建一个文件夹。</DialogDescription>
+						<div className="mt-5 space-y-2">
+							<Label htmlFor="new-directory">文件夹名称</Label>
+							<Input
+								id="new-directory"
+								value={newDirectory}
+								onChange={(event) => setNewDirectory(event.target.value)}
+								autoFocus
+								autoComplete="off"
+							/>
+						</div>
+						<div className="mt-6 flex justify-end gap-2">
+							<Button
+								type="button"
+								size="sm"
+								variant="ghost"
+								onClick={() => setNewDirectoryOpen(false)}
+							>
+								取消
+							</Button>
+							<Button type="submit" size="sm" disabled={!newDirectory.trim()}>
+								创建
+							</Button>
+						</div>
+					</form>
+				</DialogContent>
+			</Dialog>
 
 			{/* 移动目标输入 */}
 			{browser.selectedRoot && entry && destination && (
@@ -394,7 +499,8 @@ function MenuItem({
 	return (
 		<button
 			type="button"
-			className={`w-full rounded px-3 py-1.5 text-left text-sm ${danger ? "text-red-400 hover:bg-red-500/10" : "hover:bg-accent"}`}
+			role="menuitem"
+			className={`min-h-10 w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${danger ? "text-red-400 hover:bg-red-500/15" : "hover:bg-secondary"}`}
 			onClick={() => {
 				onClick();
 				close();
@@ -427,16 +533,19 @@ function FileViewerDialog({
 	const [fullscreen, setFullscreen] = useState(false);
 	const [content, setContent] = useState("");
 	const [message, setMessage] = useState("");
+	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 	useEffect(() => {
 		const controller = new AbortController();
 		setMessage("");
+		setLoading(true);
 		sdk.files
 			.readText(clientId, rootDir, path, 262144, controller.signal)
 			.then((result) => setContent(result.content))
 			.catch((reason: unknown) => {
+				if (controller.signal.aborted) return;
 				const code =
 					typeof reason === "object" && reason !== null && "errorCode" in reason
 						? String(reason.errorCode)
@@ -444,8 +553,11 @@ function FileViewerDialog({
 				setMessage(
 					code === "SIZE_EXCEEDED"
 						? "文本超过 256 KiB，请使用导出下载"
-						: "无法读取文件内容",
+						: "无法读取文件内容，请重试或使用导出下载",
 				);
+			})
+			.finally(() => {
+				if (!controller.signal.aborted) setLoading(false);
 			});
 		return () => controller.abort();
 	}, [clientId, rootDir, path, sdk]);
@@ -525,9 +637,17 @@ function FileViewerDialog({
 				</div>
 
 				{/* 内容区 */}
-				<div className="flex-1 overflow-hidden">
-					{message ? (
-						<div className="flex items-center justify-center p-12">
+				<div className="flex min-h-80 flex-1 overflow-hidden bg-background/50">
+					{loading ? (
+						<div
+							aria-busy="true"
+							className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
+						>
+							<LoaderCircle className="size-4 animate-spin" />
+							正在读取文件…
+						</div>
+					) : message ? (
+						<div className="flex flex-1 items-center justify-center p-12">
 							<p role="alert" className="text-sm text-amber-400">
 								{message}
 							</p>
@@ -535,7 +655,8 @@ function FileViewerDialog({
 					) : (
 						<textarea
 							ref={textareaRef}
-							className="h-full w-full resize-none bg-transparent p-4 font-mono text-sm leading-relaxed outline-none"
+							aria-label="文件内容"
+							className="min-h-80 w-full flex-1 resize-none bg-transparent p-4 font-mono text-sm leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
 							value={content}
 							onChange={(event) => setContent(event.target.value)}
 							spellCheck={false}

@@ -83,6 +83,11 @@ describe("MachinesPage", () => {
 		expect(
 			await screen.findByRole("heading", { name: "workstation" }),
 		).toBeVisible();
+		expect(screen.getByRole("link", { name: "workstation" })).toHaveAttribute(
+			"href",
+			"/machines/client-1/overview",
+		);
+		expect(screen.getByRole("img", { name: "Windows" })).toBeVisible();
 		for (const label of ["命令执行", "文件操作", "FRP 映射"])
 			expect(screen.getByText(label)).toBeVisible();
 		expect(screen.getByRole("link", { name: "执行" })).toHaveAttribute(
@@ -97,5 +102,32 @@ describe("MachinesPage", () => {
 			"href",
 			"/machines/client-1/frp",
 		);
+	});
+
+	it("renders unified Windows, Linux and macOS SVG icons", async () => {
+		const machine = (clientId: string, hostname: string, os: string) =>
+			({
+				clientId,
+				hostname,
+				os,
+				cpuModel: "CPU",
+				totalMemMB: 1024,
+				totalDiskMB: 1024,
+				clientVersion: "1.0.0",
+				capabilities: [],
+				online: true,
+				cpuPercent: null,
+				memPercent: null,
+				diskPercent: null,
+				lastHeartbeatAt: null,
+			}) satisfies ClientInfo;
+		renderPage(async () => [
+			machine("win", "win-host", "win32"),
+			machine("linux", "linux-host", "linux"),
+			machine("mac", "mac-host", "darwin"),
+		]);
+
+		for (const system of ["Windows", "Linux", "macOS"])
+			expect(await screen.findByRole("img", { name: system })).toBeVisible();
 	});
 });

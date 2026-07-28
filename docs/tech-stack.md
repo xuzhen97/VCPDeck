@@ -20,6 +20,7 @@
 vcpdeck/
 ├── packages/
 │   ├── shared/       # 跨包共享类型
+│   ├── sdk/          # 框架无关 REST 客户端（Node / 浏览器）
 │   ├── server/       # NestJS 网关服务
 │   ├── client/       # 机器端守护进程 (Windows/Linux)
 │   ├── cli/          # vcpdeck 命令行工具
@@ -31,7 +32,25 @@ vcpdeck/
 
 ### packages/shared
 
-共享 TypeScript 类型定义：REST API 请求/响应、Socket.IO 事件、TODO 状态枚举、流程模板、VCPToolBox 桥接类型。运行时零依赖。
+共享 TypeScript 类型定义：REST API 请求/响应、Socket.IO 事件、TODO 状态枚举、流程模板、VCPToolBox 桥接类型。运行时零依赖，同时被 server、client、cli、frontend、sdk 消费。
+
+### packages/sdk
+
+框架无关的 TypeScript REST 客户端，提供类型安全的 VCPDeck Server API 调用封装。可在 Node.js 或浏览器中运行。
+
+核心类 `VcpDeckClient`，按功能域暴露子 API：
+
+- `jobs` — Job 创建/查询/取消 + 轮询 wait（指数退避）
+- `files` — 远程文件操作（基于 Job，封装创建+等待+结果返回）
+- `auth` — 登录/登出/当前用户 + Token 管理
+- `identities` — 管理员身份 CRUD
+- `clients` — 在线 Client 列表
+- `storage` — 签名上传/下载 URL、存储后端切换
+- `aliyundrive` — 阿里云盘 OAuth 流程 + 配置
+- `frp` — FRP 端口映射 CRUD
+- `health` — 健康检查
+
+认证支持 Cookie 和 Bearer Token 两种模式。仅依赖 `@vcpdeck/shared`，零框架依赖。
 
 ### packages/server
 

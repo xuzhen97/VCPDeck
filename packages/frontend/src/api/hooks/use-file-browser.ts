@@ -69,6 +69,7 @@ export function useFileBrowser(clientId: string) {
 			),
 		[],
 	);
+	const goTo = useCallback((nextPath: string) => setPath(nextPath), []);
 	const refresh = useCallback(() => setRevision((value) => value + 1), []);
 	return {
 		roots,
@@ -81,6 +82,7 @@ export function useFileBrowser(clientId: string) {
 		selectRoot,
 		enter,
 		up,
+		goTo,
 		refresh,
 		select: setSelectedEntry,
 	};

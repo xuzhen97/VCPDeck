@@ -16,13 +16,14 @@ const identity = {
 	createdAt: "2026-07-26T00:00:00.000Z",
 };
 
-function renderWorkspace(clients: ClientInfo[]) {
+function renderWorkspace(clients: ClientInfo[], tab = "overview") {
 	const sdk = {
 		clients: { list: async () => clients },
+		files: { roots: async () => [] },
 		auth: { me: async () => identity },
 	} as unknown as VcpDeckClient;
 	return render(
-		<MemoryRouter initialEntries={["/machines/c1/overview"]}>
+		<MemoryRouter initialEntries={[`/machines/c1/${tab}`]}>
 			<SdkProvider client={sdk}>
 				<AuthProvider>
 					<Routes>
@@ -65,6 +66,36 @@ describe("MachineWorkspace overview", () => {
 		expect(screen.getByText(/23\.5%/)).toBeTruthy();
 		expect(screen.getByText(/45\.2%/)).toBeTruthy();
 		expect(screen.getByText(/67\.8%/)).toBeTruthy();
+	});
+
+	it("merges machine details and navigation into a compact header", async () => {
+		const client: ClientInfo = {
+			clientId: "c1",
+			hostname: "workstation",
+			os: "win32",
+			cpuModel: "Intel",
+			totalMemMB: 16384,
+			totalDiskMB: 512000,
+			clientVersion: "1.0.0",
+			capabilities: ["exec", "file.read"],
+			online: true,
+			cpuPercent: 1,
+			memPercent: 2,
+			diskPercent: 3,
+			lastHeartbeatAt: null,
+		};
+		renderWorkspace([client], "files");
+
+		expect(await screen.findByTestId("machine-workspace-header")).toHaveClass(
+			"space-y-3",
+		);
+		expect(
+			screen.getByRole("button", { name: "文件操作安全提示" }),
+		).toBeVisible();
+		expect(screen.getByRole("tooltip")).toHaveTextContent(
+			"symlink 边界仍有已知风险",
+		);
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
 	it("shows — for missing heartbeat fields", async () => {
