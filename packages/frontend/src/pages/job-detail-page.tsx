@@ -7,7 +7,6 @@ import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
 
-
 export function JobDetailPage() {
 	const sdk = useSdk();
 	const { jobId = "" } = useParams();
