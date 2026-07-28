@@ -103,7 +103,7 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 
 function Overview({ client }: { client: ClientInfo }) {
 	const pct = (v: number | null | undefined) =>
-		v != null ? (v * 100).toFixed(1) + "%" : "—";
+		v != null ? v.toFixed(1) + "%" : "—";
 	const fmt = (v: number | undefined) => {
 		if (v == null) return "—";
 		return v >= 1_000_000
