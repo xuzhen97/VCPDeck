@@ -147,8 +147,8 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 												/>
 											</div>
 											<p className="mt-1 text-sm text-muted-foreground">
-												{mapping.clientId} · {mapping.localIp}:{mapping.localPort}{" "}
-												→ {mapping.publicUrl ?? "等待分配"}
+												{mapping.clientId} · {mapping.localIp}:
+												{mapping.localPort} → {mapping.publicUrl ?? "等待分配"}
 											</p>
 										</div>
 										<Button
@@ -162,7 +162,8 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 							</div>
 							<div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
 								<span>
-									共 {resource.data.total} 条，第 {resource.data.page}/{resource.data.totalPages} 页
+									共 {resource.data.total} 条，第 {resource.data.page}/
+									{resource.data.totalPages} 页
 								</span>
 								<div className="flex gap-2">
 									<Button
