@@ -30,9 +30,9 @@ export function MachineWorkspace() {
 	);
 	const resource = useResource(load);
 	const { reload } = resource;
-	// 每 30 秒自动刷新机器信息（与心跳周期一致）
+	// 每 10 秒自动刷新机器信息（服务端心跳每 5 秒更新）
 	useEffect(() => {
-		const timer = setInterval(reload, 30000);
+		const timer = setInterval(reload, 10000);
 		return () => clearInterval(timer);
 	}, [reload]);
 	if (!tab)

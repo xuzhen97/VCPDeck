@@ -43,7 +43,7 @@ export function connect(): Socket {
 		if (socket.connected) {
 			socket.emit(Events.HEARTBEAT, getHeartbeat(getRunningJobIds()));
 		}
-	}, 30_000);
+	}, 5_000);
 
 	socket.on(Events.JOB_DISPATCH, (data: any) => {
 		console.log(`[vcpdeck] job dispatch: ${data.jobId} — ${data.type}`);
