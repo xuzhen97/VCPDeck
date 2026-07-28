@@ -53,6 +53,16 @@ export function MachinesPage() {
 	);
 }
 
+/** 将原始 capability 列表合并为可读的中文标签 */
+function capabilitiesLabel(raw: string[]): string[] {
+	const labels: string[] = [];
+	if (raw.includes("exec")) labels.push("命令执行");
+	if (raw.includes("file.read") || raw.includes("file.write"))
+		labels.push("文件操作");
+	if (raw.includes("frp")) labels.push("FRP 映射");
+	return labels;
+}
+
 function MachineCard({ client }: { client: ClientInfo }) {
 	const base = `/machines/${encodeURIComponent(client.clientId)}`;
 	return (
@@ -76,8 +86,8 @@ function MachineCard({ client }: { client: ClientInfo }) {
 						: "未知"}
 				</p>
 				<div className="mt-4 flex flex-wrap gap-2">
-					{client.capabilities.map((capability) => (
-						<StatusChip key={capability} label={capability} />
+					{capabilitiesLabel(client.capabilities).map((item) => (
+						<StatusChip key={item} label={item} />
 					))}
 				</div>
 				<div className="mt-6 flex flex-wrap gap-3 text-sm">

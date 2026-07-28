@@ -76,8 +76,8 @@ describe("MachinesPage", () => {
 		expect(
 			await screen.findByRole("heading", { name: "workstation" }),
 		).toBeVisible();
-		for (const capability of ["exec", "file.read", "frp"])
-			expect(screen.getByText(capability)).toBeVisible();
+		for (const label of ["命令执行", "文件操作", "FRP 映射"])
+			expect(screen.getByText(label)).toBeVisible();
 		expect(screen.getByRole("link", { name: "执行" })).toHaveAttribute(
 			"href",
 			"/machines/client-1/execute",
