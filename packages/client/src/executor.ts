@@ -4,6 +4,7 @@ import { Events } from "@vcpdeck/shared";
 import type {
 	JobOutput,
 	JobDone,
+	ExecJobDone,
 	JobCancelled,
 	JobCancelFailed,
 	JobStatusReport,
@@ -45,6 +46,8 @@ type ExecJob =
 
 export function executeExec(job: ExecJob, socket: Socket) {
 	let child: ChildProcess;
+	let stdoutBuf = "";
+	let stderrBuf = "";
 
 	if (job.mode === "command") {
 		child = spawn(job.command, {
@@ -69,17 +72,21 @@ export function executeExec(job: ExecJob, socket: Socket) {
 
 	// ── stdout ──
 	child.stdout?.on("data", (data: Buffer) => {
+		const text = data.toString();
+		stdoutBuf += text;
 		socket.emit(Events.JOB_STDOUT, {
 			jobId: job.jobId,
-			text: data.toString(),
+			text,
 		} satisfies JobOutput);
 	});
 
 	// ── stderr ──
 	child.stderr?.on("data", (data: Buffer) => {
+		const text = data.toString();
+		stderrBuf += text;
 		socket.emit(Events.JOB_STDERR, {
 			jobId: job.jobId,
-			text: data.toString(),
+			text,
 		} satisfies JobOutput);
 	});
 
@@ -98,7 +105,9 @@ export function executeExec(job: ExecJob, socket: Socket) {
 				jobId: job.jobId,
 				type: "exec" as const,
 				exitCode: code ?? 1,
-			} satisfies JobDone);
+				stdout: stdoutBuf || undefined,
+				stderr: stderrBuf || undefined,
+			} satisfies ExecJobDone);
 		});
 	});
 

@@ -1,11 +1,12 @@
 import type { JobInfo } from "@vcpdeck/shared";
+import { Card, CardContent } from "@/components/ui/card";
 import { useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
-import { Card, CardContent } from "@/components/ui/card";
+
 
 export function JobDetailPage() {
 	const sdk = useSdk();
@@ -22,6 +23,8 @@ export function JobDetailPage() {
 }
 
 function JobDetail({ job }: { job: JobInfo }) {
+	const stdout = job.result?.stdout as string | undefined;
+	const stderr = job.result?.stderr as string | undefined;
 	return (
 		<div className="space-y-6">
 			<PageHeading title={job.type} description={job.jobId} />
@@ -37,6 +40,30 @@ function JobDetail({ job }: { job: JobInfo }) {
 					{job.errorMessage && <Field label="错误" value={job.errorMessage} />}
 				</CardContent>
 			</Card>
+			{stdout && (
+				<Card>
+					<CardContent className="pt-6">
+						<p className="mb-2 text-xs font-medium text-muted-foreground">
+							标准输出
+						</p>
+						<pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">
+							{stdout}
+						</pre>
+					</CardContent>
+				</Card>
+			)}
+			{stderr && (
+				<Card>
+					<CardContent className="pt-6">
+						<p className="mb-2 text-xs font-medium text-muted-foreground">
+							标准错误
+						</p>
+						<pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">
+							{stderr}
+						</pre>
+					</CardContent>
+				</Card>
+			)}
 			<p className="text-sm text-muted-foreground">
 				为避免泄露命令、路径或凭证，详情页不展示原始 payload。
 			</p>

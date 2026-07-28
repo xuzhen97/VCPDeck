@@ -153,7 +153,9 @@ export class ClientGateway {
 
       // ── Exec 正常退出 ──
       const exitCode = raw.exitCode ?? 1;
-      const result = { exitCode };
+      const result: Record<string, unknown> = { exitCode };
+      if (raw.stdout) result.stdout = raw.stdout;
+      if (raw.stderr) result.stderr = raw.stderr;
       const status = exitCode === 0 ? JobStatus.DONE : JobStatus.ERROR;
       const next = await this.jobService.markDone(data.jobId, type, result);
 

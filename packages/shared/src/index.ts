@@ -109,6 +109,8 @@ export type ExecJobDone =
 			jobId: string;
 			type: "exec";
 			exitCode: number;
+			stdout?: string;
+			stderr?: string;
 	  }
 	| {
 			jobId: string;
