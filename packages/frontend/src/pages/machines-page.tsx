@@ -53,13 +53,21 @@ export function MachinesPage() {
 	);
 }
 
-/** 将原始 capability 列表合并为可读的中文标签 */
+/** 将原始 capability 列表映射为可读的中文标签，未映射的保留原文 */
 function capabilitiesLabel(raw: string[]): string[] {
 	const labels: string[] = [];
-	if (raw.includes("exec")) labels.push("命令执行");
-	if (raw.includes("file.read") || raw.includes("file.write"))
+	const seen = new Set<string>();
+	if (raw.includes("exec")) { labels.push("命令执行"); seen.add("exec"); }
+	if (raw.includes("file.read") || raw.includes("file.write")) {
 		labels.push("文件操作");
-	if (raw.includes("frp")) labels.push("FRP 映射");
+		seen.add("file.read");
+		seen.add("file.write");
+	}
+	if (raw.includes("frp")) { labels.push("FRP 映射"); seen.add("frp"); }
+	// 未映射的原始能力透传，确保显示不遗漏
+	for (const cap of raw) {
+		if (!seen.has(cap)) labels.push(cap);
+	}
 	return labels;
 }
 
