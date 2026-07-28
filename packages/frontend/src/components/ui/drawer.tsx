@@ -33,8 +33,8 @@ export function Drawer({
 				role="dialog"
 				aria-modal={open}
 				aria-label={title}
-				className={`fixed left-0 top-0 z-50 h-full w-96 max-w-[90vw] overflow-y-auto border-r border-border bg-card p-6 shadow-xl backdrop-blur-2xl transition-transform duration-300 ${
-					open ? "translate-x-0" : "-translate-x-full"
+				className={`fixed right-0 top-0 z-50 h-full w-96 max-w-[90vw] overflow-y-auto border-l border-border bg-card p-6 shadow-xl backdrop-blur-2xl transition-transform duration-300 ${
+					open ? "translate-x-0" : "translate-x-full"
 				}`}
 			>
 				<div className="mb-6 flex items-center justify-between">
