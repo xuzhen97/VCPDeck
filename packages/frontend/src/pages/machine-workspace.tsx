@@ -7,6 +7,7 @@ import { ErrorState, LoadingState } from "@/components/async-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
+import { capabilitiesLabel } from "@/lib/utils";
 import { ExecutePanel } from "@/pages/execute-panel";
 import { FilesPanel } from "@/pages/files-panel";
 import { FrpPanel } from "@/pages/frp-panel";
@@ -63,8 +64,8 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				actions={<StatusChip label="在线" tone="success" />}
 			/>
 			<div className="flex flex-wrap gap-2">
-				{client.capabilities.map((capability) => (
-					<StatusChip key={capability} label={capability} />
+				{capabilitiesLabel(client.capabilities).map((label) => (
+					<StatusChip key={label} label={label} />
 				))}
 			</div>
 			<nav
