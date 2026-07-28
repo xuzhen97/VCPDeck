@@ -50,7 +50,12 @@ export function executeExec(job: ExecJob, socket: Socket) {
 	let stderrBuf = "";
 
 	if (job.mode === "command") {
-		child = spawn(job.command, {
+		// Windows cmd 默认输出 GBK，先切到 UTF-8 代码页
+		const cmd =
+			process.platform === "win32"
+				? `chcp 65001 > nul && ${job.command}`
+				: job.command;
+		child = spawn(cmd, {
 			shell: true,
 			cwd: job.cwd,
 			timeout: job.timeout,
