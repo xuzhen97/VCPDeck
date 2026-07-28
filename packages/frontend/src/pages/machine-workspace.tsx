@@ -1,5 +1,5 @@
 import type { ClientInfo } from "@vcpdeck/shared";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { NavLink, Navigate, useParams } from "react-router-dom";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
@@ -29,6 +29,12 @@ export function MachineWorkspace() {
 		[sdk],
 	);
 	const resource = useResource(load);
+	const { reload } = resource;
+	// 每 30 秒自动刷新机器信息（与心跳周期一致）
+	useEffect(() => {
+		const timer = setInterval(reload, 30000);
+		return () => clearInterval(timer);
+	}, [reload]);
 	if (!tab)
 		return (
 			<Navigate
