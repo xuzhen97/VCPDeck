@@ -30,7 +30,7 @@ function JobDetail({ job }: { job: JobInfo }) {
 			<Card>
 				<CardContent className="grid gap-4 pt-6 text-sm sm:grid-cols-2">
 					<Field label="状态" value={job.status} />
-					<Field label="Client" value={job.clientId} />
+					<Field label="Client" value={job.clientName ?? job.clientId} />
 					<Field label="创建者" value={job.createdByName ?? "未知"} />
 					<Field label="来源" value={job.createdVia ?? "未知"} />
 					<Field label="创建时间" value={job.createdAt} />

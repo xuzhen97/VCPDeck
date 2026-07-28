@@ -201,6 +201,7 @@ export interface ClientInfo {
 export interface JobInfo {
 	jobId: string;
 	clientId: string;
+	clientName: string | null;
 	type: string;
 	status: JobStatus;
 	payload: Record<string, unknown>;

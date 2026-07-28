@@ -10,6 +10,7 @@ function completed(overrides: Partial<JobInfo> = {}): JobInfo {
 	return {
 		jobId: "job-1",
 		clientId: "client-1",
+		clientName: null,
 		type: "exec",
 		status: "done" as JobInfo["status"],
 		payload: { mode: "command", command: "node --version" },

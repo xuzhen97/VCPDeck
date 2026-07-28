@@ -1,6 +1,5 @@
 import type { JobInfo } from "@vcpdeck/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
@@ -13,9 +12,15 @@ import { Input } from "@/components/ui/input";
 
 export function JobsPage({ clientId }: { clientId?: string }) {
 	const sdk = useSdk();
+	const [page, setPage] = useState(1);
+	const [status, setStatus] = useState("");
 	const load = useCallback(
-		(signal: AbortSignal) => sdk.jobs.list({ clientId, pageSize: 100 }, signal),
-		[sdk, clientId],
+		(signal: AbortSignal) =>
+			sdk.jobs.list(
+				{ clientId, status: status || undefined, page, pageSize: 20 },
+				signal,
+			),
+		[sdk, clientId, status, page],
 	);
 	const resource = useResource(load);
 	const [query, setQuery] = useState("");
@@ -31,7 +36,7 @@ export function JobsPage({ clientId }: { clientId?: string }) {
 			(resource.data?.data ?? []).filter(
 				(job) =>
 					!query ||
-					`${job.clientId} ${job.type} ${job.status} ${describePayload(job)}`
+					`${job.clientName ?? job.clientId} ${job.type} ${job.status} ${describePayload(job)}`
 						.toLowerCase()
 						.includes(query.toLowerCase()),
 			),
@@ -43,34 +48,51 @@ export function JobsPage({ clientId }: { clientId?: string }) {
 	return (
 		<div className="space-y-4">
 			<PageHeading
-				title={clientId ? "机器任务记录" : "最近 100 条任务"}
+				title={clientId ? "机器任务记录" : "任务记录"}
 				description="任务记录对所有已认证身份可见"
 			/>
-			<Input
-				aria-label="筛选任务"
-				placeholder="按任务类型、摘要或状态筛选"
-				value={query}
-				onChange={(event) => setQuery(event.target.value)}
-			/>
+			<div className="flex flex-col gap-3 sm:flex-row">
+				<Input
+					aria-label="筛选任务"
+					placeholder="筛选当前页的任务类型或摘要"
+					value={query}
+					onChange={(event) => setQuery(event.target.value)}
+				/>
+				{!clientId && (
+					<select
+						aria-label="按状态筛选"
+						className="h-11 rounded-lg border border-input bg-background/60 px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 sm:w-40"
+						value={status}
+						onChange={(event) => {
+							setStatus(event.target.value);
+							setPage(1);
+						}}
+					>
+						<option value="">全部状态</option>
+						<option value="pending">等待中</option>
+						<option value="running">执行中</option>
+						<option value="waiting_input">等待输入</option>
+						<option value="disconnected">连接中断</option>
+						<option value="done">已完成</option>
+						<option value="error">失败</option>
+						<option value="cancelled">已取消</option>
+					</select>
+				)}
+			</div>
 			<Card>
-				<CardContent className={clientId ? "p-0" : "pt-6"}>
+				<CardContent className="p-0">
 					{jobs.length === 0 ? (
-						<p
-							className={
-								clientId
-									? "p-6 text-sm text-muted-foreground"
-									: "text-sm text-muted-foreground"
-							}
-						>
-							暂无匹配任务
-						</p>
-					) : clientId ? (
+						<p className="p-6 text-sm text-muted-foreground">暂无匹配任务</p>
+					) : (
 						<div className="overflow-x-auto">
 							<table aria-label="任务记录" className="w-full text-left text-sm">
 								<thead className="border-b border-border/70 bg-secondary/30 text-xs text-muted-foreground">
 									<tr>
 										<th className="px-4 py-3 font-medium">任务</th>
 										<th className="px-4 py-3 font-medium">摘要</th>
+										{!clientId && (
+											<th className="px-4 py-3 font-medium">机器</th>
+										)}
 										<th className="px-4 py-3 font-medium">状态</th>
 										<th className="px-4 py-3 font-medium">发起人</th>
 										<th className="px-4 py-3 font-medium">时间</th>
@@ -82,6 +104,7 @@ export function JobsPage({ clientId }: { clientId?: string }) {
 										<JobRow
 											key={job.jobId}
 											job={job}
+											showClient={!clientId}
 											onOpen={() => setSelectedJob(job)}
 											onChanged={resource.reload}
 										/>
@@ -89,19 +112,35 @@ export function JobsPage({ clientId }: { clientId?: string }) {
 								</tbody>
 							</table>
 						</div>
-					) : (
-						<div className="divide-y divide-border/60">
-							{jobs.map((job) => (
-								<LegacyJobRow
-									key={job.jobId}
-									job={job}
-									onChanged={resource.reload}
-								/>
-							))}
-						</div>
 					)}
 				</CardContent>
 			</Card>
+			{resource.data && resource.data.totalPages > 0 && (
+				<div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+					<p className="text-muted-foreground">
+						第 {resource.data.page} / {resource.data.totalPages} 页 · 共{" "}
+						{resource.data.total} 条
+					</p>
+					<div className="flex gap-2">
+						<Button
+							size="sm"
+							variant="outline"
+							disabled={resource.data.page <= 1}
+							onClick={() => setPage((value) => Math.max(1, value - 1))}
+						>
+							上一页
+						</Button>
+						<Button
+							size="sm"
+							variant="outline"
+							disabled={resource.data.page >= resource.data.totalPages}
+							onClick={() => setPage((value) => value + 1)}
+						>
+							下一页
+						</Button>
+					</div>
+				</div>
+			)}
 			<Drawer
 				open={selectedJob !== null}
 				onClose={() => setSelectedJob(null)}
@@ -115,10 +154,12 @@ export function JobsPage({ clientId }: { clientId?: string }) {
 
 function JobRow({
 	job,
+	showClient,
 	onOpen,
 	onChanged,
 }: {
 	job: JobInfo;
+	showClient: boolean;
 	onOpen: () => void;
 	onChanged: () => void;
 }) {
@@ -139,6 +180,13 @@ function JobRow({
 					{describePayload(job)}
 				</p>
 			</td>
+			{showClient && (
+				<td className="max-w-48 px-4 py-3 font-mono text-xs text-muted-foreground">
+					<p className="truncate" title={job.clientName ?? job.clientId}>
+						{job.clientName ?? job.clientId}
+					</p>
+				</td>
+			)}
 			<td className="whitespace-nowrap px-4 py-3">
 				<StatusChip
 					label={statusLabel(job.status)}
@@ -170,39 +218,6 @@ function JobRow({
 				</div>
 			</td>
 		</tr>
-	);
-}
-
-function LegacyJobRow({
-	job,
-	onChanged,
-}: {
-	job: JobInfo;
-	onChanged: () => void;
-}) {
-	return (
-		<article className="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-			<div className="min-w-0">
-				<div className="flex flex-wrap items-center gap-2">
-					<Link
-						className="font-mono text-sm text-primary"
-						to={`/jobs/${encodeURIComponent(job.jobId)}`}
-					>
-						{job.jobId}
-					</Link>
-					<StatusChip
-						label={statusLabel(job.status)}
-						tone={statusTone(job.status)}
-					/>
-				</div>
-				<p className="mt-2 text-sm">{describePayload(job)}</p>
-				<p className="mt-1 text-xs text-muted-foreground">
-					{job.clientId} · {job.createdByName ?? "未知身份"} ·{" "}
-					{sourceLabel(job.createdVia)}
-				</p>
-			</div>
-			<JobCancelButton job={job} onChanged={onChanged} />
-		</article>
 	);
 }
 
@@ -366,6 +381,7 @@ function statusLabel(status: string): string {
 			pending: "等待中",
 			running: "执行中",
 			waiting_input: "等待输入",
+			disconnected: "连接中断",
 			cancelling: "取消中",
 			cancelled: "已取消",
 			done: "已完成",

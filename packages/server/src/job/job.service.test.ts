@@ -43,6 +43,7 @@ describe("JobService.list()", () => {
 			{
 				id: "j1",
 				clientId: "c1",
+				client: { hostname: "machine-1" },
 				type: "exec",
 				status: "done",
 				payload: "{}",

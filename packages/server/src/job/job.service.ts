@@ -283,6 +283,11 @@ export class JobService {
     const [jobs, total] = await Promise.all([
       this.prisma.job.findMany({
         where,
+        include: {
+          client: {
+            select: { hostname: true },
+          },
+        },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -302,6 +307,11 @@ export class JobService {
   async findById(jobId: string): Promise<JobInfo | null> {
     const job = await this.prisma.job.findUnique({
       where: { id: jobId },
+      include: {
+        client: {
+          select: { hostname: true },
+        },
+      },
     });
     if (!job) return null;
     return toJobInfo(job);
@@ -323,10 +333,12 @@ function toJobInfo(j: {
   createdByIdentityId: string | null;
   createdByName: string | null;
   createdVia: string | null;
+  client: { hostname: string } | null;
 }): JobInfo {
   return {
     jobId: j.id,
     clientId: j.clientId,
+    clientName: j.client?.hostname ?? null,
     type: j.type,
     status: j.status as JobStatus,
     payload: safeJsonParse(j.payload, {}),
