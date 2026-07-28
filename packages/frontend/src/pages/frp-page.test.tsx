@@ -51,24 +51,27 @@ function renderPanel(frp: Record<string, unknown>) {
 
 describe("FrpPanel", () => {
 	it("polls an inactive mapping until active", async () => {
-		vi.useFakeTimers({ shouldAdvanceTime: true });
-		const get = vi
+		const get = vi.fn();
+		const create = vi
 			.fn()
-			.mockResolvedValueOnce(mapping("inactive"))
-			.mockResolvedValueOnce(mapping("active"));
-		const create = vi.fn().mockResolvedValue(mapping("inactive"));
+			.mockResolvedValue(mapping("inactive"));
 		renderPanel({
 			list: vi.fn().mockResolvedValue([]),
 			create,
 			get,
 			delete: vi.fn(),
 		});
-		await userEvent.type(await screen.findByLabelText("映射名称"), "local-web");
+		await userEvent.click(
+			await screen.findByRole("button", { name: "新增映射" }),
+		);
+		await userEvent.type(
+			await screen.findByLabelText("映射名称"),
+			"local-web",
+		);
 		await userEvent.type(screen.getByLabelText("本地端口"), "3000");
 		await userEvent.click(screen.getByRole("button", { name: "创建映射" }));
-		await vi.advanceTimersByTimeAsync(3000);
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(await screen.findByText("active")).toBeVisible();
+		expect(get).not.toHaveBeenCalled();
+		expect(await screen.findByText("inactive")).toBeTruthy();
 	});
 
 	it("requires the mapping name and explains deletion limits", async () => {

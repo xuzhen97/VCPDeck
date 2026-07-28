@@ -13,8 +13,10 @@ import { ErrorState, LoadingState } from "@/components/async-state";
 import { StatusChip } from "@/components/status-chip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Drawer } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Plus } from "lucide-react";
 
 export function FrpPanel({ clientId }: { clientId?: string }) {
 	const sdk = useSdk();
@@ -24,6 +26,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 	);
 	const resource = useResource(load);
 	const controller = useRef<AbortController>();
+	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [targetClientId, setTargetClientId] = useState(clientId ?? "");
 	const [proxyType, setProxyType] = useState<"tcp" | "http" | "https">("tcp");
@@ -32,6 +35,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 	const [remotePort, setRemotePort] = useState("");
 	const [customDomain, setCustomDomain] = useState("");
 	const [created, setCreated] = useState<FrpMappingInfo>();
+	const [creating, setCreating] = useState(false);
 	const [deleting, setDeleting] = useState<FrpMappingInfo>();
 	const [notice, setNotice] = useState("");
 
@@ -39,6 +43,8 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
+		setCreating(true);
+		setCreated(undefined);
 		controller.current?.abort();
 		const next = new AbortController();
 		controller.current = next;
@@ -57,7 +63,29 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		setCreated(mapping);
 		const terminal = await waitForMapping(mapping, next.signal, sdk.frp.get);
 		setCreated(terminal);
+		setCreating(false);
+		if (terminal.status === "active" || terminal.status === "error") {
+			setDrawerOpen(false);
+			resetForm();
+		}
 		resource.reload();
+	}
+
+	function resetForm() {
+		setName("");
+		setProxyType("tcp");
+		setLocalIp("127.0.0.1");
+		setLocalPort("");
+		setRemotePort("");
+		setCustomDomain("");
+		setCreated(undefined);
+	}
+
+	function openDrawer() {
+		setTargetClientId(clientId ?? "");
+		resetForm();
+		setCreating(false);
+		setDrawerOpen(true);
 	}
 
 	async function remove() {
@@ -72,110 +100,16 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 	if (resource.error)
 		return <ErrorState message="无法加载 FRP 映射" onRetry={resource.reload} />;
 	return (
-		<div className="grid gap-5 xl:grid-cols-[22rem_minmax(0,1fr)]">
+		<>
 			<Card>
 				<CardHeader>
-					<CardTitle>创建映射</CardTitle>
-				</CardHeader>
-				<CardContent>
-					<form className="space-y-4" onSubmit={submit}>
-						{!clientId && (
-							<div className="space-y-2">
-								<Label htmlFor="frp-client">Client ID</Label>
-								<Input
-									id="frp-client"
-									value={targetClientId}
-									onChange={(event) => setTargetClientId(event.target.value)}
-									required
-								/>
-							</div>
-						)}
-						<div className="space-y-2">
-							<Label htmlFor="frp-name">映射名称</Label>
-							<Input
-								id="frp-name"
-								value={name}
-								onChange={(event) => setName(event.target.value)}
-								required
-							/>
-						</div>
-						<div className="space-y-2">
-							<Label htmlFor="proxy-type">代理类型</Label>
-							<select
-								id="proxy-type"
-								className="h-11 w-full rounded-lg border border-input bg-background/60 px-3"
-								value={proxyType}
-								onChange={(event) =>
-									setProxyType(event.target.value as typeof proxyType)
-								}
-							>
-								<option value="tcp">TCP</option>
-								<option value="http">HTTP</option>
-								<option value="https">HTTPS</option>
-							</select>
-						</div>
-						<div className="space-y-2">
-							<Label htmlFor="local-ip">本地 IP</Label>
-							<Input
-								id="local-ip"
-								value={localIp}
-								onChange={(event) => setLocalIp(event.target.value)}
-								required
-							/>
-						</div>
-						<div className="space-y-2">
-							<Label htmlFor="local-port">本地端口</Label>
-							<Input
-								id="local-port"
-								type="number"
-								min="1"
-								max="65535"
-								value={localPort}
-								onChange={(event) => setLocalPort(event.target.value)}
-								required
-							/>
-						</div>
-						<div className="space-y-2">
-							<Label htmlFor="remote-port">公网端口（可选）</Label>
-							<Input
-								id="remote-port"
-								type="number"
-								value={remotePort}
-								onChange={(event) => setRemotePort(event.target.value)}
-							/>
-						</div>
-						{proxyType !== "tcp" && (
-							<div className="space-y-2">
-								<Label htmlFor="custom-domain">自定义域名</Label>
-								<Input
-									id="custom-domain"
-									value={customDomain}
-									onChange={(event) => setCustomDomain(event.target.value)}
-								/>
-							</div>
-						)}
-						<Button type="submit">创建映射</Button>
-						{created && (
-							<p className="text-sm">
-								创建状态：
-								<StatusChip
-									label={created.status}
-									tone={
-										created.status === "active"
-											? "success"
-											: created.status === "error"
-												? "danger"
-												: "warning"
-									}
-								/>
-							</p>
-						)}
-					</form>
-				</CardContent>
-			</Card>
-			<Card>
-				<CardHeader>
-					<CardTitle>{clientId ? "机器映射" : "全部映射"}</CardTitle>
+					<div className="flex items-center justify-between">
+						<CardTitle>{clientId ? "机器映射" : "全部映射"}</CardTitle>
+						<Button onClick={openDrawer}>
+							<Plus className="mr-1 size-4" />
+							新增映射
+						</Button>
+					</div>
 				</CardHeader>
 				<CardContent>
 					{notice && (
@@ -226,6 +160,107 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 					)}
 				</CardContent>
 			</Card>
+			<Drawer
+				open={drawerOpen}
+				onClose={() => setDrawerOpen(false)}
+				title="创建映射"
+			>
+				<form className="space-y-4" onSubmit={submit}>
+					{!clientId && (
+						<div className="space-y-2">
+							<Label htmlFor="frp-client">Client ID</Label>
+							<Input
+								id="frp-client"
+								value={targetClientId}
+								onChange={(event) => setTargetClientId(event.target.value)}
+								required
+							/>
+						</div>
+					)}
+					<div className="space-y-2">
+						<Label htmlFor="frp-name">映射名称</Label>
+						<Input
+							id="frp-name"
+							value={name}
+							onChange={(event) => setName(event.target.value)}
+							required
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="proxy-type">代理类型</Label>
+						<select
+							id="proxy-type"
+							className="h-11 w-full rounded-lg border border-input bg-background/60 px-3"
+							value={proxyType}
+							onChange={(event) =>
+								setProxyType(event.target.value as typeof proxyType)
+							}
+						>
+							<option value="tcp">TCP</option>
+							<option value="http">HTTP</option>
+							<option value="https">HTTPS</option>
+						</select>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="local-ip">本地 IP</Label>
+						<Input
+							id="local-ip"
+							value={localIp}
+							onChange={(event) => setLocalIp(event.target.value)}
+							required
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="local-port">本地端口</Label>
+						<Input
+							id="local-port"
+							type="number"
+							min="1"
+							max="65535"
+							value={localPort}
+							onChange={(event) => setLocalPort(event.target.value)}
+							required
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="remote-port">公网端口（可选）</Label>
+						<Input
+							id="remote-port"
+							type="number"
+							value={remotePort}
+							onChange={(event) => setRemotePort(event.target.value)}
+						/>
+					</div>
+					{proxyType !== "tcp" && (
+						<div className="space-y-2">
+							<Label htmlFor="custom-domain">自定义域名</Label>
+							<Input
+								id="custom-domain"
+								value={customDomain}
+								onChange={(event) => setCustomDomain(event.target.value)}
+							/>
+						</div>
+					)}
+					<Button type="submit" disabled={creating}>
+						{creating ? "创建中…" : "创建映射"}
+					</Button>
+					{created && (
+						<p className="text-sm">
+							状态：
+							<StatusChip
+								label={created.status}
+								tone={
+									created.status === "active"
+										? "success"
+										: created.status === "error"
+											? "danger"
+											: "warning"
+								}
+							/>
+						</p>
+					)}
+				</form>
+			</Drawer>
 			{deleting && (
 				<ConfirmTargetDialog
 					open
@@ -237,7 +272,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 					onConfirm={remove}
 				/>
 			)}
-		</div>
+		</>
 	);
 }
 
