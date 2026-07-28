@@ -53,6 +53,59 @@ packages/
 | PSK | Pre-Shared Key，客户端与网关的连接凭证 |
 | Dispatch | 网关将 pending job 发送到对应客户端执行 |
 
+## 分页规范
+
+列表接口统一用 `PaginatedResult<T>`（`packages/shared/src/index.ts`），字段：`data`、`total`、`page`、`pageSize`、`totalPages`。
+
+各层写法：
+
+```ts
+// Service — Promise.all 并发取数据和总数
+async listXxx(
+  clientId?: string,
+  page: number = 1,
+  pageSize: number = 20,
+): Promise<PaginatedResult<XxxInfo>> {
+  const where = clientId ? { clientId } : {};
+  const [list, total] = await Promise.all([
+    this.prisma.xxx.findMany({
+      where, orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize, take: pageSize,
+    }),
+    this.prisma.xxx.count({ where }),
+  ]);
+  return { data: list.map(toApi), total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+}
+
+// Controller — @Query 手动解析字符串，不引入 ValidationPipe
+@Get("xxx")
+async list(
+  @Query("clientId") clientId?: string,
+  @Query("page") page?: string,
+  @Query("pageSize") pageSize?: string,
+) {
+  return this.service.listXxx(
+    clientId,
+    page ? Math.max(1, parseInt(page, 10)) : undefined,
+    pageSize ? Math.min(100, Math.max(1, parseInt(pageSize, 10))) : undefined,
+  );
+}
+
+// SDK — URLSearchParams 拼接 query string
+list: (options?, signal?) => {
+  const params = new URLSearchParams();
+  if (options?.clientId) params.set("clientId", options.clientId);
+  if (options?.page) params.set("page", String(options.page));
+  if (options?.pageSize) params.set("pageSize", String(options.pageSize));
+  const qs = params.toString();
+  return client.request<PaginatedResult<XxxInfo>>(
+    "GET", `/api/xxx${qs ? `?${qs}` : ""}`, undefined, signal,
+  );
+},
+```
+
+参考实现：`packages/server/src/frp/frp.service.ts` `listMappings()`、`packages/server/src/frp/frp.controller.ts`、`packages/sdk/src/frp.ts`。
+
 ## 安全
 
 - Job command、stdout/stderr、环境变量和路径都可能含敏感信息；日志默认脱敏

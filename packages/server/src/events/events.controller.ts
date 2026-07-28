@@ -7,13 +7,14 @@ import {
   Get,
   Body,
   Param,
+  Query,
 } from "@nestjs/common";
 import { JobService } from "../job/job.service.js";
 import { ClientService } from "../client/client.service.js";
 import { ClientGateway } from "./client.gateway.js";
 import { Actor } from "../auth/actor.decorator.js";
 import { Public } from "../auth/public.decorator.js";
-import type { JobCreate, DispatchPayload, ActorContext } from "@vcpdeck/shared";
+import type { JobCreate, DispatchPayload, ActorContext, JobStatus } from "@vcpdeck/shared";
 
 const INVALID_JOB_PAYLOAD = "INVALID_JOB_PAYLOAD";
 
@@ -155,8 +156,18 @@ export class EventsController {
   }
 
   @Get("jobs")
-  async listJobs() {
-    return this.jobService.list();
+  async listJobs(
+    @Query("clientId") clientId?: string,
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ) {
+    return this.jobService.list({
+      clientId,
+      status: status as JobStatus | undefined,
+      page: page ? Math.max(1, parseInt(page, 10)) : undefined,
+      pageSize: pageSize ? Math.min(100, Math.max(1, parseInt(pageSize, 10))) : undefined,
+    });
   }
 
   @Get("jobs/:jobId")

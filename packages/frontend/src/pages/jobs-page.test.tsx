@@ -1,6 +1,6 @@
 import type { VcpDeckClient, WaitJobOptions } from "@vcpdeck/sdk";
 import type { IdentityInfo, JobInfo } from "@vcpdeck/shared";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -38,13 +38,17 @@ function job(overrides: Partial<JobInfo>): JobInfo {
 }
 
 it("explains list limits and only offers reliable exec cancellation", async () => {
-	const list = vi
-		.fn()
-		.mockResolvedValue([
+	const list = vi.fn().mockResolvedValue({
+		data: [
 			job({ jobId: "exec-running" }),
 			job({ jobId: "file-running", type: "file.list" }),
 			job({ jobId: "exec-done", status: "done" as JobInfo["status"] }),
-		]);
+		],
+		total: 3,
+		page: 1,
+		pageSize: 20,
+		totalPages: 1,
+	});
 	const cancel = vi
 		.fn()
 		.mockResolvedValue({ jobId: "exec-running", status: "cancelling" });
@@ -69,6 +73,9 @@ it("explains list limits and only offers reliable exec cancellation", async () =
 
 	expect(await screen.findByText("最近 100 条任务")).toBeVisible();
 	expect(screen.getByText("任务记录对所有已认证身份可见")).toBeVisible();
+	expect(
+		screen.queryByRole("table", { name: "任务记录" }),
+	).not.toBeInTheDocument();
 	expect(screen.getAllByRole("button", { name: "取消任务" })).toHaveLength(1);
 	expect(screen.getAllByText("命令：node --version")).toHaveLength(2);
 	expect(screen.queryByText(/hidden/)).not.toBeInTheDocument();
@@ -77,6 +84,60 @@ it("explains list limits and only offers reliable exec cancellation", async () =
 	expect(wait).toHaveBeenCalledWith("exec-running", {
 		signal: expect.any(AbortSignal),
 	});
+});
+
+it("shows understandable jobs in a table and opens details in a drawer", async () => {
+	const client = {
+		auth: { me: async () => identity },
+		jobs: {
+			list: vi.fn().mockResolvedValue({
+				data: [
+					job({
+						jobId: "exec-done",
+						status: "done" as JobInfo["status"],
+						startedAt: "2026-07-26T00:00:01.000Z",
+						finishedAt: "2026-07-26T00:00:03.000Z",
+						result: { exitCode: 0, stdout: "v24.0.0", stderr: "warning" },
+					}),
+					job({
+						jobId: "file-list",
+						type: "file.list",
+						payload: { rootDir: "C:\\", path: "Users", password: "hidden" },
+					}),
+				],
+				total: 2,
+				page: 1,
+				pageSize: 20,
+				totalPages: 1,
+			}),
+		},
+	} as unknown as VcpDeckClient;
+	render(
+		<MemoryRouter>
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<JobsPage clientId="c1" />
+				</AuthProvider>
+			</SdkProvider>
+		</MemoryRouter>,
+	);
+
+	const table = await screen.findByRole("table", { name: "任务记录" });
+	expect(within(table).getByText("执行命令")).toBeVisible();
+	expect(within(table).getByText("读取目录")).toBeVisible();
+	expect(within(table).getByText("已完成")).toBeVisible();
+	expect(within(table).getByText("命令：node --version")).toBeVisible();
+	expect(within(table).getByText("目录：C:\\Users")).toBeVisible();
+
+	await userEvent.click(within(table).getByText("命令：node --version"));
+	const drawer = screen.getByRole("dialog", { name: "任务详情" });
+	expect(drawer).toHaveTextContent("exec-done");
+	expect(drawer).toHaveTextContent("标准输出");
+	expect(drawer).toHaveTextContent("v24.0.0");
+	expect(drawer).toHaveTextContent("标准错误");
+	expect(drawer).toHaveTextContent("warning");
+	expect(drawer).toHaveTextContent("2 秒");
+	expect(drawer).not.toHaveTextContent("hidden");
 });
 
 it("stops cancellation polling when the page unmounts", async () => {
@@ -95,7 +156,13 @@ it("stops cancellation polling when the page unmounts", async () => {
 	const client = {
 		auth: { me: async () => identity },
 		jobs: {
-			list: vi.fn().mockResolvedValue([job({})]),
+			list: vi.fn().mockResolvedValue({
+				data: [job({})],
+				total: 1,
+				page: 1,
+				pageSize: 20,
+				totalPages: 1,
+			}),
 			cancel: vi.fn().mockResolvedValue({ jobId: "j1", status: "cancelling" }),
 			wait,
 		},

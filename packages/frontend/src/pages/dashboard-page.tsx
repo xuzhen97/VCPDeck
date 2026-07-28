@@ -60,7 +60,7 @@ function jobStatusLabel(status: string): {
 
 interface DashboardData {
 	clients: ClientInfo[];
-	jobs: JobInfo[];
+	jobs: PaginatedResult<JobInfo>;
 	mappings: PaginatedResult<FrpMappingInfo>;
 	storage: { authorized: boolean; configured: boolean };
 }
@@ -71,7 +71,7 @@ export function DashboardPage() {
 		async (signal: AbortSignal): Promise<DashboardData> => {
 			const [clients, jobs, mappings, storage] = await Promise.all([
 				sdk.clients.list(signal),
-				sdk.jobs.list(signal),
+				sdk.jobs.list({ pageSize: 5 }, signal),
 				sdk.frp.list({}, signal),
 				sdk.aliyundrive.status(signal),
 			]);
@@ -90,7 +90,7 @@ export function DashboardPage() {
 	const clientMap = new Map(
 		clients.map((item) => [item.clientId, item.hostname]),
 	);
-	const running = jobs.filter((job) =>
+	const running = jobs.data.filter((job) =>
 		["pending", "running", "disconnected"].includes(job.status),
 	).length;
 	return (
@@ -108,7 +108,7 @@ export function DashboardPage() {
 				<Metric
 					title="进行中任务"
 					value={running}
-					detail={`最近 ${jobs.length} 条记录`}
+					detail={`最近 ${jobs.data.length} 条记录`}
 				/>
 				<Metric
 					title="FRP 映射"
@@ -132,7 +132,7 @@ export function DashboardPage() {
 					<CardTitle>最近任务</CardTitle>
 				</CardHeader>
 				<CardContent>
-					{jobs.length === 0 ? (
+					{jobs.data.length === 0 ? (
 						<p className="text-sm text-muted-foreground">暂无任务记录</p>
 					) : (
 						<div className="overflow-x-auto">
@@ -146,7 +146,7 @@ export function DashboardPage() {
 									</tr>
 								</thead>
 								<tbody>
-									{jobs.slice(0, 10).map((job) => {
+									{jobs.data.slice(0, 10).map((job) => {
 										const hostname =
 											clientMap.get(job.clientId) ?? job.clientId.slice(0, 8);
 										const status = jobStatusLabel(job.status);

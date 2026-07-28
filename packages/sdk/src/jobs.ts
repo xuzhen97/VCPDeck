@@ -1,4 +1,9 @@
-import type { JobCreate, JobCreateResult, JobInfo } from "@vcpdeck/shared";
+import type {
+	JobCreate,
+	JobCreateResult,
+	JobInfo,
+	PaginatedResult,
+} from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
 
 /** Job 等待选项。 */
@@ -12,8 +17,28 @@ const TERMINAL_STATUSES = new Set(["done", "error", "cancelled"]);
 /** 创建 Job REST API。 */
 export function createJobsApi(client: Pick<VcpDeckClient, "request">) {
 	return {
-		list: (signal?: AbortSignal) =>
-			client.request<JobInfo[]>("GET", "/api/jobs", undefined, signal),
+		list: (
+			options?: {
+				clientId?: string;
+				status?: string;
+				page?: number;
+				pageSize?: number;
+			},
+			signal?: AbortSignal,
+		) => {
+			const params = new URLSearchParams();
+			if (options?.clientId) params.set("clientId", options.clientId);
+			if (options?.status) params.set("status", options.status);
+			if (options?.page) params.set("page", String(options.page));
+			if (options?.pageSize) params.set("pageSize", String(options.pageSize));
+			const qs = params.toString();
+			return client.request<PaginatedResult<JobInfo>>(
+				"GET",
+				`/api/jobs${qs ? `?${qs}` : ""}`,
+				undefined,
+				signal,
+			);
+		},
 		get: (jobId: string, signal?: AbortSignal) =>
 			client.request<JobInfo>(
 				"GET",

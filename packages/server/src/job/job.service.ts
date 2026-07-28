@@ -8,6 +8,7 @@ import type {
   StatusReport,
   JobInfo,
   ActorContext,
+  PaginatedResult,
 } from "@vcpdeck/shared";
 import { FileService } from "../file/file.service.js";
 import { randomUUID } from "node:crypto";
@@ -267,12 +268,35 @@ export class JobService {
     throw new Error(`Cannot cancel job in status "${job.status}"`);
   }
 
-  async list(): Promise<JobInfo[]> {
-    const jobs = await this.prisma.job.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    });
-    return jobs.map(toJobInfo);
+  async list(options: {
+    clientId?: string;
+    status?: JobStatus;
+    page?: number;
+    pageSize?: number;
+  } = {}): Promise<PaginatedResult<JobInfo>> {
+    const page = Math.max(1, options.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 20));
+    const where: Record<string, unknown> = {};
+    if (options.clientId) where.clientId = options.clientId;
+    if (options.status) where.status = options.status;
+
+    const [jobs, total] = await Promise.all([
+      this.prisma.job.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.job.count({ where }),
+    ]);
+
+    return {
+      data: jobs.map(toJobInfo),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
   }
 
   async findById(jobId: string): Promise<JobInfo | null> {

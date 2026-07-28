@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "prisma db push && node dist/main.js",
-    "dev": "prisma db push && tsx watch src/main.ts"
+    "dev": "prisma db push && tsx watch src/main.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
@@ -33,6 +34,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^22.20.1",
     "socket.io": "^4.8.3",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "vitest": "^3.2.7"
   }
 }
