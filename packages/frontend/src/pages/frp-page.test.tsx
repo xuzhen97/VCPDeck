@@ -52,9 +52,7 @@ function renderPanel(frp: Record<string, unknown>) {
 describe("FrpPanel", () => {
 	it("polls an inactive mapping until active", async () => {
 		const get = vi.fn();
-		const create = vi
-			.fn()
-			.mockResolvedValue(mapping("inactive"));
+		const create = vi.fn().mockResolvedValue(mapping("inactive"));
 		renderPanel({
 			list: vi.fn().mockResolvedValue([]),
 			create,
@@ -64,10 +62,7 @@ describe("FrpPanel", () => {
 		await userEvent.click(
 			await screen.findByRole("button", { name: "新增映射" }),
 		);
-		await userEvent.type(
-			await screen.findByLabelText("映射名称"),
-			"local-web",
-		);
+		await userEvent.type(await screen.findByLabelText("映射名称"), "local-web");
 		await userEvent.type(screen.getByLabelText("本地端口"), "3000");
 		await userEvent.click(screen.getByRole("button", { name: "创建映射" }));
 		expect(get).not.toHaveBeenCalled();
