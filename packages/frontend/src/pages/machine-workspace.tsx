@@ -84,13 +84,7 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 					</NavLink>
 				))}
 			</nav>
-			{tab === "overview" && (
-				<Card>
-					<CardContent className="pt-6 text-sm text-muted-foreground">
-						该机器当前在线。选择标签页开始操作。
-					</CardContent>
-				</Card>
-			)}
+			{tab === "overview" && <Overview client={client} />}
 			{tab === "execute" && <ExecutePanel clientId={client.clientId} />}
 			{tab === "files" && <FilesPanel clientId={client.clientId} />}
 			{tab === "frp" && <FrpPanel clientId={client.clientId} />}
@@ -103,6 +97,74 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 					</CardContent>
 				</Card>
 			)}
+		</div>
+	);
+}
+
+function Overview({ client }: { client: ClientInfo }) {
+	const pct = (v: number | null) =>
+		v !== null ? (v * 100).toFixed(1) + "%" : "—";
+	const fmt = (v: number) =>
+		v >= 1_000_000
+			? (v / 1_000_000).toFixed(1) + " TB"
+			: v >= 1_000
+				? (v / 1_000).toFixed(0) + " GB"
+				: v + " MB";
+	return (
+		<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+			<Card>
+				<CardContent className="pt-6">
+					<p className="text-sm text-muted-foreground">CPU</p>
+					<p className="mt-1 text-sm font-medium">{client.cpuModel}</p>
+					<p className="text-xs text-muted-foreground">
+						使用率 {pct(client.cpuPercent)}
+					</p>
+				</CardContent>
+			</Card>
+			<Card>
+				<CardContent className="pt-6">
+					<p className="text-sm text-muted-foreground">内存</p>
+					<p className="mt-1 text-sm font-medium">
+						{fmt(client.totalMemMB)}
+					</p>
+					<p className="text-xs text-muted-foreground">
+						使用率 {pct(client.memPercent)}
+					</p>
+				</CardContent>
+			</Card>
+			<Card>
+				<CardContent className="pt-6">
+					<p className="text-sm text-muted-foreground">磁盘</p>
+					<p className="mt-1 text-sm font-medium">
+						{fmt(client.totalDiskMB)}
+					</p>
+					<p className="text-xs text-muted-foreground">
+						使用率 {pct(client.diskPercent)}
+					</p>
+				</CardContent>
+			</Card>
+			<Card>
+				<CardContent className="pt-6">
+					<p className="text-sm text-muted-foreground">版本</p>
+					<p className="mt-1 text-sm font-medium">{client.clientVersion}</p>
+				</CardContent>
+			</Card>
+			<Card>
+				<CardContent className="pt-6">
+					<p className="text-sm text-muted-foreground">操作系统</p>
+					<p className="mt-1 text-sm font-medium">{client.os}</p>
+				</CardContent>
+			</Card>
+			<Card>
+				<CardContent className="pt-6">
+					<p className="text-sm text-muted-foreground">最后心跳</p>
+					<p className="mt-1 text-sm font-medium">
+						{client.lastHeartbeatAt
+							? new Date(client.lastHeartbeatAt).toLocaleString()
+							: "未知"}
+					</p>
+				</CardContent>
+			</Card>
 		</div>
 	);
 }

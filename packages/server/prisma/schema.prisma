@@ -18,6 +18,10 @@ model Client {
   capabilities    String    @default("[]")
   online          Boolean   @default(false)
   lastHeartbeatAt DateTime?
+  cpuPercent      Float?
+  memPercent      Float?
+  diskPercent     Float?
+  runningJobs     String    @default("[]")
   connectedAt     DateTime?
   socketId        String?
   createdAt       DateTime  @default(now())

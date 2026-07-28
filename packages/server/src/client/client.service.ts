@@ -42,7 +42,13 @@ export class ClientService {
   async heartbeat(dto: Heartbeat) {
     await this.prisma.client.update({
       where: { id: dto.clientId },
-      data: { lastHeartbeatAt: new Date() },
+      data: {
+        lastHeartbeatAt: new Date(),
+        cpuPercent: dto.cpuPercent,
+        memPercent: dto.memPercent,
+        diskPercent: dto.diskPercent,
+        runningJobs: JSON.stringify(dto.runningJobs),
+      },
     });
   }
 
@@ -82,8 +88,15 @@ export class ClientService {
         clientId: c.id,
         hostname: c.hostname,
         os: c.os,
+        cpuModel: c.cpuModel,
+        totalMemMB: c.totalMemMB,
+        totalDiskMB: c.totalDiskMB,
+        clientVersion: c.clientVersion,
         capabilities,
         online: c.online,
+        cpuPercent: c.cpuPercent ?? null,
+        memPercent: c.memPercent ?? null,
+        diskPercent: c.diskPercent ?? null,
         lastHeartbeatAt: c.lastHeartbeatAt?.toISOString() ?? null,
       };
     });

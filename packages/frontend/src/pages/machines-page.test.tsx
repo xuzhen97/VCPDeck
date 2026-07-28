@@ -67,9 +67,16 @@ describe("MachinesPage", () => {
 				clientId: "client-1",
 				hostname: "workstation",
 				os: "win32",
+				cpuModel: "Intel i7",
+				totalMemMB: 16384,
+				totalDiskMB: 512000,
+				clientVersion: "0.0.0",
 				capabilities: ["exec", "file.read", "frp"],
 				online: true,
-				lastHeartbeatAt: "2026-07-26T00:00:00.000Z",
+				cpuPercent: null,
+				memPercent: null,
+				diskPercent: null,
+				lastHeartbeatAt: null,
 			},
 		]);
 

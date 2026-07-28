@@ -183,8 +183,15 @@ export interface ClientInfo {
 	clientId: string;
 	hostname: string;
 	os: string;
+	cpuModel: string;
+	totalMemMB: number;
+	totalDiskMB: number;
+	clientVersion: string;
 	capabilities: string[];
 	online: boolean;
+	cpuPercent: number | null;
+	memPercent: number | null;
+	diskPercent: number | null;
 	lastHeartbeatAt: string | null;
 }
 
@@ -464,6 +471,15 @@ export interface FrpMappingInfo {
 	publicUrl: string | null;
 	createdAt: string;
 	updatedAt: string;
+}
+
+/** 通用分页包装 */
+export interface PaginatedResult<T> {
+	data: T[];
+	total: number;
+	page: number;
+	pageSize: number;
+	totalPages: number;
 }
 
 /** 创建映射 REST 请求体 */
