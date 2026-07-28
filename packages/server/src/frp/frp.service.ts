@@ -10,6 +10,7 @@ import type {
   FrpMappingInfo,
   FrpCreatePayload,
   FrpDeletePayload,
+  PaginatedResult,
 } from "@vcpdeck/shared";
 
 function buildPublicUrl(
@@ -195,12 +196,28 @@ export class FrpService {
     return m ? this.toApi(m) : null;
   }
 
-  async listMappings(clientId?: string): Promise<FrpMappingInfo[]> {
-    const list = await this.prisma.frpMapping.findMany({
-      where: clientId ? { clientId } : undefined,
-      orderBy: { createdAt: "desc" },
-    });
-    return list.map((m) => this.toApi(m));
+  async listMappings(
+    clientId?: string,
+    page: number = 1,
+    pageSize: number = 20,
+  ): Promise<PaginatedResult<FrpMappingInfo>> {
+    const where = clientId ? { clientId } : {};
+    const [list, total] = await Promise.all([
+      this.prisma.frpMapping.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.frpMapping.count({ where }),
+    ]);
+    return {
+      data: list.map((m) => this.toApi(m)),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
   }
 
   async updateStatus(

@@ -41,8 +41,16 @@ export class FrpController {
   }
 
   @Get("mappings")
-  async list(@Query("clientId") clientId?: string) {
-    return this.frpService.listMappings(clientId);
+  async list(
+    @Query("clientId") clientId?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ) {
+    return this.frpService.listMappings(
+      clientId,
+      page ? Math.max(1, parseInt(page, 10)) : undefined,
+      pageSize ? Math.min(100, Math.max(1, parseInt(pageSize, 10))) : undefined,
+    );
   }
 
   @Get("mappings/:id")
