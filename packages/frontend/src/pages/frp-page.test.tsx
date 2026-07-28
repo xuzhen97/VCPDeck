@@ -54,7 +54,13 @@ describe("FrpPanel", () => {
 		const get = vi.fn();
 		const create = vi.fn().mockResolvedValue(mapping("inactive"));
 		renderPanel({
-			list: vi.fn().mockResolvedValue([]),
+			list: vi.fn().mockResolvedValue({
+				data: [],
+				total: 0,
+				page: 1,
+				pageSize: 20,
+				totalPages: 0,
+			}),
 			create,
 			get,
 			delete: vi.fn(),
@@ -72,7 +78,13 @@ describe("FrpPanel", () => {
 	it("requires the mapping name and explains deletion limits", async () => {
 		const remove = vi.fn().mockResolvedValue({ id: "fm_1", deleted: true });
 		renderPanel({
-			list: vi.fn().mockResolvedValue([mapping("active")]),
+			list: vi.fn().mockResolvedValue({
+				data: [mapping("active")],
+				total: 1,
+				page: 1,
+				pageSize: 20,
+				totalPages: 1,
+			}),
 			create: vi.fn(),
 			get: vi.fn(),
 			delete: remove,

@@ -20,9 +20,11 @@ import { Plus } from "lucide-react";
 
 export function FrpPanel({ clientId }: { clientId?: string }) {
 	const sdk = useSdk();
+	const [page, setPage] = useState(1);
 	const load = useCallback(
-		(signal: AbortSignal) => sdk.frp.list(clientId, signal),
-		[clientId, sdk],
+		(signal: AbortSignal) =>
+			sdk.frp.list({ clientId, page, pageSize: 20 }, signal),
+		[clientId, page, sdk],
 	);
 	const resource = useResource(load);
 	const controller = useRef<AbortController>();
@@ -120,43 +122,68 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 							{notice}
 						</p>
 					)}
-					{(resource.data ?? []).length === 0 ? (
+					{!resource.data || resource.data.data.length === 0 ? (
 						<p className="text-sm text-muted-foreground">暂无映射</p>
 					) : (
-						<div className="divide-y divide-border/60">
-							{resource.data?.map((mapping) => (
-								<article
-									key={mapping.id}
-									className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"
-								>
-									<div>
-										<div className="flex items-center gap-2">
-											<h3 className="font-medium">{mapping.name}</h3>
-											<StatusChip
-												label={mapping.status}
-												tone={
-													mapping.status === "active"
-														? "success"
-														: mapping.status === "error"
-															? "danger"
-															: "warning"
-												}
-											/>
-										</div>
-										<p className="mt-1 text-sm text-muted-foreground">
-											{mapping.clientId} · {mapping.localIp}:{mapping.localPort}{" "}
-											→ {mapping.publicUrl ?? "等待分配"}
-										</p>
-									</div>
-									<Button
-										variant="destructive"
-										onClick={() => setDeleting(mapping)}
+						<>
+							<div className="divide-y divide-border/60">
+								{resource.data.data.map((mapping) => (
+									<article
+										key={mapping.id}
+										className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"
 									>
-										删除映射
+										<div>
+											<div className="flex items-center gap-2">
+												<h3 className="font-medium">{mapping.name}</h3>
+												<StatusChip
+													label={mapping.status}
+													tone={
+														mapping.status === "active"
+															? "success"
+															: mapping.status === "error"
+																? "danger"
+																: "warning"
+													}
+												/>
+											</div>
+											<p className="mt-1 text-sm text-muted-foreground">
+												{mapping.clientId} · {mapping.localIp}:{mapping.localPort}{" "}
+												→ {mapping.publicUrl ?? "等待分配"}
+											</p>
+										</div>
+										<Button
+											variant="destructive"
+											onClick={() => setDeleting(mapping)}
+										>
+											删除映射
+										</Button>
+									</article>
+								))}
+							</div>
+							<div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
+								<span>
+									共 {resource.data.total} 条，第 {resource.data.page}/{resource.data.totalPages} 页
+								</span>
+								<div className="flex gap-2">
+									<Button
+										size="sm"
+										variant="outline"
+										disabled={page <= 1}
+										onClick={() => setPage((p) => p - 1)}
+									>
+										上一页
 									</Button>
-								</article>
-							))}
-						</div>
+									<Button
+										size="sm"
+										variant="outline"
+										disabled={page >= (resource.data.totalPages ?? 1)}
+										onClick={() => setPage((p) => p + 1)}
+									>
+										下一页
+									</Button>
+								</div>
+							</div>
+						</>
 					)}
 				</CardContent>
 			</Card>

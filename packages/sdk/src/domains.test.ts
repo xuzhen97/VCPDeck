@@ -10,7 +10,7 @@ it("calls clients and frp routes", async () => {
 	});
 
 	await client.clients.list();
-	await client.frp.list("c1");
+	await client.frp.list({ clientId: "c1" });
 
 	expect(fetcher).toHaveBeenNthCalledWith(
 		1,

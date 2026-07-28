@@ -1,4 +1,9 @@
-import type { ClientInfo, FrpMappingInfo, JobInfo } from "@vcpdeck/shared";
+import type {
+	ClientInfo,
+	FrpMappingInfo,
+	JobInfo,
+	PaginatedResult,
+} from "@vcpdeck/shared";
 import { useCallback } from "react";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
@@ -56,7 +61,7 @@ function jobStatusLabel(status: string): {
 interface DashboardData {
 	clients: ClientInfo[];
 	jobs: JobInfo[];
-	mappings: FrpMappingInfo[];
+	mappings: PaginatedResult<FrpMappingInfo>;
 	storage: { authorized: boolean; configured: boolean };
 }
 
@@ -67,7 +72,7 @@ export function DashboardPage() {
 			const [clients, jobs, mappings, storage] = await Promise.all([
 				sdk.clients.list(signal),
 				sdk.jobs.list(signal),
-				sdk.frp.list(undefined, signal),
+				sdk.frp.list({}, signal),
 				sdk.aliyundrive.status(signal),
 			]);
 			return { clients, jobs, mappings, storage };
@@ -107,8 +112,8 @@ export function DashboardPage() {
 				/>
 				<Metric
 					title="FRP 映射"
-					value={mappings.length}
-					detail={`${mappings.filter((item) => item.status === "active").length} 个 active`}
+					value={mappings.total}
+					detail={`${mappings.data.filter((item) => item.status === "active").length} 个 active`}
 				/>
 				<Metric
 					title="阿里云盘"
