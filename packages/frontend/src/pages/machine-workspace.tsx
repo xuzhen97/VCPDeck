@@ -102,14 +102,16 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 }
 
 function Overview({ client }: { client: ClientInfo }) {
-	const pct = (v: number | null) =>
-		v !== null ? (v * 100).toFixed(1) + "%" : "—";
-	const fmt = (v: number) =>
-		v >= 1_000_000
+	const pct = (v: number | null | undefined) =>
+		v != null ? (v * 100).toFixed(1) + "%" : "—";
+	const fmt = (v: number | undefined) => {
+		if (v == null) return "—";
+		return v >= 1_000_000
 			? (v / 1_000_000).toFixed(1) + " TB"
 			: v >= 1_000
 				? (v / 1_000).toFixed(0) + " GB"
 				: v + " MB";
+	};
 	return (
 		<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
 			<Card>
@@ -124,9 +126,7 @@ function Overview({ client }: { client: ClientInfo }) {
 			<Card>
 				<CardContent className="pt-6">
 					<p className="text-sm text-muted-foreground">内存</p>
-					<p className="mt-1 text-sm font-medium">
-						{fmt(client.totalMemMB)}
-					</p>
+					<p className="mt-1 text-sm font-medium">{fmt(client.totalMemMB)}</p>
 					<p className="text-xs text-muted-foreground">
 						使用率 {pct(client.memPercent)}
 					</p>
@@ -135,9 +135,7 @@ function Overview({ client }: { client: ClientInfo }) {
 			<Card>
 				<CardContent className="pt-6">
 					<p className="text-sm text-muted-foreground">磁盘</p>
-					<p className="mt-1 text-sm font-medium">
-						{fmt(client.totalDiskMB)}
-					</p>
+					<p className="mt-1 text-sm font-medium">{fmt(client.totalDiskMB)}</p>
 					<p className="text-xs text-muted-foreground">
 						使用率 {pct(client.diskPercent)}
 					</p>
