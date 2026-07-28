@@ -105,7 +105,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 				<CardHeader>
 					<div className="flex items-center justify-between">
 						<CardTitle>{clientId ? "机器映射" : "全部映射"}</CardTitle>
-						<Button onClick={openDrawer}>
+						<Button size="sm" onClick={openDrawer}>
 							<Plus className="mr-1 size-4" />
 							新增映射
 						</Button>
