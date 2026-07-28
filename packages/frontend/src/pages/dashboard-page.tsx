@@ -29,9 +29,10 @@ function jobTypeLabel(type: string): string {
 	return JOB_TYPE_LABEL[type] ?? type;
 }
 
-function jobStatusLabel(
-	status: string,
-): { label: string; tone: "success" | "warning" | "danger" | "neutral" } {
+function jobStatusLabel(status: string): {
+	label: string;
+	tone: "success" | "warning" | "danger" | "neutral";
+} {
 	switch (status) {
 		case "done":
 			return { label: "已完成", tone: "success" };
@@ -81,13 +82,13 @@ export function DashboardPage() {
 			<ErrorState message="无法加载控制台概览" onRetry={resource.reload} />
 		);
 	const { clients, jobs, mappings, storage } = resource.data;
-		const clientMap = new Map(
-			clients.map((item) => [item.clientId, item.hostname]),
-		);
-		const running = jobs.filter((job) =>
-			["pending", "running", "disconnected"].includes(job.status),
-		).length;
-		return (
+	const clientMap = new Map(
+		clients.map((item) => [item.clientId, item.hostname]),
+	);
+	const running = jobs.filter((job) =>
+		["pending", "running", "disconnected"].includes(job.status),
+	).length;
+	return (
 		<div className="space-y-6">
 			<PageHeading
 				title="概览"
@@ -146,10 +147,7 @@ export function DashboardPage() {
 										const status = jobStatusLabel(job.status);
 										const time = job.createdAt.slice(0, 16).replace("T", " ");
 										return (
-											<tr
-												key={job.jobId}
-												className="border-b border-border/40"
-											>
+											<tr key={job.jobId} className="border-b border-border/40">
 												<td className="py-2.5 pr-4">
 													{jobTypeLabel(job.type)}
 												</td>
