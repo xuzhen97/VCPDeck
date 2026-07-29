@@ -3,7 +3,7 @@
 import { Injectable, Inject } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { PortAllocator } from "./port-allocator.js";
-import { getFrpConfig } from "./frp-config.js";
+import { FrpsInstancesService } from "./frp-instances.service.js";
 import { randomUUID } from "node:crypto";
 import type {
   FrpMappingCreateRequest,
@@ -17,9 +17,10 @@ function buildPublicUrl(
   remotePort: number | null,
   proxyType: string,
   customDomain?: string | null,
+  serverAddr?: string,
 ): string | null {
   if (remotePort === null) return null;
-  const host = getFrpConfig().frpsPublicHost;
+  const host = serverAddr || "127.0.0.1";
   switch (proxyType) {
     case "http":
       return customDomain
@@ -39,6 +40,8 @@ export class FrpService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(FrpsInstancesService)
+    private readonly instancesService: FrpsInstancesService,
   ) {
     this.allocator = new PortAllocator(prisma);
   }
@@ -68,8 +71,27 @@ export class FrpService {
       throw new Error(`Client "${dto.clientId}" 未启用 FRP 能力`);
     }
 
+    const instance = dto.frpsInstanceId
+      ? await this.instancesService.getById(dto.frpsInstanceId)
+      : await this.instancesService.getDefault();
+
+    if (!instance) {
+      throw new Error("未找到目标 FRP 实例");
+    }
+
     const remotePort = await this.allocator.allocate({
       preferredPort: dto.remotePort,
+      portRangeStart: instance.portRangeStart,
+      portRangeEnd: instance.portRangeEnd,
+      dashboard: instance.dashboardHost
+        ? {
+            scheme: instance.dashboardScheme as "http" | "https",
+            host: instance.dashboardHost,
+            port: instance.dashboardPort,
+            user: instance.dashboardUser,
+            password: instance.dashboardPassword,
+          }
+        : null,
     });
 
     const id = `fm_${randomUUID().slice(0, 8)}`;
@@ -77,6 +99,7 @@ export class FrpService {
       remotePort,
       dto.proxyType,
       dto.customDomain,
+      instance.serverAddr,
     );
     const nowStr = new Date().toISOString();
 
@@ -85,6 +108,7 @@ export class FrpService {
         id,
         clientId: dto.clientId,
         name: dto.name,
+        frpsInstanceId: instance.id,
         proxyType: dto.proxyType,
         localIp: dto.localIp ?? "127.0.0.1",
         localPort: dto.localPort,
@@ -95,11 +119,10 @@ export class FrpService {
       },
     });
 
-    const config = getFrpConfig();
     const frpsInfo = {
-      serverAddr: config.frpsPublicHost,
-      serverPort: parseInt(process.env.FRPS_BIND_PORT || "7000", 10),
-      authToken: process.env.FRPS_TOKEN || "",
+      serverAddr: instance.serverAddr,
+      serverPort: instance.serverPort,
+      authToken: instance.authToken,
     };
 
     const payload: FrpCreatePayload = {
