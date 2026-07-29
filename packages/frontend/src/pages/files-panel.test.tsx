@@ -45,6 +45,27 @@ function renderFiles(overrides: Record<string, unknown> = {}) {
 }
 
 describe("FilesPanel", () => {
+	it("keeps the desktop file area within the viewport and scrolls long lists", async () => {
+		renderFiles();
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+
+		expect(screen.getByTestId("file-browser-panel")).toHaveClass(
+			"h-full",
+			"min-h-0",
+		);
+		expect(screen.getByTestId("file-browser-layout")).toHaveClass(
+			"h-full",
+			"min-h-[24rem]",
+		);
+		expect(screen.getByTestId("file-browser-layout")).not.toHaveClass(
+			"lg:h-[calc(100dvh-12rem)]",
+		);
+		expect(screen.getByTestId("file-list-region")).toHaveClass(
+			"overflow-y-auto",
+			"lg:min-h-0",
+		);
+	});
+
 	it("loads discovered roots before listing a selected root", async () => {
 		const files = renderFiles();
 		expect(files.roots).toHaveBeenCalledWith(

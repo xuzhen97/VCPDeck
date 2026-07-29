@@ -120,14 +120,17 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 	});
 
 	return (
-		<div>
-			<div className="grid min-h-[34rem] gap-4 lg:grid-cols-[13rem_1fr]">
+		<div data-testid="file-browser-panel" className="h-full min-h-0">
+			<div
+				data-testid="file-browser-layout"
+				className="grid h-full min-h-[24rem] gap-4 lg:grid-cols-[13rem_1fr]"
+			>
 				{/* 左侧：文件根 */}
-				<Card>
+				<Card className="flex min-h-0 flex-col overflow-hidden">
 					<CardHeader>
 						<CardTitle>文件根</CardTitle>
 					</CardHeader>
-					<CardContent className="space-y-2">
+					<CardContent className="min-h-0 flex-1 space-y-2 overflow-y-auto">
 						{browser.loading && browser.roots.length === 0 && (
 							<p aria-busy="true" className="text-sm text-muted-foreground">
 								正在发现文件根…
@@ -148,7 +151,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 				</Card>
 
 				{/* 右侧：文件列表 */}
-				<Card>
+				<Card className="flex min-h-0 flex-col overflow-hidden">
 					<CardHeader className="border-b border-border/60 px-5 py-3">
 						{browser.selectedRoot ? (
 							<nav
@@ -189,7 +192,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 							<CardTitle className="text-base">选择文件根</CardTitle>
 						)}
 					</CardHeader>
-					<CardContent className="pt-3">
+					<CardContent className="flex min-h-0 flex-1 flex-col pt-3">
 						{(() => {
 							const err = browser.error;
 							const errCode =
@@ -255,7 +258,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 								<div
 									data-testid="file-list-region"
 									aria-busy={browser.loading}
-									className={`relative min-h-32 divide-y divide-border/60 ${browser.loading ? "pointer-events-none" : ""}`}
+									className={`relative min-h-32 flex-1 divide-y divide-border/60 overflow-y-auto lg:min-h-0 ${browser.loading ? "pointer-events-none" : ""}`}
 								>
 									{sorted.map((item) => {
 										const selected =

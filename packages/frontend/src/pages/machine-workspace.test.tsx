@@ -52,7 +52,7 @@ describe("MachineWorkspace overview", () => {
 			online: true,
 			cpuPercent: 23.5,
 			memPercent: 45.2,
-			diskPercent: 67.8,
+			diskPercent: 92.8,
 			lastHeartbeatAt: "2026-07-28T10:21:56.000Z",
 		};
 		renderWorkspace([client]);
@@ -65,7 +65,27 @@ describe("MachineWorkspace overview", () => {
 		expect(screen.getByText("0.0.0")).toBeVisible();
 		expect(screen.getByText(/23\.5%/)).toBeTruthy();
 		expect(screen.getByText(/45\.2%/)).toBeTruthy();
-		expect(screen.getByText(/67\.8%/)).toBeTruthy();
+		expect(screen.getByText(/92\.8%/)).toBeTruthy();
+		expect(screen.getByRole("img", { name: "Windows" })).toBeVisible();
+		expect(screen.getByRole("progressbar", { name: "CPU使用率" })).toHaveClass(
+			"bg-primary",
+		);
+		expect(screen.getByRole("progressbar", { name: "磁盘使用率" })).toHaveClass(
+			"bg-red-500",
+		);
+		expect(screen.getByTestId("system-information")).toHaveTextContent(
+			"最后心跳",
+		);
+		expect(screen.getByTestId("machine-workspace")).toHaveClass(
+			"h-full",
+			"min-h-0",
+			"flex-col",
+		);
+		expect(screen.getByTestId("machine-workspace-content")).toHaveClass(
+			"min-h-0",
+			"flex-1",
+			"overflow-y-auto",
+		);
 	});
 
 	it("merges machine details and navigation into a compact header", async () => {
@@ -88,10 +108,26 @@ describe("MachineWorkspace overview", () => {
 
 		expect(await screen.findByTestId("machine-workspace-header")).toHaveClass(
 			"space-y-3",
+			"shrink-0",
 		);
-		expect(
-			screen.getByRole("button", { name: "文件操作安全提示" }),
-		).toBeVisible();
+		expect(screen.getByTestId("machine-workspace")).toHaveClass(
+			"h-full",
+			"min-h-0",
+			"flex-col",
+		);
+		expect(screen.getByTestId("machine-workspace-content")).toHaveClass(
+			"min-h-0",
+			"flex-1",
+			"overflow-hidden",
+		);
+		expect(screen.getByTestId("machine-workspace-content")).not.toHaveClass(
+			"overflow-y-auto",
+		);
+		const riskButton = screen.getByRole("button", {
+			name: "文件操作安全提示",
+		});
+		expect(riskButton).toBeVisible();
+		expect(riskButton.parentElement).not.toHaveClass("mb-2");
 		expect(screen.getByRole("tooltip")).toHaveTextContent(
 			"symlink 边界仍有已知风险",
 		);
@@ -121,8 +157,9 @@ describe("MachineWorkspace overview", () => {
 		expect(screen.getByText("1.0 TB")).toBeVisible();
 		expect(screen.getByText("1.0.0")).toBeVisible();
 
-		// 三个使用率都显示为 —
-		expect(screen.getAllByText(/使用率/)).toHaveLength(3);
+		// 三个资源指标都保留进度语义，缺失值显示为 —
+		expect(screen.getAllByRole("progressbar")).toHaveLength(3);
+		expect(screen.getAllByText("—")).toHaveLength(3);
 	});
 
 	it("handles missing fields from old server gracefully", async () => {
@@ -137,7 +174,8 @@ describe("MachineWorkspace overview", () => {
 		renderWorkspace([partial]);
 
 		expect(await screen.findByText("old-server")).toBeVisible();
-		// 三个使用率 + 大小字段显示为 —
-		expect(screen.getAllByText(/使用率/)).toHaveLength(3);
+		// 旧 Client 缺失的指标仍以可访问进度条和占位值展示
+		expect(screen.getAllByRole("progressbar")).toHaveLength(3);
+		expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
 	});
 });
