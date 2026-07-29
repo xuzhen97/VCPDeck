@@ -148,7 +148,9 @@ export function DashboardPage() {
 								<tbody>
 									{jobs.data.slice(0, 10).map((job) => {
 										const hostname =
-											job.clientName ?? clientMap.get(job.clientId) ?? job.clientId.slice(0, 8);
+											job.clientName ??
+											clientMap.get(job.clientId) ??
+											job.clientId.slice(0, 8);
 										const status = jobStatusLabel(job.status);
 										const time = job.createdAt.slice(0, 16).replace("T", " ");
 										return (

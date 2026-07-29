@@ -15,3 +15,4 @@ CLAUDE.md
 # Storage files
 packages/server/data/
 .superpowers/
+.playwright-mcp/
