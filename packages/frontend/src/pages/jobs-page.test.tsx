@@ -146,6 +146,19 @@ it("shows understandable jobs in a paginated table and opens details in a drawer
 				type: "file.list",
 				payload: { rootDir: "C:\\", path: "Users", password: "hidden" },
 			}),
+			job({
+				jobId: "script-done",
+				status: "done" as JobInfo["status"],
+				payload: {
+					mode: "script",
+					executable: "node",
+					args: ["--input-type=module"],
+					cwd: "D:/workspace",
+					timeout: 30_000,
+					script: "const token = 'safe-script-text';\nconsole.log('hello');",
+					password: "never-render-this-password",
+				},
+			}),
 		],
 		total: 42,
 		page: 1,
@@ -179,9 +192,9 @@ it("shows understandable jobs in a paginated table and opens details in a drawer
 			expect.any(AbortSignal),
 		),
 	);
-	expect(within(table).getByText("执行命令")).toBeVisible();
+	expect(within(table).getAllByText("执行命令")).toHaveLength(2);
 	expect(within(table).getByText("读取目录")).toBeVisible();
-	expect(within(table).getByText("已完成")).toBeVisible();
+	expect(within(table).getAllByText("已完成")).toHaveLength(2);
 	expect(within(table).getByText("命令：node --version")).toBeVisible();
 	expect(within(table).getByText("目录：C:\\Users")).toBeVisible();
 
@@ -193,7 +206,24 @@ it("shows understandable jobs in a paginated table and opens details in a drawer
 	expect(drawer).toHaveTextContent("标准错误");
 	expect(drawer).toHaveTextContent("warning");
 	expect(drawer).toHaveTextContent("2 秒");
+	expect(within(drawer).getByText("node --version")).toBeVisible();
 	expect(drawer).not.toHaveTextContent("hidden");
+	await userEvent.click(within(drawer).getByRole("button", { name: "关闭" }));
+
+	await userEvent.click(within(table).getByText("脚本：node"));
+	const scriptDrawer = screen.getByRole("dialog", { name: "任务详情" });
+	expect(within(scriptDrawer).getByText("--input-type=module")).toBeVisible();
+	expect(within(scriptDrawer).getByText("D:/workspace")).toBeVisible();
+	expect(within(scriptDrawer).getByText("30 秒")).toBeVisible();
+	expect(within(scriptDrawer).getByText("2 行")).toBeVisible();
+	const scriptDetails = within(scriptDrawer)
+		.getByText("查看脚本")
+		.closest("details");
+	expect(scriptDetails).not.toHaveAttribute("open");
+	expect(scriptDrawer).not.toHaveTextContent("never-render-this-password");
+	await userEvent.click(within(scriptDrawer).getByText("查看脚本"));
+	expect(scriptDetails).toHaveAttribute("open");
+	expect(within(scriptDrawer).getByText(/safe-script-text/)).toBeVisible();
 });
 
 it("stops cancellation polling when the page unmounts", async () => {

@@ -291,6 +291,7 @@ function JobDetails({ job }: { job: JobInfo }) {
 					<Field label="错误说明" value={job.errorMessage} wide />
 				)}
 			</div>
+			<ExecutionContent job={job} />
 			{stdout && <Output label="标准输出" value={stdout} />}
 			{stderr && <Output label="标准错误" value={stderr} danger />}
 		</div>
@@ -312,6 +313,78 @@ function Field({
 			<p className="mt-1 break-all font-medium">{value}</p>
 		</div>
 	);
+}
+
+function ExecutionContent({ job }: { job: JobInfo }) {
+	if (job.type !== "exec") return null;
+	const { payload } = job;
+	const cwd = typeof payload.cwd === "string" ? payload.cwd : null;
+	const timeout = typeof payload.timeout === "number" ? payload.timeout : null;
+
+	if (payload.mode === "command" && typeof payload.command === "string") {
+		return (
+			<section className="space-y-3">
+				<p className="text-xs font-medium text-muted-foreground">执行命令</p>
+				{(cwd || timeout !== null) && (
+					<div className="grid gap-3 sm:grid-cols-2">
+						{cwd && <Field label="工作目录" value={cwd} />}
+						{timeout !== null && (
+							<Field label="超时时间" value={formatTimeout(timeout)} />
+						)}
+					</div>
+				)}
+				<CodeBlock value={payload.command} />
+			</section>
+		);
+	}
+
+	if (payload.mode !== "script" || typeof payload.script !== "string")
+		return null;
+	const executable =
+		typeof payload.executable === "string" ? payload.executable : "未知解释器";
+	const args = Array.isArray(payload.args)
+		? payload.args.filter(
+				(value): value is string => typeof value === "string",
+			)
+		: [];
+	const lineCount = payload.script.split(/\r?\n/).length;
+
+	return (
+		<section className="space-y-3">
+			<p className="text-xs font-medium text-muted-foreground">执行脚本</p>
+			<div className="grid gap-3 sm:grid-cols-2">
+				<Field label="解释器" value={executable} />
+				<Field label="参数" value={args.length ? args.join(" ") : "—"} />
+				{cwd && <Field label="工作目录" value={cwd} />}
+				{timeout !== null && (
+					<Field label="超时时间" value={formatTimeout(timeout)} />
+				)}
+				<Field label="脚本行数" value={`${lineCount} 行`} />
+			</div>
+			<details className="rounded-lg border border-border/70 bg-secondary/20">
+				<summary className="cursor-pointer px-4 py-3 font-medium">
+					查看脚本
+				</summary>
+				<div className="border-t border-border/70 p-3">
+					<CodeBlock value={payload.script} />
+				</div>
+			</details>
+		</section>
+	);
+}
+
+function CodeBlock({ value }: { value: string }) {
+	return (
+		<pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 font-mono text-xs leading-relaxed">
+			{value}
+		</pre>
+	);
+}
+
+function formatTimeout(milliseconds: number): string {
+	return milliseconds >= 1000
+		? `${milliseconds / 1000} 秒`
+		: `${milliseconds} 毫秒`;
 }
 
 function Output({
