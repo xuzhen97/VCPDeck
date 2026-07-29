@@ -13,6 +13,7 @@ interface ConfirmTargetDialogProps {
 	open: boolean;
 	target: string;
 	title: string;
+	error?: string;
 	onConfirm: () => void;
 	onOpenChange: (open: boolean) => void;
 }
@@ -21,6 +22,7 @@ export function ConfirmTargetDialog({
 	open,
 	target,
 	title,
+	error,
 	onConfirm,
 	onOpenChange,
 }: ConfirmTargetDialogProps) {
@@ -47,6 +49,11 @@ export function ConfirmTargetDialog({
 						autoComplete="off"
 					/>
 				</div>
+				{error && (
+					<p role="alert" className="mt-4 text-sm text-red-400">
+						{error}
+					</p>
+				)}
 				<div className="mt-6 flex justify-end gap-3">
 					<Button
 						type="button"
