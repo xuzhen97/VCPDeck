@@ -1,7 +1,22 @@
 /** @file 端口分配器 — DB 检查 + 可选 frps Dashboard 对账 */
 
 import type { PrismaService } from "../prisma/prisma.service.js";
-import { getFrpConfig } from "./frp-config.js";
+
+/** Dashboard 配置（由调用者传入，不再从环境变量读取） */
+export interface DashboardConfig {
+	scheme: "http" | "https";
+	host: string;
+	port: number;
+	user: string;
+	password: string;
+}
+
+export interface AllocateOptions {
+	preferredPort?: number;
+	portRangeStart?: number;
+	portRangeEnd?: number;
+	dashboard?: DashboardConfig | null;
+}
 
 export class PortAllocator {
 	private allocationQueue: Promise<unknown> = Promise.resolve();
@@ -14,17 +29,19 @@ export class PortAllocator {
 	 * 2. 如配置了 Dashboard → 查 Dashboard 已用端口（可选，不可达时降级）
 	 * 3. 从范围中取第一个空闲端口
 	 */
-	async allocate(options?: { preferredPort?: number }): Promise<number> {
-		const config = getFrpConfig();
+	async allocate(options?: AllocateOptions): Promise<number> {
+		const portRangeStart = options?.portRangeStart ?? 20000;
+		const portRangeEnd = options?.portRangeEnd ?? 21000;
+		const dashboard = options?.dashboard ?? null;
 
 		return this.withLock(async () => {
-			const usedPorts = await this.loadUsedPorts();
+			const usedPorts = await this.loadUsedPorts(dashboard);
 
 			if (typeof options?.preferredPort === "number") {
 				const p = options.preferredPort;
-				if (p < config.portRangeStart || p > config.portRangeEnd) {
+				if (p < portRangeStart || p > portRangeEnd) {
 					throw new Error(
-						`端口 ${p} 超出配置范围 ${config.portRangeStart}-${config.portRangeEnd}`,
+						`端口 ${p} 超出配置范围 ${portRangeStart}-${portRangeEnd}`,
 					);
 				}
 				if (usedPorts.has(p)) {
@@ -33,16 +50,12 @@ export class PortAllocator {
 				return p;
 			}
 
-			for (
-				let port = config.portRangeStart;
-				port <= config.portRangeEnd;
-				port++
-			) {
+			for (let port = portRangeStart; port <= portRangeEnd; port++) {
 				if (!usedPorts.has(port)) return port;
 			}
 
 			throw new Error(
-				`端口范围 ${config.portRangeStart}-${config.portRangeEnd} 内无可用端口`,
+				`端口范围 ${portRangeStart}-${portRangeEnd} 内无可用端口`,
 			);
 		});
 	}
@@ -52,7 +65,7 @@ export class PortAllocator {
 		// ponytail: DB 记录已删除，端口自然释放。后续加审计日志时在此实现。
 	}
 
-	private async loadUsedPorts(): Promise<Set<number>> {
+	private async loadUsedPorts(dashboard: DashboardConfig | null): Promise<Set<number>> {
 		const mappings = await this.prisma.frpMapping.findMany({
 			where: { remotePort: { not: null } },
 			select: { remotePort: true },
@@ -62,7 +75,6 @@ export class PortAllocator {
 		);
 
 		// Dashboard 对账（如配置了）
-		const dashboard = getFrpConfig().dashboard;
 		if (dashboard) {
 			try {
 				const auth = Buffer.from(
