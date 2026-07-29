@@ -1,8 +1,16 @@
 import type { JobCreate } from "@vcpdeck/shared";
+import { LoaderCircle, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useJobAction } from "@/api/hooks/use-job-action";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusChip } from "@/components/status-chip";
@@ -14,6 +22,7 @@ export function ExecutePanel({ clientId }: { clientId: string }) {
 	const [executable, setExecutable] = useState("");
 	const [args, setArgs] = useState("");
 	const [script, setScript] = useState("");
+	const [dialogOpen, setDialogOpen] = useState(false);
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
@@ -26,6 +35,7 @@ export function ExecutePanel({ clientId }: { clientId: string }) {
 						args: args.trim() ? args.trim().split(/\s+/) : [],
 						script,
 					};
+		setDialogOpen(true);
 		try {
 			await action.run({ clientId, type: "exec", payload } satisfies JobCreate);
 		} catch {
@@ -35,7 +45,7 @@ export function ExecutePanel({ clientId }: { clientId: string }) {
 
 	const busy = action.phase === "creating" || action.phase === "waiting";
 	return (
-		<div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+		<>
 			<Card>
 				<CardHeader>
 					<CardTitle>远程执行</CardTitle>
@@ -104,68 +114,156 @@ export function ExecutePanel({ clientId }: { clientId: string }) {
 							</>
 						)}
 						<Button type="submit" disabled={busy}>
-							{busy
-								? "等待任务完成…"
-								: mode === "command"
-									? "执行命令"
-									: "执行脚本"}
+							{busy && (
+								<LoaderCircle aria-hidden className="size-4 animate-spin" />
+							)}
+							{busy ? "执行中…" : mode === "command" ? "执行命令" : "执行脚本"}
 						</Button>
 					</form>
 				</CardContent>
 			</Card>
-			<ResultSummary action={action} />
-		</div>
+			<Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+				<DialogContent
+					aria-describedby="execution-dialog-description"
+					className="max-h-[85vh] w-[min(94vw,48rem)] overflow-y-auto"
+				>
+					<div className="flex items-start justify-between gap-4">
+						<div>
+							<DialogTitle>执行任务</DialogTitle>
+							<DialogDescription id="execution-dialog-description">
+								远程命令的执行进度与最终结果
+							</DialogDescription>
+						</div>
+						<DialogClose asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								aria-label="关闭"
+							>
+								<X aria-hidden className="size-4" />
+							</Button>
+						</DialogClose>
+					</div>
+					<ExecutionDialogContent action={action} />
+				</DialogContent>
+			</Dialog>
+		</>
 	);
 }
 
-function ResultSummary({
+function ExecutionDialogContent({
 	action,
 }: {
 	action: ReturnType<typeof useJobAction>;
 }) {
+	if (action.phase === "creating" || action.phase === "waiting") {
+		return (
+			<div
+				role="status"
+				className="flex flex-col items-center gap-4 py-10 text-center"
+			>
+				<div className="rounded-full bg-primary/10 p-4 text-primary">
+					<LoaderCircle aria-hidden className="size-8 animate-spin" />
+				</div>
+				<div>
+					<p className="font-medium">
+						{action.phase === "creating"
+							? "正在创建任务…"
+							: "正在等待机器返回结果…"}
+					</p>
+					<p className="mt-1 text-xs text-muted-foreground">
+						关闭弹框不会取消远程任务
+					</p>
+				</div>
+			</div>
+		);
+	}
+
+	if (action.error !== undefined) {
+		return (
+			<p
+				role="alert"
+				className="mt-6 rounded-lg bg-destructive/10 p-4 text-destructive"
+			>
+				无法创建或等待任务
+			</p>
+		);
+	}
+
 	const job = action.job;
+	if (!job) return null;
+	const stdout =
+		typeof job.result?.stdout === "string" ? job.result.stdout : null;
+	const stderr =
+		typeof job.result?.stderr === "string" ? job.result.stderr : null;
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>执行结果</CardTitle>
-			</CardHeader>
-			<CardContent className="space-y-3 text-sm">
-				{!job && action.phase === "idle" && (
-					<p className="text-muted-foreground">
-						提交后将在此显示 Job 状态摘要。
-					</p>
+		<div className="mt-6 space-y-4 text-sm">
+			<div className="flex items-center justify-between gap-4 rounded-lg bg-secondary/50 p-4">
+				<div className="min-w-0">
+					<p className="text-xs text-muted-foreground">任务 ID</p>
+					<p className="truncate font-mono text-xs">{job.jobId}</p>
+				</div>
+				<StatusChip
+					label={job.status === "done" ? "已完成" : "执行失败"}
+					tone={job.status === "done" ? "success" : "danger"}
+				/>
+			</div>
+			<div className="grid gap-3 sm:grid-cols-2">
+				{typeof job.result?.exitCode === "number" && (
+					<ResultField label="退出码" value={String(job.result.exitCode)} />
 				)}
-				{action.error !== undefined && (
-					<p role="alert" className="text-red-400">
-						无法创建或等待任务
-					</p>
+				{job.startedAt && job.finishedAt && (
+					<ResultField
+						label="执行耗时"
+						value={formatDuration(job.startedAt, job.finishedAt)}
+					/>
 				)}
-				{job && (
-					<>
-						<div className="flex items-center justify-between">
-							<span className="font-mono text-xs">{job.jobId}</span>
-							<StatusChip
-								label={job.status}
-								tone={job.status === "done" ? "success" : "danger"}
-							/>
-						</div>
-						{typeof job.result?.exitCode === "number" && (
-							<p>退出码 {job.result.exitCode}</p>
-						)}
-						{job.errorCode && (
-							<p className="font-mono text-red-400">{job.errorCode}</p>
-						)}
-						{job.errorMessage && <p>{job.errorMessage}</p>}
-						{job.startedAt && job.finishedAt && (
-							<p>{formatDuration(job.startedAt, job.finishedAt)}</p>
-						)}
-						<p className="rounded-lg bg-secondary/60 p-3 text-muted-foreground">
-							当前 Server 未持久化过程输出
-						</p>
-					</>
-				)}
-			</CardContent>
-		</Card>
+			</div>
+			{job.errorCode && (
+				<p className="font-mono text-destructive">{job.errorCode}</p>
+			)}
+			{job.errorMessage && <p>{job.errorMessage}</p>}
+			{stdout && <ExecutionOutput label="标准输出" value={stdout} />}
+			{stderr && <ExecutionOutput label="标准错误" value={stderr} danger />}
+			{!stdout && !stderr && (
+				<p className="rounded-lg bg-secondary/60 p-3 text-muted-foreground">
+					命令未产生标准输出
+				</p>
+			)}
+		</div>
+	);
+}
+
+function ExecutionOutput({
+	label,
+	value,
+	danger = false,
+}: {
+	label: string;
+	value: string;
+	danger?: boolean;
+}) {
+	return (
+		<section>
+			<p
+				className={`mb-2 text-xs font-medium ${danger ? "text-destructive" : "text-muted-foreground"}`}
+			>
+				{label}
+			</p>
+			<pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-4 font-mono text-xs leading-relaxed">
+				{value}
+			</pre>
+		</section>
+	);
+}
+
+function ResultField({ label, value }: { label: string; value: string }) {
+	return (
+		<div className="rounded-lg border border-border/70 p-3">
+			<p className="text-xs text-muted-foreground">{label}</p>
+			<p className="mt-1 font-medium">{value}</p>
+		</div>
 	);
 }
 
