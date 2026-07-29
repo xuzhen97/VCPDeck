@@ -4,6 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module.js";
 import cookieParser from "cookie-parser";
 import { PrismaService } from "./prisma/prisma.service.js";
+import { FrpsInstancesService } from "./frp/frp-instances.service.js";
 import { randomUUID } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 
@@ -45,6 +46,10 @@ async function bootstrap() {
 
 	// seed 默认存储配置
 	const prisma = app.get(PrismaService);
+
+	// FRP 配置自动迁移（从环境变量到 DB）
+	await app.get(FrpsInstancesService).migrateFromEnvIfNeeded();
+
 	const storageCount = await prisma.storageBackendConfig.count();
 	if (storageCount === 0) {
 		await prisma.storageBackendConfig.create({
