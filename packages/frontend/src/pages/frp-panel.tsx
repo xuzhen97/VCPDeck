@@ -43,6 +43,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 	const [customDomain, setCustomDomain] = useState("");
 	const [created, setCreated] = useState<FrpMappingInfo>();
 	const [creating, setCreating] = useState(false);
+	const [createError, setCreateError] = useState("");
 	const [deleting, setDeleting] = useState<FrpMappingInfo>();
 	const [notice, setNotice] = useState("");
 
@@ -57,6 +58,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 	async function submit(event: FormEvent) {
 		event.preventDefault();
 		setCreating(true);
+		setCreateError("");
 		setCreated(undefined);
 		controller.current?.abort();
 		const next = new AbortController();
@@ -85,7 +87,10 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 			}
 			resource.reload();
 		} catch (error) {
-			if (!next.signal.aborted) throw error;
+			if (!next.signal.aborted) {
+				setCreating(false);
+				setCreateError(error instanceof Error ? error.message : "创建映射失败");
+			}
 		}
 	}
 
@@ -97,6 +102,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		setRemotePort("");
 		setCustomDomain("");
 		setCreated(undefined);
+		setCreateError("");
 		setFrpsInstanceId("");
 	}
 
@@ -341,6 +347,11 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 								onChange={(event) => setCustomDomain(event.target.value)}
 							/>
 						</div>
+					)}
+					{createError && (
+						<p role="alert" className="text-sm text-red-400">
+							{createError}
+						</p>
 					)}
 					<Button type="submit" disabled={creating}>
 						{creating ? "创建中…" : "创建映射"}

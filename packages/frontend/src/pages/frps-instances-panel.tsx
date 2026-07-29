@@ -241,7 +241,7 @@ function InstanceForm({ initial, onSubmit, saving, error }: {
 		<form className="space-y-4" onSubmit={submit}>
 			<Field label="实例名称" id="instance-name" value={name} setValue={setName} required />
 			<Field label="Server 地址" id="server-addr" value={serverAddr} setValue={setServerAddr} required />
-			<Field label="Server 端口" id="server-port" value={serverPort} setValue={setServerPort} type="number" />
+			<Field label="Server 端口" id="server-port" value={serverPort} setValue={setServerPort} type="number" required />
 			<SecretField label="Auth Token" id="auth-token" value={authToken} setValue={setAuthToken} visible={showToken} toggle={() => setShowToken((value) => !value)} />
 			<div className="space-y-2">
 				<Label htmlFor="dashboard-scheme">Dashboard Scheme</Label>
@@ -250,11 +250,11 @@ function InstanceForm({ initial, onSubmit, saving, error }: {
 				</select>
 			</div>
 			<Field label="Dashboard Host" id="dashboard-host" value={dashboardHost} setValue={setDashboardHost} />
-			<Field label="Dashboard 端口" id="dashboard-port" value={dashboardPort} setValue={setDashboardPort} type="number" />
+			<Field label="Dashboard 端口" id="dashboard-port" value={dashboardPort} setValue={setDashboardPort} type="number" required />
 			<Field label="Dashboard 用户名" id="dashboard-user" value={dashboardUser} setValue={setDashboardUser} />
 			<SecretField label="Dashboard 密码" id="dashboard-password" value={dashboardPassword} setValue={setDashboardPassword} visible={showPassword} toggle={() => setShowPassword((value) => !value)} />
-			<Field label="端口范围起始" id="range-start" value={portRangeStart} setValue={setPortRangeStart} type="number" />
-			<Field label="端口范围结束" id="range-end" value={portRangeEnd} setValue={setPortRangeEnd} type="number" />
+			<Field label="端口范围起始" id="range-start" value={portRangeStart} setValue={setPortRangeStart} type="number" required />
+			<Field label="端口范围结束" id="range-end" value={portRangeEnd} setValue={setPortRangeEnd} type="number" required />
 			{rangeError && <p role="alert" className="text-sm text-red-400">{rangeError}</p>}
 			{!initial && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={isDefault} onChange={(event) => setIsDefault(event.target.checked)} />设为默认</label>}
 			{error && <p role="alert" className="text-sm text-red-400">{error}</p>}
@@ -282,7 +282,31 @@ function ProbeStatus({ item, result }: { item: FrpsInstanceInfo; result?: ProbeR
 }
 
 function ProbeDetails({ result }: { result: ProbeResult }) {
-	return <div className="rounded-lg bg-secondary/40 p-3 text-sm"><p>TCP {result.tcpLatencyMs} ms</p>{result.serverInfo && <p>FRP {result.serverInfo.version}</p>}{result.proxies && <><p>TCP {result.proxies.byType.tcp} · HTTP {result.proxies.byType.http} · HTTPS {result.proxies.byType.https}</p><p>{result.proxies.usedPorts.join(", ") || "无占用端口"}</p></>}</div>;
+	return (
+		<div className="rounded-lg bg-secondary/40 p-3 text-sm">
+			<p>
+				TCP {result.tcpReachable ? "可达" : "不可达"} · {result.tcpLatencyMs} ms
+			</p>
+			<p>
+				Dashboard {result.dashboardReachable ? "可达" : "不可达"} · 认证
+				{result.authValid ? "有效" : "无效"}
+			</p>
+			{result.serverInfo && <p>FRP {result.serverInfo.version}</p>}
+			{result.proxies && (
+				<>
+					<p>Proxy 共 {result.proxies.total} 个</p>
+					<p>
+						TCP {result.proxies.byType.tcp} · HTTP {result.proxies.byType.http} · HTTPS{" "}
+						{result.proxies.byType.https}
+					</p>
+					<p>
+						已占用端口：
+						{result.proxies.usedPorts.join(", ") || "无"}
+					</p>
+				</>
+			)}
+		</div>
+	);
 }
 
 function message(error: unknown, fallback: string) {

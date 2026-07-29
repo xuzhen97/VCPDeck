@@ -199,6 +199,24 @@ describe("FrpPanel", () => {
 		);
 	});
 
+	it("allows retrying after mapping creation fails", async () => {
+		const create = vi.fn().mockRejectedValue(new Error("创建失败"));
+		renderPanel({
+			list: vi.fn().mockResolvedValue({
+				data: [], total: 0, page: 1, pageSize: 20, totalPages: 0,
+			}),
+			create,
+			get: vi.fn(),
+			delete: vi.fn(),
+		});
+		await userEvent.click(await screen.findByRole("button", { name: "新增映射" }));
+		await userEvent.type(screen.getByLabelText("映射名称"), "local-web");
+		await userEvent.type(screen.getByLabelText("本地端口"), "3000");
+		await userEvent.click(screen.getByRole("button", { name: "创建映射" }));
+		expect(await screen.findByRole("alert")).toHaveTextContent("创建失败");
+		expect(screen.getByRole("button", { name: "创建映射" })).toBeEnabled();
+	});
+
 	it("falls back to the server default when instances cannot load", async () => {
 		const create = vi.fn().mockResolvedValue(mapping("active"));
 		renderPanel({

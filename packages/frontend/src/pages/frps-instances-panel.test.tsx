@@ -128,6 +128,19 @@ describe("FrpsInstancesPanel", () => {
 		);
 	});
 
+	it("requires every numeric configuration field", async () => {
+		const create = vi.fn().mockResolvedValue(instance);
+		renderPanel(api({ create }));
+		await userEvent.click(await screen.findByRole("button", { name: "新增实例" }));
+		const dialog = screen.getByRole("dialog", { name: "新增实例" });
+		await userEvent.type(within(dialog).getByLabelText("实例名称"), "备用 frps");
+		await userEvent.type(within(dialog).getByLabelText("Server 地址"), "5.6.7.8");
+		await userEvent.clear(within(dialog).getByLabelText("Server 端口"));
+		await userEvent.click(within(dialog).getByRole("button", { name: "保存实例" }));
+		expect(create).not.toHaveBeenCalled();
+		expect(within(dialog).getByLabelText("Server 端口")).toBeInvalid();
+	});
+
 	it("loads details and sends null when Dashboard is disabled", async () => {
 		const get = vi.fn().mockResolvedValue(instance);
 		const update = vi.fn().mockResolvedValue(instance);
@@ -162,7 +175,14 @@ describe("FrpsInstancesPanel", () => {
 					usedPorts: [20001, 20002],
 				},
 			} satisfies ProbeResult,
-			expected: ["TCP 12 ms", "FRP 0.61.0", "TCP 3 · HTTP 1 · HTTPS 1", "20001, 20002"],
+			expected: [
+			"TCP 可达 · 12 ms",
+			"Dashboard 可达 · 认证有效",
+			"FRP 0.61.0",
+			"Proxy 共 5 个",
+			"TCP 3 · HTTP 1 · HTTPS 1",
+			"已占用端口：20001, 20002",
+		],
 		},
 		{
 			name: "without Dashboard",
