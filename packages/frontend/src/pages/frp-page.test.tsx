@@ -10,6 +10,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
 import { AuthProvider } from "@/auth-context";
+import { FrpPage } from "./frp-page";
 import { FrpPanel } from "./frp-panel";
 
 const identity: IdentityInfo = {
@@ -80,6 +81,56 @@ function renderPanel(frp: Record<string, unknown>) {
 		</MemoryRouter>,
 	);
 }
+
+describe("FrpPage", () => {
+	it("switches between mapping and instance panels", async () => {
+		const client = {
+			auth: { me: async () => identity },
+			frp: {
+				list: vi.fn().mockResolvedValue({
+					data: [],
+					total: 0,
+					page: 1,
+					pageSize: 20,
+					totalPages: 0,
+				}),
+				get: vi.fn(),
+				create: vi.fn(),
+				delete: vi.fn(),
+				instances: {
+					list: vi.fn().mockResolvedValue({
+						data: [],
+						total: 0,
+						page: 1,
+						pageSize: 20,
+						totalPages: 0,
+					}),
+					get: vi.fn(),
+					create: vi.fn(),
+					update: vi.fn(),
+					delete: vi.fn(),
+					probe: vi.fn(),
+					setDefault: vi.fn(),
+				},
+			},
+		} as unknown as VcpDeckClient;
+		render(
+			<MemoryRouter>
+				<SdkProvider client={client}>
+					<AuthProvider>
+						<FrpPage />
+					</AuthProvider>
+				</SdkProvider>
+			</MemoryRouter>,
+		);
+
+		expect(await screen.findByText("全部映射")).toBeVisible();
+		await userEvent.click(screen.getByRole("button", { name: "实例配置" }));
+		expect(await screen.findByText("frps 实例")).toBeVisible();
+		await userEvent.click(screen.getByRole("button", { name: "映射" }));
+		expect(await screen.findByText("全部映射")).toBeVisible();
+	});
+});
 
 describe("FrpPanel", () => {
 	it("polls an inactive mapping until active", async () => {
@@ -170,9 +221,7 @@ describe("FrpPanel", () => {
 			await screen.findByRole("button", { name: "新增映射" }),
 		);
 		expect(
-			await screen.findByText(
-				"无法加载 frps 实例，将使用服务端默认实例",
-			),
+			await screen.findByText("无法加载 frps 实例，将使用服务端默认实例"),
 		).toBeVisible();
 		await userEvent.type(screen.getByLabelText("映射名称"), "local-web");
 		await userEvent.type(screen.getByLabelText("本地端口"), "3000");
