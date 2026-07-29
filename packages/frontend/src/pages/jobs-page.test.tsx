@@ -41,11 +41,21 @@ function job(overrides: Partial<JobInfo>): JobInfo {
 it("shows the global jobs table and filters status through the paginated API", async () => {
 	const list = vi.fn().mockResolvedValue({
 		data: [
-			job({ jobId: "exec-running", clientId: "machine-a" }),
-			job({ jobId: "file-running", clientId: "machine-b", type: "file.list" }),
+			job({
+				jobId: "exec-running",
+				clientId: "machine-a-id",
+				clientName: "构建服务器",
+			}),
+			job({
+				jobId: "file-running",
+				clientId: "machine-b-id",
+				clientName: "文件服务器",
+				type: "file.list",
+			}),
 			job({
 				jobId: "exec-done",
-				clientId: "machine-a",
+				clientId: "machine-a-id",
+				clientName: "构建服务器",
 				status: "done" as JobInfo["status"],
 			}),
 		],
@@ -86,10 +96,18 @@ it("shows the global jobs table and filters status through the paginated API", a
 	expect(
 		within(table).getByRole("columnheader", { name: "机器" }),
 	).toBeVisible();
-	expect(within(table).getAllByText("machine-a")).toHaveLength(2);
+	expect(within(table).getAllByText("构建服务器")).toHaveLength(2);
+	expect(within(table).getByText("文件服务器")).toBeVisible();
+	expect(within(table).queryByText("machine-a-id")).not.toBeInTheDocument();
 	expect(screen.getAllByRole("button", { name: "取消任务" })).toHaveLength(1);
 	expect(screen.getAllByText("命令：node --version")).toHaveLength(2);
 	expect(screen.queryByText(/hidden/)).not.toBeInTheDocument();
+
+	await userEvent.click(within(table).getAllByText("构建服务器")[0]!);
+	expect(screen.getByRole("dialog", { name: "任务详情" })).toHaveTextContent(
+		"构建服务器",
+	);
+	await userEvent.click(screen.getByRole("button", { name: "关闭" }));
 
 	await userEvent.click(screen.getByRole("button", { name: "下一页" }));
 	await waitFor(() =>

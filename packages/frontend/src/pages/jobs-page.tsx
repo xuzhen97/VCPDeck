@@ -275,6 +275,7 @@ function JobDetails({ job }: { job: JobInfo }) {
 			</div>
 			<div className="grid gap-4 sm:grid-cols-2">
 				<Field label="任务 ID" value={job.jobId} wide />
+				<Field label="机器" value={job.clientName ?? job.clientId} wide />
 				<Field label="任务摘要" value={describePayload(job)} wide />
 				<Field label="发起人" value={job.createdByName ?? "未知身份"} />
 				<Field label="来源" value={sourceLabel(job.createdVia)} />
