@@ -343,9 +343,7 @@ function ExecutionContent({ job }: { job: JobInfo }) {
 	const executable =
 		typeof payload.executable === "string" ? payload.executable : "未知解释器";
 	const args = Array.isArray(payload.args)
-		? payload.args.filter(
-				(value): value is string => typeof value === "string",
-			)
+		? payload.args.filter((value): value is string => typeof value === "string")
 		: [];
 	const lineCount = payload.script.split(/\r?\n/).length;
 
