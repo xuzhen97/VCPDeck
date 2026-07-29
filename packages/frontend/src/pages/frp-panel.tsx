@@ -1,4 +1,4 @@
-import type { FrpMappingInfo } from "@vcpdeck/shared";
+import type { FrpMappingInfo, FrpsInstanceInfo } from "@vcpdeck/shared";
 import {
 	useCallback,
 	useEffect,
@@ -28,7 +28,12 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 	);
 	const resource = useResource(load);
 	const controller = useRef<AbortController>();
+	const instanceController = useRef<AbortController>();
 	const [drawerOpen, setDrawerOpen] = useState(false);
+	const [instances, setInstances] = useState<FrpsInstanceInfo[]>([]);
+	const [instancesLoading, setInstancesLoading] = useState(false);
+	const [instancesError, setInstancesError] = useState(false);
+	const [frpsInstanceId, setFrpsInstanceId] = useState("");
 	const [name, setName] = useState("");
 	const [targetClientId, setTargetClientId] = useState(clientId ?? "");
 	const [proxyType, setProxyType] = useState<"tcp" | "http" | "https">("tcp");
@@ -41,7 +46,13 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 	const [deleting, setDeleting] = useState<FrpMappingInfo>();
 	const [notice, setNotice] = useState("");
 
-	useEffect(() => () => controller.current?.abort(), []);
+	useEffect(
+		() => () => {
+			controller.current?.abort();
+			instanceController.current?.abort();
+		},
+		[],
+	);
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
@@ -50,27 +61,32 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		controller.current?.abort();
 		const next = new AbortController();
 		controller.current = next;
-		const mapping = await sdk.frp.create(
-			{
-				clientId: targetClientId,
-				name,
-				proxyType,
-				localIp,
-				localPort: Number(localPort),
-				...(remotePort ? { remotePort: Number(remotePort) } : {}),
-				...(proxyType !== "tcp" && customDomain ? { customDomain } : {}),
-			},
-			next.signal,
-		);
-		setCreated(mapping);
-		const terminal = await waitForMapping(mapping, next.signal, sdk.frp.get);
-		setCreated(terminal);
-		setCreating(false);
-		if (terminal.status === "active" || terminal.status === "error") {
-			setDrawerOpen(false);
-			resetForm();
+		try {
+			const mapping = await sdk.frp.create(
+				{
+					clientId: targetClientId,
+					name,
+					proxyType,
+					localIp,
+					localPort: Number(localPort),
+					...(frpsInstanceId ? { frpsInstanceId } : {}),
+					...(remotePort ? { remotePort: Number(remotePort) } : {}),
+					...(proxyType !== "tcp" && customDomain ? { customDomain } : {}),
+				},
+				next.signal,
+			);
+			setCreated(mapping);
+			const terminal = await waitForMapping(mapping, next.signal, sdk.frp.get);
+			setCreated(terminal);
+			setCreating(false);
+			if (terminal.status === "active" || terminal.status === "error") {
+				setDrawerOpen(false);
+				resetForm();
+			}
+			resource.reload();
+		} catch (error) {
+			if (!next.signal.aborted) throw error;
 		}
-		resource.reload();
 	}
 
 	function resetForm() {
@@ -81,13 +97,34 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		setRemotePort("");
 		setCustomDomain("");
 		setCreated(undefined);
+		setFrpsInstanceId("");
 	}
 
-	function openDrawer() {
+	async function openDrawer() {
 		setTargetClientId(clientId ?? "");
 		resetForm();
 		setCreating(false);
 		setDrawerOpen(true);
+		setInstances([]);
+		setInstancesError(false);
+		setInstancesLoading(true);
+		instanceController.current?.abort();
+		const next = new AbortController();
+		instanceController.current = next;
+		try {
+			const result = await sdk.frp.instances.list(
+				{ page: 1, pageSize: 100 },
+				next.signal,
+			);
+			setInstances(result.data);
+			setFrpsInstanceId(
+				result.data.find((instance) => instance.isDefault)?.id ?? "",
+			);
+		} catch {
+			if (!next.signal.aborted) setInstancesError(true);
+		} finally {
+			if (!next.signal.aborted) setInstancesLoading(false);
+		}
 	}
 
 	async function remove() {
@@ -215,6 +252,40 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 						/>
 					</div>
 					<div className="space-y-2">
+						<Label htmlFor="frps-instance">frps 实例</Label>
+						<select
+							id="frps-instance"
+							className="h-11 w-full rounded-lg border border-input bg-background/60 px-3"
+							value={frpsInstanceId}
+							onChange={(event) => setFrpsInstanceId(event.target.value)}
+							disabled={instancesLoading}
+						>
+							<option value="">使用服务端默认实例</option>
+							{instances.map((instance) => (
+								<option key={instance.id} value={instance.id}>
+									{instance.name}
+									{instance.isDefault ? "（默认）" : ""}
+								</option>
+							))}
+						</select>
+						{instancesLoading && (
+							<p className="text-sm text-muted-foreground">正在加载实例…</p>
+						)}
+						{instancesError && (
+							<p role="alert" className="text-sm text-amber-400">
+								无法加载 frps 实例，将使用服务端默认实例
+							</p>
+						)}
+						{instances
+							.filter((instance) => instance.id === frpsInstanceId)
+							.map((instance) => (
+								<p key={instance.id} className="text-sm text-muted-foreground">
+									{instance.serverAddr}:{instance.serverPort} · 端口范围{" "}
+									{instance.portRangeStart}–{instance.portRangeEnd}
+								</p>
+							))}
+					</div>
+					<div className="space-y-2">
 						<Label htmlFor="proxy-type">代理类型</Label>
 						<select
 							id="proxy-type"
@@ -255,6 +326,8 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 						<Input
 							id="remote-port"
 							type="number"
+							min="1"
+							max="65535"
 							value={remotePort}
 							onChange={(event) => setRemotePort(event.target.value)}
 						/>
