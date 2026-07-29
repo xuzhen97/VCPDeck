@@ -494,4 +494,75 @@ export interface FrpMappingCreateRequest {
 	localPort: number;
 	remotePort?: number;
 	customDomain?: string;
+	frpsInstanceId?: string;
+}
+
+// ── FRP 实例配置 ──
+
+/** DB 中存储的 frps 实例信息（REST 返回） */
+export interface FrpsInstanceInfo {
+	id: string;
+	name: string;
+	serverAddr: string;
+	serverPort: number;
+	authToken: string;
+	dashboardScheme: string;
+	dashboardHost: string | null;
+	dashboardPort: number;
+	dashboardUser: string;
+	dashboardPassword: string;
+	portRangeStart: number;
+	portRangeEnd: number;
+	isDefault: boolean;
+	createdAt: string;
+	updatedAt: string;
+}
+
+/** 创建 frps 实例请求体 */
+export interface FrpsInstanceCreateRequest {
+	name: string;
+	serverAddr: string;
+	serverPort?: number;
+	authToken?: string;
+	dashboardScheme?: "http" | "https";
+	dashboardHost?: string;
+	dashboardPort?: number;
+	dashboardUser?: string;
+	dashboardPassword?: string;
+	portRangeStart?: number;
+	portRangeEnd?: number;
+	isDefault?: boolean;
+}
+
+/** 更新 frps 实例请求体（所有字段可选） */
+export interface FrpsInstanceUpdateRequest {
+	name?: string;
+	serverAddr?: string;
+	serverPort?: number;
+	authToken?: string;
+	dashboardScheme?: "http" | "https";
+	dashboardHost?: string | null;
+	dashboardPort?: number;
+	dashboardUser?: string;
+	dashboardPassword?: string;
+	portRangeStart?: number;
+	portRangeEnd?: number;
+	isDefault?: boolean;
+}
+
+/** 健康检查返回体 */
+export interface ProbeResult {
+	ok: boolean;
+	tcpReachable: boolean;
+	tcpLatencyMs: number;
+	dashboardReachable: boolean;
+	authValid: boolean;
+	serverInfo?: { version: string };
+	error?: string;
+	proxies: {
+		total: number;
+		byType: { tcp: number; http: number; https: number };
+		list: { name: string; proxyType: string; remotePort: number | null }[];
+		usedPorts: number[];
+	} | null;
 }

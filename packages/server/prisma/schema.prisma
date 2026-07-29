@@ -88,7 +88,9 @@ model AuthSession {
 model FrpMapping {
   id           String   @id
   clientId     String
-  client       Client   @relation(fields: [clientId], references: [id])
+  client       Client       @relation(fields: [clientId], references: [id])
+  frpsInstanceId String?
+  frpsInstance   FrpsInstance? @relation(fields: [frpsInstanceId], references: [id])
   name         String
   proxyType    String   @default("tcp")
   localIp      String   @default("127.0.0.1")
@@ -99,6 +101,26 @@ model FrpMapping {
   publicUrl    String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+model FrpsInstance {
+  id                String   @id                          // "frps_" + uuid8
+  name              String                                // 实例名称
+  serverAddr        String                                // frps 连接地址
+  serverPort        Int      @default(7000)
+  authToken         String   @default("")
+  dashboardScheme   String   @default("http")             // "http" | "https"
+  dashboardHost     String?
+  dashboardPort     Int      @default(7500)
+  dashboardUser     String   @default("admin")
+  dashboardPassword String   @default("admin")
+  portRangeStart    Int      @default(20000)
+  portRangeEnd      Int      @default(21000)
+  isDefault         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  mappings          FrpMapping[]
 }
 
 model StorageBackendConfig {
