@@ -167,13 +167,13 @@ export class FrpsInstancesService {
 				id: `frps_${randomUUID().slice(0, 8)}`,
 				name: "默认（从环境变量迁移）",
 				serverAddr: process.env.FRP_PUBLIC_HOST || "127.0.0.1",
-				serverPort: parseInt(process.env.FRPS_BIND_PORT || "7000", 10),
-				authToken: process.env.FRPS_TOKEN || "",
+				serverPort: parseInt(process.env.FRPS_BIND_PORT || "17000", 10),
+				authToken: process.env.FRPS_TOKEN || "test-frp-token",
 				dashboardScheme:
 					(process.env.FRP_DASHBOARD_SCHEME as "http" | "https") || "http",
-				dashboardHost: process.env.FRP_DASHBOARD_HOST || null,
+				dashboardHost: process.env.FRP_DASHBOARD_HOST || "127.0.0.1",
 				dashboardPort: parseInt(
-					process.env.FRP_DASHBOARD_PORT || "7500",
+					process.env.FRP_DASHBOARD_PORT || "17500",
 					10,
 				),
 				dashboardUser: process.env.FRP_DASHBOARD_USER || "admin",

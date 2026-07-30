@@ -121,11 +121,11 @@ describe("FrpsInstancesService", () => {
 				id: "frps_mig",
 				name: "默认（从环境变量迁移）",
 				serverAddr: "127.0.0.1",
-				serverPort: 7000,
-				authToken: "",
+				serverPort: 17000,
+				authToken: "test-frp-token",
 				dashboardScheme: "http",
-				dashboardHost: null,
-				dashboardPort: 7500,
+				dashboardHost: "127.0.0.1",
+				dashboardPort: 17500,
 				dashboardUser: "admin",
 				dashboardPassword: "admin",
 				portRangeStart: 20000,
@@ -137,6 +137,9 @@ describe("FrpsInstancesService", () => {
 			const result = await service.migrateFromEnvIfNeeded();
 			expect(result).not.toBeNull();
 			expect(result!.name).toBe("默认（从环境变量迁移）");
+			expect(result!.serverPort).toBe(17000);
+			expect(result!.authToken).toBe("test-frp-token");
+			expect(result!.dashboardHost).toBe("127.0.0.1");
 			expect(prisma.frpsInstance.create).toHaveBeenCalled();
 		});
 	});
@@ -163,9 +166,10 @@ describe("FrpsInstancesService", () => {
 			});
 			const result = await service.setDefault("frps_abc");
 			expect(result.isDefault).toBe(true);
-			expect(prisma.frpsInstance.updateMany).toHaveBeenCalledWith(
-				{ where: { isDefault: true }, data: { isDefault: false } },
-			);
+			expect(prisma.frpsInstance.updateMany).toHaveBeenCalledWith({
+				where: { isDefault: true },
+				data: { isDefault: false },
+			});
 		});
 	});
 
