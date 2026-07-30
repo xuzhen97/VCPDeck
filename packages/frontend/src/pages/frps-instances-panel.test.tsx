@@ -77,7 +77,7 @@ function api(overrides: Record<string, unknown> = {}) {
 }
 
 describe("FrpsInstancesPanel", () => {
-	it("shows instances to a non-admin and reloads after setting default", async () => {
+	it("shows instances in a management table and reloads after setting default", async () => {
 		const list = vi
 			.fn()
 			.mockResolvedValueOnce({
@@ -88,32 +88,50 @@ describe("FrpsInstancesPanel", () => {
 		const setDefault = vi.fn().mockResolvedValue(instance);
 		renderPanel(api({ list, setDefault }));
 
-		expect(await screen.findByText("生产 frps")).toBeVisible();
-		expect(screen.getByText("1.2.3.4:7000")).toBeVisible();
+		expect((await screen.findAllByText("生产 frps"))[0]).toBeVisible();
+		expect(screen.getAllByText("1.2.3.4:7000")[0]).toBeVisible();
+		expect(screen.getAllByText("20000–21000")[0]).toBeVisible();
+		expect(screen.getAllByText("1,001 个端口")[0]).toBeVisible();
+		expect(screen.getAllByText("HTTP")[0]).toBeVisible();
+		expect(screen.queryByRole("button", { name: "上一页" })).toBeNull();
+		await userEvent.click(
+			(await screen.findAllByRole("button", { name: "更多操作" }))[0]!,
+		);
 		await userEvent.click(screen.getByRole("button", { name: "设为默认" }));
 		expect(setDefault).toHaveBeenCalledWith("frps_1");
 		await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
-		expect(await screen.findByText("默认")).toBeVisible();
+		expect((await screen.findAllByText("默认"))[0]).toBeVisible();
 	});
 
-	it("creates instances with numeric fields and masked secrets", async () => {
+	it("creates instances with numeric fields and masked secrets in a wide drawer", async () => {
 		const create = vi.fn().mockResolvedValue(instance);
 		renderPanel(api({ create }));
-		await screen.findByText("生产 frps");
+		await screen.findAllByText("生产 frps");
 		await userEvent.click(screen.getByRole("button", { name: "新增实例" }));
 		const dialog = screen.getByRole("dialog", { name: "新增实例" });
+		expect(dialog).toHaveClass("w-[720px]");
 		const token = within(dialog).getByLabelText("Auth Token");
 		const password = within(dialog).getByLabelText("Dashboard 密码");
 		expect(token).toHaveAttribute("type", "password");
 		expect(password).toHaveAttribute("type", "password");
-		const revealButtons = within(dialog).getAllByRole("button", { name: "显示" });
+		const revealButtons = within(dialog).getAllByRole("button", {
+			name: "显示",
+		});
 		await userEvent.click(revealButtons[0]!);
 		await userEvent.click(revealButtons[1]!);
 		expect(token).toHaveAttribute("type", "text");
 		expect(password).toHaveAttribute("type", "text");
-		await userEvent.type(within(dialog).getByLabelText("实例名称"), "备用 frps");
-		await userEvent.type(within(dialog).getByLabelText("Server 地址"), "5.6.7.8");
-		await userEvent.click(within(dialog).getByRole("button", { name: "保存实例" }));
+		await userEvent.type(
+			within(dialog).getByLabelText("实例名称"),
+			"备用 frps",
+		);
+		await userEvent.type(
+			within(dialog).getByLabelText("Server 地址"),
+			"5.6.7.8",
+		);
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "保存实例" }),
+		);
 		await waitFor(() =>
 			expect(create).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -131,12 +149,22 @@ describe("FrpsInstancesPanel", () => {
 	it("requires every numeric configuration field", async () => {
 		const create = vi.fn().mockResolvedValue(instance);
 		renderPanel(api({ create }));
-		await userEvent.click(await screen.findByRole("button", { name: "新增实例" }));
+		await userEvent.click(
+			await screen.findByRole("button", { name: "新增实例" }),
+		);
 		const dialog = screen.getByRole("dialog", { name: "新增实例" });
-		await userEvent.type(within(dialog).getByLabelText("实例名称"), "备用 frps");
-		await userEvent.type(within(dialog).getByLabelText("Server 地址"), "5.6.7.8");
+		await userEvent.type(
+			within(dialog).getByLabelText("实例名称"),
+			"备用 frps",
+		);
+		await userEvent.type(
+			within(dialog).getByLabelText("Server 地址"),
+			"5.6.7.8",
+		);
 		await userEvent.clear(within(dialog).getByLabelText("Server 端口"));
-		await userEvent.click(within(dialog).getByRole("button", { name: "保存实例" }));
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "保存实例" }),
+		);
 		expect(create).not.toHaveBeenCalled();
 		expect(within(dialog).getByLabelText("Server 端口")).toBeInvalid();
 	});
@@ -145,11 +173,17 @@ describe("FrpsInstancesPanel", () => {
 		const get = vi.fn().mockResolvedValue(instance);
 		const update = vi.fn().mockResolvedValue(instance);
 		renderPanel(api({ get, update }));
-		await userEvent.click(await screen.findByRole("button", { name: "编辑" }));
+		await userEvent.click(
+			(await screen.findAllByRole("button", { name: "更多操作" }))[0]!,
+		);
+		await userEvent.click(screen.getByRole("button", { name: "编辑配置" }));
 		expect(get).toHaveBeenCalledWith("frps_1");
 		const dialog = await screen.findByRole("dialog", { name: "编辑实例" });
+		expect(dialog).toHaveClass("w-[720px]");
 		await userEvent.clear(within(dialog).getByLabelText("Dashboard Host"));
-		await userEvent.click(within(dialog).getByRole("button", { name: "保存实例" }));
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "保存实例" }),
+		);
 		await waitFor(() =>
 			expect(update).toHaveBeenCalledWith(
 				"frps_1",
@@ -176,13 +210,13 @@ describe("FrpsInstancesPanel", () => {
 				},
 			} satisfies ProbeResult,
 			expected: [
-			"TCP 可达 · 12 ms",
-			"Dashboard 可达 · 认证有效",
-			"FRP 0.61.0",
-			"Proxy 共 5 个",
-			"TCP 3 · HTTP 1 · HTTPS 1",
-			"已占用端口：20001, 20002",
-		],
+				"TCP 可达 · 12 ms",
+				"Dashboard 可达 · 认证有效",
+				"FRP 0.61.0",
+				"Proxy 共 5 个",
+				"TCP 3 · HTTP 1 · HTTPS 1",
+				"已占用端口：20001, 20002",
+			],
 		},
 		{
 			name: "without Dashboard",
@@ -209,20 +243,35 @@ describe("FrpsInstancesPanel", () => {
 			} satisfies ProbeResult,
 			expected: ["Dashboard 认证无效"],
 		},
-	])("renders probe result $name", async ({ probe, expected, instance: item = instance }) => {
+	])("renders probe result $name", async ({
+		probe,
+		expected,
+		instance: item = instance,
+	}) => {
 		renderPanel(
 			api({
 				list: vi.fn().mockResolvedValue({ ...listResult, data: [item] }),
 				probe: vi.fn().mockResolvedValue(probe),
 			}),
 		);
-		await userEvent.click(await screen.findByRole("button", { name: "健康检查" }));
-		for (const text of expected) expect(await screen.findByText(text)).toBeVisible();
+		await userEvent.click(
+			(await screen.findAllByRole("button", { name: "更多操作" }))[0]!,
+		);
+		await userEvent.click(screen.getByRole("button", { name: "健康检查" }));
+		for (const text of expected)
+			expect((await screen.findAllByText(text))[0]).toBeVisible();
 	});
 
 	it("keeps the delete dialog open when the server rejects deletion", async () => {
-		renderPanel(api({ delete: vi.fn().mockRejectedValue(new Error("仍有关联的 2 条映射")) }));
-		await userEvent.click(await screen.findByRole("button", { name: "删除" }));
+		renderPanel(
+			api({
+				delete: vi.fn().mockRejectedValue(new Error("仍有关联的 2 条映射")),
+			}),
+		);
+		await userEvent.click(
+			(await screen.findAllByRole("button", { name: "更多操作" }))[0]!,
+		);
+		await userEvent.click(screen.getByRole("button", { name: "删除实例" }));
 		await userEvent.type(screen.getByLabelText("输入目标以确认"), "生产 frps");
 		await userEvent.click(screen.getByRole("button", { name: "确认删除" }));
 		expect(await screen.findByText("仍有关联的 2 条映射")).toBeVisible();
