@@ -1,5 +1,6 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import type {
+	ClientInfo,
 	FrpMappingInfo,
 	FrpsInstanceInfo,
 	IdentityInfo,
@@ -52,12 +53,32 @@ const frpsInstance = (): FrpsInstanceInfo => ({
 	createdAt: "2026-07-29T00:00:00.000Z",
 	updatedAt: "2026-07-29T00:00:00.000Z",
 });
+const clientInfo = (): ClientInfo => ({
+	clientId: "client-1",
+	hostname: "DESKTOP-DEV",
+	os: "win32",
+	cpuModel: "cpu",
+	totalMemMB: 1,
+	totalDiskMB: 1,
+	clientVersion: "test",
+	capabilities: [],
+	online: true,
+	cpuPercent: null,
+	memPercent: null,
+	diskPercent: null,
+	lastHeartbeatAt: null,
+});
 
 afterEach(() => vi.useRealTimers());
 
-function renderPanel(frp: Record<string, unknown>) {
+function renderPanel(overrides: Record<string, unknown>) {
+	const { clients, ...frp } = overrides;
 	const client = {
 		auth: { me: async () => identity },
+		clients:
+			(clients as Record<string, unknown> | undefined) ?? {
+				list: vi.fn().mockResolvedValue([clientInfo()]),
+			},
 		frp: {
 			instances: {
 				list: vi.fn().mockResolvedValue({
@@ -86,6 +107,9 @@ describe("FrpPage", () => {
 	it("switches between mapping and instance panels", async () => {
 		const client = {
 			auth: { me: async () => identity },
+			clients: {
+				list: vi.fn().mockResolvedValue([clientInfo()]),
+			},
 			frp: {
 				list: vi.fn().mockResolvedValue({
 					data: [],
@@ -178,6 +202,73 @@ describe("FrpPanel", () => {
 		expect(screen.getByRole("dialog", { name: "创建映射" })).toHaveClass(
 			"w-[720px]",
 		);
+	});
+
+	it("shows mapping rows with Client hostname and endpoints", async () => {
+		renderPanel({
+			list: vi.fn().mockResolvedValue({
+				data: [mapping("active")],
+				total: 1,
+				page: 1,
+				pageSize: 20,
+				totalPages: 1,
+			}),
+			create: vi.fn(),
+			get: vi.fn(),
+			delete: vi.fn(),
+		});
+
+		expect((await screen.findAllByText("local-web"))[0]).toBeVisible();
+		expect(screen.getAllByText("DESKTOP-DEV")[0]).toBeVisible();
+		expect(screen.getAllByText("client-1…")[0]).toBeVisible();
+		expect(screen.getAllByText("TCP")[0]).toBeVisible();
+		expect(screen.getAllByText("运行中")[0]).toBeVisible();
+		expect(screen.getAllByText("127.0.0.1:3000")[0]).toBeVisible();
+		expect(screen.getAllByText("example.com:20080")[0]).toBeVisible();
+		expect(screen.queryByRole("button", { name: "上一页" })).toBeNull();
+	});
+
+	it("falls back when Client names cannot load", async () => {
+		renderPanel({
+			list: vi.fn().mockResolvedValue({
+				data: [mapping("active")],
+				total: 1,
+				page: 1,
+				pageSize: 20,
+				totalPages: 1,
+			}),
+			create: vi.fn(),
+			get: vi.fn(),
+			delete: vi.fn(),
+			clients: { list: vi.fn().mockRejectedValue(new Error("offline")) },
+		});
+
+		expect((await screen.findAllByText("未知 Client"))[0]).toBeVisible();
+		expect(screen.getAllByText("client-1…")[0]).toBeVisible();
+	});
+
+	it("copies the public URL from the row menu", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.assign(navigator, { clipboard: { writeText } });
+		renderPanel({
+			list: vi.fn().mockResolvedValue({
+				data: [mapping("active")],
+				total: 1,
+				page: 1,
+				pageSize: 20,
+				totalPages: 1,
+			}),
+			create: vi.fn(),
+			get: vi.fn(),
+			delete: vi.fn(),
+		});
+
+		await userEvent.click(
+			(await screen.findAllByRole("button", { name: "更多操作" }))[0]!,
+		);
+		await userEvent.click(screen.getByRole("button", { name: "复制公网地址" }));
+		expect(writeText).toHaveBeenCalledWith("example.com:20080");
+		expect((await screen.findAllByText("已复制"))[0]).toBeVisible();
 	});
 
 	it("selects the default frps instance when creating a mapping", async () => {
@@ -291,8 +382,9 @@ describe("FrpPanel", () => {
 			delete: remove,
 		});
 		await userEvent.click(
-			await screen.findByRole("button", { name: "删除映射" }),
+			(await screen.findAllByRole("button", { name: "更多操作" }))[0]!,
 		);
+		await userEvent.click(screen.getByRole("button", { name: "删除映射" }));
 		const confirm = screen.getByRole("button", { name: "确认删除" });
 		expect(confirm).toBeDisabled();
 		await userEvent.type(screen.getByLabelText("输入目标以确认"), "local-web");
