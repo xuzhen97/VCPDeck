@@ -14,16 +14,18 @@ export function FrpPage() {
 			/>
 			<nav
 				aria-label="FRP 导航"
-				className="flex gap-2 border-b border-border/70 pb-3"
+				className="inline-flex rounded-2xl border border-border/70 bg-card/50 p-1 shadow-sm backdrop-blur-xl"
 			>
 				<Button
 					variant={section === "mappings" ? "secondary" : "ghost"}
+					aria-current={section === "mappings" ? "page" : undefined}
 					onClick={() => setSection("mappings")}
 				>
 					映射
 				</Button>
 				<Button
 					variant={section === "instances" ? "secondary" : "ghost"}
+					aria-current={section === "instances" ? "page" : undefined}
 					onClick={() => setSection("instances")}
 				>
 					实例配置

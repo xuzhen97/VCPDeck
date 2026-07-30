@@ -202,6 +202,9 @@ describe("FrpPanel", () => {
 		expect(screen.getByRole("dialog", { name: "创建映射" })).toHaveClass(
 			"w-[720px]",
 		);
+		expect(screen.getByText("目标")).toBeVisible();
+		expect(screen.getByText("本地服务")).toBeVisible();
+		expect(screen.getByText("公网入口")).toBeVisible();
 	});
 
 	it("shows mapping rows with Client hostname and endpoints", async () => {

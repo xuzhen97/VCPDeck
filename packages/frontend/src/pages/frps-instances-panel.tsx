@@ -5,7 +5,7 @@ import type {
 	ProbeResult,
 } from "@vcpdeck/shared";
 import { Plus } from "lucide-react";
-import { useCallback, useState, type FormEvent } from "react";
+import { useCallback, useState, type FormEvent, type ReactNode } from "react";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
@@ -345,108 +345,116 @@ function InstanceForm({
 
 	return (
 		<form className="space-y-4" onSubmit={submit}>
-			<Field
-				label="实例名称"
-				id="instance-name"
-				value={name}
-				setValue={setName}
-				required
-			/>
-			<Field
-				label="Server 地址"
-				id="server-addr"
-				value={serverAddr}
-				setValue={setServerAddr}
-				required
-			/>
-			<Field
-				label="Server 端口"
-				id="server-port"
-				value={serverPort}
-				setValue={setServerPort}
-				type="number"
-				required
-			/>
-			<SecretField
-				label="Auth Token"
-				id="auth-token"
-				value={authToken}
-				setValue={setAuthToken}
-				visible={showToken}
-				toggle={() => setShowToken((value) => !value)}
-			/>
-			<div className="space-y-2">
-				<Label htmlFor="dashboard-scheme">Dashboard Scheme</Label>
-				<select
-					id="dashboard-scheme"
-					className="h-11 w-full rounded-lg border border-input bg-background/60 px-3"
-					value={dashboardScheme}
-					onChange={(event) =>
-						setDashboardScheme(event.target.value as "http" | "https")
-					}
-				>
-					<option value="http">http</option>
-					<option value="https">https</option>
-				</select>
-			</div>
-			<Field
-				label="Dashboard Host"
-				id="dashboard-host"
-				value={dashboardHost}
-				setValue={setDashboardHost}
-			/>
-			<Field
-				label="Dashboard 端口"
-				id="dashboard-port"
-				value={dashboardPort}
-				setValue={setDashboardPort}
-				type="number"
-				required
-			/>
-			<Field
-				label="Dashboard 用户名"
-				id="dashboard-user"
-				value={dashboardUser}
-				setValue={setDashboardUser}
-			/>
-			<SecretField
-				label="Dashboard 密码"
-				id="dashboard-password"
-				value={dashboardPassword}
-				setValue={setDashboardPassword}
-				visible={showPassword}
-				toggle={() => setShowPassword((value) => !value)}
-			/>
-			<Field
-				label="端口范围起始"
-				id="range-start"
-				value={portRangeStart}
-				setValue={setPortRangeStart}
-				type="number"
-				required
-			/>
-			<Field
-				label="端口范围结束"
-				id="range-end"
-				value={portRangeEnd}
-				setValue={setPortRangeEnd}
-				type="number"
-				required
-			/>
+			<FormSection title="基础连接">
+				<Field
+					label="实例名称"
+					id="instance-name"
+					value={name}
+					setValue={setName}
+					required
+				/>
+				<Field
+					label="Server 地址"
+					id="server-addr"
+					value={serverAddr}
+					setValue={setServerAddr}
+					required
+				/>
+				<Field
+					label="Server 端口"
+					id="server-port"
+					value={serverPort}
+					setValue={setServerPort}
+					type="number"
+					required
+				/>
+				<SecretField
+					label="Auth Token"
+					id="auth-token"
+					value={authToken}
+					setValue={setAuthToken}
+					visible={showToken}
+					toggle={() => setShowToken((value) => !value)}
+				/>
+			</FormSection>
+			<FormSection title="Dashboard">
+				<div className="space-y-2">
+					<Label htmlFor="dashboard-scheme">Dashboard Scheme</Label>
+					<select
+						id="dashboard-scheme"
+						className="h-11 w-full rounded-lg border border-input bg-background/60 px-3"
+						value={dashboardScheme}
+						onChange={(event) =>
+							setDashboardScheme(event.target.value as "http" | "https")
+						}
+					>
+						<option value="http">http</option>
+						<option value="https">https</option>
+					</select>
+				</div>
+				<Field
+					label="Dashboard Host"
+					id="dashboard-host"
+					value={dashboardHost}
+					setValue={setDashboardHost}
+				/>
+				<Field
+					label="Dashboard 端口"
+					id="dashboard-port"
+					value={dashboardPort}
+					setValue={setDashboardPort}
+					type="number"
+					required
+				/>
+				<Field
+					label="Dashboard 用户名"
+					id="dashboard-user"
+					value={dashboardUser}
+					setValue={setDashboardUser}
+				/>
+				<SecretField
+					label="Dashboard 密码"
+					id="dashboard-password"
+					value={dashboardPassword}
+					setValue={setDashboardPassword}
+					visible={showPassword}
+					toggle={() => setShowPassword((value) => !value)}
+				/>
+			</FormSection>
+			<FormSection title="端口范围">
+				<Field
+					label="端口范围起始"
+					id="range-start"
+					value={portRangeStart}
+					setValue={setPortRangeStart}
+					type="number"
+					required
+				/>
+				<Field
+					label="端口范围结束"
+					id="range-end"
+					value={portRangeEnd}
+					setValue={setPortRangeEnd}
+					type="number"
+					required
+				/>
+			</FormSection>
 			{rangeError && (
 				<p role="alert" className="text-sm text-red-400">
 					{rangeError}
 				</p>
 			)}
 			{!initial && (
-				<label className="flex items-center gap-2 text-sm">
-					<input
-						type="checkbox"
-						checked={isDefault}
-						onChange={(event) => setIsDefault(event.target.checked)}
-					/>
-					设为默认
-				</label>
+				<FormSection title="默认设置">
+					<label className="flex items-center gap-2 text-sm">
+						<input
+							type="checkbox"
+							checked={isDefault}
+							onChange={(event) => setIsDefault(event.target.checked)}
+						/>
+						设为默认
+					</label>
+				</FormSection>
 			)}
 			{error && (
 				<p role="alert" className="text-sm text-red-400">
@@ -457,6 +465,23 @@ function InstanceForm({
 				{saving ? "保存中…" : "保存实例"}
 			</Button>
 		</form>
+	);
+}
+
+function FormSection({
+	title,
+	children,
+}: {
+	title: string;
+	children: ReactNode;
+}) {
+	return (
+		<section className="grid gap-4 rounded-2xl border border-border/60 bg-background/35 p-4 md:grid-cols-2">
+			<h3 className="text-sm font-semibold text-muted-foreground md:col-span-2">
+				{title}
+			</h3>
+			{children}
+		</section>
 	);
 }
 

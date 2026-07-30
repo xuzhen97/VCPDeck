@@ -5,6 +5,7 @@ import {
 	useRef,
 	useState,
 	type FormEvent,
+	type ReactNode,
 } from "react";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
@@ -306,117 +307,123 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 				size="wide"
 			>
 				<form className="space-y-4" onSubmit={submit}>
-					{!clientId && (
+					<FormSection title="目标">
+						{!clientId && (
+							<div className="space-y-2">
+								<Label htmlFor="frp-client">Client ID</Label>
+								<Input
+									id="frp-client"
+									value={targetClientId}
+									onChange={(event) => setTargetClientId(event.target.value)}
+									required
+								/>
+							</div>
+						)}
 						<div className="space-y-2">
-							<Label htmlFor="frp-client">Client ID</Label>
+							<Label htmlFor="frp-name">映射名称</Label>
 							<Input
-								id="frp-client"
-								value={targetClientId}
-								onChange={(event) => setTargetClientId(event.target.value)}
+								id="frp-name"
+								value={name}
+								onChange={(event) => setName(event.target.value)}
 								required
 							/>
 						</div>
-					)}
-					<div className="space-y-2">
-						<Label htmlFor="frp-name">映射名称</Label>
-						<Input
-							id="frp-name"
-							value={name}
-							onChange={(event) => setName(event.target.value)}
-							required
-						/>
-					</div>
-					<div className="space-y-2">
-						<Label htmlFor="frps-instance">frps 实例</Label>
-						<select
-							id="frps-instance"
-							className="h-11 w-full rounded-lg border border-input bg-background/60 px-3"
-							value={frpsInstanceId}
-							onChange={(event) => setFrpsInstanceId(event.target.value)}
-							disabled={instancesLoading}
-						>
-							<option value="">使用服务端默认实例</option>
-							{instances.map((instance) => (
-								<option key={instance.id} value={instance.id}>
-									{instance.name}
-									{instance.isDefault ? "（默认）" : ""}
-								</option>
-							))}
-						</select>
-						{instancesLoading && (
-							<p className="text-sm text-muted-foreground">正在加载实例…</p>
-						)}
-						{instancesError && (
-							<p role="alert" className="text-sm text-amber-400">
-								无法加载 frps 实例，将使用服务端默认实例
-							</p>
-						)}
-						{instances
-							.filter((instance) => instance.id === frpsInstanceId)
-							.map((instance) => (
-								<p key={instance.id} className="text-sm text-muted-foreground">
-									{instance.serverAddr}:{instance.serverPort} · 端口范围{" "}
-									{instance.portRangeStart}–{instance.portRangeEnd}
-								</p>
-							))}
-					</div>
-					<div className="space-y-2">
-						<Label htmlFor="proxy-type">代理类型</Label>
-						<select
-							id="proxy-type"
-							className="h-11 w-full rounded-lg border border-input bg-background/60 px-3"
-							value={proxyType}
-							onChange={(event) =>
-								setProxyType(event.target.value as typeof proxyType)
-							}
-						>
-							<option value="tcp">TCP</option>
-							<option value="http">HTTP</option>
-							<option value="https">HTTPS</option>
-						</select>
-					</div>
-					<div className="space-y-2">
-						<Label htmlFor="local-ip">本地 IP</Label>
-						<Input
-							id="local-ip"
-							value={localIp}
-							onChange={(event) => setLocalIp(event.target.value)}
-							required
-						/>
-					</div>
-					<div className="space-y-2">
-						<Label htmlFor="local-port">本地端口</Label>
-						<Input
-							id="local-port"
-							type="number"
-							min="1"
-							max="65535"
-							value={localPort}
-							onChange={(event) => setLocalPort(event.target.value)}
-							required
-						/>
-					</div>
-					<div className="space-y-2">
-						<Label htmlFor="remote-port">公网端口（可选）</Label>
-						<Input
-							id="remote-port"
-							type="number"
-							min="1"
-							max="65535"
-							value={remotePort}
-							onChange={(event) => setRemotePort(event.target.value)}
-						/>
-					</div>
-					{proxyType !== "tcp" && (
 						<div className="space-y-2">
-							<Label htmlFor="custom-domain">自定义域名</Label>
+							<Label htmlFor="frps-instance">frps 实例</Label>
+							<select
+								id="frps-instance"
+								className="h-11 w-full rounded-lg border border-input bg-background/60 px-3"
+								value={frpsInstanceId}
+								onChange={(event) => setFrpsInstanceId(event.target.value)}
+								disabled={instancesLoading}
+							>
+								<option value="">使用服务端默认实例</option>
+								{instances.map((instance) => (
+									<option key={instance.id} value={instance.id}>
+										{instance.name}
+										{instance.isDefault ? "（默认）" : ""}
+									</option>
+								))}
+							</select>
+							{instancesLoading && (
+								<p className="text-sm text-muted-foreground">正在加载实例…</p>
+							)}
+							{instancesError && (
+								<p role="alert" className="text-sm text-amber-400">
+									无法加载 frps 实例，将使用服务端默认实例
+								</p>
+							)}
+							{instances
+								.filter((instance) => instance.id === frpsInstanceId)
+								.map((instance) => (
+									<p key={instance.id} className="text-sm text-muted-foreground">
+										{instance.serverAddr}:{instance.serverPort} · 端口范围{" "}
+										{instance.portRangeStart}–{instance.portRangeEnd}
+									</p>
+								))}
+						</div>
+					</FormSection>
+					<FormSection title="本地服务">
+						<div className="space-y-2">
+							<Label htmlFor="proxy-type">代理类型</Label>
+							<select
+								id="proxy-type"
+								className="h-11 w-full rounded-lg border border-input bg-background/60 px-3"
+								value={proxyType}
+								onChange={(event) =>
+									setProxyType(event.target.value as typeof proxyType)
+								}
+							>
+								<option value="tcp">TCP</option>
+								<option value="http">HTTP</option>
+								<option value="https">HTTPS</option>
+							</select>
+						</div>
+						<div className="space-y-2">
+							<Label htmlFor="local-ip">本地 IP</Label>
 							<Input
-								id="custom-domain"
-								value={customDomain}
-								onChange={(event) => setCustomDomain(event.target.value)}
+								id="local-ip"
+								value={localIp}
+								onChange={(event) => setLocalIp(event.target.value)}
+								required
 							/>
 						</div>
-					)}
+						<div className="space-y-2">
+							<Label htmlFor="local-port">本地端口</Label>
+							<Input
+								id="local-port"
+								type="number"
+								min="1"
+								max="65535"
+								value={localPort}
+								onChange={(event) => setLocalPort(event.target.value)}
+								required
+							/>
+						</div>
+					</FormSection>
+					<FormSection title="公网入口">
+						<div className="space-y-2">
+							<Label htmlFor="remote-port">公网端口（可选）</Label>
+							<Input
+								id="remote-port"
+								type="number"
+								min="1"
+								max="65535"
+								value={remotePort}
+								onChange={(event) => setRemotePort(event.target.value)}
+							/>
+						</div>
+						{proxyType !== "tcp" && (
+							<div className="space-y-2">
+								<Label htmlFor="custom-domain">自定义域名</Label>
+								<Input
+									id="custom-domain"
+									value={customDomain}
+									onChange={(event) => setCustomDomain(event.target.value)}
+								/>
+							</div>
+						)}
+					</FormSection>
 					{createError && (
 						<p role="alert" className="text-sm text-red-400">
 							{createError}
@@ -454,6 +461,23 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 				/>
 			)}
 		</>
+	);
+}
+
+function FormSection({
+	title,
+	children,
+}: {
+	title: string;
+	children: ReactNode;
+}) {
+	return (
+		<section className="grid gap-4 rounded-2xl border border-border/60 bg-background/35 p-4 md:grid-cols-2">
+			<h3 className="text-sm font-semibold text-muted-foreground md:col-span-2">
+				{title}
+			</h3>
+			{children}
+		</section>
 	);
 }
 

@@ -110,6 +110,10 @@ describe("FrpsInstancesPanel", () => {
 		await userEvent.click(screen.getByRole("button", { name: "新增实例" }));
 		const dialog = screen.getByRole("dialog", { name: "新增实例" });
 		expect(dialog).toHaveClass("w-[720px]");
+		expect(within(dialog).getByText("基础连接")).toBeVisible();
+		expect(within(dialog).getByText("Dashboard")).toBeVisible();
+		expect(within(dialog).getByText("端口范围")).toBeVisible();
+		expect(within(dialog).getByText("默认设置")).toBeVisible();
 		const token = within(dialog).getByLabelText("Auth Token");
 		const password = within(dialog).getByLabelText("Dashboard 密码");
 		expect(token).toHaveAttribute("type", "password");
@@ -180,6 +184,9 @@ describe("FrpsInstancesPanel", () => {
 		expect(get).toHaveBeenCalledWith("frps_1");
 		const dialog = await screen.findByRole("dialog", { name: "编辑实例" });
 		expect(dialog).toHaveClass("w-[720px]");
+		expect(within(dialog).getByText("基础连接")).toBeVisible();
+		expect(within(dialog).getByText("Dashboard")).toBeVisible();
+		expect(within(dialog).getByText("端口范围")).toBeVisible();
 		await userEvent.clear(within(dialog).getByLabelText("Dashboard Host"));
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "保存实例" }),
