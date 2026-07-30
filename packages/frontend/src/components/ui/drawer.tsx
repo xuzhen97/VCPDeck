@@ -5,11 +5,13 @@ export function Drawer({
 	onClose,
 	title,
 	children,
+	size = "default",
 }: {
 	open: boolean;
 	onClose: () => void;
 	title: string;
 	children: ReactNode;
+	size?: "default" | "wide";
 }) {
 	useEffect(() => {
 		if (!open) return;
@@ -33,7 +35,9 @@ export function Drawer({
 				role="dialog"
 				aria-modal={open}
 				aria-label={title}
-				className={`fixed right-0 top-0 z-50 h-full w-96 max-w-[90vw] overflow-y-auto border-l border-border bg-card p-6 shadow-xl backdrop-blur-2xl transition-transform duration-300 ${
+				className={`fixed right-0 top-0 z-50 h-full ${
+					size === "wide" ? "w-[720px] max-w-[95vw]" : "w-96 max-w-[90vw]"
+				} overflow-y-auto border-l border-border bg-card p-6 shadow-xl backdrop-blur-2xl transition-transform duration-300 ${
 					open ? "translate-x-0" : "translate-x-full"
 				}`}
 			>

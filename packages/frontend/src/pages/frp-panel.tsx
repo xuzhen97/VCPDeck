@@ -235,6 +235,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 				open={drawerOpen}
 				onClose={() => setDrawerOpen(false)}
 				title="创建映射"
+				size="wide"
 			>
 				<form className="space-y-4" onSubmit={submit}>
 					{!clientId && (
