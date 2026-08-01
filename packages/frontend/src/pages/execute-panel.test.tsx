@@ -15,6 +15,7 @@ function completed(overrides: Partial<JobInfo> = {}): JobInfo {
 		status: "done" as JobInfo["status"],
 		payload: { mode: "command", command: "node --version" },
 		result: { exitCode: 0 },
+		progress: null,
 		errorCode: null,
 		errorMessage: null,
 		createdAt: "2026-07-26T00:00:00.000Z",

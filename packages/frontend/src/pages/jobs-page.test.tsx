@@ -26,6 +26,7 @@ function job(overrides: Partial<JobInfo>): JobInfo {
 		status: "running" as JobInfo["status"],
 		payload: { mode: "command", command: "node --version", secret: "hidden" },
 		result: null,
+		progress: null,
 		errorCode: null,
 		errorMessage: null,
 		createdAt: "2026-07-26T00:00:00.000Z",

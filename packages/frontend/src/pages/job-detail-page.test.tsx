@@ -16,6 +16,7 @@ const exportJob: JobInfo = {
 	status: JobStatus.DONE,
 	payload: { rootDir: "/srv", path: "/srv/logs/app.log" },
 	result: { fileId: "f1", key: "aliyun-fileid-123", size: 1024, sha256: "x" },
+	progress: null,
 	errorCode: null,
 	errorMessage: null,
 	createdAt: "2026-08-01T00:00:00.000Z",
