@@ -56,6 +56,11 @@
 - 不动 `FileCleanupService`：`expiresAt` 为 null 的 File 永不清理，与永久链接配套；后续清理策略（按保留期批量置 `expiresAt`）另行设计
 - 不引入鉴权改造
 
+## 实现期间的补充发现（2026-08-01 实现时）
+
+1. **签名密钥持久化**：两个 provider 的 `signSecret` 原本在配置缺失时每次进程启动随机生成——重启 server 后所有已签发链接（含永久链接）立即失效。已修复：`StorageService.loadProvider` 在配置缺 `signSecret` 时生成并写回 `StorageBackendConfig`，保证重启后链接仍有效。
+2. **端到端验证**：新增 `scripts/e2e-permanent-link.cjs` 回归脚本（登录 → 上传 → 签永久 token → 下载校验 → 1 小时 token 回归）。在真实阿里云盘后端验证通过，含重启 server 后同一 URL 下载成功的用例。
+
 ## 安全取舍
 
 - 永久链接无鉴权（REST 当前为内部使用），**链接泄露 = 文件可被任何人下载**
