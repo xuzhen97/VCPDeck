@@ -5,6 +5,7 @@ import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
+import { DownloadLinkCard } from "@/components/download-link-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Drawer } from "@/components/ui/drawer";
@@ -291,6 +292,13 @@ function JobDetails({ job }: { job: JobInfo }) {
 					<Field label="错误说明" value={job.errorMessage} wide />
 				)}
 			</div>
+			{job.type === "file.export" &&
+				job.status === "done" &&
+				!!job.result?.key && (
+					<section className="space-y-3">
+						<DownloadLinkCard job={job} />
+					</section>
+				)}
 			<ExecutionContent job={job} />
 			{stdout && <Output label="标准输出" value={stdout} />}
 			{stderr && <Output label="标准错误" value={stderr} danger />}

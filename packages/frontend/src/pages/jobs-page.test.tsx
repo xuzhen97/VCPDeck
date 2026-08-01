@@ -275,3 +275,56 @@ it("stops cancellation polling when the page unmounts", async () => {
 	rejectWait?.(new DOMException("Aborted", "AbortError"));
 	await Promise.resolve();
 });
+
+it("shows the permanent download link in the job drawer for a completed file.export", async () => {
+	const exportJob = job({
+		jobId: "export-done",
+		clientId: "machine-a-id",
+		clientName: "构建服务器",
+		type: "file.export",
+		status: "done" as JobInfo["status"],
+		payload: { rootDir: "D:\\", path: "D:\\nginx-1.18.0.zip" },
+		result: { fileId: "f1", key: "aliyun-fileid-123", size: 1024, sha256: "x" },
+		finishedAt: "2026-08-01T07:43:00.000Z",
+	});
+	const list = vi.fn().mockResolvedValue({
+		data: [exportJob],
+		total: 1,
+		page: 1,
+		pageSize: 20,
+		totalPages: 1,
+	});
+	const createDownloadToken = vi.fn().mockResolvedValue({
+		url: "/api/storage/download/aliyun-fileid-123?expires=0&sig=abc",
+		expiresAt: 0,
+	});
+	const client = {
+		auth: { me: async () => identity },
+		jobs: { list },
+		storage: { createDownloadToken },
+	} as unknown as VcpDeckClient;
+	render(
+		<MemoryRouter>
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<JobsPage />
+				</AuthProvider>
+			</SdkProvider>
+		</MemoryRouter>,
+	);
+
+	await userEvent.click(
+		await screen.findByRole("button", { name: "查看详情" }),
+	);
+	const drawer = screen.getByRole("dialog", { name: "任务详情" });
+	const link = await within(drawer).findByRole("link", { name: "下载文件" });
+	expect(link).toHaveAttribute(
+		"href",
+		`${window.location.origin}/api/storage/download/aliyun-fileid-123?expires=0&sig=abc`,
+	);
+	expect(link).toHaveAttribute("download", "nginx-1.18.0.zip");
+	expect(createDownloadToken).toHaveBeenCalledWith({
+		key: "aliyun-fileid-123",
+		ttlSeconds: 0,
+	});
+});
