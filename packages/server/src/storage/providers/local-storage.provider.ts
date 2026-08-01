@@ -72,7 +72,9 @@ export class LocalStorageProvider implements StorageProvider {
 	}
 
 	signDownloadUrl(key: string, expiresInSeconds: number): string {
-		const expiresAt = Date.now() + expiresInSeconds * 1000;
+		// ttlSeconds <= 0 表示永久链接（expires=0），由清理任务兜底回收
+		const expiresAt =
+			expiresInSeconds <= 0 ? 0 : Date.now() + expiresInSeconds * 1000;
 		const sig = this.sign(`${SIGN_DOWNLOAD_PREFIX}:${key}:${expiresAt}`);
 		return `expires=${expiresAt}&sig=${sig}`;
 	}
@@ -88,7 +90,8 @@ export class LocalStorageProvider implements StorageProvider {
 		expiresAt: number,
 		sig: string,
 	): boolean {
-		if (Date.now() > expiresAt) return false;
+		// expires=0 为永久链接标记，不做时间校验
+		if (expiresAt > 0 && Date.now() > expiresAt) return false;
 		const expected = this.sign(`${SIGN_DOWNLOAD_PREFIX}:${key}:${expiresAt}`);
 		return expected === sig;
 	}
