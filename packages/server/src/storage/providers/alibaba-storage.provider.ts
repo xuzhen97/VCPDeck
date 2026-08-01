@@ -16,7 +16,7 @@
  *
  * ponytail: 令牌只在内存中刷新，服务重启后从 DB 重新读取
  */
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, unlink, stat } from "node:fs/promises";
 import { randomUUID, createHmac } from "node:crypto";
@@ -55,6 +55,7 @@ interface RuntimeConfig {
 
 @Injectable()
 export class AlibabaStorageProvider implements StorageProvider {
+	private readonly logger = new Logger(AlibabaStorageProvider.name);
 	private readonly signSecret: string;
 	private runtime: RuntimeConfig | null = null;
 	constructor(config: Record<string, unknown> = {}) {
@@ -326,9 +327,13 @@ export class AlibabaStorageProvider implements StorageProvider {
 			throw new Error(`阿里云盘下载失败: HTTP ${response.status}`);
 		}
 
-		// ponytail: 将 Web ReadableStream 转为 Node.js Readable
+		// ponytail: 将 Web ReadableStream 转为 Node.js Readable；
+		// 上游中断时通过 error 事件向上传递（controller 销毁响应）
 		const webStream = response.body;
 		const nodeStream = Readable.fromWeb(webStream as any);
+		nodeStream.on("error", (err) => {
+			this.logger.warn(`阿里云盘下载流中断: ${(err as Error).message}`);
+		});
 
 		return {
 			stream: nodeStream,

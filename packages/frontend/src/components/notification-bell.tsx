@@ -130,7 +130,11 @@ export function NotificationBell() {
 								{item.status === "done" &&
 									item.type === "file.export" &&
 									item.key && (
-										<DownloadButton key={item.jobId} storageKey={item.key} />
+										<DownloadButton
+											key={item.jobId}
+											storageKey={item.key}
+											filename={item.filename}
+										/>
 									)}
 							</div>
 							<Button
@@ -180,8 +184,10 @@ function ProgressBar({ progress }: { progress: JobProgress | null }) {
 /** 完成项内的下载按钮：签永久下载链接并触发浏览器下载 */
 function DownloadButton({
 	storageKey,
+	filename,
 }: {
 	storageKey: string;
+	filename: string;
 }) {
 	const sdk = useSdk();
 	const [busy, setBusy] = useState(false);
@@ -194,9 +200,10 @@ function DownloadButton({
 				key: storageKey,
 				ttlSeconds: 0,
 			});
+			// download 属性显式传文件名：空值/缺省时 Chromium 按 URL/MIME 推断（得到 fileId 或 .json）
 			const anchor = document.createElement("a");
 			anchor.href = `${window.location.origin}${token.url}`;
-			anchor.download = "";
+			anchor.download = filename;
 			document.body.append(anchor);
 			anchor.click();
 			anchor.remove();
@@ -207,7 +214,7 @@ function DownloadButton({
 		} finally {
 			setBusy(false);
 		}
-	}, [sdk, storageKey]);
+	}, [sdk, storageKey, filename]);
 
 	return (
 		<div>

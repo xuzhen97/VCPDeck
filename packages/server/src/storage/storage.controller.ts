@@ -108,6 +108,10 @@ export class StorageController {
 			`attachment; filename="${encodeURIComponent(filename)}"`,
 		);
 		res.setHeader("Content-Length", meta.size);
+		// 上游流中断时销毁响应，避免浏览器挂起等待直到超时报错
+		stream.on("error", () => {
+			res.destroy();
+		});
 		stream.pipe(res);
 	}
 
