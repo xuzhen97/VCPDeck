@@ -96,13 +96,16 @@ export class StorageController {
 			parseInt(expires, 10),
 			sig,
 		);
+		// 优先用 DB File 记录的真实文件名（阿里云盘后端 meta.filename 为 fileId）
+		const filename =
+			(await this.storageService.resolveFilename(key)) ?? meta.filename;
 		res.setHeader(
 			"Content-Type",
 			meta.mimeType || "application/octet-stream",
 		);
 		res.setHeader(
 			"Content-Disposition",
-			`attachment; filename="${encodeURIComponent(meta.filename)}"`,
+			`attachment; filename="${encodeURIComponent(filename)}"`,
 		);
 		res.setHeader("Content-Length", meta.size);
 		stream.pipe(res);

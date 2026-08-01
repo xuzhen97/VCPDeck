@@ -7,6 +7,9 @@ function mockPrisma() {
 			findFirst: vi.fn(),
 			upsert: vi.fn(),
 		},
+		file: {
+			findFirst: vi.fn(),
+		},
 	};
 }
 
@@ -52,6 +55,28 @@ describe("StorageService", () => {
 			await service.loadProvider();
 
 			expect(prisma.storageBackendConfig.upsert).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("resolveFilename", () => {
+		it("从 File 记录返回真实文件名（阿里云盘 key 为 fileId）", async () => {
+			prisma.file.findFirst.mockResolvedValue({
+				filename: "nginx-1.18.0.zip",
+			});
+
+			expect(
+				await service.resolveFilename("6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1"),
+			).toBe("nginx-1.18.0.zip");
+			expect(prisma.file.findFirst).toHaveBeenCalledWith({
+				where: { key: "6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1" },
+				select: { filename: true },
+			});
+		});
+
+		it("无 File 记录时返回 null（直接上传未建记录的兜底）", async () => {
+			prisma.file.findFirst.mockResolvedValue(null);
+
+			expect(await service.resolveFilename("some-key")).toBeNull();
 		});
 	});
 

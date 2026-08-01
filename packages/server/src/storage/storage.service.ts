@@ -158,6 +158,15 @@ export class StorageService implements OnModuleInit {
 		return p.download(key);
 	}
 
+	/** 从 DB File 记录解析真实文件名（阿里云盘后端 key 为 fileId，无文件名语义） */
+	async resolveFilename(key: string): Promise<string | null> {
+		const file = await this.prisma.file.findFirst({
+			where: { key },
+			select: { filename: true },
+		});
+		return file?.filename ?? null;
+	}
+
 	/** 删除文件 */
 	async delete(key: string): Promise<void> {
 		return this.getProvider().delete(key);
