@@ -39,6 +39,16 @@ export class StorageService implements OnModuleInit {
 			this.logger.warn("Invalid storage config JSON, using defaults");
 		}
 
+		// 签名密钥持久化：缺失时生成并写回 DB，保证 server 重启后已签发链接仍有效
+		if (!config.signSecret) {
+			config.signSecret = randomUUID();
+			await this.prisma.storageBackendConfig.upsert({
+				where: { id: 1 },
+				create: { id: 1, kind, config: JSON.stringify(config) },
+				update: { config: JSON.stringify(config) },
+			});
+		}
+
 		const ProviderClass = STORAGE_PROVIDERS[kind];
 		if (!ProviderClass) {
 			this.logger.warn(`Unknown storage kind "${kind}", falling back to local`);
@@ -153,18 +163,14 @@ export class StorageService implements OnModuleInit {
 		return this.getProvider().delete(key);
 	}
 
-	/** 获取存储后端配置（供 REST 端点使用） */
-	async getBackendConfig() {
+	/** 获取当前激活后端的安全摘要，不返回 provider 原始配置。 */
+	async getBackendConfig(): Promise<{
+		kind: "local" | "alibaba";
+		updatedAt: string | null;
+	}> {
 		const row = await this.prisma.storageBackendConfig.findFirst();
-		let config: Record<string, unknown> = {};
-		try {
-			config = JSON.parse(row?.config || "{}");
-		} catch {
-			this.logger.warn("Invalid storage config JSON in DB");
-		}
 		return {
-			kind: row?.kind || "local",
-			config,
+			kind: row?.kind === "alibaba" ? "alibaba" : "local",
 			updatedAt: row?.updatedAt?.toISOString() || null,
 		};
 	}
