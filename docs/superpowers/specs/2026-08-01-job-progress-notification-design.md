@@ -59,6 +59,11 @@
 - `file-detail.tsx` 查看器导出按钮：导出中显示"导出中…"（已有 busy 态保留），失败红字（已有）
 - 不做就地百分比（全局铃铛承担）
 
+## 实现期间的补充发现（2026-08-01 实现时）
+
+1. **导出路径 sha256 恒为空摘要（既有 bug）**：`handleExport` 原实现在同一流上同时挂 `data` 监听器与 `Readable.toWeb()` 消费（pull 模式），两者互斥导致 data 事件不触发——sha256 始终为空串摘要，进度也无法上报。已改为 `Transform` 单消费者链（计数 + 节流上报 + hash 都在 transform 回调内），顺带修复了 file.import 校验依赖的 sha256 正确性。
+2. **前端 JobInfo 类型变更**：`JobInfo.progress` 为必填（null 表示无），既有测试 fixture 已补齐。
+
 ## 不做的事
 
 - Server → 阿里云盘分片上传段进度（B 方案）
