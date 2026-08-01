@@ -1,7 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { JobScheduler } from "./job.scheduler.js";
-import { JobStatus } from "@vcpdeck/shared";
+import { JobStatus, type JobProgress } from "@vcpdeck/shared";
 import type {
   JobCreateResult,
   DispatchPayload,
@@ -40,6 +40,20 @@ function safeJsonParse<T>(raw: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+/** 解析 progress JSON，无效返回 null */
+function parseProgress(raw: string | null): JobProgress | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<JobProgress>;
+    if (typeof parsed.loaded === "number" && typeof parsed.total === "number") {
+      return { loaded: parsed.loaded, total: parsed.total };
+    }
+  } catch {
+    // 无效 JSON 按无进度处理
+  }
+  return null;
 }
 
 @Injectable()
@@ -159,6 +173,18 @@ export class JobService {
     // ponytail: stdout/stderr 暂不持久化，仅实时转发。后续加 output spool 时在此实现。
     const job = await this.prisma.job.findUnique({ where: { id: jobId } });
     if (!job) return;
+  }
+
+  /** 更新 job 传输段进度（file.export 上传时由 client 上报） */
+  async updateProgress(
+    jobId: string,
+    loaded: number,
+    total: number,
+  ): Promise<void> {
+    await this.prisma.job.update({
+      where: { id: jobId },
+      data: { progress: JSON.stringify({ loaded, total }) },
+    });
   }
 
   async markDone(
@@ -325,6 +351,7 @@ function toJobInfo(j: {
   status: string;
   payload: string;
   result: string | null;
+  progress: string | null;
   errorCode: string | null;
   errorMessage: string | null;
   createdAt: Date;
@@ -343,6 +370,7 @@ function toJobInfo(j: {
     status: j.status as JobStatus,
     payload: safeJsonParse(j.payload, {}),
     result: j.result ? safeJsonParse(j.result, null) : null,
+    progress: parseProgress(j.progress),
     errorCode: j.errorCode,
     errorMessage: j.errorMessage,
     createdAt: j.createdAt.toISOString(),

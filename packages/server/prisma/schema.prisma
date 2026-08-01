@@ -38,6 +38,7 @@ model Job {
   status       String    @default("pending")
   payload      String    @default("{}")
   result       String?
+  progress     String?
   errorCode    String?
   errorMessage String?
   timeout      Int?

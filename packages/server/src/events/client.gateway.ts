@@ -11,7 +11,7 @@ import { ClientService } from "../client/client.service.js";
 import { JobService } from "../job/job.service.js";
 import { FileService } from "../file/file.service.js";
 import { FrpService } from "../frp/frp.service.js";
-import { Events, JobStatus } from "@vcpdeck/shared";
+import { Events, JobStatus, type JobProgress } from "@vcpdeck/shared";
 import type {
   MachineRegister,
   Heartbeat,
@@ -129,6 +129,11 @@ export class ClientGateway {
     this.server.emit(Events.JOB_STDERR, data);
   }
 
+  @SubscribeMessage(Events.JOB_PROGRESS)
+  async handleJobProgress(@MessageBody() data: JobProgress & { jobId: string }) {
+    await this.jobService.updateProgress(data.jobId, data.loaded, data.total);
+  }
+
   @SubscribeMessage(Events.JOB_DONE)
   async handleJobDone(@MessageBody() data: JobDone) {
     const raw = data as any;
@@ -219,10 +224,11 @@ export class ClientGateway {
       return;
     }
 
-    // file.export 完成后确认上传 → File 记录 completed
+    // file.export 完成后确认上传 → File 记录 completed，并写回真实存储 key
     if (type === "file.export" && result?.fileId && result?.sha256) {
       await this.fileService.confirmUpload(
         result.fileId as string,
+        (result.key as string) ?? "",
         result.sha256 as string,
       );
     }

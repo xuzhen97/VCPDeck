@@ -37,6 +37,73 @@ function makeService(jobs: Array<Record<string, unknown>>): JobService {
 	return new JobService(mockPrisma(jobs), mockScheduler(), mockFileService());
 }
 
+describe("JobService.updateProgress()", () => {
+	it("写入序列化进度", async () => {
+		const prisma = mockPrisma([]);
+		const svc = new JobService(prisma, mockScheduler(), mockFileService());
+
+		await svc.updateProgress("job-1", 65536, 158601385);
+
+		expect(prisma.job.update).toHaveBeenCalledWith({
+			where: { id: "job-1" },
+			data: {
+				progress: JSON.stringify({ loaded: 65536, total: 158601385 }),
+			},
+		});
+	});
+});
+
+describe("JobService.list() 进度透出", () => {
+	it("toJobInfo 解析 progress JSON，无效时返回 null", async () => {
+		const svc = makeService([
+			{
+				id: "j1",
+				clientId: "c1",
+				client: { hostname: "machine-1" },
+				type: "file.export",
+				status: "running",
+				payload: "{}",
+				result: null,
+				progress: JSON.stringify({ loaded: 66, total: 158 }),
+				errorCode: null,
+				errorMessage: null,
+				createdAt: new Date(),
+				startedAt: null,
+				finishedAt: null,
+				createdByIdentityId: "i1",
+				createdByName: "测试",
+				createdVia: "web",
+			},
+		]);
+
+		const page = await svc.list({ page: 1, pageSize: 20 });
+		expect(page.data[0]?.progress).toEqual({ loaded: 66, total: 158 });
+
+		const svcBad = makeService([
+			{
+				id: "j2",
+				clientId: "c1",
+				client: { hostname: "machine-1" },
+				type: "exec",
+				status: "done",
+				payload: "{}",
+				result: null,
+				progress: "not-json",
+				errorCode: null,
+				errorMessage: null,
+				createdAt: new Date(),
+				startedAt: null,
+				finishedAt: null,
+				createdByIdentityId: null,
+				createdByName: null,
+				createdVia: null,
+			},
+		]);
+		const pageBad = await svcBad.list({ page: 1, pageSize: 20 });
+		expect(pageBad.data[0]?.progress).toBeNull();
+	});
+});
+
 describe("JobService.list()", () => {
 	it("returns PaginatedResult with default page/pageSize", async () => {
 		const svc = makeService([
