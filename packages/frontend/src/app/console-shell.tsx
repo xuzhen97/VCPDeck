@@ -16,6 +16,7 @@ import {
 import { useState, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { NotificationBell } from "@/components/notification-bell";
 import {
 	applyTheme,
 	readSidebarCollapsed,
@@ -109,6 +110,7 @@ export function ConsoleShell({
 					<header className="flex h-16 items-center justify-between border-b border-border/70 bg-card/30 px-4 backdrop-blur-xl sm:px-6">
 						<span className="font-semibold lg:hidden">VCPDeck</span>
 						<div className="ml-auto flex items-center gap-2">
+							<NotificationBell />
 							<Button
 								type="button"
 								size="icon"

@@ -44,6 +44,8 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 		y: number;
 		entry: FileEntry;
 	} | null>(null);
+	const [exportError, setExportError] = useState("");
+const [exportNotice, setExportNotice] = useState("");
 	const [viewEntry, setViewEntry] = useState<{
 		entry: FileEntry;
 		rootDir: string;
@@ -221,6 +223,22 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 								</div>
 							) : null;
 						})()}
+						{exportError && (
+							<div
+								role="alert"
+								className="mb-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400"
+							>
+								导出下载失败：{exportError}
+							</div>
+						)}
+						{exportNotice && (
+							<div
+								role="status"
+								className="mb-4 rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400"
+							>
+								{exportNotice}
+							</div>
+						)}
 						{browser.selectedRoot && (
 							<>
 								<div className="mb-3 flex items-center gap-1">
@@ -362,19 +380,28 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 								const e = contextMenu.entry;
 								const rp =
 									browser.path === "." ? e.name : `${browser.path}/${e.name}`;
-								const exported = await sdk.files.export(clientId, {
-									rootDir: browser.selectedRoot!,
-									path: rp,
-								});
-								const token = await sdk.storage.createDownloadToken({
-									key: exported.key,
-								});
-								const anchor = document.createElement("a");
-								anchor.href = token.url;
-								anchor.download = e.name;
-								document.body.append(anchor);
-								anchor.click();
-								anchor.remove();
+								setExportError("");
+								try {
+									const exported = await sdk.files.export(clientId, {
+										rootDir: browser.selectedRoot!,
+										path: rp,
+									});
+									const token = await sdk.storage.createDownloadToken({
+										key: exported.key,
+									});
+									const anchor = document.createElement("a");
+									anchor.href = token.url;
+									anchor.download = e.name;
+									document.body.append(anchor);
+									anchor.click();
+									anchor.remove();
+									setExportNotice("正在开始下载，请查看浏览器下载栏");
+									window.setTimeout(() => setExportNotice(""), 2500);
+								} catch (err) {
+									setExportError(
+										err instanceof Error ? err.message : String(err),
+									);
+								}
 							}}
 							close={() => setContextMenu(null)}
 						/>
