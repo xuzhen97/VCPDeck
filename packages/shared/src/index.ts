@@ -8,6 +8,7 @@ export const Events = {
 	JOB_STDOUT: "job:stdout",
 	JOB_STDERR: "job:stderr",
 	JOB_DONE: "job:done",
+	JOB_PROGRESS: "job:progress",
 	JOB_CANCEL: "job:cancel",
 	JOB_CANCELLED: "job:cancelled",
 	JOB_CANCEL_FAILED: "job:cancel-failed",
@@ -198,6 +199,12 @@ export interface ClientInfo {
 }
 
 // ── Job info (REST response) ──
+/** Job 传输段进度：已传输字节 / 总字节 */
+export interface JobProgress {
+	loaded: number;
+	total: number;
+}
+
 export interface JobInfo {
 	jobId: string;
 	clientId: string;
@@ -206,6 +213,8 @@ export interface JobInfo {
 	status: JobStatus;
 	payload: Record<string, unknown>;
 	result: Record<string, unknown> | null;
+	/** 传输段进度（file.export 上传时上报，无则 null） */
+	progress: JobProgress | null;
 	errorCode: string | null;
 	errorMessage: string | null;
 	createdAt: string;
