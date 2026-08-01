@@ -2,7 +2,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { stat, rename, unlink } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
-import { Readable, PassThrough } from "node:stream";
+import { Readable, PassThrough, Transform } from "node:stream";
 import type { Socket } from "socket.io-client";
 import { Events, FileErrorCode } from "@vcpdeck/shared";
 import type { JobDone, FileRef } from "@vcpdeck/shared";
@@ -107,15 +107,32 @@ async function handleExport(
 	const safe = await resolveSafePath(rootDir, path);
 	const fileStat = await stat(safe);
 	const hash = createHash("sha256");
+	const total = fileStat.size;
 
 	const fileStream = createReadStream(safe);
-	const countingStream = new PassThrough();
-	countingStream.on("data", (chunk: Buffer) => hash.update(chunk));
-	fileStream.pipe(countingStream);
+	// 传输段进度 + sha256：用 Transform 计数（toWeb 与 data 监听器在同一流上互斥，
+	// 此前 hash 恒为空摘要且进度无法上报）
+	let loaded = 0;
+	let lastEmitAt = 0;
+	let lastEmitBytes = 0;
+	const hashTransform = new Transform({
+		transform(chunk: Buffer, _encoding, callback) {
+			hash.update(chunk);
+			loaded += chunk.length;
+			const now = Date.now();
+			if (now - lastEmitAt >= 500 || loaded - lastEmitBytes >= 1024 * 1024) {
+				lastEmitAt = now;
+				lastEmitBytes = loaded;
+				socket.emit(Events.JOB_PROGRESS, { jobId, loaded, total });
+			}
+			callback(null, chunk);
+		},
+	});
+	fileStream.pipe(hashTransform);
 
 	// safe: uploadRef.url 由 Server 签发并校验签名，非任意 URL
 	const webStream = Readable.toWeb(
-		countingStream,
+		hashTransform,
 	) as ReadableStream<Uint8Array>;
 	const res = await fetch(absUrl(uploadRef.url), {
 		method: "PUT",
@@ -133,11 +150,17 @@ async function handleExport(
 		return;
 	}
 
+	// 真实存储 key：阿里云盘后端上传后以 fileId 作为 key，由 Server 响应返回；
+	// 忽略响应会导致后续下载签名使用错误 key（本地后端响应 key 与原 key 相同）
+	const uploaded = (await res.json().catch(() => null)) as {
+		key?: string;
+		size?: number;
+	} | null;
 	const sha256 = hash.digest("hex");
 	emitDone(socket, jobId, "file.export", {
 		fileId: uploadRef.id,
-		key: uploadRef.key,
-		size: fileStat.size,
+		key: uploaded?.key || uploadRef.key,
+		size: uploaded?.size ?? fileStat.size,
 		sha256,
 	});
 }
