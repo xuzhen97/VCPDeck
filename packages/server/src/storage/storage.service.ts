@@ -127,6 +127,7 @@ export class StorageService implements OnModuleInit {
 		if (!pending) {
 			// 签名有效但内存缓存丢失（服务重启），从签名恢复最小元数据
 			// ponytail: 丢失 jobId/clientId，后续 File 表解决
+			this.logger.warn(`receiveUpload fallback (pending 丢失): key=${key.slice(0, 40)}`);
 			return p.uploadToKey(
 				stream,
 				{

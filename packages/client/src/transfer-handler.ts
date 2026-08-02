@@ -131,9 +131,7 @@ async function handleExport(
 	fileStream.pipe(hashTransform);
 
 	// safe: uploadRef.url 由 Server 签发并校验签名，非任意 URL
-	const webStream = Readable.toWeb(
-		hashTransform,
-	) as ReadableStream<Uint8Array>;
+	const webStream = Readable.toWeb(hashTransform) as ReadableStream<Uint8Array>;
 	const res = await fetch(absUrl(uploadRef.url), {
 		method: "PUT",
 		body: webStream,
