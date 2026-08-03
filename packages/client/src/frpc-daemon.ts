@@ -45,7 +45,7 @@ function defaultFrpcPath(): string | null {
 	};
 	const rel = map[`${platform}-${arch}`];
 	if (!rel) return null;
-	return path.join(__dirname, "..", rel);
+	return path.join(__dirname, rel);
 }
 
 function resolveFrpcPath(): string | null {

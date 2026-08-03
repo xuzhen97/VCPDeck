@@ -55,10 +55,8 @@ export function createFrpApi(client: Pick<VcpDeckClient, "request">) {
 				signal?: AbortSignal,
 			) => {
 				const params = new URLSearchParams();
-				if (options?.page)
-					params.set("page", String(options.page));
-				if (options?.pageSize)
-					params.set("pageSize", String(options.pageSize));
+				if (options?.page) params.set("page", String(options.page));
+				if (options?.pageSize) params.set("pageSize", String(options.pageSize));
 				const qs = params.toString();
 				return client.request<PaginatedResult<FrpsInstanceInfo>>(
 					"GET",
@@ -74,10 +72,7 @@ export function createFrpApi(client: Pick<VcpDeckClient, "request">) {
 					undefined,
 					signal,
 				),
-			create: (
-				input: FrpsInstanceCreateRequest,
-				signal?: AbortSignal,
-			) =>
+			create: (input: FrpsInstanceCreateRequest, signal?: AbortSignal) =>
 				client.request<FrpsInstanceInfo>(
 					"POST",
 					"/api/frp/instances",

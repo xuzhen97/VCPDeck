@@ -33,7 +33,7 @@ const parseArg = (name, fallback) => {
 	return arg
 		? arg.split("=")[1]
 		: process.env[name.replace(/^--/, "").toUpperCase().replace(/-/g, "_")] ||
-			fallback;
+				fallback;
 };
 
 const isWin = os.platform() === "win32";
@@ -49,7 +49,15 @@ const BG = args.includes("--bg");
 const ROOT = path.resolve(__dirname, "..");
 const FRPS_BIN =
 	process.env.FRPS_BIN ||
-	path.join(ROOT, "packages", "server", "dist", "frp", platform, isWin ? "frps.exe" : "frps");
+	path.join(
+		ROOT,
+		"packages",
+		"server",
+		"dist",
+		"frp",
+		platform,
+		isWin ? "frps.exe" : "frps",
+	);
 const TMP_DIR = path.join(ROOT, ".tmp", "test-frps");
 const CONFIG_PATH = path.join(TMP_DIR, "frps.toml");
 const LOG_PATH = path.join(TMP_DIR, "frps.log");
@@ -101,7 +109,9 @@ frps.on("error", (err) => {
 
 frps.on("exit", (code) => {
 	if (code !== null && CLEAN) {
-		try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch {}
+		try {
+			fs.rmSync(TMP_DIR, { recursive: true, force: true });
+		} catch {}
 	}
 });
 
@@ -134,7 +144,9 @@ if (CLEAN) {
 		console.log("\n  [start-test-frps] 正在清理...");
 		frps.kill("SIGTERM");
 		setTimeout(() => {
-			try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch {}
+			try {
+				fs.rmSync(TMP_DIR, { recursive: true, force: true });
+			} catch {}
 			process.exit(0);
 		}, 500);
 	};

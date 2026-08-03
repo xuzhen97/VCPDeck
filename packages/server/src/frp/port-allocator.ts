@@ -65,7 +65,9 @@ export class PortAllocator {
 		// ponytail: DB 记录已删除，端口自然释放。后续加审计日志时在此实现。
 	}
 
-	private async loadUsedPorts(dashboard: DashboardConfig | null): Promise<Set<number>> {
+	private async loadUsedPorts(
+		dashboard: DashboardConfig | null,
+	): Promise<Set<number>> {
 		const mappings = await this.prisma.frpMapping.findMany({
 			where: { remotePort: { not: null } },
 			select: { remotePort: true },

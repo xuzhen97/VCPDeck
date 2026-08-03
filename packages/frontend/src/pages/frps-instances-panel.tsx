@@ -132,7 +132,7 @@ export function FrpsInstancesPanel() {
 					{!resource.data?.data.length ? (
 						<p className="text-sm text-muted-foreground">暂无实例</p>
 					) : (
-						<div className="overflow-hidden rounded-2xl border border-border/70 bg-background/40">
+						<div className="overflow-visible rounded-2xl border border-border/70 bg-background/40">
 							<div className="hidden grid-cols-[1.15fr_1.05fr_.95fr_.8fr_1fr_3rem] gap-3 border-b border-border/60 bg-secondary/40 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground md:grid">
 								<span>实例</span>
 								<span>Server</span>
@@ -154,9 +154,13 @@ export function FrpsInstancesPanel() {
 													{shortId(item.id)}
 												</p>
 											</div>
-											<code className="text-sm">{item.serverAddr}:{item.serverPort}</code>
+											<code className="text-sm">
+												{item.serverAddr}:{item.serverPort}
+											</code>
 											<div>
-												<code className="text-sm">{item.portRangeStart}–{item.portRangeEnd}</code>
+												<code className="text-sm">
+													{item.portRangeStart}–{item.portRangeEnd}
+												</code>
 												<p className="mt-1 text-xs text-muted-foreground">
 													{portCount(item).toLocaleString("zh-CN")} 个端口
 												</p>
@@ -172,10 +176,29 @@ export function FrpsInstancesPanel() {
 											</div>
 											<FrpActionMenu
 												items={[
-													{ label: probingId === item.id ? "检查中…" : "健康检查", disabled: probingId === item.id, onSelect: () => probe(item.id) },
+													{
+														label:
+															probingId === item.id ? "检查中…" : "健康检查",
+														disabled: probingId === item.id,
+														onSelect: () => probe(item.id),
+													},
 													{ label: "编辑配置", onSelect: () => openEdit(item) },
-													...(item.isDefault ? [] : [{ label: "设为默认", onSelect: () => setDefault(item.id) }]),
-													{ label: "删除实例", tone: "danger" as const, onSelect: () => { setActionError(""); setDeleting(item); } },
+													...(item.isDefault
+														? []
+														: [
+																{
+																	label: "设为默认",
+																	onSelect: () => setDefault(item.id),
+																},
+															]),
+													{
+														label: "删除实例",
+														tone: "danger" as const,
+														onSelect: () => {
+															setActionError("");
+															setDeleting(item);
+														},
+													},
 												]}
 											/>
 										</div>
@@ -187,25 +210,57 @@ export function FrpsInstancesPanel() {
 														{item.isDefault && <StatusChip label="默认" />}
 														<ProbeStatus item={item} result={probes[item.id]} />
 													</div>
-													<p className="mt-1 text-sm text-muted-foreground">{item.serverAddr}:{item.serverPort}</p>
-													<p className="font-mono text-xs text-muted-foreground">{shortId(item.id)}</p>
+													<p className="mt-1 text-sm text-muted-foreground">
+														{item.serverAddr}:{item.serverPort}
+													</p>
+													<p className="font-mono text-xs text-muted-foreground">
+														{shortId(item.id)}
+													</p>
 												</div>
 												<FrpActionMenu
 													items={[
-														{ label: probingId === item.id ? "检查中…" : "健康检查", disabled: probingId === item.id, onSelect: () => probe(item.id) },
-														{ label: "编辑配置", onSelect: () => openEdit(item) },
-														...(item.isDefault ? [] : [{ label: "设为默认", onSelect: () => setDefault(item.id) }]),
-														{ label: "删除实例", tone: "danger" as const, onSelect: () => { setActionError(""); setDeleting(item); } },
+														{
+															label:
+																probingId === item.id ? "检查中…" : "健康检查",
+															disabled: probingId === item.id,
+															onSelect: () => probe(item.id),
+														},
+														{
+															label: "编辑配置",
+															onSelect: () => openEdit(item),
+														},
+														...(item.isDefault
+															? []
+															: [
+																	{
+																		label: "设为默认",
+																		onSelect: () => setDefault(item.id),
+																	},
+																]),
+														{
+															label: "删除实例",
+															tone: "danger" as const,
+															onSelect: () => {
+																setActionError("");
+																setDeleting(item);
+															},
+														},
 													]}
 												/>
 											</div>
 											<div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-												<code>{item.portRangeStart}–{item.portRangeEnd}</code>
-												<span>{portCount(item).toLocaleString("zh-CN")} 个端口</span>
+												<code>
+													{item.portRangeStart}–{item.portRangeEnd}
+												</code>
+												<span>
+													{portCount(item).toLocaleString("zh-CN")} 个端口
+												</span>
 												<span>{dashboardLabel(item)}</span>
 											</div>
 										</div>
-										{probes[item.id] && <ProbeDetails result={probes[item.id]} />}
+										{probes[item.id] && (
+											<ProbeDetails result={probes[item.id]} />
+										)}
 									</article>
 								))}
 							</div>

@@ -41,7 +41,7 @@ export function FrpActionMenu({ items }: { items: FrpActionMenuItem[] }) {
 				<MoreHorizontal className="size-4" />
 			</Button>
 			{open && (
-				<div className="absolute right-0 top-11 z-20 min-w-40 rounded-xl border border-border bg-card p-1 text-sm shadow-xl backdrop-blur-2xl">
+				<div className="absolute right-0 top-11 z-30 min-w-40 rounded-xl border border-border bg-card p-1 text-sm shadow-xl backdrop-blur-2xl">
 					{items.map((item) => (
 						<button
 							key={item.label}

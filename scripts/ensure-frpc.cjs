@@ -12,7 +12,14 @@ const ROOT = path.resolve(__dirname, "..");
 const IS_WIN = process.platform === "win32";
 
 const PLATFORM = `${process.platform.replace("win32", "win")}-${process.arch}`;
-const TARGET_DIR = path.join(ROOT, "packages", "client", "dist", "frp", PLATFORM);
+const TARGET_DIR = path.join(
+	ROOT,
+	"packages",
+	"client",
+	"dist",
+	"frp",
+	PLATFORM,
+);
 const BINARY_NAME = IS_WIN ? "frpc.exe" : "frpc";
 const BINARY_PATH = path.join(TARGET_DIR, BINARY_NAME);
 
@@ -22,12 +29,23 @@ if (fs.existsSync(BINARY_PATH)) {
 	process.exit(0);
 }
 
-console.log(`[ensure-frpc] frpc 未找到，下载 frpc v${FRP_VERSION} (${PLATFORM})...`);
+console.log(
+	`[ensure-frpc] frpc 未找到，下载 frpc v${FRP_VERSION} (${PLATFORM})...`,
+);
 
 const ASSETS = {
-	"win-x64":     { name: `frp_${FRP_VERSION}_windows_amd64.zip`,     extractDir: `frp_${FRP_VERSION}_windows_amd64` },
-	"linux-x64":   { name: `frp_${FRP_VERSION}_linux_amd64.tar.gz`,    extractDir: `frp_${FRP_VERSION}_linux_amd64` },
-	"linux-arm64": { name: `frp_${FRP_VERSION}_linux_arm64.tar.gz`,    extractDir: `frp_${FRP_VERSION}_linux_arm64` },
+	"win-x64": {
+		name: `frp_${FRP_VERSION}_windows_amd64.zip`,
+		extractDir: `frp_${FRP_VERSION}_windows_amd64`,
+	},
+	"linux-x64": {
+		name: `frp_${FRP_VERSION}_linux_amd64.tar.gz`,
+		extractDir: `frp_${FRP_VERSION}_linux_amd64`,
+	},
+	"linux-arm64": {
+		name: `frp_${FRP_VERSION}_linux_arm64.tar.gz`,
+		extractDir: `frp_${FRP_VERSION}_linux_arm64`,
+	},
 };
 
 const asset = ASSETS[PLATFORM];
@@ -67,7 +85,9 @@ async function main() {
 				{ stdio: "inherit" },
 			);
 		} else {
-			execSync(`tar -xzf "${archivePath}" -C "${tmpDir}"`, { stdio: "inherit" });
+			execSync(`tar -xzf "${archivePath}" -C "${tmpDir}"`, {
+				stdio: "inherit",
+			});
 		}
 	} catch (e) {
 		throw new Error(`解压失败: ${e.message}`);

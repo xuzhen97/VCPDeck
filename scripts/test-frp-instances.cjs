@@ -43,10 +43,7 @@ async function main() {
 	const testId = created.data.id;
 
 	// 3. 健康检查（可能失败或有数据，取决于 frps 是否在运行）
-	const probe = await request(
-		"POST",
-		`/api/frp/instances/${testId}/probe`,
-	);
+	const probe = await request("POST", `/api/frp/instances/${testId}/probe`);
 	console.log("健康检查:", JSON.stringify(probe.data, null, 2));
 
 	// 4. 设为默认
@@ -54,23 +51,13 @@ async function main() {
 		"POST",
 		`/api/frp/instances/${testId}/set-default`,
 	);
-	console.log(
-		"设为默认:",
-		setDefault.data.name,
-		setDefault.data.isDefault,
-	);
+	console.log("设为默认:", setDefault.data.name, setDefault.data.isDefault);
 
 	// 5. 恢复原默认
-	await request(
-		"POST",
-		`/api/frp/instances/${defaultId}/set-default`,
-	);
+	await request("POST", `/api/frp/instances/${defaultId}/set-default`);
 
 	// 6. 删除测试实例
-	const deleted = await request(
-		"DELETE",
-		`/api/frp/instances/${testId}`,
-	);
+	const deleted = await request("DELETE", `/api/frp/instances/${testId}`);
 	console.log("删除:", JSON.stringify(deleted.data));
 
 	console.log("\n全部通过 ✅");

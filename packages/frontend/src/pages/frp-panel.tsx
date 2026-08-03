@@ -1,4 +1,8 @@
-import type { ClientInfo, FrpMappingInfo, FrpsInstanceInfo } from "@vcpdeck/shared";
+import type {
+	ClientInfo,
+	FrpMappingInfo,
+	FrpsInstanceInfo,
+} from "@vcpdeck/shared";
 import {
 	useCallback,
 	useEffect,
@@ -202,7 +206,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 						<p className="text-sm text-muted-foreground">暂无映射</p>
 					) : (
 						<>
-							<div className="overflow-hidden rounded-2xl border border-border/70 bg-background/40">
+							<div className="overflow-visible rounded-2xl border border-border/70 bg-background/40">
 								<div className="hidden grid-cols-[1.15fr_1.1fr_.55fr_.75fr_1.05fr_1.15fr_3rem] gap-3 border-b border-border/60 bg-secondary/40 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground md:grid">
 									<span>映射</span>
 									<span>Client</span>
@@ -224,10 +228,14 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 													<div>
 														<h3 className="font-medium">{mapping.name}</h3>
 														{copiedId === mapping.id && (
-															<p className="mt-1 text-xs text-emerald-400">已复制</p>
+															<p className="mt-1 text-xs text-emerald-400">
+																已复制
+															</p>
 														)}
 														{copyErrorId === mapping.id && (
-															<p className="mt-1 text-xs text-red-400">复制失败</p>
+															<p className="mt-1 text-xs text-red-400">
+																复制失败
+															</p>
 														)}
 													</div>
 													<div>
@@ -237,17 +245,30 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 														</p>
 													</div>
 													<div>
-														<StatusChip label={mapping.proxyType.toUpperCase()} />
+														<StatusChip
+															label={mapping.proxyType.toUpperCase()}
+														/>
 													</div>
 													<div>
-														<StatusChip label={statusLabel(mapping.status)} tone={statusTone(mapping.status)} />
+														<StatusChip
+															label={statusLabel(mapping.status)}
+															tone={statusTone(mapping.status)}
+														/>
 													</div>
 													<code className="text-sm">{localEndpoint}</code>
 													<code className="text-sm">{publicEndpoint}</code>
 													<FrpActionMenu
 														items={[
-															{ label: "复制公网地址", disabled: !mapping.publicUrl, onSelect: () => copyPublicUrl(mapping) },
-															{ label: "删除映射", tone: "danger", onSelect: () => setDeleting(mapping) },
+															{
+																label: "复制公网地址",
+																disabled: !mapping.publicUrl,
+																onSelect: () => copyPublicUrl(mapping),
+															},
+															{
+																label: "删除映射",
+																tone: "danger",
+																onSelect: () => setDeleting(mapping),
+															},
 														]}
 													/>
 												</div>
@@ -256,27 +277,53 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 														<div>
 															<div className="flex items-center gap-2">
 																<h3 className="font-medium">{mapping.name}</h3>
-																<StatusChip label={statusLabel(mapping.status)} tone={statusTone(mapping.status)} />
+																<StatusChip
+																	label={statusLabel(mapping.status)}
+																	tone={statusTone(mapping.status)}
+																/>
 															</div>
-															<p className="mt-1 text-sm text-muted-foreground">{displayName} · {mapping.proxyType.toUpperCase()}</p>
-															<p className="font-mono text-xs text-muted-foreground">{shortId(mapping.clientId)}</p>
+															<p className="mt-1 text-sm text-muted-foreground">
+																{displayName} ·{" "}
+																{mapping.proxyType.toUpperCase()}
+															</p>
+															<p className="font-mono text-xs text-muted-foreground">
+																{shortId(mapping.clientId)}
+															</p>
 														</div>
 														<FrpActionMenu
 															items={[
-																{ label: "复制公网地址", disabled: !mapping.publicUrl, onSelect: () => copyPublicUrl(mapping) },
-																{ label: "删除映射", tone: "danger", onSelect: () => setDeleting(mapping) },
+																{
+																	label: "复制公网地址",
+																	disabled: !mapping.publicUrl,
+																	onSelect: () => copyPublicUrl(mapping),
+																},
+																{
+																	label: "删除映射",
+																	tone: "danger",
+																	onSelect: () => setDeleting(mapping),
+																},
 															]}
 														/>
 													</div>
 													<div className="flex flex-wrap gap-2">
-														<StatusChip label={mapping.proxyType.toUpperCase()} />
+														<StatusChip
+															label={mapping.proxyType.toUpperCase()}
+														/>
 														<code className="text-sm">{localEndpoint}</code>
 														<span className="text-muted-foreground">→</span>
 														<code className="text-sm">{publicEndpoint}</code>
 													</div>
-													{copiedId === mapping.id && <p className="text-xs text-emerald-400">已复制</p>}
-													{copyErrorId === mapping.id && <p className="text-xs text-red-400">复制失败</p>}
-													{clientsError && !clientName && <p className="text-xs text-muted-foreground">Client 名称加载失败</p>}
+													{copiedId === mapping.id && (
+														<p className="text-xs text-emerald-400">已复制</p>
+													)}
+													{copyErrorId === mapping.id && (
+														<p className="text-xs text-red-400">复制失败</p>
+													)}
+													{clientsError && !clientName && (
+														<p className="text-xs text-muted-foreground">
+															Client 名称加载失败
+														</p>
+													)}
 												</div>
 											</article>
 										);
@@ -287,10 +334,20 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 								<span>共 {resource.data.total} 条映射</span>
 								{(resource.data.totalPages ?? 0) > 1 && (
 									<div className="flex gap-2">
-										<Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+										<Button
+											size="sm"
+											variant="outline"
+											disabled={page <= 1}
+											onClick={() => setPage((p) => p - 1)}
+										>
 											上一页
 										</Button>
-										<Button size="sm" variant="outline" disabled={page >= (resource.data.totalPages ?? 1)} onClick={() => setPage((p) => p + 1)}>
+										<Button
+											size="sm"
+											variant="outline"
+											disabled={page >= (resource.data.totalPages ?? 1)}
+											onClick={() => setPage((p) => p + 1)}
+										>
 											下一页
 										</Button>
 									</div>
@@ -356,7 +413,10 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 							{instances
 								.filter((instance) => instance.id === frpsInstanceId)
 								.map((instance) => (
-									<p key={instance.id} className="text-sm text-muted-foreground">
+									<p
+										key={instance.id}
+										className="text-sm text-muted-foreground"
+									>
 										{instance.serverAddr}:{instance.serverPort} · 端口范围{" "}
 										{instance.portRangeStart}–{instance.portRangeEnd}
 									</p>
@@ -486,11 +546,19 @@ function shortId(value: string) {
 }
 
 function statusLabel(status: string) {
-	return status === "active" ? "运行中" : status === "error" ? "异常" : "待启动";
+	return status === "active"
+		? "运行中"
+		: status === "error"
+			? "异常"
+			: "待启动";
 }
 
 function statusTone(status: string): "success" | "warning" | "danger" {
-	return status === "active" ? "success" : status === "error" ? "danger" : "warning";
+	return status === "active"
+		? "success"
+		: status === "error"
+			? "danger"
+			: "warning";
 }
 
 function waitForMapping(
