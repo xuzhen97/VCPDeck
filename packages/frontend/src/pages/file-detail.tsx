@@ -26,6 +26,8 @@ export function FileDetail({
 	const sdk = useSdk();
 	const [content, setContent] = useState("");
 	const [message, setMessage] = useState("");
+	const [exporting, setExporting] = useState(false);
+	const [exportError, setExportError] = useState("");
 	const relativePath =
 		path === "." ? (entry?.name ?? "") : `${path}/${entry?.name ?? ""}`;
 	useEffect(() => {
@@ -78,6 +80,11 @@ export function FileDetail({
 						{message}
 					</p>
 				)}
+				{exportError && (
+					<p role="alert" className="text-sm text-red-400">
+						导出下载失败：{exportError}
+					</p>
+				)}
 				{entry.kind === "file" && !message && (
 					<textarea
 						aria-label="文件内容"
@@ -104,23 +111,34 @@ export function FileDetail({
 					)}
 					<Button
 						variant="outline"
+						disabled={exporting}
 						onClick={async () => {
-							const exported = await sdk.files.export(clientId, {
-								rootDir,
-								path: relativePath,
-							});
-							const token = await sdk.storage.createDownloadToken({
-								key: exported.key,
-							});
-							const anchor = document.createElement("a");
-							anchor.href = token.url;
-							anchor.download = entry.name;
-							document.body.append(anchor);
-							anchor.click();
-							anchor.remove();
+							setExporting(true);
+							setExportError("");
+							try {
+								const exported = await sdk.files.export(clientId, {
+									rootDir,
+									path: relativePath,
+								});
+								const token = await sdk.storage.createDownloadToken({
+									key: exported.key,
+								});
+								const anchor = document.createElement("a");
+								anchor.href = token.url;
+								anchor.download = entry.name;
+								document.body.append(anchor);
+								anchor.click();
+								anchor.remove();
+							} catch (err) {
+								setExportError(
+									err instanceof Error ? err.message : String(err),
+								);
+							} finally {
+								setExporting(false);
+							}
 						}}
 					>
-						导出下载
+						{exporting ? "导出中…" : "导出下载"}
 					</Button>
 					<Button variant="outline" onClick={onMove}>
 						移动

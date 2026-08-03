@@ -58,7 +58,7 @@ export class FileService {
 		return { fileId, key, uploadUrl: url, expiresAt };
 	}
 
-	/** 确认上传完成，校验并记录 sha256 */
+	/** 确认上传完成，保留上传阶段持久化的真实 key 并写入 sha256 */
 	async confirmUpload(
 		fileId: string,
 		sha256: string,

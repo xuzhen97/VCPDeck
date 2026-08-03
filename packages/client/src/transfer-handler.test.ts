@@ -60,9 +60,9 @@ function doneCalls(socket: Socket) {
 function progressCalls(socket: Socket) {
 	return vi
 		.mocked(socket.emit)
-		.mock.calls.filter(
-			([event]) => event === Events.JOB_PROGRESS,
-		) as Array<[string, { jobId: string; loaded: number; total: number }]>;
+		.mock.calls.filter(([event]) => event === Events.JOB_PROGRESS) as Array<
+		[string, { jobId: string; loaded: number; total: number }]
+	>;
 }
 
 describe("handleTransfer file.export", () => {
@@ -71,20 +71,24 @@ describe("handleTransfer file.export", () => {
 		// sha256/进度逻辑都不会执行
 		vi.stubGlobal(
 			"fetch",
-			vi.fn().mockImplementation(async (_url: unknown, init?: { body?: unknown }) => {
-				const body = init?.body as ReadableStream<Uint8Array> | undefined;
-				if (body) {
-					const reader = body.getReader();
-					while (true) {
-						const { done } = await reader.read();
-						if (done) break;
-					}
-				}
-				return {
-					ok: true,
-					json: async () => ({ key: "aliyun-fileid-123", size: 5 }),
-				};
-			}),
+			vi
+				.fn()
+				.mockImplementation(
+					async (_url: unknown, init?: { body?: unknown }) => {
+						const body = init?.body as ReadableStream<Uint8Array> | undefined;
+						if (body) {
+							const reader = body.getReader();
+							while (true) {
+								const { done } = await reader.read();
+								if (done) break;
+							}
+						}
+						return {
+							ok: true,
+							json: async () => ({ key: "aliyun-fileid-123", size: 5 }),
+						};
+					},
+				),
 		);
 		mockFsPromises.stat.mockResolvedValue({ size: 5 });
 	});
@@ -106,11 +110,34 @@ describe("handleTransfer file.export", () => {
 		vi.mocked(fetch).mockResolvedValue({
 			ok: true,
 			json: async () => ({}),
-		} as never);		const socket = mockSocket();
+		} as never);
+		const socket = mockSocket();
 		await handleTransfer(exportJob(), socket);
 
 		const [, data] = doneCalls(socket)[0]!;
 		expect(data.result.key).toBe("uuid/a.txt");
+	});
+
+	it("流结束时补报精确的总进度", async () => {
+		const MB = 1024 * 1024;
+		const total = MB + 7;
+		vi.mocked(createReadStream).mockReturnValueOnce(
+			Readable.from([
+				Buffer.alloc(MB, 1),
+				Buffer.alloc(7, 2),
+			]) as unknown as import("node:fs").ReadStream,
+		);
+		mockFsPromises.stat.mockResolvedValue({ size: total });
+		const socket = mockSocket();
+
+		await handleTransfer(exportJob(), socket);
+
+		const progress = progressCalls(socket);
+		expect(progress.at(-1)?.[1]).toEqual({
+			jobId: "job-1",
+			loaded: total,
+			total,
+		});
 	});
 
 	it("上传流按节流上报 JOB_PROGRESS（每 1MB 增量）", async () => {

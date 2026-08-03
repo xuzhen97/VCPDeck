@@ -89,6 +89,53 @@ describe("NotificationBell", () => {
 		expect(screen.getByText(/42%/)).toBeInTheDocument();
 	});
 
+	it("每 500ms 刷新一次进行中任务进度", async () => {
+		const list = vi.fn().mockResolvedValue({
+			data: [job({ jobId: "progress-1", type: "file.export" })],
+			total: 1,
+			page: 1,
+			pageSize: 5,
+			totalPages: 1,
+		});
+		renderBell({ jobs: { list, get: vi.fn() } });
+
+		await vi.advanceTimersByTimeAsync(0);
+		await act(async () => {});
+		expect(list).toHaveBeenCalledTimes(1);
+
+		await vi.advanceTimersByTimeAsync(499);
+		expect(list).toHaveBeenCalledTimes(1);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(list).toHaveBeenCalledTimes(2);
+	});
+
+	it("上传字节达到 100% 但 Job 未完成时显示云盘收尾状态", async () => {
+		const MB = 1024 * 1024;
+		const list = vi.fn().mockResolvedValue({
+			data: [
+				job({
+					jobId: "export-finalizing",
+					type: "file.export",
+					payload: { path: "D:\\big.zip" },
+					progress: { loaded: 158 * MB, total: 158 * MB },
+				}),
+			],
+			total: 1,
+			page: 1,
+			pageSize: 5,
+			totalPages: 1,
+		});
+		renderBell({ jobs: { list, get: vi.fn() } });
+
+		await vi.advanceTimersByTimeAsync(0);
+		await act(async () => {});
+		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
+
+		expect(screen.getByText("上传完成 · 正在保存到云盘…")).toBeInTheDocument();
+		expect(screen.queryByText(/100%/)).not.toBeInTheDocument();
+	});
+
 	it("新完成的 file.export 出现下载按钮，点击触发下载", async () => {
 		const running = job({
 			jobId: "export-2",
@@ -105,8 +152,20 @@ describe("NotificationBell", () => {
 		});
 		const list = vi
 			.fn()
-			.mockResolvedValueOnce({ data: [running], total: 1, page: 1, pageSize: 5, totalPages: 1 })
-			.mockResolvedValueOnce({ data: [doneJob], total: 1, page: 1, pageSize: 5, totalPages: 1 });
+			.mockResolvedValueOnce({
+				data: [running],
+				total: 1,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			})
+			.mockResolvedValueOnce({
+				data: [doneJob],
+				total: 1,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			});
 		const get = vi.fn().mockResolvedValue(doneJob);
 		const createDownloadToken = vi.fn().mockResolvedValue({
 			url: "/api/storage/download/aliyun-fileid-9?expires=0&sig=abc",
@@ -119,13 +178,21 @@ describe("NotificationBell", () => {
 		await vi.advanceTimersByTimeAsync(3000); // 第二次轮询：done
 		await act(async () => {});
 		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
-		console.log("DIALOG2:", JSON.stringify(screen.getByRole("dialog", { name: "任务通知" }).textContent));
+		console.log(
+			"DIALOG2:",
+			JSON.stringify(
+				screen.getByRole("dialog", { name: "任务通知" }).textContent,
+			),
+		);
 		expect(screen.getByText(/done\.zip/)).toBeInTheDocument();
 
 		fireEvent.click(
-			within(screen.getByRole("dialog", { name: "任务通知" })).getByRole("button", {
-				name: "下载",
-			}),
+			within(screen.getByRole("dialog", { name: "任务通知" })).getByRole(
+				"button",
+				{
+					name: "下载",
+				},
+			),
 		);
 		expect(createDownloadToken).toHaveBeenCalledWith({
 			key: "aliyun-fileid-9",
@@ -150,8 +217,20 @@ describe("NotificationBell", () => {
 		});
 		const list = vi
 			.fn()
-			.mockResolvedValueOnce({ data: [running], total: 1, page: 1, pageSize: 5, totalPages: 1 })
-			.mockResolvedValueOnce({ data: [errorJob], total: 1, page: 1, pageSize: 5, totalPages: 1 });
+			.mockResolvedValueOnce({
+				data: [running],
+				total: 1,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			})
+			.mockResolvedValueOnce({
+				data: [errorJob],
+				total: 1,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			});
 		renderBell({ jobs: { list, get: vi.fn().mockResolvedValue(errorJob) } });
 
 		await vi.advanceTimersByTimeAsync(0);

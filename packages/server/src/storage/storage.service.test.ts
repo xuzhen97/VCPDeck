@@ -9,6 +9,8 @@ function mockPrisma() {
 		},
 		file: {
 			findFirst: vi.fn(),
+			findUnique: vi.fn().mockResolvedValue(null),
+			updateMany: vi.fn(),
 		},
 	};
 }
@@ -65,7 +67,9 @@ describe("StorageService", () => {
 			});
 
 			expect(
-				await service.resolveFilename("6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1"),
+				await service.resolveFilename(
+					"6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1",
+				),
 			).toBe("nginx-1.18.0.zip");
 			expect(prisma.file.findFirst).toHaveBeenCalledWith({
 				where: { key: "6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1" },
@@ -77,6 +81,87 @@ describe("StorageService", () => {
 			prisma.file.findFirst.mockResolvedValue(null);
 
 			expect(await service.resolveFilename("some-key")).toBeNull();
+		});
+	});
+
+	describe("receiveUpload", () => {
+		it("上传完成后把 File 临时 key 替换为 provider 返回的真实 key", async () => {
+			const provider = {
+				verifyUploadSignature: vi.fn().mockReturnValue(true),
+				uploadToKey: vi.fn().mockResolvedValue({
+					key: "aliyun-file-id",
+					jobId: "job-1",
+					clientId: "client-1",
+					filename: "nginx-1.18.0.zip",
+					size: 158601385,
+					storageKind: "alibaba",
+					createdAt: new Date(),
+				}),
+			} as never;
+			vi.spyOn(service, "getProvider").mockReturnValue(provider);
+
+			await service.receiveUpload(
+				"temporary-key/nginx-1.18.0.zip",
+				{} as never,
+				0,
+				"sig",
+			);
+
+			expect(prisma.file.updateMany).toHaveBeenCalledWith({
+				where: { key: "temporary-key/nginx-1.18.0.zip" },
+				data: {
+					key: "aliyun-file-id",
+					status: "completed",
+				},
+			});
+		});
+
+		it("pending 缓存丢失时按临时 key 从 File 表恢复上传元数据", async () => {
+			const uploadToKey = vi.fn().mockResolvedValue({
+				key: "aliyun-file-id",
+				jobId: "job-1",
+				clientId: "client-1",
+				filename: "nginx-1.18.0.zip",
+				mimeType: "application/zip",
+				size: 158601385,
+				storageKind: "alibaba",
+				createdAt: new Date(),
+			});
+			const provider = {
+				verifyUploadSignature: vi.fn().mockReturnValue(true),
+				uploadToKey,
+			} as never;
+			vi.spyOn(service, "getProvider").mockReturnValue(provider);
+			prisma.file.findUnique.mockResolvedValue({
+				jobId: "job-1",
+				clientId: "client-1",
+				filename: "nginx-1.18.0.zip",
+				mimeType: "application/zip",
+				size: 158601385,
+			});
+			const stream = {} as never;
+
+			await service.receiveUpload(
+				"temporary-key/nginx-1.18.0.zip",
+				stream,
+				0,
+				"sig",
+			);
+
+			expect(prisma.file.findUnique).toHaveBeenCalledWith({
+				where: { key: "temporary-key/nginx-1.18.0.zip" },
+			});
+			expect(uploadToKey).toHaveBeenCalledWith(
+				stream,
+				expect.objectContaining({
+					jobId: "job-1",
+					clientId: "client-1",
+					filename: "nginx-1.18.0.zip",
+					mimeType: "application/zip",
+					size: 158601385,
+				}),
+				"temporary-key/nginx-1.18.0.zip",
+			);
 		});
 	});
 

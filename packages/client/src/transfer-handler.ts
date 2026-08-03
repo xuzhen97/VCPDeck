@@ -127,6 +127,13 @@ async function handleExport(
 			}
 			callback(null, chunk);
 		},
+		flush(callback) {
+			if (loaded !== lastEmitBytes) {
+				lastEmitBytes = loaded;
+				socket.emit(Events.JOB_PROGRESS, { jobId, loaded, total });
+			}
+			callback();
+		},
 	});
 	fileStream.pipe(hashTransform);
 

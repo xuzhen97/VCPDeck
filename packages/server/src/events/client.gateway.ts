@@ -192,7 +192,7 @@ export class ClientGateway {
       return;
     }
 
-    const result: Record<string, unknown> = raw.result;
+    let result: Record<string, unknown> = raw.result;
 
     // ── FRP 回调 ──
     if (type === "frp.create" || type === "frp.delete") {
@@ -224,13 +224,13 @@ export class ClientGateway {
       return;
     }
 
-    // file.export 完成后确认上传 → File 记录 completed，并写回真实存储 key
+    // file.export 完成后确认上传，使用 File 表中上传阶段持久化的真实 key
     if (type === "file.export" && result?.fileId && result?.sha256) {
-      await this.fileService.confirmUpload(
+      const file = await this.fileService.confirmUpload(
         result.fileId as string,
-        (result.key as string) ?? "",
         result.sha256 as string,
       );
+      result = { ...result, key: file.key };
     }
 
     const next = await this.jobService.markDone(data.jobId, type, result);

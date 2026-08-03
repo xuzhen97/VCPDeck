@@ -7,6 +7,7 @@
     "build": "tsc",
     "prebuild": "node ../../scripts/ensure-frpc.cjs",
     "start": "node dist/index.js",
+    "dev": "pnpm build && node ../../scripts/wait-for-server.cjs && pnpm start",
     "test": "vitest run"
   },
   "dependencies": {

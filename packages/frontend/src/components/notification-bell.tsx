@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSdk } from "@/api/context";
 import { Button } from "@/components/ui/button";
 
-const POLL_MS = 3000;
+const POLL_MS = 500;
 const ACTIVE_STATUSES = new Set(["pending", "running"]);
 
 interface FinishedItem {
@@ -160,6 +160,18 @@ export function NotificationBell() {
 function ProgressBar({ progress }: { progress: JobProgress | null }) {
 	if (!progress || progress.total <= 0) {
 		return <div className="h-1.5 w-full rounded-full bg-muted" />;
+	}
+	if (progress.loaded >= progress.total) {
+		return (
+			<div>
+				<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+					<div className="h-full w-full animate-pulse rounded-full bg-primary/70" />
+				</div>
+				<p className="mt-1 text-xs text-muted-foreground">
+					上传完成 · 正在保存到云盘…
+				</p>
+			</div>
+		);
 	}
 	const pct = Math.min(
 		100,

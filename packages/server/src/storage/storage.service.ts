@@ -123,25 +123,40 @@ export class StorageService implements OnModuleInit {
 			});
 		}
 
+		const uploadAndPersist = async (meta: FileMeta) => {
+			const entry = await p.uploadToKey(stream, meta, key);
+			await this.prisma.file.updateMany({
+				where: { key },
+				data: { key: entry.key, status: "completed" },
+			});
+			return entry;
+		};
+
 		const pending = this.pendingUploads.get(key);
 		if (!pending) {
-			// 签名有效但内存缓存丢失（服务重启），从签名恢复最小元数据
-			// ponytail: 丢失 jobId/clientId，后续 File 表解决
+			const file = await this.prisma.file.findUnique({ where: { key } });
+			if (file) {
+				return uploadAndPersist({
+					jobId: file.jobId,
+					clientId: file.clientId,
+					filename: file.filename,
+					mimeType: file.mimeType ?? undefined,
+					size: file.size,
+				});
+			}
+
+			// 签名有效但内存缓存和 File 记录都丢失时，使用最小元数据兜底。
 			this.logger.warn(`receiveUpload fallback (pending 丢失): key=${key.slice(0, 40)}`);
-			return p.uploadToKey(
-				stream,
-				{
-					jobId: "",
-					clientId: "",
-					filename: key.split("/").pop() || key,
-					size: 0,
-				},
-				key,
-			);
+			return uploadAndPersist({
+				jobId: "",
+				clientId: "",
+				filename: key.split("/").pop() || key,
+				size: 0,
+			});
 		}
 
 		this.pendingUploads.delete(key);
-		return p.uploadToKey(stream, pending.meta, key);
+		return uploadAndPersist(pending.meta);
 	}
 
 	/** 验证下载签名并返回文件流 + 元数据 */
