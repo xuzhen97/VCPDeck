@@ -45,7 +45,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 		entry: FileEntry;
 	} | null>(null);
 	const [exportError, setExportError] = useState("");
-const [exportNotice, setExportNotice] = useState("");
+	const [exportNotice, setExportNotice] = useState("");
 	const [viewEntry, setViewEntry] = useState<{
 		entry: FileEntry;
 		rootDir: string;

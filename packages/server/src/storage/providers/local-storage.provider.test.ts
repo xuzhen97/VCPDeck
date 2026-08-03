@@ -21,7 +21,10 @@ describe("LocalStorageProvider download signature", () => {
 		vi.useFakeTimers();
 		try {
 			const qs = provider.signDownloadUrl("abc/def.txt", 1); // 1 秒有效期
-			const expires = parseInt(new URLSearchParams(qs).get("expires") || "0", 10);
+			const expires = parseInt(
+				new URLSearchParams(qs).get("expires") || "0",
+				10,
+			);
 			const sig = new URLSearchParams(qs).get("sig") || "";
 			expect(
 				provider.verifyDownloadSignature("abc/def.txt", expires, sig),
