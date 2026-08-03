@@ -12,7 +12,7 @@
 
 1. 页面打开后，用户无需阅读按钮或进入表单即可知道当前激活的 Storage 后端。
 2. 用明确的切换控件支持本地存储与阿里云盘之间的切换。
-3. 用 Tab 收纳后端配置、阿里云盘设置、授权与安全，降低首屏信息密度。
+3. 用两个顶层 Tab 收纳后端配置与阿里云盘管理；阿里云盘的应用配置和 OAuth 授权在同一面板内呈现，降低首屏信息密度并符合后端归属。
 4. 切换过程提供确认、loading、成功和失败反馈，且页面最终以服务端状态为准。
 5. 不向浏览器返回或展示 Storage 配置 JSON 中的密钥和 OAuth token。
 6. 只使用现有后端能力，不增加文件迁移或虚假的健康检查能力。
@@ -26,6 +26,7 @@
 - `PUT /api/storage/config` 接收 `kind`，写入数据库并调用 `StorageService.reload()` 热加载 provider。
 - 当前注册后端为 `local` 和 `alibaba`。
 - `GET /api/aliyundrive/status` 返回不含原始 secret/token 的阿里云盘状态摘要。
+- `POST /api/aliyundrive/verify` 调用 `getDriveInfo` OpenAPI 验证远端授权；临近过期时先使用 refresh token 刷新并持久化。
 - `PUT /api/aliyundrive/config` 保存 Client ID、可选 Client Secret、OpenAPI 地址和传输目录；保存结果不返回 Client Secret。
 - OAuth 由 `/api/aliyundrive/oauth/start`、`/complete`、`/revoke` 驱动。
 - 切换后端不会迁移历史文件，后端没有迁移接口。
@@ -78,7 +79,7 @@
 
 ### 3.2 Tab 配置区
 
-Tab 使用单面板展示内容，固定包含三项：
+Tab 使用单面板展示内容，固定包含两项：
 
 #### 后端配置
 
@@ -86,25 +87,27 @@ Tab 使用单面板展示内容，固定包含三项：
 - 显示当前后端及“当前使用”标识。
 - 提供完整切换入口；顶部快捷切换和卡片入口共用同一个切换处理函数。
 - 本地存储只展示说明，不添加后端不存在的路径或容量配置表单。
-- 阿里云盘卡片展示配置/授权摘要，并提供进入对应 Tab 的入口。
+- 阿里云盘卡片展示配置/授权摘要，并提供进入“阿里云盘”面板的入口。
 - 说明切换不迁移历史文件。
 
-#### 阿里云盘设置
+#### 阿里云盘
 
-- Client ID：必填。
-- Client Secret：密码输入框，提交时可为空表示保留原值；保存成功后清空输入框，绝不回填。
-- 传输目录：使用现有字段，默认值沿用服务端返回/现有页面默认值。
-- 保存调用 `PUT /api/aliyundrive/config`。
-- 保存成功后刷新阿里云盘安全状态。
+阿里云盘 Tab 是一个完整的后端管理面板，内部使用两个并列区块：
 
-#### 授权与安全
-
-- 展示 `configured`、`authorized`、`isExpired`、Client ID、Drive ID、过期时间等现有安全摘要。
-- “开始授权”调用 `POST /api/aliyundrive/oauth/start`。
-- 仅在授权地址通过现有安全校验后打开新窗口。
-- 提供 OAuth State 和授权码输入，完成授权调用 `POST /api/aliyundrive/oauth/complete`。
-- 撤销授权调用 `POST /api/aliyundrive/oauth/revoke`，继续使用确认对话框。
-- 授权、完成授权和撤销后刷新状态；不读取原始 token。
+- **连接配置**
+  - Client ID：必填。
+  - Client Secret：密码输入框，提交时可为空表示保留原值；保存成功后清空输入框，绝不回填。
+  - 传输目录：使用现有字段，默认值沿用服务端返回/现有页面默认值。
+  - 保存调用 `PUT /api/aliyundrive/config`。
+- **授权状态与 OAuth**
+  - 展示 `configured`、`authorized`、`isExpired`、Client ID、Drive ID、过期时间等现有安全摘要。
+  - 进入“阿里云盘”Tab 时自动调用远端授权验证，另外提供“立即检查授权”按钮。
+  - 校验结果展示为“授权有效”“授权已失效”“无法完成检查”等状态；网络错误不会清除已保存授权。
+  - “开始授权”调用 `POST /api/aliyundrive/oauth/start`。
+  - 仅在授权地址通过现有安全校验后打开新窗口。
+  - 提供 OAuth State 和授权码输入，完成授权调用 `POST /api/aliyundrive/oauth/complete`。
+  - 撤销授权调用 `POST /api/aliyundrive/oauth/revoke`，继续使用确认对话框。
+  - 授权、完成授权和撤销后刷新状态；不读取原始 token。
 
 ### 3.3 全局反馈
 
@@ -206,7 +209,7 @@ getBackendConfig(signal?) =>
 - 未配置数据库记录时返回 `kind: "local"`。
 - `PUT /api/storage/config` 仍能切换 `local` / `alibaba`，并触发 provider reload。
 - Storage SDK 能读取安全摘要并发送切换请求。
-- 现有阿里云盘配置和 OAuth 行为保持不变。
+- 现有阿里云盘配置和 OAuth 行为保持不变；新增远端授权验证只读调用 `getDriveInfo`，不创建目录、不上传文件。
 
 ### 8.2 前端
 
@@ -228,7 +231,8 @@ getBackendConfig(signal?) =>
 3. 用户能明确区分“当前后端”“阿里云盘已授权”和“阿里云盘已配置”。
 4. 任何切换结果都与服务端最终响应一致。
 5. 浏览器网络响应中不出现 `clientSecret`、`accessToken`、`refreshToken` 或完整 `config`。
-6. 既有本地文件、云盘文件和 OAuth 流程不因页面重排而增加迁移或删除行为。
+6. 两个 Tab 具备语义化角色和 `aria-selected`/`aria-controls` 关系，阿里云盘面板同时包含配置和授权。
+7. 既有本地文件、云盘文件和 OAuth 流程不因页面重排而增加迁移或删除行为。
 
 ## 9. 非目标
 

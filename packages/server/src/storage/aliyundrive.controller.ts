@@ -26,6 +26,7 @@ import type {
 	AlibabaStorageConfig,
 } from "./providers/alibaba-types.js";
 import { DEFAULT_OPENAPI_BASE, DEFAULT_TRANSFER_FOLDER } from "./providers/alibaba-types.js";
+import { AlibabaOpenApiClient } from "./providers/alibaba-openapi.client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 /** OAuth 会话（内存缓存，服务重启丢失） */
@@ -65,6 +66,58 @@ export class AliyunDriveController {
 			driveId: config?.driveId,
 			expiresAt: config?.expiresAt,
 		};
+	}
+
+	/** 通过阿里云盘 OpenAPI 验证当前授权是否仍可用。 */
+	@Post("verify")
+	async verify() {
+		const checkedAt = new Date().toISOString();
+		const config = await this.getConfig();
+		if (!config?.clientId) {
+			return { valid: false, checkedAt, reason: "not_configured" as const };
+		}
+
+		let working = config;
+		try {
+			if (
+				config.refreshToken &&
+				(!config.accessToken ||
+					!config.expiresAt ||
+					config.expiresAt <= Date.now() + 300_000)
+			) {
+				working = {
+					...config,
+					...(await this.refreshAccessToken(config)),
+				};
+				await this.writeConfig(working);
+			}
+
+			if (!working.accessToken) {
+				return { valid: false, checkedAt, reason: "not_authorized" as const };
+			}
+			if (working.expiresAt && working.expiresAt <= Date.now()) {
+				return { valid: false, checkedAt, reason: "expired" as const };
+			}
+
+			const client = new AlibabaOpenApiClient({
+				openapiBase: working.openapiBase || DEFAULT_OPENAPI_BASE,
+				accessToken: working.accessToken,
+			});
+			const { driveId } = await client.getDriveInfo();
+			await this.writeConfig({ ...working, driveId });
+			return { valid: true, checkedAt, driveId };
+		} catch (error) {
+			const status = getHttpStatus(error);
+			const reason =
+				status === 401
+					? "revoked"
+					: status === 403
+						? "forbidden"
+						: status === 400
+							? "revoked"
+							: "unreachable";
+			return { valid: false, checkedAt, reason };
+		}
 	}
 
 	/** 保存配置 */
@@ -229,6 +282,40 @@ export class AliyunDriveController {
 		}
 	}
 
+	private async refreshAccessToken(
+		config: AlibabaStorageConfig,
+	): Promise<Pick<AlibabaStorageConfig, "accessToken" | "refreshToken" | "expiresAt">> {
+		if (!config.refreshToken) throw new Error("缺少 refresh_token");
+		const openapiBase = config.openapiBase || DEFAULT_OPENAPI_BASE;
+		const payload: Record<string, string> = {
+			client_id: config.clientId,
+			grant_type: "refresh_token",
+			refresh_token: config.refreshToken,
+		};
+		if (config.clientSecret) payload.client_secret = config.clientSecret;
+
+		const response = await fetch(`${openapiBase}/oauth/access_token`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(payload),
+		});
+		if (!response.ok) {
+			throw Object.assign(new Error("阿里云盘 token 刷新失败"), {
+				statusCode: response.status,
+			});
+		}
+		const data = (await response.json()) as {
+			access_token: string;
+			refresh_token?: string;
+			expires_in: number;
+		};
+		return {
+			accessToken: data.access_token,
+			refreshToken: data.refresh_token ?? config.refreshToken,
+			expiresAt: Date.now() + data.expires_in * 1000,
+		};
+	}
+
 	private async writeConfig(config: AlibabaStorageConfig): Promise<void> {
 		const json = JSON.stringify(config);
 		await this.prisma.storageBackendConfig.upsert({
@@ -237,6 +324,18 @@ export class AliyunDriveController {
 			update: { config: json },
 		});
 	}
+}
+
+function getHttpStatus(error: unknown): number | undefined {
+	if (typeof error === "object" && error !== null) {
+		const statusCode = (error as { statusCode?: unknown }).statusCode;
+		if (typeof statusCode === "number") return statusCode;
+	}
+	if (error instanceof Error) {
+		const match = error.message.match(/HTTP (\d{3})/);
+		if (match) return Number(match[1]);
+	}
+	return undefined;
 }
 
 /** 生成 PKCE code_verifier */

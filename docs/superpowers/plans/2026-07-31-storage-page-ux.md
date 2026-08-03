@@ -4,7 +4,7 @@
 
 **Goal:** 在不泄露 Storage 原始配置的前提下，重做存储页面的信息层级、后端切换反馈和 Tab 配置流，使当前激活后端始终来自服务端并符合现有热切换/OAuth 后端逻辑。
 
-**Architecture:** Server 将 `GET /api/storage/config` 收窄为安全摘要；SDK 为该摘要提供类型化读取方法；Frontend 用两个并行资源分别读取激活后端和阿里云盘安全状态，顶部状态卡负责快捷切换，下方三个 Tab 负责后端配置、阿里云盘设置和授权安全。切换到阿里云盘需要确认，切回本地直接执行，但所有结果都在服务端请求成功后重新读取。
+**Architecture:** Server 将 `GET /api/storage/config` 收窄为安全摘要；SDK 为该摘要提供类型化读取方法；Frontend 用两个并行资源分别读取激活后端和阿里云盘安全状态，顶部状态卡负责快捷切换，下方两个 Tab 负责后端配置和阿里云盘管理，后者内部同时呈现连接配置与 OAuth 授权。切换到阿里云盘需要确认，切回本地直接执行，但所有结果都在服务端请求成功后重新读取。
 
 **Tech Stack:** NestJS、Prisma、TypeScript/ESM、React 18、Vite、Tailwind CSS v4、Radix Dialog、Vitest、Testing Library。
 
@@ -20,6 +20,7 @@
 - 切换到 `alibaba` 不因未授权而被前端擅自阻止；切换成功后明确提示新的文件操作可能失败。
 - 错误对象保持稳定、安全的 message；不展示 stack、密钥、token 或完整后端配置。
 - 每个非平凡交互至少留下一个可运行的 Vitest/Testing Library 检查。
+- 远端授权验证只调用 `getDriveInfo`，不创建目录、不上传文件；网络错误不清除已保存授权。
 - 当前工作区已有的 FRP、Client、脚本和 `AGENTS.md` 未提交修改不属于本计划，实施时不得覆盖或重置。
 
 ---
@@ -29,10 +30,13 @@
 ### 修改
 
 - `packages/server/src/storage/storage.service.ts`：把后端配置读取改为安全摘要，并保持 provider 热切换逻辑不变。
+- `packages/server/src/storage/aliyundrive.controller.ts`：增加只读的远端授权验证、临近过期 Token 刷新与安全结果映射。
 - `packages/sdk/src/storage.ts`：增加 `StorageBackendKind`、`StorageBackendStatus` 和安全摘要读取方法；收窄 `setBackend` 返回类型。
-- `packages/sdk/src/domains.test.ts`：覆盖 Storage 安全摘要读取和切换请求。
-- `packages/frontend/src/pages/storage-page.tsx`：实现顶部激活卡、共享切换流程、三个 Tab、状态反馈和现有 OAuth 表单迁移。
-- `packages/frontend/src/pages/storage-page.test.tsx`：覆盖激活状态、确认/直接切换、失败回滚、Tab、配置和 OAuth 行为。
+- `packages/sdk/src/aliyundrive.ts`：增加远端授权验证类型和 `verify()` API。
+- `packages/sdk/src/domains.test.ts`：覆盖 Storage 安全摘要读取、切换请求和 Aliyun 远端验证请求。
+- `packages/server/src/storage/aliyundrive.controller.test.ts`：覆盖有效 Token、401 失效和临近过期刷新后的远端验证。
+- `packages/frontend/src/pages/storage-page.tsx`：实现顶部激活卡、共享切换流程、两个 Tab、阿里云盘配置/授权合并面板、远端授权验证和状态反馈。
+- `packages/frontend/src/pages/storage-page.test.tsx`：覆盖激活状态、确认/直接切换、失败回滚、Tab、配置、远端授权验证和 OAuth 行为。
 - `packages/frontend/src/styles.css`：增加仅作用于存储页面的 Tab/状态更新动画，并支持 `prefers-reduced-motion`。
 - `docs/storage-api.md`：补充安全配置摘要读取和切换接口的公开响应约束。
 
@@ -529,7 +533,7 @@ pnpm --filter @vcpdeck/frontend test -- src/pages/storage-page.test.tsx
 
 ---
 
-### Task 4: 实现顶部激活卡和三个 Tab
+### Task 4: 实现顶部激活卡和两个 Tab，并合并阿里云盘配置/授权
 
 **Files:**
 
@@ -547,15 +551,16 @@ pnpm --filter @vcpdeck/frontend test -- src/pages/storage-page.test.tsx
 在 `storage-page.test.tsx` 增加以下测试；所有测试只通过可访问角色和 label 操作，不依赖 CSS 类：
 
 ```ts
-it("switches between the three configuration tabs", async () => {
+it("uses two tabs and combines Alibaba configuration with authorization", async () => {
  renderPage();
  await screen.findByText("本地存储");
 
+ expect(screen.getAllByRole("tab")).toHaveLength(2);
  expect(screen.getByRole("tabpanel")).toHaveTextContent("选择存储后端");
- await userEvent.click(screen.getByRole("tab", { name: "阿里云盘设置" }));
+ await userEvent.click(screen.getByRole("tab", { name: "阿里云盘" }));
  expect(screen.getByRole("tabpanel")).toHaveTextContent("Client ID");
- await userEvent.click(screen.getByRole("tab", { name: "授权与安全" }));
  expect(screen.getByRole("tabpanel")).toHaveTextContent("开始授权");
+ expect(screen.queryByRole("tab", { name: "授权与安全" })).not.toBeInTheDocument();
 });
 
 it("warns when Alibaba Drive is active but not authorized", async () => {
@@ -577,7 +582,7 @@ it("warns when Alibaba Drive is active but not authorized", async () => {
 
 it("does not send an empty client secret and clears it after a non-empty save", async () => {
  const { configure } = renderPage();
- await userEvent.click(await screen.findByRole("tab", { name: "阿里云盘设置" }));
+ await userEvent.click(await screen.findByRole("tab", { name: "阿里云盘" }));
  await userEvent.clear(screen.getByLabelText("Client ID"));
  await userEvent.type(screen.getByLabelText("Client ID"), "new-app-id");
  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
@@ -589,7 +594,7 @@ it("does not send an empty client secret and clears it after a non-empty save", 
 });
 ```
 
-把 `renderPage` 的 mock 返回对象扩展为可选 `aliyun` 状态，并返回 `configure` 供测试断言。保留现有三条 OAuth 测试，但在调用“开始授权”前先切换到“授权与安全” Tab。
+把 `renderPage` 的 mock 返回对象扩展为可选 `aliyun` 状态，并返回 `configure` 供测试断言。保留 OAuth 测试，但在调用“开始授权”前统一切换到“阿里云盘” Tab。
 
 - [ ] **Step 2: 运行 Tab 测试确认失败**
 
@@ -599,7 +604,7 @@ it("does not send an empty client secret and clears it after a non-empty save", 
 pnpm --filter @vcpdeck/frontend test -- src/pages/storage-page.test.tsx
 ```
 
-预期：FAIL，当前页面没有三个语义化 Tab、激活后端文案和安全配置入参行为。
+预期：FAIL，当前页面没有两个语义化 Tab、合并后的阿里云盘面板和安全配置入参行为。
 
 - [ ] **Step 3: 实现顶部激活卡**
 
@@ -643,12 +648,12 @@ function activeBackendLabel(
 
 激活卡包含：`当前激活的存储`、名称、说明、快捷切换控件和“切换只影响新任务，不会自动迁移已有文件”。阿里云盘未授权/过期时使用 warning 文案和状态 chip；不能把 `kind: alibaba` 展示为本地。
 
-- [ ] **Step 4: 实现三个可访问 Tab**
+- [ ] **Step 4: 实现两个可访问 Tab，并合并阿里云盘配置/授权**
 
-使用页面内部 `useState<"backend" | "aliyun-config" | "security">("backend")`，不引入 Router 或第三方 Tabs 组件。Tab 按钮使用 roving focus 的最小实现：当前 Tab `tabIndex=0`，其他 Tab `tabIndex=-1`；在 Tab 上处理 `ArrowLeft`/`ArrowRight` 循环切换并将焦点移到新 Tab，同时保留普通 Tab 键顺序。结构必须满足：
+使用页面内部 `useState<"backend" | "aliyun">("backend")`，不引入 Router 或第三方 Tabs 组件。Tab 按钮使用 roving focus 的最小实现：当前 Tab `tabIndex=0`，其他 Tab `tabIndex=-1`；在 Tab 上处理 `ArrowLeft`/`ArrowRight` 循环切换并将焦点移到新 Tab，同时保留普通 Tab 键顺序。结构必须满足：
 
 ```tsx
-const tabs = ["backend", "aliyun-config", "security"] as const;
+const tabs = ["backend", "aliyun"] as const;
 const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
 function handleTabKeyDown(index: number, event: React.KeyboardEvent) {
@@ -675,21 +680,12 @@ function handleTabKeyDown(index: number, event: React.KeyboardEvent) {
  </button>
  <button
   role="tab"
-  id="storage-tab-aliyun-config"
-  aria-controls="storage-panel-aliyun-config"
-  aria-selected={tab === "aliyun-config"}
-  onClick={() => setTab("aliyun-config")}
+  id="storage-tab-aliyun"
+  aria-controls="storage-panel-aliyun"
+  aria-selected={tab === "aliyun"}
+  onClick={() => setTab("aliyun")}
  >
-  阿里云盘设置
- </button>
- <button
-  role="tab"
-  id="storage-tab-security"
-  aria-controls="storage-panel-security"
-  aria-selected={tab === "security"}
-  onClick={() => setTab("security")}
- >
-  授权与安全
+  阿里云盘
  </button>
 </div>
 ```
@@ -697,7 +693,7 @@ function handleTabKeyDown(index: number, event: React.KeyboardEvent) {
 当前面板使用 `role="tabpanel"`、对应 `aria-labelledby` 和唯一 id。Tab 面板内容如下：
 
 - `backend`：本地存储卡、阿里云盘卡、当前使用标识、阿里云盘授权摘要、两个卡片切换入口；卡片按钮调用同一个 `requestBackendSwitch`。
-- `aliyun-config`：Client ID、Client Secret（可选，留空保留现有值）、传输目录和保存按钮。首次安全状态加载后，用 `clientId` 和 `transferFolder` 填充公开字段；使用一次性的 `configInitialized` ref，避免状态刷新覆盖用户尚未提交的编辑。提交时只在 secret 非空时把 `clientSecret` 放入 request body：
+- `aliyun`：一个完整的阿里云盘面板，内部并列显示 Client ID、Client Secret、传输目录配置和授权状态/OAuth 操作；配置与授权属于同一个后端上下文。首次安全状态加载后，用 `clientId` 和 `transferFolder` 填充公开字段；使用一次性的 `configInitialized` ref，避免状态刷新覆盖用户尚未提交的编辑。提交时只在 secret 非空时把 `clientSecret` 放入 request body：
 
 ```ts
 const input: AliyunDriveConfigInput = {
@@ -711,7 +707,7 @@ setClientSecret("");
 
 保存成功后重新读取阿里云盘状态；保存失败时保留用户输入并显示错误。
 
-- `security`：复用现有安全摘要字段；状态缺失时显示不可用重试；开始授权、完成授权、撤销授权继续调用现有接口。OAuth 地址继续使用现有 `safeAuthorizationUrl`，不安全时不得调用 `window.open`。
+阿里云盘面板复用现有安全摘要字段；状态缺失时显示不可用重试；开始授权、完成授权、撤销授权继续调用现有接口。OAuth 地址继续使用现有 `safeAuthorizationUrl`，不安全时不得调用 `window.open`。
 
 确认切换对话框继续使用现有 Radix `Dialog`，文案为“启用阿里云盘？”、“新创建的任务将使用阿里云盘。已有文件不会自动迁移，未完成上传任务将继续使用原后端。”；确认按钮调用 `switchBackend("alibaba")`，取消只清除 pending 状态。
 
@@ -895,7 +891,7 @@ git show --stat --oneline --summary HEAD
 2. 顶部快捷切换和 Tab 内卡片切换调用同一逻辑；阿里云盘目标需要确认，本地目标不需要确认。
 3. 切换失败时旧后端仍可见，切换成功后页面重新读取服务端状态。
 4. 阿里云盘已切换但未授权/已过期时，页面明确提示真实状态，不阻止后端已经完成的切换。
-5. 三个 Tab 具备语义化角色、键盘可操作的按钮和 `aria-selected`/`aria-controls` 关系。
+5. 两个 Tab 具备语义化角色、键盘可操作的按钮和 `aria-selected`/`aria-controls` 关系；阿里云盘面板同时包含配置和授权。
 6. Client Secret 为空时不会覆盖服务端已有 secret，保存后输入框清空；页面不回填 token。
 7. 不安全 OAuth URL 不会打开新窗口；现有 OAuth 测试继续通过。
 8. Server、SDK、Frontend 相关测试和构建均通过，LSP 无 blocking error。

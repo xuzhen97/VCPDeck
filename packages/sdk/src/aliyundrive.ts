@@ -1,5 +1,19 @@
 import type { VcpDeckClient } from "./client.js";
 
+/** 阿里云盘授权远端校验结果；不包含访问凭证。 */
+export interface AliyunDriveVerification {
+	valid: boolean;
+	checkedAt: string;
+	driveId?: string;
+	reason?:
+		| "not_configured"
+		| "not_authorized"
+		| "expired"
+		| "revoked"
+		| "forbidden"
+		| "unreachable";
+}
+
 /** 阿里云盘安全状态；不包含访问凭证。 */
 export interface AliyunDriveStatus {
 	configured: boolean;
@@ -24,6 +38,13 @@ export interface AliyunDriveConfigInput {
 /** 创建阿里云盘 OAuth API。 */
 export function createAliyunDriveApi(client: Pick<VcpDeckClient, "request">) {
 	return {
+		verify: (signal?: AbortSignal) =>
+			client.request<AliyunDriveVerification>(
+				"POST",
+				"/api/aliyundrive/verify",
+				undefined,
+				signal,
+			),
 		status: (signal?: AbortSignal) =>
 			client.request<AliyunDriveStatus>(
 				"GET",

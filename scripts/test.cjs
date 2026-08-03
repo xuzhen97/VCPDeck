@@ -1043,9 +1043,9 @@ const done = (code) => {
 async function main() {
 	console.log("\n=== VCPDeck Integration Test ===\n");
 
-	cleanDb();
 	killPort();
 	await sleep(1000);
+	cleanDb();
 
 	// 1. Start server
 	console.log("[setup] Starting server...");
@@ -1380,10 +1380,11 @@ async function main() {
 
 	{
 		const { body } = await apiJson("GET", "/api/jobs");
-		if (Array.isArray(body)) {
-			pass("GET /api/jobs returns array", `length=${body.length}`);
+		const jobs = Array.isArray(body) ? body : body?.data;
+		if (Array.isArray(jobs)) {
+			pass("GET /api/jobs returns paginated data", `length=${jobs.length}`);
 		} else {
-			fail("GET /api/jobs returns array", JSON.stringify(body));
+			fail("GET /api/jobs returns paginated data", JSON.stringify(body));
 		}
 	}
 
@@ -1434,8 +1435,8 @@ async function main() {
 		await sleep(500);
 		try {
 			const { body: clients } = await apiJson("GET", "/api/clients");
-			if (clients.length > 0) {
-				const c = clients[0];
+			const c = clients.find((item) => item.clientId === clientId);
+			if (c) {
 				if (c.clientId && c.hostname && c.os) {
 					pass("Client info has fields", `hostname=${c.hostname}, os=${c.os}`);
 				} else {
@@ -1462,8 +1463,10 @@ async function main() {
 	if (clientSocket?.connected && clientId) {
 		try {
 			const { body: clients } = await apiJson("GET", "/api/clients");
-			const realClientId = clients[0]?.clientId;
-			if (!realClientId) throw new Error("No clientId from API");
+			const realClientId = clients.find(
+				(item) => item.clientId === clientId,
+			)?.clientId;
+			if (!realClientId) throw new Error("Registered client not found");
 
 			// Register listener BEFORE creating the job
 			const dispatchPromise = new Promise((resolve) => {
@@ -1508,8 +1511,11 @@ async function main() {
 
 				await sleep(500);
 
-				const { body: jobs } = await apiJson("GET", "/api/jobs");
-				const ourJob = jobs.find((j) => j.jobId === dispatchReceived.jobId);
+				const { body: jobsResponse } = await apiJson("GET", "/api/jobs");
+				const jobs = Array.isArray(jobsResponse)
+					? jobsResponse
+					: jobsResponse?.data;
+				const ourJob = jobs?.find((j) => j.jobId === dispatchReceived.jobId);
 				if (ourJob && ourJob.status === "done") {
 					pass("Job completes", `status=${ourJob.status}`);
 
@@ -1545,8 +1551,10 @@ async function main() {
 	if (clientSocket?.connected && clientId) {
 		try {
 			const { body: clients } = await apiJson("GET", "/api/clients");
-			const realClientId = clients[0]?.clientId;
-			if (!realClientId) throw new Error("No clientId from API");
+			const realClientId = clients.find(
+				(item) => item.clientId === clientId,
+			)?.clientId;
+			if (!realClientId) throw new Error("Registered client not found");
 
 			// Register cancel listener first
 			const cancelPromise = new Promise((resolve) => {
@@ -1600,8 +1608,11 @@ async function main() {
 				});
 				await sleep(500);
 
-				const { body: jobs } = await apiJson("GET", "/api/jobs");
-				const ourJob = jobs.find((j) => j.jobId === cancelReceived.jobId);
+				const { body: jobsResponse } = await apiJson("GET", "/api/jobs");
+				const jobs = Array.isArray(jobsResponse)
+					? jobsResponse
+					: jobsResponse?.data;
+				const ourJob = jobs?.find((j) => j.jobId === cancelReceived.jobId);
 				if (ourJob?.status === "cancelled") {
 					pass("Job is cancelled", `status=${ourJob.status}`);
 				} else {
@@ -1623,7 +1634,8 @@ async function main() {
 	if (clientSocket?.connected && clientId) {
 		try {
 			const { body: clients } = await apiJson("GET", "/api/clients");
-			const c = clients[0];
+			const c = clients.find((item) => item.clientId === clientId);
+			if (!c) throw new Error("Registered client not found");
 			const before = c.lastHeartbeatAt;
 
 			clientSocket.emit(Events.HEARTBEAT, {

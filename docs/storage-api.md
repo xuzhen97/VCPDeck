@@ -150,6 +150,39 @@ Server（内部）                                                             C
 
 ## 配置
 
+### GET /api/storage/config
+
+返回当前激活后端的安全摘要，不返回 `config` JSON。
+
+```json
+{
+  "kind": "local",
+  "updatedAt": "2026-07-31T12:00:00.000Z"
+}
+```
+
+`kind` 只有 `local` 和 `alibaba`；没有数据库记录时为 `local`。响应不包含 `clientSecret`、`accessToken`、`refreshToken`。
+
+### PUT /api/storage/config
+
+Request body：`{ "kind": "local" | "alibaba" }`。
+
+服务端更新 `StorageBackendConfig.kind` 并热加载 provider，响应与 `GET /api/storage/config` 相同。切换不会迁移已有文件；切换到 `alibaba` 时服务端不会替前端验证 OAuth 授权状态。
+
+### POST /api/aliyundrive/verify
+
+通过阿里云盘 `getDriveInfo` OpenAPI 验证当前授权是否仍可用。若 access token 临近过期且存在 refresh token，服务端会先刷新并持久化新的 token，再执行验证。
+
+```json
+{
+  "valid": true,
+  "checkedAt": "2026-07-31T12:00:00.000Z",
+  "driveId": "drive-1"
+}
+```
+
+失败时 `valid` 为 `false`，`reason` 可能为 `not_configured`、`not_authorized`、`expired`、`revoked`、`forbidden` 或 `unreachable`。网络错误不会清除已保存的授权。响应不包含任何 token、secret 或完整配置。
+
 存储后端通过数据库 `StorageBackendConfig` 表配置（单行）。
 
 ```sql
@@ -158,7 +191,7 @@ SELECT kind, config FROM StorageBackendConfig;
 -- config: {"baseDir": "./data/storage"}
 ```
 
-切换后端：修改 `kind` 和 `config` 字段后，调 `StorageService.reload()` 或重启 Server。
+数据库中的 `config` JSON 供服务端 provider 使用，不通过管理端点返回浏览器。
 
 ## 扩展
 
