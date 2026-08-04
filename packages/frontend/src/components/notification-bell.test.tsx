@@ -89,6 +89,58 @@ describe("NotificationBell", () => {
 		expect(screen.getByText(/42%/)).toBeInTheDocument();
 	});
 
+	it("waiting_input 文件上传显示 Storage 上传状态", async () => {
+		const list = vi.fn().mockResolvedValue({
+			data: [
+				job({
+					jobId: "upload-1",
+					type: "file.import",
+					status: "waiting_input" as JobInfo["status"],
+					payload: { targetPath: "uploads/a.txt" },
+					progress: { loaded: 2, total: 5 },
+				}),
+			],
+			total: 1,
+			page: 1,
+			pageSize: 5,
+			totalPages: 1,
+		});
+		renderBell({ jobs: { list, get: vi.fn() } });
+
+		await vi.advanceTimersByTimeAsync(0);
+		await act(async () => {});
+		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
+
+		expect(screen.getByText(/a\.txt/)).toBeInTheDocument();
+		expect(screen.getByText(/正在上传到 Storage/)).toBeInTheDocument();
+		expect(screen.getByText(/40%/)).toBeInTheDocument();
+	});
+
+	it("running file.import 显示远程目录写入状态", async () => {
+		const list = vi.fn().mockResolvedValue({
+			data: [
+				job({
+					jobId: "import-1",
+					type: "file.import",
+					payload: { targetPath: "uploads/a.txt" },
+					progress: { loaded: 2, total: 5 },
+				}),
+			],
+			total: 1,
+			page: 1,
+			pageSize: 5,
+			totalPages: 1,
+		});
+		renderBell({ jobs: { list, get: vi.fn() } });
+
+		await vi.advanceTimersByTimeAsync(0);
+		await act(async () => {});
+		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
+
+		expect(screen.getByText(/正在写入远程目录/)).toBeInTheDocument();
+		expect(screen.getByText(/40%/)).toBeInTheDocument();
+	});
+
 	it("每 500ms 刷新一次进行中任务进度", async () => {
 		const list = vi.fn().mockResolvedValue({
 			data: [job({ jobId: "progress-1", type: "file.export" })],

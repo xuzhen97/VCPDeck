@@ -5,7 +5,7 @@ import { useSdk } from "@/api/context";
 import { Button } from "@/components/ui/button";
 
 const POLL_MS = 500;
-const ACTIVE_STATUSES = new Set(["pending", "running"]);
+const ACTIVE_STATUSES = new Set(["pending", "running", "waiting_input"]);
 
 interface FinishedItem {
 	jobId: string;
@@ -106,7 +106,11 @@ export function NotificationBell() {
 							<p className="mb-1 truncate text-sm font-medium">
 								{jobTypeLabel(job.type)}：{filenameOf(job)}
 							</p>
-							<ProgressBar progress={job.progress} />
+							<ProgressBar
+								progress={job.progress}
+								status={job.status}
+								type={job.type}
+							/>
 						</div>
 					))}
 					{finished.map((item) => (
@@ -157,11 +161,34 @@ export function NotificationBell() {
 	);
 }
 
-function ProgressBar({ progress }: { progress: JobProgress | null }) {
+function ProgressBar({
+	progress,
+	status,
+	type,
+}: {
+	progress: JobProgress | null;
+	status: string;
+	type: string;
+}) {
+	const stage =
+		status === "waiting_input"
+			? "正在上传到 Storage"
+			: status === "pending"
+				? "等待派发"
+				: type === "file.import"
+					? "正在写入远程目录"
+					: "";
 	if (!progress || progress.total <= 0) {
-		return <div className="h-1.5 w-full rounded-full bg-muted" />;
+			return (
+				<div>
+					<div className="h-1.5 w-full rounded-full bg-muted" />
+					{stage && (
+						<p className="mt-1 text-xs text-muted-foreground">{stage}</p>
+					)}
+				</div>
+			);
 	}
-	if (progress.loaded >= progress.total) {
+	if (progress.loaded >= progress.total && type === "file.export") {
 		return (
 			<div>
 				<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -187,7 +214,8 @@ function ProgressBar({ progress }: { progress: JobProgress | null }) {
 				/>
 			</div>
 			<p className="mt-1 text-xs text-muted-foreground">
-				已传 {mb(progress.loaded)} / {mb(progress.total)} MB · {pct}%
+				{stage && <span>{stage}</span>}
+				{stage && " · "}已传 {mb(progress.loaded)} / {mb(progress.total)} MB · {pct}%
 			</p>
 		</div>
 	);
@@ -239,7 +267,8 @@ function DownloadButton({
 }
 
 function filenameOf(job: JobInfo): string {
-	const path = job.payload?.path;
+	const path =
+		job.payload?.path ?? job.payload?.targetPath ?? job.payload?.filename;
 	return typeof path === "string"
 		? path.split(/[/\\]/).pop() || path
 		: job.type;
