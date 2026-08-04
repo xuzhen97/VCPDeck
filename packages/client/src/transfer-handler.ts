@@ -10,9 +10,22 @@ import { resolveSafePath } from "./file-handler.js";
 
 const SERVER_BASE = process.env.VCPDECK_SERVER || "http://localhost:3001";
 
-/** 将相对 URL 转为绝对 URL */
+/** 将相对 URL 转为绝对 URL；绝对 URL 必须与 Server 同源，防止拉取任意内网地址 */
 function absUrl(path: string): string {
-	if (path.startsWith("http://") || path.startsWith("https://")) return path;
+	if (path.startsWith("http://") || path.startsWith("https://")) {
+		let base: URL;
+		let target: URL;
+		try {
+			base = new URL(SERVER_BASE);
+			target = new URL(path);
+		} catch {
+			throw new Error("Invalid transfer URL");
+		}
+		if (target.origin !== base.origin) {
+			throw new Error(`Blocked URL outside server origin: ${target.origin}`);
+		}
+		return path;
+	}
 	return `${SERVER_BASE}${path}`;
 }
 

@@ -256,6 +256,28 @@ describe("handleTransfer file.import", () => {
 		);
 	});
 
+	it("拒绝非 Server 同源的绝对下载 URL", async () => {
+		vi.mocked(fetch).mockClear();
+		const socket = mockSocket();
+		const job = importJob(false);
+		await handleTransfer(
+			{
+				...job,
+				payload: {
+					...job.payload,
+					downloadRef: {
+						...job.payload.downloadRef,
+						url: "http://evil.example/steal",
+					},
+				},
+			},
+			socket,
+		);
+
+		expect(errorCalls(socket)[0]?.[1].error.code).toBe("IO_ERROR");
+		expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+	});
+
 	it("下载写入阶段补报精确进度", async () => {
 		const socket = mockSocket();
 		await handleTransfer(importJob(false), socket);
