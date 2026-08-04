@@ -2,7 +2,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { stat, rename, unlink } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
-import { Readable, PassThrough, Transform } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import type { Socket } from "socket.io-client";
 import { Events, FileErrorCode } from "@vcpdeck/shared";
 import type { JobDone, FileRef } from "@vcpdeck/shared";
@@ -65,6 +65,8 @@ export async function handleTransfer(
 			const rootDir = payload.rootDir as string;
 			const downloadRef = payload.downloadRef as FileRef;
 			const expectedSha256 = payload.sha256 as string;
+			const expectedSize = Number(payload.size ?? 0);
+			const overwrite = payload.overwrite === true;
 
 			await handleImport(
 				jobId,
@@ -72,6 +74,8 @@ export async function handleTransfer(
 				rootDir,
 				downloadRef,
 				expectedSha256,
+				expectedSize,
+				overwrite,
 				socket,
 			);
 			return;
@@ -176,11 +180,16 @@ async function handleImport(
 	rootDir: string,
 	downloadRef: FileRef,
 	expectedSha256: string,
+	expectedSize: number,
+	overwrite: boolean,
 	socket: Socket,
 ) {
 	const safe = await resolveSafePath(rootDir, targetPath);
 	const tmpPath = `${safe}.vcpdeck-tmp-${randomUUID()}`;
 	const hash = createHash("sha256");
+	let loaded = 0;
+	let lastEmitAt = 0;
+	let lastEmitBytes = 0;
 
 	try {
 		// safe: downloadRef.url 由 Server 签发并校验签名，非任意 URL
@@ -196,13 +205,43 @@ async function handleImport(
 			return;
 		}
 
-		const countingStream = new PassThrough();
-		countingStream.on("data", (chunk: Buffer) => hash.update(chunk));
-		// fetch body 是 web ReadableStream，转为 Node stream 后再 pipe
+		const tracker = new Transform({
+			transform(chunk: Buffer, _encoding, callback) {
+				const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+				hash.update(buffer);
+				loaded += buffer.length;
+				const now = Date.now();
+				if (
+					now - lastEmitAt >= 500 ||
+					loaded - lastEmitBytes >= 1024 * 1024
+				) {
+					lastEmitAt = now;
+					lastEmitBytes = loaded;
+					socket.emit(Events.JOB_PROGRESS, {
+						jobId,
+						loaded,
+						total: expectedSize,
+					});
+				}
+				callback(null, buffer);
+			},
+			flush(callback) {
+				if (loaded !== lastEmitBytes) {
+					lastEmitBytes = loaded;
+					socket.emit(Events.JOB_PROGRESS, {
+						jobId,
+						loaded,
+						total: expectedSize,
+					});
+				}
+				callback();
+			},
+		});
+		// fetch body 是 web ReadableStream，转为 Node stream 后再写入临时文件。
 		const webBody = res.body as ReadableStream<Uint8Array>;
+		if (!webBody) throw new Error("Download response has no body");
 		const nodeBody = Readable.fromWeb(webBody as any);
-		nodeBody.pipe(countingStream);
-		await pipeline(countingStream, createWriteStream(tmpPath));
+		await pipeline(nodeBody, tracker, createWriteStream(tmpPath));
 
 		const sha256 = hash.digest("hex");
 		if (sha256 !== expectedSha256) {
@@ -217,10 +256,23 @@ async function handleImport(
 			return;
 		}
 
+		const existing = await stat(safe).catch(() => null);
+		if (existing?.isDirectory() || (existing && !overwrite)) {
+			await unlink(tmpPath).catch(() => {});
+			emitError(
+				socket,
+				jobId,
+				"file.import",
+				FileErrorCode.PATH_CONFLICT,
+				"Destination exists; set overwrite=true",
+			);
+			return;
+		}
+		if (existing && overwrite) await unlink(safe);
 		await rename(tmpPath, safe);
 		emitDone(socket, jobId, "file.import", {
 			path: safe,
-			size: downloadRef.expiresAt, // ponytail: 实际 size 从下载端获得，首版用 downloadRef 附带
+			size: loaded,
 			sha256,
 		});
 	} catch (err) {
