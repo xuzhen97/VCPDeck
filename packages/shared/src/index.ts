@@ -199,7 +199,7 @@ export interface ClientInfo {
 }
 
 // ── Job info (REST response) ──
-/** Job 传输段进度：已传输字节 / 总字节 */
+/** Job 传输段进度：浏览器上传或 Client 导入阶段已传输字节 / 总字节 */
 export interface JobProgress {
 	loaded: number;
 	total: number;
@@ -213,7 +213,7 @@ export interface JobInfo {
 	status: JobStatus;
 	payload: Record<string, unknown>;
 	result: Record<string, unknown> | null;
-	/** 传输段进度（file.export 上传时上报，无则 null） */
+	/** 传输段进度（Storage 上传或 Client 导入时上报，无则 null） */
 	progress: JobProgress | null;
 	errorCode: string | null;
 	errorMessage: string | null;
@@ -239,6 +239,23 @@ export interface FileRef {
 	method: "GET" | "PUT";
 	expiresAt: number;
 	headers?: Record<string, string>;
+}
+
+export interface FileUploadSessionCreate {
+	clientId: string;
+	rootDir: string;
+	targetPath: string;
+	filename: string;
+	size: number;
+	mimeType?: string;
+	overwrite?: boolean;
+}
+
+export interface FileUploadSession {
+	jobId: string;
+	fileId: string;
+	status: JobStatus;
+	upload: Pick<FileRef, "url" | "expiresAt">;
 }
 
 // ── File job payload ──
@@ -286,6 +303,7 @@ export interface FileImportPayload {
 	downloadRef: FileRef;
 	size: number;
 	sha256: string;
+	overwrite?: boolean;
 }
 
 // ── File roots result ──
