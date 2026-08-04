@@ -5,14 +5,21 @@ import type {
 	FileRootsResult,
 	FileStatResult,
 	FileTransferResult,
+	FileUploadSession,
+	FileUploadSessionCreate,
 	JobCreate,
+	JobCreateResult,
 } from "@vcpdeck/shared";
 import type { createJobsApi } from "./jobs.js";
+import type { VcpDeckClient } from "./client.js";
 
 type JobsApi = ReturnType<typeof createJobsApi>;
 
 /** 创建远程文件 Job API。 */
-export function createFilesApi(jobs: Pick<JobsApi, "create" | "wait">) {
+export function createFilesApi(
+	client: Pick<VcpDeckClient, "request">,
+	jobs: Pick<JobsApi, "create" | "wait">,
+) {
 	async function run<T>(input: JobCreate, signal?: AbortSignal): Promise<T> {
 		const created = await jobs.create(input, signal);
 		const job = await jobs.wait(created.jobId, { signal });
@@ -21,6 +28,23 @@ export function createFilesApi(jobs: Pick<JobsApi, "create" | "wait">) {
 	}
 
 	return {
+		createUploadSession: (
+			input: FileUploadSessionCreate,
+			signal?: AbortSignal,
+		) =>
+			client.request<FileUploadSession>(
+				"POST",
+				"/api/files/upload-sessions",
+				input,
+				signal,
+			),
+		completeUpload: (jobId: string, signal?: AbortSignal) =>
+			client.request<JobCreateResult>(
+				"POST",
+				`/api/files/upload-sessions/${encodeURIComponent(jobId)}/complete`,
+				undefined,
+				signal,
+			),
 		roots: async (clientId: string, signal?: AbortSignal) =>
 			(
 				await run<FileRootsResult>(
@@ -106,7 +130,12 @@ export function createFilesApi(jobs: Pick<JobsApi, "create" | "wait">) {
 			),
 		import: (
 			clientId: string,
-			payload: { rootDir: string; targetPath: string; fileId: string },
+			payload: {
+				rootDir: string;
+				targetPath: string;
+				fileId: string;
+				overwrite?: boolean;
+			},
 			signal?: AbortSignal,
 		) =>
 			run<{ path: string; size: number; sha256: string }>(

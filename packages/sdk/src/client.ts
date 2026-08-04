@@ -49,7 +49,7 @@ export class VcpDeckClient {
 		this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
 		this.baseUrl = options.baseUrl.replace(/\/$/, "");
 		this.jobs = createJobsApi(this);
-		this.files = createFilesApi(this.jobs);
+		this.files = createFilesApi(this, this.jobs);
 		this.auth = createAuthApi(this);
 		this.identities = createIdentitiesApi(this);
 		this.clients = createClientsApi(this);

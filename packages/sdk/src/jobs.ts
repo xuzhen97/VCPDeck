@@ -10,6 +10,7 @@ import type { VcpDeckClient } from "./client.js";
 export interface WaitJobOptions {
 	signal?: AbortSignal;
 	delays?: readonly number[];
+	onUpdate?: (job: JobInfo) => void;
 }
 
 const TERMINAL_STATUSES = new Set(["done", "error", "cancelled"]);
@@ -68,6 +69,7 @@ export function createJobsApi(client: Pick<VcpDeckClient, "request">) {
 					undefined,
 					options.signal,
 				);
+				options.onUpdate?.(job);
 				if (TERMINAL_STATUSES.has(job.status)) return job;
 			}
 		},
