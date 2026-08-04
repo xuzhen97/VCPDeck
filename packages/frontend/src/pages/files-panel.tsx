@@ -173,7 +173,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 				</Card>
 
 				{/* 右侧：文件列表 */}
-				<Card className="flex min-h-0 flex-col overflow-hidden">
+				<Card className="relative flex min-h-0 flex-col overflow-hidden">
 					<CardHeader className="border-b border-border/60 px-5 py-3">
 						{browser.selectedRoot ? (
 							<nav
@@ -346,21 +346,21 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 											</div>
 										);
 									})}
-									{browser.loading && (
-										<div
-											role="status"
-											aria-label="正在读取目录"
-											aria-live="polite"
-											className="absolute inset-0 flex items-center justify-center gap-2 rounded-lg bg-background/80 text-sm text-muted-foreground backdrop-blur-[2px]"
-										>
-											<LoaderCircle className="size-5 animate-spin text-primary" />
-											<span>正在读取目录…</span>
-										</div>
-									)}
 								</div>
 							</>
 						)}
 					</CardContent>
+					{browser.loading && (
+						<div
+							role="status"
+							aria-label="正在读取目录"
+							aria-live="polite"
+							className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background/80 text-sm text-muted-foreground backdrop-blur-[2px]"
+						>
+							<LoaderCircle className="size-5 animate-spin text-primary" />
+							<span>正在读取目录…</span>
+						</div>
+					)}
 				</Card>
 			</div>
 

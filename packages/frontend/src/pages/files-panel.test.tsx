@@ -96,9 +96,14 @@ describe("FilesPanel", () => {
 		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
 
 		expect(screen.getByRole("status", { name: "正在读取目录" })).toBeVisible();
-		expect(screen.getByTestId("file-list-region")).toHaveClass(
-			"pointer-events-none",
+		expect(screen.getByRole("status", { name: "正在读取目录" })).toHaveClass(
+			"absolute",
+			"inset-0",
+			"z-10",
 		);
+		expect(
+			screen.getByTestId("file-list-region").querySelector('[role="status"]'),
+		).not.toBeInTheDocument();
 
 		await act(async () => resolveList({ entries: [] }));
 		expect(

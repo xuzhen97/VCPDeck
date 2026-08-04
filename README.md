@@ -118,6 +118,157 @@ VCPDeck      = 你的驾驶台（TODO、机器调度、流程编排、聊天协�
 
 技术选型详情见 [`docs/tech-stack.md`](docs/tech-stack.md)。
 
+## 本地开发与测试
+
+### 初始化依赖
+
+```bash
+pnpm install
+```
+
+FRP 相关测试需要本机的 `frpc` 和 `frps` 二进制。下载当前平台版本：
+
+```bash
+pnpm download:frp
+```
+
+下载完成后，二进制位于：
+
+- Client：`packages/client/dist/frp/<platform>/frpc[.exe]`
+- Server：`packages/server/dist/frp/<platform>/frps[.exe]`
+
+### 启动项目
+
+先复制 Server 配置并设置首次启动所需的管理员密码：
+
+```bash
+# macOS / Linux
+cp packages/server/.env.example packages/server/.env
+
+# Windows PowerShell
+Copy-Item packages/server/.env.example packages/server/.env
+```
+
+默认配置会使用 `http://localhost:3001`、`admin` 用户和 `test123` 密码。常用启动方式：
+
+```bash
+# 只启动 Server 和 Frontend
+pnpm dev
+
+# 启动 Server、Frontend 和 Client（远程机器测试推荐）
+pnpm dev:all
+```
+
+访问前端：<http://localhost:5173>。
+
+### 启动本地 FRPS 测试实例
+
+`start-test-frps.cjs` 会生成临时 `frps.toml`，启动带 Dashboard 和 Token 鉴权的本地 FRPS。默认参数如下：
+
+| 配置 | 默认值 |
+| --- | --- |
+| FRPS bind port | `17000` |
+| Dashboard | <http://127.0.0.1:17500> |
+| Dashboard 登录 | `admin / admin` |
+| Token | `test-frp-token` |
+| 临时目录 | `.tmp/test-frps/` |
+
+在单独的终端运行：
+
+```bash
+node scripts/start-test-frps.cjs --clean
+```
+
+保持该终端运行，停止时按 `Ctrl+C`。`--clean` 会在退出时删除临时配置和日志。需要自定义端口或 Token 时：
+
+```bash
+node scripts/start-test-frps.cjs \
+  --port=17000 \
+  --dashboard-port=17500 \
+  --token=test-frp-token \
+  --clean
+```
+
+也可以使用环境变量覆盖默认值：`FRPS_BIN`、`FRPS_PORT`、`FRPS_DASHBOARD_PORT`、`FRPS_TOKEN`。
+
+要让 VCPDeck Server 使用这台 FRPS，在 `packages/server/.env` 中补充：
+
+```dotenv
+FRP_PUBLIC_HOST=127.0.0.1
+FRPS_BIND_PORT=17000
+FRPS_TOKEN=test-frp-token
+FRP_DASHBOARD_HOST=127.0.0.1
+FRP_DASHBOARD_PORT=17500
+FRP_DASHBOARD_USER=admin
+FRP_DASHBOARD_PASSWORD=admin
+FRP_PORT_RANGE_START=20000
+FRP_PORT_RANGE_END=21000
+```
+
+然后在另一个终端启动项目：
+
+```bash
+pnpm dev:all
+```
+
+首次启动或数据库中还没有 FRPS 实例时，Server 会从这些环境变量迁移默认实例。之后可以在前端的 FRP 页面中创建实例、执行健康检查和管理映射。FRPS Dashboard 可用于确认代理是否已注册。
+
+如果只验证 FRPS 实例管理接口，也可以在 Server 已启动后运行：
+
+```bash
+node scripts/test-frp-instances.cjs
+```
+
+该脚本使用 `http://localhost:3001`，会创建、探测、切换默认实例并删除测试实例。
+
+### 运行项目测试
+
+#### 各包单元测试
+
+运行 Server、Client、Frontend 和 SDK 中声明的 Vitest 测试：
+
+```bash
+pnpm -r test
+```
+
+也可以按包运行：
+
+```bash
+pnpm --filter @vcpdeck/server test
+pnpm --filter @vcpdeck/client test
+pnpm --filter @vcpdeck/frontend test
+pnpm --filter @vcpdeck/sdk test
+```
+
+#### 项目端到端集成测试
+
+根目录的 `pnpm test` 会自动启动临时 Server 和 mock Client，覆盖认证、任务、文件传输等核心链路；测试结束后会清理进程。它会占用 `3001` 端口，并重建本地测试数据库：
+
+```bash
+pnpm test
+```
+
+不要在有未备份数据的开发数据库上运行该命令。
+
+#### FRP 全链路集成测试
+
+`pnpm test:frp` 会自动启动随机端口的 FRPS、Server 和真实 Client，验证 TCP/HTTP 映射、Dashboard 代理状态、删除和错误场景，测试完成后自动清理：
+
+```bash
+pnpm build
+pnpm test:frp
+```
+
+该测试需要先执行 `pnpm download:frp`。如果输出 `SKIP`，表示 FRP 二进制缺失，此次没有真正执行 FRP 测试，不应视为全链路测试通过。
+
+#### 构建检查
+
+```bash
+pnpm build
+```
+
+`pnpm build` 会构建所有 workspace 包；Client 构建时如果缺少 `frpc`，会尝试自动下载当前平台版本。
+
 ## 后续扩展方向
 
 - **移动端** — 延伸到手机，随时随地查看 TODO、跟 Agent 对话、审核结果
