@@ -9,6 +9,8 @@ import type {
   JobInfo,
   ActorContext,
   PaginatedResult,
+  FileUploadSession,
+  FileUploadSessionCreate,
 } from "@vcpdeck/shared";
 import { FileService } from "../file/file.service.js";
 import { randomUUID } from "node:crypto";
@@ -63,6 +65,185 @@ export class JobService {
     @Inject(JobScheduler) private readonly scheduler: JobScheduler,
     @Inject(FileService) private readonly fileService: FileService,
   ) {}
+
+  /** 创建等待浏览器上传的文件导入会话。 */
+  async createUploadSession(
+    input: FileUploadSessionCreate,
+    actor: ActorContext,
+  ): Promise<FileUploadSession> {
+    const client = await this.prisma.client.findUnique({
+      where: { id: input.clientId },
+    });
+    if (!client) {
+      throw Object.assign(
+        new Error(`Client "${input.clientId}" not found — register the client first`),
+        { code: "CLIENT_NOT_FOUND" },
+      );
+    }
+    if (!client.online) {
+      throw Object.assign(new Error(`Client "${input.clientId}" is offline`), {
+        code: "CLIENT_OFFLINE",
+      });
+    }
+
+    const caps = parseCapabilities(client.capabilities);
+    if (!caps.includes("file.write")) {
+      throw Object.assign(
+        new Error(`Client "${input.clientId}" lacks "file.write" capability`),
+        { code: "CAPABILITY_MISSING" },
+      );
+    }
+    if (
+      typeof input.rootDir !== "string" ||
+      input.rootDir.trim() === "" ||
+      typeof input.targetPath !== "string" ||
+      input.targetPath.trim() === "" ||
+      typeof input.filename !== "string" ||
+      input.filename.trim() === ""
+    ) {
+      throw Object.assign(new Error("rootDir, targetPath and filename are required"), {
+        code: "INVALID_UPLOAD_SESSION",
+      });
+    }
+    if (!Number.isFinite(input.size) || !Number.isInteger(input.size) || input.size < 0) {
+      throw Object.assign(new Error("size must be a non-negative integer"), {
+        code: "INVALID_UPLOAD_SESSION",
+      });
+    }
+    if (input.mimeType !== undefined && typeof input.mimeType !== "string") {
+      throw Object.assign(new Error("mimeType must be a string"), {
+        code: "INVALID_UPLOAD_SESSION",
+      });
+    }
+
+    const jobId = randomUUID();
+    const pending = await this.fileService.createPending(jobId, input.clientId, {
+      jobId,
+      clientId: input.clientId,
+      filename: input.filename,
+      size: input.size,
+      mimeType: input.mimeType,
+    });
+    const payload = {
+      rootDir: input.rootDir,
+      targetPath: input.targetPath,
+      fileId: pending.fileId,
+      overwrite: input.overwrite === true,
+    };
+
+    await this.prisma.job.create({
+      data: {
+        id: jobId,
+        clientId: input.clientId,
+        type: "file.import",
+        status: "waiting_input",
+        payload: JSON.stringify(payload),
+        timeout: null,
+        createdByIdentityId: actor.identityId,
+        createdByName: actor.displayName,
+        createdVia: actor.source,
+      },
+    });
+
+    return {
+      jobId,
+      fileId: pending.fileId,
+      status: JobStatus.WAITING_INPUT,
+      upload: { url: pending.uploadUrl, expiresAt: pending.expiresAt },
+    };
+  }
+
+  /** 确认 Storage 上传并激活文件导入 Job。 */
+  async completeUploadSession(
+    jobId: string,
+  ): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
+    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+    if (!job) {
+      throw Object.assign(new Error(`Upload session "${jobId}" not found`), {
+        code: "UPLOAD_SESSION_NOT_FOUND",
+      });
+    }
+    if (job.type !== "file.import") {
+      throw Object.assign(new Error(`Job "${jobId}" is not a file import`), {
+        code: "INVALID_UPLOAD_SESSION",
+      });
+    }
+    if (job.status === "cancelled") {
+      throw Object.assign(new Error(`Upload session "${jobId}" was cancelled`), {
+        code: "UPLOAD_SESSION_CANCELLED",
+      });
+    }
+
+    const activeStatuses = new Set([
+      "pending",
+      "running",
+      "done",
+      "error",
+      "disconnected",
+    ]);
+    if (activeStatuses.has(job.status)) {
+      return {
+        result: {
+          jobId,
+          status: job.status as JobStatus,
+          type: job.type,
+        },
+        dispatch: null,
+      };
+    }
+    if (job.status !== "waiting_input") {
+      throw Object.assign(new Error(`Invalid upload session status "${job.status}"`), {
+        code: "INVALID_UPLOAD_SESSION",
+      });
+    }
+
+    const payload = safeJsonParse<{
+      rootDir?: string;
+      targetPath?: string;
+      fileId?: string;
+      overwrite?: boolean;
+    }>(job.payload, {});
+    if (!payload.fileId) {
+      throw Object.assign(new Error("Upload session file is missing"), {
+        code: "FILE_NOT_READY",
+      });
+    }
+    const file = await this.fileService.findById(payload.fileId);
+    if (!file || file.status !== "completed") {
+      throw Object.assign(new Error("File upload is not complete"), {
+        code: "FILE_NOT_READY",
+      });
+    }
+
+    const download = await this.fileService.createDownloadToken(payload.fileId);
+    const finalPayload = {
+      ...payload,
+      downloadRef: {
+        id: payload.fileId,
+        key: file.key,
+        url: download.downloadUrl,
+        method: "GET" as const,
+        expiresAt: 0,
+      },
+      size: download.size,
+      sha256: download.sha256,
+    };
+    await this.prisma.job.update({
+      where: { id: jobId },
+      data: { status: "pending", payload: JSON.stringify(finalPayload) },
+    });
+
+    const dispatch = await this.scheduler.tryDispatch(job.clientId);
+    return {
+      result: {
+        jobId,
+        status:
+          dispatch?.jobId === jobId ? JobStatus.RUNNING : JobStatus.PENDING,
+        type: job.type,
+      },
+      dispatch,
+    };
+  }
 
   async create(
     params: {

@@ -14,7 +14,13 @@ import { ClientService } from "../client/client.service.js";
 import { ClientGateway } from "./client.gateway.js";
 import { Actor } from "../auth/actor.decorator.js";
 import { Public } from "../auth/public.decorator.js";
-import type { JobCreate, DispatchPayload, ActorContext, JobStatus } from "@vcpdeck/shared";
+import type {
+  JobCreate,
+  DispatchPayload,
+  ActorContext,
+  JobStatus,
+  FileUploadSessionCreate,
+} from "@vcpdeck/shared";
 
 const INVALID_JOB_PAYLOAD = "INVALID_JOB_PAYLOAD";
 
@@ -134,6 +140,38 @@ export class EventsController {
       this.gateway.sendDispatch(dispatch);
     }
     return result;
+  }
+
+  /** 创建浏览器直传 Storage 的文件上传会话。 */
+  @Post("files/upload-sessions")
+  async createUploadSession(
+    @Body() body: FileUploadSessionCreate,
+    @Actor() actor: ActorContext,
+  ) {
+    try {
+      return await this.jobService.createUploadSession(body, actor);
+    } catch (e: any) {
+      throw new BadRequestException({
+        code: e.code ?? "INVALID_UPLOAD_SESSION",
+        message: e.message ?? String(e),
+      });
+    }
+  }
+
+  /** 完成 Storage 上传并激活远程文件导入 Job。 */
+  @Post("files/upload-sessions/:jobId/complete")
+  async completeUploadSession(@Param("jobId") jobId: string) {
+    try {
+      const { result, dispatch } =
+        await this.jobService.completeUploadSession(jobId);
+      if (dispatch) this.gateway.sendDispatch(dispatch);
+      return result;
+    } catch (e: any) {
+      throw new BadRequestException({
+        code: e.code ?? "UPLOAD_SESSION_INVALID",
+        message: e.message ?? String(e),
+      });
+    }
   }
 
   @Post("jobs/:jobId/cancel")

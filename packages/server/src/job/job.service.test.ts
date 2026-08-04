@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { JobStatus } from "@vcpdeck/shared";
+import type { ActorContext, JobStatus } from "@vcpdeck/shared";
 import { JobService } from "./job.service.js";
 import type { PrismaService } from "../prisma/prisma.service.js";
 import type { JobScheduler } from "./job.scheduler.js";
@@ -36,6 +36,177 @@ function mockFileService() {
 function makeService(jobs: Array<Record<string, unknown>>): JobService {
 	return new JobService(mockPrisma(jobs), mockScheduler(), mockFileService());
 }
+
+describe("JobService upload sessions", () => {
+	function makeUploadDeps() {
+		const prisma = mockPrisma([]) as any;
+		prisma.client.findUnique.mockResolvedValue({
+			id: "c1",
+			online: true,
+			capabilities: ["file.write"],
+		});
+		const scheduler = {
+			tryDispatch: vi.fn(),
+		} as any;
+		const fileService = {
+			createPending: vi.fn().mockResolvedValue({
+				fileId: "file-1",
+				uploadUrl: "/api/storage/upload/key?expires=1&sig=s",
+				expiresAt: 1,
+			}),
+			findById: vi.fn(),
+			createDownloadToken: vi.fn(),
+		} as any;
+		return {
+			prisma,
+			scheduler,
+			fileService,
+			service: new JobService(prisma, scheduler, fileService),
+		};
+	}
+
+	const actor: ActorContext = {
+		identityId: "identity-1",
+		displayName: "测试用户",
+		isAdmin: false,
+		credentialId: null,
+		sessionId: "session-1",
+		source: "web",
+		requestId: "request-1",
+	};
+
+	it("创建 waiting_input 会话且不提前派发", async () => {
+		const { prisma, scheduler, fileService, service } = makeUploadDeps();
+
+		const result = await service.createUploadSession(
+			{
+				clientId: "c1",
+				rootDir: "D:\\",
+				targetPath: "uploads/a.txt",
+				filename: "a.txt",
+				size: 5,
+				mimeType: "text/plain",
+				overwrite: false,
+			},
+			actor,
+		);
+
+		expect(fileService.createPending).toHaveBeenCalledWith(
+			expect.any(String),
+			"c1",
+			expect.objectContaining({
+				filename: "a.txt",
+				size: 5,
+				mimeType: "text/plain",
+			}),
+		);
+		expect(prisma.job.create).toHaveBeenCalledWith({
+			data: expect.objectContaining({
+				type: "file.import",
+				status: "waiting_input",
+				payload: JSON.stringify({
+					rootDir: "D:\\",
+					targetPath: "uploads/a.txt",
+					fileId: "file-1",
+					overwrite: false,
+				}),
+			}),
+		});
+		expect(scheduler.tryDispatch).not.toHaveBeenCalled();
+		expect(result).toMatchObject({
+			fileId: "file-1",
+			status: "waiting_input",
+			upload: { url: "/api/storage/upload/key?expires=1&sig=s" },
+		});
+	});
+
+	it("未完成 File 时不激活 waiting_input Job", async () => {
+		const { prisma, fileService, service } = makeUploadDeps();
+		prisma.job.findUnique.mockResolvedValue({
+			id: "job-1",
+			clientId: "c1",
+			type: "file.import",
+			status: "waiting_input",
+			payload: JSON.stringify({
+				rootDir: "D:\\",
+				targetPath: "a.txt",
+				fileId: "file-1",
+			}),
+		});
+		fileService.findById.mockResolvedValue({ id: "file-1", status: "pending" });
+
+		await expect(service.completeUploadSession("job-1")).rejects.toMatchObject({
+			code: "FILE_NOT_READY",
+		});
+		expect(prisma.job.update).not.toHaveBeenCalled();
+	});
+
+	it("完成上传后补全 payload、转 pending 并返回 dispatch", async () => {
+		const { prisma, scheduler, fileService, service } = makeUploadDeps();
+		prisma.job.findUnique.mockResolvedValue({
+			id: "job-1",
+			clientId: "c1",
+			type: "file.import",
+			status: "waiting_input",
+			payload: JSON.stringify({
+				rootDir: "D:\\",
+				targetPath: "a.txt",
+				fileId: "file-1",
+				overwrite: true,
+			}),
+		});
+		fileService.findById.mockResolvedValue({
+			id: "file-1",
+			status: "completed",
+			key: "storage-key",
+			size: 5,
+			sha256: "sha",
+		});
+		fileService.createDownloadToken.mockResolvedValue({
+			downloadUrl: "/api/storage/download/storage-key?expires=0&sig=x",
+			size: 5,
+			sha256: "sha",
+		});
+		const dispatch = {
+			jobId: "job-1",
+			clientId: "c1",
+			type: "file.import",
+			payload: {},
+		};
+		scheduler.tryDispatch.mockResolvedValue(dispatch);
+
+		const result = await service.completeUploadSession("job-1");
+
+		expect(prisma.job.update).toHaveBeenCalledWith({
+			where: { id: "job-1" },
+			data: expect.objectContaining({
+				status: "pending",
+				payload: expect.stringContaining("downloadRef"),
+			}),
+		});
+		expect(result).toMatchObject({
+			result: { jobId: "job-1", status: "running", type: "file.import" },
+			dispatch,
+		});
+	});
+
+	it("重复完成已激活会话时不重复派发", async () => {
+		const { prisma, scheduler, service } = makeUploadDeps();
+		prisma.job.findUnique.mockResolvedValue({
+			id: "job-1",
+			clientId: "c1",
+			type: "file.import",
+			status: "running",
+			payload: "{}",
+		});
+
+		await expect(service.completeUploadSession("job-1")).resolves.toEqual({
+			result: { jobId: "job-1", status: "running", type: "file.import" },
+			dispatch: null,
+		});
+		expect(scheduler.tryDispatch).not.toHaveBeenCalled();
+	});
+});
 
 describe("JobService.updateProgress()", () => {
 	it("写入序列化进度", async () => {
