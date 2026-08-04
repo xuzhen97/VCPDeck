@@ -28,6 +28,7 @@ import type {
 import { DEFAULT_OPENAPI_BASE, DEFAULT_TRANSFER_FOLDER } from "./providers/alibaba-types.js";
 import { AlibabaOpenApiClient } from "./providers/alibaba-openapi.client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { StorageService } from "./storage.service.js";
 
 /** OAuth 会话（内存缓存，服务重启丢失） */
 interface OAuthSession {
@@ -44,6 +45,7 @@ export class AliyunDriveController {
 
 	constructor(
 		@Inject(PrismaService) private readonly prisma: PrismaService,
+		@Inject(StorageService) private readonly storage: StorageService,
 	) {}
 
 	/** 获取当前配置和授权状态 */
@@ -323,6 +325,8 @@ export class AliyunDriveController {
 			create: { id: 1, kind: "alibaba", config: json },
 			update: { config: json },
 		});
+		// 配置已变更：立即热切换内存 provider，避免运行中的 provider 使用旧 token。
+		await this.storage.reload();
 	}
 }
 
