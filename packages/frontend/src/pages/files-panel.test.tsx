@@ -209,6 +209,37 @@ describe("FilesPanel", () => {
 		expect(screen.getByRole("menu")).toHaveClass("bg-background");
 	});
 
+	it("keeps a bottom context menu inside the viewport", async () => {
+		const rectSpy = vi
+			.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+			.mockImplementation(function (this: HTMLElement) {
+				if (this.getAttribute("role") === "menu") {
+					return {
+						height: 180,
+						width: 160,
+					} as DOMRect;
+				}
+				return { height: 0, width: 0 } as DOMRect;
+			});
+
+		try {
+			renderFiles();
+			await userEvent.click(
+				await screen.findByRole("button", { name: "D:\\" }),
+			);
+			fireEvent.contextMenu(
+				await screen.findByRole("button", { name: /^README\.md/ }),
+				{ clientX: 120, clientY: 740 },
+			);
+
+			const menu = screen.getByRole("menu");
+			expect(menu.style.left).toBe("120px");
+			expect(menu.style.top).toBe(`${window.innerHeight - 180}px`);
+		} finally {
+			rectSpy.mockRestore();
+		}
+	});
+
 	it("handles oversized text and requires the full path for deletion", async () => {
 		const files = renderFiles({
 			readText: vi.fn().mockRejectedValue({ errorCode: "SIZE_EXCEEDED" }),

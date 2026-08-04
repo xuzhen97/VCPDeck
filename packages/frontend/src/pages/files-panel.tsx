@@ -10,7 +10,13 @@ import {
 	RefreshCw,
 	X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { useSdk } from "@/api/context";
 import { useFileBrowser } from "@/api/hooks/use-file-browser";
 import { ConfirmTargetDialog } from "@/components/confirm-target-dialog";
@@ -44,6 +50,11 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 		y: number;
 		entry: FileEntry;
 	} | null>(null);
+	const [menuPosition, setMenuPosition] = useState<{
+		x: number;
+		y: number;
+	} | null>(null);
+	const menuRef = useRef<HTMLDivElement>(null);
 	const [exportError, setExportError] = useState("");
 	const [exportNotice, setExportNotice] = useState("");
 	const [viewEntry, setViewEntry] = useState<{
@@ -51,6 +62,15 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 		rootDir: string;
 		path: string;
 	} | null>(null);
+	useLayoutEffect(() => {
+		if (!contextMenu || !menuRef.current) return;
+		const { width, height } = menuRef.current.getBoundingClientRect();
+		setMenuPosition({
+			x: Math.max(0, Math.min(contextMenu.x, window.innerWidth - width)),
+			y: Math.max(0, Math.min(contextMenu.y, window.innerHeight - height)),
+		});
+	}, [contextMenu]);
+
 	const entry = browser.selectedEntry ?? contextMenu?.entry ?? null;
 	const relativePath =
 		browser.path === "."
@@ -355,10 +375,14 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 					}}
 				>
 					<div
+						ref={menuRef}
 						role="menu"
 						aria-label={`${contextMenu.entry.name} 操作`}
 						className="absolute z-50 min-w-40 rounded-lg border border-border bg-background p-1.5 text-foreground shadow-2xl ring-1 ring-black/10"
-						style={{ left: contextMenu.x, top: contextMenu.y }}
+						style={{
+							left: menuPosition?.x ?? contextMenu.x,
+							top: menuPosition?.y ?? contextMenu.y,
+						}}
 					>
 						{contextMenu.entry.kind === "file" && (
 							<MenuItem
