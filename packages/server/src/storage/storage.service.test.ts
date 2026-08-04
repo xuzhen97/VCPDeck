@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StorageService } from "./storage.service.js";
 
@@ -11,6 +12,10 @@ function mockPrisma() {
 			findFirst: vi.fn(),
 			findUnique: vi.fn().mockResolvedValue(null),
 			updateMany: vi.fn(),
+		},
+		job: {
+			findUnique: vi.fn().mockResolvedValue(null),
+			update: vi.fn(),
 		},
 	};
 }
@@ -85,24 +90,29 @@ describe("StorageService", () => {
 	});
 
 	describe("receiveUpload", () => {
-		it("上传完成后把 File 临时 key 替换为 provider 返回的真实 key", async () => {
+		it("上传完成后把 File 临时 key 替换为 provider 返回的真实 key并保存摘要", async () => {
 			const provider = {
 				verifyUploadSignature: vi.fn().mockReturnValue(true),
-				uploadToKey: vi.fn().mockResolvedValue({
-					key: "aliyun-file-id",
-					jobId: "job-1",
-					clientId: "client-1",
-					filename: "nginx-1.18.0.zip",
-					size: 158601385,
-					storageKind: "alibaba",
-					createdAt: new Date(),
+				uploadToKey: vi.fn(async (stream: Readable) => {
+					for await (const _chunk of stream) {
+						// 消费上传流，模拟真实 provider。
+					}
+					return {
+						key: "aliyun-file-id",
+						jobId: "job-1",
+						clientId: "client-1",
+						filename: "nginx-1.18.0.zip",
+						size: 5,
+						storageKind: "alibaba",
+						createdAt: new Date(),
+					};
 				}),
 			} as never;
 			vi.spyOn(service, "getProvider").mockReturnValue(provider);
 
 			await service.receiveUpload(
 				"temporary-key/nginx-1.18.0.zip",
-				{} as never,
+				Readable.from([Buffer.from("hello")]),
 				0,
 				"sig",
 			);
@@ -112,20 +122,27 @@ describe("StorageService", () => {
 				data: {
 					key: "aliyun-file-id",
 					status: "completed",
+					size: 5,
+					sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
 				},
 			});
 		});
 
 		it("pending 缓存丢失时按临时 key 从 File 表恢复上传元数据", async () => {
-			const uploadToKey = vi.fn().mockResolvedValue({
-				key: "aliyun-file-id",
-				jobId: "job-1",
-				clientId: "client-1",
-				filename: "nginx-1.18.0.zip",
-				mimeType: "application/zip",
-				size: 158601385,
-				storageKind: "alibaba",
-				createdAt: new Date(),
+			const uploadToKey = vi.fn(async (stream: Readable) => {
+				for await (const _chunk of stream) {
+					// 消费上传流，模拟真实 provider。
+				}
+				return {
+					key: "aliyun-file-id",
+					jobId: "job-1",
+					clientId: "client-1",
+					filename: "nginx-1.18.0.zip",
+					mimeType: "application/zip",
+					size: 5,
+					storageKind: "alibaba",
+					createdAt: new Date(),
+				};
 			});
 			const provider = {
 				verifyUploadSignature: vi.fn().mockReturnValue(true),
@@ -139,7 +156,8 @@ describe("StorageService", () => {
 				mimeType: "application/zip",
 				size: 158601385,
 			});
-			const stream = {} as never;
+			prisma.job.findUnique.mockResolvedValue({ type: "file.import" });
+			const stream = Readable.from([Buffer.from("hello")]);
 
 			await service.receiveUpload(
 				"temporary-key/nginx-1.18.0.zip",
@@ -152,7 +170,7 @@ describe("StorageService", () => {
 				where: { key: "temporary-key/nginx-1.18.0.zip" },
 			});
 			expect(uploadToKey).toHaveBeenCalledWith(
-				stream,
+				expect.any(Readable),
 				expect.objectContaining({
 					jobId: "job-1",
 					clientId: "client-1",
@@ -162,6 +180,45 @@ describe("StorageService", () => {
 				}),
 				"temporary-key/nginx-1.18.0.zip",
 			);
+			expect(prisma.job.update).toHaveBeenCalledWith({
+				where: { id: "job-1" },
+				data: { progress: JSON.stringify({ loaded: 5, total: 158601385 }) },
+			});
+		});
+
+		it("file.import provider 失败时标记 Job 错误但不标记 File 完成", async () => {
+			const provider = {
+				verifyUploadSignature: vi.fn().mockReturnValue(true),
+				uploadToKey: vi.fn().mockRejectedValue(new Error("provider down")),
+			} as never;
+			vi.spyOn(service, "getProvider").mockReturnValue(provider);
+			prisma.file.findUnique.mockResolvedValue({
+				jobId: "job-1",
+				clientId: "client-1",
+				filename: "a.txt",
+				mimeType: "text/plain",
+				size: 5,
+			});
+			prisma.job.findUnique.mockResolvedValue({ type: "file.import" });
+
+			await expect(
+				service.receiveUpload(
+					"temporary-key/a.txt",
+					Readable.from([Buffer.from("hello")]),
+					0,
+					"sig",
+				),
+			).rejects.toThrow("provider down");
+			expect(prisma.file.updateMany).not.toHaveBeenCalled();
+			expect(prisma.job.update).toHaveBeenCalledWith({
+				where: { id: "job-1" },
+				data: {
+					status: "error",
+					errorCode: "IO_ERROR",
+					errorMessage: "Storage upload failed",
+					finishedAt: expect.any(Date),
+				},
+			});
 		});
 	});
 

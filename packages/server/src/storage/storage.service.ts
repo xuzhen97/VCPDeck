@@ -1,6 +1,6 @@
 import { Injectable, type OnModuleInit, Logger, Inject } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
-import type { Readable } from "node:stream";
+import { createHash, randomUUID } from "node:crypto";
+import { Transform, type Readable } from "node:stream";
 import { STORAGE_PROVIDERS } from "./providers/providers.registry.js";
 import type {
 	StorageProvider,
@@ -124,12 +124,70 @@ export class StorageService implements OnModuleInit {
 		}
 
 		const uploadAndPersist = async (meta: FileMeta) => {
-			const entry = await p.uploadToKey(stream, meta, key);
-			await this.prisma.file.updateMany({
-				where: { key },
-				data: { key: entry.key, status: "completed" },
+			const job = meta.jobId
+				? await this.prisma.job.findUnique({
+						where: { id: meta.jobId },
+						select: { type: true },
+					})
+				: null;
+			const reportProgress = job?.type === "file.import";
+			const hash = createHash("sha256");
+			let loaded = 0;
+			let lastEmitAt = 0;
+			let lastEmitBytes = 0;
+			let progressWrite = Promise.resolve();
+			const tracker = new Transform({
+				transform: (chunk, _encoding, callback) => {
+					const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+					hash.update(buffer);
+					loaded += buffer.length;
+					if (reportProgress) {
+						const now = Date.now();
+						if (
+							now - lastEmitAt >= 500 ||
+							loaded - lastEmitBytes >= 1024 * 1024
+						) {
+							lastEmitAt = now;
+							lastEmitBytes = loaded;
+							progressWrite = progressWrite
+								.then(() =>
+									this.updateJobProgress(meta.jobId, loaded, meta.size),
+								)
+								.catch(() => {});
+						}
+					}
+					callback(null, buffer);
+				},
+				flush: (callback) => {
+					if (reportProgress && loaded !== lastEmitBytes) {
+						lastEmitBytes = loaded;
+						progressWrite = progressWrite
+							.then(() =>
+								this.updateJobProgress(meta.jobId, loaded, meta.size),
+							)
+							.catch(() => {});
+					}
+					callback();
+				},
 			});
-			return entry;
+
+			try {
+				const entry = await p.uploadToKey(stream.pipe(tracker), meta, key);
+				await progressWrite;
+				await this.prisma.file.updateMany({
+					where: { key },
+					data: {
+						key: entry.key,
+						status: "completed",
+						size: loaded,
+						sha256: hash.digest("hex"),
+					},
+				});
+				return entry;
+			} catch (error) {
+				if (reportProgress) await this.markUploadJobError(meta.jobId);
+				throw error;
+			}
 		};
 
 		const pending = this.pendingUploads.get(key);
@@ -157,6 +215,37 @@ export class StorageService implements OnModuleInit {
 
 		this.pendingUploads.delete(key);
 		return uploadAndPersist(pending.meta);
+	}
+
+	private async updateJobProgress(
+		jobId: string,
+		loaded: number,
+		total: number,
+	): Promise<void> {
+		try {
+			await this.prisma.job.update({
+				where: { id: jobId },
+				data: { progress: JSON.stringify({ loaded, total }) },
+			});
+		} catch (error) {
+			this.logger.warn(`Unable to persist upload progress for job ${jobId}`);
+		}
+	}
+
+	private async markUploadJobError(jobId: string): Promise<void> {
+		try {
+			await this.prisma.job.update({
+				where: { id: jobId },
+				data: {
+					status: "error",
+					errorCode: "IO_ERROR",
+					errorMessage: "Storage upload failed",
+					finishedAt: new Date(),
+				},
+			});
+		} catch (error) {
+			this.logger.warn(`Unable to persist upload failure for job ${jobId}`);
+		}
 	}
 
 	/** 验证下载签名并返回文件流 + 元数据 */
