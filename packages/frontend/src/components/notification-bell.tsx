@@ -132,7 +132,8 @@ export function NotificationBell() {
 									</p>
 								)}
 								{item.status === "done" &&
-									item.type === "file.export" &&
+									(item.type === "file.export" ||
+										item.type === "file.import") &&
 									item.key && (
 										<DownloadButton
 											key={item.jobId}

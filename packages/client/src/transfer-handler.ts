@@ -285,6 +285,7 @@ async function handleImport(
 		await rename(tmpPath, safe);
 		emitDone(socket, jobId, "file.import", {
 			path: safe,
+			key: downloadRef.key,
 			size: loaded,
 			sha256,
 		});

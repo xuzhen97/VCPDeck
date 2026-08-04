@@ -329,3 +329,57 @@ it("shows the permanent download link in the job drawer for a completed file.exp
 		ttlSeconds: 0,
 	});
 });
+
+it("shows the permanent download link in the job drawer for a completed file.import", async () => {
+	const importJob = job({
+		jobId: "import-done",
+		clientId: "machine-a-id",
+		clientName: "构建服务器",
+		type: "file.import",
+		status: "done" as JobInfo["status"],
+		payload: { rootDir: "D:\\", targetPath: "D:\\uploads\\app.log" },
+		result: {
+			path: "D:\\uploads\\app.log",
+			size: 1024,
+			sha256: "x",
+			key: "aliyun-fileid-456",
+		},
+		finishedAt: "2026-08-01T07:43:00.000Z",
+	});
+	const list = vi.fn().mockResolvedValue({
+		data: [importJob],
+		total: 1,
+		page: 1,
+		pageSize: 20,
+		totalPages: 1,
+	});
+	const createDownloadToken = vi.fn().mockResolvedValue({
+		url: "/api/storage/download/aliyun-fileid-456?expires=0&sig=def",
+		expiresAt: 0,
+	});
+	const client = {
+		auth: { me: async () => identity },
+		jobs: { list },
+		storage: { createDownloadToken },
+	} as unknown as VcpDeckClient;
+	render(
+		<MemoryRouter>
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<JobsPage />
+				</AuthProvider>
+			</SdkProvider>
+		</MemoryRouter>,
+	);
+
+	await userEvent.click(
+		await screen.findByRole("button", { name: "查看详情" }),
+	);
+	const drawer = screen.getByRole("dialog", { name: "任务详情" });
+	const link = await within(drawer).findByRole("link", { name: "下载文件" });
+	expect(link).toHaveAttribute("download", "app.log");
+	expect(createDownloadToken).toHaveBeenCalledWith({
+		key: "aliyun-fileid-456",
+		ttlSeconds: 0,
+	});
+});

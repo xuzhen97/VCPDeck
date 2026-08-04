@@ -252,6 +252,69 @@ describe("NotificationBell", () => {
 		});
 	});
 
+	it("新完成的 file.import 出现下载按钮，点击触发下载", async () => {
+		const running = job({
+			jobId: "import-2",
+			type: "file.import",
+			payload: { targetPath: "D:\\in.zip" },
+		});
+		const doneJob = job({
+			jobId: "import-2",
+			type: "file.import",
+			status: "done" as JobInfo["status"],
+			payload: { targetPath: "D:\\in.zip" },
+			result: {
+				path: "D:\\in.zip",
+				key: "aliyun-fileid-9",
+				size: 1,
+				sha256: "x",
+			},
+			finishedAt: "2026-08-01T00:01:00.000Z",
+		});
+		const list = vi
+			.fn()
+			.mockResolvedValueOnce({
+				data: [running],
+				total: 1,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			})
+			.mockResolvedValueOnce({
+				data: [doneJob],
+				total: 1,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			});
+		const get = vi.fn().mockResolvedValue(doneJob);
+		const createDownloadToken = vi.fn().mockResolvedValue({
+			url: "/api/storage/download/aliyun-fileid-9?expires=0&sig=abc",
+			expiresAt: 0,
+		});
+		renderBell({ jobs: { list, get }, storage: { createDownloadToken } });
+
+		await vi.advanceTimersByTimeAsync(0); // 首次轮询：running
+		await act(async () => {});
+		await vi.advanceTimersByTimeAsync(3000); // 第二次轮询：done
+		await act(async () => {});
+		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
+		expect(screen.getByText(/in\.zip/)).toBeInTheDocument();
+
+		fireEvent.click(
+			within(screen.getByRole("dialog", { name: "任务通知" })).getByRole(
+				"button",
+				{
+					name: "下载",
+				},
+			),
+		);
+		expect(createDownloadToken).toHaveBeenCalledWith({
+			key: "aliyun-fileid-9",
+			ttlSeconds: 0,
+		});
+	});
+
 	it("失败任务显示错误并可清除", async () => {
 		const running = job({
 			jobId: "export-3",

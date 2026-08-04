@@ -292,7 +292,7 @@ function JobDetails({ job }: { job: JobInfo }) {
 					<Field label="错误说明" value={job.errorMessage} wide />
 				)}
 			</div>
-			{job.type === "file.export" &&
+			{(job.type === "file.export" || job.type === "file.import") &&
 				job.status === "done" &&
 				!!job.result?.key && (
 					<section className="space-y-3">

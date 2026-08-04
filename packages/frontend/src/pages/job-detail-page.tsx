@@ -40,7 +40,7 @@ function JobDetail({ job }: { job: JobInfo }) {
 					{job.errorMessage && <Field label="错误" value={job.errorMessage} />}
 				</CardContent>
 			</Card>
-			{job.type === "file.export" &&
+			{(job.type === "file.export" || job.type === "file.import") &&
 				job.status === "done" &&
 				!!job.result?.key && (
 					<Card>

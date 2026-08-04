@@ -96,6 +96,53 @@ describe("JobDetailPage 下载链接", () => {
 		expect(await screen.findByText("下载链接不可用")).toBeInTheDocument();
 	});
 
+	it("file.import 完成的 job 展示下载链接且文件名取 targetPath", async () => {
+		const createDownloadToken = vi.fn().mockResolvedValue({
+			url: "/api/storage/download/aliyun-fileid-456?expires=0&sig=def",
+			expiresAt: 0,
+		});
+		renderDetail(
+			{
+				...exportJob,
+				type: "file.import",
+				payload: { rootDir: "/srv", targetPath: "/srv/uploads/app.log" },
+				result: {
+					path: "/srv/uploads/app.log",
+					size: 1024,
+					sha256: "x",
+					key: "aliyun-fileid-456",
+				},
+			},
+			createDownloadToken,
+		);
+
+		const link = await screen.findByRole("link", { name: "下载文件" });
+		expect(link).toHaveAttribute("download", "app.log");
+		expect(createDownloadToken).toHaveBeenCalledWith({
+			key: "aliyun-fileid-456",
+			ttlSeconds: 0,
+		});
+	});
+
+	it("file.import 完成但没有 key 时不显示下载链接", async () => {
+		const createDownloadToken = vi.fn();
+		renderDetail(
+			{
+				...exportJob,
+				type: "file.import",
+				payload: { rootDir: "/srv", targetPath: "/srv/uploads/app.log" },
+				result: { path: "/srv/uploads/app.log", size: 1024, sha256: "x" },
+			},
+			createDownloadToken,
+		);
+
+		expect(await screen.findByText("状态")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("link", { name: "下载文件" }),
+		).not.toBeInTheDocument();
+		expect(createDownloadToken).not.toHaveBeenCalled();
+	});
+
 	it("exec 类型的 job 不显示下载链接", async () => {
 		const createDownloadToken = vi.fn();
 		renderDetail(

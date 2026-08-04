@@ -13,7 +13,7 @@ export function DownloadLinkCard({ job }: { job: JobInfo }) {
 	const [failed, setFailed] = useState(false);
 	const key = job.result?.key;
 	const filename =
-		String(job.payload?.path ?? "")
+		String(job.payload?.path ?? job.payload?.targetPath ?? "")
 			.split(/[/\\]/)
 			.pop() || "download";
 
