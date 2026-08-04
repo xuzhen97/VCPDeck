@@ -8,6 +8,7 @@ import {
 	Maximize2,
 	Minimize2,
 	RefreshCw,
+	Upload,
 	X,
 } from "lucide-react";
 import {
@@ -443,10 +444,13 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 									/>
 									<Button
 										size="sm"
-										variant="outline"
+										variant="ghost"
+										className="w-9 px-0"
+										aria-label="上传文件"
+										title="上传文件"
 										onClick={() => uploadInputRef.current?.click()}
 									>
-										上传文件
+										<Upload className="size-4" />
 									</Button>
 									<Button
 										size="sm"

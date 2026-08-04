@@ -275,6 +275,10 @@ describe("FilesPanel", () => {
 	it("uploads one file to the current remote directory", async () => {
 		const files = renderFiles();
 		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+		expect(screen.getByRole("button", { name: "上传文件" })).toHaveClass(
+			"w-9",
+			"px-0",
+		);
 		const file = new File(["hello"], "report.txt", { type: "text/plain" });
 
 		await userEvent.upload(screen.getByLabelText("选择上传文件"), file);
