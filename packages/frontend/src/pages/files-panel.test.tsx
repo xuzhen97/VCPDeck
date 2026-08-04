@@ -1,9 +1,14 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
+import { uploadFile } from "@/api/upload-file";
 import { FilesPanel } from "./files-panel";
+
+vi.mock("@/api/upload-file", () => ({
+	uploadFile: vi.fn().mockResolvedValue(undefined),
+}));
 
 function renderFiles(overrides: Record<string, unknown> = {}) {
 	const files = {
@@ -30,12 +35,34 @@ function renderFiles(overrides: Record<string, unknown> = {}) {
 		delete: vi.fn().mockResolvedValue({ path: "README.md" }),
 		move: vi.fn(),
 		export: vi.fn(),
+		createUploadSession: vi.fn().mockResolvedValue({
+			jobId: "upload-job",
+			fileId: "file-1",
+			status: "waiting_input",
+			upload: { url: "/api/storage/upload/key", expiresAt: 123 },
+		}),
+		completeUpload: vi.fn().mockResolvedValue({
+			jobId: "upload-job",
+			status: "running",
+			type: "file.import",
+		}),
+		import: vi.fn(),
 		...overrides,
+	};
+	const jobs = {
+		wait: vi.fn().mockResolvedValue({
+			jobId: "upload-job",
+			status: "done",
+			type: "file.import",
+			progress: { loaded: 5, total: 5 },
+		}),
 	};
 	const client = {
 		files,
+		jobs,
 		storage: { createDownloadToken: vi.fn() },
 	} as unknown as VcpDeckClient;
+	(files as Record<string, unknown>).jobs = jobs;
 	render(
 		<SdkProvider client={client}>
 			<FilesPanel clientId="client-1" />
@@ -243,6 +270,91 @@ describe("FilesPanel", () => {
 		} finally {
 			rectSpy.mockRestore();
 		}
+	});
+
+	it("uploads one file to the current remote directory", async () => {
+		const files = renderFiles();
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+		const file = new File(["hello"], "report.txt", { type: "text/plain" });
+
+		await userEvent.upload(screen.getByLabelText("选择上传文件"), file);
+
+		await waitFor(() =>
+			expect(files.createUploadSession).toHaveBeenCalledWith(
+				{
+					clientId: "client-1",
+					rootDir: "D:\\",
+					targetPath: "report.txt",
+					filename: "report.txt",
+					size: 5,
+					mimeType: "text/plain",
+					overwrite: false,
+				},
+				expect.any(AbortSignal),
+			),
+		);
+		expect(uploadFile).toHaveBeenCalledWith(
+			`${window.location.origin}/api/storage/upload/key`,
+			file,
+			expect.objectContaining({ onProgress: expect.any(Function) }),
+		);
+		expect(files.completeUpload).toHaveBeenCalledWith(
+			"upload-job",
+			expect.any(AbortSignal),
+		);
+		expect((files as Record<string, any>).jobs.wait).toHaveBeenCalledWith(
+			"upload-job",
+			expect.objectContaining({ onUpdate: expect.any(Function) }),
+		);
+	});
+
+	it("同名文件先确认再传 overwrite=true", async () => {
+		const files = renderFiles();
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+		const file = new File(["new"], "README.md", { type: "text/markdown" });
+
+		await userEvent.upload(screen.getByLabelText("选择上传文件"), file);
+		expect(files.createUploadSession).not.toHaveBeenCalled();
+		expect(screen.getByText(/覆盖当前目录中的/)).toBeVisible();
+
+		await userEvent.click(screen.getByRole("button", { name: "确认覆盖" }));
+		await waitFor(() =>
+			expect(files.createUploadSession).toHaveBeenCalledWith(
+				expect.objectContaining({ overwrite: true }),
+				expect.any(AbortSignal),
+			),
+		);
+	});
+
+	it("远程写入竞态冲突时复用已上传 File 重试", async () => {
+		const files = renderFiles();
+		(files as Record<string, any>).jobs.wait.mockResolvedValueOnce({
+			jobId: "upload-job",
+			status: "error",
+			type: "file.import",
+			errorCode: "PATH_CONFLICT",
+			errorMessage: "Destination exists; set overwrite=true",
+		});
+		files.import.mockResolvedValue({ path: "report.txt", size: 5, sha256: "sha" });
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+		const file = new File(["hello"], "report.txt", { type: "text/plain" });
+
+		await userEvent.upload(screen.getByLabelText("选择上传文件"), file);
+		await waitFor(() => expect(screen.getByRole("button", { name: "确认覆盖" })).toBeVisible());
+		await userEvent.click(screen.getByRole("button", { name: "确认覆盖" }));
+
+		await waitFor(() =>
+			expect(files.import).toHaveBeenCalledWith(
+				"client-1",
+				{
+					rootDir: "D:\\",
+					targetPath: "report.txt",
+					fileId: "file-1",
+					overwrite: true,
+				},
+				expect.any(AbortSignal),
+			),
+		);
 	});
 
 	it("handles oversized text and requires the full path for deletion", async () => {

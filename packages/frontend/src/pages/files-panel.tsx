@@ -18,6 +18,7 @@ import {
 	useState,
 } from "react";
 import { useSdk } from "@/api/context";
+import { uploadFile } from "@/api/upload-file";
 import { useFileBrowser } from "@/api/hooks/use-file-browser";
 import { ConfirmTargetDialog } from "@/components/confirm-target-dialog";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,20 @@ type FileEntry = {
 	kind: "file" | "dir";
 	size: number;
 	mtime: string;
+};
+
+type PendingUpload = {
+	file: File;
+	targetPath: string;
+	fileId?: string;
+};
+
+type UploadState = {
+	phase: "uploading" | "importing" | "done" | "error";
+	filename: string;
+	loaded: number;
+	total: number;
+	message?: string;
 };
 
 export function FilesPanel({ clientId }: { clientId: string }) {
@@ -57,6 +72,10 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 	const menuRef = useRef<HTMLDivElement>(null);
 	const [exportError, setExportError] = useState("");
 	const [exportNotice, setExportNotice] = useState("");
+	const [uploadConfirm, setUploadConfirm] = useState<PendingUpload | null>(null);
+	const [uploadState, setUploadState] = useState<UploadState | null>(null);
+	const uploadInputRef = useRef<HTMLInputElement>(null);
+	const uploadControllerRef = useRef<AbortController | null>(null);
 	const [viewEntry, setViewEntry] = useState<{
 		entry: FileEntry;
 		rootDir: string;
@@ -71,6 +90,8 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 		});
 	}, [contextMenu]);
 
+	useEffect(() => () => uploadControllerRef.current?.abort(), []);
+
 	const entry = browser.selectedEntry ?? contextMenu?.entry ?? null;
 	const relativePath =
 		browser.path === "."
@@ -80,6 +101,153 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 		? joinDisplayPath(browser.selectedRoot, relativePath)
 		: relativePath;
 	const breadcrumbs = browser.path === "." ? [] : browser.path.split("/");
+
+	function uploadTargetPath(filename: string): string {
+		return browser.path === "." ? filename : `${browser.path}/${filename}`;
+	}
+
+	function uploadUrl(url: string): string {
+		return url.startsWith("http://") || url.startsWith("https://")
+			? url
+			: `${window.location.origin}${url}`;
+	}
+
+	function errorDetails(reason: unknown): { code: string; message: string } {
+		if (typeof reason === "object" && reason !== null) {
+			const value = reason as Record<string, unknown>;
+			return {
+				code: typeof value.errorCode === "string" ? value.errorCode : "",
+				message:
+					typeof value.errorMessage === "string"
+						? value.errorMessage
+						: reason instanceof Error
+							? reason.message
+							: String(reason),
+			};
+		}
+		return { code: "", message: String(reason) };
+	}
+
+	async function runImport(
+		file: File,
+		targetPath: string,
+		overwrite: boolean,
+		fileId?: string,
+	) {
+		if (!browser.selectedRoot) return;
+		const controller = new AbortController();
+		uploadControllerRef.current?.abort();
+		uploadControllerRef.current = controller;
+		setUploadState({
+			phase: fileId ? "importing" : "uploading",
+			filename: file.name,
+			loaded: 0,
+			total: file.size,
+		});
+		let uploadedFileId = fileId;
+
+		try {
+			let job: { status: string; errorCode?: string | null; errorMessage?: string | null };
+			if (fileId) {
+				await sdk.files.import(
+					clientId,
+					{
+						rootDir: browser.selectedRoot,
+						targetPath,
+						fileId,
+						overwrite: true,
+					},
+					controller.signal,
+				);
+				job = { status: "done" };
+			} else {
+				const session = await sdk.files.createUploadSession(
+					{
+						clientId,
+						rootDir: browser.selectedRoot,
+						targetPath,
+						filename: file.name,
+						size: file.size,
+						mimeType: file.type || undefined,
+						overwrite,
+					},
+					controller.signal,
+				);
+				uploadedFileId = session.fileId;
+				await uploadFile(uploadUrl(session.upload.url), file, {
+					signal: controller.signal,
+					onProgress: (loaded, total) =>
+						setUploadState({
+							phase: "uploading",
+							filename: file.name,
+							loaded,
+							total,
+						}),
+				});
+				const activated = await sdk.files.completeUpload(
+					session.jobId,
+					controller.signal,
+				);
+				job = await sdk.jobs.wait(activated.jobId, {
+					signal: controller.signal,
+					onUpdate: (next) =>
+						setUploadState({
+							phase: "importing",
+							filename: file.name,
+							loaded: next.progress?.loaded ?? file.size,
+							total: next.progress?.total ?? file.size,
+						}),
+				});
+			}
+			if (job.status !== "done") {
+				const details = errorDetails(job);
+				if (details.code === "PATH_CONFLICT" && uploadedFileId) {
+					setUploadConfirm({ file, targetPath, fileId: uploadedFileId });
+					return;
+				}
+				setUploadState({
+					phase: "error",
+					filename: file.name,
+					loaded: 0,
+					total: file.size,
+					message: details.message || details.code || `任务状态：${job.status}`,
+				});
+				return;
+			}
+			setUploadState({
+				phase: "done",
+				filename: file.name,
+				loaded: file.size,
+				total: file.size,
+			});
+			browser.refresh();
+		} catch (reason) {
+			if (controller.signal.aborted) return;
+			const details = errorDetails(reason);
+			if (details.code === "PATH_CONFLICT" && uploadedFileId) {
+				setUploadConfirm({ file, targetPath, fileId: uploadedFileId });
+				return;
+			}
+			setUploadState({
+				phase: "error",
+				filename: file.name,
+				loaded: 0,
+				total: file.size,
+				message: details.message || details.code || "上传失败",
+			});
+		}
+	}
+
+	function selectUpload(file: File) {
+		if (!browser.selectedRoot) return;
+		const targetPath = uploadTargetPath(file.name);
+		const conflict = browser.entries.some((item) => item.name === file.name);
+		if (conflict) {
+			setUploadConfirm({ file, targetPath });
+			return;
+		}
+		void runImport(file, targetPath, false);
+	}
 
 	async function createDirectory() {
 		if (!browser.selectedRoot || !newDirectory.trim()) return;
@@ -262,6 +430,24 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 						{browser.selectedRoot && (
 							<>
 								<div className="mb-3 flex items-center gap-1">
+									<input
+										ref={uploadInputRef}
+										type="file"
+										aria-label="选择上传文件"
+										className="hidden"
+										onChange={(event) => {
+											const file = event.target.files?.[0];
+										event.currentTarget.value = "";
+										if (file) selectUpload(file);
+									}}
+									/>
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => uploadInputRef.current?.click()}
+									>
+										上传文件
+									</Button>
 									<Button
 										size="sm"
 										variant="ghost"
@@ -293,6 +479,30 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 										<FolderPlus className="size-4" />
 									</Button>
 								</div>
+								{uploadState && (
+									<div
+										role={uploadState.phase === "error" ? "alert" : "status"}
+										className={`mb-3 rounded border px-3 py-2 text-sm ${uploadState.phase === "error" ? "border-red-500/40 bg-red-500/10 text-red-400" : uploadState.phase === "done" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400" : "border-border bg-secondary/30 text-muted-foreground"}`}
+									>
+										<div>
+											{uploadState.phase === "uploading" &&
+											`正在上传 ${uploadState.filename}`}
+										{uploadState.phase === "importing" &&
+											`正在写入远程目录：${uploadState.filename}`}
+										{uploadState.phase === "done" &&
+											`上传完成：${uploadState.filename}`}
+										{uploadState.phase === "error" &&
+											`上传失败：${uploadState.message ?? uploadState.filename}`}
+										</div>
+										{uploadState.phase !== "error" && uploadState.phase !== "done" && (
+											<progress
+												className="mt-2 h-1.5 w-full"
+												max={uploadState.total || undefined}
+												value={uploadState.loaded}
+											/>
+										)}
+									</div>
+								)}
 								<div
 									data-testid="file-list-region"
 									aria-busy={browser.loading}
@@ -521,6 +731,54 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 					/>
 				</>
 			)}
+
+			<Dialog
+				open={uploadConfirm !== null}
+				onOpenChange={(open) => {
+					if (!open) setUploadConfirm(null);
+				}}
+			>
+				<DialogContent>
+					<DialogTitle>确认覆盖</DialogTitle>
+					<DialogDescription>
+						覆盖当前目录中的{" "}
+						<strong className="text-foreground">
+							{uploadConfirm
+								? joinDisplayPath(
+										browser.selectedRoot ?? "",
+										uploadConfirm.targetPath,
+									)
+								: ""}
+							？
+						</strong>
+					</DialogDescription>
+					<div className="mt-6 flex justify-end gap-2">
+						<Button
+							type="button"
+							variant="ghost"
+							onClick={() => setUploadConfirm(null)}
+						>
+							取消
+						</Button>
+						<Button
+							type="button"
+							onClick={() => {
+								const pending = uploadConfirm;
+								setUploadConfirm(null);
+								if (!pending) return;
+								void runImport(
+									pending.file,
+									pending.targetPath,
+									true,
+									pending.fileId,
+								);
+							}}
+						>
+							确认覆盖
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
 
 			{/* 文件查看 / 编辑弹窗 */}
 			{viewEntry && (
