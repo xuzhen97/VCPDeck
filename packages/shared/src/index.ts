@@ -235,11 +235,23 @@ export interface JobError {
 export interface FileRef {
 	id: string; // DB File 表主键
 	key: string; // Storage 对象路径
-	url: string; // 预签名 URL
+	url: string; // 预签名 URL（local）；外部直连 URL（alibaba，direct=true）
 	method: "GET" | "PUT";
 	expiresAt: number;
 	headers?: Record<string, string>;
+	direct?: boolean; // true = 外部直连 URL（阿里云），Client 不做同源限制
 }
+
+// ── UploadTarget ──
+// local：Server 签名 URL 中转；alibaba：OSS 分片直传（预签名 URL 列表）
+export type UploadTarget =
+	| { kind: "proxy"; url: string; expiresAt: number }
+	| {
+			kind: "direct";
+			fileId: string;
+			uploadId: string;
+			parts: Array<{ partNumber: number; url: string }>;
+	  };
 
 export interface FileUploadSessionCreate {
 	clientId: string;
@@ -255,7 +267,19 @@ export interface FileUploadSession {
 	jobId: string;
 	fileId: string;
 	status: JobStatus;
-	upload: Pick<FileRef, "url" | "expiresAt">;
+	upload: UploadTarget;
+}
+
+// ── 导出直传会话（client 协商） ──
+export interface FileExportSessionCreate {
+	jobId: string;
+	size: number;
+}
+
+export interface FileExportSession {
+	fileId: string;
+	uploadId: string;
+	parts: Array<{ partNumber: number; url: string }>;
 }
 
 // ── File job payload ──
@@ -302,7 +326,6 @@ export interface FileImportPayload {
 	rootDir: string;
 	downloadRef: FileRef;
 	size: number;
-	sha256: string;
 	overwrite?: boolean;
 }
 
