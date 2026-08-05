@@ -118,7 +118,12 @@ describe("AlibabaStorageProvider 直传会话", () => {
 		const fetcher = openapiOk({});
 		vi.stubGlobal("fetch", fetcher);
 		await provider.completeDirectUpload("file-1", "upload-1");
-		const body = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
+		let body: Record<string, unknown> = {};
+		try {
+			body = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
+		} catch {
+			body = {};
+		}
 		expect(body).toMatchObject({ file_id: "file-1", upload_id: "upload-1" });
 	});
 

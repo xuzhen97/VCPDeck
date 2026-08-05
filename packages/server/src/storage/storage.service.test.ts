@@ -11,7 +11,9 @@ function mockPrisma() {
 		file: {
 			findFirst: vi.fn(),
 			findUnique: vi.fn().mockResolvedValue(null),
+			findUniqueOrThrow: vi.fn(),
 			updateMany: vi.fn(),
+			update: vi.fn(),
 		},
 		job: {
 			findUnique: vi.fn().mockResolvedValue(null),
@@ -267,6 +269,177 @@ describe("StorageService", () => {
 				kind: "local",
 				updatedAt: null,
 			});
+		});
+	});
+
+	describe("直传会话编排", () => {
+		const directProvider = {
+			createDirectUpload: vi.fn(),
+			completeDirectUpload: vi.fn(),
+			refreshPartUrls: vi.fn(),
+			getExternalDownloadUrl: vi.fn(),
+		};
+
+		function mockDirectProvider() {
+			vi.spyOn(service, "getProvider").mockReturnValue(
+				directProvider as never,
+			);
+		}
+
+		it("createDirectUploadSession 建会话并更新 File key 为阿里云 fileId", async () => {
+			mockDirectProvider();
+			directProvider.createDirectUpload.mockResolvedValue({
+				fileId: "aliyun-file",
+				uploadId: "up-1",
+				parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
+			});
+			prisma.file.update.mockResolvedValue({});
+
+			const result = await service.createDirectUploadSession(
+				100,
+				"a.bin",
+				"f1",
+			);
+
+			expect(result).toMatchObject({ fileId: "aliyun-file", uploadId: "up-1" });
+			expect(prisma.file.update).toHaveBeenCalledWith({
+				where: { id: "f1" },
+				data: { key: "aliyun-file" },
+			});
+		});
+
+		it("completeDirectUploadSession 校验字节数、合并分片、置 completed", async () => {
+			mockDirectProvider();
+			prisma.file.findUniqueOrThrow.mockResolvedValue({
+				id: "f1",
+				size: 100,
+				key: "aliyun-file",
+			});
+			directProvider.completeDirectUpload.mockResolvedValue(undefined);
+			prisma.file.update.mockResolvedValue({});
+
+			await service.createDirectUploadSession(100, "a.bin", "f1");
+			await service.completeDirectUploadSession("f1", 100);
+
+			expect(directProvider.completeDirectUpload).toHaveBeenCalledWith(
+				"aliyun-file",
+				"up-1",
+			);
+			expect(prisma.file.update).toHaveBeenCalledWith({
+				where: { id: "f1" },
+				data: expect.objectContaining({
+					status: "completed",
+					storageKind: "alibaba",
+					sha256: "",
+				}),
+			});
+		});
+
+		it("completeDirectUploadSession 字节数不符时报 SIZE_MISMATCH", async () => {
+			mockDirectProvider();
+			prisma.file.findUniqueOrThrow.mockResolvedValue({
+				id: "f1",
+				size: 100,
+				key: "aliyun-file",
+			});
+			await service.createDirectUploadSession(100, "a.bin", "f1");
+
+			await expect(
+				service.completeDirectUploadSession("f1", 99),
+			).rejects.toMatchObject({ code: "SIZE_MISMATCH" });
+		});
+
+		it("createExportSession 从 job payload 取文件名并更新 File size", async () => {
+			mockDirectProvider();
+			prisma.job.findUnique.mockResolvedValue({
+				id: "j1",
+				type: "file.export",
+				payload: JSON.stringify({ path: "D:\\a.zip" }),
+			});
+			prisma.file.findFirst.mockResolvedValue({ id: "f1", key: "k" });
+			directProvider.createDirectUpload.mockResolvedValue({
+				fileId: "aliyun-file",
+				uploadId: "up-1",
+				parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
+			});
+			prisma.file.update.mockResolvedValue({});
+
+			const result = await service.createExportSession("j1", 100);
+
+			expect(directProvider.createDirectUpload).toHaveBeenCalledWith(
+				100,
+				"a.zip",
+			);
+			expect(prisma.file.update).toHaveBeenCalledWith({
+				where: { id: "f1" },
+				data: expect.objectContaining({ size: 100, key: "aliyun-file" }),
+			});
+			expect(result.parts).toHaveLength(1);
+		});
+
+		it("completeExportUpload 校验字节数并返回真实 key", async () => {
+			mockDirectProvider();
+			prisma.job.findUnique.mockResolvedValue({
+				id: "j1",
+				type: "file.export",
+				payload: JSON.stringify({ path: "D:\\a.zip" }),
+			});
+			prisma.file.findFirst.mockResolvedValue({ id: "f1", size: 100 });
+			directProvider.completeDirectUpload.mockResolvedValue(undefined);
+			prisma.file.update.mockResolvedValue({});
+			await service.createExportSession("j1", 100);
+
+			const result = await service.completeExportUpload("j1", 100);
+
+			expect(result).toEqual({ key: "aliyun-file" });
+			expect(prisma.file.update).toHaveBeenCalledWith({
+				where: { id: "f1" },
+				data: expect.objectContaining({ status: "completed" }),
+			});
+		});
+
+		it("createDownloadToken 在直传 provider 上返回外部 URL", async () => {
+			mockDirectProvider();
+			directProvider.getExternalDownloadUrl.mockResolvedValue({
+				url: "https://download.example/x",
+				expiresAt: 1760000000000,
+			});
+
+			await expect(service.createDownloadToken("aliyun-file")).resolves.toEqual({
+				url: "https://download.example/x",
+				expiresAt: 1760000000000,
+			});
+		});
+
+		it("local provider 上 createDownloadToken 保持签名 URL", async () => {
+			const localProvider = {
+				signDownloadUrl: vi.fn().mockReturnValue("expires=123&sig=s"),
+			};
+			vi.spyOn(service, "getProvider").mockReturnValue(localProvider as never);
+
+			await expect(service.createDownloadToken("k")).resolves.toEqual({
+				url: "/api/storage/download/k?expires=123&sig=s",
+				expiresAt: 123,
+			});
+		});
+
+		it("updateUploadProgress 写入 job.progress（total 取 File.size）", async () => {
+			prisma.job.findUnique.mockResolvedValue({
+				id: "j1",
+				payload: JSON.stringify({ fileId: "f1" }),
+			});
+			prisma.file.findUnique.mockResolvedValue({ size: 100 });
+			prisma.job.update.mockResolvedValue({});
+
+			await service.updateUploadProgress("j1", 50);
+
+			expect(prisma.job.update).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: expect.objectContaining({
+						progress: JSON.stringify({ loaded: 50, total: 100 }),
+					}),
+				}),
+			);
 		});
 	});
 });

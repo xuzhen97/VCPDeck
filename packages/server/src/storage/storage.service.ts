@@ -2,6 +2,7 @@ import { Injectable, type OnModuleInit, Logger, Inject } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { Transform, type Readable } from "node:stream";
 import { STORAGE_PROVIDERS } from "./providers/providers.registry.js";
+import { AlibabaStorageProvider } from "./providers/alibaba-storage.provider.js";
 import type {
 	StorageProvider,
 	FileMeta,
@@ -16,11 +17,19 @@ interface PendingUpload {
 	createdAt: number;
 }
 
+/** 直传上传会话（ponytail: 内存 Map；上传中断需用户重试，重启后会话失效） */
+interface DirectUploadSession {
+	fileId: string; // 阿里云 fileId
+	uploadId: string;
+}
+
 @Injectable()
 export class StorageService implements OnModuleInit {
 	private readonly logger = new Logger(StorageService.name);
 	private provider: StorageProvider | null = null;
 	private pendingUploads = new Map<string, PendingUpload>();
+	/** key = File 行主键（dbFileId） */
+	private directUploadSessions = new Map<string, DirectUploadSession>();
 
 	constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -71,6 +80,17 @@ export class StorageService implements OnModuleInit {
 		return this.provider;
 	}
 
+	/** 获取支持直传的阿里云 provider（功能检测，便于测试 mock） */
+	private requireDirectProvider(): AlibabaStorageProvider {
+		const p = this.getProvider();
+		if (typeof (p as AlibabaStorageProvider).createDirectUpload !== "function") {
+			throw Object.assign(new Error("当前存储后端不支持直传"), {
+				statusCode: 400,
+			});
+		}
+		return p as AlibabaStorageProvider;
+	}
+
 	/** 签发上传令牌，返回 FileRef */
 	async createUploadToken(
 		meta: FileMeta,
@@ -92,12 +112,16 @@ export class StorageService implements OnModuleInit {
 		};
 	}
 
-	/** 签发下载令牌（内部/管理面板调用） */
-	createDownloadToken(
+	/** 签发下载令牌（内部/管理面板调用）；alibaba 后端返回阿里云临时外部 URL */
+	async createDownloadToken(
 		key: string,
 		ttlSeconds = 3600,
-	): { url: string; expiresAt: number } {
+	): Promise<{ url: string; expiresAt: number }> {
 		const p = this.getProvider();
+		if (typeof (p as AlibabaStorageProvider).getExternalDownloadUrl === "function") {
+			// 直连后端：阿里云下载 URL 临时有效，每次实时生成，不签名
+			return (p as AlibabaStorageProvider).getExternalDownloadUrl(key);
+		}
 		const queryString = p.signDownloadUrl(key, ttlSeconds);
 		const expiresAt = parseInt(
 			new URLSearchParams(queryString).get("expires") || "0",
@@ -107,6 +131,176 @@ export class StorageService implements OnModuleInit {
 			url: `/api/storage/download/${key}?${queryString}`,
 			expiresAt,
 		};
+	}
+
+	/** 创建直传上传会话（上传方向：浏览器→远程），并把 File 行 key 更新为阿里云 fileId */
+	async createDirectUploadSession(
+		size: number,
+		name: string,
+		dbFileId: string,
+	): Promise<{
+		fileId: string;
+		uploadId: string;
+		parts: Array<{ partNumber: number; url: string }>;
+	}> {
+		const p = this.requireDirectProvider();
+		const session = await p.createDirectUpload(size, name);
+		this.directUploadSessions.set(dbFileId, {
+			fileId: session.fileId,
+			uploadId: session.uploadId,
+		});
+		await this.prisma.file.update({
+			where: { id: dbFileId },
+			data: { key: session.fileId },
+		});
+		return session;
+	}
+
+	/** 完成上传方向直传：校验字节数、合并分片、File 置 completed */
+	async completeDirectUploadSession(
+		dbFileId: string,
+		uploadedBytes: number,
+	): Promise<void> {
+		const p = this.requireDirectProvider();
+		const session = this.directUploadSessions.get(dbFileId);
+		if (!session) {
+			throw Object.assign(new Error("直传会话不存在或已过期"), {
+				code: "UPLOAD_SESSION_NOT_FOUND",
+			});
+		}
+		const file = await this.prisma.file.findUniqueOrThrow({
+			where: { id: dbFileId },
+		});
+		if (file.size !== uploadedBytes) {
+			throw Object.assign(
+				new Error(
+					`上传字节数不匹配：期望 ${file.size}，实际 ${uploadedBytes}`,
+				),
+				{ code: "SIZE_MISMATCH", statusCode: 400 },
+			);
+		}
+		await p.completeDirectUpload(session.fileId, session.uploadId);
+		await this.prisma.file.update({
+			where: { id: dbFileId },
+			data: { status: "completed", storageKind: "alibaba", sha256: "" },
+		});
+		this.directUploadSessions.delete(dbFileId);
+	}
+
+	/** 创建导出直传会话（导出方向：远程→浏览器，Client stat 后协商） */
+	async createExportSession(
+		jobId: string,
+		size: number,
+	): Promise<{
+		fileId: string;
+		uploadId: string;
+		parts: Array<{ partNumber: number; url: string }>;
+	}> {
+		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+		if (!job || job.type !== "file.export") {
+			throw Object.assign(new Error(`导出任务 ${jobId} 不存在`), {
+				code: "UPLOAD_SESSION_NOT_FOUND",
+			});
+		}
+		let parsed: { path?: string } = {};
+		try {
+			parsed = JSON.parse(job.payload || "{}") as { path?: string };
+		} catch {
+			parsed = {};
+		}
+		const filename = String(parsed.path ?? "file")
+			.split(/[\\\\/]/)
+			.pop() || "file";
+		const file = await this.prisma.file.findFirst({ where: { jobId } });
+		if (!file) {
+			throw Object.assign(new Error("导出任务缺少 File 记录"), {
+				code: "FILE_NOT_READY",
+			});
+		}
+		const p = this.requireDirectProvider();
+		const session = await p.createDirectUpload(size, filename);
+		this.directUploadSessions.set(file.id, {
+			fileId: session.fileId,
+			uploadId: session.uploadId,
+		});
+		await this.prisma.file.update({
+			where: { id: file.id },
+			data: { size, key: session.fileId },
+		});
+		return session;
+	}
+
+	/** 完成导出直传：校验字节数、合并分片、File 置 completed，返回真实 key */
+	async completeExportUpload(
+		jobId: string,
+		uploadedBytes: number,
+	): Promise<{ key: string }> {
+		const file = await this.prisma.file.findFirst({ where: { jobId } });
+		if (!file) {
+			throw Object.assign(new Error("导出任务缺少 File 记录"), {
+				code: "FILE_NOT_READY",
+			});
+		}
+		const session = this.directUploadSessions.get(file.id);
+		if (!session) {
+			throw Object.assign(new Error("直传会话不存在或已过期"), {
+				code: "UPLOAD_SESSION_NOT_FOUND",
+			});
+		}
+		if (file.size !== uploadedBytes) {
+			throw Object.assign(
+				new Error(
+					`上传字节数不匹配：期望 ${file.size}，实际 ${uploadedBytes}`,
+				),
+				{ code: "SIZE_MISMATCH", statusCode: 400 },
+			);
+		}
+		const p = this.requireDirectProvider();
+		await p.completeDirectUpload(session.fileId, session.uploadId);
+		await this.prisma.file.update({
+			where: { id: file.id },
+			data: { status: "completed", storageKind: "alibaba", sha256: "" },
+		});
+		this.directUploadSessions.delete(file.id);
+		return { key: session.fileId };
+	}
+
+	/** 续期直传会话指定分片的上传 URL */
+	async refreshDirectPartUrls(
+		jobId: string,
+		partNumbers: number[],
+	): Promise<Array<{ partNumber: number; url: string }>> {
+		const file = await this.prisma.file.findFirst({ where: { jobId } });
+		const dbFileId = file?.id ?? jobId;
+		const session =
+			this.directUploadSessions.get(dbFileId) ??
+			this.directUploadSessions.get(jobId);
+		if (!session) {
+			throw Object.assign(new Error("直传会话不存在或已过期"), {
+				code: "UPLOAD_SESSION_NOT_FOUND",
+			});
+		}
+		const p = this.requireDirectProvider();
+		return p.refreshPartUrls(session.fileId, session.uploadId, partNumbers);
+	}
+
+	/** 直传进度上报：写入 job.progress（total 取 File.size） */
+	async updateUploadProgress(jobId: string, loaded: number): Promise<void> {
+		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+		if (!job) return;
+		let payload: { fileId?: string } = {};
+		try {
+			payload = JSON.parse(job.payload || "{}") as { fileId?: string };
+		} catch {
+			payload = {};
+		}
+		const file = payload.fileId
+			? await this.prisma.file.findUnique({
+					where: { id: payload.fileId },
+					select: { size: true },
+				})
+			: null;
+		await this.updateJobProgress(jobId, loaded, file?.size ?? loaded);
 	}
 
 	/** 接收文件流并存储 */

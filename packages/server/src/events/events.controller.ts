@@ -12,6 +12,7 @@ import {
 import { JobService } from "../job/job.service.js";
 import { ClientService } from "../client/client.service.js";
 import { ClientGateway } from "./client.gateway.js";
+import { StorageService } from "../storage/storage.service.js";
 import { Actor } from "../auth/actor.decorator.js";
 import { Public } from "../auth/public.decorator.js";
 import type {
@@ -85,12 +86,13 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
 }
 
 @Controller("api")
-export class EventsController {
-  constructor(
-    @Inject(JobService) private readonly jobService: JobService,
-    @Inject(ClientService) private readonly clientService: ClientService,
-    @Inject(ClientGateway) private readonly gateway: ClientGateway,
-  ) {}
+	export class EventsController {
+	constructor(
+		@Inject(JobService) private readonly jobService: JobService,
+		@Inject(ClientService) private readonly clientService: ClientService,
+		@Inject(ClientGateway) private readonly gateway: ClientGateway,
+		@Inject(StorageService) private readonly storageService: StorageService,
+	) {}
 
   @Public()
   @Get("health")
@@ -160,10 +162,15 @@ export class EventsController {
 
   /** 完成 Storage 上传并激活远程文件导入 Job。 */
   @Post("files/upload-sessions/:jobId/complete")
-  async completeUploadSession(@Param("jobId") jobId: string) {
+  async completeUploadSession(
+    @Param("jobId") jobId: string,
+    @Body() body: { uploadedBytes?: number },
+  ) {
     try {
-      const { result, dispatch } =
-        await this.jobService.completeUploadSession(jobId);
+      const { result, dispatch } = await this.jobService.completeUploadSession(
+        jobId,
+        body,
+      );
       if (dispatch) this.gateway.sendDispatch(dispatch);
       return result;
     } catch (e: any) {
@@ -172,6 +179,65 @@ export class EventsController {
         message: e.message ?? String(e),
       });
     }
+  }
+
+  /** 创建导出直传会话（Client stat 文件后协商分片 URL）。 */
+  @Post("files/export-sessions")
+  async createExportSession(@Body() body: { jobId?: string; size?: number }) {
+    const jobId = body?.jobId;
+    const size = body?.size;
+    if (typeof jobId !== "string" || jobId === "" || !Number.isInteger(size) || (size ?? 0) < 0) {
+      throw new BadRequestException({
+        code: "INVALID_EXPORT_SESSION",
+        message: "jobId and size are required",
+      });
+    }
+    return this.storageService.createExportSession(jobId, size as number);
+  }
+
+  /** 完成导出直传并返回真实 storage key。 */
+  @Post("files/export-sessions/:jobId/complete")
+  async completeExportSession(
+    @Param("jobId") jobId: string,
+    @Body() body: { uploadedBytes?: number },
+  ) {
+    const uploadedBytes = body?.uploadedBytes;
+    if (!Number.isInteger(uploadedBytes) || (uploadedBytes ?? 0) < 0) {
+      throw new BadRequestException({
+        code: "INVALID_EXPORT_SESSION",
+        message: "uploadedBytes is required",
+      });
+    }
+    return this.storageService.completeExportUpload(jobId, uploadedBytes as number);
+  }
+
+  /** 续期上传会话指定分片的直传 URL。 */
+  @Post("files/upload-sessions/:jobId/part-urls")
+  async refreshPartUrls(
+    @Param("jobId") jobId: string,
+    @Body() body: { partNumbers?: number[] },
+  ) {
+    const partNumbers = body?.partNumbers;
+    if (!Array.isArray(partNumbers) || partNumbers.length === 0) {
+      throw new BadRequestException({
+        code: "INVALID_PART_NUMBERS",
+        message: "partNumbers is required",
+      });
+    }
+    return this.storageService.refreshDirectPartUrls(jobId, partNumbers);
+  }
+
+  /** 直传分片进度上报（节流由前端控制）。 */
+  @Post("files/upload-sessions/:jobId/progress")
+  async updateProgress(@Param("jobId") jobId: string, @Body() body: { loaded?: number }) {
+    const loaded = body?.loaded;
+    if (!Number.isFinite(loaded) || (loaded ?? 0) < 0) {
+      throw new BadRequestException({
+        code: "INVALID_PROGRESS",
+        message: "loaded is required",
+      });
+    }
+    await this.storageService.updateUploadProgress(jobId, loaded as number);
   }
 
   @Post("jobs/:jobId/cancel")

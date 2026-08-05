@@ -34,7 +34,15 @@ function mockFileService() {
 }
 
 function makeService(jobs: Array<Record<string, unknown>>): JobService {
-	return new JobService(mockPrisma(jobs), mockScheduler(), mockFileService());
+	const storage = {
+		getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+	} as never;
+	return new JobService(
+		mockPrisma(jobs),
+		mockScheduler(),
+		mockFileService(),
+		storage,
+	);
 }
 
 describe("JobService upload sessions", () => {
@@ -57,11 +65,17 @@ describe("JobService upload sessions", () => {
 			findById: vi.fn(),
 			createDownloadToken: vi.fn(),
 		} as any;
+		const storage = {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+			createDirectUploadSession: vi.fn(),
+			completeDirectUploadSession: vi.fn(),
+		} as any;
 		return {
 			prisma,
 			scheduler,
 			fileService,
-			service: new JobService(prisma, scheduler, fileService),
+			storage,
+			service: new JobService(prisma, scheduler, fileService, storage),
 		};
 	}
 
@@ -211,7 +225,9 @@ describe("JobService upload sessions", () => {
 describe("JobService.updateProgress()", () => {
 	it("写入序列化进度", async () => {
 		const prisma = mockPrisma([]);
-		const svc = new JobService(prisma, mockScheduler(), mockFileService());
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
 
 		await svc.updateProgress("job-1", 65536, 158601385);
 
@@ -320,7 +336,9 @@ describe("JobService.list()", () => {
 			frpMapping: { findMany: vi.fn(), count: vi.fn() },
 		} as unknown as PrismaService;
 
-		const svc = new JobService(prisma, mockScheduler(), mockFileService());
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
 		await svc.list({ page: 3, pageSize: 10 });
 
 		expect(prisma.job.findMany).toHaveBeenCalledWith(
@@ -342,7 +360,9 @@ describe("JobService.list()", () => {
 			frpMapping: { findMany: vi.fn(), count: vi.fn() },
 		} as unknown as PrismaService;
 
-		const svc = new JobService(prisma, mockScheduler(), mockFileService());
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
 		await svc.list({ clientId: "c1" });
 
 		expect(prisma.job.findMany).toHaveBeenCalledWith(
@@ -367,7 +387,9 @@ describe("JobService.list()", () => {
 			frpMapping: { findMany: vi.fn(), count: vi.fn() },
 		} as unknown as PrismaService;
 
-		const svc = new JobService(prisma, mockScheduler(), mockFileService());
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
 		await svc.list({ status: "running" as JobStatus });
 
 		expect(prisma.job.findMany).toHaveBeenCalledWith(
@@ -389,7 +411,9 @@ describe("JobService.list()", () => {
 			frpMapping: { findMany: vi.fn(), count: vi.fn() },
 		} as unknown as PrismaService;
 
-		const svc = new JobService(prisma, mockScheduler(), mockFileService());
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
 		await svc.list({ pageSize: 999 });
 		expect(prisma.job.findMany).toHaveBeenCalledWith(
 			expect.objectContaining({ take: 100 }),
@@ -415,7 +439,9 @@ describe("JobService.list()", () => {
 			frpMapping: { findMany: vi.fn(), count: vi.fn() },
 		} as unknown as PrismaService;
 
-		const svc = new JobService(prisma, mockScheduler(), mockFileService());
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
 		const result = await svc.list({ pageSize: 10 });
 		expect(result.totalPages).toBe(3);
 	});
@@ -434,7 +460,9 @@ describe("JobService.list()", () => {
 			frpMapping: { findMany: vi.fn(), count: vi.fn() },
 		} as unknown as PrismaService;
 
-		const svc = new JobService(prisma, mockScheduler(), mockFileService());
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
 		await svc.list({
 			clientId: "c1",
 			status: "done" as JobStatus,

@@ -7,6 +7,7 @@ import { JobModule } from "../job/job.module.js";
 import { FileModule } from "../file/file.module.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
 import { FrpModule } from "../frp/frp.module.js";
+import { StorageModule } from "../storage/storage.module.js";
 
 @Module({
 	imports: [
@@ -14,6 +15,7 @@ import { FrpModule } from "../frp/frp.module.js";
 		JobModule,
 		FileModule,
 		PrismaModule,
+		StorageModule,
 		forwardRef(() => FrpModule),
 	],
 	providers: [ClientGateway, AppGateway],

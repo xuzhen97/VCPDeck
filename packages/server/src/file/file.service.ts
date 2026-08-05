@@ -80,7 +80,7 @@ export class FileService {
 				statusCode: 400,
 			});
 		}
-		const { url } = this.storage.createDownloadToken(file.key);
+		const { url } = await this.storage.createDownloadToken(file.key);
 		return { downloadUrl: url, size: file.size, sha256: file.sha256 };
 	}
 

@@ -13,7 +13,9 @@ import type {
   FileUploadSessionCreate,
 } from "@vcpdeck/shared";
 import { FileService } from "../file/file.service.js";
+import { StorageService } from "../storage/storage.service.js";
 import { randomUUID } from "node:crypto";
+import type { UploadTarget } from "@vcpdeck/shared";
 
 const FILE_READ_TYPES = ["file.list", "file.stat", "file.readText", "file.export", "file.roots"];
 const FILE_WRITE_TYPES = [
@@ -64,6 +66,7 @@ export class JobService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(JobScheduler) private readonly scheduler: JobScheduler,
     @Inject(FileService) private readonly fileService: FileService,
+    @Inject(StorageService) private readonly storage: StorageService,
   ) {}
 
   /** 创建等待浏览器上传的文件导入会话。 */
@@ -145,17 +148,35 @@ export class JobService {
       },
     });
 
+    const backend = await this.storage.getBackendConfig();
+    let upload: UploadTarget;
+    if (backend.kind === "alibaba") {
+      const session = await this.storage.createDirectUploadSession(
+            input.size,
+            input.filename,
+            pending.fileId,
+      );
+      upload = { kind: "direct", ...session };
+    } else {
+      upload = {
+            kind: "proxy",
+            url: pending.uploadUrl,
+            expiresAt: pending.expiresAt,
+      };
+    }
+
     return {
       jobId,
       fileId: pending.fileId,
       status: JobStatus.WAITING_INPUT,
-      upload: { url: pending.uploadUrl, expiresAt: pending.expiresAt },
+      upload,
     };
   }
 
   /** 确认 Storage 上传并激活文件导入 Job。 */
   async completeUploadSession(
     jobId: string,
+    body?: { uploadedBytes?: number },
   ): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
     const job = await this.prisma.job.findUnique({ where: { id: jobId } });
     if (!job) {
@@ -209,7 +230,24 @@ export class JobService {
       });
     }
     const file = await this.fileService.findById(payload.fileId);
-    if (!file || file.status !== "completed") {
+    if (!file) {
+      throw Object.assign(new Error("Upload session file is missing"), {
+        code: "FILE_NOT_READY",
+      });
+    }
+    const backend = await this.storage.getBackendConfig();
+    if (backend.kind === "alibaba") {
+      // 直连后端：浏览器已完成分片直传，Server 校验字节数并合并分片
+      if (typeof body?.uploadedBytes !== "number") {
+        throw Object.assign(new Error("uploadedBytes is required"), {
+                code: "SIZE_MISMATCH",
+        });
+      }
+      await this.storage.completeDirectUploadSession(
+        payload.fileId,
+        body.uploadedBytes,
+      );
+    } else if (file.status !== "completed") {
       throw Object.assign(new Error("File upload is not complete"), {
         code: "FILE_NOT_READY",
       });
@@ -224,9 +262,9 @@ export class JobService {
         url: download.downloadUrl,
         method: "GET" as const,
         expiresAt: 0,
+        direct: backend.kind === "alibaba",
       },
       size: download.size,
-      sha256: download.sha256,
     };
     await this.prisma.job.update({
       where: { id: jobId },
@@ -293,16 +331,32 @@ export class JobService {
             p.path.split(/[/\\]/).pop() || "file",
           size: 0,
         });
-      finalPayload = {
-        ...finalPayload,
-        uploadRef: {
-          id: fileId,
-          key,
-          url: uploadUrl,
-          method: "PUT" as const,
-          expiresAt,
-        },
-      };
+      const backend = await this.storage.getBackendConfig();
+      if (backend.kind === "alibaba") {
+        // 直连后端：Client stat 文件后协商直传会话（size 未知，无法预创建分片任务）
+        finalPayload = {
+          ...finalPayload,
+          uploadRef: {
+            id: fileId,
+            key,
+            url: "",
+            method: "PUT" as const,
+            expiresAt: 0,
+            direct: true,
+          },
+        };
+      } else {
+        finalPayload = {
+          ...finalPayload,
+          uploadRef: {
+            id: fileId,
+            key,
+            url: uploadUrl,
+            method: "PUT" as const,
+            expiresAt,
+          },
+        };
+      }
     } else if (params.type === "file.import") {
       const p = params.payload as {
         targetPath: string;
@@ -310,6 +364,7 @@ export class JobService {
         fileId: string;
       };
       const dl = await this.fileService.createDownloadToken(p.fileId);
+      const backend = await this.storage.getBackendConfig();
       finalPayload = {
         ...finalPayload,
         downloadRef: {
@@ -318,9 +373,9 @@ export class JobService {
           url: dl.downloadUrl,
           method: "GET" as const,
           expiresAt: 0,
+          direct: backend.kind === "alibaba",
         },
         size: dl.size,
-        sha256: dl.sha256,
       };
     }
 
