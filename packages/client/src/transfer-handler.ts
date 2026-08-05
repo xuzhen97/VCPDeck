@@ -5,7 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
 import type { Socket } from "socket.io-client";
 import { Events, FileErrorCode } from "@vcpdeck/shared";
-import type { JobDone, FileRef } from "@vcpdeck/shared";
+import type { JobDone, FileRef, FileExportSession } from "@vcpdeck/shared";
 import { resolveSafePath } from "./file-handler.js";
 
 const SERVER_BASE = process.env.VCPDECK_SERVER || "http://localhost:3001";
@@ -27,6 +27,112 @@ function absUrl(path: string): string {
 		return path;
 	}
 	return `${SERVER_BASE}${path}`;
+}
+
+// ── 直传（阿里云 OSS 分片） ──
+const PART_CONCURRENCY = 3;
+const PART_RETRIES = 2;
+
+/** 按 parts 并发 PUT 分片；403 时调 refreshUrl 续期后重试 */
+async function uploadParts(
+	parts: Array<{ partNumber: number; url: string }>,
+	size: number,
+	opts: {
+		readPart(partNumber: number, start: number, end: number): Promise<BodyInit>;
+		onProgress?(loaded: number): void;
+		signal?: AbortSignal;
+		refreshUrl(partNumber: number): Promise<string>;
+	},
+): Promise<void> {
+	const partSize = Math.ceil(size / parts.length);
+	let loaded = 0;
+	const queue = [...parts];
+	async function worker() {
+		while (queue.length > 0) {
+			const part = queue.shift();
+			if (part === undefined) return;
+			const start = (part.partNumber - 1) * partSize;
+			const end = Math.min(size, start + partSize);
+			let url = part.url;
+			for (let attempt = 0; ; attempt++) {
+				const res = await fetch(url, {
+					method: "PUT",
+					body: await opts.readPart(part.partNumber, start, end),
+					signal: opts.signal,
+				});
+				if (res.ok) break;
+				if (res.status === 403 && attempt < PART_RETRIES) {
+					url = await opts.refreshUrl(part.partNumber);
+					continue;
+				}
+				if (attempt < PART_RETRIES) continue;
+				throw new Error(`分片 ${part.partNumber} 上传失败: HTTP ${res.status}`);
+			}
+			loaded += end - start;
+			opts.onProgress?.(loaded);
+		}
+	}
+	await Promise.all(
+		Array.from(
+			{ length: Math.min(PART_CONCURRENCY, parts.length) },
+			() => worker(),
+		),
+	);
+}
+
+/** 协商导出直传会话（Server 建阿里云分片任务） */
+async function negotiateExportSession(
+	jobId: string,
+	size: number,
+): Promise<FileExportSession> {
+	const res = await fetch(absUrl("/api/files/export-sessions"), {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ jobId, size }),
+	});
+	if (!res.ok) throw new Error(`Export session failed: HTTP ${res.status}`);
+	return (await res.json()) as FileExportSession;
+}
+
+/** 续期指定分片的上传 URL */
+async function refreshExportPartUrl(
+	jobId: string,
+	partNumber: number,
+): Promise<string> {
+	const res = await fetch(
+		absUrl(`/api/files/export-sessions/${jobId}/part-urls`),
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ partNumbers: [partNumber] }),
+		},
+	);
+	if (!res.ok) throw new Error(`刷新分片 URL 失败: HTTP ${res.status}`);
+	const parts = (await res.json()) as Array<{
+		partNumber: number;
+		url: string;
+	}>;
+	const part = parts.find((p) => p.partNumber === partNumber);
+	if (!part?.url) throw new Error("刷新分片 URL 未返回新地址");
+	return part.url;
+}
+
+/** 完成导出直传，返回真实 storage key */
+async function completeExportUpload(
+	jobId: string,
+	uploadedBytes: number,
+): Promise<string> {
+	const res = await fetch(
+		absUrl(`/api/files/export-sessions/${jobId}/complete`),
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ uploadedBytes }),
+		},
+	);
+	if (!res.ok) throw new Error(`Export complete failed: HTTP ${res.status}`);
+	const body = (await res.json()) as { key?: string };
+	return body.key ?? "";
 }
 
 function emitDone(
@@ -77,7 +183,6 @@ export async function handleTransfer(
 			const targetPath = payload.targetPath as string;
 			const rootDir = payload.rootDir as string;
 			const downloadRef = payload.downloadRef as FileRef;
-			const expectedSha256 = payload.sha256 as string;
 			const expectedSize = Number(payload.size ?? 0);
 			const overwrite = payload.overwrite === true;
 
@@ -86,7 +191,6 @@ export async function handleTransfer(
 				targetPath,
 				rootDir,
 				downloadRef,
-				expectedSha256,
 				expectedSize,
 				overwrite,
 				socket,
@@ -123,12 +227,31 @@ async function handleExport(
 ) {
 	const safe = await resolveSafePath(rootDir, path);
 	const fileStat = await stat(safe);
-	const hash = createHash("sha256");
 	const total = fileStat.size;
+
+	// 直连模式：Client stat 文件后协商直传会话，分片 PUT 到 OSS，最后完成导出
+	if (uploadRef.direct) {
+		const session = await negotiateExportSession(jobId, total);
+		await uploadParts(session.parts, total, {
+			readPart: async (_n, start, end): Promise<BodyInit> =>
+				Readable.toWeb(createReadStream(safe, { start, end: end - 1 })) as unknown as BodyInit,
+			onProgress: (loaded) =>
+				socket.emit(Events.JOB_PROGRESS, { jobId, loaded, total }),
+			refreshUrl: (partNumber) => refreshExportPartUrl(jobId, partNumber),
+		});
+		const key = await completeExportUpload(jobId, total);
+		emitDone(socket, jobId, "file.export", {
+			fileId: key,
+			key,
+			size: total,
+		});
+		return;
+	}
 
 	const fileStream = createReadStream(safe);
 	// 传输段进度 + sha256：用 Transform 计数（toWeb 与 data 监听器在同一流上互斥，
 	// 此前 hash 恒为空摘要且进度无法上报）
+	const hash = createHash("sha256");
 	let loaded = 0;
 	let lastEmitAt = 0;
 	let lastEmitBytes = 0;
@@ -192,21 +315,22 @@ async function handleImport(
 	targetPath: string,
 	rootDir: string,
 	downloadRef: FileRef,
-	expectedSha256: string,
 	expectedSize: number,
 	overwrite: boolean,
 	socket: Socket,
 ) {
 	const safe = await resolveSafePath(rootDir, targetPath);
 	const tmpPath = `${safe}.vcpdeck-tmp-${randomUUID()}`;
-	const hash = createHash("sha256");
 	let loaded = 0;
 	let lastEmitAt = 0;
 	let lastEmitBytes = 0;
 
 	try {
-		// safe: downloadRef.url 由 Server 签发并校验签名，非任意 URL
-		const res = await fetch(absUrl(downloadRef.url), { method: "GET" });
+		// safe: downloadRef.url 由 Server 签发（proxy）或由阿里云 getDownloadUrl 生成（direct）
+		const res = await fetch(
+			downloadRef.direct ? downloadRef.url : absUrl(downloadRef.url),
+			{ method: "GET" },
+		);
 		if (!res.ok) {
 			emitError(
 				socket,
@@ -221,13 +345,9 @@ async function handleImport(
 		const tracker = new Transform({
 			transform(chunk: Buffer, _encoding, callback) {
 				const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-				hash.update(buffer);
 				loaded += buffer.length;
 				const now = Date.now();
-				if (
-					now - lastEmitAt >= 500 ||
-					loaded - lastEmitBytes >= 1024 * 1024
-				) {
+				if (now - lastEmitAt >= 500 || loaded - lastEmitBytes >= 1024 * 1024) {
 					lastEmitAt = now;
 					lastEmitBytes = loaded;
 					socket.emit(Events.JOB_PROGRESS, {
@@ -256,15 +376,14 @@ async function handleImport(
 		const nodeBody = Readable.fromWeb(webBody as any);
 		await pipeline(nodeBody, tracker, createWriteStream(tmpPath));
 
-		const sha256 = hash.digest("hex");
-		if (sha256 !== expectedSha256) {
+		if (loaded !== expectedSize) {
 			await unlink(tmpPath).catch(() => {});
 			emitError(
 				socket,
 				jobId,
 				"file.import",
-				FileErrorCode.SHA256_MISMATCH,
-				"SHA-256 mismatch",
+				FileErrorCode.IO_ERROR,
+				`Size mismatch: expected ${expectedSize}, got ${loaded}`,
 			);
 			return;
 		}
@@ -287,7 +406,6 @@ async function handleImport(
 			path: safe,
 			key: downloadRef.key,
 			size: loaded,
-			sha256,
 		});
 	} catch (err) {
 		await unlink(tmpPath).catch(() => {});

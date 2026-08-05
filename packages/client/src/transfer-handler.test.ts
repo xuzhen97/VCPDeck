@@ -75,7 +75,7 @@ function errorCalls(socket: Socket) {
 	>;
 }
 
-function importJob(overwrite = false) {
+function importJob(overwrite = false, direct = false) {
 	return {
 		jobId: "job-1",
 		type: "file.import",
@@ -85,12 +85,14 @@ function importJob(overwrite = false) {
 			downloadRef: {
 				id: "f1",
 				key: "k",
-				url: "/api/storage/download/k?expires=0&sig=abc",
+				url: direct
+					? "https://download.example/x"
+					: "/api/storage/download/k?expires=0&sig=abc",
 				method: "GET" as const,
 				expiresAt: 0,
+				direct,
 			},
 			size: 5,
-			sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
 			overwrite,
 		},
 	};
@@ -124,7 +126,9 @@ describe("handleTransfer file.export", () => {
 		mockFsPromises.stat.mockResolvedValue({ size: 5 });
 		mockFsPromises.unlink.mockResolvedValue(undefined);
 		mockFsPromises.rename.mockResolvedValue(undefined);
-		vi.mocked(createWriteStream).mockImplementation(() => new PassThrough() as never);
+		vi.mocked(createWriteStream).mockImplementation(
+			() => new PassThrough() as never,
+		);
 	});
 
 	it("回传 Server 返回的真实存储 key（阿里云盘 fileId），而非上传签名 key", async () => {
@@ -197,6 +201,52 @@ describe("handleTransfer file.export", () => {
 		// 1MB 阈值触发，节流内至少 2 次上报（第 1、2 MB）
 		expect(progress.length).toBeGreaterThanOrEqual(2);
 	});
+
+	it("uploadRef.direct 时分片直传并完成导出会话", async () => {
+		const fetcher = vi
+			.fn()
+			// 1) 协商导出直传会话
+			.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({
+					fileId: "aliyun-file",
+					uploadId: "up-1",
+					parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
+				}),
+			})
+			// 2) PUT 分片到 OSS
+			.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+			// 3) 完成导出会话
+			.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ key: "aliyun-file" }),
+			});
+		vi.stubGlobal("fetch", fetcher);
+		const socket = mockSocket();
+		const job = exportJob();
+		await handleTransfer(
+			{
+				...job,
+				payload: {
+					...job.payload,
+					uploadRef: { ...job.payload.uploadRef, url: "", direct: true },
+				},
+			},
+			socket,
+		);
+
+		expect(fetcher.mock.calls[0]?.[0]).toBe(
+			"http://localhost:3001/api/files/export-sessions",
+		);
+		expect(fetcher.mock.calls[1]?.[0]).toBe("https://oss.example/p1");
+		expect(fetcher.mock.calls[2]?.[0]).toBe(
+			"http://localhost:3001/api/files/export-sessions/job-1/complete",
+		);
+		expect(doneCalls(socket)[0]?.[1].result).toMatchObject({
+			key: "aliyun-file",
+			size: 5,
+		});
+	});
 });
 
 describe("handleTransfer file.import", () => {
@@ -238,23 +288,36 @@ describe("handleTransfer file.import", () => {
 		expect(doneCalls(socket)[0]?.[1].result).toMatchObject({
 			key: "k",
 			size: 5,
-			sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
 		});
 	});
 
-	it("摘要不匹配时保留原文件并清理临时文件", async () => {
+	it("实际字节数与声明 size 不符时报 IO_ERROR 并清理临时文件", async () => {
 		const socket = mockSocket();
 		const job = importJob(false);
 		await handleTransfer(
-			{ ...job, payload: { ...job.payload, sha256: "wrong" } },
+			{ ...job, payload: { ...job.payload, size: 999 } },
 			socket,
 		);
 
-		expect(errorCalls(socket)[0]?.[1].error.code).toBe("SHA256_MISMATCH");
+		expect(errorCalls(socket)[0]?.[1].error.code).toBe("IO_ERROR");
 		expect(mockFsPromises.rename).not.toHaveBeenCalled();
 		expect(mockFsPromises.unlink).toHaveBeenCalledWith(
 			expect.stringContaining("a.txt.vcpdeck-tmp-"),
 		);
+	});
+
+	it("downloadRef.direct 时直连外部 URL 且只校验 size", async () => {
+		vi.mocked(fetch).mockClear();
+		const socket = mockSocket();
+		await handleTransfer(importJob(false, true), socket);
+
+		expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+			"https://download.example/x",
+		);
+		expect(doneCalls(socket)[0]?.[1].result).toMatchObject({
+			key: "k",
+			size: 5,
+		});
 	});
 
 	it("拒绝非 Server 同源的绝对下载 URL", async () => {
