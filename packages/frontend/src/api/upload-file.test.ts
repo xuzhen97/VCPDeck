@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { uploadFile } from "./upload-file";
+import { uploadDirect, uploadFile } from "./upload-file";
 
 class FakeUpload {
 	onprogress: ((event: ProgressEvent) => void) | null = null;
@@ -36,7 +36,11 @@ describe("uploadFile", () => {
 		const onProgress = vi.fn();
 		const promise = uploadFile("/api/storage/upload/key", file, { onProgress });
 		const xhr = FakeXhr.instances[0]!;
-		xhr.upload.onprogress?.({ loaded: 2, total: 5, lengthComputable: true } as ProgressEvent);
+		xhr.upload.onprogress?.({
+			loaded: 2,
+			total: 5,
+			lengthComputable: true,
+		} as ProgressEvent);
 		xhr.onload?.();
 
 		await expect(promise).resolves.toBeUndefined();
@@ -66,5 +70,81 @@ describe("uploadFile", () => {
 
 		expect(xhr.abort).toHaveBeenCalledOnce();
 		await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+	});
+});
+
+describe("uploadDirect", () => {
+	const parts = [
+		{ partNumber: 1, url: "https://oss.example/p1" },
+		{ partNumber: 2, url: "https://oss.example/p2" },
+	];
+
+	it("按分片 PUT 到 OSS 并汇总进度", async () => {
+		vi.stubGlobal("XMLHttpRequest", FakeXhr);
+		const file = new File([new ArrayBuffer(10)], "big.bin");
+		const onProgress = vi.fn();
+		const promise = uploadDirect(parts, 10, file, {
+			onProgress,
+			refreshPartUrl: vi.fn(),
+		});
+
+		const xhrs = FakeXhr.instances;
+		expect(xhrs).toHaveLength(2);
+		expect(xhrs[0]!.open).toHaveBeenCalledWith(
+			"PUT",
+			"https://oss.example/p1",
+		);
+		expect(xhrs[1]!.open).toHaveBeenCalledWith(
+			"PUT",
+			"https://oss.example/p2",
+		);
+		// 片 1 进度 4/5
+		xhrs[0]!.upload.onprogress?.({
+			loaded: 4,
+			total: 5,
+			lengthComputable: true,
+		} as ProgressEvent);
+		xhrs[0]!.onload?.();
+		// 片 2 进度 3/5
+		xhrs[1]!.upload.onprogress?.({
+			loaded: 3,
+			total: 5,
+			lengthComputable: true,
+		} as ProgressEvent);
+		xhrs[1]!.onload?.();
+
+		await expect(promise).resolves.toBeUndefined();
+		// 片内进度：start + event.loaded；完成汇总：5 / 10
+		expect(onProgress).toHaveBeenCalledWith(4, 10);
+		expect(onProgress).toHaveBeenCalledWith(8, 10);
+		expect(onProgress).toHaveBeenCalledWith(10, 10);
+	});
+
+	it("分片 403 时调 refreshPartUrl 换 URL 重试", async () => {
+		vi.stubGlobal("XMLHttpRequest", FakeXhr);
+		const file = new File([new ArrayBuffer(10)], "big.bin");
+		const refreshPartUrl = vi.fn().mockResolvedValue("https://oss.example/p1-new");
+		const promise = uploadDirect(parts, 10, file, {
+			refreshPartUrl,
+		});
+
+		const xhrs = FakeXhr.instances;
+		// 片 1 第一次 403
+		xhrs[0]!.status = 403;
+		xhrs[0]!.onload?.();
+		await vi.waitFor(() =>
+			expect(refreshPartUrl).toHaveBeenCalledWith(1),
+		);
+		// 重试 XHR（第 3 个实例）成功后完成
+		const retry = FakeXhr.instances[2]!;
+		expect(retry.open).toHaveBeenCalledWith(
+			"PUT",
+			"https://oss.example/p1-new",
+		);
+		xhrs[1]!.onload?.();
+		retry.onload?.();
+
+		await expect(promise).resolves.toBeUndefined();
+		expect(refreshPartUrl).toHaveBeenCalledTimes(1);
 	});
 });

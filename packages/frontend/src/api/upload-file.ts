@@ -3,6 +3,109 @@ interface UploadFileOptions {
 	onProgress?: (loaded: number, total: number) => void;
 }
 
+interface DirectUploadOptions extends UploadFileOptions {
+	/** 分片 URL 过期（403）时重新获取新 URL */
+	refreshPartUrl: (partNumber: number) => Promise<string>;
+}
+
+const DIRECT_CONCURRENCY = 3;
+const DIRECT_RETRIES = 2;
+
+/** 分片直传：按 parts 并发 PUT 到 OSS 预签名 URL，汇总进度 */
+export function uploadDirect(
+	parts: Array<{ partNumber: number; url: string }>,
+	size: number,
+	file: File,
+	options: DirectUploadOptions,
+): Promise<void> {
+	const partSize = Math.ceil(size / parts.length);
+	const queue = [...parts];
+	let loaded = 0;
+	const active: XMLHttpRequest[] = [];
+
+	function putPart(
+		partNumber: number,
+		start: number,
+		end: number,
+		url: string,
+	): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const xhr = new XMLHttpRequest();
+			active.push(xhr);
+			xhr.upload.onprogress = (event) => {
+				options.onProgress?.(start + event.loaded, size);
+			};
+			xhr.onload = () => {
+				if (xhr.status >= 200 && xhr.status < 300) {
+					resolve();
+				} else {
+					const err = new Error(`分片 ${partNumber} 上传失败：HTTP ${xhr.status}`) as Error & {
+						status?: number;
+					};
+					err.status = xhr.status;
+					reject(err);
+				}
+			};
+			xhr.onerror = () => reject(new Error(`分片 ${partNumber} 上传失败`));
+			xhr.ontimeout = () => reject(new Error(`分片 ${partNumber} 上传失败`));
+			xhr.open("PUT", url);
+			xhr.send(file.slice(start, end));
+		});
+	}
+
+	async function worker() {
+		while (queue.length > 0) {
+			const part = queue.shift()!;
+			if (options.signal?.aborted) return;
+			const start = (part.partNumber - 1) * partSize;
+			const end = Math.min(size, start + partSize);
+			let url = part.url;
+			for (let attempt = 0; ; attempt++) {
+				try {
+					await putPart(part.partNumber, start, end, url);
+					break;
+				} catch (err) {
+					const status = (err as { status?: number }).status ?? 0;
+					if (status === 403 && attempt < DIRECT_RETRIES) {
+						url = await options.refreshPartUrl(part.partNumber);
+						continue;
+					}
+					if (attempt < DIRECT_RETRIES) continue;
+					throw err;
+				}
+			}
+			loaded += end - start;
+			options.onProgress?.(loaded, size);
+		}
+	}
+
+	return new Promise((resolve, reject) => {
+		const onAbort = () => {
+			for (const xhr of active) xhr.abort();
+			reject(new DOMException("Aborted", "AbortError"));
+		};
+		if (options.signal?.aborted) {
+			onAbort();
+			return;
+		}
+		options.signal?.addEventListener("abort", onAbort, { once: true });
+		Promise.all(
+			Array.from(
+				{ length: Math.min(DIRECT_CONCURRENCY, parts.length) },
+				() => worker(),
+			),
+		)
+			.then(() => {
+				options.signal?.removeEventListener("abort", onAbort);
+				resolve();
+			})
+			.catch((err) => {
+				options.signal?.removeEventListener("abort", onAbort);
+				reject(err);
+			});
+	});
+}
+
 /** 使用浏览器原生 XHR 将单个文件直传到签名 Storage URL。 */
 export function uploadFile(
 	url: string,
