@@ -32,6 +32,9 @@ import {
 	MAX_PARTS,
 } from "./alibaba-types.js";
 import type { AlibabaStorageConfig } from "./alibaba-types.js";
+
+/** 直传分片大小（与现有 uploadToKey 的分片逻辑一致） */
+export const ALIBABA_PART_SIZE = DEFAULT_PART_SIZE;
 import type {
 	StorageProvider,
 	FileMeta,
@@ -144,6 +147,112 @@ export class AlibabaStorageProvider implements StorageProvider {
 		this.runtime.accessToken = data.access_token;
 		if (data.refresh_token) this.runtime.refreshToken = data.refresh_token;
 		this.runtime.expiresAt = Date.now() + data.expires_in * 1000;
+	}
+
+	// ── 直传会话（浏览器 / Client 直连 OSS） ──
+
+	/** 创建直传上传会话，返回各分片预签名 URL */
+	async createDirectUpload(
+		size: number,
+		name: string,
+	): Promise<{
+		fileId: string;
+		uploadId: string;
+		parts: Array<{ partNumber: number; url: string }>;
+	}> {
+		const rt = await this.ensureReady();
+		const client = this.makeClient();
+		const folderId = await client.ensureFolderPath({
+			driveId: rt.driveId,
+			folderPath: rt.transferFolder,
+		});
+		const partSize = this.resolvePartSize(size);
+		const partCount = Math.max(1, Math.ceil(size / partSize));
+		const created = await client.createFileUpload({
+			driveId: rt.driveId,
+			parentFileId: folderId,
+			name,
+			size,
+			partInfoList: Array.from({ length: partCount }, (_, i) => ({
+				part_number: i + 1,
+			})),
+		});
+		const fileId = String(created.file_id ?? created.fileId ?? "");
+		const uploadId = String(created.upload_id ?? created.uploadId ?? "");
+		if (!fileId || !uploadId) {
+			throw new Error("阿里云盘创建上传任务未返回 file_id/upload_id");
+		}
+
+		const list = (created.part_info_list ??
+			created.partInfoList ??
+			[]) as Array<Record<string, unknown>>;
+		const parts = list
+			.map((p) => ({
+				partNumber: Number(p.part_number ?? p.partNumber ?? 0),
+				url: String(p.upload_url ?? p.uploadUrl ?? ""),
+			}))
+			.filter((p) => p.partNumber > 0 && p.url);
+
+		// create 响应可能不带 upload_url：缺哪些分片就补哪些
+		const missing = Array.from({ length: partCount }, (_, i) => i + 1).filter(
+			(n) => !parts.some((p) => p.partNumber === n),
+		);
+		if (missing.length > 0) {
+			const refreshed = await this.refreshPartUrls(fileId, uploadId, missing);
+			parts.push(...refreshed);
+		}
+		parts.sort((a, b) => a.partNumber - b.partNumber);
+		if (parts.length !== partCount) {
+			throw new Error("阿里云盘未返回全部分片上传 URL");
+		}
+		return { fileId, uploadId, parts };
+	}
+
+	/** 续期指定分片的上传 URL */
+	async refreshPartUrls(
+		fileId: string,
+		uploadId: string,
+		partNumbers: number[],
+	): Promise<Array<{ partNumber: number; url: string }>> {
+		const rt = await this.ensureReady();
+		const client = this.makeClient();
+		const result = await client.getUploadUrl({
+			driveId: rt.driveId,
+			fileId,
+			uploadId,
+			partNumbers,
+		});
+		const list = (result.part_info_list ?? result.partInfoList ?? []) as Array<
+			Record<string, unknown>
+		>;
+		return list
+			.map((p) => ({
+				partNumber: Number(p.part_number ?? p.partNumber ?? 0),
+				url: String(p.upload_url ?? p.uploadUrl ?? ""),
+			}))
+			.filter((p) => p.partNumber > 0 && p.url);
+	}
+
+	/** 完成直传（合并分片） */
+	async completeDirectUpload(fileId: string, uploadId: string): Promise<void> {
+		const rt = await this.ensureReady();
+		const client = this.makeClient();
+		await client.completeUpload({ driveId: rt.driveId, fileId, uploadId });
+	}
+
+	/** 获取外部下载 URL（临时，约 15 分钟） */
+	async getExternalDownloadUrl(
+		fileId: string,
+	): Promise<{ url: string; expiresAt: number }> {
+		const rt = await this.ensureReady();
+		const client = this.makeClient();
+		const result = await client.getDownloadUrl({ driveId: rt.driveId, fileId });
+		const url = String(result.url ?? "");
+		if (!url) throw new Error("阿里云盘未返回下载 URL");
+		return {
+			url,
+			expiresAt: Number(result.expire_time ?? result.expiresAt ?? 0),
+		};
 	}
 
 	// ── StorageProvider 实现 ──
