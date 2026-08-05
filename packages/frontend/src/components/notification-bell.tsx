@@ -180,14 +180,12 @@ function ProgressBar({
 					? "正在写入远程目录"
 					: "";
 	if (!progress || progress.total <= 0) {
-			return (
-				<div>
-					<div className="h-1.5 w-full rounded-full bg-muted" />
-					{stage && (
-						<p className="mt-1 text-xs text-muted-foreground">{stage}</p>
-					)}
-				</div>
-			);
+		return (
+			<div>
+				<div className="h-1.5 w-full rounded-full bg-muted" />
+				{stage && <p className="mt-1 text-xs text-muted-foreground">{stage}</p>}
+			</div>
+		);
 	}
 	if (progress.loaded >= progress.total && type === "file.export") {
 		return (
@@ -216,7 +214,8 @@ function ProgressBar({
 			</div>
 			<p className="mt-1 text-xs text-muted-foreground">
 				{stage && <span>{stage}</span>}
-				{stage && " · "}已传 {mb(progress.loaded)} / {mb(progress.total)} MB · {pct}%
+				{stage && " · "}已传 {mb(progress.loaded)} / {mb(progress.total)} MB ·{" "}
+				{pct}%
 			</p>
 		</div>
 	);
@@ -243,7 +242,9 @@ function DownloadButton({
 			});
 			// download 属性显式传文件名：空值/缺省时 Chromium 按 URL/MIME 推断（得到 fileId 或 .json）
 			const anchor = document.createElement("a");
-			anchor.href = `${window.location.origin}${token.url}`;
+			anchor.href = token.url.startsWith("http")
+				? token.url
+				: `${window.location.origin}${token.url}`;
 			anchor.download = filename;
 			document.body.append(anchor);
 			anchor.click();

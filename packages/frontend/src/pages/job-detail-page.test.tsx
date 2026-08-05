@@ -87,6 +87,22 @@ describe("JobDetailPage 下载链接", () => {
 		});
 	});
 
+	it("token.url 为外部绝对 URL 时原样渲染且文案为临时链接", async () => {
+		const createDownloadToken = vi.fn().mockResolvedValue({
+			url: "https://download.example/x?expires=123&sig=abc",
+			expiresAt: 123,
+		});
+		renderDetail(exportJob, createDownloadToken);
+
+		const link = await screen.findByRole("link", { name: "下载文件" });
+		expect(link).toHaveAttribute(
+			"href",
+			"https://download.example/x?expires=123&sig=abc",
+		);
+		expect(screen.getByText(/临时有效/)).toBeInTheDocument();
+		expect(screen.queryByText(/永久/)).not.toBeInTheDocument();
+	});
+
 	it("签发失败时显示下载链接不可用", async () => {
 		const createDownloadToken = vi
 			.fn()
