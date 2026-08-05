@@ -45,6 +45,9 @@ export function createStorageApi(client: Pick<VcpDeckClient, "request">) {
 				input,
 				signal,
 			),
+		/** 构造受鉴权的稳定下载地址；不提前签发临时 URL。 */
+		downloadUrl: (key: string) =>
+			`/api/storage/download-redirect/${encodeURIComponent(key)}`,
 		createDownloadToken: (
 			input: { key: string; ttlSeconds?: number },
 			signal?: AbortSignal,
