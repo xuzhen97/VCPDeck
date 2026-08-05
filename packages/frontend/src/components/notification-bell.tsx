@@ -2,6 +2,7 @@ import type { JobInfo, JobProgress } from "@vcpdeck/shared";
 import { Bell } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSdk } from "@/api/context";
+import { startBrowserDownload } from "@/api/download-file";
 import { Button } from "@/components/ui/button";
 
 const POLL_MS = 500;
@@ -226,7 +227,7 @@ function ProgressBar({
 	);
 }
 
-/** 完成项内的下载按钮：签永久下载链接并触发浏览器下载 */
+/** 完成项内的下载按钮。 */
 function DownloadButton({
 	storageKey,
 	filename,
@@ -235,39 +236,17 @@ function DownloadButton({
 	filename: string;
 }) {
 	const sdk = useSdk();
-	const [busy, setBusy] = useState(false);
 	const [notice, setNotice] = useState("");
-	const doDownload = useCallback(async () => {
-		setBusy(true);
-		setNotice("");
-		try {
-			const token = await sdk.storage.createDownloadToken({
-				key: storageKey,
-				ttlSeconds: 0,
-			});
-			// download 属性显式传文件名：空值/缺省时 Chromium 按 URL/MIME 推断（得到 fileId 或 .json）
-			const anchor = document.createElement("a");
-			anchor.href = token.url.startsWith("http")
-				? token.url
-				: `${window.location.origin}${token.url}`;
-			anchor.download = filename;
-			anchor.referrerPolicy = "no-referrer";
-			document.body.append(anchor);
-			anchor.click();
-			anchor.remove();
-			setNotice("已开始下载，请查看浏览器下载栏");
-			window.setTimeout(() => setNotice(""), 3000);
-		} catch {
-			setNotice("下载链接生成失败");
-		} finally {
-			setBusy(false);
-		}
+	const doDownload = useCallback(() => {
+		startBrowserDownload(sdk.storage.downloadUrl(storageKey), filename);
+		setNotice("已开始下载，请查看浏览器下载栏");
+		window.setTimeout(() => setNotice(""), 3000);
 	}, [sdk, storageKey, filename]);
 
 	return (
 		<div>
-			<Button size="sm" variant="outline" disabled={busy} onClick={doDownload}>
-				{busy ? "生成中…" : "下载"}
+			<Button size="sm" variant="outline" onClick={doDownload}>
+				下载
 			</Button>
 			{notice && <p className="mt-1 text-xs text-muted-foreground">{notice}</p>}
 		</div>

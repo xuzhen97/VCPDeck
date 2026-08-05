@@ -253,11 +253,10 @@ describe("NotificationBell", () => {
 				totalPages: 1,
 			});
 		const get = vi.fn().mockResolvedValue(doneJob);
-		const createDownloadToken = vi.fn().mockResolvedValue({
-			url: "/api/storage/download/aliyun-fileid-9?expires=0&sig=abc",
-			expiresAt: 0,
-		});
-		renderBell({ jobs: { list, get }, storage: { createDownloadToken } });
+		const downloadUrl = vi
+			.fn()
+			.mockReturnValue("/api/storage/download-redirect/aliyun-fileid-9");
+		renderBell({ jobs: { list, get }, storage: { downloadUrl } });
 
 		await vi.advanceTimersByTimeAsync(0); // 首次轮询：running
 		await act(async () => {});
@@ -274,15 +273,11 @@ describe("NotificationBell", () => {
 				},
 			),
 		);
-		expect(createDownloadToken).toHaveBeenCalledWith({
-			key: "aliyun-fileid-9",
-			ttlSeconds: 0,
-		});
-		await act(async () => {});
+		expect(downloadUrl).toHaveBeenCalledWith("aliyun-fileid-9");
 		expect(anchorClick).toHaveBeenCalledOnce();
 		expect(anchorClick.mock.instances[0]).toHaveProperty(
-			"referrerPolicy",
-			"no-referrer",
+			"href",
+			`${window.location.origin}/api/storage/download-redirect/aliyun-fileid-9`,
 		);
 	});
 
@@ -322,11 +317,10 @@ describe("NotificationBell", () => {
 				totalPages: 1,
 			});
 		const get = vi.fn().mockResolvedValue(doneJob);
-		const createDownloadToken = vi.fn().mockResolvedValue({
-			url: "/api/storage/download/aliyun-fileid-9?expires=0&sig=abc",
-			expiresAt: 0,
-		});
-		renderBell({ jobs: { list, get }, storage: { createDownloadToken } });
+		const downloadUrl = vi
+			.fn()
+			.mockReturnValue("/api/storage/download-redirect/aliyun-fileid-9");
+		renderBell({ jobs: { list, get }, storage: { downloadUrl } });
 
 		await vi.advanceTimersByTimeAsync(0); // 首次轮询：running
 		await act(async () => {});
@@ -343,10 +337,7 @@ describe("NotificationBell", () => {
 				},
 			),
 		);
-		expect(createDownloadToken).toHaveBeenCalledWith({
-			key: "aliyun-fileid-9",
-			ttlSeconds: 0,
-		});
+		expect(downloadUrl).toHaveBeenCalledWith("aliyun-fileid-9");
 	});
 
 	it("失败任务显示错误并可清除", async () => {
