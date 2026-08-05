@@ -44,6 +44,13 @@ import type {
 const SIGN_UPLOAD_PREFIX = "upload";
 const SIGN_DOWNLOAD_PREFIX = "download";
 
+/** 刷新后需要持久化的 token 字段 */
+export interface TokenPersistence {
+	accessToken: string;
+	refreshToken?: string;
+	expiresAt: number;
+}
+
 /** 缓存可更新的运行时配置（ponytail: 内存可变副本，重启丢失刷新后的 token） */
 interface RuntimeConfig {
 	clientId: string;
@@ -58,10 +65,11 @@ interface RuntimeConfig {
 
 @Injectable()
 export class AlibabaStorageProvider implements StorageProvider {
-	private readonly logger = new Logger(AlibabaStorageProvider.name);
-	private readonly signSecret: string;
-	private runtime: RuntimeConfig | null = null;
-	constructor(config: Record<string, unknown> = {}) {
+private readonly logger = new Logger(AlibabaStorageProvider.name);
+private readonly signSecret: string;
+private runtime: RuntimeConfig | null = null;
+private persistTokens?: (tokens: TokenPersistence) => Promise<void>;
+constructor(config: Record<string, unknown> = {}) {
 		const parsed = config as Partial<AlibabaStorageConfig>;
 		this.signSecret = parsed.signSecret || randomUUID();
 
@@ -106,6 +114,11 @@ export class AlibabaStorageProvider implements StorageProvider {
 		return this.runtime;
 	}
 
+	/** 注册 token 刷新后的持久化回调（写回 DB，保证重启后不丢失） */
+	setTokenPersistence(fn: (tokens: TokenPersistence) => Promise<void>): void {
+		this.persistTokens = fn;
+	}
+
 	private makeClient(): AlibabaOpenApiClient {
 		if (!this.runtime) throw new Error("未配置阿里云盘");
 		return new AlibabaOpenApiClient({
@@ -147,6 +160,15 @@ export class AlibabaStorageProvider implements StorageProvider {
 		this.runtime.accessToken = data.access_token;
 		if (data.refresh_token) this.runtime.refreshToken = data.refresh_token;
 		this.runtime.expiresAt = Date.now() + data.expires_in * 1000;
+
+		// 刷新成功：把新凭证写回 DB，避免服务重启后使用过期 token
+		if (this.persistTokens) {
+			await this.persistTokens({
+				accessToken: this.runtime.accessToken,
+				refreshToken: this.runtime.refreshToken,
+				expiresAt: this.runtime.expiresAt,
+			});
+		}
 	}
 
 	// ── 直传会话（浏览器 / Client 直连 OSS） ──

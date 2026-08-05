@@ -18,6 +18,70 @@ function openapiOk(body: unknown) {
 describe("AlibabaStorageProvider 直传会话", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
+	it("刷新 token 后调用持久化回调写回新凭证", async () => {
+		const provider = new AlibabaStorageProvider({
+			clientId: "app-id",
+			accessToken: "old-token",
+			refreshToken: "refresh-old",
+			expiresAt: Date.now() - 60_000, // 已过期 → 触发刷新
+			driveId: "drive-1",
+		} as never);
+		const persist = vi.fn();
+		provider.setTokenPersistence(persist);
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(
+					Response.json({
+						access_token: "new-token",
+						refresh_token: "refresh-new",
+						expires_in: 3600,
+					}),
+				)
+				.mockResolvedValueOnce(
+					Response.json({ url: "https://download.example/x", expire_time: 1 }),
+				),
+		);
+
+		await provider.getExternalDownloadUrl("file-1");
+
+		expect(persist).toHaveBeenCalledWith({
+			accessToken: "new-token",
+			refreshToken: "refresh-new",
+			expiresAt: expect.any(Number),
+		});
+	});
+
+	it("未设置持久化回调时刷新不抛错", async () => {
+		const provider = new AlibabaStorageProvider({
+			clientId: "app-id",
+			accessToken: "old-token",
+			refreshToken: "refresh-old",
+			expiresAt: Date.now() - 60_000,
+			driveId: "drive-1",
+		} as never);
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(
+					Response.json({
+						access_token: "new-token",
+						refresh_token: "refresh-new",
+						expires_in: 3600,
+					}),
+				)
+				.mockResolvedValueOnce(
+					Response.json({ url: "https://download.example/x", expire_time: 1 }),
+				),
+		);
+
+		await expect(
+			provider.getExternalDownloadUrl("file-1"),
+		).resolves.toMatchObject({ url: "https://download.example/x" });
+	});
+
 	it("createDirectUpload 按 size 分片并返回各片 URL", async () => {
 		const provider = new AlibabaStorageProvider(baseConfig as never);
 		const fetcher = vi

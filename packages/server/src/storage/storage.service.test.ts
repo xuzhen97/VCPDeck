@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StorageService } from "./storage.service.js";
+import type { AlibabaStorageProvider } from "./providers/alibaba-storage.provider.js";
 
 function mockPrisma() {
 	return {
@@ -64,6 +65,55 @@ describe("StorageService", () => {
 			await service.loadProvider();
 
 			expect(prisma.storageBackendConfig.upsert).not.toHaveBeenCalled();
+		});
+
+		it("alibaba provider 刷新 token 后把新凭证写回 DB", async () => {
+			const config = {
+				signSecret: "fixed-secret",
+				clientId: "app-id",
+				accessToken: "old-token",
+				refreshToken: "refresh-old",
+				expiresAt: Date.now() - 60_000, // 已过期 → 触发刷新
+				driveId: "drive-1",
+			};
+			prisma.storageBackendConfig.findFirst.mockResolvedValue({
+				kind: "alibaba",
+				config: JSON.stringify(config),
+				updatedAt: null,
+			});
+
+			await service.loadProvider();
+
+			const provider = service.getProvider() as AlibabaStorageProvider;
+			vi.stubGlobal(
+				"fetch",
+				vi
+					.fn()
+					.mockResolvedValueOnce(
+						Response.json({
+							access_token: "new-token",
+							refresh_token: "refresh-new",
+							expires_in: 3600,
+						}),
+					)
+					.mockResolvedValueOnce(
+						Response.json({
+							url: "https://download.example/x",
+							expire_time: 1,
+						}),
+					),
+			);
+
+			await provider.getExternalDownloadUrl("file-1");
+
+			expect(prisma.storageBackendConfig.upsert).toHaveBeenCalledWith(
+				expect.objectContaining({
+					where: { id: 1 },
+					update: expect.objectContaining({
+						config: expect.stringContaining("new-token"),
+					}),
+				}),
+			);
 		});
 	});
 

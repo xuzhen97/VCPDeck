@@ -67,6 +67,25 @@ export class StorageService implements OnModuleInit {
 		}
 
 		this.provider = new ProviderClass(config);
+		// 阿里云 token 刷新后写回 DB，避免服务重启后使用过期凭证
+		if (this.provider instanceof AlibabaStorageProvider) {
+			this.provider.setTokenPersistence(async (tokens) => {
+				const row = await this.prisma.storageBackendConfig.findFirst();
+				if (!row) return;
+				let current: Record<string, unknown> = {};
+				try {
+					current = JSON.parse(row.config || "{}");
+				} catch {
+					current = {};
+				}
+				const merged = { ...current, ...tokens };
+				await this.prisma.storageBackendConfig.upsert({
+					where: { id: 1 },
+					create: { id: 1, kind, config: JSON.stringify(merged) },
+					update: { config: JSON.stringify(merged) },
+				});
+			});
+		}
 		this.logger.log(`Storage provider: ${kind}`);
 	}
 
