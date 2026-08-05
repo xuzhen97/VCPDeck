@@ -24,16 +24,16 @@ export function DownloadLinkCard({ job }: { job: JobInfo }) {
 			return;
 		}
 		let cancelled = false;
-			sdk.storage
-				.createDownloadToken({ key: String(key), ttlSeconds: 0 })
-				.then((token) => {
-					if (!cancelled)
-						setUrl(
-							token.url.startsWith("http")
-								? token.url
-								: `${window.location.origin}${token.url}`,
-						);
-				})
+		sdk.storage
+			.createDownloadToken({ key: String(key), ttlSeconds: 0 })
+			.then((token) => {
+				if (!cancelled)
+					setUrl(
+						token.url.startsWith("http")
+							? token.url
+							: `${window.location.origin}${token.url}`,
+					);
+			})
 			.catch(() => {
 				if (!cancelled) setFailed(true);
 			});
@@ -56,6 +56,7 @@ export function DownloadLinkCard({ job }: { job: JobInfo }) {
 					<a
 						href={url}
 						download={filename}
+						referrerPolicy="no-referrer"
 						className="text-sm font-medium text-primary underline underline-offset-4"
 					>
 						下载文件

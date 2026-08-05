@@ -99,6 +99,7 @@ describe("JobDetailPage 下载链接", () => {
 			"href",
 			"https://download.example/x?expires=123&sig=abc",
 		);
+		expect(link).toHaveAttribute("referrerpolicy", "no-referrer");
 		expect(screen.getByText(/临时有效/)).toBeInTheDocument();
 		expect(screen.queryByText(/永久/)).not.toBeInTheDocument();
 	});

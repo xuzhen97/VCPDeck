@@ -90,14 +90,8 @@ describe("uploadDirect", () => {
 
 		const xhrs = FakeXhr.instances;
 		expect(xhrs).toHaveLength(2);
-		expect(xhrs[0]!.open).toHaveBeenCalledWith(
-			"PUT",
-			"https://oss.example/p1",
-		);
-		expect(xhrs[1]!.open).toHaveBeenCalledWith(
-			"PUT",
-			"https://oss.example/p2",
-		);
+		expect(xhrs[0]!.open).toHaveBeenCalledWith("PUT", "https://oss.example/p1");
+		expect(xhrs[1]!.open).toHaveBeenCalledWith("PUT", "https://oss.example/p2");
 		// 片 1 进度 4/5
 		xhrs[0]!.upload.onprogress?.({
 			loaded: 4,
@@ -120,10 +114,44 @@ describe("uploadDirect", () => {
 		expect(onProgress).toHaveBeenCalledWith(10, 10);
 	});
 
+	it("并发分片事件交错时汇总总进度且不回退", async () => {
+		vi.stubGlobal("XMLHttpRequest", FakeXhr);
+		const file = new File([new ArrayBuffer(10)], "big.bin");
+		const onProgress = vi.fn();
+		const promise = uploadDirect(parts, 10, file, {
+			onProgress,
+			refreshPartUrl: vi.fn(),
+		});
+
+		const xhrs = FakeXhr.instances;
+		// 后一片先上报 4 字节，再由前一片上报 1 字节；总进度应为 4 → 5，不能按片偏移变成 9 → 1。
+		xhrs[1]!.upload.onprogress?.({
+			loaded: 4,
+			total: 5,
+			lengthComputable: true,
+		} as ProgressEvent);
+		xhrs[0]!.upload.onprogress?.({
+			loaded: 1,
+			total: 5,
+			lengthComputable: true,
+		} as ProgressEvent);
+
+		expect(onProgress.mock.calls.slice(0, 2)).toEqual([
+			[4, 10],
+			[5, 10],
+		]);
+		xhrs[0]!.onload?.();
+		xhrs[1]!.onload?.();
+		await expect(promise).resolves.toBeUndefined();
+		expect(onProgress).toHaveBeenLastCalledWith(10, 10);
+	});
+
 	it("分片 403 时调 refreshPartUrl 换 URL 重试", async () => {
 		vi.stubGlobal("XMLHttpRequest", FakeXhr);
 		const file = new File([new ArrayBuffer(10)], "big.bin");
-		const refreshPartUrl = vi.fn().mockResolvedValue("https://oss.example/p1-new");
+		const refreshPartUrl = vi
+			.fn()
+			.mockResolvedValue("https://oss.example/p1-new");
 		const promise = uploadDirect(parts, 10, file, {
 			refreshPartUrl,
 		});
@@ -132,9 +160,7 @@ describe("uploadDirect", () => {
 		// 片 1 第一次 403
 		xhrs[0]!.status = 403;
 		xhrs[0]!.onload?.();
-		await vi.waitFor(() =>
-			expect(refreshPartUrl).toHaveBeenCalledWith(1),
-		);
+		await vi.waitFor(() => expect(refreshPartUrl).toHaveBeenCalledWith(1));
 		// 重试 XHR（第 3 个实例）成功后完成
 		const retry = FakeXhr.instances[2]!;
 		expect(retry.open).toHaveBeenCalledWith(

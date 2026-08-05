@@ -20,8 +20,21 @@ export function uploadDirect(
 ): Promise<void> {
 	const partSize = Math.ceil(size / parts.length);
 	const queue = [...parts];
+	const loadedByPart = new Map<number, number>();
 	let loaded = 0;
 	const active: XMLHttpRequest[] = [];
+
+	function reportPartProgress(
+		partNumber: number,
+		value: number,
+		partSize: number,
+	) {
+		const previous = loadedByPart.get(partNumber) ?? 0;
+		const next = Math.max(previous, Math.min(value, partSize));
+		loadedByPart.set(partNumber, next);
+		loaded += next - previous;
+		options.onProgress?.(Math.min(loaded, size), size);
+	}
 
 	function putPart(
 		partNumber: number,
@@ -33,13 +46,16 @@ export function uploadDirect(
 			const xhr = new XMLHttpRequest();
 			active.push(xhr);
 			xhr.upload.onprogress = (event) => {
-				options.onProgress?.(start + event.loaded, size);
+				reportPartProgress(partNumber, event.loaded, end - start);
 			};
 			xhr.onload = () => {
 				if (xhr.status >= 200 && xhr.status < 300) {
+					reportPartProgress(partNumber, end - start, end - start);
 					resolve();
 				} else {
-					const err = new Error(`分片 ${partNumber} 上传失败：HTTP ${xhr.status}`) as Error & {
+					const err = new Error(
+						`分片 ${partNumber} 上传失败：HTTP ${xhr.status}`,
+					) as Error & {
 						status?: number;
 					};
 					err.status = xhr.status;
@@ -74,8 +90,6 @@ export function uploadDirect(
 					throw err;
 				}
 			}
-			loaded += end - start;
-			options.onProgress?.(loaded, size);
 		}
 	}
 
@@ -90,9 +104,8 @@ export function uploadDirect(
 		}
 		options.signal?.addEventListener("abort", onAbort, { once: true });
 		Promise.all(
-			Array.from(
-				{ length: Math.min(DIRECT_CONCURRENCY, parts.length) },
-				() => worker(),
+			Array.from({ length: Math.min(DIRECT_CONCURRENCY, parts.length) }, () =>
+				worker(),
 			),
 		)
 			.then(() => {

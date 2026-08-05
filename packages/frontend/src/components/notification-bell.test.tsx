@@ -162,6 +162,37 @@ describe("NotificationBell", () => {
 		expect(list).toHaveBeenCalledTimes(2);
 	});
 
+	it("慢轮询未完成时不启动下一次轮询", async () => {
+		let resolveList!: (value: {
+			data: JobInfo[];
+			total: number;
+			page: number;
+			pageSize: number;
+			totalPages: number;
+		}) => void;
+		const list = vi.fn().mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveList = resolve;
+				}),
+		);
+		renderBell({ jobs: { list, get: vi.fn() } });
+
+		await vi.advanceTimersByTimeAsync(500);
+		expect(list).toHaveBeenCalledTimes(1);
+
+		resolveList({
+			data: [],
+			total: 0,
+			page: 1,
+			pageSize: 5,
+			totalPages: 0,
+		});
+		await act(async () => {});
+		await vi.advanceTimersByTimeAsync(500);
+		expect(list).toHaveBeenCalledTimes(2);
+	});
+
 	it("上传字节达到 100% 但 Job 未完成时显示云盘收尾状态", async () => {
 		const MB = 1024 * 1024;
 		const list = vi.fn().mockResolvedValue({
@@ -189,6 +220,9 @@ describe("NotificationBell", () => {
 	});
 
 	it("新完成的 file.export 出现下载按钮，点击触发下载", async () => {
+		const anchorClick = vi
+			.spyOn(HTMLAnchorElement.prototype, "click")
+			.mockImplementation(() => {});
 		const running = job({
 			jobId: "export-2",
 			type: "file.export",
@@ -230,12 +264,6 @@ describe("NotificationBell", () => {
 		await vi.advanceTimersByTimeAsync(3000); // 第二次轮询：done
 		await act(async () => {});
 		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
-		console.log(
-			"DIALOG2:",
-			JSON.stringify(
-				screen.getByRole("dialog", { name: "任务通知" }).textContent,
-			),
-		);
 		expect(screen.getByText(/done\.zip/)).toBeInTheDocument();
 
 		fireEvent.click(
@@ -250,6 +278,12 @@ describe("NotificationBell", () => {
 			key: "aliyun-fileid-9",
 			ttlSeconds: 0,
 		});
+		await act(async () => {});
+		expect(anchorClick).toHaveBeenCalledOnce();
+		expect(anchorClick.mock.instances[0]).toHaveProperty(
+			"referrerPolicy",
+			"no-referrer",
+		);
 	});
 
 	it("新完成的 file.import 出现下载按钮，点击触发下载", async () => {

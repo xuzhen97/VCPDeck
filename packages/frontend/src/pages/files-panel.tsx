@@ -182,44 +182,51 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 				);
 				uploadedFileId = session.fileId;
 				if (session.upload.kind === "direct") {
-					// 直传：分片 PUT 到阿里云 OSS，进度节流上报 Server（铃铛可见）
+					// 直传：分片 PUT 到阿里云 OSS，进度节流并串行上报，避免旧请求覆盖新进度
 					let lastReportAt = 0;
-					await uploadDirect(
-						session.upload.parts,
-						file.size,
-						file,
-						{
-							signal: controller.signal,
-							onProgress: (loaded, total) => {
-								setUploadState({
-									phase: "uploading",
-									filename: file.name,
-									loaded,
-									total,
-								});
-								const now = Date.now();
-								if (now - lastReportAt < 500) return;
-								lastReportAt = now;
-								void sdk.files
-									.updateUploadProgress(
-										session.jobId,
-										loaded,
-										controller.signal,
-									)
-									.catch(() => {});
-							},
-							refreshPartUrl: async (partNumber) => {
-								const parts = await sdk.files.refreshUploadPartUrls(
+					let reportedLoaded = 0;
+					let reportQueue = Promise.resolve();
+					const reportProgress = (loaded: number, force = false) => {
+						const now = Date.now();
+						if (
+							(!force && now - lastReportAt < 500) ||
+							loaded <= reportedLoaded
+						)
+							return;
+						lastReportAt = now;
+						reportedLoaded = loaded;
+						reportQueue = reportQueue
+							.then(() =>
+								sdk.files.updateUploadProgress(
 									session.jobId,
-									[partNumber],
+									loaded,
 									controller.signal,
-								);
-								return (
-									parts.find((p) => p.partNumber === partNumber)?.url ?? ""
-								);
-							},
+								),
+							)
+							.catch(() => {});
+					};
+					await uploadDirect(session.upload.parts, file.size, file, {
+						signal: controller.signal,
+						onProgress: (loaded, total) => {
+							setUploadState({
+								phase: "uploading",
+								filename: file.name,
+								loaded,
+								total,
+							});
+							reportProgress(loaded);
 						},
-					);
+						refreshPartUrl: async (partNumber) => {
+							const parts = await sdk.files.refreshUploadPartUrls(
+								session.jobId,
+								[partNumber],
+								controller.signal,
+							);
+							return parts.find((p) => p.partNumber === partNumber)?.url ?? "";
+						},
+					});
+					reportProgress(file.size, true);
+					await reportQueue;
 				} else {
 					await uploadFile(uploadUrl(session.upload.url), file, {
 						signal: controller.signal,
@@ -679,6 +686,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 									const anchor = document.createElement("a");
 									anchor.href = token.url;
 									anchor.download = e.name;
+									anchor.referrerPolicy = "no-referrer";
 									document.body.append(anchor);
 									anchor.click();
 									anchor.remove();
@@ -1051,6 +1059,7 @@ function FileViewerDialog({
 								const anchor = document.createElement("a");
 								anchor.href = token.url;
 								anchor.download = entry.name;
+								anchor.referrerPolicy = "no-referrer";
 								document.body.append(anchor);
 								anchor.click();
 								anchor.remove();

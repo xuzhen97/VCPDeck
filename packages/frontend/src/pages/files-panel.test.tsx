@@ -66,12 +66,14 @@ function renderFiles(overrides: Record<string, unknown> = {}) {
 			progress: { loaded: 5, total: 5 },
 		}),
 	};
+	const storage = { createDownloadToken: vi.fn() };
 	const client = {
 		files,
 		jobs,
-		storage: { createDownloadToken: vi.fn() },
+		storage,
 	} as unknown as VcpDeckClient;
 	(files as Record<string, unknown>).jobs = jobs;
+	(files as Record<string, unknown>).storage = storage;
 	render(
 		<SdkProvider client={client}>
 			<FilesPanel clientId="client-1" />
@@ -324,9 +326,11 @@ describe("FilesPanel", () => {
 
 	it("direct 会话走分片直传并在完成后 complete", async () => {
 		vi.mocked(uploadFile).mockClear();
-		vi.mocked(uploadDirect).mockImplementation(async (_parts, _size, _file, opts) => {
-			opts.onProgress?.(5, 5);
-		});
+		vi.mocked(uploadDirect).mockImplementation(
+			async (_parts, _size, _file, opts) => {
+				opts.onProgress?.(5, 5);
+			},
+		);
 		const files = renderFiles({
 			createUploadSession: vi.fn().mockResolvedValue({
 				jobId: "upload-job",
@@ -372,9 +376,11 @@ describe("FilesPanel", () => {
 
 	it("direct 会话分片完成后节流上报进度", async () => {
 		vi.mocked(uploadFile).mockClear();
-		vi.mocked(uploadDirect).mockImplementation(async (_parts, _size, _file, opts) => {
-			opts.onProgress?.(5, 5);
-		});
+		vi.mocked(uploadDirect).mockImplementation(
+			async (_parts, _size, _file, opts) => {
+				opts.onProgress?.(5, 5);
+			},
+		);
 		const files = renderFiles({
 			createUploadSession: vi.fn().mockResolvedValue({
 				jobId: "upload-job",
@@ -400,6 +406,56 @@ describe("FilesPanel", () => {
 				expect.any(AbortSignal),
 			),
 		);
+	});
+
+	it("direct 进度上报按顺序发送，旧请求不会晚于新请求落库", async () => {
+		let now = 1000;
+		vi.spyOn(Date, "now").mockImplementation(() => now);
+		let resolveFirst!: () => void;
+		const updateUploadProgress = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						resolveFirst = resolve;
+					}),
+			)
+			.mockResolvedValue(undefined);
+		vi.mocked(uploadDirect).mockImplementation(
+			async (_parts, _size, _file, opts) => {
+				opts.onProgress?.(1, 5);
+				now = 2000;
+				opts.onProgress?.(4, 5);
+			},
+		);
+		const files = renderFiles({
+			updateUploadProgress,
+			createUploadSession: vi.fn().mockResolvedValue({
+				jobId: "upload-job",
+				fileId: "file-1",
+				status: "waiting_input",
+				upload: {
+					kind: "direct",
+					fileId: "aliyun-file",
+					uploadId: "up-1",
+					parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
+				},
+			}),
+		});
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+
+		await userEvent.upload(
+			screen.getByLabelText("选择上传文件"),
+			new File(["hello"], "report.txt", { type: "text/plain" }),
+		);
+		await waitFor(() => expect(updateUploadProgress).toHaveBeenCalledTimes(1));
+
+		resolveFirst();
+		await waitFor(() => expect(updateUploadProgress).toHaveBeenCalledTimes(3));
+		expect(updateUploadProgress.mock.calls.map((call) => call[1])).toEqual([
+			1, 4, 5,
+		]);
+		expect(files.completeUpload).toHaveBeenCalled();
 	});
 
 	it("同名文件先确认再传 overwrite=true", async () => {
@@ -454,6 +510,34 @@ describe("FilesPanel", () => {
 				},
 				expect.any(AbortSignal),
 			),
+		);
+	});
+
+	it("文件查看器导出外部链接时不发送 Referer", async () => {
+		const anchorClick = vi
+			.spyOn(HTMLAnchorElement.prototype, "click")
+			.mockImplementation(() => {});
+		const files = renderFiles({
+			export: vi.fn().mockResolvedValue({ key: "aliyun-file" }),
+		});
+		(
+			files as Record<string, any>
+		).storage.createDownloadToken.mockResolvedValue({
+			url: "https://download.example/README.md",
+			expiresAt: 123,
+		});
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+		await userEvent.dblClick(
+			await screen.findByRole("button", { name: /^README\.md/ }),
+		);
+
+		await userEvent.click(
+			await screen.findByRole("button", { name: "导出下载" }),
+		);
+		await waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
+		expect(anchorClick.mock.instances[0]).toHaveProperty(
+			"referrerPolicy",
+			"no-referrer",
 		);
 	});
 

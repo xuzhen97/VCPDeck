@@ -126,6 +126,7 @@ export function FileDetail({
 								const anchor = document.createElement("a");
 								anchor.href = token.url;
 								anchor.download = entry.name;
+								anchor.referrerPolicy = "no-referrer";
 								document.body.append(anchor);
 								anchor.click();
 								anchor.remove();

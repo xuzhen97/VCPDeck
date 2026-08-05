@@ -23,8 +23,11 @@ export function NotificationBell() {
 	const [active, setActive] = useState<JobInfo[]>([]);
 	const [finished, setFinished] = useState<FinishedItem[]>([]);
 	const seenRunning = useRef(new Set<string>());
+	const polling = useRef(false);
 
 	const poll = useCallback(async () => {
+		if (polling.current) return;
+		polling.current = true;
 		try {
 			const page = await sdk.jobs.list({ pageSize: 5 });
 			const nowRunning = new Set(
@@ -57,6 +60,8 @@ export function NotificationBell() {
 			}
 		} catch {
 			// 轮询失败静默，下轮重试
+		} finally {
+			polling.current = false;
 		}
 	}, [sdk]);
 
@@ -246,6 +251,7 @@ function DownloadButton({
 				? token.url
 				: `${window.location.origin}${token.url}`;
 			anchor.download = filename;
+			anchor.referrerPolicy = "no-referrer";
 			document.body.append(anchor);
 			anchor.click();
 			anchor.remove();
