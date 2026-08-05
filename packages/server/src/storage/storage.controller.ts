@@ -63,6 +63,20 @@ export class StorageController {
 		return { url: ref.url, expiresAt: ref.expiresAt };
 	}
 
+	/** 受鉴权的稳定下载入口；每次请求实时签发后端 URL */
+	@Get("download-redirect/:key(*)")
+	async redirectDownload(
+		@Param("key") key: string,
+		@Res() res: Response,
+	): Promise<void> {
+		const ref = await this.storageService.createDownloadToken(key);
+		res.status(302);
+		res.setHeader("Location", ref.url);
+		res.setHeader("Referrer-Policy", "no-referrer");
+		res.setHeader("Cache-Control", "private, no-store");
+		res.end();
+	}
+
 	/** 接收文件上传（预签名 URL） */
 	@Public()
 	@Put("upload/:key(*)")
