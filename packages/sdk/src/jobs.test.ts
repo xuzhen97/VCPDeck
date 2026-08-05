@@ -77,10 +77,13 @@ describe("files", () => {
 				status: JobStatus.PENDING,
 				type: "file.import",
 			});
-		const files = createFilesApi({ request } as never, {
-			create: vi.fn(),
-			wait: vi.fn(),
-		} as never);
+		const files = createFilesApi(
+			{ request } as never,
+			{
+				create: vi.fn(),
+				wait: vi.fn(),
+			} as never,
+		);
 
 		await expect(
 			files.createUploadSession({
@@ -91,7 +94,7 @@ describe("files", () => {
 				size: 5,
 			}),
 		).resolves.toMatchObject({ fileId: "f1" });
-		await files.completeUpload("j1");
+		await files.completeUpload("j1", { uploadedBytes: 5 });
 		expect(request).toHaveBeenNthCalledWith(
 			1,
 			"POST",
@@ -103,7 +106,7 @@ describe("files", () => {
 			2,
 			"POST",
 			"/api/files/upload-sessions/j1/complete",
-			undefined,
+			{ uploadedBytes: 5 },
 			undefined,
 		);
 	});
@@ -116,12 +119,15 @@ describe("files", () => {
 				result: { path: "a.txt", size: 5, sha256: "sha" },
 			}),
 		};
-		await createFilesApi({ request: vi.fn() } as never, jobs as never).import("c1", {
-			rootDir: "D:\\",
-			targetPath: "a.txt",
-			fileId: "f1",
-			overwrite: true,
-		});
+		await createFilesApi({ request: vi.fn() } as never, jobs as never).import(
+			"c1",
+			{
+				rootDir: "D:\\",
+				targetPath: "a.txt",
+				fileId: "f1",
+				overwrite: true,
+			},
+		);
 		expect(jobs.create).toHaveBeenCalledWith(
 			expect.objectContaining({
 				payload: expect.objectContaining({ overwrite: true }),
@@ -141,9 +147,7 @@ describe("files", () => {
 
 		await expect(
 			createFilesApi({ request: vi.fn() } as never, jobs as never).roots("c1"),
-		).resolves.toEqual([
-			"C:\\",
-		]);
+		).resolves.toEqual(["C:\\"]);
 		expect(jobs.create).toHaveBeenCalledWith(
 			{ clientId: "c1", type: "file.roots", payload: {} },
 			undefined,

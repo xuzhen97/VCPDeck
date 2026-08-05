@@ -1,5 +1,6 @@
 import type {
 	FileChangeResult,
+	FileExportSession,
 	FileListResult,
 	FileReadTextResult,
 	FileRootsResult,
@@ -38,11 +39,63 @@ export function createFilesApi(
 				input,
 				signal,
 			),
-		completeUpload: (jobId: string, signal?: AbortSignal) =>
+		completeUpload: (
+			jobId: string,
+			body: { uploadedBytes: number },
+			signal?: AbortSignal,
+		) =>
 			client.request<JobCreateResult>(
 				"POST",
 				`/api/files/upload-sessions/${encodeURIComponent(jobId)}/complete`,
-				undefined,
+				body,
+				signal,
+			),
+		/** 导出直传会话协商（Client stat 文件后调用） */
+		createExportSession: (
+			jobId: string,
+			size: number,
+			signal?: AbortSignal,
+		) =>
+			client.request<FileExportSession>(
+				"POST",
+				"/api/files/export-sessions",
+				{ jobId, size },
+				signal,
+			),
+		/** 完成导出直传，返回真实 storage key */
+		completeExportUpload: (
+			jobId: string,
+			uploadedBytes: number,
+			signal?: AbortSignal,
+		) =>
+			client.request<{ key: string }>(
+				"POST",
+				`/api/files/export-sessions/${encodeURIComponent(jobId)}/complete`,
+				{ uploadedBytes },
+				signal,
+			),
+		/** 续期直传会话指定分片的上传 URL */
+		refreshUploadPartUrls: (
+			jobId: string,
+			partNumbers: number[],
+			signal?: AbortSignal,
+		) =>
+			client.request<Array<{ partNumber: number; url: string }>>(
+				"POST",
+				`/api/files/upload-sessions/${encodeURIComponent(jobId)}/part-urls`,
+				{ partNumbers },
+				signal,
+			),
+		/** 直传分片进度上报（节流由调用方控制） */
+		updateUploadProgress: (
+			jobId: string,
+			loaded: number,
+			signal?: AbortSignal,
+		) =>
+			client.request<void>(
+				"POST",
+				`/api/files/upload-sessions/${encodeURIComponent(jobId)}/progress`,
+				{ loaded },
 				signal,
 			),
 		roots: async (clientId: string, signal?: AbortSignal) =>
