@@ -975,7 +975,10 @@ async function storageUploadAndVerify() {
 	}
 	const uploadUrl = tokenRes.url;
 	if (!uploadUrl || !uploadUrl.startsWith("/api/storage/upload/")) {
-		return fail("Storage upload token", `bad url: ${uploadUrl}`);
+		return fail(
+			"Storage upload token",
+			uploadUrl ? "unexpected URL format" : "missing URL",
+		);
 	}
 	const keyMatch = uploadUrl.match(/\/api\/storage\/upload\/([^?]+)/);
 	const keyFromUrl = keyMatch ? keyMatch[1] : null;
@@ -1014,9 +1017,12 @@ async function storageUploadAndVerify() {
 	}
 	const downloadUrl = dlTokenRes.url;
 	if (!downloadUrl || !downloadUrl.startsWith("/api/storage/download/")) {
-		return fail("Storage download token", `bad url: ${downloadUrl}`);
+		return fail(
+			"Storage download token",
+			downloadUrl ? "unexpected URL format" : "missing URL",
+		);
 	}
-	pass("Storage download token", `url=${downloadUrl.slice(0, 50)}...`);
+	pass("Storage download token", "signed URL issued");
 
 	// 4. GET 下载
 	const getRes = await fetch(`${BASE}${downloadUrl}`, { redirect: "manual" });
@@ -1030,6 +1036,93 @@ async function storageUploadAndVerify() {
 	pass("Storage download", `content matches, ${content.length} bytes`);
 
 	return { key: putBody.key, uploadUrl, signedDownloadUrl: downloadUrl };
+}
+
+async function verifyStableDownloadRedirect(key) {
+	const stablePath = `/api/storage/download-redirect/${encodeURIComponent(key)}`;
+
+	const anonymous = await api("GET", stablePath, { noCookie: true });
+	if (anonymous.status === 401) {
+		pass("Storage stable download no auth", "401");
+	} else {
+		fail(
+			"Storage stable download no auth",
+			`expected 401, got ${anonymous.status}`,
+		);
+	}
+
+	const cookieRedirect = await api("GET", stablePath, {
+		headers: { Range: "bytes=1-" },
+	});
+	const location = cookieRedirect.headers.get("location") || "";
+	const referrerPolicy = cookieRedirect.headers.get("referrer-policy");
+	const cacheControl = cookieRedirect.headers.get("cache-control") || "";
+	if (
+		cookieRedirect.status === 302 &&
+		location.startsWith("/api/storage/download/") &&
+		referrerPolicy === "no-referrer" &&
+		cacheControl.includes("no-store")
+	) {
+		pass("Storage stable download cookie redirect", "302 + safe headers");
+	} else {
+		fail(
+			"Storage stable download cookie redirect",
+			JSON.stringify({
+				status: cookieRedirect.status,
+				hasLocation: Boolean(location),
+				locationKind: location.startsWith("/api/storage/download/")
+					? "local-signed"
+					: "unexpected",
+				referrerPolicy,
+				cacheControl,
+			}),
+		);
+	}
+
+	const { status: tokenStatus, body: token } = await apiJson(
+		"POST",
+		"/api/auth/tokens",
+		{ json: { label: "storage-download-redirect" } },
+	);
+	if ((tokenStatus !== 200 && tokenStatus !== 201) || !token?.token) {
+		fail("Storage stable download bearer setup", `status=${tokenStatus}`);
+	} else {
+		try {
+			const bearerRedirect = await api("GET", stablePath, {
+				bearer: token.token,
+				noCookie: true,
+				headers: { Range: "bytes=1-" },
+			});
+			if (
+				bearerRedirect.status === 302 &&
+				(bearerRedirect.headers.get("location") || "").startsWith(
+					"/api/storage/download/",
+				)
+			) {
+				pass("Storage stable download bearer redirect", "302");
+			} else {
+				fail(
+					"Storage stable download bearer redirect",
+					`status=${bearerRedirect.status}`,
+				);
+			}
+		} finally {
+			await api("DELETE", `/api/auth/tokens/${token.id}`);
+		}
+	}
+
+	if (location.startsWith("/api/storage/download/")) {
+		const localDownload = await fetch(`${BASE}${location}`);
+		const content = await localDownload.text();
+		if (localDownload.status === 200 && content === TEST_FILE_CONTENT) {
+			pass("Storage stable download local content", "content matches");
+		} else {
+			fail(
+				"Storage stable download local content",
+				`status=${localDownload.status} contentLen=${content.length}`,
+			);
+		}
+	}
 }
 
 // ── Main ──
@@ -1815,6 +1908,9 @@ async function main() {
 		if (result?.key) testKey = result.key;
 	} catch (e) {
 		fail("Storage full flow", e.message);
+	}
+	if (testKey) {
+		await verifyStableDownloadRedirect(testKey);
 	}
 
 	// 50. Upload with expired signature → 403
