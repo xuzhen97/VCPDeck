@@ -72,7 +72,7 @@ describe("EventsController upload sessions", () => {
 		};
 		jobService.completeUploadSession.mockResolvedValue({ result, dispatch });
 
-		await expect(controller.completeUploadSession("job-1")).resolves.toBe(
+		await expect(controller.completeUploadSession("job-1", {})).resolves.toBe(
 			result,
 		);
 		expect(gateway.sendDispatch).toHaveBeenCalledWith(dispatch);
@@ -86,7 +86,7 @@ describe("EventsController upload sessions", () => {
 			dispatch: null,
 		});
 
-		await controller.completeUploadSession("job-1");
+		await controller.completeUploadSession("job-1", {});
 		expect(gateway.sendDispatch).not.toHaveBeenCalled();
 	});
 
