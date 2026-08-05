@@ -1,12 +1,12 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import type { IdentityInfo, JobInfo } from "@vcpdeck/shared";
+import { JobStatus } from "@vcpdeck/shared";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
 import { AuthProvider } from "@/auth-context";
 import { JobDetailPage } from "./job-detail-page";
-import { JobStatus } from "@vcpdeck/shared";
 
 const exportJob: JobInfo = {
 	jobId: "job-1",
@@ -36,14 +36,11 @@ const identity: IdentityInfo = {
 	createdAt: "2026-07-26T00:00:00.000Z",
 };
 
-function renderDetail(
-	job: JobInfo,
-	createDownloadToken: ReturnType<typeof vi.fn>,
-) {
+function renderDetail(job: JobInfo, downloadUrl: ReturnType<typeof vi.fn>) {
 	const client = {
 		auth: { me: vi.fn().mockResolvedValue(identity) },
 		jobs: { get: vi.fn().mockResolvedValue(job) },
-		storage: { createDownloadToken },
+		storage: { downloadUrl },
 	} as unknown as VcpDeckClient;
 	return render(
 		<MemoryRouter initialEntries={["/jobs/job-1"]}>
@@ -63,61 +60,27 @@ beforeEach(() => {
 });
 
 describe("JobDetailPage 下载链接", () => {
-	it("file.export 完成的 job 展示可点击的下载链接", async () => {
-		const createDownloadToken = vi.fn().mockResolvedValue({
-			url: "/api/storage/download/aliyun-fileid-123?expires=0&sig=abc",
-			expiresAt: 0,
-		});
-		renderDetail(exportJob, createDownloadToken);
+	it("file.export 完成的 job 展示稳定下载链接", async () => {
+		const downloadUrl = vi
+			.fn()
+			.mockReturnValue("/api/storage/download-redirect/aliyun-fileid-123");
+		renderDetail(exportJob, downloadUrl);
 
 		const link = await screen.findByRole("link", { name: "下载文件" });
 		expect(link).toHaveAttribute(
 			"href",
-			`${window.location.origin}/api/storage/download/aliyun-fileid-123?expires=0&sig=abc`,
+			`${window.location.origin}/api/storage/download-redirect/aliyun-fileid-123`,
 		);
 		expect(link).toHaveAttribute("download", "app.log");
-		expect(
-			screen.getByText(
-				`${window.location.origin}/api/storage/download/aliyun-fileid-123?expires=0&sig=abc`,
-			),
-		).toBeInTheDocument();
-		expect(createDownloadToken).toHaveBeenCalledWith({
-			key: "aliyun-fileid-123",
-			ttlSeconds: 0,
-		});
-	});
-
-	it("token.url 为外部绝对 URL 时原样渲染且文案为临时链接", async () => {
-		const createDownloadToken = vi.fn().mockResolvedValue({
-			url: "https://download.example/x?expires=123&sig=abc",
-			expiresAt: 123,
-		});
-		renderDetail(exportJob, createDownloadToken);
-
-		const link = await screen.findByRole("link", { name: "下载文件" });
-		expect(link).toHaveAttribute(
-			"href",
-			"https://download.example/x?expires=123&sig=abc",
-		);
 		expect(link).toHaveAttribute("referrerpolicy", "no-referrer");
-		expect(screen.getByText(/临时有效/)).toBeInTheDocument();
-		expect(screen.queryByText(/永久/)).not.toBeInTheDocument();
-	});
-
-	it("签发失败时显示下载链接不可用", async () => {
-		const createDownloadToken = vi
-			.fn()
-			.mockRejectedValue(new Error("invalid key"));
-		renderDetail(exportJob, createDownloadToken);
-
-		expect(await screen.findByText("下载链接不可用")).toBeInTheDocument();
+		expect(downloadUrl).toHaveBeenCalledWith("aliyun-fileid-123");
+		expect(screen.queryByText(/正在生成下载链接/)).not.toBeInTheDocument();
 	});
 
 	it("file.import 完成的 job 展示下载链接且文件名取 targetPath", async () => {
-		const createDownloadToken = vi.fn().mockResolvedValue({
-			url: "/api/storage/download/aliyun-fileid-456?expires=0&sig=def",
-			expiresAt: 0,
-		});
+		const downloadUrl = vi
+			.fn()
+			.mockReturnValue("/api/storage/download-redirect/aliyun-fileid-456");
 		renderDetail(
 			{
 				...exportJob,
@@ -130,19 +93,16 @@ describe("JobDetailPage 下载链接", () => {
 					key: "aliyun-fileid-456",
 				},
 			},
-			createDownloadToken,
+			downloadUrl,
 		);
 
 		const link = await screen.findByRole("link", { name: "下载文件" });
 		expect(link).toHaveAttribute("download", "app.log");
-		expect(createDownloadToken).toHaveBeenCalledWith({
-			key: "aliyun-fileid-456",
-			ttlSeconds: 0,
-		});
+		expect(downloadUrl).toHaveBeenCalledWith("aliyun-fileid-456");
 	});
 
 	it("file.import 完成但没有 key 时不显示下载链接", async () => {
-		const createDownloadToken = vi.fn();
+		const downloadUrl = vi.fn();
 		renderDetail(
 			{
 				...exportJob,
@@ -150,18 +110,18 @@ describe("JobDetailPage 下载链接", () => {
 				payload: { rootDir: "/srv", targetPath: "/srv/uploads/app.log" },
 				result: { path: "/srv/uploads/app.log", size: 1024, sha256: "x" },
 			},
-			createDownloadToken,
+			downloadUrl,
 		);
 
 		expect(await screen.findByText("状态")).toBeInTheDocument();
 		expect(
 			screen.queryByRole("link", { name: "下载文件" }),
 		).not.toBeInTheDocument();
-		expect(createDownloadToken).not.toHaveBeenCalled();
+		expect(downloadUrl).not.toHaveBeenCalled();
 	});
 
 	it("exec 类型的 job 不显示下载链接", async () => {
-		const createDownloadToken = vi.fn();
+		const downloadUrl = vi.fn();
 		renderDetail(
 			{
 				...exportJob,
@@ -169,13 +129,13 @@ describe("JobDetailPage 下载链接", () => {
 				result: { exitCode: 0, stdout: "hello" },
 				payload: { command: "ls" },
 			},
-			createDownloadToken,
+			downloadUrl,
 		);
 
 		expect(await screen.findByText("标准输出")).toBeInTheDocument();
 		expect(
 			screen.queryByRole("link", { name: "下载文件" }),
 		).not.toBeInTheDocument();
-		expect(createDownloadToken).not.toHaveBeenCalled();
+		expect(downloadUrl).not.toHaveBeenCalled();
 	});
 });

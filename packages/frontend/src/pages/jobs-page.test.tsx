@@ -295,14 +295,13 @@ it("shows the permanent download link in the job drawer for a completed file.exp
 		pageSize: 20,
 		totalPages: 1,
 	});
-	const createDownloadToken = vi.fn().mockResolvedValue({
-		url: "/api/storage/download/aliyun-fileid-123?expires=0&sig=abc",
-		expiresAt: 0,
-	});
+	const downloadUrl = vi.fn((key: string) =>
+		`/api/storage/download-redirect/${encodeURIComponent(key)}`
+	);
 	const client = {
 		auth: { me: async () => identity },
 		jobs: { list },
-		storage: { createDownloadToken },
+		storage: { downloadUrl },
 	} as unknown as VcpDeckClient;
 	render(
 		<MemoryRouter>
@@ -321,13 +320,10 @@ it("shows the permanent download link in the job drawer for a completed file.exp
 	const link = await within(drawer).findByRole("link", { name: "下载文件" });
 	expect(link).toHaveAttribute(
 		"href",
-		`${window.location.origin}/api/storage/download/aliyun-fileid-123?expires=0&sig=abc`,
+		`${window.location.origin}/api/storage/download-redirect/aliyun-fileid-123`,
 	);
 	expect(link).toHaveAttribute("download", "nginx-1.18.0.zip");
-	expect(createDownloadToken).toHaveBeenCalledWith({
-		key: "aliyun-fileid-123",
-		ttlSeconds: 0,
-	});
+	expect(downloadUrl).toHaveBeenCalledWith("aliyun-fileid-123");
 });
 
 it("shows the permanent download link in the job drawer for a completed file.import", async () => {
@@ -353,14 +349,13 @@ it("shows the permanent download link in the job drawer for a completed file.imp
 		pageSize: 20,
 		totalPages: 1,
 	});
-	const createDownloadToken = vi.fn().mockResolvedValue({
-		url: "/api/storage/download/aliyun-fileid-456?expires=0&sig=def",
-		expiresAt: 0,
-	});
+	const downloadUrl = vi.fn((key: string) =>
+		`/api/storage/download-redirect/${encodeURIComponent(key)}`
+	);
 	const client = {
 		auth: { me: async () => identity },
 		jobs: { list },
-		storage: { createDownloadToken },
+		storage: { downloadUrl },
 	} as unknown as VcpDeckClient;
 	render(
 		<MemoryRouter>
@@ -377,9 +372,10 @@ it("shows the permanent download link in the job drawer for a completed file.imp
 	);
 	const drawer = screen.getByRole("dialog", { name: "任务详情" });
 	const link = await within(drawer).findByRole("link", { name: "下载文件" });
+	expect(link).toHaveAttribute(
+		"href",
+		`${window.location.origin}/api/storage/download-redirect/aliyun-fileid-456`,
+	);
 	expect(link).toHaveAttribute("download", "app.log");
-	expect(createDownloadToken).toHaveBeenCalledWith({
-		key: "aliyun-fileid-456",
-		ttlSeconds: 0,
-	});
+	expect(downloadUrl).toHaveBeenCalledWith("aliyun-fileid-456");
 });
