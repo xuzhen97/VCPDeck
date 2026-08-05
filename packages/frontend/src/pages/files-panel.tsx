@@ -19,7 +19,7 @@ import {
 	useState,
 } from "react";
 import { useSdk } from "@/api/context";
-import { uploadFile } from "@/api/upload-file";
+import { uploadDirect, uploadFile } from "@/api/upload-file";
 import { useFileBrowser } from "@/api/hooks/use-file-browser";
 import { ConfirmTargetDialog } from "@/components/confirm-target-dialog";
 import { Button } from "@/components/ui/button";
@@ -73,7 +73,9 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 	const menuRef = useRef<HTMLDivElement>(null);
 	const [exportError, setExportError] = useState("");
 	const [exportNotice, setExportNotice] = useState("");
-	const [uploadConfirm, setUploadConfirm] = useState<PendingUpload | null>(null);
+	const [uploadConfirm, setUploadConfirm] = useState<PendingUpload | null>(
+		null,
+	);
 	const [uploadState, setUploadState] = useState<UploadState | null>(null);
 	const uploadInputRef = useRef<HTMLInputElement>(null);
 	const uploadControllerRef = useRef<AbortController | null>(null);
@@ -148,7 +150,11 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 		let uploadedFileId = fileId;
 
 		try {
-			let job: { status: string; errorCode?: string | null; errorMessage?: string | null };
+			let job: {
+				status: string;
+				errorCode?: string | null;
+				errorMessage?: string | null;
+			};
 			if (fileId) {
 				await sdk.files.import(
 					clientId,
@@ -175,18 +181,60 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 					controller.signal,
 				);
 				uploadedFileId = session.fileId;
-				await uploadFile(uploadUrl(session.upload.url), file, {
-					signal: controller.signal,
-					onProgress: (loaded, total) =>
-						setUploadState({
-							phase: "uploading",
-							filename: file.name,
-							loaded,
-							total,
-						}),
-				});
+				if (session.upload.kind === "direct") {
+					// 直传：分片 PUT 到阿里云 OSS，进度节流上报 Server（铃铛可见）
+					let lastReportAt = 0;
+					await uploadDirect(
+						session.upload.parts,
+						file.size,
+						file,
+						{
+							signal: controller.signal,
+							onProgress: (loaded, total) => {
+								setUploadState({
+									phase: "uploading",
+									filename: file.name,
+									loaded,
+									total,
+								});
+								const now = Date.now();
+								if (now - lastReportAt < 500) return;
+								lastReportAt = now;
+								void sdk.files
+									.updateUploadProgress(
+										session.jobId,
+										loaded,
+										controller.signal,
+									)
+									.catch(() => {});
+							},
+							refreshPartUrl: async (partNumber) => {
+								const parts = await sdk.files.refreshUploadPartUrls(
+									session.jobId,
+									[partNumber],
+									controller.signal,
+								);
+								return (
+									parts.find((p) => p.partNumber === partNumber)?.url ?? ""
+								);
+							},
+						},
+					);
+				} else {
+					await uploadFile(uploadUrl(session.upload.url), file, {
+						signal: controller.signal,
+						onProgress: (loaded, total) =>
+							setUploadState({
+								phase: "uploading",
+								filename: file.name,
+								loaded,
+								total,
+							}),
+					});
+				}
 				const activated = await sdk.files.completeUpload(
 					session.jobId,
+					{ uploadedBytes: file.size },
 					controller.signal,
 				);
 				job = await sdk.jobs.wait(activated.jobId, {
@@ -438,9 +486,9 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 										className="hidden"
 										onChange={(event) => {
 											const file = event.target.files?.[0];
-										event.currentTarget.value = "";
-										if (file) selectUpload(file);
-									}}
+											event.currentTarget.value = "";
+											if (file) selectUpload(file);
+										}}
 									/>
 									<Button
 										size="sm"
@@ -490,21 +538,22 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 									>
 										<div>
 											{uploadState.phase === "uploading" &&
-											`正在上传 ${uploadState.filename}`}
-										{uploadState.phase === "importing" &&
-											`正在写入远程目录：${uploadState.filename}`}
-										{uploadState.phase === "done" &&
-											`上传完成：${uploadState.filename}`}
-										{uploadState.phase === "error" &&
-											`上传失败：${uploadState.message ?? uploadState.filename}`}
+												`正在上传 ${uploadState.filename}`}
+											{uploadState.phase === "importing" &&
+												`正在写入远程目录：${uploadState.filename}`}
+											{uploadState.phase === "done" &&
+												`上传完成：${uploadState.filename}`}
+											{uploadState.phase === "error" &&
+												`上传失败：${uploadState.message ?? uploadState.filename}`}
 										</div>
-										{uploadState.phase !== "error" && uploadState.phase !== "done" && (
-											<progress
-												className="mt-2 h-1.5 w-full"
-												max={uploadState.total || undefined}
-												value={uploadState.loaded}
-											/>
-										)}
+										{uploadState.phase !== "error" &&
+											uploadState.phase !== "done" && (
+												<progress
+													className="mt-2 h-1.5 w-full"
+													max={uploadState.total || undefined}
+													value={uploadState.loaded}
+												/>
+											)}
 									</div>
 								)}
 								<div

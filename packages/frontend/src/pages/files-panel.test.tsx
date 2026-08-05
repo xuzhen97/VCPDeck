@@ -1,13 +1,20 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+	act,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
-import { uploadFile } from "@/api/upload-file";
+import { uploadDirect, uploadFile } from "@/api/upload-file";
 import { FilesPanel } from "./files-panel";
 
 vi.mock("@/api/upload-file", () => ({
 	uploadFile: vi.fn().mockResolvedValue(undefined),
+	uploadDirect: vi.fn().mockResolvedValue(undefined),
 }));
 
 function renderFiles(overrides: Record<string, unknown> = {}) {
@@ -39,13 +46,15 @@ function renderFiles(overrides: Record<string, unknown> = {}) {
 			jobId: "upload-job",
 			fileId: "file-1",
 			status: "waiting_input",
-			upload: { url: "/api/storage/upload/key", expiresAt: 123 },
+			upload: { kind: "proxy", url: "/api/storage/upload/key", expiresAt: 123 },
 		}),
 		completeUpload: vi.fn().mockResolvedValue({
 			jobId: "upload-job",
 			status: "running",
 			type: "file.import",
 		}),
+		refreshUploadPartUrls: vi.fn(),
+		updateUploadProgress: vi.fn().mockResolvedValue(undefined),
 		import: vi.fn(),
 		...overrides,
 	};
@@ -304,11 +313,92 @@ describe("FilesPanel", () => {
 		);
 		expect(files.completeUpload).toHaveBeenCalledWith(
 			"upload-job",
+			{ uploadedBytes: 5 },
 			expect.any(AbortSignal),
 		);
 		expect((files as Record<string, any>).jobs.wait).toHaveBeenCalledWith(
 			"upload-job",
 			expect.objectContaining({ onUpdate: expect.any(Function) }),
+		);
+	});
+
+	it("direct 会话走分片直传并在完成后 complete", async () => {
+		vi.mocked(uploadFile).mockClear();
+		vi.mocked(uploadDirect).mockImplementation(async (_parts, _size, _file, opts) => {
+			opts.onProgress?.(5, 5);
+		});
+		const files = renderFiles({
+			createUploadSession: vi.fn().mockResolvedValue({
+				jobId: "upload-job",
+				fileId: "file-1",
+				status: "waiting_input",
+				upload: {
+					kind: "direct",
+					fileId: "aliyun-file",
+					uploadId: "up-1",
+					parts: [
+						{ partNumber: 1, url: "https://oss.example/p1" },
+						{ partNumber: 2, url: "https://oss.example/p2" },
+					],
+				},
+			}),
+		});
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+		const file = new File(["hello"], "report.txt", { type: "text/plain" });
+
+		await userEvent.upload(screen.getByLabelText("选择上传文件"), file);
+
+		await waitFor(() =>
+			expect(uploadDirect).toHaveBeenCalledWith(
+				[
+					{ partNumber: 1, url: "https://oss.example/p1" },
+					{ partNumber: 2, url: "https://oss.example/p2" },
+				],
+				5,
+				file,
+				expect.objectContaining({
+					onProgress: expect.any(Function),
+					refreshPartUrl: expect.any(Function),
+				}),
+			),
+		);
+		expect(files.completeUpload).toHaveBeenCalledWith(
+			"upload-job",
+			{ uploadedBytes: 5 },
+			expect.any(AbortSignal),
+		);
+		expect(uploadFile).not.toHaveBeenCalled();
+	});
+
+	it("direct 会话分片完成后节流上报进度", async () => {
+		vi.mocked(uploadFile).mockClear();
+		vi.mocked(uploadDirect).mockImplementation(async (_parts, _size, _file, opts) => {
+			opts.onProgress?.(5, 5);
+		});
+		const files = renderFiles({
+			createUploadSession: vi.fn().mockResolvedValue({
+				jobId: "upload-job",
+				fileId: "file-1",
+				status: "waiting_input",
+				upload: {
+					kind: "direct",
+					fileId: "aliyun-file",
+					uploadId: "up-1",
+					parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
+				},
+			}),
+		});
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+		const file = new File(["hello"], "report.txt", { type: "text/plain" });
+
+		await userEvent.upload(screen.getByLabelText("选择上传文件"), file);
+
+		await waitFor(() =>
+			expect(files.updateUploadProgress).toHaveBeenCalledWith(
+				"upload-job",
+				5,
+				expect.any(AbortSignal),
+			),
 		);
 	});
 
@@ -339,12 +429,18 @@ describe("FilesPanel", () => {
 			errorCode: "PATH_CONFLICT",
 			errorMessage: "Destination exists; set overwrite=true",
 		});
-		files.import.mockResolvedValue({ path: "report.txt", size: 5, sha256: "sha" });
+		files.import.mockResolvedValue({
+			path: "report.txt",
+			size: 5,
+			sha256: "sha",
+		});
 		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
 		const file = new File(["hello"], "report.txt", { type: "text/plain" });
 
 		await userEvent.upload(screen.getByLabelText("选择上传文件"), file);
-		await waitFor(() => expect(screen.getByRole("button", { name: "确认覆盖" })).toBeVisible());
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: "确认覆盖" })).toBeVisible(),
+		);
 		await userEvent.click(screen.getByRole("button", { name: "确认覆盖" }));
 
 		await waitFor(() =>
