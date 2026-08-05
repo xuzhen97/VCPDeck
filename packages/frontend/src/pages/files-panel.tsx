@@ -19,6 +19,7 @@ import {
 	useState,
 } from "react";
 import { useSdk } from "@/api/context";
+import { startBrowserDownload } from "@/api/download-file";
 import { uploadDirect, uploadFile } from "@/api/upload-file";
 import { useFileBrowser } from "@/api/hooks/use-file-browser";
 import { ConfirmTargetDialog } from "@/components/confirm-target-dialog";
@@ -680,16 +681,10 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 										rootDir: browser.selectedRoot!,
 										path: rp,
 									});
-									const token = await sdk.storage.createDownloadToken({
-										key: exported.key,
-									});
-									const anchor = document.createElement("a");
-									anchor.href = token.url;
-									anchor.download = e.name;
-									anchor.referrerPolicy = "no-referrer";
-									document.body.append(anchor);
-									anchor.click();
-									anchor.remove();
+									startBrowserDownload(
+										sdk.storage.downloadUrl(exported.key),
+										e.name,
+									);
 									setExportNotice("正在开始下载，请查看浏览器下载栏");
 									window.setTimeout(() => setExportNotice(""), 2500);
 								} catch (err) {
@@ -1053,16 +1048,10 @@ function FileViewerDialog({
 									rootDir,
 									path,
 								});
-								const token = await sdk.storage.createDownloadToken({
-									key: exported.key,
-								});
-								const anchor = document.createElement("a");
-								anchor.href = token.url;
-								anchor.download = entry.name;
-								anchor.referrerPolicy = "no-referrer";
-								document.body.append(anchor);
-								anchor.click();
-								anchor.remove();
+								startBrowserDownload(
+									sdk.storage.downloadUrl(exported.key),
+									entry.name,
+								);
 							}}
 						>
 							导出下载

@@ -66,7 +66,12 @@ function renderFiles(overrides: Record<string, unknown> = {}) {
 			progress: { loaded: 5, total: 5 },
 		}),
 	};
-	const storage = { createDownloadToken: vi.fn() };
+	const storage = {
+		downloadUrl: vi.fn(
+			(key: string) =>
+				`/api/storage/download-redirect/${encodeURIComponent(key)}`,
+		),
+	};
 	const client = {
 		files,
 		jobs,
@@ -513,18 +518,31 @@ describe("FilesPanel", () => {
 		);
 	});
 
-	it("文件查看器导出外部链接时不发送 Referer", async () => {
+	it("右键导出使用稳定下载地址", async () => {
 		const anchorClick = vi
 			.spyOn(HTMLAnchorElement.prototype, "click")
 			.mockImplementation(() => {});
 		const files = renderFiles({
 			export: vi.fn().mockResolvedValue({ key: "aliyun-file" }),
 		});
-		(
-			files as Record<string, any>
-		).storage.createDownloadToken.mockResolvedValue({
-			url: "https://download.example/README.md",
-			expiresAt: 123,
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+		fireEvent.contextMenu(
+			await screen.findByRole("button", { name: /^README\.md/ }),
+		);
+
+		await userEvent.click(screen.getByRole("menuitem", { name: "导出下载" }));
+		await waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
+		expect((files as Record<string, any>).storage.downloadUrl).toHaveBeenCalledWith(
+			"aliyun-file",
+		);
+	});
+
+	it("文件查看器导出使用稳定下载地址", async () => {
+		const anchorClick = vi
+			.spyOn(HTMLAnchorElement.prototype, "click")
+			.mockImplementation(() => {});
+		const files = renderFiles({
+			export: vi.fn().mockResolvedValue({ key: "aliyun-file" }),
 		});
 		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
 		await userEvent.dblClick(
@@ -535,9 +553,12 @@ describe("FilesPanel", () => {
 			await screen.findByRole("button", { name: "导出下载" }),
 		);
 		await waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
+		expect((files as Record<string, any>).storage.downloadUrl).toHaveBeenCalledWith(
+			"aliyun-file",
+		);
 		expect(anchorClick.mock.instances[0]).toHaveProperty(
-			"referrerPolicy",
-			"no-referrer",
+			"href",
+			`${window.location.origin}/api/storage/download-redirect/aliyun-file`,
 		);
 	});
 

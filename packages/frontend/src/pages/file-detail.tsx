@@ -1,6 +1,7 @@
 import type { FileListResult } from "@vcpdeck/shared";
 import { useEffect, useState } from "react";
 import { useSdk } from "@/api/context";
+import { startBrowserDownload } from "@/api/download-file";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -120,16 +121,10 @@ export function FileDetail({
 									rootDir,
 									path: relativePath,
 								});
-								const token = await sdk.storage.createDownloadToken({
-									key: exported.key,
-								});
-								const anchor = document.createElement("a");
-								anchor.href = token.url;
-								anchor.download = entry.name;
-								anchor.referrerPolicy = "no-referrer";
-								document.body.append(anchor);
-								anchor.click();
-								anchor.remove();
+								startBrowserDownload(
+									sdk.storage.downloadUrl(exported.key),
+									entry.name,
+								);
 							} catch (err) {
 								setExportError(
 									err instanceof Error ? err.message : String(err),
