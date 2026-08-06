@@ -94,7 +94,6 @@ interface MachineRegister {
   os: string;             // e.g. "Windows 11", "Ubuntu 22.04"
   cpuModel: string;
   totalMemMB: number;
-  totalDiskMB: number;
   clientVersion: string;
   capabilities: string[]; // e.g. ["exec", "file.read", "file.write", "agent.pi"]
 }
@@ -122,7 +121,7 @@ interface Heartbeat {
   clientId: string;
   cpuPercent: number;
   memPercent: number;
-  diskPercent: number;
+  disks: DiskInfo[];      // 每盘 { name, totalMB, usedPercent }
   runningJobs: string[];  // jobId 列表（含 waiting_input 状态的会话）
   uptime: number;         // client 进程运行秒数
 }
