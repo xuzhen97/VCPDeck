@@ -778,7 +778,6 @@ async function testFileCapabilityRejection() {
 				os: "test",
 				cpuModel: "test-cpu",
 				totalMemMB: 1024,
-				totalDiskMB: 10240,
 				clientVersion: "0.0.0",
 				capabilities: ["exec"],
 			});
@@ -1502,7 +1501,6 @@ async function main() {
 				os: "test",
 				cpuModel: "test-cpu",
 				totalMemMB: 1024,
-				totalDiskMB: 10240,
 				clientVersion: "0.0.0",
 				capabilities: ["exec"],
 			});
@@ -1731,7 +1729,7 @@ async function main() {
 				clientId: c.clientId,
 				cpuPercent: 15,
 				memPercent: 60,
-				diskPercent: 40,
+				disks: [],
 				runningJobs: [],
 				uptime: 120,
 			});
