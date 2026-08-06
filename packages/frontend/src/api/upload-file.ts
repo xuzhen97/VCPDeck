@@ -10,7 +10,6 @@ interface DirectUploadOptions extends UploadFileOptions {
 	refreshPartUrl: (partNumber: number) => Promise<string>;
 }
 
-const DIRECT_CONCURRENCY = 3;
 const DIRECT_RETRIES = 2;
 
 /** 分片直传：按 parts 并发 PUT 到 OSS 预签名 URL，汇总进度 */
@@ -21,7 +20,7 @@ export function uploadDirect(
 	options: DirectUploadOptions,
 ): Promise<void> {
 	const partSize = options.partSize;
-	const queue = [...parts];
+	const queue = [...parts].sort((a, b) => a.partNumber - b.partNumber);
 	const loadedByPart = new Map<number, number>();
 	let loaded = 0;
 	const active: XMLHttpRequest[] = [];
@@ -105,11 +104,7 @@ export function uploadDirect(
 			return;
 		}
 		options.signal?.addEventListener("abort", onAbort, { once: true });
-		Promise.all(
-			Array.from({ length: Math.min(DIRECT_CONCURRENCY, parts.length) }, () =>
-				worker(),
-			),
-		)
+		worker()
 			.then(() => {
 				options.signal?.removeEventListener("abort", onAbort);
 				resolve();
