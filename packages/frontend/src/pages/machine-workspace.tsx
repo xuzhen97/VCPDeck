@@ -1,4 +1,4 @@
-import type { ClientInfo } from "@vcpdeck/shared";
+import type { ClientInfo, DiskInfo } from "@vcpdeck/shared";
 import {
 	Clock3,
 	Cpu,
@@ -164,17 +164,18 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 	);
 }
 
+// client 上报的 totalMemMB/totalDiskMB 实为 MiB（bytes ÷ 1024²），
+// 展示按 GiB 口径（÷1024）换算，与资源管理器、文件面板一致
+const fmt = (v: number | undefined) => {
+	if (v == null) return "—";
+	return v >= 1024 * 1024
+		? (v / (1024 * 1024)).toFixed(1) + " TB"
+		: v >= 1024
+			? (v / 1024).toFixed(0) + " GB"
+			: v + " MB";
+};
+
 function Overview({ client }: { client: ClientInfo }) {
-	// client 上报的 totalMemMB/totalDiskMB 实为 MiB（bytes ÷ 1024²），
-	// 展示按 GiB 口径（÷1024）换算，与资源管理器、文件面板一致
-	const fmt = (v: number | undefined) => {
-		if (v == null) return "—";
-		return v >= 1024 * 1024
-			? (v / (1024 * 1024)).toFixed(1) + " TB"
-			: v >= 1024
-				? (v / 1024).toFixed(0) + " GB"
-				: v + " MB";
-	};
 	return (
 		<div className="space-y-4">
 			<div className="grid gap-4 lg:grid-cols-3">
@@ -190,12 +191,7 @@ function Overview({ client }: { client: ClientInfo }) {
 					value={client.memPercent}
 					icon={<MemoryStick className="size-5" />}
 				/>
-				<ResourceCard
-					label="磁盘"
-					detail={fmt(client.totalDiskMB)}
-					value={client.diskPercent}
-					icon={<HardDrive className="size-5" />}
-				/>
+				<DiskCard disks={client.disks} />
 			</div>
 			<Card>
 				<CardContent
@@ -276,6 +272,62 @@ function ResourceCard({
 				>
 					{detail}
 				</p>
+			</CardContent>
+		</Card>
+	);
+}
+
+function DiskCard({ disks = [] }: { disks?: DiskInfo[] }) {
+	return (
+		<Card>
+			<CardContent className="pt-6">
+				<div className="flex items-start justify-between gap-4">
+					<div>
+						<p className="text-sm font-medium text-muted-foreground">磁盘</p>
+						{disks.length === 0 && (
+							<p className="mt-2 text-3xl font-semibold tabular-nums">—</p>
+						)}
+					</div>
+					<div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+						<HardDrive className="size-5" />
+					</div>
+				</div>
+				{disks.length === 0 ? (
+					<p className="mt-3 text-xs text-muted-foreground">尚无磁盘数据</p>
+				) : (
+					<ul className="mt-5 space-y-4">
+						{disks.map((disk) => {
+							const bounded = Math.min(100, Math.max(0, disk.usedPercent));
+							const color =
+								bounded >= 90
+									? "bg-red-500"
+									: bounded >= 70
+											? "bg-amber-500"
+											: "bg-primary";
+							return (
+								<li key={disk.name}>
+									<div className="flex items-baseline justify-between gap-3">
+										<span className="text-sm font-medium">{disk.name}</span>
+										<span className="text-xs text-muted-foreground">
+											{fmt(disk.totalMB)} · {disk.usedPercent.toFixed(1)}%
+										</span>
+									</div>
+									<div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary">
+										<div
+											role="progressbar"
+											aria-label={`磁盘 ${disk.name} 使用率`}
+											aria-valuemin={0}
+											aria-valuemax={100}
+											aria-valuenow={disk.usedPercent}
+											className={`h-full rounded-full transition-[width] duration-300 ${color}`}
+											style={{ width: `${bounded}%` }}
+										/>
+									</div>
+								</li>
+							);
+						})}
+					</ul>
+				)}
 			</CardContent>
 		</Card>
 	);

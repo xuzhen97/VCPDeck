@@ -59,13 +59,12 @@ const clientInfo = (): ClientInfo => ({
 	os: "win32",
 	cpuModel: "cpu",
 	totalMemMB: 1,
-	totalDiskMB: 1,
+	disks: [],
 	clientVersion: "test",
 	capabilities: [],
 	online: true,
 	cpuPercent: null,
 	memPercent: null,
-	diskPercent: null,
 	lastHeartbeatAt: null,
 });
 

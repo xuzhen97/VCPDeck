@@ -46,13 +46,15 @@ describe("MachineWorkspace overview", () => {
 			os: "win32 10.0.26200",
 			cpuModel: "Intel(R) Core(TM) i7-12700",
 			totalMemMB: 16384,
-			totalDiskMB: 512000,
+			disks: [
+				{ name: "C:", totalMB: 512000, usedPercent: 92.8 },
+				{ name: "D:", totalMB: 464444, usedPercent: 5 },
+			],
 			clientVersion: "0.0.0",
 			capabilities: ["exec", "file.read", "file.write"],
 			online: true,
 			cpuPercent: 23.5,
 			memPercent: 45.2,
-			diskPercent: 92.8,
 			lastHeartbeatAt: "2026-07-28T10:21:56.000Z",
 		};
 		renderWorkspace([client]);
@@ -61,7 +63,6 @@ describe("MachineWorkspace overview", () => {
 		expect(screen.getByText("win32 10.0.26200 · c1")).toBeVisible();
 		expect(screen.getByText("Intel(R) Core(TM) i7-12700")).toBeVisible();
 		expect(screen.getByText("16 GB")).toBeVisible();
-		expect(screen.getByText("500 GB")).toBeVisible();
 		expect(screen.getByText("0.0.0")).toBeVisible();
 		expect(screen.getByText(/23\.5%/)).toBeTruthy();
 		expect(screen.getByText(/45\.2%/)).toBeTruthy();
@@ -70,9 +71,17 @@ describe("MachineWorkspace overview", () => {
 		expect(screen.getByRole("progressbar", { name: "CPU使用率" })).toHaveClass(
 			"bg-primary",
 		);
-		expect(screen.getByRole("progressbar", { name: "磁盘使用率" })).toHaveClass(
-			"bg-red-500",
-		);
+		expect(screen.getByText("C:")).toBeVisible();
+		expect(screen.getByText("D:")).toBeVisible();
+		expect(screen.getByText(/500 GB/)).toBeVisible();
+		expect(screen.getByText(/454 GB/)).toBeVisible();
+		expect(screen.getByText(/5\.0%/)).toBeVisible();
+		expect(
+			screen.getByRole("progressbar", { name: "磁盘 C: 使用率" }),
+		).toHaveClass("bg-red-500");
+		expect(
+			screen.getByRole("progressbar", { name: "磁盘 D: 使用率" }),
+		).toHaveClass("bg-primary");
 		expect(screen.getByTestId("system-information")).toHaveTextContent(
 			"最后心跳",
 		);
@@ -95,13 +104,12 @@ describe("MachineWorkspace overview", () => {
 			os: "win32",
 			cpuModel: "Intel",
 			totalMemMB: 16384,
-			totalDiskMB: 512000,
+			disks: [],
 			clientVersion: "1.0.0",
 			capabilities: ["exec", "file.read"],
 			online: true,
 			cpuPercent: 1,
 			memPercent: 2,
-			diskPercent: 3,
 			lastHeartbeatAt: null,
 		};
 		renderWorkspace([client], "files");
@@ -141,25 +149,24 @@ describe("MachineWorkspace overview", () => {
 			os: "linux",
 			cpuModel: "AMD EPYC",
 			totalMemMB: 32768,
-			totalDiskMB: 1_000_000,
+			disks: [],
 			clientVersion: "1.0.0",
 			capabilities: ["exec"],
 			online: true,
 			cpuPercent: null,
 			memPercent: null,
-			diskPercent: null,
 			lastHeartbeatAt: null,
 		};
 		renderWorkspace([client]);
 
 		expect(await screen.findByText("AMD EPYC")).toBeVisible();
 		expect(screen.getByText("32 GB")).toBeVisible();
-		expect(screen.getByText("977 GB")).toBeVisible();
 		expect(screen.getByText("1.0.0")).toBeVisible();
 
-		// 三个资源指标都保留进度语义，缺失值显示为 —
-		expect(screen.getAllByRole("progressbar")).toHaveLength(3);
+		// CPU、内存进度条保留；磁盘无数据时以 — 占位
+		expect(screen.getAllByRole("progressbar")).toHaveLength(2);
 		expect(screen.getAllByText("—")).toHaveLength(3);
+		expect(screen.getByText("尚无磁盘数据")).toBeVisible();
 	});
 
 	it("handles missing fields from old server gracefully", async () => {
@@ -174,8 +181,8 @@ describe("MachineWorkspace overview", () => {
 		renderWorkspace([partial]);
 
 		expect(await screen.findByText("old-server")).toBeVisible();
-		// 旧 Client 缺失的指标仍以可访问进度条和占位值展示
-		expect(screen.getAllByRole("progressbar")).toHaveLength(3);
+		// 旧 Client 缺失的指标仍以可访问进度条和占位值展示；磁盘无数据时不渲染进度条
+		expect(screen.getAllByRole("progressbar")).toHaveLength(2);
 		expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
 	});
 });

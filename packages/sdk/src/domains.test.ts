@@ -9,13 +9,12 @@ it("clients.list returns full machine info", async () => {
 			os: "win32 10.0.26200",
 			cpuModel: "Intel(R) Core(TM) i7-12700",
 			totalMemMB: 16384,
-			totalDiskMB: 512000,
+			disks: [{ name: "C:", totalMB: 512000, usedPercent: 67.8 }],
 			clientVersion: "0.0.0",
 			capabilities: ["exec", "file.read", "file.write"],
 			online: true,
 			cpuPercent: 23.5,
 			memPercent: 45.2,
-			diskPercent: 67.8,
 			lastHeartbeatAt: "2026-07-28T10:21:56.000Z",
 		},
 	];
@@ -34,13 +33,12 @@ it("clients.list returns full machine info", async () => {
 	expect(c.os).toBe("win32 10.0.26200");
 	expect(c.cpuModel).toBe("Intel(R) Core(TM) i7-12700");
 	expect(c.totalMemMB).toBe(16384);
-	expect(c.totalDiskMB).toBe(512000);
+	expect(c.disks).toEqual([{ name: "C:", totalMB: 512000, usedPercent: 67.8 }]);
 	expect(c.clientVersion).toBe("0.0.0");
 	expect(c.capabilities).toEqual(["exec", "file.read", "file.write"]);
 	expect(c.online).toBe(true);
 	expect(c.cpuPercent).toBe(23.5);
 	expect(c.memPercent).toBe(45.2);
-	expect(c.diskPercent).toBe(67.8);
 	expect(c.lastHeartbeatAt).toBe("2026-07-28T10:21:56.000Z");
 });
 
