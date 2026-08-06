@@ -53,16 +53,22 @@ export interface MachineRegister {
 	os: string;
 	cpuModel: string;
 	totalMemMB: number;
-	totalDiskMB: number;
 	clientVersion: string;
 	capabilities: string[];
+}
+
+/** 单盘容量与占用率（容量与使用率来自同一次 statfs） */
+export interface DiskInfo {
+	name: string; // Windows: "C:" / "D:"；Linux: 挂载点 "/"、"/home"
+	totalMB: number; // MiB（bytes ÷ 1024²，与 totalMemMB 同口径）
+	usedPercent: number; // 0-100
 }
 
 export interface Heartbeat {
 	clientId: string;
 	cpuPercent: number;
 	memPercent: number;
-	diskPercent: number;
+	disks: DiskInfo[];
 	runningJobs: string[];
 	uptime: number;
 }
@@ -188,13 +194,12 @@ export interface ClientInfo {
 	os: string;
 	cpuModel: string;
 	totalMemMB: number;
-	totalDiskMB: number;
 	clientVersion: string;
 	capabilities: string[];
 	online: boolean;
 	cpuPercent: number | null;
 	memPercent: number | null;
-	diskPercent: number | null;
+	disks: DiskInfo[];
 	lastHeartbeatAt: string | null;
 }
 
