@@ -219,6 +219,55 @@ describe("NotificationBell", () => {
 		expect(screen.queryByText(/100%/)).not.toBeInTheDocument();
 	});
 
+	it("按进行中和最近结果分组展示任务", async () => {
+		const running = job({
+			jobId: "active-1",
+			type: "file.import",
+			payload: { targetPath: "uploads/a.txt" },
+			progress: { loaded: 2, total: 5 },
+		});
+		const finished = job({
+			jobId: "active-2",
+			type: "file.export",
+			status: "done" as JobInfo["status"],
+			payload: { path: "D:\\done.zip" },
+			result: { fileId: "f1", key: "download-key", size: 1, sha256: "x" },
+			finishedAt: "2026-08-01T00:01:00.000Z",
+		});
+		const list = vi
+			.fn()
+			.mockResolvedValueOnce({
+				data: [running, job({ jobId: "active-2" })],
+				total: 2,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			})
+			.mockResolvedValueOnce({
+				data: [running],
+				total: 1,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			});
+		renderBell({
+			jobs: { list, get: vi.fn().mockResolvedValue(finished) },
+			storage: { downloadUrl: vi.fn().mockReturnValue("/download") },
+		});
+
+		await vi.advanceTimersByTimeAsync(0);
+		await act(async () => {});
+		await vi.advanceTimersByTimeAsync(500);
+		await act(async () => {});
+		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
+
+		expect(screen.getByRole("heading", { name: "进行中" })).toBeVisible();
+		expect(screen.getByRole("heading", { name: "最近结果" })).toBeVisible();
+		expect(
+			screen.getByRole("button", { name: "清除通知 active-2" }),
+		).toBeVisible();
+	});
+
 	it("新完成的 file.export 出现下载按钮，点击触发下载", async () => {
 		const anchorClick = vi
 			.spyOn(HTMLAnchorElement.prototype, "click")

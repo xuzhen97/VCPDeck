@@ -1,5 +1,12 @@
 import type { JobInfo, JobProgress } from "@vcpdeck/shared";
-import { Bell } from "lucide-react";
+import {
+	Bell,
+	CheckCircle2,
+	CircleAlert,
+	CircleX,
+	LoaderCircle,
+	X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSdk } from "@/api/context";
 import { startBrowserDownload } from "@/api/download-file";
@@ -86,82 +93,155 @@ export function NotificationBell() {
 				onClick={() => setOpen((v) => !v)}
 				className="relative"
 			>
-				<Bell className="size-4" />
-				{activeCount > 0 && (
-					<span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-						{activeCount}
-					</span>
-				)}
-			</Button>
+					<Bell aria-hidden="true" className="size-4" />
+					{activeCount > 0 && (
+						<span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+							{activeCount}
+						</span>
+					)}
+				</Button>
 			{open && (
 				<div
 					role="dialog"
 					aria-label="任务通知"
-					className="absolute right-0 top-11 z-50 w-80 rounded-xl border border-border bg-background p-3 shadow-2xl"
+					className="absolute right-0 top-11 z-50 w-[min(22.5rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border/80 bg-background/95 shadow-2xl backdrop-blur-xl"
 				>
-					<p className="mb-2 text-xs font-semibold text-muted-foreground">
-						任务通知
-					</p>
-					{active.length === 0 && finished.length === 0 && (
-						<p className="py-4 text-center text-sm text-muted-foreground">
-							暂无任务
-						</p>
-					)}
-					{active.map((job) => (
-						<div key={job.jobId} className="mb-3">
-							<p className="mb-1 truncate text-sm font-medium">
-								{jobTypeLabel(job.type)}：{filenameOf(job)}
-							</p>
-							<ProgressBar
-								progress={job.progress}
-								status={job.status}
-								type={job.type}
+					<header className="flex items-center justify-between border-b border-border/70 px-4 py-3">
+						<div className="flex items-center gap-2">
+							<Bell
+								aria-hidden="true"
+								className="size-4 text-primary"
 							/>
+							<h2 className="text-sm font-semibold">任务通知</h2>
 						</div>
-					))}
-					{finished.map((item) => (
-						<div
-							key={item.jobId}
-							className="mb-2 flex items-start justify-between gap-2 rounded-lg border border-border/70 bg-secondary/20 p-2 text-sm"
-						>
-							<div className="min-w-0">
-								<p className="truncate font-medium">
-									{item.status === "done"
-										? `完成：${item.filename}`
-										: item.status === "error"
-											? `失败：${item.filename}`
-											: `已取消：${item.filename}`}
-								</p>
-								{item.status === "error" && item.message && (
-									<p className="mt-0.5 truncate text-xs text-red-400">
-										{item.message}
-									</p>
-								)}
-								{item.status === "done" &&
-									(item.type === "file.export" ||
-										item.type === "file.import") &&
-									item.key && (
-										<DownloadButton
-											key={item.jobId}
-											storageKey={item.key}
-											filename={item.filename}
-										/>
-									)}
-							</div>
-							<Button
-								size="sm"
-								variant="ghost"
-								aria-label={`清除通知 ${item.jobId}`}
-								onClick={() =>
-									setFinished((prev) =>
-										prev.filter((f) => f.jobId !== item.jobId),
-									)
-								}
-							>
-								清除
-							</Button>
-						</div>
-					))}
+						{activeCount > 0 && (
+							<span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+								{activeCount} 个进行中
+							</span>
+						)}
+					</header>
+					<div className="max-h-[min(32rem,calc(100dvh-6rem))] overflow-y-auto p-3">
+						{active.length === 0 && finished.length === 0 && (
+							<p className="py-8 text-center text-sm text-muted-foreground">
+								暂无任务
+							</p>
+						)}
+						{active.length > 0 && (
+							<section aria-labelledby="active-tasks-heading" className="mb-4">
+								<h3
+									id="active-tasks-heading"
+									className="mb-2 px-1 text-xs font-semibold text-muted-foreground"
+								>
+									进行中
+								</h3>
+								<div className="space-y-2">
+									{active.map((job) => (
+										<div
+											key={job.jobId}
+											className="rounded-xl border border-primary/20 bg-primary/5 p-3"
+										>
+											<div className="mb-2 flex min-w-0 items-center gap-2">
+												<LoaderCircle
+													aria-hidden="true"
+													className="size-4 shrink-0 text-primary motion-safe:animate-spin"
+												/>
+												<p className="min-w-0 truncate text-sm font-medium">
+													{jobTypeLabel(job.type)}：{filenameOf(job)}
+												</p>
+											</div>
+											<ProgressBar
+												progress={job.progress}
+												status={job.status}
+												type={job.type}
+											/>
+										</div>
+									))}
+								</div>
+							</section>
+						)}
+						{finished.length > 0 && (
+							<section aria-labelledby="finished-tasks-heading">
+								<h3
+									id="finished-tasks-heading"
+									className="mb-2 px-1 text-xs font-semibold text-muted-foreground"
+								>
+									最近结果
+								</h3>
+								<div className="space-y-2">
+									{finished.map((item) => {
+										const StatusIcon =
+											item.status === "done"
+												? CheckCircle2
+												: item.status === "error"
+													? CircleAlert
+													: CircleX;
+										const statusClass =
+											item.status === "done"
+												? "border-emerald-500/25 bg-emerald-500/5"
+												: item.status === "error"
+													? "border-red-500/25 bg-red-500/5"
+													: "border-border/70 bg-secondary/20";
+										const iconClass =
+											item.status === "done"
+												? "text-emerald-500"
+												: item.status === "error"
+													? "text-red-400"
+													: "text-muted-foreground";
+										return (
+											<div
+												key={item.jobId}
+												className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${statusClass}`}
+											>
+												<StatusIcon
+													aria-hidden="true"
+													className={`mt-0.5 size-4 shrink-0 ${iconClass}`}
+												/>
+												<div className="min-w-0 flex-1">
+													<p className="truncate font-medium">
+														{item.status === "done"
+															? `完成：${item.filename}`
+															: item.status === "error"
+																? `失败：${item.filename}`
+																: `已取消：${item.filename}`}
+													</p>
+													{item.status === "error" && item.message && (
+														<p className="mt-0.5 truncate text-xs text-red-400">
+															{item.message}
+														</p>
+													)}
+													{item.status === "done" &&
+														(item.type === "file.export" ||
+															item.type === "file.import") &&
+														item.key && (
+															<DownloadButton
+																key={item.jobId}
+																storageKey={item.key}
+																filename={item.filename}
+															/>
+														)}
+												</div>
+												<Button
+													type="button"
+													size="icon"
+													variant="ghost"
+													className="size-11 min-h-11 shrink-0"
+													aria-label={`清除通知 ${item.jobId}`}
+													title="清除通知"
+													onClick={() =>
+														setFinished((prev) =>
+															prev.filter((f) => f.jobId !== item.jobId),
+														)
+													}
+												>
+													<X aria-hidden="true" className="size-4" />
+												</Button>
+											</div>
+										);
+									})}
+								</div>
+							</section>
+						)}
+					</div>
 				</div>
 			)}
 		</div>
