@@ -44,7 +44,7 @@ export function NotificationBell() {
 		if (polling.current) return;
 		polling.current = true;
 		try {
-			const page = await sdk.jobs.list({ pageSize: 100 });
+			const page = await sdk.jobs.list({ status: "active", pageSize: 100 });
 			const visibleJobs = page.data.filter(
 				(j) => !HIDDEN_JOB_TYPES.has(j.type),
 			);

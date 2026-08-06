@@ -268,7 +268,7 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
   ) {
     return this.jobService.list({
       clientId,
-      status: status as JobStatus | undefined,
+      status: status as JobStatus | "active" | undefined,
       page: page ? Math.max(1, parseInt(page, 10)) : undefined,
       pageSize: pageSize ? Math.min(100, Math.max(1, parseInt(pageSize, 10))) : undefined,
     });

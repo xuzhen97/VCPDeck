@@ -399,6 +399,34 @@ describe("JobService.list()", () => {
 		);
 	});
 
+	it("filters active statuses before pagination", async () => {
+		const prisma = {
+			job: {
+				findMany: vi.fn().mockResolvedValue([]),
+				count: vi.fn().mockResolvedValue(0),
+				findUnique: vi.fn(),
+				update: vi.fn(),
+				updateMany: vi.fn(),
+				create: vi.fn(),
+			},
+			client: { findUnique: vi.fn() },
+			frpMapping: { findMany: vi.fn(), count: vi.fn() },
+		} as unknown as PrismaService;
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
+
+		await svc.list({ status: "active" });
+
+		const where = {
+			status: { in: ["pending", "running", "waiting_input"] },
+		};
+		expect(prisma.job.findMany).toHaveBeenCalledWith(
+			expect.objectContaining({ where }),
+		);
+		expect(prisma.job.count).toHaveBeenCalledWith({ where });
+	});
+
 	it("clamps pageSize to max 100", async () => {
 		const prisma = {
 			job: {

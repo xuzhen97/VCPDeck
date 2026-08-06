@@ -537,7 +537,7 @@ export class JobService {
 
   async list(options: {
     clientId?: string;
-    status?: JobStatus;
+    status?: JobStatus | "active";
     page?: number;
     pageSize?: number;
   } = {}): Promise<PaginatedResult<JobInfo>> {
@@ -545,7 +545,11 @@ export class JobService {
     const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 20));
     const where: Record<string, unknown> = {};
     if (options.clientId) where.clientId = options.clientId;
-    if (options.status) where.status = options.status;
+    if (options.status === "active") {
+      where.status = { in: ["pending", "running", "waiting_input"] };
+    } else if (options.status) {
+      where.status = options.status;
+    }
 
     const [jobs, total] = await Promise.all([
       this.prisma.job.findMany({

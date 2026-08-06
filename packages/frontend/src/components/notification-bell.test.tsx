@@ -81,7 +81,7 @@ describe("NotificationBell", () => {
 		renderBell({ jobs: { list, get: vi.fn() } });
 
 		await vi.advanceTimersByTimeAsync(0);
-		expect(list).toHaveBeenCalledWith({ pageSize: 100 });
+		expect(list).toHaveBeenCalledWith({ status: "active", pageSize: 100 });
 		await act(async () => {}); // flush 轮询后的 setState
 		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
 		expect(screen.getByText(/big\.zip/)).toBeInTheDocument();
