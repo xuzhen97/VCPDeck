@@ -14,6 +14,13 @@ import { Button } from "@/components/ui/button";
 
 const POLL_MS = 500;
 const ACTIVE_STATUSES = new Set(["pending", "running", "waiting_input"]);
+const HIDDEN_JOB_TYPES = new Set([
+	"file.roots",
+	"file.list",
+	"file.stat",
+	"file.readText",
+	"frp.list",
+]);
 
 interface FinishedItem {
 	jobId: string;
@@ -38,8 +45,11 @@ export function NotificationBell() {
 		polling.current = true;
 		try {
 			const page = await sdk.jobs.list({ pageSize: 5 });
+			const visibleJobs = page.data.filter(
+				(j) => !HIDDEN_JOB_TYPES.has(j.type),
+			);
 			const nowRunning = new Set(
-				page.data
+				visibleJobs
 					.filter((j) => ACTIVE_STATUSES.has(j.status))
 					.map((j) => j.jobId),
 			);
@@ -49,7 +59,7 @@ export function NotificationBell() {
 				if (!nowRunning.has(prevId)) newlyFinished.push(prevId);
 			}
 			seenRunning.current = nowRunning;
-			setActive(page.data.filter((j) => ACTIVE_STATUSES.has(j.status)));
+			setActive(visibleJobs.filter((j) => ACTIVE_STATUSES.has(j.status)));
 
 			for (const jobId of newlyFinished) {
 				const job = await sdk.jobs.get(jobId);
@@ -259,12 +269,14 @@ function ProgressBar({
 }) {
 	const stage =
 		status === "waiting_input"
-			? "正在上传到 Storage"
-			: status === "pending"
-				? "等待派发"
+			? "正在上传到阿里云盘"
+			: status === "pending" && type === "file.import"
+				? "等待远程机器接收"
 				: type === "file.import"
-					? "正在写入远程目录"
-					: "";
+					? "正在导入远程机器"
+					: status === "pending"
+						? "等待派发"
+						: "";
 	if (!progress || progress.total <= 0) {
 		return (
 			<div>
@@ -273,14 +285,20 @@ function ProgressBar({
 			</div>
 		);
 	}
-	if (progress.loaded >= progress.total && type === "file.export") {
+	if (
+		progress.loaded >= progress.total &&
+		(type === "file.export" ||
+			(type === "file.import" && status === "waiting_input"))
+	) {
 		return (
 			<div>
 				<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
 					<div className="h-full w-full animate-pulse rounded-full bg-primary/70" />
 				</div>
 				<p className="mt-1 text-xs text-muted-foreground">
-					上传完成 · 正在保存到云盘…
+					{type === "file.import"
+						? "上传完成 · 正在保存到阿里云盘…"
+						: "上传完成 · 正在保存到云盘…"}
 				</p>
 			</div>
 		);

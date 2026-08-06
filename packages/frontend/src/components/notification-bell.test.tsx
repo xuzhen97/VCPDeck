@@ -112,11 +112,64 @@ describe("NotificationBell", () => {
 		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
 
 		expect(screen.getByText(/a\.txt/)).toBeInTheDocument();
-		expect(screen.getByText(/正在上传到 Storage/)).toBeInTheDocument();
+		expect(screen.getByText(/正在上传到阿里云盘/)).toBeInTheDocument();
 		expect(screen.getByText(/40%/)).toBeInTheDocument();
 	});
 
-	it("running file.import 显示远程目录写入状态", async () => {
+	it("waiting_input 上传完成后显示阿里云盘保存状态", async () => {
+		const list = vi.fn().mockResolvedValue({
+			data: [
+				job({
+					jobId: "upload-finalizing",
+					type: "file.import",
+					status: "waiting_input" as JobInfo["status"],
+					payload: { targetPath: "uploads/a.txt" },
+					progress: { loaded: 5, total: 5 },
+				}),
+			],
+			total: 1,
+			page: 1,
+			pageSize: 5,
+			totalPages: 1,
+		});
+		renderBell({ jobs: { list, get: vi.fn() } });
+
+		await vi.advanceTimersByTimeAsync(0);
+		await act(async () => {});
+		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
+
+		expect(
+			screen.getByText("上传完成 · 正在保存到阿里云盘…"),
+		).toBeInTheDocument();
+		expect(screen.queryByText(/100%/)).not.toBeInTheDocument();
+	});
+
+	it("pending file.import 显示等待远程机器接收", async () => {
+		const list = vi.fn().mockResolvedValue({
+			data: [
+				job({
+					jobId: "import-pending",
+					type: "file.import",
+					status: "pending" as JobInfo["status"],
+					payload: { targetPath: "uploads/a.txt" },
+					progress: { loaded: 0, total: 5 },
+				}),
+			],
+			total: 1,
+			page: 1,
+			pageSize: 5,
+			totalPages: 1,
+		});
+		renderBell({ jobs: { list, get: vi.fn() } });
+
+		await vi.advanceTimersByTimeAsync(0);
+		await act(async () => {});
+		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
+
+		expect(screen.getByText(/等待远程机器接收/)).toBeInTheDocument();
+	});
+
+	it("running file.import 显示远程机器导入状态", async () => {
 		const list = vi.fn().mockResolvedValue({
 			data: [
 				job({
@@ -137,7 +190,7 @@ describe("NotificationBell", () => {
 		await act(async () => {});
 		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
 
-		expect(screen.getByText(/正在写入远程目录/)).toBeInTheDocument();
+		expect(screen.getByText(/正在导入远程机器/)).toBeInTheDocument();
 		expect(screen.getByText(/40%/)).toBeInTheDocument();
 	});
 
@@ -217,6 +270,47 @@ describe("NotificationBell", () => {
 
 		expect(screen.getByText("上传完成 · 正在保存到云盘…")).toBeInTheDocument();
 		expect(screen.queryByText(/100%/)).not.toBeInTheDocument();
+	});
+
+	it("忽略文件浏览产生的完成任务通知", async () => {
+		const runningJob = job({
+			jobId: "list-1",
+			type: "file.list",
+			payload: { rootDir: "D:\\", path: "." },
+		});
+		const doneJob = job({
+			...runningJob,
+			status: "done" as JobInfo["status"],
+			finishedAt: "2026-08-01T00:01:00.000Z",
+		});
+		const list = vi
+			.fn()
+			.mockResolvedValueOnce({
+				data: [runningJob],
+				total: 1,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			})
+			.mockResolvedValueOnce({
+				data: [doneJob],
+				total: 1,
+				page: 1,
+				pageSize: 5,
+				totalPages: 1,
+			});
+		renderBell({ jobs: { list, get: vi.fn().mockResolvedValue(doneJob) } });
+
+		await vi.advanceTimersByTimeAsync(0);
+		await act(async () => {});
+		await vi.advanceTimersByTimeAsync(500);
+		await act(async () => {});
+		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
+
+		expect(
+			screen.queryByRole("heading", { name: "最近结果" }),
+		).not.toBeInTheDocument();
+		expect(screen.queryByText("完成：.")).not.toBeInTheDocument();
 	});
 
 	it("按进行中和最近结果分组展示任务", async () => {
