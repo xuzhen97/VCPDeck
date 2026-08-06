@@ -11,6 +11,10 @@
 const { spawn, execSync } = require("node:child_process");
 const path = require("node:path");
 const os = require("node:os");
+const {
+	createIntegrationTestDb,
+	cleanupIntegrationTestDb,
+} = require("./integration-test-db.cjs");
 
 const isWin = os.platform() === "win32";
 
@@ -31,6 +35,7 @@ const { Events } = require(sharedPath);
 const BASE = "http://localhost:3001";
 const PSK = "vcpdeck-dev-psk";
 const ADMIN_PASSWORD = "test123";
+const testDatabase = createIntegrationTestDb();
 
 // ── Test state ──
 let clientSocket;
@@ -113,16 +118,6 @@ async function apiRaw(method, path, body, opts = {}) {
 	}
 
 	return res;
-}
-
-/** Clean up database from previous runs so bootstrapAdmin creates fresh admin. */
-function cleanDb() {
-	const dbPath = path.join(serverDir, "prisma", "dev.db");
-	try {
-		require("node:fs").unlinkSync(dbPath);
-	} catch {
-		// file doesn't exist or is locked — db push will recreate
-	}
 }
 
 /** Kill anything on port 3001 from previous runs. */
@@ -1138,7 +1133,6 @@ async function main() {
 
 	killPort();
 	await sleep(1000);
-	cleanDb();
 
 	// 1. Start server
 	console.log("[setup] Starting server...");
@@ -1150,6 +1144,7 @@ async function main() {
 			...process.env,
 			VCPDECK_ADMIN_PASSWORD: ADMIN_PASSWORD,
 			VCPDECK_FRONTEND_ORIGIN: "http://localhost:5173",
+			DATABASE_URL: testDatabase.databaseUrl,
 		},
 	});
 	let serverOutput = "";
@@ -2072,5 +2067,14 @@ main()
 		if (_serverProcess?.pid) killTree(_serverProcess.pid);
 		_serverProcess = null;
 		killPort();
+		try {
+			cleanupIntegrationTestDb(testDatabase);
+		} catch (error) {
+			console.error(
+				`Failed to clean integration test database ${testDatabase.directory}:`,
+				error.message,
+			);
+			_exitCode = 1;
+		}
 		process.exit(_exitCode);
 	});
