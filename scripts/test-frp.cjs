@@ -539,7 +539,6 @@ async function testNoFrpCapability() {
 				os: "test",
 				cpuModel: "test",
 				totalMemMB: 1024,
-				totalDiskMB: 10240,
 				clientVersion: "0.0.0",
 				capabilities: ["exec"], // NO "frp"
 			});
