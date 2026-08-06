@@ -165,12 +165,14 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 }
 
 function Overview({ client }: { client: ClientInfo }) {
+	// client 上报的 totalMemMB/totalDiskMB 实为 MiB（bytes ÷ 1024²），
+	// 展示按 GiB 口径（÷1024）换算，与资源管理器、文件面板一致
 	const fmt = (v: number | undefined) => {
 		if (v == null) return "—";
-		return v >= 1_000_000
-			? (v / 1_000_000).toFixed(1) + " TB"
-			: v >= 1_000
-				? (v / 1_000).toFixed(0) + " GB"
+		return v >= 1024 * 1024
+			? (v / (1024 * 1024)).toFixed(1) + " TB"
+			: v >= 1024
+				? (v / 1024).toFixed(0) + " GB"
 				: v + " MB";
 	};
 	return (

@@ -61,7 +61,7 @@ describe("MachineWorkspace overview", () => {
 		expect(screen.getByText("win32 10.0.26200 · c1")).toBeVisible();
 		expect(screen.getByText("Intel(R) Core(TM) i7-12700")).toBeVisible();
 		expect(screen.getByText("16 GB")).toBeVisible();
-		expect(screen.getByText("512 GB")).toBeVisible();
+		expect(screen.getByText("500 GB")).toBeVisible();
 		expect(screen.getByText("0.0.0")).toBeVisible();
 		expect(screen.getByText(/23\.5%/)).toBeTruthy();
 		expect(screen.getByText(/45\.2%/)).toBeTruthy();
@@ -153,8 +153,8 @@ describe("MachineWorkspace overview", () => {
 		renderWorkspace([client]);
 
 		expect(await screen.findByText("AMD EPYC")).toBeVisible();
-		expect(screen.getByText("33 GB")).toBeVisible();
-		expect(screen.getByText("1.0 TB")).toBeVisible();
+		expect(screen.getByText("32 GB")).toBeVisible();
+		expect(screen.getByText("977 GB")).toBeVisible();
 		expect(screen.getByText("1.0.0")).toBeVisible();
 
 		// 三个资源指标都保留进度语义，缺失值显示为 —
