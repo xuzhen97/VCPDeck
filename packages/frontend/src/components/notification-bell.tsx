@@ -44,7 +44,7 @@ export function NotificationBell() {
 		if (polling.current) return;
 		polling.current = true;
 		try {
-			const page = await sdk.jobs.list({ pageSize: 5 });
+			const page = await sdk.jobs.list({ pageSize: 100 });
 			const visibleJobs = page.data.filter(
 				(j) => !HIDDEN_JOB_TYPES.has(j.type),
 			);
@@ -163,6 +163,11 @@ export function NotificationBell() {
 												progress={job.progress}
 												status={job.status}
 												type={job.type}
+												storageKind={
+													job.payload?.storageKind === "alibaba"
+														? "alibaba"
+														: "local"
+												}
 											/>
 										</div>
 									))}
@@ -262,14 +267,18 @@ function ProgressBar({
 	progress,
 	status,
 	type,
+	storageKind,
 }: {
 	progress: JobProgress | null;
 	status: string;
 	type: string;
+	storageKind: "local" | "alibaba";
 }) {
 	const stage =
 		status === "waiting_input"
-			? "正在上传到阿里云盘"
+			? storageKind === "alibaba"
+				? "正在上传到阿里云盘"
+				: "正在上传到 Storage"
 			: status === "pending" && type === "file.import"
 				? "等待远程机器接收"
 				: type === "file.import"
@@ -288,7 +297,9 @@ function ProgressBar({
 	if (
 		progress.loaded >= progress.total &&
 		(type === "file.export" ||
-			(type === "file.import" && status === "waiting_input"))
+			(type === "file.import" &&
+				status === "waiting_input" &&
+				storageKind === "alibaba"))
 	) {
 		return (
 			<div>

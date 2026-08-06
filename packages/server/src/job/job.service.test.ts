@@ -123,6 +123,7 @@ describe("JobService upload sessions", () => {
 					targetPath: "uploads/a.txt",
 					fileId: "file-1",
 					overwrite: false,
+					storageKind: "local",
 				}),
 			}),
 		});

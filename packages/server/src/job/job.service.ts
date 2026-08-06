@@ -127,11 +127,13 @@ export class JobService {
       size: input.size,
       mimeType: input.mimeType,
     });
+    const backend = await this.storage.getBackendConfig();
     const payload = {
       rootDir: input.rootDir,
       targetPath: input.targetPath,
       fileId: pending.fileId,
       overwrite: input.overwrite === true,
+      storageKind: backend.kind,
     };
 
     await this.prisma.job.create({
@@ -148,7 +150,6 @@ export class JobService {
       },
     });
 
-    const backend = await this.storage.getBackendConfig();
     let upload: UploadTarget;
     if (backend.kind === "alibaba") {
       const session = await this.storage.createDirectUploadSession(

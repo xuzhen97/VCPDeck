@@ -81,7 +81,7 @@ describe("NotificationBell", () => {
 		renderBell({ jobs: { list, get: vi.fn() } });
 
 		await vi.advanceTimersByTimeAsync(0);
-		expect(list).toHaveBeenCalled();
+		expect(list).toHaveBeenCalledWith({ pageSize: 100 });
 		await act(async () => {}); // flush 轮询后的 setState
 		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
 		expect(screen.getByText(/big\.zip/)).toBeInTheDocument();
@@ -96,7 +96,10 @@ describe("NotificationBell", () => {
 					jobId: "upload-1",
 					type: "file.import",
 					status: "waiting_input" as JobInfo["status"],
-					payload: { targetPath: "uploads/a.txt" },
+					payload: {
+						targetPath: "uploads/a.txt",
+						storageKind: "alibaba",
+					},
 					progress: { loaded: 2, total: 5 },
 				}),
 			],
@@ -116,6 +119,32 @@ describe("NotificationBell", () => {
 		expect(screen.getByText(/40%/)).toBeInTheDocument();
 	});
 
+	it("waiting_input local 上传不显示阿里云盘", async () => {
+		const list = vi.fn().mockResolvedValue({
+			data: [
+				job({
+					jobId: "local-upload",
+					type: "file.import",
+					status: "waiting_input" as JobInfo["status"],
+					payload: { targetPath: "uploads/a.txt", storageKind: "local" },
+					progress: { loaded: 2, total: 5 },
+				}),
+			],
+			total: 1,
+			page: 1,
+			pageSize: 100,
+			totalPages: 1,
+		});
+		renderBell({ jobs: { list, get: vi.fn() } });
+
+		await vi.advanceTimersByTimeAsync(0);
+		await act(async () => {});
+		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
+
+		expect(screen.getByText(/正在上传到 Storage/)).toBeInTheDocument();
+		expect(screen.queryByText(/阿里云盘/)).not.toBeInTheDocument();
+	});
+
 	it("waiting_input 上传完成后显示阿里云盘保存状态", async () => {
 		const list = vi.fn().mockResolvedValue({
 			data: [
@@ -123,7 +152,10 @@ describe("NotificationBell", () => {
 					jobId: "upload-finalizing",
 					type: "file.import",
 					status: "waiting_input" as JobInfo["status"],
-					payload: { targetPath: "uploads/a.txt" },
+					payload: {
+						targetPath: "uploads/a.txt",
+						storageKind: "alibaba",
+					},
 					progress: { loaded: 5, total: 5 },
 				}),
 			],
