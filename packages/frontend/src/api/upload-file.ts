@@ -4,6 +4,8 @@ interface UploadFileOptions {
 }
 
 interface DirectUploadOptions extends UploadFileOptions {
+	/** 服务端创建会话时使用的固定分片大小 */
+	partSize: number;
 	/** 分片 URL 过期（403）时重新获取新 URL */
 	refreshPartUrl: (partNumber: number) => Promise<string>;
 }
@@ -18,7 +20,7 @@ export function uploadDirect(
 	file: File,
 	options: DirectUploadOptions,
 ): Promise<void> {
-	const partSize = Math.ceil(size / parts.length);
+	const partSize = options.partSize;
 	const queue = [...parts];
 	const loadedByPart = new Map<number, number>();
 	let loaded = 0;

@@ -208,6 +208,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 							.catch(() => {});
 					};
 					await uploadDirect(session.upload.parts, file.size, file, {
+						partSize: session.upload.partSize,
 						signal: controller.signal,
 						onProgress: (loaded, total) => {
 							setUploadState({

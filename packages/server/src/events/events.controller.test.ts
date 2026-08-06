@@ -96,6 +96,7 @@ describe("EventsController upload sessions", () => {
 			const session = {
 				fileId: "aliyun-file",
 				uploadId: "up-1",
+				partSize: 64,
 				parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
 			};
 			storageService.createExportSession.mockResolvedValue(session);

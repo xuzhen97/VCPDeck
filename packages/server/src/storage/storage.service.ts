@@ -160,6 +160,7 @@ export class StorageService implements OnModuleInit {
 	): Promise<{
 		fileId: string;
 		uploadId: string;
+		partSize: number;
 		parts: Array<{ partNumber: number; url: string }>;
 	}> {
 		const p = this.requireDirectProvider();
@@ -172,7 +173,12 @@ export class StorageService implements OnModuleInit {
 			where: { id: dbFileId },
 			data: { key: session.fileId },
 		});
-		return session;
+		return {
+			fileId: session.fileId,
+			uploadId: session.uploadId,
+			partSize: session.partSize,
+			parts: session.parts,
+		};
 	}
 
 	/** 完成上传方向直传：校验字节数、合并分片、File 置 completed */
@@ -213,6 +219,7 @@ export class StorageService implements OnModuleInit {
 	): Promise<{
 		fileId: string;
 		uploadId: string;
+		partSize: number;
 		parts: Array<{ partNumber: number; url: string }>;
 	}> {
 		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
@@ -246,7 +253,12 @@ export class StorageService implements OnModuleInit {
 			where: { id: file.id },
 			data: { size, key: session.fileId },
 		});
-		return session;
+		return {
+			fileId: session.fileId,
+			uploadId: session.uploadId,
+			partSize: session.partSize,
+			parts: session.parts,
+		};
 	}
 
 	/** 完成导出直传：校验字节数、合并分片、File 置 completed，返回真实 key */

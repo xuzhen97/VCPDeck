@@ -41,10 +41,11 @@ async function uploadParts(
 		readPart(partNumber: number, start: number, end: number): Promise<BodyInit>;
 		onProgress?(loaded: number): void;
 		signal?: AbortSignal;
+		partSize: number;
 		refreshUrl(partNumber: number): Promise<string>;
 	},
 ): Promise<void> {
-	const partSize = Math.ceil(size / parts.length);
+	const partSize = opts.partSize;
 	let loaded = 0;
 	const queue = [...parts];
 	async function worker() {
@@ -232,6 +233,7 @@ async function handleExport(
 	if (uploadRef.direct) {
 		const session = await negotiateExportSession(jobId, total);
 		await uploadParts(session.parts, total, {
+			partSize: session.partSize,
 			readPart: async (_n, start, end): Promise<BodyInit> =>
 				Readable.toWeb(
 					createReadStream(safe, { start, end: end - 1 }),

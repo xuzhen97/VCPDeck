@@ -341,6 +341,7 @@ describe("StorageService", () => {
 			directProvider.createDirectUpload.mockResolvedValue({
 				fileId: "aliyun-file",
 				uploadId: "up-1",
+				partSize: 64,
 				parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
 			});
 			prisma.file.update.mockResolvedValue({});
@@ -410,6 +411,7 @@ describe("StorageService", () => {
 			directProvider.createDirectUpload.mockResolvedValue({
 				fileId: "aliyun-file",
 				uploadId: "up-1",
+				partSize: 64,
 				parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
 			});
 			prisma.file.update.mockResolvedValue({});

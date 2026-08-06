@@ -84,6 +84,7 @@ describe("uploadDirect", () => {
 		const file = new File([new ArrayBuffer(10)], "big.bin");
 		const onProgress = vi.fn();
 		const promise = uploadDirect(parts, 10, file, {
+			partSize: 5,
 			onProgress,
 			refreshPartUrl: vi.fn(),
 		});
@@ -114,11 +115,39 @@ describe("uploadDirect", () => {
 		expect(onProgress).toHaveBeenCalledWith(10, 10);
 	});
 
+	it("按服务端分片大小切片，最后一片使用剩余字节", async () => {
+		vi.stubGlobal("XMLHttpRequest", FakeXhr);
+		const file = new File([new ArrayBuffer(13)], "big.bin");
+		const promise = uploadDirect(
+			[
+				{ partNumber: 1, url: "https://oss.example/p1" },
+				{ partNumber: 2, url: "https://oss.example/p2" },
+			],
+			13,
+			file,
+			{
+				partSize: 8,
+				refreshPartUrl: vi.fn(),
+			},
+		);
+
+		expect(FakeXhr.instances[0]!.send).toHaveBeenCalledWith(
+			expect.objectContaining({ size: 8 }),
+		);
+		expect(FakeXhr.instances[1]!.send).toHaveBeenCalledWith(
+			expect.objectContaining({ size: 5 }),
+		);
+		FakeXhr.instances[0]!.onload?.();
+		FakeXhr.instances[1]!.onload?.();
+		await expect(promise).resolves.toBeUndefined();
+	});
+
 	it("并发分片事件交错时汇总总进度且不回退", async () => {
 		vi.stubGlobal("XMLHttpRequest", FakeXhr);
 		const file = new File([new ArrayBuffer(10)], "big.bin");
 		const onProgress = vi.fn();
 		const promise = uploadDirect(parts, 10, file, {
+			partSize: 5,
 			onProgress,
 			refreshPartUrl: vi.fn(),
 		});
@@ -153,6 +182,7 @@ describe("uploadDirect", () => {
 			.fn()
 			.mockResolvedValue("https://oss.example/p1-new");
 		const promise = uploadDirect(parts, 10, file, {
+			partSize: 5,
 			refreshPartUrl,
 		});
 

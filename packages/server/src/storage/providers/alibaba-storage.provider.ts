@@ -180,6 +180,7 @@ constructor(config: Record<string, unknown> = {}) {
 	): Promise<{
 		fileId: string;
 		uploadId: string;
+		partSize: number;
 		parts: Array<{ partNumber: number; url: string }>;
 	}> {
 		const rt = await this.ensureReady();
@@ -227,7 +228,7 @@ constructor(config: Record<string, unknown> = {}) {
 		if (parts.length !== partCount) {
 			throw new Error("阿里云盘未返回全部分片上传 URL");
 		}
-		return { fileId, uploadId, parts };
+		return { fileId, uploadId, partSize, parts };
 	}
 
 	/** 续期指定分片的上传 URL */

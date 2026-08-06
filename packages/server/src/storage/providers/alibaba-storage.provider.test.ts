@@ -113,6 +113,7 @@ describe("AlibabaStorageProvider 直传会话", () => {
 		expect(result).toMatchObject({
 			fileId: "file-1",
 			uploadId: "upload-1",
+			partSize: ALIBABA_PART_SIZE,
 			parts: [
 				{ partNumber: 1, url: "https://oss.example/p1" },
 				{ partNumber: 2, url: "https://oss.example/p2" },

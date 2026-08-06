@@ -366,6 +366,7 @@ describe("FilesPanel", () => {
 					kind: "direct",
 					fileId: "aliyun-file",
 					uploadId: "up-1",
+					partSize: 5,
 					parts: [
 						{ partNumber: 1, url: "https://oss.example/p1" },
 						{ partNumber: 2, url: "https://oss.example/p2" },
@@ -387,6 +388,7 @@ describe("FilesPanel", () => {
 				5,
 				file,
 				expect.objectContaining({
+					partSize: 5,
 					onProgress: expect.any(Function),
 					refreshPartUrl: expect.any(Function),
 				}),
@@ -416,6 +418,7 @@ describe("FilesPanel", () => {
 					kind: "direct",
 					fileId: "aliyun-file",
 					uploadId: "up-1",
+					partSize: 5,
 					parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
 				},
 			}),
@@ -464,6 +467,7 @@ describe("FilesPanel", () => {
 					kind: "direct",
 					fileId: "aliyun-file",
 					uploadId: "up-1",
+					partSize: 5,
 					parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
 				},
 			}),

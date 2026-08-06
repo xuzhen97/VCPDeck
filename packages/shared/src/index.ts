@@ -250,6 +250,7 @@ export type UploadTarget =
 			kind: "direct";
 			fileId: string;
 			uploadId: string;
+			partSize: number;
 			parts: Array<{ partNumber: number; url: string }>;
 	  };
 
@@ -279,6 +280,7 @@ export interface FileExportSessionCreate {
 export interface FileExportSession {
 	fileId: string;
 	uploadId: string;
+	partSize: number;
 	parts: Array<{ partNumber: number; url: string }>;
 }
 

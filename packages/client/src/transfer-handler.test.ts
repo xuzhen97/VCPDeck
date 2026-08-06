@@ -202,6 +202,62 @@ describe("handleTransfer file.export", () => {
 		expect(progress.length).toBeGreaterThanOrEqual(2);
 	});
 
+	it("直传导出按服务端分片大小读取文件", async () => {
+		const uploadedSizes: number[] = [];
+		const fetcher = vi.fn().mockImplementation(
+			async (_url: unknown, init?: { body?: BodyInit }) => {
+				if (init?.body instanceof ReadableStream) {
+					const reader = init.body.getReader();
+					let size = 0;
+					while (true) {
+						const chunk = await reader.read();
+						if (chunk.done) break;
+						size += chunk.value.byteLength;
+					}
+					uploadedSizes.push(size);
+				}
+				const call = fetcher.mock.calls.length;
+				if (call === 1) {
+					return {
+						ok: true,
+						json: async () => ({
+							fileId: "aliyun-file",
+							uploadId: "up-1",
+							partSize: 8,
+							parts: [
+								{ partNumber: 1, url: "https://oss.example/p1" },
+								{ partNumber: 2, url: "https://oss.example/p2" },
+							],
+						}),
+					};
+				}
+				return { ok: true, json: async () => ({ key: "aliyun-file" }) };
+			},
+		);
+		vi.stubGlobal("fetch", fetcher);
+		mockFsPromises.stat.mockResolvedValue({ size: 13 });
+		vi.mocked(createReadStream).mockImplementation(
+			((_path: unknown, options?: { start?: number; end?: number }) =>
+				Readable.from([
+					Buffer.alloc((options?.end ?? 0) - (options?.start ?? 0) + 1),
+				]) as never) as never,
+		);
+		const socket = mockSocket();
+
+		await handleTransfer(
+			{
+				...exportJob(),
+				payload: {
+					...exportJob().payload,
+					uploadRef: { ...exportJob().payload.uploadRef, url: "", direct: true },
+				},
+			},
+			socket,
+		);
+
+		expect(uploadedSizes).toEqual([8, 5]);
+	});
+
 	it("uploadRef.direct 时分片直传并完成导出会话", async () => {
 		const fetcher = vi
 			.fn()
@@ -211,6 +267,7 @@ describe("handleTransfer file.export", () => {
 				json: async () => ({
 					fileId: "aliyun-file",
 					uploadId: "up-1",
+					partSize: 5,
 					parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
 				}),
 			})
