@@ -107,7 +107,7 @@ export function ConsoleShell({
 					</div>
 				</aside>
 				<section className="vcpdeck-main-column">
-					<header className="flex h-16 items-center justify-between border-b border-border/70 bg-card/30 px-4 backdrop-blur-xl sm:px-6">
+					<header className="relative z-40 flex h-16 items-center justify-between border-b border-border/70 bg-card/30 px-4 backdrop-blur-xl sm:px-6">
 						<span className="font-semibold lg:hidden">VCPDeck</span>
 						<div className="ml-auto flex items-center gap-2">
 							<NotificationBell />

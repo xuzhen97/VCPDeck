@@ -33,6 +33,18 @@ describe("ConsoleShell", () => {
 		}
 	});
 
+	it("keeps the notification layer above the scrolling main content", () => {
+		render(
+			<MemoryRouter>
+				<ConsoleShell identity={admin} onLogout={vi.fn()}>
+					<p>content</p>
+				</ConsoleShell>
+			</MemoryRouter>,
+		);
+
+		expect(screen.getByRole("banner")).toHaveClass("relative", "z-40");
+	});
+
 	it("requires exact target before destructive confirmation", async () => {
 		const onConfirm = vi.fn();
 		render(
