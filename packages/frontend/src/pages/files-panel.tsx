@@ -48,10 +48,11 @@ type PendingUpload = {
 };
 
 type UploadState = {
-	phase: "uploading" | "importing" | "done" | "error";
+	phase: "uploading" | "finalizing" | "importing" | "done" | "error";
 	filename: string;
 	loaded: number;
 	total: number;
+	storage?: "alibaba";
 	message?: string;
 };
 
@@ -216,6 +217,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 								filename: file.name,
 								loaded,
 								total,
+								storage: "alibaba",
 							});
 							reportProgress(loaded);
 						},
@@ -230,6 +232,13 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 					});
 					reportProgress(file.size, true);
 					await reportQueue;
+					setUploadState({
+						phase: "finalizing",
+						filename: file.name,
+						loaded: file.size,
+						total: file.size,
+						storage: "alibaba",
+					});
 				} else {
 					await uploadFile(uploadUrl(session.upload.url), file, {
 						signal: controller.signal,
@@ -247,13 +256,19 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 					{ uploadedBytes: file.size },
 					controller.signal,
 				);
+				setUploadState({
+					phase: "importing",
+					filename: file.name,
+					loaded: 0,
+					total: file.size,
+				});
 				job = await sdk.jobs.wait(activated.jobId, {
 					signal: controller.signal,
 					onUpdate: (next) =>
 						setUploadState({
 							phase: "importing",
 							filename: file.name,
-							loaded: next.progress?.loaded ?? file.size,
+							loaded: next.progress?.loaded ?? 0,
 							total: next.progress?.total ?? file.size,
 						}),
 				});
@@ -555,14 +570,18 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 													/>
 												)}
 												<span className="min-w-0 break-all">
-													{uploadState.phase === "uploading" &&
-														`正在上传 ${uploadState.filename}`}
-													{uploadState.phase === "importing" &&
-														`正在写入远程目录：${uploadState.filename}`}
-													{uploadState.phase === "done" &&
-														`上传完成：${uploadState.filename}`}
-													{uploadState.phase === "error" &&
-														`上传失败：${uploadState.message ?? uploadState.filename}`}
+											{uploadState.phase === "uploading" &&
+												(uploadState.storage === "alibaba"
+													? `正在上传到阿里云盘：${uploadState.filename}`
+													: `正在上传 ${uploadState.filename}`)}
+											{uploadState.phase === "finalizing" &&
+												"正在保存到阿里云盘…"}
+											{uploadState.phase === "importing" &&
+												`正在导入远程机器：${uploadState.filename}`}
+											{uploadState.phase === "done" &&
+												`导入完成：${uploadState.filename}`}
+											{uploadState.phase === "error" &&
+												`导入失败：${uploadState.message ?? uploadState.filename}`}
 												</span>
 											</div>
 											{uploadState.phase === "done" && (

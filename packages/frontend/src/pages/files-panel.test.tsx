@@ -337,12 +337,12 @@ describe("FilesPanel", () => {
 			new File(["hello"], "report.txt", { type: "text/plain" }),
 		);
 
-		expect(await screen.findByText("上传完成：report.txt")).toBeVisible();
+		expect(await screen.findByText("导入完成：report.txt")).toBeVisible();
 		await userEvent.click(
 			screen.getByRole("button", { name: "关闭上传提示" }),
 		);
 
-		expect(screen.queryByText("上传完成：report.txt")).not.toBeInTheDocument();
+		expect(screen.queryByText("导入完成：report.txt")).not.toBeInTheDocument();
 		expect(files.completeUpload).toHaveBeenCalledWith(
 			"upload-job",
 			{ uploadedBytes: 5 },
@@ -400,6 +400,110 @@ describe("FilesPanel", () => {
 			expect.any(AbortSignal),
 		);
 		expect(uploadFile).not.toHaveBeenCalled();
+	});
+
+	it("direct 上传完成后显示阿里云盘保存阶段", async () => {
+		let resolveComplete!: (value: {
+			jobId: string;
+			status: string;
+			type: string;
+		}) => void;
+		vi.mocked(uploadDirect).mockImplementation(async (_parts, _size, _file, opts) => {
+			opts.onProgress?.(5, 5);
+		});
+		renderFiles({
+			createUploadSession: vi.fn().mockResolvedValue({
+				jobId: "upload-job",
+				fileId: "file-1",
+				status: "waiting_input",
+				upload: {
+					kind: "direct",
+					fileId: "aliyun-file",
+					uploadId: "up-1",
+					partSize: 5,
+					parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
+				},
+			}),
+			completeUpload: vi.fn().mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveComplete = resolve;
+					}),
+			),
+		});
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+
+		await userEvent.upload(
+			screen.getByLabelText("选择上传文件"),
+			new File(["hello"], "report.txt", { type: "text/plain" }),
+		);
+
+		expect(await screen.findByText("正在保存到阿里云盘…")).toBeVisible();
+		await act(async () => {
+			resolveComplete({
+				jobId: "upload-job",
+				status: "running",
+				type: "file.import",
+			});
+		});
+	});
+
+	it("远程导入阶段从 0 开始并跟随 Job 进度", async () => {
+		let onUpdate!: (job: {
+			progress: { loaded: number; total: number } | null;
+		}) => void;
+		let resolveWait!: (value: {
+			jobId: string;
+			status: string;
+			type: string;
+			progress: { loaded: number; total: number };
+		}) => void;
+		vi.mocked(uploadDirect).mockImplementation(async (_parts, _size, _file, opts) => {
+			opts.onProgress?.(5, 5);
+		});
+		const files = renderFiles({
+			createUploadSession: vi.fn().mockResolvedValue({
+				jobId: "upload-job",
+				fileId: "file-1",
+				status: "waiting_input",
+				upload: {
+					kind: "direct",
+					fileId: "aliyun-file",
+					uploadId: "up-1",
+					partSize: 5,
+					parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
+				},
+			}),
+		});
+		(files as Record<string, any>).jobs.wait.mockImplementation(
+			(_jobId: string, options: { onUpdate: typeof onUpdate }) => {
+				onUpdate = options.onUpdate;
+				return new Promise((resolve) => {
+					resolveWait = resolve;
+				});
+			},
+		);
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+
+		await userEvent.upload(
+			screen.getByLabelText("选择上传文件"),
+			new File(["hello"], "report.txt", { type: "text/plain" }),
+		);
+
+		expect(
+			await screen.findByText("正在导入远程机器：report.txt"),
+		).toBeVisible();
+		expect(screen.getByRole("progressbar")).toHaveValue(0);
+		act(() => onUpdate({ progress: { loaded: 2, total: 5 } }));
+		expect(screen.getByRole("progressbar")).toHaveValue(2);
+		await act(async () => {
+			resolveWait({
+				jobId: "upload-job",
+				status: "done",
+				type: "file.import",
+				progress: { loaded: 5, total: 5 },
+			});
+		});
 	});
 
 	it("direct 会话分片完成后节流上报进度", async () => {
