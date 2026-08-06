@@ -295,8 +295,9 @@ it("shows the permanent download link in the job drawer for a completed file.exp
 		pageSize: 20,
 		totalPages: 1,
 	});
-	const downloadUrl = vi.fn((key: string) =>
-		`/api/storage/download-redirect/${encodeURIComponent(key)}`
+	const downloadUrl = vi.fn(
+		(key: string) =>
+			`/api/storage/download-redirect/${encodeURIComponent(key)}`,
 	);
 	const client = {
 		auth: { me: async () => identity },
@@ -349,8 +350,9 @@ it("shows the permanent download link in the job drawer for a completed file.imp
 		pageSize: 20,
 		totalPages: 1,
 	});
-	const downloadUrl = vi.fn((key: string) =>
-		`/api/storage/download-redirect/${encodeURIComponent(key)}`
+	const downloadUrl = vi.fn(
+		(key: string) =>
+			`/api/storage/download-redirect/${encodeURIComponent(key)}`,
 	);
 	const client = {
 		auth: { me: async () => identity },

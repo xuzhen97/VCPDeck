@@ -532,9 +532,9 @@ describe("FilesPanel", () => {
 
 		await userEvent.click(screen.getByRole("menuitem", { name: "导出下载" }));
 		await waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
-		expect((files as Record<string, any>).storage.downloadUrl).toHaveBeenCalledWith(
-			"aliyun-file",
-		);
+		expect(
+			(files as Record<string, any>).storage.downloadUrl,
+		).toHaveBeenCalledWith("aliyun-file");
 	});
 
 	it("文件查看器导出使用稳定下载地址", async () => {
@@ -553,9 +553,9 @@ describe("FilesPanel", () => {
 			await screen.findByRole("button", { name: "导出下载" }),
 		);
 		await waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
-		expect((files as Record<string, any>).storage.downloadUrl).toHaveBeenCalledWith(
-			"aliyun-file",
-		);
+		expect(
+			(files as Record<string, any>).storage.downloadUrl,
+		).toHaveBeenCalledWith("aliyun-file");
 		expect(anchorClick.mock.instances[0]).toHaveProperty(
 			"href",
 			`${window.location.origin}/api/storage/download-redirect/aliyun-file`,

@@ -41,7 +41,9 @@ describe("FileDetail", () => {
 			</SdkProvider>,
 		);
 
-		await userEvent.click(await screen.findByRole("button", { name: "导出下载" }));
+		await userEvent.click(
+			await screen.findByRole("button", { name: "导出下载" }),
+		);
 		await waitFor(() => expect(click).toHaveBeenCalledOnce());
 		expect(downloadUrl).toHaveBeenCalledWith("aliyun-file");
 	});

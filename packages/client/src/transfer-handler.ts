@@ -73,9 +73,8 @@ async function uploadParts(
 		}
 	}
 	await Promise.all(
-		Array.from(
-			{ length: Math.min(PART_CONCURRENCY, parts.length) },
-			() => worker(),
+		Array.from({ length: Math.min(PART_CONCURRENCY, parts.length) }, () =>
+			worker(),
 		),
 	);
 }
@@ -234,7 +233,9 @@ async function handleExport(
 		const session = await negotiateExportSession(jobId, total);
 		await uploadParts(session.parts, total, {
 			readPart: async (_n, start, end): Promise<BodyInit> =>
-				Readable.toWeb(createReadStream(safe, { start, end: end - 1 })) as unknown as BodyInit,
+				Readable.toWeb(
+					createReadStream(safe, { start, end: end - 1 }),
+				) as unknown as BodyInit,
 			onProgress: (loaded) =>
 				socket.emit(Events.JOB_PROGRESS, { jobId, loaded, total }),
 			refreshUrl: (partNumber) => refreshExportPartUrl(jobId, partNumber),

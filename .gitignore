@@ -19,3 +19,4 @@ CLAUDE.md
 packages/server/data/
 .superpowers/
 .playwright-mcp/
+.vscode/

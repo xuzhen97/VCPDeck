@@ -51,11 +51,7 @@ export function createFilesApi(
 				signal,
 			),
 		/** 导出直传会话协商（Client stat 文件后调用） */
-		createExportSession: (
-			jobId: string,
-			size: number,
-			signal?: AbortSignal,
-		) =>
+		createExportSession: (jobId: string, size: number, signal?: AbortSignal) =>
 			client.request<FileExportSession>(
 				"POST",
 				"/api/files/export-sessions",
