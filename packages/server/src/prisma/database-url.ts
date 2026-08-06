@@ -6,5 +6,8 @@ export function resolveDatabaseUrl(
 	databaseUrl = process.env.DATABASE_URL,
 	cwd = process.cwd(),
 ): string {
-	return databaseUrl || pathToFileURL(path.join(cwd, "prisma", "dev.db")).href;
+	if (!databaseUrl || databaseUrl === "file:./dev.db") {
+		return pathToFileURL(path.join(cwd, "prisma", "dev.db")).href;
+	}
+	return databaseUrl;
 }
