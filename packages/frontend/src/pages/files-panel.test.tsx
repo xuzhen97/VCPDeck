@@ -329,6 +329,27 @@ describe("FilesPanel", () => {
 		);
 	});
 
+	it("closes the completed upload notice for the current page", async () => {
+		const files = renderFiles();
+		await userEvent.click(await screen.findByRole("button", { name: "D:\\" }));
+		await userEvent.upload(
+			screen.getByLabelText("选择上传文件"),
+			new File(["hello"], "report.txt", { type: "text/plain" }),
+		);
+
+		expect(await screen.findByText("上传完成：report.txt")).toBeVisible();
+		await userEvent.click(
+			screen.getByRole("button", { name: "关闭上传提示" }),
+		);
+
+		expect(screen.queryByText("上传完成：report.txt")).not.toBeInTheDocument();
+		expect(files.completeUpload).toHaveBeenCalledWith(
+			"upload-job",
+			{ uploadedBytes: 5 },
+			expect.any(AbortSignal),
+		);
+	});
+
 	it("direct 会话走分片直传并在完成后 complete", async () => {
 		vi.mocked(uploadFile).mockClear();
 		vi.mocked(uploadDirect).mockImplementation(

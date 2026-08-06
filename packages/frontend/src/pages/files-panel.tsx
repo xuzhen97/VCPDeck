@@ -3,6 +3,7 @@ import {
 	ChevronRight,
 	File,
 	Folder,
+	CheckCircle2,
 	FolderPlus,
 	LoaderCircle,
 	Maximize2,
@@ -544,15 +545,38 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 										role={uploadState.phase === "error" ? "alert" : "status"}
 										className={`mb-3 rounded border px-3 py-2 text-sm ${uploadState.phase === "error" ? "border-red-500/40 bg-red-500/10 text-red-400" : uploadState.phase === "done" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400" : "border-border bg-secondary/30 text-muted-foreground"}`}
 									>
-										<div>
-											{uploadState.phase === "uploading" &&
-												`正在上传 ${uploadState.filename}`}
-											{uploadState.phase === "importing" &&
-												`正在写入远程目录：${uploadState.filename}`}
-											{uploadState.phase === "done" &&
-												`上传完成：${uploadState.filename}`}
-											{uploadState.phase === "error" &&
-												`上传失败：${uploadState.message ?? uploadState.filename}`}
+										<div className="flex items-center justify-between gap-2">
+											<div className="flex min-w-0 items-center gap-2">
+												{uploadState.phase === "done" && (
+													<CheckCircle2
+														aria-hidden="true"
+														className="size-4 shrink-0"
+													/>
+												)}
+												<span className="min-w-0 break-all">
+													{uploadState.phase === "uploading" &&
+														`正在上传 ${uploadState.filename}`}
+													{uploadState.phase === "importing" &&
+														`正在写入远程目录：${uploadState.filename}`}
+													{uploadState.phase === "done" &&
+														`上传完成：${uploadState.filename}`}
+													{uploadState.phase === "error" &&
+														`上传失败：${uploadState.message ?? uploadState.filename}`}
+												</span>
+											</div>
+											{uploadState.phase === "done" && (
+												<Button
+													type="button"
+													size="icon"
+													variant="ghost"
+													className="size-11 min-h-11 shrink-0"
+													aria-label="关闭上传提示"
+													title="关闭上传提示"
+													onClick={() => setUploadState(null)}
+												>
+													<X aria-hidden="true" className="size-4" />
+												</Button>
+											)}
 										</div>
 										{uploadState.phase !== "error" &&
 											uploadState.phase !== "done" && (
