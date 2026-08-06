@@ -2,7 +2,6 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { fileURLToPath } = require("node:url");
 
 const {
 	createIntegrationTestDb,
@@ -14,9 +13,10 @@ test("creates and cleans a unique integration database directory", () => {
 	const second = createIntegrationTestDb();
 	try {
 		assert.notEqual(first.directory, second.directory);
+		assert.match(path.basename(first.directory), /^vcpdeck-db-test-/);
 		assert.equal(
-			path.dirname(fileURLToPath(first.databaseUrl)),
-			first.directory,
+			first.databaseUrl,
+			`file:${path.join(first.directory, "test.db").replace(/\\/g, "/")}`,
 		);
 		fs.writeFileSync(path.join(first.directory, "test.db"), "test");
 	} finally {
@@ -32,4 +32,6 @@ test("root integration test no longer deletes the development database", () => {
 	assert.doesNotMatch(source, /unlinkSync\s*\(/);
 	assert.doesNotMatch(source, /["']dev\.db["']/);
 	assert.match(source, /DATABASE_URL:\s*testDatabase\.databaseUrl/);
+	assert.doesNotMatch(source, /spawn\("pnpm"[\s\S]*?shell:\s*true/);
+	assert.match(source, /process\.env\.ComSpec/);
 });

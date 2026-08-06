@@ -1,16 +1,13 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
 
-const prefix = path.join(os.tmpdir(), "vcpdeck-test-");
+const prefix = path.join(os.tmpdir(), "vcpdeck-db-test-");
 
 function createIntegrationTestDb() {
 	const directory = fs.mkdtempSync(prefix);
-	return {
-		directory,
-		databaseUrl: pathToFileURL(path.join(directory, "test.db")).href,
-	};
+	const databasePath = path.join(directory, "test.db").replace(/\\/g, "/");
+	return { directory, databaseUrl: `file:${databasePath}` };
 }
 
 function cleanupIntegrationTestDb(context) {

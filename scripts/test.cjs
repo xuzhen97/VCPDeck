@@ -1136,10 +1136,11 @@ async function main() {
 
 	// 1. Start server
 	console.log("[setup] Starting server...");
-	_serverProcess = spawn("pnpm", ["start"], {
+	const serverCommand = isWin ? process.env.ComSpec || "cmd.exe" : "pnpm";
+	const serverArgs = isWin ? ["/d", "/s", "/c", "pnpm start"] : ["start"];
+	_serverProcess = spawn(serverCommand, serverArgs, {
 		cwd: serverDir,
 		stdio: ["ignore", "pipe", "pipe"],
-		shell: true,
 		env: {
 			...process.env,
 			VCPDECK_ADMIN_PASSWORD: ADMIN_PASSWORD,
