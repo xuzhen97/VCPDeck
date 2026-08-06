@@ -570,18 +570,18 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 													/>
 												)}
 												<span className="min-w-0 break-all">
-											{uploadState.phase === "uploading" &&
-												(uploadState.storage === "alibaba"
-													? `正在上传到阿里云盘：${uploadState.filename}`
-													: `正在上传 ${uploadState.filename}`)}
-											{uploadState.phase === "finalizing" &&
-												"正在保存到阿里云盘…"}
-											{uploadState.phase === "importing" &&
-												`正在导入远程机器：${uploadState.filename}`}
-											{uploadState.phase === "done" &&
-												`导入完成：${uploadState.filename}`}
-											{uploadState.phase === "error" &&
-												`导入失败：${uploadState.message ?? uploadState.filename}`}
+													{uploadState.phase === "uploading" &&
+														(uploadState.storage === "alibaba"
+															? `正在上传到阿里云盘：${uploadState.filename}`
+															: `正在上传 ${uploadState.filename}`)}
+													{uploadState.phase === "finalizing" &&
+														"正在保存到阿里云盘…"}
+													{uploadState.phase === "importing" &&
+														`正在导入远程机器：${uploadState.filename}`}
+													{uploadState.phase === "done" &&
+														`导入完成：${uploadState.filename}`}
+													{uploadState.phase === "error" &&
+														`导入失败：${uploadState.message ?? uploadState.filename}`}
 												</span>
 											</div>
 											{uploadState.phase === "done" && (

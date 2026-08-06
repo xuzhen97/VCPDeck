@@ -175,7 +175,8 @@ describe("StorageService", () => {
 					key: "aliyun-file-id",
 					status: "completed",
 					size: 5,
-					sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+					sha256:
+						"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
 				},
 			});
 		});
@@ -331,9 +332,7 @@ describe("StorageService", () => {
 		};
 
 		function mockDirectProvider() {
-			vi.spyOn(service, "getProvider").mockReturnValue(
-				directProvider as never,
-			);
+			vi.spyOn(service, "getProvider").mockReturnValue(directProvider as never);
 		}
 
 		it("createDirectUploadSession 建会话并更新 File key 为阿里云 fileId", async () => {
@@ -457,10 +456,12 @@ describe("StorageService", () => {
 				expiresAt: 1760000000000,
 			});
 
-			await expect(service.createDownloadToken("aliyun-file")).resolves.toEqual({
-				url: "https://download.example/x",
-				expiresAt: 1760000000000,
-			});
+			await expect(service.createDownloadToken("aliyun-file")).resolves.toEqual(
+				{
+					url: "https://download.example/x",
+					expiresAt: 1760000000000,
+				},
+			);
 		});
 
 		it("local provider 上 createDownloadToken 保持签名 URL", async () => {

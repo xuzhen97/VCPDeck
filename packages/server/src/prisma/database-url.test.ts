@@ -24,13 +24,13 @@ describe("resolveDatabaseUrl", () => {
 		);
 	});
 
-	it.each([undefined, ""])(
-		"defaults to the server development database for %j",
-		(databaseUrl) => {
-			const cwd = path.resolve("test-server");
-			expect(resolveDatabaseUrl(databaseUrl, cwd)).toBe(
-				pathToFileURL(path.join(cwd, "prisma", "dev.db")).href,
-			);
-		},
-	);
+	it.each([
+		undefined,
+		"",
+	])("defaults to the server development database for %j", (databaseUrl) => {
+		const cwd = path.resolve("test-server");
+		expect(resolveDatabaseUrl(databaseUrl, cwd)).toBe(
+			pathToFileURL(path.join(cwd, "prisma", "dev.db")).href,
+		);
+	});
 });

@@ -338,9 +338,7 @@ describe("FilesPanel", () => {
 		);
 
 		expect(await screen.findByText("导入完成：report.txt")).toBeVisible();
-		await userEvent.click(
-			screen.getByRole("button", { name: "关闭上传提示" }),
-		);
+		await userEvent.click(screen.getByRole("button", { name: "关闭上传提示" }));
 
 		expect(screen.queryByText("导入完成：report.txt")).not.toBeInTheDocument();
 		expect(files.completeUpload).toHaveBeenCalledWith(
@@ -408,9 +406,11 @@ describe("FilesPanel", () => {
 			status: string;
 			type: string;
 		}) => void;
-		vi.mocked(uploadDirect).mockImplementation(async (_parts, _size, _file, opts) => {
-			opts.onProgress?.(5, 5);
-		});
+		vi.mocked(uploadDirect).mockImplementation(
+			async (_parts, _size, _file, opts) => {
+				opts.onProgress?.(5, 5);
+			},
+		);
 		renderFiles({
 			createUploadSession: vi.fn().mockResolvedValue({
 				jobId: "upload-job",
@@ -458,9 +458,11 @@ describe("FilesPanel", () => {
 			type: string;
 			progress: { loaded: number; total: number };
 		}) => void;
-		vi.mocked(uploadDirect).mockImplementation(async (_parts, _size, _file, opts) => {
-			opts.onProgress?.(5, 5);
-		});
+		vi.mocked(uploadDirect).mockImplementation(
+			async (_parts, _size, _file, opts) => {
+				opts.onProgress?.(5, 5);
+			},
+		);
 		const files = renderFiles({
 			createUploadSession: vi.fn().mockResolvedValue({
 				jobId: "upload-job",

@@ -23,7 +23,10 @@ function loadConfig(databaseUrl) {
 
 test("Prisma config preserves the development default", () => {
 	for (const databaseUrl of [undefined, ""]) {
-		assert.equal(loadConfig(databaseUrl).datasource.url, "file:./prisma/dev.db");
+		assert.equal(
+			loadConfig(databaseUrl).datasource.url,
+			"file:./prisma/dev.db",
+		);
 	}
 });
 

@@ -204,8 +204,9 @@ describe("handleTransfer file.export", () => {
 
 	it("直传导出按服务端分片大小读取文件", async () => {
 		const uploadedSizes: number[] = [];
-		const fetcher = vi.fn().mockImplementation(
-			async (_url: unknown, init?: { body?: BodyInit }) => {
+		const fetcher = vi
+			.fn()
+			.mockImplementation(async (_url: unknown, init?: { body?: BodyInit }) => {
 				if (init?.body instanceof ReadableStream) {
 					const reader = init.body.getReader();
 					let size = 0;
@@ -232,8 +233,7 @@ describe("handleTransfer file.export", () => {
 					};
 				}
 				return { ok: true, json: async () => ({ key: "aliyun-file" }) };
-			},
-		);
+			});
 		vi.stubGlobal("fetch", fetcher);
 		mockFsPromises.stat.mockResolvedValue({ size: 13 });
 		vi.mocked(createReadStream).mockImplementation(
@@ -249,7 +249,11 @@ describe("handleTransfer file.export", () => {
 				...exportJob(),
 				payload: {
 					...exportJob().payload,
-					uploadRef: { ...exportJob().payload.uploadRef, url: "", direct: true },
+					uploadRef: {
+						...exportJob().payload.uploadRef,
+						url: "",
+						direct: true,
+					},
 				},
 			},
 			socket,

@@ -103,13 +103,13 @@ export function NotificationBell() {
 				onClick={() => setOpen((v) => !v)}
 				className="relative"
 			>
-					<Bell aria-hidden="true" className="size-4" />
-					{activeCount > 0 && (
-						<span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-							{activeCount}
-						</span>
-					)}
-				</Button>
+				<Bell aria-hidden="true" className="size-4" />
+				{activeCount > 0 && (
+					<span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+						{activeCount}
+					</span>
+				)}
+			</Button>
 			{open && (
 				<div
 					role="dialog"
@@ -118,10 +118,7 @@ export function NotificationBell() {
 				>
 					<header className="flex items-center justify-between border-b border-border/70 px-4 py-3">
 						<div className="flex items-center gap-2">
-							<Bell
-								aria-hidden="true"
-								className="size-4 text-primary"
-							/>
+							<Bell aria-hidden="true" className="size-4 text-primary" />
 							<h2 className="text-sm font-semibold">任务通知</h2>
 						</div>
 						{activeCount > 0 && (

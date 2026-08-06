@@ -65,11 +65,11 @@ interface RuntimeConfig {
 
 @Injectable()
 export class AlibabaStorageProvider implements StorageProvider {
-private readonly logger = new Logger(AlibabaStorageProvider.name);
-private readonly signSecret: string;
-private runtime: RuntimeConfig | null = null;
-private persistTokens?: (tokens: TokenPersistence) => Promise<void>;
-constructor(config: Record<string, unknown> = {}) {
+	private readonly logger = new Logger(AlibabaStorageProvider.name);
+	private readonly signSecret: string;
+	private runtime: RuntimeConfig | null = null;
+	private persistTokens?: (tokens: TokenPersistence) => Promise<void>;
+	constructor(config: Record<string, unknown> = {}) {
 		const parsed = config as Partial<AlibabaStorageConfig>;
 		this.signSecret = parsed.signSecret || randomUUID();
 

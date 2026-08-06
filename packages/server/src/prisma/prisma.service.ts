@@ -5,12 +5,12 @@ import { resolveDatabaseUrl } from "./database-url.js";
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
-  constructor() {
-    const factory = new PrismaLibSql({ url: resolveDatabaseUrl() }, {});
-    super({ adapter: factory });
-  }
+	constructor() {
+		const factory = new PrismaLibSql({ url: resolveDatabaseUrl() }, {});
+		super({ adapter: factory });
+	}
 
-  async onModuleInit() {
-    await this.$connect();
-  }
+	async onModuleInit() {
+		await this.$connect();
+	}
 }
