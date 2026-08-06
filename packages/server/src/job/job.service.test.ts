@@ -196,6 +196,7 @@ describe("JobService upload sessions", () => {
 			data: expect.objectContaining({
 				status: "pending",
 				payload: expect.stringContaining("downloadRef"),
+				progress: JSON.stringify({ loaded: 0, total: 5 }),
 			}),
 		});
 		expect(result).toMatchObject({

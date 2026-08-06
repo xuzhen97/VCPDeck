@@ -268,7 +268,11 @@ export class JobService {
     };
     await this.prisma.job.update({
       where: { id: jobId },
-      data: { status: "pending", payload: JSON.stringify(finalPayload) },
+      data: {
+        status: "pending",
+        payload: JSON.stringify(finalPayload),
+        progress: JSON.stringify({ loaded: 0, total: download.size }),
+      },
     });
 
     const dispatch = await this.scheduler.tryDispatch(job.clientId);
