@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
-import type { MachineRegister, Heartbeat, ClientInfo } from "@vcpdeck/shared";
+import type { MachineRegister, Heartbeat, ClientInfo, DiskInfo } from "@vcpdeck/shared";
 
 @Injectable()
 export class ClientService {
@@ -17,7 +17,6 @@ export class ClientService {
         os: dto.os,
         cpuModel: dto.cpuModel,
         totalMemMB: dto.totalMemMB,
-        totalDiskMB: dto.totalDiskMB,
         clientVersion: dto.clientVersion,
         capabilities: JSON.stringify(dto.capabilities),
         online: true,
@@ -29,7 +28,6 @@ export class ClientService {
         os: dto.os,
         cpuModel: dto.cpuModel,
         totalMemMB: dto.totalMemMB,
-        totalDiskMB: dto.totalDiskMB,
         clientVersion: dto.clientVersion,
         capabilities: JSON.stringify(dto.capabilities),
         online: true,
@@ -46,7 +44,7 @@ export class ClientService {
         lastHeartbeatAt: new Date(),
         cpuPercent: dto.cpuPercent,
         memPercent: dto.memPercent,
-        diskPercent: dto.diskPercent,
+        disks: JSON.stringify(dto.disks),
         runningJobs: JSON.stringify(dto.runningJobs),
       },
     });
@@ -84,19 +82,24 @@ export class ClientService {
       } catch {
         // ponytail: stored as JSON, fallback to empty on corruption
       }
+      let disks: DiskInfo[] = [];
+      try {
+        disks = JSON.parse(c.disks) as DiskInfo[];
+      } catch {
+        // ponytail: stored as JSON, fallback to empty on corruption
+      }
       return {
         clientId: c.id,
         hostname: c.hostname,
         os: c.os,
         cpuModel: c.cpuModel,
         totalMemMB: c.totalMemMB,
-        totalDiskMB: c.totalDiskMB,
         clientVersion: c.clientVersion,
         capabilities,
         online: c.online,
         cpuPercent: c.cpuPercent ?? null,
         memPercent: c.memPercent ?? null,
-        diskPercent: c.diskPercent ?? null,
+        disks,
         lastHeartbeatAt: c.lastHeartbeatAt?.toISOString() ?? null,
       };
     });

@@ -13,14 +13,13 @@ model Client {
   os              String
   cpuModel        String
   totalMemMB      Int
-  totalDiskMB     Int
   clientVersion   String
   capabilities    String    @default("[]")
+  disks           String    @default("[]")
   online          Boolean   @default(false)
   lastHeartbeatAt DateTime?
   cpuPercent      Float?
   memPercent      Float?
-  diskPercent     Float?
   runningJobs     String    @default("[]")
   connectedAt     DateTime?
   socketId        String?
