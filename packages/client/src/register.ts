@@ -35,19 +35,7 @@ export function getRegisterInfo(): MachineRegister {
 		os: `${os.platform()} ${os.release()}`,
 		cpuModel: cpus[0]?.model || "unknown",
 		totalMemMB: Math.round(os.totalmem() / 1024 / 1024),
-		totalDiskMB: Math.round(diskTotalMB()),
 		clientVersion: "0.0.0",
 		capabilities: caps,
 	};
-}
-
-function diskTotalMB(): number {
-	try {
-		const s = fs.statfsSync(
-			os.platform() === "win32" ? process.cwd().charAt(0) + ":\\" : "/",
-		);
-		return Number((BigInt(s.blocks) * BigInt(s.bsize)) / BigInt(1024 * 1024));
-	} catch {
-		return 0;
-	}
 }

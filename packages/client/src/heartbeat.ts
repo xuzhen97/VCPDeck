@@ -1,6 +1,6 @@
 import * as os from "node:os";
-import * as fs from "node:fs";
 import type { Heartbeat } from "@vcpdeck/shared";
+import { collectDisks } from "./disks.js";
 import { CLIENT_ID } from "./register.js";
 
 // ponytail: 模块级缓存前一次 CPU 累计时间，计算两次心跳间的 delta
@@ -31,20 +31,6 @@ function calcCpuPercent(): number {
 	return Math.round((1 - deltaIdle / deltaTotal) * 100);
 }
 
-function calcDiskPercent(): number {
-	try {
-		const s = fs.statfsSync(
-			os.platform() === "win32" ? process.cwd().charAt(0) + ":\\" : "/",
-		);
-		const total = Number(BigInt(s.blocks) * BigInt(s.bsize));
-		const free = Number(BigInt(s.bavail) * BigInt(s.bsize));
-		if (total === 0) return 0;
-		return Math.round(((total - free) / total) * 100);
-	} catch {
-		return 0;
-	}
-}
-
 export function getHeartbeat(runningJobs: string[]): Heartbeat {
 	const totalMem = os.totalmem();
 	const freeMem = os.freemem();
@@ -53,7 +39,7 @@ export function getHeartbeat(runningJobs: string[]): Heartbeat {
 		clientId: CLIENT_ID,
 		cpuPercent: Math.min(calcCpuPercent(), 100),
 		memPercent: Math.round(((totalMem - freeMem) / totalMem) * 100),
-		diskPercent: Math.min(calcDiskPercent(), 100),
+		disks: collectDisks(),
 		runningJobs,
 		uptime: Math.round(process.uptime()),
 	};
