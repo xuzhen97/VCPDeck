@@ -420,6 +420,15 @@ describe("JobService.list()", () => {
 
 		const where = {
 			status: { in: ["pending", "running", "waiting_input"] },
+			type: {
+				notIn: [
+					"file.roots",
+					"file.list",
+					"file.stat",
+					"file.readText",
+					"frp.list",
+				],
+			},
 		};
 		expect(prisma.job.findMany).toHaveBeenCalledWith(
 			expect.objectContaining({ where }),

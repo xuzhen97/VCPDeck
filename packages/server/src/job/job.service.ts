@@ -547,6 +547,15 @@ export class JobService {
     if (options.clientId) where.clientId = options.clientId;
     if (options.status === "active") {
       where.status = { in: ["pending", "running", "waiting_input"] };
+      where.type = {
+        notIn: [
+          "file.roots",
+          "file.list",
+          "file.stat",
+          "file.readText",
+          "frp.list",
+        ],
+      };
     } else if (options.status) {
       where.status = options.status;
     }
