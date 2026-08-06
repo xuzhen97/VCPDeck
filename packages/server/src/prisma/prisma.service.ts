@@ -1,14 +1,12 @@
 import { Injectable, type OnModuleInit } from "@nestjs/common";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 import { PrismaClient } from "../../generated/client/index.js";
-import * as path from "node:path";
+import { resolveDatabaseUrl } from "./database-url.js";
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
   constructor() {
-    const dbPath = path.resolve("./prisma/dev.db").replace(/\\/g, "/");
-    const fileUrl = "file:///" + dbPath;
-    const factory = new PrismaLibSql({ url: fileUrl }, {});
+    const factory = new PrismaLibSql({ url: resolveDatabaseUrl() }, {});
     super({ adapter: factory });
   }
 
