@@ -34,4 +34,5 @@ test("root integration test no longer deletes the development database", () => {
 	assert.match(source, /DATABASE_URL:\s*testDatabase\.databaseUrl/);
 	assert.doesNotMatch(source, /spawn\("pnpm"[\s\S]*?shell:\s*true/);
 	assert.match(source, /process\.env\.ComSpec/);
+	assert.match(source, /\.finally\(\(\) =>/);
 });

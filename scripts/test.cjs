@@ -2062,7 +2062,7 @@ main()
 		console.error("Test error:", err.message);
 		done(1);
 	})
-	.then(() => {
+	.finally(() => {
 		if (clientSocket) clientSocket.disconnect();
 		stopRealClient();
 		if (_serverProcess?.pid) killTree(_serverProcess.pid);
