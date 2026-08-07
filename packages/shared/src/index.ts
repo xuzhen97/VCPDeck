@@ -3,6 +3,33 @@ export const VERSION = "0.0.0";
 // ── 远程 Pi 协议 ──
 export * from "./pi.js";
 import type { PiCapabilityStatus } from "./pi.js";
+// 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
+export type {
+	PiAgentState,
+	PiAttachmentDescriptor,
+	PiCapabilityStatus,
+	PiClientEvent,
+	PiCwdRef,
+	PiErrorCode,
+	PiEvent,
+	PiExtensionUiRequest,
+	PiImagePlaceholder,
+	PiMessage,
+	PiMessageContent,
+	PiPromptAccepted,
+	PiProjectKey,
+	PiRequest,
+	PiResponse,
+	PiRunSummary,
+	PiSessionContextPage,
+	PiSessionDetail,
+	PiSessionInfo,
+	PiSessionTreeNode,
+	PiStateReport,
+	PiTextContent,
+	PiThinkingPlaceholder,
+	PiToolCallContent,
+} from "./pi.js";
 
 // ── Event names ──
 export const Events = {

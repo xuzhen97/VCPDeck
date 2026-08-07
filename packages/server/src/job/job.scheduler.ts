@@ -25,7 +25,7 @@ export class JobScheduler {
     if (runningCount >= MAX_CONCURRENT_JOBS) return null;
 
     const pending = await this.prisma.job.findFirst({
-      where: { clientId, status: "pending" },
+      where: { clientId, status: "pending", type: { not: "agent.run" } },
       orderBy: { createdAt: "asc" },
     });
     if (!pending) return null;
