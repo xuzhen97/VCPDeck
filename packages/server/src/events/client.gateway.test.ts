@@ -16,6 +16,20 @@ function makeGateway() {
 		jobService as never,
 		fileService as never,
 		{ updateStatus: vi.fn() } as never,
+		{
+			bindEmitter: vi.fn(),
+			request: vi.fn(),
+			resolve: vi.fn(),
+			disconnect: vi.fn(),
+		} as never,
+		{
+			publish: vi.fn(),
+			stream: vi.fn(),
+			handleState: vi.fn().mockResolvedValue([]),
+		} as never,
+		{
+			markDisconnected: vi.fn().mockResolvedValue(undefined),
+		} as never,
 	);
 	gateway.server = { emit: vi.fn() } as never;
 	return { gateway, jobService, fileService };

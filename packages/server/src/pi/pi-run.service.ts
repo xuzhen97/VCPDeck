@@ -15,6 +15,9 @@ interface ProjectLock {
 	jobId: string;
 }
 
+/** settlement 30 秒可取消 grace */
+const SETTLEMENT_GRACE_MS = 30_000;
+
 function piError(code: string, message: string): Error {
 	return Object.assign(new Error(message), { code });
 }
@@ -41,6 +44,10 @@ export interface CreateRunInput {
 @Injectable()
 export class PiRunService {
 	private readonly locks = new Map<string, ProjectLock>();
+	private readonly settlementTimers = new Map<
+		string,
+		ReturnType<typeof setTimeout>
+	>();
 
 	constructor(
 		@Inject(PrismaService) private readonly prisma: PrismaService,
@@ -98,6 +105,7 @@ export class PiRunService {
 	}
 
 	async settle(jobId: string, state: PiAgentState): Promise<void> {
+		this.cancelSettlement(jobId);
 		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
 		if (!job) throw piError("PI_SESSION_NOT_FOUND", "Run not found");
 		const payload = safeJsonParse(job.payload, {}) as { sessionId?: string };
@@ -157,6 +165,31 @@ export class PiRunService {
 				}
 				this.releaseLock(run.jobId);
 			}
+		}
+	}
+
+	/**
+	 * 安排 30 秒可取消的 settlement：首次 idle+queue empty 只 schedule；
+	 * 同 run 任一新 activity 调用 cancelSettlement 取消；grace 到期执行 onSettle。
+	 */
+	async scheduleSettlement(
+		jobId: string,
+		onSettle: () => Promise<void>,
+	): Promise<void> {
+		this.cancelSettlement(jobId);
+		const timer = setTimeout(() => {
+			this.settlementTimers.delete(jobId);
+			void onSettle().catch(() => {});
+		}, SETTLEMENT_GRACE_MS);
+		this.settlementTimers.set(jobId, timer);
+	}
+
+	/** 取消待执行的 settlement（grace 内出现新 activity 时调用） */
+	cancelSettlement(jobId: string): void {
+		const timer = this.settlementTimers.get(jobId);
+		if (timer) {
+			clearTimeout(timer);
+			this.settlementTimers.delete(jobId);
 		}
 	}
 

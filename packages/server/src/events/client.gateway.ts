@@ -1,4 +1,5 @@
 import { Inject } from "@nestjs/common";
+import { Ack } from "@nestjs/websockets/decorators/ack.decorator";
 import {
   ConnectedSocket,
   MessageBody,
@@ -11,7 +12,17 @@ import { ClientService } from "../client/client.service.js";
 import { JobService } from "../job/job.service.js";
 import { FileService } from "../file/file.service.js";
 import { FrpService } from "../frp/frp.service.js";
-import { Events, JobStatus, type JobProgress } from "@vcpdeck/shared";
+import { PiRequestBroker } from "../pi/pi-request-broker.js";
+import { PiEventBroker } from "../pi/pi-event-broker.js";
+import { PiRunService } from "../pi/pi-run.service.js";
+import {
+  Events,
+  JobStatus,
+  parsePiEvent,
+  parsePiResponse,
+  parsePiStateReport,
+  type JobProgress,
+} from "@vcpdeck/shared";
 import type {
   MachineRegister,
   Heartbeat,
@@ -23,6 +34,9 @@ import type {
   JobUpdate,
   JobDispatch,
   DispatchPayload,
+  PiEvent,
+  PiResponse,
+  PiStateReport,
 } from "@vcpdeck/shared";
 
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
@@ -37,7 +51,17 @@ export class ClientGateway {
     @Inject(JobService) private readonly jobService: JobService,
     @Inject(FileService) private readonly fileService: FileService,
     @Inject(FrpService) private readonly frpService: FrpService,
+    @Inject(PiRequestBroker) private readonly piRequests: PiRequestBroker,
+    @Inject(PiEventBroker) private readonly piEvents: PiEventBroker,
+    @Inject(PiRunService) private readonly piRuns: PiRunService,
   ) {}
+
+  // ── Pi request 发送通道（避免与 PiModule 循环依赖） ──
+  afterInit() {
+    this.piRequests.bindEmitter((clientId, request) => {
+      this.server.to(clientId).emit(Events.PI_REQUEST, request);
+    });
+  }
 
   // ── Connection lifecycle ──
   handleConnection(client: Socket) {
@@ -55,6 +79,9 @@ export class ClientGateway {
     if (clientId) {
       await this.jobService.markDisconnected(clientId);
       await this.frpService.markInactiveByClientId(clientId);
+      // Pi：失败 pending request + 标记活动回合 disconnected；不请求 Client 停 Worker
+      this.piRequests.disconnect(clientId);
+      await this.piRuns.markDisconnected(clientId);
     }
     await this.clientService.markOfflineBySocketId(client.id);
     console.log(`[ws] disconnected: ${clientId ?? client.id}`);
@@ -65,11 +92,65 @@ export class ClientGateway {
   async handleRegister(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: MachineRegister,
+    @Ack() ack?: () => void,
   ) {
     await this.clientService.register(data, client.id);
     client.join(data.clientId);
     client.emit("ack", { event: Events.REGISTER });
+    if (typeof ack === "function") ack();
     console.log(`[ws] registered: ${data.clientId} (${data.hostname})`);
+  }
+
+  // ── Pi 事件（复用现有 PSK 连接） ──
+
+  @SubscribeMessage(Events.PI_RESPONSE)
+  async handlePiResponse(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: PiResponse,
+  ) {
+    const clientId = await this.clientService.getClientIdBySocketId(client.id);
+    if (!clientId) return;
+    try {
+      const parsed = parsePiResponse(data);
+      // 只接受来自原请求目标 Client 的响应
+      this.piRequests.resolve(clientId, parsed);
+    } catch {
+      // 非法响应忽略
+    }
+  }
+
+  @SubscribeMessage(Events.PI_EVENT)
+  async handlePiEvent(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: PiEvent,
+  ) {
+    const clientId = await this.clientService.getClientIdBySocketId(client.id);
+    if (!clientId) return;
+    try {
+      const parsed = parsePiEvent(data);
+      if (parsed.clientId !== clientId) return; // 身份绑定：禁止伪造其他 Client 事件
+      await this.piEvents.publish(parsed);
+    } catch {
+      // 非法事件忽略
+    }
+  }
+
+  @SubscribeMessage(Events.PI_STATE)
+  async handlePiState(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: PiStateReport,
+    @Ack() ack?: (result: { acceptedRunIds: string[] }) => void,
+  ) {
+    const clientId = await this.clientService.getClientIdBySocketId(client.id);
+    if (!clientId) return;
+    try {
+      const parsed = parsePiStateReport(data);
+      if (parsed.clientId !== clientId) return; // 身份绑定
+      const acceptedRunIds = await this.piEvents.handleState(clientId, parsed);
+      if (typeof ack === "function") ack({ acceptedRunIds });
+    } catch {
+      // 非法报告忽略
+    }
   }
 
   @SubscribeMessage(Events.HEARTBEAT)
