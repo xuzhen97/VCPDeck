@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { MachineRegister } from "@vcpdeck/shared";
+import type { MachineRegister, PiCapabilityStatus } from "@vcpdeck/shared";
 import { isFrpAvailable } from "./frpc-daemon.js";
 
 const CLIENT_ID_DIR = path.join(os.homedir(), ".vcpdeck");
@@ -23,11 +23,19 @@ function loadOrCreateClientId(): string {
 export const CLIENT_ID =
 	process.env.VCPDECK_CLIENT_ID || loadOrCreateClientId();
 
-export function getRegisterInfo(): MachineRegister {
+export function getRegisterInfo(
+	piStatus?: PiCapabilityStatus,
+): MachineRegister {
 	const cpus = os.cpus();
 	const caps: string[] = ["exec", "file.read", "file.write"];
 	if (isFrpAvailable()) {
 		caps.push("frp");
+	}
+	if (piStatus !== undefined) {
+		caps.push("pi.probe");
+		if (piStatus.available) {
+			caps.push("agent.pi");
+		}
 	}
 	return {
 		clientId: CLIENT_ID,
@@ -37,5 +45,6 @@ export function getRegisterInfo(): MachineRegister {
 		totalMemMB: Math.round(os.totalmem() / 1024 / 1024),
 		clientVersion: "0.0.0",
 		capabilities: caps,
+		...(piStatus !== undefined ? { capabilityDetails: { pi: piStatus } } : {}),
 	};
 }
