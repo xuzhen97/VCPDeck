@@ -165,14 +165,17 @@ describe("PiSessionReader", () => {
 		expect(sessions.find((s) => s.id === "c")?.parentSessionId).toBe("a");
 
 		// 文件层面验证 header 被原子改写
-		const cPath = (await reader.list()).length > 0 ? "" : "";
-		void cPath;
 		const files = await readdirFiles(sessionDir);
 		for (const f of files) {
 			if (!f.includes("_c.jsonl")) continue;
 			const content = await readFile(join(sessionDir, f), "utf8");
-			const header = JSON.parse(content.split("\n")[0]) as { parentSession?: string };
-			expect(header.parentSession).toContain("_a.jsonl");
+			let header: { parentSession?: string } | null = null;
+			try {
+				header = JSON.parse(content.split("\n")[0]) as { parentSession?: string };
+			} catch {
+				// 解析失败视为断言失败
+			}
+			expect(header?.parentSession).toContain("_a.jsonl");
 		}
 	});
 
