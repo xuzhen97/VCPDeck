@@ -136,6 +136,7 @@ export interface PiEvent {
 export type PiClientEvent =
 	| { type: "connected"; sessionId: string }
 	| { type: "history_changed"; sessionId: string }
+	| { type: "agent_start"; sessionId: string }
 	| { type: "agent_end"; sessionId: string }
 	| { type: "prompt_done"; sessionId: string }
 	| { type: "prompt_error"; sessionId: string; code: PiErrorCode; message: string }
@@ -347,6 +348,7 @@ const REQUEST_KEYS = new Set([
 const EVENT_TYPES: ReadonlySet<string> = new Set<PiClientEvent["type"]>([
 	"connected",
 	"history_changed",
+	"agent_start",
 	"agent_end",
 	"prompt_done",
 	"prompt_error",

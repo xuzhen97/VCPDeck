@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.84.0",
     "@earendil-works/pi-coding-agent": "0.84.0",
     "@vcpdeck/shared": "workspace:*",
     "socket.io-client": "^4.7.5"

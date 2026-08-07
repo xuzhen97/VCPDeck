@@ -30,6 +30,9 @@ importers:
 
   packages/client:
     dependencies:
+      '@earendil-works/pi-agent-core':
+        specifier: 0.84.0
+        version: 0.84.0(ws@8.21.1)(zod@4.4.3)
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.0
         version: 0.84.0(ws@8.21.1)(zod@4.4.3)
@@ -366,8 +369,8 @@ packages:
     resolution: {integrity: sha512-Vd/9EVDiu6PPJt9yAh6roZP6El1xHrdvIVGjyBsHR0RYwNHgL7FJPyIIW4fANJNG6FtyZfvlRPpFI4ZM/lubvw==}
     engines: {node: '>=18'}
 
-  '@earendil-works/pi-agent-core@0.84.1':
-    resolution: {integrity: sha512-evyzXYWCLQGmcaBYHlmSku02r8qoN4SGI60GZABo6iV+H+nqX+P9ud8fEZ4GmRq9mUSREvvfX+w9dA9ThF9C6w==}
+  '@earendil-works/pi-agent-core@0.84.0':
+    resolution: {integrity: sha512-L1lw0lwR5LXCzGEeHD9XNEruU2bg0H8clOA8ySdGMHvxutp8GC+yZL6MZp4tqQRnLKP3gHmY7TrWzQ3YnFdJYQ==}
     engines: {node: '>=22.19.0'}
 
   '@earendil-works/pi-ai@0.84.1':
@@ -3898,7 +3901,7 @@ snapshots:
 
   '@csstools/css-tokenizer@3.0.4': {}
 
-  '@earendil-works/pi-agent-core@0.84.1(ws@8.21.1)(zod@4.4.3)':
+  '@earendil-works/pi-agent-core@0.84.0(ws@8.21.1)(zod@4.4.3)':
     dependencies:
       '@earendil-works/pi-ai': 0.84.1(ws@8.21.1)(zod@4.4.3)
       '@earendil-works/pi-telemetry': 0.84.1
@@ -3942,7 +3945,7 @@ snapshots:
 
   '@earendil-works/pi-coding-agent@0.84.0(ws@8.21.1)(zod@4.4.3)':
     dependencies:
-      '@earendil-works/pi-agent-core': 0.84.1(ws@8.21.1)(zod@4.4.3)
+      '@earendil-works/pi-agent-core': 0.84.0(ws@8.21.1)(zod@4.4.3)
       '@earendil-works/pi-ai': 0.84.1(ws@8.21.1)(zod@4.4.3)
       '@earendil-works/pi-client': 0.84.1
       '@earendil-works/pi-protocol': 0.84.1
