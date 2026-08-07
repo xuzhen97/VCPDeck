@@ -8,13 +8,13 @@ import {
 	rm,
 	rename,
 	realpath,
-	access,
 } from "node:fs/promises";
-import { homedir, platform } from "node:os";
+import { platform } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { Socket } from "socket.io-client";
 import { Events, FileErrorCode } from "@vcpdeck/shared";
 import type { JobDone } from "@vcpdeck/shared";
+import { discoverRoots } from "./filesystem-roots.js";
 
 const isWin = platform() === "win32";
 const normPath = (p: string) => {
@@ -76,30 +76,6 @@ function emitError(
 		type,
 		error: { code, message },
 	} satisfies JobDone);
-}
-
-/** 发现客户端可访问的根路径 */
-async function discoverRoots(): Promise<string[]> {
-	if (platform() === "win32") {
-		const results = await Promise.allSettled(
-			Array.from({ length: 26 }, (_, i) => {
-				const drive = String.fromCharCode(65 + i) + ":\\";
-				return access(drive).then(() => drive);
-			}),
-		);
-		return results
-			.filter(
-				(r): r is PromiseFulfilledResult<string> => r.status === "fulfilled",
-			)
-			.map((r) => r.value);
-	}
-	// Linux / macOS
-	try {
-		await readdir("/");
-		return ["/"];
-	} catch {
-		return [homedir()];
-	}
 }
 
 /** 处理轻量 fs 操作 */
