@@ -1,5 +1,9 @@
 export const VERSION = "0.0.0";
 
+// ── 远程 Pi 协议 ──
+export * from "./pi.js";
+import type { PiCapabilityStatus } from "./pi.js";
+
 // ── Event names ──
 export const Events = {
 	REGISTER: "register",
@@ -14,6 +18,10 @@ export const Events = {
 	JOB_CANCEL_FAILED: "job:cancel-failed",
 	JOB_UPDATE: "job:update",
 	STATUS_REPORT: "status:report",
+	PI_REQUEST: "pi:request",
+	PI_RESPONSE: "pi:response",
+	PI_EVENT: "pi:event",
+	PI_STATE: "pi:state",
 } as const;
 
 // ── Job type ──
@@ -55,6 +63,8 @@ export interface MachineRegister {
 	totalMemMB: number;
 	clientVersion: string;
 	capabilities: string[];
+	/** 可选：Client Pi 能力探测结果摘要（旧 Client 缺省） */
+	capabilityDetails?: { pi?: PiCapabilityStatus };
 }
 
 /** 单盘容量与占用率（容量与使用率来自同一次 statfs） */
@@ -196,6 +206,8 @@ export interface ClientInfo {
 	totalMemMB: number;
 	clientVersion: string;
 	capabilities: string[];
+	/** 解析后的 Pi 能力摘要（无探测/损坏时为 {}） */
+	capabilityDetails: { pi?: PiCapabilityStatus };
 	online: boolean;
 	cpuPercent: number | null;
 	memPercent: number | null;

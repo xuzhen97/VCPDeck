@@ -12,6 +12,7 @@ it("clients.list returns full machine info", async () => {
 			disks: [{ name: "C:", totalMB: 512000, usedPercent: 67.8 }],
 			clientVersion: "0.0.0",
 			capabilities: ["exec", "file.read", "file.write"],
+			capabilityDetails: {},
 			online: true,
 			cpuPercent: 23.5,
 			memPercent: 45.2,

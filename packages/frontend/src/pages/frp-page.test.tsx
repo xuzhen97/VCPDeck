@@ -62,6 +62,7 @@ const clientInfo = (): ClientInfo => ({
 	disks: [],
 	clientVersion: "test",
 	capabilities: [],
+	capabilityDetails: {},
 	online: true,
 	cpuPercent: null,
 	memPercent: null,

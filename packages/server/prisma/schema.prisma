@@ -8,25 +8,26 @@ datasource db {
 }
 
 model Client {
-  id              String    @id
-  hostname        String
-  os              String
-  cpuModel        String
-  totalMemMB      Int
-  clientVersion   String
-  capabilities    String    @default("[]")
-  disks           String    @default("[]")
-  online          Boolean   @default(false)
-  lastHeartbeatAt DateTime?
-  cpuPercent      Float?
-  memPercent      Float?
-  runningJobs     String    @default("[]")
-  connectedAt     DateTime?
-  socketId        String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  jobs            Job[]
-  frpMappings     FrpMapping[]
+  id                String    @id
+  hostname          String
+  os                String
+  cpuModel          String
+  totalMemMB        Int
+  clientVersion     String
+  capabilities      String    @default("[]")
+  capabilityDetails String    @default("{}")
+  disks             String    @default("[]")
+  online            Boolean   @default(false)
+  lastHeartbeatAt   DateTime?
+  cpuPercent        Float?
+  memPercent        Float?
+  runningJobs       String    @default("[]")
+  connectedAt       DateTime?
+  socketId          String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  jobs              Job[]
+  frpMappings       FrpMapping[]
 }
 
 model Job {

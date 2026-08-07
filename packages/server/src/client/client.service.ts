@@ -1,6 +1,12 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
-import type { MachineRegister, Heartbeat, ClientInfo, DiskInfo } from "@vcpdeck/shared";
+import type {
+	MachineRegister,
+	Heartbeat,
+	ClientInfo,
+	DiskInfo,
+	PiCapabilityStatus,
+} from "@vcpdeck/shared";
 
 @Injectable()
 export class ClientService {
@@ -9,6 +15,7 @@ export class ClientService {
   ) {}
 
   async register(dto: MachineRegister, socketId: string) {
+    const capabilityDetails = JSON.stringify(dto.capabilityDetails ?? {});
     await this.prisma.client.upsert({
       where: { id: dto.clientId },
       create: {
@@ -19,6 +26,7 @@ export class ClientService {
         totalMemMB: dto.totalMemMB,
         clientVersion: dto.clientVersion,
         capabilities: JSON.stringify(dto.capabilities),
+        capabilityDetails,
         online: true,
         socketId,
         connectedAt: new Date(),
@@ -30,6 +38,7 @@ export class ClientService {
         totalMemMB: dto.totalMemMB,
         clientVersion: dto.clientVersion,
         capabilities: JSON.stringify(dto.capabilities),
+        capabilityDetails,
         online: true,
         socketId,
         connectedAt: new Date(),
@@ -88,6 +97,14 @@ export class ClientService {
       } catch {
         // ponytail: stored as JSON, fallback to empty on corruption
       }
+      let capabilityDetails: { pi?: PiCapabilityStatus } = {};
+      try {
+        capabilityDetails = JSON.parse(c.capabilityDetails) as {
+          pi?: PiCapabilityStatus;
+        };
+      } catch {
+        // ponytail: stored as JSON, fallback to empty on corruption
+      }
       return {
         clientId: c.id,
         hostname: c.hostname,
@@ -96,6 +113,7 @@ export class ClientService {
         totalMemMB: c.totalMemMB,
         clientVersion: c.clientVersion,
         capabilities,
+        capabilityDetails,
         online: c.online,
         cpuPercent: c.cpuPercent ?? null,
         memPercent: c.memPercent ?? null,
