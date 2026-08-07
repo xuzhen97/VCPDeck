@@ -117,7 +117,13 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 
 	return {
 		async onConnected() {
-			const piStatus = await deps.getPiStatus().catch(() => undefined);
+			// probe 最多等待 3 秒：超时降级为无 Pi 能力，不阻塞注册
+			const piStatus = await Promise.race([
+				deps.getPiStatus(),
+				new Promise<undefined>((resolve) =>
+					setTimeout(() => resolve(undefined), 3000),
+				),
+			]).catch(() => undefined);
 			socket.emit(Events.REGISTER, deps.getRegister(piStatus), onRegistered);
 		},
 	};
