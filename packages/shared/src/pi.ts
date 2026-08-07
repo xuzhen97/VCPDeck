@@ -197,6 +197,13 @@ export interface PiImagePlaceholder {
 	blockIndex: number;
 }
 
+/** thinking 正文占位：正文永不离开远程 Session JSONL */
+export interface PiThinkingPlaceholder {
+	type: "thinking";
+	deferred: true;
+	durationMs?: number;
+}
+
 export interface PiToolCallContent {
 	type: "tool_call";
 	toolCallId: string;
@@ -207,12 +214,13 @@ export interface PiToolCallContent {
 export type PiMessageContent =
 	| PiTextContent
 	| PiImagePlaceholder
+	| PiThinkingPlaceholder
 	| PiToolCallContent;
 
 export interface PiUserMessage {
 	id: string;
 	role: "user";
-	content: PiTextContent[];
+	content: (PiTextContent | PiImagePlaceholder)[];
 }
 
 export interface PiAssistantMessage {
