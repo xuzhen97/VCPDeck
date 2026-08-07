@@ -134,7 +134,7 @@ model StorageBackendConfig {
 model File {
   id          String    @id
   key         String    @unique
-  jobId       String
+  jobId       String?
   clientId    String
   filename    String
   mimeType    String?
@@ -144,4 +144,5 @@ model File {
   storageKind String    @default("local")
   expiresAt   DateTime?
   createdAt   DateTime  @default(now())
+  purpose     String    @default("job")
 }

@@ -25,6 +25,7 @@ import { ClientService } from "../client/client.service.js";
 import { PiEventBroker } from "./pi-event-broker.js";
 import { PiRequestBroker } from "./pi-request-broker.js";
 import { PiRunService } from "./pi-run.service.js";
+import { PiAttachmentService } from "./pi-attachment.service.js";
 
 function badRequest(code: string, message: string): BadRequestException {
 	return new BadRequestException({ code, message });
@@ -38,6 +39,7 @@ export class PiController {
 		@Inject(PiEventBroker) private readonly events: PiEventBroker,
 		@Inject(PiRunService) private readonly runs: PiRunService,
 		@Inject(ClientService) private readonly clients: ClientService,
+		@Inject(PiAttachmentService) private readonly attachments: PiAttachmentService,
 	) {}
 
 	// ── helpers ──
@@ -451,7 +453,13 @@ export class PiController {
 				sessionId,
 				jobId,
 				runId,
-				payload: { prompt: body.prompt, submissionId },
+			payload: {
+				prompt: body.prompt,
+				submissionId,
+				...(Array.isArray(body.images) && body.images.length > 0
+					? { attachments: body.images }
+					: {}),
+			},
 			});
 			if (!response.ok) {
 				await this.runs.fail(jobId, response.error.code, response.error.message);
@@ -483,6 +491,53 @@ export class PiController {
 	async running(@Param("clientId") clientId: string) {
 		await this.requirePiClient(clientId);
 		return this.runs.listActiveByClient(clientId);
+	}
+
+	// ── 图片附件（临时 Storage + FileRef） ──
+
+	@Post("attachments")
+	async createAttachments(
+		@Param("clientId") clientId: string,
+		@Body()
+		body: {
+			images?: Array<{ filename?: string; size?: number; mimeType?: string }>;
+		},
+	) {
+		await this.requirePiClient(clientId);
+		if (!Array.isArray(body.images) || body.images.length === 0) {
+			throw badRequest("PI_PROTOCOL_INVALID", "images required");
+		}
+		const images = body.images.map((img) => {
+			if (
+				typeof img.filename !== "string" ||
+				typeof img.size !== "number" ||
+				typeof img.mimeType !== "string"
+			) {
+				throw badRequest("PI_PROTOCOL_INVALID", "invalid image descriptor");
+			}
+			return { filename: img.filename, size: img.size, mimeType: img.mimeType };
+		});
+		return this.attachments.createPromptUploads(clientId, images);
+	}
+
+	@Post("attachments/:attachmentId/complete")
+	async completeAttachment(
+		@Param("clientId") clientId: string,
+		@Param("attachmentId") attachmentId: string,
+	) {
+		await this.requirePiClient(clientId);
+		return this.attachments.completePromptUpload(attachmentId, clientId);
+	}
+
+	@Delete("attachments/:attachmentId")
+	@HttpCode(200)
+	async deleteAttachment(
+		@Param("clientId") clientId: string,
+		@Param("attachmentId") attachmentId: string,
+	) {
+		await this.requirePiClient(clientId);
+		await this.attachments.deleteAttachment(attachmentId, clientId);
+		return { ok: true };
 	}
 
 	// ── 活动回合控制（Owner only） ──

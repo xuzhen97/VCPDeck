@@ -69,4 +69,21 @@ describe("VcpDeckClient.pi", () => {
 		await client.pi.running("c1");
 		expect(fetcher.mock.calls.every((c) => c[1]?.method === "GET")).toBe(true);
 	});
+
+	it("attachments create/complete/delete 使用正确端点", async () => {
+		const { client, fetcher } = makeClient();
+		await client.pi.attachments.create("c1", [
+			{ filename: "a.png", size: 100, mimeType: "image/png" },
+		]);
+		expect(fetcher.mock.calls[0]?.[0]).toContain("/api/clients/c1/pi/attachments");
+		expect(fetcher.mock.calls[0]?.[1]?.method).toBe("POST");
+
+		await client.pi.attachments.complete("c1", "f1");
+		expect(fetcher.mock.calls[1]?.[0]).toContain("/api/clients/c1/pi/attachments/f1/complete");
+		expect(fetcher.mock.calls[1]?.[1]?.method).toBe("POST");
+
+		await client.pi.attachments.delete("c1", "f1");
+		expect(fetcher.mock.calls[2]?.[0]).toContain("/api/clients/c1/pi/attachments/f1");
+		expect(fetcher.mock.calls[2]?.[1]?.method).toBe("DELETE");
+	});
 });

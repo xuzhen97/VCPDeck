@@ -63,11 +63,26 @@ export interface PiAgentApi {
 	eventsPath(clientId: string, sessionId: string): string;
 }
 
+export interface PiAttachmentsApi {
+	create(
+		clientId: string,
+		images: Array<{ filename: string; size: number; mimeType: string }>,
+		signal?: AbortSignal,
+	): Promise<Array<{ fileId: string; uploadUrl: string; expiresAt: number }>>;
+	complete(
+		clientId: string,
+		attachmentId: string,
+		signal?: AbortSignal,
+	): Promise<import("@vcpdeck/shared").PiAttachmentRef>;
+	delete(clientId: string, attachmentId: string): Promise<unknown>;
+}
+
 export interface PiApi {
 	capability(clientId: string, signal?: AbortSignal): Promise<unknown>;
 	models(clientId: string, cwdRef: PiCwdRef, signal?: AbortSignal): Promise<unknown>;
 	sessions: PiSessionsApi;
 	agent: PiAgentApi;
+	attachments: PiAttachmentsApi;
 	running(clientId: string, signal?: AbortSignal): Promise<unknown>;
 }
 
@@ -215,6 +230,28 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 				),
 			eventsPath: (clientId, sessionId) =>
 				`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/events`,
+		},
+
+		attachments: {
+			create: (clientId, images, signal) =>
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/attachments`,
+					{ images },
+					signal,
+				),
+			complete: (clientId, attachmentId, signal) =>
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/attachments/${enc(attachmentId)}/complete`,
+					undefined,
+					signal,
+				),
+			delete: (clientId, attachmentId) =>
+				client.request(
+					"DELETE",
+					`/api/clients/${enc(clientId)}/pi/attachments/${enc(attachmentId)}`,
+				),
 		},
 
 		running: (clientId, signal) =>

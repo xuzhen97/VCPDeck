@@ -1,6 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
-import type { ClientInfo, PiCapabilityStatus, PiCwdRef } from "@vcpdeck/shared";
+import type {
+	ClientInfo,
+	PiAttachmentRef,
+	PiCapabilityStatus,
+	PiCwdRef,
+	PiImagePlaceholder,
+} from "@vcpdeck/shared";
 import { useSdk } from "@/api/context";
+import { uploadFile } from "@/api/upload-file";
 import { Drawer } from "@/components/ui/drawer";
 import { PiSessionSidebar } from "../pi/pi-session-sidebar.js";
 import { PiChatWindow } from "../pi/pi-chat-window.js";
@@ -34,6 +41,10 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 	const [info, setInfo] = useState<{ id: string; name: string; firstMessage: string | null } | null>(null);
 	const [leftOpen, setLeftOpen] = useState(false);
 	const [rightOpen, setRightOpen] = useState(false);
+	const [attachments, setAttachments] = useState<
+		Array<{ name: string; status: "uploading" | "ready" | "error"; ref?: PiAttachmentRef }>
+	>([]);
+	const [loadedImages, setLoadedImages] = useState<Record<string, string>>({});
 
 	const { state, actions } = usePiSession(sdk.pi);
 
@@ -68,9 +79,71 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 			setCwdRef(ref);
 			setSessionId(null);
 			setInfo(null);
+			setAttachments([]);
+			setLoadedImages({});
 			actions.close();
 		},
 		[actions],
+	);
+
+	/** 选图 → create upload → XHR PUT → complete → refs */
+	const handlePickFiles = useCallback(
+		async (files: FileList) => {
+			const list = Array.from(files);
+			if (attachments.length + list.length > 10) return;
+			const pending = list.map((f) => ({ name: f.name, status: "uploading" as const }));
+			setAttachments((prev) => [...prev, ...pending]);
+			for (const file of list) {
+				try {
+					const [session] = (await sdk.pi.attachments.create(client.clientId, [
+						{ filename: file.name, size: file.size, mimeType: file.type || "image/png" },
+					])) as Array<{ fileId: string; uploadUrl: string; expiresAt: number }>;
+					if (!session) throw new Error("create failed");
+					await uploadFile(session.uploadUrl, file);
+					const ref = (await sdk.pi.attachments.complete(
+						client.clientId,
+						session.fileId,
+					)) as PiAttachmentRef;
+					setAttachments((prev) =>
+						prev.map((a) =>
+							a.name === file.name && a.status === "uploading"
+								? { name: a.name, status: "ready" as const, ref }
+								: a,
+						),
+					);
+				} catch {
+					setAttachments((prev) =>
+						prev.map((a) =>
+							a.name === file.name ? { name: a.name, status: "error" as const } : a,
+						),
+					);
+				}
+			}
+		},
+		[attachments.length, client.clientId, sdk.pi],
+	);
+
+	/** 历史图片惰性加载（entryContent → data URL） */
+	const handleImageLoad = useCallback(
+		async (block: PiImagePlaceholder) => {
+			if (!cwdRef || !sessionId) return;
+			try {
+				const content = (await sdk.pi.sessions.entryContent(
+					client.clientId,
+					sessionId,
+					block.entryId,
+					cwdRef,
+					block.blockIndex,
+				)) as { mimeType: string; data: string };
+				setLoadedImages((prev) => ({
+					...prev,
+					[`${block.entryId}:${block.blockIndex}`]: `data:${content.mimeType};base64,${content.data}`,
+				}));
+			} catch {
+				// 忽略：图片过期或不可用
+			}
+		},
+		[sdk.pi, client.clientId, cwdRef, sessionId],
 	);
 
 	// 不可用态
@@ -158,8 +231,8 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 								if (cwdRef && sessionId && state.nextCursor) {
 									void sdk.pi.sessions
 										.context(client.clientId, sessionId, cwdRef, {
-											cursor: state.nextCursor,
-										})
+												cursor: state.nextCursor,
+											})
 										.then((page) => {
 											// 追加更早消息（简化：交给 reconcile 轮询）
 											void page;
@@ -167,12 +240,25 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 										.catch(() => {});
 								}
 							}}
+							onImageLoad={(block) => void handleImageLoad(block)}
+							imageUrls={loadedImages}
 						/>
 					</div>
 					<PiChatInput
 						status={state.status}
 						disabled={!cwdRef || !sessionId}
-						onSend={(prompt) => void actions.send({ prompt })}
+						attachments={attachments.map((a) => ({ name: a.name, status: a.status }))}
+						onPickFiles={(files) => void handlePickFiles(files)}
+						onRemoveAttachment={(index) =>
+							setAttachments((prev) => prev.filter((_, i) => i !== index))
+						}
+						onSend={(prompt) => {
+							const refs = attachments
+								.filter((a) => a.status === "ready" && a.ref)
+								.map((a) => a.ref!);
+							setAttachments([]);
+							void actions.send({ prompt, images: refs.length > 0 ? refs : undefined });
+						}}
 						onSteer={(message) => void actions.steer(message)}
 						onFollowUp={(message) => void actions.followUp(message)}
 						onAbort={() => void actions.abort()}

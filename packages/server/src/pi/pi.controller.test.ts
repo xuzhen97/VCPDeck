@@ -49,13 +49,21 @@ function makeController(overrides: Partial<Record<"requests" | "events" | "runs"
 		]),
 		...((overrides.clients as object) ?? {}),
 	};
+	const attachments = {
+		createPromptUploads: vi.fn(async () => []),
+		completePromptUpload: vi.fn(),
+		deleteAttachment: vi.fn(async () => {}),
+		prepareHistoryUpload: vi.fn(),
+		completeHistoryUpload: vi.fn(),
+	};
 	const controller = new PiController(
 		requests as never,
 		events as never,
 		runs as never,
 		clients as never,
+		attachments as never,
 	);
-	return { controller, requests, events, runs, clients };
+	return { controller, requests, events, runs, clients, attachments };
 }
 
 describe("PiController", () => {

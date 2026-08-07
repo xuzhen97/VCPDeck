@@ -2,7 +2,8 @@ import type { Readable } from "node:stream";
 
 /** 文件元数据（上传时提供） */
 export interface FileMeta {
-	jobId: string;
+	/** 关联 Job；Pi 临时附件在 Job 创建前上传，可为空 */
+	jobId?: string;
 	clientId: string;
 	filename: string;
 	mimeType?: string;

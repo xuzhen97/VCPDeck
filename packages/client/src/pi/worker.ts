@@ -9,12 +9,13 @@ import {
 	SettingsManager,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import type { PiRequest, PiResponse } from "@vcpdeck/shared";
+import type { PiAttachmentDescriptor, PiRequest } from "@vcpdeck/shared";
 import { createPiSessionReader, type PiSessionReader } from "./session-reader.js";
 import {
 	startPiAgentSession,
 	type PiAgentSessionWrapper,
 } from "./agent-session.js";
+import { downloadPromptImages, toSdkImages } from "./images.js";
 import type {
 	PiWorkerOutboundMessage,
 	PiWorkerRequestMessage,
@@ -32,10 +33,6 @@ let lastActivity = Date.now();
 
 function send(msg: PiWorkerOutboundMessage): void {
 	if (process.send) process.send(msg);
-}
-
-function fail(requestId: string, code: string, message: string): PiResponse {
-	return { requestId, ok: false, error: { code: code as never, message } };
 }
 
 function normalizeError(err: unknown): { code: string; message: string } {
@@ -151,6 +148,15 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 					runId: request.runId ?? request.jobId ?? "",
 					sessionId,
 				};
+				const payload = { ...(request.payload ?? {}) };
+				// 图片附件：下载校验后转为 SDK image content（失败清空并抛稳定错误）
+				if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
+					const downloaded = await downloadPromptImages(
+						payload.attachments as PiAttachmentDescriptor[],
+					);
+					payload.images = toSdkImages(downloaded);
+				}
+				return await w.send(request.action, payload);
 			}
 			return await w.send(request.action, request.payload ?? {});
 		}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { PiMessage } from "@vcpdeck/shared";
+import type { PiImagePlaceholder, PiMessage } from "@vcpdeck/shared";
 import { PiMessageView } from "./pi-message-view.js";
 import { buildTurnGroups, type PiTurnGroup } from "./turn-groups.js";
 import type { PiSessionState } from "./use-pi-session.js";
@@ -65,10 +65,14 @@ export function PiChatWindow({
 	state,
 	info,
 	onLoadMore,
+	onImageLoad,
+	imageUrls = {},
 }: {
 	state: PiSessionState;
 	info: { id: string; name: string; firstMessage: string | null } | null;
 	onLoadMore: () => void;
+	onImageLoad?: (block: PiImagePlaceholder) => void;
+	imageUrls?: Record<string, string>;
 }) {
 	const groups = useMemo(() => buildTurnGroups(state.messages), [state.messages]);
 	const toolResults = useMemo(() => toolResultsOf(state.messages), [state.messages]);
@@ -112,7 +116,12 @@ export function PiChatWindow({
 						)}
 						{group.finalAssistant && (
 							<div className="max-w-[95%]">
-								<PiMessageView message={group.finalAssistant} toolResults={toolResults} />
+								<PiMessageView
+									message={group.finalAssistant}
+									toolResults={toolResults}
+									onImageLoad={onImageLoad}
+									imageUrls={imageUrls}
+								/>
 							</div>
 						)}
 					</div>

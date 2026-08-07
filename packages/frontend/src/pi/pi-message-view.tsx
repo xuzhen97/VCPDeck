@@ -23,12 +23,24 @@ function ThinkingBlock({ block }: { block: PiThinkingPlaceholder }) {
 }
 
 /** 图片占位（历史惰性加载，Task 13 接入短时 URL） */
-function ImageBlock({ block }: { block: PiImagePlaceholder }) {
+function ImageBlock({
+	block,
+	onLoad,
+	src,
+}: {
+	block: PiImagePlaceholder;
+	onLoad?: (block: PiImagePlaceholder) => void;
+	src?: string;
+}) {
+	if (src) {
+		return <img src={src} alt="历史图片" className="max-h-64 rounded" data-testid="loaded-image" />;
+	}
 	return (
 		<button
 			type="button"
 			className="text-xs text-blue-500 underline"
 			data-testid="image-placeholder"
+			onClick={() => onLoad?.(block)}
 		>
 			[图片 {block.mimeType}] 点击加载
 		</button>
@@ -108,17 +120,31 @@ function Markdown({ text }: { text: string }) {
 export function PiMessageView({
 	message,
 	toolResults = {},
+	onImageLoad,
+	imageUrls = {},
 }: {
 	message: PiMessage;
 	/** toolCallId → Tool Result 文本（展开时显示） */
 	toolResults?: Record<string, string>;
+	/** 历史图片惰性加载（Task 13） */
+	onImageLoad?: (block: PiImagePlaceholder) => void;
+	/** 已加载的历史图片（key: `${entryId}:${blockIndex}` → data URL） */
+	imageUrls?: Record<string, string>;
 }) {
 	if (message.role === "user") {
 		return (
 			<div className="rounded-lg bg-blue-950/40 px-3 py-2" data-testid="user-message">
 				{message.content.map((block, i) => {
 					if (block.type === "text") return <Markdown key={i} text={block.text} />;
-					if (block.type === "image") return <ImageBlock key={i} block={block} />;
+					if (block.type === "image")
+						return (
+							<ImageBlock
+								key={i}
+								block={block}
+								onLoad={onImageLoad}
+								src={imageUrls[`${block.entryId}:${block.blockIndex}`]}
+							/>
+						);
 					return null;
 				})}
 			</div>
@@ -143,7 +169,14 @@ export function PiMessageView({
 								/>
 							);
 						case "image":
-							return <ImageBlock key={i} block={block} />;
+							return (
+								<ImageBlock
+									key={i}
+									block={block}
+									onLoad={onImageLoad}
+									src={imageUrls[`${block.entryId}:${block.blockIndex}`]}
+								/>
+							);
 						default:
 							return null;
 					}

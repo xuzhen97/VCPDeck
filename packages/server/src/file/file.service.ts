@@ -28,12 +28,13 @@ export class FileService {
 
 	/** 创建 pending File 记录 + 签发上传令牌 */
 	async createPending(
-		jobId: string,
+		jobId: string | undefined,
 		clientId: string,
 		meta: Omit<FileMeta, "key">,
+		options: { expiresAt?: Date; purpose?: string } = {},
 	): Promise<CreatePendingResult> {
 		const fileId = randomUUID();
-		const { url, expiresAt } = await this.storage.createUploadToken(meta);
+		const { url, expiresAt: tokenExpiresAt } = await this.storage.createUploadToken(meta);
 
 		// 从 url 中提取 key: /api/storage/upload/:key?...
 		const key =
@@ -44,7 +45,7 @@ export class FileService {
 			data: {
 				id: fileId,
 				key,
-				jobId,
+				jobId: jobId ?? null,
 				clientId,
 				filename: meta.filename,
 				mimeType: meta.mimeType ?? null,
@@ -52,10 +53,12 @@ export class FileService {
 				sha256: "",
 				status: "pending",
 				storageKind: "local",
+				...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+				...(options.purpose ? { purpose: options.purpose } : {}),
 			},
 		});
 
-		return { fileId, key, uploadUrl: url, expiresAt };
+		return { fileId, key, uploadUrl: url, expiresAt: tokenExpiresAt };
 	}
 
 	/** 确认上传完成，保留上传阶段持久化的真实 key 并写入 sha256 */

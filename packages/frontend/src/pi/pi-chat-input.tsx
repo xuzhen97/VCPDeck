@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import type { PiSessionStatus } from "./use-pi-session.js";
 
 /**
- * 输入区：idle prompt；running 时 Steer/Follow-up 切换；abort/compact。
+ * 输入区：idle prompt；running 时 Steer/Follow-up 切换；abort/compact；附件草稿槽。
  * 不支持 `!`/`!!` 直接 shell。
  */
 export function PiChatInput({
@@ -16,6 +15,9 @@ export function PiChatInput({
 	onAbort,
 	onCompact,
 	onAbortCompact,
+	attachments = [],
+	onPickFiles,
+	onRemoveAttachment,
 }: {
 	status: PiSessionStatus;
 	disabled: boolean;
@@ -25,6 +27,10 @@ export function PiChatInput({
 	onAbort: () => void;
 	onCompact: () => void;
 	onAbortCompact: () => void;
+	/** 附件草稿（仅 idle prompt 可用） */
+	attachments?: Array<{ name: string; status: "uploading" | "ready" | "error" }>;
+	onPickFiles?: (files: FileList) => void;
+	onRemoveAttachment?: (index: number) => void;
 }) {
 	const [text, setText] = useState("");
 	const [mode, setMode] = useState<"prompt" | "steer" | "followUp">("prompt");
@@ -79,7 +85,47 @@ export function PiChatInput({
 					</span>
 				</div>
 			)}
+			{attachments.length > 0 && (
+				<div className="flex flex-wrap gap-1.5">
+					{attachments.map((a, i) => (
+						<span
+							key={`${a.name}-${i}`}
+							className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px]"
+						>
+							{a.status === "uploading" ? "⏳" : a.status === "error" ? "❌" : "🖼️"} {a.name}
+							{onRemoveAttachment && (
+								<button
+									type="button"
+									className="text-muted-foreground"
+									onClick={() => onRemoveAttachment(i)}
+									aria-label={`移除附件 ${a.name}`}
+								>
+									✕
+								</button>
+							)}
+						</span>
+					))}
+				</div>
+			)}
 			<div className="flex items-end gap-2">
+				{onPickFiles && (
+					<label className="shrink-0 cursor-pointer rounded border border-border px-2 py-1.5 text-xs">
+						🖼️ 添加
+						<input
+							type="file"
+							accept="image/png,image/jpeg,image/gif,image/webp"
+							multiple
+							className="hidden"
+							disabled={disabled || running}
+							onChange={(e) => {
+								if (e.target.files && e.target.files.length > 0) {
+									onPickFiles(e.target.files);
+									e.target.value = "";
+								}
+							}}
+						/>
+					</label>
+				)}
 				<textarea
 					ref={textareaRef}
 					value={text}

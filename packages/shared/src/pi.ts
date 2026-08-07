@@ -115,6 +115,8 @@ export interface PiAttachmentDescriptor {
 	sha256: string;
 	size: number;
 	mimeType: string;
+	/** 短期下载 URL（transient，不进 Job/日志） */
+	url: string;
 }
 
 /** prompt 被接受后的权威响应（SSE 断线 fallback 使用） */
@@ -122,6 +124,16 @@ export interface PiPromptAccepted {
 	jobId: string;
 	runId: string;
 	sessionId: string;
+}
+
+/** 临时附件引用（short-lived，不进 Job/日志） */
+export interface PiAttachmentRef {
+	fileId: string;
+	sha256: string;
+	size: number;
+	mimeType: string;
+	url: string;
+	expiresAt: number;
 }
 
 /** 投影后的 Agent 事件（Client → Server 包装） */
@@ -422,6 +434,7 @@ function parseAttachments(v: unknown): PiAttachmentDescriptor[] {
 			sha256: item.sha256,
 			size: item.size,
 			mimeType: item.mimeType,
+			url: typeof item.url === "string" ? item.url : "",
 		});
 	}
 	return out;

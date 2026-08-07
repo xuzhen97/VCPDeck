@@ -349,13 +349,15 @@ export class StorageService implements OnModuleInit {
 		}
 
 		const uploadAndPersist = async (meta: FileMeta) => {
-			const job = meta.jobId
+			const jobId = meta.jobId;
+			const job = jobId
 				? await this.prisma.job.findUnique({
-						where: { id: meta.jobId },
+						where: { id: jobId },
 						select: { type: true },
 					})
 				: null;
-			const reportProgress = job?.type === "file.import";
+			// Pi 临时附件无 jobId：不上报进度
+			const reportProgress = jobId !== undefined && job?.type === "file.import";
 			const hash = createHash("sha256");
 			let loaded = 0;
 			let lastEmitAt = 0;
@@ -376,7 +378,7 @@ export class StorageService implements OnModuleInit {
 							lastEmitBytes = loaded;
 							progressWrite = progressWrite
 								.then(() =>
-									this.updateJobProgress(meta.jobId, loaded, meta.size),
+									this.updateJobProgress(jobId!, loaded, meta.size),
 								)
 								.catch(() => {});
 						}
@@ -388,7 +390,7 @@ export class StorageService implements OnModuleInit {
 						lastEmitBytes = loaded;
 						progressWrite = progressWrite
 							.then(() =>
-								this.updateJobProgress(meta.jobId, loaded, meta.size),
+								this.updateJobProgress(jobId!, loaded, meta.size),
 							)
 							.catch(() => {});
 					}
@@ -410,7 +412,7 @@ export class StorageService implements OnModuleInit {
 				});
 				return entry;
 			} catch (error) {
-				if (reportProgress) await this.markUploadJobError(meta.jobId);
+				if (reportProgress) await this.markUploadJobError(jobId!);
 				throw error;
 			}
 		};
@@ -420,7 +422,7 @@ export class StorageService implements OnModuleInit {
 			const file = await this.prisma.file.findUnique({ where: { key } });
 			if (file) {
 				return uploadAndPersist({
-					jobId: file.jobId,
+					jobId: file.jobId ?? undefined,
 					clientId: file.clientId,
 					filename: file.filename,
 					mimeType: file.mimeType ?? undefined,
