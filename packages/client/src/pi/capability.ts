@@ -1,6 +1,6 @@
 import { access, readFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fork } from "node:child_process";
 import type { PiCapabilityStatus } from "@vcpdeck/shared";
 import { isSupportedNodeVersion } from "./node-version.js";
@@ -49,10 +49,16 @@ async function readSettingsShellPath(home: string): Promise<string | null> {
 	}
 }
 
+/**
+ * 在 PATH 中查找 bash（跨平台：Windows 找 bash.exe，POSIX 找 bash）。
+ * PATH 分隔符使用 path.delimiter（Windows `;`、Linux/macOS `:`）。
+ */
 async function findBashInPath(): Promise<boolean> {
-	const dirs = (process.env.PATH ?? "").split(";").filter(Boolean);
+	const isWin = platform() === "win32";
+	const name = isWin ? "bash.exe" : "bash";
+	const dirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
 	for (const dir of dirs) {
-		if (await exists(join(dir, "bash.exe"))) return true;
+		if (await exists(join(dir, name))) return true;
 	}
 	return false;
 }
@@ -159,6 +165,13 @@ export async function probePiCapability(
 				message: "Pi-compatible Bash not found on Windows",
 			};
 		}
+	} else if (!(await env.findBashInPath())) {
+		// Linux/macOS：Pi 同样需要 bash（bash 不在 PATH 时降级）
+		return {
+			available: false,
+			code: "PI_BASH_NOT_FOUND",
+			message: "Bash not found in PATH",
+		};
 	}
 
 	if (!(await env.readAgentDir())) {

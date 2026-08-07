@@ -51,14 +51,29 @@ describe("probePiCapability", () => {
 		expect(result).toMatchObject({ available: true, shellKind: "path" });
 	});
 
-	it("Linux 使用 system bash", async () => {
+	it("Linux 使用 system bash（bash 在 PATH）", async () => {
 		const result = await probePiCapability(
 			fakeEnv({
 				platform: "linux",
 				existsGitBash: async () => true,
+				findBashInPath: async () => true,
 			}),
 		);
 		expect(result).toMatchObject({ available: true, shellKind: "system" });
+	});
+
+	it("Linux 无 bash 返回 PI_BASH_NOT_FOUND", async () => {
+		const result = await probePiCapability(
+			fakeEnv({
+				platform: "linux",
+				existsGitBash: async () => true,
+				findBashInPath: async () => false,
+			}),
+		);
+		expect(result).toMatchObject({
+			available: false,
+			code: "PI_BASH_NOT_FOUND",
+		});
 	});
 
 	it("Node 过旧返回 PI_NODE_UNSUPPORTED", async () => {
