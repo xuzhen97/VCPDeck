@@ -6,12 +6,14 @@ export function Drawer({
 	title,
 	children,
 	size = "default",
+	side = "right",
 }: {
 	open: boolean;
 	onClose: () => void;
 	title: string;
 	children: ReactNode;
 	size?: "default" | "wide";
+	side?: "left" | "right";
 }) {
 	useEffect(() => {
 		if (!open) return;
@@ -35,10 +37,14 @@ export function Drawer({
 				role="dialog"
 				aria-modal={open}
 				aria-label={title}
-				className={`fixed right-0 top-0 z-50 h-full ${
+				className={`fixed top-0 z-50 h-full overflow-y-auto border-border bg-card p-6 shadow-xl backdrop-blur-2xl transition-transform duration-300 ${
 					size === "wide" ? "w-[720px] max-w-[95vw]" : "w-96 max-w-[90vw]"
-				} overflow-y-auto border-l border-border bg-card p-6 shadow-xl backdrop-blur-2xl transition-transform duration-300 ${
-					open ? "translate-x-0" : "translate-x-full"
+				} ${side === "left" ? "left-0 border-r" : "right-0 border-l"} ${
+					open
+						? "translate-x-0"
+						: side === "left"
+							? "-translate-x-full"
+							: "translate-x-full"
 				}`}
 			>
 				<div className="mb-6 flex items-center justify-between">

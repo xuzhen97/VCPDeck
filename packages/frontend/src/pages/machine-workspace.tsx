@@ -21,6 +21,7 @@ import { ExecutePanel } from "@/pages/execute-panel";
 import { FilesPanel } from "@/pages/files-panel";
 import { FrpPanel } from "@/pages/frp-panel";
 import { JobsPage } from "@/pages/jobs-page";
+import { PiPanel } from "@/pages/pi-panel";
 
 const tabs = [
 	["overview", "概览"],
@@ -28,6 +29,7 @@ const tabs = [
 	["files", "文件"],
 	["frp", "FRP"],
 	["jobs", "任务记录"],
+	["pi", "Pi"],
 ] as const;
 
 export function MachineWorkspace() {
@@ -151,7 +153,8 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				{tab === "files" && <FilesPanel clientId={client.clientId} />}
 				{tab === "frp" && <FrpPanel clientId={client.clientId} />}
 				{tab === "jobs" && <JobsPage clientId={client.clientId} />}
-				{!["overview", "execute", "files", "frp", "jobs"].includes(tab) && (
+				{tab === "pi" && <PiPanel client={client} />}
+				{!["overview", "execute", "files", "frp", "jobs", "pi"].includes(tab) && (
 					<Card>
 						<CardContent className="pt-6 text-sm text-muted-foreground">
 							{tabs.find(([key]) => key === tab)?.[1] ?? "未知页面"}
