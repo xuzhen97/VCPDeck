@@ -6,6 +6,7 @@ import { IdentityModule } from "./identity/identity.module.js";
 import { StorageModule } from "./storage/storage.module.js";
 import { FileModule } from "./file/file.module.js";
 import { FrpModule } from "./frp/frp.module.js";
+import { PiModule } from "./pi/pi.module.js";
 
 @Module({
 	imports: [
@@ -16,6 +17,7 @@ import { FrpModule } from "./frp/frp.module.js";
 		StorageModule,
 		FileModule,
 		FrpModule,
+		PiModule,
 	],
 })
 export class AppModule {}

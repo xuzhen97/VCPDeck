@@ -8,6 +8,7 @@ import { FileModule } from "../file/file.module.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
 import { FrpModule } from "../frp/frp.module.js";
 import { StorageModule } from "../storage/storage.module.js";
+import { PiModule } from "../pi/pi.module.js";
 
 @Module({
 	imports: [
@@ -17,6 +18,7 @@ import { StorageModule } from "../storage/storage.module.js";
 		PrismaModule,
 		StorageModule,
 		forwardRef(() => FrpModule),
+		PiModule,
 	],
 	providers: [ClientGateway, AppGateway],
 	exports: [ClientGateway],

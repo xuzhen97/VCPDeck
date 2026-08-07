@@ -4,6 +4,7 @@ import { createClientsApi } from "./clients.js";
 import { createFilesApi } from "./files.js";
 import { createFrpApi } from "./frp.js";
 import { createJobsApi } from "./jobs.js";
+import { createPiApi } from "./pi.js";
 import { createStorageApi } from "./storage.js";
 
 export type AuthMode = { type: "cookie" } | { type: "bearer"; token: string };
@@ -40,6 +41,7 @@ export class VcpDeckClient {
 	readonly storage;
 	readonly aliyundrive;
 	readonly frp;
+	readonly pi;
 	readonly health = {
 		get: (signal?: AbortSignal) =>
 			this.request<{ ok: true }>("GET", "/api/health", undefined, signal),
@@ -56,6 +58,7 @@ export class VcpDeckClient {
 		this.storage = createStorageApi(this);
 		this.aliyundrive = createAliyunDriveApi(this);
 		this.frp = createFrpApi(this);
+		this.pi = createPiApi(this);
 	}
 
 	/** 发起 REST 请求并归一化失败响应。 */

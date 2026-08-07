@@ -1,0 +1,187 @@
+import { describe, expect, it, vi } from "vitest";
+import { BadRequestException } from "@nestjs/common";
+import { PiController } from "./pi.controller.js";
+
+const actor = {
+	identityId: "user-1",
+	displayName: "User",
+	isAdmin: false,
+	credentialId: null,
+	sessionId: null,
+	source: "web",
+	requestId: "req-1",
+} as const;
+
+function makeController(overrides: Partial<Record<"requests" | "events" | "runs" | "clients", unknown>> = {}) {
+	const requests = {
+		request: vi.fn(
+			async (_clientId: string, _req: { action: string }) => ({
+				ok: true,
+				data: {},
+			}),
+		),
+		bindEmitter: vi.fn(),
+		...((overrides.requests as object) ?? {}),
+	};
+	const events = {
+		publish: vi.fn(async () => {}),
+		stream: vi.fn(() => ({ subscribe: () => () => {} })),
+		...((overrides.events as object) ?? {}),
+	};
+	const runs = {
+		createRun: vi.fn(async () => ({ jobId: "j1", runId: "j1" })),
+		accept: vi.fn(async () => {}),
+		fail: vi.fn(async () => {}),
+		cancel: vi.fn(async () => {}),
+		resume: vi.fn(async () => {}),
+		assertOwner: vi.fn(async () => {}),
+		assertIdleMutation: vi.fn(async () => {}),
+		listActiveByClient: vi.fn(async () => []),
+		...((overrides.runs as object) ?? {}),
+	};
+	const clients = {
+		listOnline: vi.fn(async () => [
+			{
+				clientId: "c1",
+				capabilities: ["pi.probe", "agent.pi"],
+				capabilityDetails: { pi: { available: true } },
+			},
+		]),
+		...((overrides.clients as object) ?? {}),
+	};
+	const controller = new PiController(
+		requests as never,
+		events as never,
+		runs as never,
+		clients as never,
+	);
+	return { controller, requests, events, runs, clients };
+}
+
+describe("PiController", () => {
+	it("capability 返回 Client 的 Pi 状态", async () => {
+		const { controller } = makeController();
+		const result = await controller.capability("c1");
+		expect(result).toMatchObject({ available: true });
+	});
+
+	it("旧 Client 返回 PI_CLIENT_UNSUPPORTED", async () => {
+		const { controller, clients } = makeController();
+		(clients.listOnline as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{ clientId: "c1", capabilities: ["exec"], capabilityDetails: {} },
+		]);
+		const result = await controller.capability("c1");
+		expect(result).toMatchObject({ code: "PI_CLIENT_UNSUPPORTED" });
+	});
+
+	it("sessions.list 转发 cwdRef", async () => {
+		const { controller, requests } = makeController();
+		await controller.sessions("c1", "D:\\", "repo");
+		expect(requests.request).toHaveBeenCalledWith(
+			"c1",
+			expect.objectContaining({
+				action: "sessions.list",
+				cwdRef: { rootDir: "D:\\", relativePath: "repo" },
+			}),
+		);
+	});
+
+	it("prompt 先 createRun 再发布 run_created 再 dispatch，返回 accepted", async () => {
+		const { controller, requests, events, runs } = makeController();
+		requests.request.mockImplementation(async (_clientId: string, req: { action: string }) => {
+			if (req.action === "project.resolve") return { ok: true, data: { projectKey: "k".repeat(64) } };
+			return { ok: true, data: { accepted: true } };
+		});
+		const result = await controller.prompt("c1", "s1", {
+			rootDir: "D:\\",
+			relativePath: "repo",
+			type: "prompt",
+			submissionId: "sub-1",
+			prompt: "hello",
+		}, actor);
+
+		expect(runs.createRun).toHaveBeenCalledWith(
+			actor,
+			expect.objectContaining({ clientId: "c1", sessionId: "s1", imageCount: 0 }),
+		);
+		expect(events.publish).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "j1",
+				event: expect.objectContaining({ type: "run_created", submissionId: "sub-1", runId: "j1" }),
+			}),
+		);
+		expect(result).toEqual({ jobId: "j1", runId: "j1", sessionId: "s1" });
+	});
+
+	it("prompt 请求失败时 Job fail", async () => {
+		const { controller, requests, runs } = makeController();
+		requests.request.mockImplementation((async (_clientId: string, req: { action: string }) => {
+			if (req.action === "project.resolve") return { ok: true, data: { projectKey: "k".repeat(64) } };
+			return { ok: false, error: { code: "PI_WORKER_EXITED", message: "died" } };
+		}) as never);
+		await expect(
+			controller.prompt("c1", "s1", {
+				rootDir: "D:\\",
+				relativePath: "repo",
+				type: "prompt",
+				submissionId: "sub-1",
+				prompt: "hello",
+			}, actor),
+		).rejects.toBeInstanceOf(BadRequestException);
+		expect(runs.fail).toHaveBeenCalledWith("j1", "PI_WORKER_EXITED", "died");
+	});
+
+	it("非法 body 返回 400", async () => {
+		const { controller } = makeController();
+		await expect(controller.prompt("c1", "s1", {
+			rootDir: "D:\\",
+			relativePath: "repo",
+			type: "steer", // 错误 type
+			submissionId: "s",
+			prompt: "x",
+		}, actor)).rejects.toBeInstanceOf(BadRequestException);
+	});
+
+	it("steer 先校验 Owner", async () => {
+		const { controller, runs } = makeController();
+		(runs.assertOwner as ReturnType<typeof vi.fn>).mockRejectedValue(
+			Object.assign(new Error("forbidden"), { code: "PI_CONTROL_FORBIDDEN" }),
+		);
+		await expect(
+			controller.steer("c1", "s1", { jobId: "j1", message: "go" }, actor),
+		).rejects.toBeInstanceOf(BadRequestException);
+	});
+
+	it("活动回合时 model.set 拒绝（assertIdle 失败）", async () => {
+		const { controller, requests, runs } = makeController();
+		requests.request.mockResolvedValue({ ok: true, data: { projectKey: "k".repeat(64) } });
+		(runs.assertIdleMutation as ReturnType<typeof vi.fn>).mockRejectedValue(
+			Object.assign(new Error("busy"), { code: "PI_PROJECT_BUSY" }),
+		);
+		await expect(
+			controller.setModel("c1", "s1", {
+				rootDir: "D:\\",
+				relativePath: "repo",
+				provider: "p",
+				modelId: "m",
+			}),
+		).rejects.toBeInstanceOf(BadRequestException);
+	});
+
+	it("SSE stream 不要求 Owner", async () => {
+		const { controller, events } = makeController();
+		controller.stream("c1", "s1");
+		expect(events.stream).toHaveBeenCalledWith("c1", "s1");
+	});
+
+	it("running 返回活动回合列表", async () => {
+		const { controller, runs } = makeController();
+		(runs.listActiveByClient as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{ jobId: "j1", runId: "j1", sessionId: "s1", status: "running" },
+		]);
+		const result = await controller.running("c1");
+		expect(result).toEqual([
+			{ jobId: "j1", runId: "j1", sessionId: "s1", status: "running" },
+		]);
+	});
+});

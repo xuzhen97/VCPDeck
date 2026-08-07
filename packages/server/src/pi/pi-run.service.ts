@@ -217,6 +217,30 @@ export class PiRunService {
 		return this.prisma.job.findMany({ where: { type: "agent.run" } });
 	}
 
+	/** 列出某 Client 的活动回合（running/reattach 用） */
+	async listActiveByClient(
+		clientId: string,
+	): Promise<Array<{ jobId: string; runId: string; sessionId: string; status: string }>> {
+		const jobs = await this.prisma.job.findMany({
+			where: {
+				clientId,
+				type: "agent.run",
+				status: {
+					in: [JobStatus.RUNNING, JobStatus.WAITING_INPUT, JobStatus.DISCONNECTED],
+				},
+			},
+		});
+		return jobs.map((j) => {
+			const payload = safeJsonParse(j.payload, {}) as { sessionId?: string };
+			return {
+				jobId: j.id,
+				runId: j.id,
+				sessionId: payload.sessionId ?? "",
+				status: j.status,
+			};
+		});
+	}
+
 	private async update(
 		jobId: string,
 		data: {
