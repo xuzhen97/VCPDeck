@@ -390,15 +390,14 @@ export function usePiSession(pi: Pick<PiApi, "sessions" | "agent">) {
 				await pi.agent.setThinking(clientId, sessionId, cwdRef, level);
 			},
 			extensionResponse: (requestId, value, confirmed) =>
-				withRun((c, s, runId) =>
-					pi.agent.extensionResponse(c, s, runId, {
+				withRun(async (c, s, runId) => {
+					await pi.agent.extensionResponse(c, s, runId, {
 						requestId,
 						...(value !== undefined ? { value } : {}),
 						...(confirmed !== undefined ? { confirmed } : {}),
-					}).then(() => {
-						setState((st) => ({ ...st, status: "running", pendingExtension: null }));
-					}),
-				),
+					});
+					setState((st) => ({ ...st, status: "running", pendingExtension: null }));
+				}),
 			navigate: async (targetId) => {
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;

@@ -1,19 +1,23 @@
-import {
-	createAgentSessionFromServices,
-	createAgentSessionServices,
-	getAgentDir,
-	SessionManager,
-	type AgentSession,
-	type AgentSessionEvent,
-	type SlashCommandInfo,
-	ProjectTrustStore,
-	hasTrustRequiringProjectResources,
-	resolveModelScopeWithDiagnostics,
+import type {
+	AgentSession,
+	AgentSessionEvent,
+	SlashCommandInfo,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { randomUUID } from "node:crypto";
 import type { PiAction, PiAgentState, PiClientEvent, PiExtensionUiRequest } from "@vcpdeck/shared";
 import { projectPiEvent } from "./event-projector.js";
+
+/**
+ * Pi SDK 是 ESM-only；Client 编译为 CJS，静态 import 会触发
+ * ERR_PACKAGE_PATH_NOT_EXPORTED，必须运行时动态 import。
+ */
+type PiSdk = typeof import("@earendil-works/pi-coding-agent");
+let sdkPromise: Promise<PiSdk> | null = null;
+function getSdk(): Promise<PiSdk> {
+	if (!sdkPromise) sdkPromise = import("@earendil-works/pi-coding-agent");
+	return sdkPromise;
+}
 
 /** 空闲 10 分钟后优雅关闭 */
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -58,14 +62,14 @@ export function startPiAgentSession(
 	options: PiAgentSessionOptions,
 ): Promise<PiAgentSessionWrapper> {
 	return (async () => {
-		const agentDir = getAgentDir();
+		const agentDir = (await getSdk()).getAgentDir();
 		const sessionManager = options.sessionFile
-			? SessionManager.open(options.sessionFile, undefined)
-			: SessionManager.create(options.cwd, undefined);
+			? (await getSdk()).SessionManager.open(options.sessionFile, undefined)
+			: (await getSdk()).SessionManager.create(options.cwd, undefined);
 
 		let trustAsk: ((message: string) => Promise<boolean>) | null = null;
 		const noAsk = () => Promise.resolve(false);
-		const services = await createAgentSessionServices({
+		const services = await (await getSdk()).createAgentSessionServices({
 			cwd: sessionManager.getCwd(),
 			agentDir,
 			resourceLoaderReloadOptions: {
@@ -84,7 +88,7 @@ export function startPiAgentSession(
 		const enabled = services.settingsManager.getEnabledModels();
 		let scopedModels: Array<{ model: unknown; thinkingLevel?: ThinkingLevel }> = [];
 		if (enabled && enabled.length > 0) {
-			const { scopedModels: resolved } = await resolveModelScopeWithDiagnostics(
+			const { scopedModels: resolved } = await (await getSdk()).resolveModelScopeWithDiagnostics(
 				enabled,
 				services.modelRuntime,
 			);
@@ -92,7 +96,7 @@ export function startPiAgentSession(
 		}
 
 		const initial = selectInitialModel(available, scopedModels, options);
-		const { session: inner } = await createAgentSessionFromServices({
+		const { session: inner } = await (await getSdk()).createAgentSessionFromServices({
 			services,
 			sessionManager,
 			...(initial.model ? { model: initial.model as never } : {}),
@@ -131,10 +135,11 @@ async function defaultTrustResolver(
 	cwd: string,
 	ask: (message: string) => Promise<boolean>,
 ): Promise<boolean> {
-	const store = new ProjectTrustStore(getAgentDir());
+	const sdk = await getSdk();
+	const store = new sdk.ProjectTrustStore(sdk.getAgentDir());
 	const existing = store.get(cwd);
 	if (existing !== null) return existing;
-	if (!hasTrustRequiringProjectResources(cwd)) return false;
+	if (!(await getSdk()).hasTrustRequiringProjectResources(cwd)) return false;
 	const confirmed = await ask(
 		`此项目包含本地扩展/Skills（.pi/extensions 或 .agents/skills），是否信任并加载？`,
 	);
@@ -370,7 +375,7 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 		if (!enabled || enabled.length === 0) {
 			return available.map((m) => ({ provider: m.provider, modelId: m.id }));
 		}
-		const { scopedModels } = await resolveModelScopeWithDiagnostics(
+		const { scopedModels } = await (await getSdk()).resolveModelScopeWithDiagnostics(
 			enabled,
 			this.inner.modelRuntime,
 		);
@@ -452,18 +457,18 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 		let newSessionFile: string;
 		if (entry.parentId) {
 			// 历史中 fork：复制到 fork 点之前
-			const sourceManager = SessionManager.open(currentSessionFile, sessionDir);
+			const sourceManager = (await getSdk()).SessionManager.open(currentSessionFile, sessionDir);
 			const forkedPath = sourceManager.createBranchedSession(entry.parentId);
 			if (!forkedPath) return { cancelled: true };
 			newSessionFile = forkedPath;
 		} else {
 			// 首条消息前 fork：创建指向当前 Session 的空 Session
-			const newManager = SessionManager.create(sessionManager.getCwd(), sessionDir);
+			const newManager = (await getSdk()).SessionManager.create(sessionManager.getCwd(), sessionDir);
 			newManager.newSession({ parentSession: currentSessionFile });
 			newSessionFile = newManager.getSessionFile() as string;
 		}
 
-		const newSessionId = SessionManager.open(newSessionFile, sessionDir).getSessionId();
+		const newSessionId = (await getSdk()).SessionManager.open(newSessionFile, sessionDir).getSessionId();
 		await this.shutdown();
 		return { cancelled: false, newSessionId };
 	}
@@ -476,7 +481,7 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 		if (!leafId) return { cancelled: true };
 		const newPath = sessionManager.createBranchedSession(leafId);
 		if (!newPath) return { cancelled: true };
-		const newSessionId = SessionManager.open(newPath, sessionManager.getSessionDir()).getSessionId();
+		const newSessionId = (await getSdk()).SessionManager.open(newPath, sessionManager.getSessionDir()).getSessionId();
 		await this.shutdown();
 		return { cancelled: false, newSessionId };
 	}

@@ -1,14 +1,8 @@
 /**
  * 单项目 Pi Worker 子进程入口。
  * 通过 IPC 与 parent（Supervisor）通信；只服务一个 canonical cwd。
- * 主进程不静态 import Pi SDK；本文件由 fork 启动，运行时才加载 SDK。
+ * 主进程不静态 import Pi SDK；本文件由 fork 启动，运行时才动态加载 SDK。
  */
-import {
-	ModelRuntime,
-	SessionManager,
-	SettingsManager,
-	getAgentDir,
-} from "@earendil-works/pi-coding-agent";
 import type { PiAttachmentDescriptor, PiRequest } from "@vcpdeck/shared";
 import { createPiSessionReader, type PiSessionReader } from "./session-reader.js";
 import {
@@ -24,6 +18,14 @@ import type {
 const cwd = process.argv[2] ?? "";
 if (!cwd) {
 	process.exit(1);
+}
+
+/** Pi SDK 是 ESM-only；CJS 下必须动态 import */
+type PiSdk = typeof import("@earendil-works/pi-coding-agent");
+let sdkPromise: Promise<PiSdk> | null = null;
+function getSdk(): Promise<PiSdk> {
+	if (!sdkPromise) sdkPromise = import("@earendil-works/pi-coding-agent");
+	return sdkPromise;
 }
 
 const reader: PiSessionReader = createPiSessionReader(cwd);
@@ -54,7 +56,7 @@ async function ensureWrapper(sessionId: string): Promise<PiAgentSessionWrapper> 
 		await wrapper.shutdown();
 		wrapper = null;
 	}
-	const sessions = await SessionManager.list(cwd);
+	const sessions = await (await getSdk()).SessionManager.list(cwd);
 	const found = sessions.find((s) => s.id === sessionId);
 	if (!found) {
 		throw Object.assign(new Error("Session not found"), { code: "PI_SESSION_NOT_FOUND" });
@@ -117,8 +119,8 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 			return await reader.navigate(request.sessionId, String(request.payload?.targetId ?? ""));
 		case "models.list": {
 			// 项目级模型列表：可用模型 ∩ enabledModels（无 session 依赖）
-			const settings = SettingsManager.create(cwd, getAgentDir());
-			const runtime = await ModelRuntime.create();
+			const settings = (await getSdk()).SettingsManager.create(cwd, (await getSdk()).getAgentDir());
+			const runtime = await (await getSdk()).ModelRuntime.create();
 			const available = await runtime.getAvailable();
 			const enabled = settings.getEnabledModels();
 			if (!enabled || enabled.length === 0) {

@@ -1,12 +1,21 @@
-import {
-	buildContextEntries,
-	SessionManager,
-	type SessionEntry,
-	type SessionInfo as PiSdkSessionInfo,
+import type {
+	SessionEntry,
+	SessionInfo as PiSdkSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, normalize } from "node:path";
 import { randomUUID } from "node:crypto";
+
+/**
+ * Pi SDK 是 ESM-only；Client 编译为 CJS，静态 import 会触发
+ * ERR_PACKAGE_PATH_NOT_EXPORTED，必须运行时动态 import。
+ */
+type PiSdk = typeof import("@earendil-works/pi-coding-agent");
+let sdkPromise: Promise<PiSdk> | null = null;
+function getSdk(): Promise<PiSdk> {
+	if (!sdkPromise) sdkPromise = import("@earendil-works/pi-coding-agent");
+	return sdkPromise;
+}
 import type {
 	PiImagePlaceholder,
 	PiMessage,
@@ -70,7 +79,7 @@ export function createPiSessionReader(
 
 	async function loadList(): Promise<PiSessionInfo[]> {
 		if (listCache) return listCache;
-		const piSessions: PiSdkSessionInfo[] = await SessionManager.list(cwd, sessionDir);
+		const piSessions: PiSdkSessionInfo[] = await (await getSdk()).SessionManager.list(cwd, sessionDir);
 		const pathToId = new Map<string, string>();
 		for (const s of piSessions) pathToId.set(pathKey(s.path), s.id);
 		const out: PiSessionInfo[] = [];
@@ -231,11 +240,11 @@ export function createPiSessionReader(
 		cursor?: string | null,
 	): Promise<{ messages: PiMessage[]; nextCursor: string | null }> {
 		const path = await resolvePath(sessionId);
-		const sm = SessionManager.open(path);
+		const sm = (await getSdk()).SessionManager.open(path);
 		const entries = sm.getEntries() as unknown as SessionEntry[];
 		const byId = new Map<string, SessionEntry>();
 		for (const e of entries) byId.set(e.id, e);
-		const selected = buildContextEntries(entries, leafId ?? sm.getLeafId(), byId);
+		const selected = (await getSdk()).buildContextEntries(entries, leafId ?? sm.getLeafId(), byId);
 		const all: PiMessage[] = [];
 		for (const entry of selected) {
 			const m = entryToMessage(entry);
@@ -259,7 +268,7 @@ export function createPiSessionReader(
 		},
 		async get(sessionId) {
 			const path = await resolvePath(sessionId);
-			const sm = SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path);
 			const header = sm.getHeader();
 			const leafId = sm.getLeafId();
 			const tree = sm.getTree() as unknown as Array<{
@@ -290,7 +299,7 @@ export function createPiSessionReader(
 		},
 		async entryContent(sessionId, entryId, blockIndex) {
 			const path = await resolvePath(sessionId);
-			const sm = SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path);
 			const entry = sm.getEntry(entryId);
 			if (!entry || entry.type !== "message") {
 				throw piError("PI_SESSION_NOT_FOUND", "Entry not found");
@@ -309,13 +318,13 @@ export function createPiSessionReader(
 			const trimmed = name.trim();
 			if (!trimmed) throw piError("PI_PROTOCOL_INVALID", "Session name must not be empty");
 			const path = await resolvePath(sessionId);
-			const sm = SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path);
 			sm.appendSessionInfo(trimmed);
 			invalidateList();
 		},
 		async delete(sessionId) {
 			const path = await resolvePath(sessionId);
-			const sm = SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path);
 			const parentSessionPath = sm.getHeader()?.parentSession ?? null;
 			const dir = dirname(path);
 			const targetKey = pathKey(path);
@@ -353,7 +362,7 @@ export function createPiSessionReader(
 		},
 		async fork(sessionId, upToMessageId) {
 			const sourcePath = await resolvePath(sessionId);
-			const sm = SessionManager.open(sourcePath);
+			const sm = (await getSdk()).SessionManager.open(sourcePath);
 			const targetCwd = sm.getCwd() || cwd;
 			const dir = sm.getSessionDir();
 			const entries = sm.getEntries() as unknown as SessionEntry[];
@@ -389,7 +398,7 @@ export function createPiSessionReader(
 		},
 		async clone(sessionId) {
 			const path = await resolvePath(sessionId);
-			const sm = SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path);
 			const leafId = sm.getLeafId();
 			if (!leafId) throw piError("PI_SESSION_NOT_FOUND", "Session has no leaf");
 			const newPath = sm.createBranchedSession(leafId);
