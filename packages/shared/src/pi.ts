@@ -3,6 +3,7 @@
 
 // ── 稳定错误码 ──
 export type PiErrorCode =
+	| "PI_PROTOCOL_INVALID"
 	| "PI_CLIENT_UNSUPPORTED"
 	| "PI_NODE_UNSUPPORTED"
 	| "PI_BASH_NOT_FOUND"
