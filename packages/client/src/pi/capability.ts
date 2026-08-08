@@ -9,7 +9,10 @@ import { isSupportedNodeVersion } from "./node-version.js";
 export interface ProbeWorkerResult {
 	sdkVersion: string;
 	modelCount: number;
-	error: { code: "PI_RUNTIME_UNAVAILABLE" | "PI_AUTH_UNAVAILABLE"; message: string } | null;
+	error: {
+		code: "PI_RUNTIME_UNAVAILABLE" | "PI_AUTH_UNAVAILABLE";
+		message: string;
+	} | null;
 }
 
 /** 探测环境抽象（测试注入） */
@@ -39,7 +42,10 @@ async function exists(p: string): Promise<boolean> {
  */
 async function readSettingsShellPath(home: string): Promise<string | null> {
 	try {
-		const raw = await readFile(join(home, ".pi", "agent", "settings.json"), "utf8");
+		const raw = await readFile(
+			join(home, ".pi", "agent", "settings.json"),
+			"utf8",
+		);
 		const parsed = JSON.parse(raw) as { shellPath?: unknown };
 		return typeof parsed.shellPath === "string" && parsed.shellPath.length > 0
 			? parsed.shellPath
@@ -96,6 +102,7 @@ function forkProbeWorker(): Promise<ProbeWorkerResult> {
 		const child = fork(join(__dirname, "probe-worker.js"), {
 			stdio: ["ignore", "ignore", "ignore", "ipc"],
 		});
+		child.send({ type: "probe" });
 		const timer = setTimeout(() => {
 			child.kill();
 			resolve({
@@ -184,7 +191,11 @@ export async function probePiCapability(
 
 	const worker = await env.forkProbeWorker();
 	if (worker.error) {
-		return { available: false, code: worker.error.code, message: worker.error.message };
+		return {
+			available: false,
+			code: worker.error.code,
+			message: worker.error.message,
+		};
 	}
 	if (worker.modelCount === 0) {
 		return {
