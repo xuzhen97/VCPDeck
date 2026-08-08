@@ -246,26 +246,58 @@ function SessionTree({
 	return (
 		<div className="space-y-0.5" style={{ paddingLeft: depth > 0 ? 10 : 0 }}>
 			{nodes.map((node) => (
-				<div key={node.id}>
+				<SessionTreeNode
+					key={node.id}
+					node={node}
+					onNavigate={onNavigate}
+					depth={depth}
+				/>
+			))}
+		</div>
+	);
+}
+
+/** 分支节点：子分支默认折叠（长 fork 链会话避免上千 DOM 节点） */
+function SessionTreeNode({
+	node,
+	onNavigate,
+	depth,
+}: {
+	node: PiSessionTreeNode;
+	onNavigate: (entryId: string) => void;
+	depth: number;
+}) {
+	const [open, setOpen] = useState(false);
+	const hasChildren = node.children.length > 0;
+	return (
+		<div>
+			<div className="flex items-center gap-1">
+				{hasChildren ? (
 					<button
 						type="button"
-						className={`block w-full truncate rounded px-1 py-0.5 text-left text-[10px] ${
-							node.running ? "text-green-500" : "text-muted-foreground"
-						}`}
-						onClick={() => onNavigate(node.id)}
-						title="分支节点（会话内导航）"
+						className="w-4 shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
+						onClick={() => setOpen((v) => !v)}
+						aria-label={open ? "收起分支" : "展开分支"}
 					>
-						{node.running ? "●" : "○"} {node.name || `分支 ${node.id.slice(0, 6)}`}
+						{open ? "▾" : "▸"}
 					</button>
-					{node.children.length > 0 && (
-						<SessionTree
-							nodes={node.children}
-							onNavigate={onNavigate}
-							depth={depth + 1}
-						/>
-					)}
-				</div>
-			))}
+				) : (
+					<span className="w-4 shrink-0" />
+				)}
+				<button
+					type="button"
+					className={`block w-full truncate rounded px-0.5 py-0.5 text-left text-[10px] ${
+						node.running ? "text-green-500" : "text-muted-foreground"
+					}`}
+					onClick={() => onNavigate(node.id)}
+					title="分支节点（会话内导航）"
+				>
+					{node.running ? "●" : "○"} {node.name || `分支 ${node.id.slice(0, 6)}`}
+				</button>
+			</div>
+			{open && hasChildren && (
+				<SessionTree nodes={node.children} onNavigate={onNavigate} depth={depth + 1} />
+			)}
 		</div>
 	);
 }
