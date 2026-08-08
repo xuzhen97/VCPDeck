@@ -24,6 +24,8 @@
 
 `auto`、`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`
 
+其中 `auto` 是前端语义：选择它时不向 SDK 发送 `thinking.set` 请求，保留远程 Session 当前默认值。共享协议和 Client 的实际状态只使用 Pi SDK 原生的 7 档值：`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。重新读取权威状态后，界面显示 SDK 返回的实际级别。
+
 当前版本不在前端自行推断模型能力；不支持的级别由现有 Client/SDK 行为处理，并通过稳定错误返回。
 
 ### 运行中行为
@@ -64,7 +66,7 @@
 
 ### Shared
 
-扩展 `PiAgentState`，增加当前思考深度字段 `thinkingLevel`，使用 Pi SDK 兼容的字符串值。
+扩展 `PiAgentState`，增加当前思考深度字段 `thinkingLevel`，类型为 Pi SDK 原生 7 档值 `off | minimal | low | medium | high | xhigh | max`。
 
 ### Client
 
@@ -74,7 +76,7 @@
 
 ### Frontend
 
-- `usePiSession` 暴露模型列表、模型切换、思考深度切换所需状态和动作；
+- `usePiSession` 暴露模型列表、模型切换、思考深度切换所需状态和动作；`auto` 只更新前端选择，不调用 `setThinking`；
 - 进入项目/打开 Session 时加载模型列表和 Agent state；
 - `PiRunDetails` 增加两个选择器；
 - `PiPanel` 连接 SDK API、传递空闲状态、处理成功刷新与失败提示；
