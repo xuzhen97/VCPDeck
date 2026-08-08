@@ -8,7 +8,7 @@ export function piError(code: string, message: string): Error {
 	return Object.assign(new Error(message), { code });
 }
 
-function canonicalPath(p: string): string {
+export function canonicalPath(p: string): string {
 	const s = resolve(p).replace(/\\/g, "/");
 	return process.platform === "win32" ? s.toLowerCase() : s;
 }

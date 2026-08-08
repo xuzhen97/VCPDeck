@@ -9,7 +9,7 @@ import type {
 	PiStateReport,
 } from "@vcpdeck/shared";
 import { discoverRoots } from "../filesystem-roots.js";
-import { resolveProjectCwd } from "./project-path.js";
+import { canonicalPath, projectKeyFor, resolveProjectCwd } from "./project-path.js";
 import type {
 	PiWorkerOutboundMessage,
 	PiWorkerRequestMessage,
@@ -80,6 +80,8 @@ export function createPiSupervisor(options: {
 	const registry = new Map<string, ProjectEntry>();
 	/** 已退出 Worker 的终态摘要（registry 清理后仍保留直到 ack） */
 	const orphanTerminals: PiRunSummary[] = [];
+	/** jobId → cwd（终态后 settlement 查询回退；仅内存，不上报） */
+	const terminalCwd = new Map<string, string>();
 	const eventListeners: ((event: PiEvent) => void)[] = [];
 	const pending = new Map<
 		string,
@@ -103,6 +105,11 @@ export function createPiSupervisor(options: {
 				if (entry.activeRun?.jobId === request.jobId) {
 					return { key, cwd: entry.cwd };
 				}
+			}
+			// settlement 在 activeRun 清除（agent_settled）后才查询：回退到终态记录
+			const settledCwd = terminalCwd.get(request.jobId);
+			if (settledCwd) {
+				return { key: projectKeyFor(canonicalPath(settledCwd)), cwd: settledCwd };
 			}
 			throw { code: "PI_SESSION_NOT_FOUND", message: "No active run for job" };
 		}
@@ -157,6 +164,7 @@ export function createPiSupervisor(options: {
 							status: "done",
 							projectKey: run.projectKey,
 						});
+						terminalCwd.set(run.jobId, entry.cwd);
 						entry.activeRun = null;
 					}
 					if (msg.event.type === "prompt_error") {
@@ -167,6 +175,7 @@ export function createPiSupervisor(options: {
 							status: "error",
 							projectKey: run.projectKey,
 						});
+						terminalCwd.set(run.jobId, entry.cwd);
 						entry.activeRun = null;
 					}
 				}
@@ -299,6 +308,7 @@ export function createPiSupervisor(options: {
 			for (const entry of registry.values()) {
 				entry.terminals = entry.terminals.filter((t) => !accepted.has(t.jobId));
 			}
+			for (const jobId of accepted) terminalCwd.delete(jobId);
 		},
 
 		onEvent(listener) {

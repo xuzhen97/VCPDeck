@@ -37,9 +37,10 @@ export function PiSessionSidebar({
 		setLoading(true);
 		setError(null);
 		try {
-			const list = (await pi.sessions.list(clientId, cwdRef)) as { sessions: PiSessionInfo[] };
+			// Server 返回裸数组（GET /pi/sessions），直接作为列表使用
+			const list = (await pi.sessions.list(clientId, cwdRef)) as PiSessionInfo[];
 			const withTree = await Promise.all(
-				list.sessions.slice(0, 50).map(async (s) => {
+				list.slice(0, 50).map(async (s) => {
 					try {
 						const detail = (await pi.sessions.get(clientId, s.id, cwdRef)) as {
 							tree: PiSessionTreeNode[];

@@ -1,5 +1,6 @@
 import {
 	BadRequestException,
+	ConflictException,
 	Controller,
 	Delete,
 	Get,
@@ -429,12 +430,27 @@ export class PiController {
 		}
 
 		const projectKey = await this.resolveProjectKey(clientId, { rootDir, relativePath });
-		const { jobId, runId } = await this.runs.createRun(actor, {
-			clientId,
-			sessionId,
-			projectKey,
-			imageCount: Array.isArray(body.images) ? body.images.length : 0,
-		});
+		let run: { jobId: string; runId: string };
+		try {
+			run = await this.runs.createRun(actor, {
+				clientId,
+				sessionId,
+				projectKey,
+				imageCount: Array.isArray(body.images) ? body.images.length : 0,
+			});
+		} catch (err) {
+			if (
+				err instanceof Error &&
+				(err as { code?: unknown }).code === "PI_PROJECT_BUSY"
+			) {
+				throw new ConflictException({
+					code: "PI_PROJECT_BUSY",
+					message: err.message,
+				});
+			}
+			throw err;
+		}
+		const { jobId, runId } = run;
 
 		// 先发布 run_created（submissionId 绑定），再 dispatch，保证首个 Agent 事件不丢
 		await this.events.publish({
