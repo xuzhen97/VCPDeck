@@ -83,6 +83,8 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 			return { available: true };
 		case "sessions.list":
 			return { sessions: await reader.list() };
+		case "session.new":
+			return await reader.newSession();
 		case "session.get":
 			if (!request.sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
 			return await reader.get(request.sessionId);

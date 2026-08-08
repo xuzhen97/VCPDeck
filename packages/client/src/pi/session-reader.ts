@@ -51,6 +51,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 export interface PiSessionReader {
 	list(): Promise<PiSessionInfo[]>;
+	newSession(): Promise<{ sessionId: string }>;
 	get(sessionId: string): Promise<PiSessionDetail>;
 	context(
 		sessionId: string,
@@ -265,6 +266,19 @@ export function createPiSessionReader(
 	return {
 		async list() {
 			return loadList();
+		},
+		async newSession() {
+			const manager = (await getSdk()).SessionManager.create(cwd, sessionDir);
+			const sessionFile = manager.getSessionFile();
+			const header = manager.getHeader();
+			if (!sessionFile || !header) {
+				throw piError("PI_RUNTIME_UNAVAILABLE", "Failed to create Session");
+			}
+			await writeFile(sessionFile, `${JSON.stringify(header)}\n`, "utf8");
+			const sessionId = manager.getSessionId();
+			pathCache.set(sessionId, sessionFile);
+			invalidateList();
+			return { sessionId };
 		},
 		async get(sessionId) {
 			const path = await resolvePath(sessionId);

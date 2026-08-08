@@ -88,6 +88,48 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 		}
 	});
 
+	it("新建 Session 返回可继续打开的真实 sessionId", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
+		const cwd = join(agentDir, "project");
+		await mkdir(cwd, { recursive: true });
+		roots.push(agentDir);
+
+		const child = spawnWorker(cwd, { PI_CODING_AGENT_DIR: agentDir });
+		const msg = await requestOnce(child, {
+			requestId: "r-new",
+			action: "session.new",
+			cwdRef: { rootDir: agentDir, relativePath: "project" },
+		});
+
+		expect(msg.type).toBe("response");
+		if (msg.type === "response") {
+			expect(msg.ok).toBe(true);
+			if (msg.ok) {
+				const sessionId = (msg.data as { sessionId: string }).sessionId;
+				expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+
+				const listed = await requestOnce(child, {
+					requestId: "r-new-list",
+					action: "sessions.list",
+					cwdRef: { rootDir: agentDir, relativePath: "project" },
+				});
+				expect(listed.type).toBe("response");
+				if (listed.type === "response" && listed.ok) {
+					const sessions = (listed.data as { sessions: Array<{ id: string }> }).sessions;
+					expect(sessions.some((session) => session.id === sessionId)).toBe(true);
+				}
+
+				const detail = await requestOnce(child, {
+					requestId: "r-new-get",
+					action: "session.get",
+					sessionId,
+					cwdRef: { rootDir: agentDir, relativePath: "project" },
+				});
+				expect(detail.type).toBe("response");
+				if (detail.type === "response") expect(detail.ok).toBe(true);
+			}
+		}
+	});
 	it("parent disconnect 后 Worker 退出", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
 		const cwd = join(agentDir, "project");

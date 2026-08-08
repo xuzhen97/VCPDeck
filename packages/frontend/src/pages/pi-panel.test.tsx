@@ -160,12 +160,19 @@ describe("PiPanel", () => {
 		await screen.getByText("D:\\").click();
 		await screen.findByText("📁 repo");
 		await screen.getByText("📁 repo").click();
+		await vi.waitFor(() => {
+			expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0);
+		});
 		await screen.getByText("选择此目录").click();
+		expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0);
 
 		// 新建会话
 		await screen.getAllByText("新建")[0]!.click();
 		await vi.waitFor(() => {
-			expect(sdk.pi.agent.newSession).toHaveBeenCalled();
+			expect(sdk.pi.agent.newSession).toHaveBeenCalledWith("c1", {
+				rootDir: "D:\\",
+				relativePath: "repo",
+			});
 		});
 		expect(MockEventSource.instances.length).toBeGreaterThan(0);
 	});

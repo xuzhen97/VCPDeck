@@ -52,6 +52,17 @@ function keyOf(p: RecentProject): string {
 	return `${p.clientId}\u0000${p.rootDir}\u0000${p.relativePath}`;
 }
 
+/** 将 rootDir/relativePath 组合成与远程系统一致的显示路径。 */
+function formatCwdRef(ref: PiCwdRef): string {
+	const separator = ref.rootDir.includes("\\") ? "\\" : "/";
+	const root = ref.rootDir.replace(/[\\/]+$/, "");
+	const relative = ref.relativePath
+		.replace(/^[\\/]+|[\\/]+$/g, "")
+		.replace(/[\\/]+/g, separator);
+	if (!relative) return ref.rootDir.endsWith(separator) ? ref.rootDir : `${ref.rootDir}${separator}`;
+	return root ? `${root}${separator}${relative}` : `${separator}${relative}`;
+}
+
 /**
  * 项目选择器：复用 Files roots/list 浏览目录（不接受自由路径）。
  * 最近项目按机器分组、限量存 localStorage；重新选择时由 Client canonical 校验。
@@ -134,9 +145,9 @@ export function PiProjectPicker({
 			<div className="flex items-center gap-2">
 				<div
 					className="min-w-0 flex-1 truncate rounded border border-border bg-secondary/40 px-2 py-1 text-xs"
-					title={value ? `${value.rootDir}/${value.relativePath}` : undefined}
+					title={value ? formatCwdRef(value) : undefined}
 				>
-					{value ? `${value.rootDir}/${value.relativePath}` : "未选择项目"}
+					{value ? formatCwdRef(value) : "未选择项目"}
 				</div>
 				<Button
 					type="button"
@@ -162,7 +173,7 @@ export function PiProjectPicker({
 								className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-secondary/60"
 								onClick={() => pickRecent(p)}
 							>
-								{p.rootDir}/{p.relativePath}
+								{formatCwdRef(p)}
 							</button>
 						))}
 					</div>
@@ -191,7 +202,9 @@ export function PiProjectPicker({
 							>
 								↑ 上级
 							</button>
-							<span className="ml-2 text-muted-foreground">{path || "/"}</span>
+							<span className="ml-2 text-muted-foreground">
+								{root ? formatCwdRef({ rootDir: root, relativePath: path }) : "/"}
+							</span>
 						</div>
 					)}
 					<div className="max-h-40 space-y-1 overflow-y-auto">
