@@ -295,17 +295,43 @@ export interface PiSessionContextPage {
 	nextCursor: string | null;
 }
 
+/** Pi SDK 支持的思考深度（Frontend 的 auto 不属于协议值） */
+export const PI_THINKING_LEVELS = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+] as const;
+
+export type PiThinkingLevel = (typeof PI_THINKING_LEVELS)[number];
+
+/** 当前可选模型的安全摘要 */
+export interface PiModelInfo {
+	provider: string;
+	modelId: string;
+}
+
+/** 判断值是否为 Pi SDK 支持的思考深度 */
+export function isPiThinkingLevel(value: unknown): value is PiThinkingLevel {
+	return typeof value === "string" &&
+		(PI_THINKING_LEVELS as readonly string[]).includes(value);
+}
+
 /** Agent 状态快照（settlement check 使用） */
 export interface PiAgentState {
 	status: "idle" | "running" | "compacting" | "waiting_for_extension_input";
 	streaming: boolean;
 	prompting: boolean;
 	compacting: boolean;
+	thinkingLevel: PiThinkingLevel;
 	queuedMessages: {
 		steering: unknown[];
 		followUp: unknown[];
 	};
-	model?: { provider: string; modelId: string };
+	model?: PiModelInfo;
 	waitingForExtensionInput?: boolean;
 }
 

@@ -27,9 +27,12 @@ export type {
 	PiSessionTreeNode,
 	PiStateReport,
 	PiTextContent,
+	PiThinkingLevel,
 	PiThinkingPlaceholder,
 	PiToolCallContent,
+	PiModelInfo,
 } from "./pi.js";
+export { PI_THINKING_LEVELS, isPiThinkingLevel } from "./pi.js";
 
 // ── Event names ──
 export const Events = {

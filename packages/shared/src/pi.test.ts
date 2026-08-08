@@ -5,7 +5,16 @@ import {
 	parsePiResponse,
 	parsePiStateReport,
 	MAX_PI_IMAGES_PER_PROMPT,
+	isPiThinkingLevel,
 } from "./pi.js";
+
+describe("Pi thinking levels", () => {
+	it("只接受 Pi SDK 原生思考深度", () => {
+		expect(isPiThinkingLevel("high")).toBe(true);
+		expect(isPiThinkingLevel("auto")).toBe(false);
+		expect(isPiThinkingLevel("unknown")).toBe(false);
+	});
+});
 
 describe("parsePiRequest", () => {
 	it("接受合法的 agent.prompt 请求", () => {
