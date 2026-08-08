@@ -57,9 +57,22 @@ function makePi() {
 			clone: vi.fn(async () => ({ sessionId: "cloned" })),
 			navigate: vi.fn(async () => ({})),
 		},
+		models: vi.fn(async () => [
+			{ provider: "p", modelId: "m1" },
+			{ provider: "p", modelId: "m2" },
+		]),
 		agent: {
 			newSession: vi.fn(async () => ({ sessionId: "s1" })),
-			state: vi.fn(async () => ({ status: "idle", streaming: false, prompting: false, compacting: false, queuedMessages: { steering: [], followUp: [] } })),
+			state: vi.fn(async () => ({
+				status: "idle",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			})),
+
 			prompt: vi.fn(async () => ({ jobId: "j1", runId: "j1", sessionId: "s1" })),
 			steer: vi.fn(async () => ({})),
 			followUp: vi.fn(async () => ({})),
@@ -72,7 +85,7 @@ function makePi() {
 			eventsPath: (clientId: string, sessionId: string) =>
 				`/api/clients/${clientId}/pi/agent/${sessionId}/events`,
 		},
-	} as unknown as Pick<PiApi, "sessions" | "agent">;
+	} as unknown as Pick<PiApi, "sessions" | "agent" | "models">;
 }
 
 afterEach(() => {
@@ -190,6 +203,67 @@ describe("usePiSession", () => {
 			await new Promise((r) => setTimeout(r, 700));
 		});
 		expect(pi.sessions.context).toHaveBeenCalled();
+	});
+
+	it("打开 Session 加载模型并显示当前 thinking level", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const { result } = renderHook(() => usePiSession(pi));
+
+		await act(async () => {
+			await result.current.actions.openSession("c1", "s1", CWD);
+		});
+
+		expect(result.current.state.models).toEqual([
+			{ provider: "p", modelId: "m1" },
+			{ provider: "p", modelId: "m2" },
+		]);
+		expect(result.current.state.agentState?.thinkingLevel).toBe("off");
+		expect(result.current.state.thinkingSelection).toBe("off");
+	});
+
+	it("切换模型和 thinking level，auto 不发送 setThinking", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+
+		await act(async () => result.current.actions.setModel("p", "m2"));
+		await act(async () => result.current.actions.setThinking("high"));
+		await act(async () => result.current.actions.setThinking("auto"));
+
+		expect(pi.agent.setModel).toHaveBeenCalledWith("c1", "s1", CWD, "p", "m2");
+		expect(pi.agent.setThinking).toHaveBeenCalledTimes(1);
+		expect(pi.agent.setThinking).toHaveBeenCalledWith("c1", "s1", CWD, "high");
+		expect(result.current.state.thinkingSelection).toBe("auto");
+	});
+
+	it("切换失败保留旧选择并显示错误", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.setModel as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("busy"));
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+
+		await act(async () => {
+			await expect(result.current.actions.setModel("p", "m2")).rejects.toThrow("busy");
+		});
+		expect(result.current.state.agentState?.model).toEqual({ provider: "p", modelId: "m1" });
+		expect(result.current.state.error).toBe("busy");
+	});
+
+	it("运行中不调用模型或 thinking 切换", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+		act(() => emit({ type: "agent_start", sessionId: "s1" }));
+
+		await act(async () => result.current.actions.setModel("p", "m2"));
+		await act(async () => result.current.actions.setThinking("high"));
+
+		expect(pi.agent.setModel).not.toHaveBeenCalled();
+		expect(pi.agent.setThinking).not.toHaveBeenCalled();
 	});
 
 	it("send 前未打开会话时报错", async () => {

@@ -66,9 +66,19 @@ function makePi() {
 			clone: vi.fn(),
 			navigate: vi.fn(),
 		},
+		models: vi.fn(async () => [{ provider: "p", modelId: "m1" }]),
 		agent: {
 			newSession: vi.fn(async () => ({ sessionId: "s1" })),
-			state: vi.fn(async () => ({ status: "idle", streaming: false, prompting: false, compacting: false, queuedMessages: { steering: [], followUp: [] } })),
+			state: vi.fn(async () => ({
+				status: "idle",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			})),
+
 			prompt: vi.fn(async () => ({ jobId: "j1", runId: "j1", sessionId: "s1" })),
 			steer: vi.fn(),
 			followUp: vi.fn(),
@@ -81,7 +91,7 @@ function makePi() {
 			eventsPath: (clientId: string, sessionId: string) =>
 				`/api/clients/${clientId}/pi/agent/${sessionId}/events`,
 		},
-	} as unknown as Pick<PiApi, "sessions" | "agent">;
+	} as unknown as Pick<PiApi, "sessions" | "agent" | "models">;
 }
 
 afterEach(() => {

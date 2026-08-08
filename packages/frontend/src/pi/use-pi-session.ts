@@ -3,8 +3,10 @@ import type {
 	PiAgentState,
 	PiCwdRef,
 	PiMessage,
+	PiModelInfo,
 	PiSessionContextPage,
 	PiSessionDetail,
+	PiThinkingLevel,
 } from "@vcpdeck/shared";
 import type { PiApi } from "@vcpdeck/sdk";
 import { openPiEventStream, type PiEventStream } from "./pi-stream.js";
@@ -21,6 +23,8 @@ export type PiSessionStatus =
 	| "waiting_input"
 	| "error";
 
+export type PiThinkingSelection = "auto" | PiThinkingLevel;
+
 export interface PiSessionState {
 	messages: PiMessage[];
 	session: PiSessionDetail | null;
@@ -32,6 +36,8 @@ export interface PiSessionState {
 	nextCursor: string | null;
 	/** 待回答的 Extension UI 请求 */
 	pendingExtension: { requestId: string; kind: string; title?: string; message?: string; options?: string[] } | null;
+	models: PiModelInfo[];
+	thinkingSelection: PiThinkingSelection;
 }
 
 export interface PiSessionActions {
@@ -44,7 +50,7 @@ export interface PiSessionActions {
 	compact(customInstructions?: string): Promise<void>;
 	abortCompact(): Promise<void>;
 	setModel(provider: string, modelId: string): Promise<void>;
-	setThinking(level: string): Promise<void>;
+	setThinking(level: PiThinkingSelection): Promise<void>;
 	extensionResponse(requestId: string, value?: string, confirmed?: boolean): Promise<void>;
 	navigate(targetId: string): Promise<void>;
 	fork(messageId: string): Promise<void>;
@@ -62,11 +68,15 @@ const INITIAL_STATE: PiSessionState = {
 	hasMore: false,
 	nextCursor: null,
 	pendingExtension: null,
+	models: [],
+	thinkingSelection: "auto",
 };
 
 /** 前端 Pi 会话状态机（参考 Pi Web useAgentSession 核心语义） */
-export function usePiSession(pi: Pick<PiApi, "sessions" | "agent">) {
+export function usePiSession(pi: Pick<PiApi, "sessions" | "agent" | "models">) {
 	const [state, setState] = useState<PiSessionState>(INITIAL_STATE);
+	const stateRef = useRef(state);
+	stateRef.current = state;
 
 	const sessionIdRef = useRef<string | null>(null);
 	const clientIdRef = useRef<string | null>(null);
@@ -111,11 +121,11 @@ export function usePiSession(pi: Pick<PiApi, "sessions" | "agent">) {
 	}, [pi]);
 
 	/** 读取权威 agent state（reconcile/补绑 runId） */
-	const refreshState = useCallback(async () => {
+	const refreshState = useCallback(async (): Promise<PiAgentState | null> => {
 		const clientId = clientIdRef.current;
 		const sessionId = sessionIdRef.current;
 		const cwdRef = cwdRefRef.current;
-		if (!clientId || !sessionId || !cwdRef) return;
+		if (!clientId || !sessionId || !cwdRef) return null;
 		try {
 			const agentState = (await pi.agent.state(clientId, sessionId, cwdRef)) as PiAgentState;
 			setState((s) => ({ ...s, agentState }));
@@ -126,8 +136,10 @@ export function usePiSession(pi: Pick<PiApi, "sessions" | "agent">) {
 			) {
 				// 保持现有 runId；若为空且状态运行中，等待 run_created/权威接口
 			}
+			return agentState;
 		} catch (err) {
 			void err; // 连接未就绪时静默，重连后 refreshState 会重试
+			return null;
 		}
 	}, [pi]);
 
@@ -269,12 +281,27 @@ export function usePiSession(pi: Pick<PiApi, "sessions" | "agent">) {
 			const stream = openStream(clientId, sessionId, () => {});
 			await stream.connected();
 
-			// 附着：读取历史 + 权威状态
-			await reloadHistory();
-			await refreshState();
-			setState((s) => ({ ...s, status: "idle" }));
+			// 附着：读取历史、权威状态和当前可用模型
+			const modelsPromise = pi.models(clientId, cwdRef).catch((err: unknown) => {
+				setState((s) => ({
+					...s,
+					error: err instanceof Error ? err.message : String(err),
+				}));
+				return null;
+			});
+			const [, agentState, models] = await Promise.all([
+				reloadHistory(),
+				refreshState(),
+				modelsPromise,
+			]);
+			setState((s) => ({
+				...s,
+				status: "idle",
+				...(models ? { models } : {}),
+				...(agentState ? { thinkingSelection: agentState.thinkingLevel } : {}),
+			}));
 		},
-		[openStream, reloadHistory, refreshState],
+		[openStream, reloadHistory, refreshState, pi],
 	);
 
 	const createSession = useCallback(
@@ -376,18 +403,42 @@ export function usePiSession(pi: Pick<PiApi, "sessions" | "agent">) {
 			abortCompact: () =>
 				withRun((c, s, runId) => pi.agent.abortCompact(c, s, runId)),
 			setModel: async (provider, modelId) => {
+				if (stateRef.current.status !== "idle" || stateRef.current.agentState?.status !== "idle") return;
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;
 				const cwdRef = cwdRefRef.current;
 				if (!clientId || !sessionId || !cwdRef) return;
-				await pi.agent.setModel(clientId, sessionId, cwdRef, provider, modelId);
+				try {
+					await pi.agent.setModel(clientId, sessionId, cwdRef, provider, modelId);
+					await refreshState();
+					setState((s) => ({ ...s, error: null }));
+				} catch (err) {
+					setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
+					throw err;
+				}
 			},
 			setThinking: async (level) => {
+				if (level === "auto") {
+					setState((s) => ({ ...s, thinkingSelection: "auto", error: null }));
+					return;
+				}
+				if (stateRef.current.status !== "idle" || stateRef.current.agentState?.status !== "idle") return;
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;
 				const cwdRef = cwdRefRef.current;
 				if (!clientId || !sessionId || !cwdRef) return;
-				await pi.agent.setThinking(clientId, sessionId, cwdRef, level);
+				try {
+					await pi.agent.setThinking(clientId, sessionId, cwdRef, level);
+					const agentState = await refreshState();
+					setState((s) => ({
+						...s,
+						thinkingSelection: agentState?.thinkingLevel ?? level,
+						error: null,
+					}));
+				} catch (err) {
+					setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
+					throw err;
+				}
 			},
 			extensionResponse: (requestId, value, confirmed) =>
 				withRun(async (c, s, runId) => {
@@ -421,7 +472,7 @@ export function usePiSession(pi: Pick<PiApi, "sessions" | "agent">) {
 			},
 			close,
 		}),
-		[createSession, openSession, send, withRun, pi, clearGrace, close],
+		[createSession, openSession, send, withRun, pi, clearGrace, close, refreshState],
 	);
 
 	return { state, actions };
