@@ -15,11 +15,12 @@ import {
 	Sse,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import type {
-	ActorContext,
-	PiCwdRef,
-	PiPromptAccepted,
-	PiRequest,
+import {
+	isPiThinkingLevel,
+	type ActorContext,
+	type PiCwdRef,
+	type PiPromptAccepted,
+	type PiRequest,
 } from "@vcpdeck/shared";
 import { Actor } from "../auth/actor.decorator.js";
 import { ClientService } from "../client/client.service.js";
@@ -728,8 +729,8 @@ export class PiController {
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
 		}
-		if (typeof level !== "string") {
-			throw badRequest("PI_PROTOCOL_INVALID", "level required");
+		if (!isPiThinkingLevel(level)) {
+			throw badRequest("PI_PROTOCOL_INVALID", "invalid thinking level");
 		}
 		return this.idleAction(clientId, rootDir, relativePath, "thinking.set", sessionId, {
 			level,

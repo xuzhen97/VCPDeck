@@ -142,6 +142,7 @@ describe("PiRunService", () => {
 			streaming: false,
 			prompting: false,
 			compacting: false,
+			thinkingLevel: "off",
 			queuedMessages: { steering: [], followUp: [] },
 			model: { provider: "p", modelId: "m" },
 		});
@@ -163,6 +164,7 @@ describe("PiRunService", () => {
 			streaming: false,
 			prompting: false,
 			compacting: false,
+			thinkingLevel: "off",
 			queuedMessages: { steering: [], followUp: [] },
 		});
 		expect(job?.finishedAt).toBe(first);

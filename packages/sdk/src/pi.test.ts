@@ -70,6 +70,19 @@ describe("VcpDeckClient.pi", () => {
 		expect(fetcher.mock.calls.every((c) => c[1]?.method === "GET")).toBe(true);
 	});
 
+	it("agent.setModel/setThinking 使用当前 session endpoint", async () => {
+		const { client, fetcher } = makeClient();
+		const cwdRef = { rootDir: "D:\\", relativePath: "repo" };
+
+		await client.pi.agent.setModel("c1", "s1", cwdRef, "provider", "model");
+		await client.pi.agent.setThinking("c1", "s1", cwdRef, "high");
+
+		expect(fetcher.mock.calls[0]?.[0]).toContain("/api/clients/c1/pi/agent/s1/model");
+		expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
+		expect(fetcher.mock.calls[1]?.[0]).toContain("/api/clients/c1/pi/agent/s1/thinking");
+		expect(fetcher.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
+	});
+
 	it("attachments create/complete/delete 使用正确端点", async () => {
 		const { client, fetcher } = makeClient();
 		await client.pi.attachments.create("c1", [

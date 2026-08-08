@@ -176,6 +176,34 @@ describe("PiController", () => {
 		).rejects.toBeInstanceOf(BadRequestException);
 	});
 
+	it("thinking.set 校验 SDK 原生 level 并转发 cwd/session", async () => {
+		const { controller, requests, runs } = makeController();
+		requests.request.mockResolvedValue({ ok: true, data: { projectKey: "k".repeat(64) } });
+
+		await controller.setThinking("c1", "s1", {
+			rootDir: "D:\\",
+			relativePath: "repo",
+			level: "high",
+		});
+
+		expect(runs.assertIdleMutation).toHaveBeenCalledWith("c1", "k".repeat(64));
+		expect(requests.request).toHaveBeenLastCalledWith("c1", expect.objectContaining({
+			action: "thinking.set",
+			sessionId: "s1",
+			cwdRef: { rootDir: "D:\\", relativePath: "repo" },
+			payload: { level: "high" },
+		}));
+	});
+
+	it("thinking.set 拒绝 auto 和未知 level", async () => {
+		const { controller } = makeController();
+		await expect(controller.setThinking("c1", "s1", {
+			rootDir: "D:\\",
+			relativePath: "repo",
+			level: "auto",
+		})).rejects.toMatchObject({ response: { code: "PI_PROTOCOL_INVALID" } });
+	});
+
 	it("SSE stream 不要求 Owner", async () => {
 		const { controller, events } = makeController();
 		controller.stream("c1", "s1");

@@ -142,6 +142,7 @@ describe("Pi 端到端 loopback 集成", () => {
 			streaming: false,
 			prompting: false,
 			compacting: false,
+			thinkingLevel: "off",
 			queuedMessages: { steering: [], followUp: [] },
 		});
 
@@ -162,6 +163,7 @@ describe("Pi 端到端 loopback 集成", () => {
 			streaming: false,
 			prompting: false,
 			compacting: false,
+			thinkingLevel: "off",
 			queuedMessages: { steering: [], followUp: [] },
 		});
 

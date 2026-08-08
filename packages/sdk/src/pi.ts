@@ -1,6 +1,8 @@
 import type {
 	PiCwdRef,
+	PiModelInfo,
 	PiPromptAccepted,
+	PiThinkingLevel,
 } from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
 
@@ -52,7 +54,12 @@ export interface PiAgentApi {
 	compact(clientId: string, sessionId: string, jobId: string, customInstructions?: string): Promise<unknown>;
 	abortCompact(clientId: string, sessionId: string, jobId: string): Promise<unknown>;
 	setModel(clientId: string, sessionId: string, cwdRef: PiCwdRef, provider: string, modelId: string): Promise<unknown>;
-	setThinking(clientId: string, sessionId: string, cwdRef: PiCwdRef, level: string): Promise<unknown>;
+	setThinking(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		level: PiThinkingLevel,
+	): Promise<unknown>;
 	extensionResponse(
 		clientId: string,
 		sessionId: string,
@@ -79,7 +86,7 @@ export interface PiAttachmentsApi {
 
 export interface PiApi {
 	capability(clientId: string, signal?: AbortSignal): Promise<unknown>;
-	models(clientId: string, cwdRef: PiCwdRef, signal?: AbortSignal): Promise<unknown>;
+	models(clientId: string, cwdRef: PiCwdRef, signal?: AbortSignal): Promise<PiModelInfo[]>;
 	sessions: PiSessionsApi;
 	agent: PiAgentApi;
 	attachments: PiAttachmentsApi;
