@@ -180,6 +180,8 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 	}
 
 	const isObserver = false; // 首版单用户环境无多身份；Owner 语义由 Server 保证
+	const settingsDisabled =
+		!sessionId || state.status !== "idle" || state.agentState?.status !== "idle";
 
 	const filesApi = useMemo(
 		() => ({
@@ -279,6 +281,11 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 						sessionId={sessionId}
 						ownerName={null}
 						isObserver={isObserver}
+						models={state.models}
+						thinkingSelection={state.thinkingSelection}
+						disabled={settingsDisabled}
+						onModelChange={(provider, modelId) => void actions.setModel(provider, modelId)}
+						onThinkingChange={(level) => void actions.setThinking(level)}
 					/>
 				</aside>
 			</div>
@@ -319,6 +326,11 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					sessionId={sessionId}
 					ownerName={null}
 					isObserver={isObserver}
+					models={state.models}
+					thinkingSelection={state.thinkingSelection}
+					disabled={settingsDisabled}
+					onModelChange={(provider, modelId) => void actions.setModel(provider, modelId)}
+					onThinkingChange={(level) => void actions.setThinking(level)}
 				/>
 			</Drawer>
 

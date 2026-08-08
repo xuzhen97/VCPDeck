@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { PiPanel } from "./pi-panel.js";
 import { SdkProvider } from "@/api/context";
 import type { ClientInfo } from "@vcpdeck/shared";
@@ -42,7 +42,12 @@ function makeClient(): ClientInfo {
 		clientVersion: "1",
 		capabilities: ["pi.probe", "agent.pi"],
 		capabilityDetails: {
-			pi: { available: true, sdkVersion: "0.84.0", nodeVersion: "22.19.0", shellKind: "git-bash" },
+			pi: {
+				available: true,
+				sdkVersion: "0.84.0",
+				nodeVersion: "22.19.0",
+				shellKind: "git-bash",
+			},
 		},
 		online: true,
 		cpuPercent: null,
@@ -56,10 +61,17 @@ function makeSdk() {
 	const sdk = {
 		pi: {
 			capability: vi.fn(async () => ({ available: true })),
-			models: vi.fn(async () => []),
+			models: vi.fn(async () => [
+				{ provider: "p", modelId: "m1" },
+				{ provider: "p", modelId: "m2" },
+			]),
 			sessions: {
 				list: vi.fn(async () => ({ sessions: [] })),
-				get: vi.fn(async () => ({ info: { id: "s1", name: "s", firstMessage: "hi" }, tree: [], activeLeafId: null })),
+				get: vi.fn(async () => ({
+					info: { id: "s1", name: "s", firstMessage: "hi" },
+					tree: [],
+					activeLeafId: null,
+				})),
 				context: vi.fn(async () => ({ messages: [], nextCursor: null })),
 				entryContent: vi.fn(),
 				rename: vi.fn(),
@@ -70,8 +82,20 @@ function makeSdk() {
 			},
 			agent: {
 				newSession: vi.fn(async () => ({ sessionId: "s1" })),
-				state: vi.fn(async () => ({ status: "idle", streaming: false, prompting: false, compacting: false, queuedMessages: { steering: [], followUp: [] } })),
-				prompt: vi.fn(async () => ({ jobId: "j1", runId: "j1", sessionId: "s1" })),
+				state: vi.fn(async () => ({
+					status: "idle",
+					streaming: false,
+					prompting: false,
+					compacting: false,
+					thinkingLevel: "off",
+					model: { provider: "p", modelId: "m1" },
+					queuedMessages: { steering: [], followUp: [] },
+				})),
+				prompt: vi.fn(async () => ({
+					jobId: "j1",
+					runId: "j1",
+					sessionId: "s1",
+				})),
 				steer: vi.fn(),
 				followUp: vi.fn(),
 				abort: vi.fn(),
@@ -146,6 +170,45 @@ describe("PiPanel", () => {
 		const client: ClientInfo = { ...makeClient(), capabilityDetails: {} };
 		renderPanel(client);
 		expect(screen.getByText(/PI_CLIENT_UNSUPPORTED/)).toBeTruthy();
+	});
+
+	it("打开会话后可切换模型和思考深度", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const { sdk } = renderPanel(makeClient());
+
+		await screen.getAllByText("选择")[0]!.click();
+		await screen.findByText("D:\\");
+		await screen.getByText("D:\\").click();
+		await screen.findByText("📁 repo");
+		await screen.getByText("📁 repo").click();
+		await vi.waitFor(() => expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0));
+		await screen.getByText("选择此目录").click();
+		await screen.getAllByText("新建")[0]!.click();
+		await vi.waitFor(() => expect(sdk.pi.agent.newSession).toHaveBeenCalled());
+		await vi.waitFor(() => expect(screen.getAllByRole("combobox", { name: "模型" })[0]).toBeEnabled());
+		const modelSelect = screen.getAllByRole("combobox", { name: "模型" })[0]!;
+		const thinkingSelect = screen.getAllByRole("combobox", { name: "思考深度" })[0]!;
+
+		fireEvent.change(modelSelect, {
+			target: { value: "p\u0000m2" },
+		});
+		fireEvent.change(thinkingSelect, {
+			target: { value: "high" },
+		});
+		await vi.waitFor(() => {
+			expect(sdk.pi.agent.setModel).toHaveBeenCalledWith(
+				"c1", "s1", { rootDir: "D:\\", relativePath: "repo" }, "p", "m2",
+			);
+			expect(sdk.pi.agent.setThinking).toHaveBeenCalledWith(
+				"c1", "s1", { rootDir: "D:\\", relativePath: "repo" }, "high",
+			);
+		});
+		const thinkingCalls = (sdk.pi.agent.setThinking as ReturnType<typeof vi.fn>).mock.calls.length;
+		fireEvent.change(thinkingSelect, {
+			target: { value: "auto" },
+		});
+		await Promise.resolve();
+		expect(sdk.pi.agent.setThinking).toHaveBeenCalledTimes(thinkingCalls);
 	});
 
 	it("选择目录后新建会话并打开事件流", async () => {
