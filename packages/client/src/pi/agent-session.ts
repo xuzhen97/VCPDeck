@@ -5,7 +5,13 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { randomUUID } from "node:crypto";
-import type { PiAction, PiAgentState, PiClientEvent, PiExtensionUiRequest } from "@vcpdeck/shared";
+import {
+	isPiThinkingLevel,
+	type PiAction,
+	type PiAgentState,
+	type PiClientEvent,
+	type PiExtensionUiRequest,
+} from "@vcpdeck/shared";
 import { projectPiEvent } from "./event-projector.js";
 
 /**
@@ -338,9 +344,16 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				await this.inner.setModel(model as never);
 				return { ok: true, data: { provider, modelId } };
 			}
-			case "thinking.set":
+			case "thinking.set": {
+				if (!isPiThinkingLevel(payload.level)) {
+					return {
+						ok: false,
+						error: { code: "PI_PROTOCOL_INVALID", message: "Invalid thinking level" },
+					};
+				}
 				this.inner.setThinkingLevel(payload.level as ThinkingLevel);
 				return null;
+			}
 			case "session.rename": {
 				const name = (payload.name as string | undefined)?.trim();
 				if (!name) {
@@ -433,6 +446,7 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			streaming: this.inner.isStreaming,
 			prompting: this.promptRunning,
 			compacting: this.inner.isCompacting,
+			thinkingLevel: this.inner.thinkingLevel,
 			queuedMessages: {
 				steering: [...this.inner.getSteeringMessages()],
 				followUp: [...this.inner.getFollowUpMessages()],

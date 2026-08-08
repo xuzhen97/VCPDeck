@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { PiThinkingLevel } from "@vcpdeck/shared";
 import { PiAgentSessionWrapperImpl } from "./agent-session.js";
 
 type Listener = (event: AgentSessionEvent) => void;
@@ -9,6 +10,7 @@ class FakeInner {
 	sessionFile = "/tmp/sessions/s1.jsonl";
 	isStreaming = false;
 	isCompacting = false;
+	thinkingLevel: PiThinkingLevel = "off";
 	model: { provider: string; id: string } | undefined = { provider: "p", id: "m1" };
 	modelRuntime = {
 		getAvailable: vi.fn(async () => [{ provider: "p", id: "m1" }]),
@@ -200,6 +202,21 @@ describe("PiAgentSessionWrapperImpl", () => {
 		const { wrapper } = makeWrapper();
 		const result = await wrapper.send("model.set", { provider: "x", modelId: "nope" });
 		expect(result).toMatchObject({ ok: false, error: { code: "PI_MODEL_NOT_FOUND" } });
+	});
+
+	it("agent.state 返回当前 thinking level", () => {
+		const { inner, wrapper } = makeWrapper();
+		inner.thinkingLevel = "high";
+		expect(wrapper.getState().thinkingLevel).toBe("high");
+	});
+
+	it("thinking.set 校验原生 level 后调用 SDK", async () => {
+		const { inner, wrapper } = makeWrapper();
+		await wrapper.send("thinking.set", { level: "high" });
+		expect(inner.setThinkingLevel).toHaveBeenCalledWith("high");
+		const result = await wrapper.send("thinking.set", { level: "auto" });
+		expect(result).toMatchObject({ ok: false, error: { code: "PI_PROTOCOL_INVALID" } });
+		expect(inner.setThinkingLevel).toHaveBeenCalledTimes(1);
 	});
 
 	it("get_state 在等待 Extension input 时映射 waiting_for_extension_input", async () => {
