@@ -40,6 +40,12 @@ Pi SDK 0.84.0 → 远程用户 ~/.pi/agent（凭据/模型/扩展/skills）
 5. 中间过程折叠在 **Process Details**，最终回答单独展示；Tool Call 可展开参数与结果。
 6. 图片：仅空闲时可附加（最多 10 张、单张 ≤ 10 MiB、总量 ≤ 100 MiB；PNG/JPEG/GIF/WebP）。
 
+### 模型与思考深度
+
+打开 Session 后，右侧“运行详情”可切换当前 Session 的模型和思考深度。模型显示为 `provider / modelId`；思考深度支持自动、关闭、最低、低、中、高、超高、最大。Agent 运行、压缩或等待扩展输入时不能切换。
+
+“自动”是页面侧选项，不会向 Pi SDK 发送 `auto`；它保留远程 Session 当前默认值。切换只影响当前 Session，不会修改项目或全局 Pi 配置。远程 Client 仍会校验模型认证、模型可用性和项目空闲状态。
+
 ## 与 Execute Tab 的区别
 
 - **Execute Tab**：一次性 shell 命令（`exec` Job）。
