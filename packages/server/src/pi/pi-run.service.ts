@@ -302,12 +302,28 @@ export class PiRunService {
 			where: {
 				id: jobId,
 				type: "agent.session",
-				status: { in: [JobStatus.IDLE, JobStatus.ERROR, JobStatus.DONE] },
+				status: { in: [JobStatus.IDLE, JobStatus.ERROR] },
 				payload: EMPTY_SESSION_PAYLOAD,
 			},
-			data: { status: JobStatus.DONE, progress: null, finishedAt: now },
+			data: {
+				status: JobStatus.DONE,
+				progress: null,
+				finishedAt: now,
+				errorCode: null,
+				errorMessage: null,
+			},
 		});
-		return completed.count > 0;
+		if (completed.count > 0) return true;
+		const unchanged = await this.prisma.job.updateMany({
+			where: {
+				id: jobId,
+				type: "agent.session",
+				status: JobStatus.DONE,
+				payload: EMPTY_SESSION_PAYLOAD,
+			},
+			data: { status: JobStatus.DONE },
+		});
+		return unchanged.count > 0;
 	}
 
 	async failSession(jobId: string, runId: string, code: PiErrorCode): Promise<boolean> {

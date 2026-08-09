@@ -220,12 +220,29 @@ describe("PiRunService session CAS", () => {
 		});
 	});
 
-	it("无 runId complete 将 error 原子完成为 done", async () => {
+	it("重复 complete 保持首次 finishedAt 不变", async () => {
+		const { service, current, ensure } = setup();
+		await ensure();
+		expect(await service.completeSession("s1")).toBe(true);
+		const finishedAt = (current().finishedAt as Date).getTime();
+		expect(await service.completeSession("s1")).toBe(true);
+		expect((current().finishedAt as Date).getTime()).toBe(finishedAt);
+	});
+
+	it("无 runId complete 将 error 原子完成为 done 并清理错误字段", async () => {
 		const { service, current, running } = setup();
 		const run = await running();
 		await service.failSession(run.jobId, run.runId, "PI_WORKER_EXITED");
 		expect(await service.completeSession(run.jobId)).toBe(true);
-		expect(current()).toMatchObject({ status: "done", payload: "{}" });
+		expect(current()).toMatchObject({
+			status: "done",
+			payload: "{}",
+			errorCode: null,
+			errorMessage: null,
+		});
+		const snapshot = await service.snapshot(run.jobId, actor.identityId);
+		expect(snapshot).not.toHaveProperty("errorCode");
+		expect(snapshot).not.toHaveProperty("errorMessage");
 	});
 
 	it("complete 处理 pending/active/disconnected 且 active 必须匹配 runId", async () => {
