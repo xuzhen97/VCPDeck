@@ -679,6 +679,36 @@ describe("usePiSession", () => {
 		expect(result.current.state.thinkingSelection).toBe("auto");
 	});
 
+	it("agentState 陈旧（Job 已 idle）时切换模型仍发送请求", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			job: {
+				jobId: "s1",
+				sessionId: "s1",
+				status: "idle",
+				runId: null,
+				ownerName: "User",
+				isOwner: true,
+			},
+			// 陈旧的 agentState：SDK 状态仍是 running，但 Job 权威为 idle。
+			agentState: {
+				status: "running",
+				streaming: true,
+				prompting: true,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+
+		await act(async () => result.current.actions.setModel("p", "m2"));
+		expect(pi.agent.setModel).toHaveBeenCalledWith("c1", "s1", CWD, "p", "m2");
+	});
+
 	it("切换失败保留旧选择并显示错误", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();

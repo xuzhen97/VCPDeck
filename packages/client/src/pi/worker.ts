@@ -371,6 +371,19 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 				void promptPipeline.catch((error) => emitPromptError(run, error));
 				return { accepted: true };
 			}
+			// 空闲 idle mutation（model.set/thinking.set）不要求 active run；
+			// 带 runId 的异常请求仍走下方严格 envelope 校验。
+			if (
+				(request.action === "model.set" || request.action === "thinking.set") &&
+				!request.runId
+			) {
+				if (active)
+					throw Object.assign(new Error("Pi project is busy"), {
+						code: "PI_PROJECT_BUSY",
+					});
+				const w = await ensureWrapper(sessionId);
+				return w.send(request.action, request.payload ?? {});
+			}
 			if (!matchesRequest(active, request)) {
 				throw Object.assign(new Error("No matching active run"), {
 					code: "PI_CONTROL_FORBIDDEN",

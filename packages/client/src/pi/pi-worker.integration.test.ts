@@ -626,6 +626,26 @@ describe("Pi Worker prompt pipeline seam", () => {
 			}
 			await expect(request("agent.state", "run-bounded-0")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
 			await expect(request("agent.state", "run-bounded-32")).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
+
+			// 空闲 idle mutation：model.set/thinking.set 无需 active run，直接到达 wrapper。
+			const idleSet = async (action: string, payload: Record<string, unknown>) => {
+				const requestId = `seam-idle-${++requestSeq}`;
+				workerListener?.({
+					type: "request",
+					projectKey: "project",
+					request: { requestId, action, jobId: "session-1", sessionId: "session-1", payload },
+				}, {} as never);
+				await vi.waitFor(() => expect(sent.some((message) =>
+					message.type === "response" && message.requestId === requestId,
+				)).toBe(true));
+				return sent.find((message) =>
+					message.type === "response" && message.requestId === requestId,
+				)!;
+			};
+			await expect(idleSet("model.set", { provider: "AxonHub", modelId: "deepseek-v4-flash" })).resolves.toMatchObject({ ok: true });
+			expect(attachmentWrapper.send).toHaveBeenCalledWith("model.set", { provider: "AxonHub", modelId: "deepseek-v4-flash" });
+			await expect(idleSet("thinking.set", { level: "high" })).resolves.toMatchObject({ ok: true });
+			expect(attachmentWrapper.send).toHaveBeenCalledWith("thinking.set", { level: "high" });
 		} finally {
 			if (workerListener) process.removeListener("message", workerListener);
 			process.argv[2] = originalArg;

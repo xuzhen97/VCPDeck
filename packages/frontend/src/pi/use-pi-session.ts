@@ -640,7 +640,7 @@ export function usePiSession(
 			setModel: async (provider, modelId) => {
 				if (
 					stateRef.current.status !== "idle" ||
-					stateRef.current.agentState?.status !== "idle"
+					stateRef.current.agentState?.compacting === true
 				)
 					return;
 				const clientId = clientIdRef.current;
@@ -670,14 +670,14 @@ export function usePiSession(
 					throw err;
 				}
 			},
-			setThinking: async (level) => {
+				setThinking: async (level) => {
 				if (level === "auto") {
 					setState((s) => ({ ...s, thinkingSelection: "auto", error: null }));
 					return;
 				}
 				if (
 					stateRef.current.status !== "idle" ||
-					stateRef.current.agentState?.status !== "idle"
+					stateRef.current.agentState?.compacting === true
 				)
 					return;
 				const clientId = clientIdRef.current;
