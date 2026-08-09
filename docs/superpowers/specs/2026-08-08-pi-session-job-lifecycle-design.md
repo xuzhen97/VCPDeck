@@ -52,7 +52,7 @@ requestId：一次协议请求或 Extension UI 请求的相关 ID
 约束：
 
 - 同一 `sessionId` 在 Job 表中最多存在一条 `type = "agent.session"` 的记录；
-- 新建 Pi Session 时立即创建同 ID 的 Job；
+- 新建、Fork 或 Clone Pi Session 时立即创建同 ID 的 Job；
 - 旧 Session 首次打开时按 `sessionId` 幂等补建；
 - 每次 Prompt 必须生成新的 `runId`；
 - Server、Client、SSE 和 Frontend 必须同时携带并校验 `jobId + runId`；
@@ -143,7 +143,13 @@ done
 4. 设置当前 Actor 为固定 Owner；
 5. 如果同 ID Job 已存在，则按幂等成功处理。
 
-### 6.2 旧 Session
+### 6.2 Fork、Clone 与删除
+
+`session.fork` 和 `session.clone` 成功返回新 `sessionId` 后，Server 必须立即按新 ID 创建 `agent.session / idle` Job，当前 Actor 成为新 Session 的固定 Owner。创建失败时不得返回一个没有 Job 的新 Session；重复响应按 ID 幂等处理。
+
+删除 Session 只允许固定 Owner 在没有活动 run 时执行。Client 删除成功后，对应 `agent.session` Job 更新为 `cancelled` 并设置 `finishedAt`，保留安全审计元数据，不删除 Job 记录。
+
+### 6.3 旧 Session
 
 新增幂等接口：
 
@@ -389,7 +395,8 @@ Current Run: <runId 或 —>
 
 ### Server
 
-- Session 新建和 `/open` 幂等创建 `agent.session / idle`；
+- Session 新建、Fork、Clone 和 `/open` 幂等创建 `agent.session / idle`；
+- 删除 Session 后对应 Job 保留并进入 `cancelled`；
 - 固定 Owner 校验；
 - `done`、`idle` 和可恢复 `error` 可创建新 run；
 - 每个 Prompt 生成新 runId；
