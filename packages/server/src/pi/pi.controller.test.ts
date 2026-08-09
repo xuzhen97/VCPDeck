@@ -174,6 +174,27 @@ describe("PiController", () => {
 		expect(runs.createRun).not.toHaveBeenCalled();
 	});
 
+	it("非 Pi code 保持基础设施错误，不映射为暴露 message 的 400", async () => {
+		const prismaError = Object.assign(new Error("secret unique constraint details"), {
+			code: "P2002",
+		});
+		const { controller } = makeController({
+			runs: {
+				withReconciledClient: vi.fn(async () => { throw prismaError; }),
+			},
+		});
+
+		let caught: unknown;
+		try {
+			await controller.sessions("c1", "D:\\", "repo");
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBe(prismaError);
+		expect(caught).not.toBeInstanceOf(BadRequestException);
+		expect((caught as { response?: unknown }).response).toBeUndefined();
+	});
+
 	it("project mutation 在同一 lease 内 resolve、锁检查并请求", async () => {
 		const { controller, requests, runs } = makeController();
 		requests.request.mockImplementation(

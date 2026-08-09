@@ -22,7 +22,16 @@ const PROMPT_SENTINEL = "SENTINEL_PROMPT_9f2a";
 const URL_SENTINEL = "SENTINEL_SIGNED_URL_7c11";
 const THINKING_SENTINEL = "SENTINEL_THINKING_3d4e";
 const TOOL_SENTINEL = "SENTINEL_TOOL_RESULT_5b8f";
+const EXTENSION_SENTINEL = "SENTINEL_EXTENSION_INPUT_c621";
 const ERROR_SENTINEL = "SENTINEL_PROMPT_ERROR_d18c";
+const SENSITIVE_SENTINELS = [
+	PROMPT_SENTINEL,
+	URL_SENTINEL,
+	THINKING_SENTINEL,
+	TOOL_SENTINEL,
+	EXTENSION_SENTINEL,
+	ERROR_SENTINEL,
+];
 
 function matches(value: unknown, condition: unknown): boolean {
 	if (condition && typeof condition === "object" && !Array.isArray(condition)) {
@@ -350,29 +359,69 @@ describe("Pi Gateway loopback 集成", () => {
 			acceptedRunIds: [], closedRunIds: [], reportAgain: false,
 		});
 
-		await loop.runs.ensureSession(actor, { clientId: "c1", sessionId: "session-3" });
-		const run3 = await loop.runs.startRun(actor, {
-			clientId: "c1", sessionId: "session-3", projectKey: "3".repeat(64),
-		});
-		await loop.runs.accept(run3.jobId, run3.runId);
-		await loop.gateway.handlePiEvent(socket, {
-			clientId: "c1", sessionId: "session-3", jobId: "session-3", runId: run3.runId,
-			event: {
+		loop.autoRespond(socket);
+		const run3 = await loop.controller.prompt(
+			"c1",
+			"session-3",
+			{
+				rootDir: `D:\\${URL_SENTINEL}`,
+				relativePath: "repo",
+				type: "prompt",
+				submissionId: "submission-sensitive",
+				prompt: PROMPT_SENTINEL,
+			},
+			actor,
+		);
+		const events = [
+			{
+				type: "message_update",
+				sessionId: "session-3",
+				text: PROMPT_SENTINEL,
+			},
+			{
+				type: "thinking_progress",
+				sessionId: "session-3",
+				text: `${THINKING_SENTINEL} ${URL_SENTINEL}`,
+			},
+			{
+				type: "message_update",
+				sessionId: "session-3",
+				text: TOOL_SENTINEL,
+				role: "tool_result",
+			},
+			{
+				type: "extension_request",
+				sessionId: "session-3",
+				ui: {
+					requestId: "ui-sensitive",
+					extensionId: "ext",
+					kind: "input",
+					message: EXTENSION_SENTINEL,
+				},
+			},
+			{
 				type: "prompt_error",
 				sessionId: "session-3",
 				code: "PI_WORKER_EXITED",
 				message: ERROR_SENTINEL,
 			},
-		} as PiEvent);
-		expect(loop.current("session-3")).toMatchObject({ status: "idle", payload: "{}" });
-		const persisted = JSON.stringify(loop.prisma.calls);
-		for (const sentinel of [
-			PROMPT_SENTINEL,
-			URL_SENTINEL,
-			THINKING_SENTINEL,
-			TOOL_SENTINEL,
-			ERROR_SENTINEL,
-		]) expect(persisted).not.toContain(sentinel);
+		] as const;
+		for (const event of events) {
+			await loop.gateway.handlePiEvent(socket, {
+				clientId: "c1", sessionId: "session-3", jobId: run3.jobId, runId: run3.runId,
+				event,
+			} as PiEvent);
+		}
+		const job = loop.current(run3.jobId);
+		expect(job).toMatchObject({
+			errorMessage: null,
+			progress: null,
+			result: null,
+		});
+		const persisted = JSON.stringify({ calls: loop.prisma.calls, job });
+		for (const sentinel of SENSITIVE_SENTINELS) {
+			expect(persisted).not.toContain(sentinel);
+		}
 	});
 
 	it("REST lease 跨 await 阻塞 REGISTER，且新旧 socket 响应/断线隔离", async () => {

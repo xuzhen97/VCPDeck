@@ -17,6 +17,7 @@ import {
 import { randomUUID } from "node:crypto";
 import {
 	isPiThinkingLevel,
+	PI_ERROR_CODES,
 	type ActorContext,
 	type PiCwdRef,
 	type PiPromptAccepted,
@@ -34,6 +35,12 @@ import { PiAttachmentService } from "./pi-attachment.service.js";
 
 function badRequest(code: string, message: string): BadRequestException {
 	return new BadRequestException({ code, message });
+}
+
+function isPiError(error: unknown): error is Error & { code: string } {
+	return error instanceof Error && "code" in error &&
+		typeof error.code === "string" &&
+		(PI_ERROR_CODES as readonly string[]).includes(error.code);
 }
 
 /** 机器命名空间的远程 Pi REST/SSE 接口 */
@@ -74,8 +81,8 @@ export class PiController {
 		try {
 			return await this.runs.withReconciledClient(clientId, operation);
 		} catch (err) {
-			if (err instanceof Error && "code" in err) {
-				throw badRequest(String((err as { code: unknown }).code), err.message);
+			if (isPiError(err)) {
+				throw badRequest(err.code, err.message);
 			}
 			throw err;
 		}
