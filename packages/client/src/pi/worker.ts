@@ -49,6 +49,8 @@ interface ActivePrompt {
 }
 let active: ActivePrompt | null = null;
 let promptPipeline: Promise<void> | null = null;
+const settledRunIds = new Map<string, { jobId: string; sessionId: string }>();
+const MAX_SETTLED_RUN_IDS = 32;
 let lastActivity = Date.now();
 
 const PI_ERROR_CODE_SET: ReadonlySet<string> = new Set(PI_ERROR_CODES);
@@ -143,6 +145,13 @@ function clearRun(run: ActivePrompt): void {
 	promptPipeline = null;
 }
 
+function rememberSettledRun(run: ActivePrompt): void {
+	settledRunIds.set(run.runId, { jobId: run.jobId, sessionId: run.sessionId });
+	if (settledRunIds.size > MAX_SETTLED_RUN_IDS) {
+		settledRunIds.delete(settledRunIds.keys().next().value!);
+	}
+}
+
 function bindWrapperEvents(w: PiAgentSessionWrapper, run: ActivePrompt): void {
 	run.unsubscribe?.();
 	run.unsubscribe = w.onEvent((rawEvent) => {
@@ -151,7 +160,8 @@ function bindWrapperEvents(w: PiAgentSessionWrapper, run: ActivePrompt): void {
 		const event: PiClientEvent = rawEvent.type === "prompt_error"
 			? { type: "prompt_error", sessionId: run.sessionId, ...normalizeError(rawEvent) }
 			: rawEvent;
-		if (terminal) {
+		if (terminal && isCurrentRun(run)) {
+			rememberSettledRun(run);
 			clearRun(run);
 		}
 		send({
@@ -336,8 +346,14 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 				throw Object.assign(new Error("sessionId required"), {
 					code: "PI_PROTOCOL_INVALID",
 				});
-			if (request.action === "agent.state" && !request.runId)
-				return reader.state(sessionId);
+			if (request.action === "agent.state") {
+				if (!request.runId) return reader.state(sessionId);
+				const settled = settledRunIds.get(request.runId);
+				if (!matchesRequest(active, request) && settled &&
+					settled.jobId === request.jobId && settled.sessionId === sessionId) {
+					return reader.state(sessionId);
+				}
+			}
 			if (request.action === "agent.prompt") {
 				if (active)
 					throw Object.assign(new Error("Pi project is busy"), {

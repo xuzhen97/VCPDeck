@@ -478,6 +478,11 @@ describe("Pi Worker prompt pipeline seam", () => {
 			SessionManager: { list: vi.fn().mockResolvedValue([{ id: "session-1", path: "session.jsonl" }]) },
 		}));
 		vi.doMock("./agent-session.js", () => ({ startPiAgentSession }));
+		vi.doMock("./session-reader.js", () => ({
+			createPiSessionReader: () => ({
+				state: vi.fn().mockResolvedValue({ status: "idle" }),
+			}),
+		}));
 		vi.doMock("./images.js", () => ({
 			downloadPromptImages,
 			toSdkImages: vi.fn(() => []),
@@ -583,14 +588,25 @@ describe("Pi Worker prompt pipeline seam", () => {
 			})));
 			await expect(request("agent.state", "run-attachment")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
 
-			// 旧 wrapper listener 不能清理/重标当前新 run。
+			// matching prompt_error 释放 active，但保留该 envelope 的只读 state 权限。
 			await request("agent.prompt", "run-old", { prompt: "ok" });
 			await vi.waitFor(() => expect(attachmentWrapper.send).toHaveBeenCalledWith("agent.prompt", expect.anything()));
 			const oldListener = attachmentWrapper.listeners[0]!;
-			oldListener({ type: "agent_settled", sessionId: "session-1" });
+			oldListener({ type: "prompt_error", sessionId: "session-1", code: "PI_RUNTIME_UNAVAILABLE" });
+			await expect(request("agent.state", "run-old")).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
+			await expect(request("agent.state", "run-unknown")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+
+			// agent_settled 同样保留只读 state 权限。
+			await request("agent.prompt", "run-settled", { prompt: "ok" });
+			const settledListener = attachmentWrapper.listeners[0]!;
+			settledListener({ type: "agent_settled", sessionId: "session-1" });
+			await expect(request("agent.state", "run-settled")).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
+
+			// 新 envelope 不清历史记录，旧 listener 不能清理/重标当前新 run。
 			await request("agent.prompt", "run-current", { prompt: "ok" });
-			oldListener({ type: "agent_settled", sessionId: "session-1" });
+			settledListener({ type: "agent_settled", sessionId: "session-1" });
 			await expect(request("agent.state", "run-current")).resolves.toMatchObject({ ok: true, data: { status: "running" } });
+			await expect(request("agent.state", "run-old")).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
 
 			// abort 失败保留 run；第二次仍到达同 wrapper 并最终清理。
 			attachmentWrapper.send.mockImplementationOnce(async (action: string) => {
@@ -601,12 +617,22 @@ describe("Pi Worker prompt pipeline seam", () => {
 			await expect(request("agent.abort", "run-current")).resolves.toMatchObject({ ok: true });
 			expect(attachmentWrapper.send.mock.calls.filter(([action]) => action === "agent.abort")).toHaveLength(2);
 			await expect(request("agent.state", "run-current")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+
+			// settled run 缓存按 FIFO 限制为 32 条。
+			for (let index = 0; index < 33; index += 1) {
+				await request("agent.prompt", `run-bounded-${index}`, { prompt: "ok" });
+				await vi.waitFor(() => expect(attachmentWrapper.listeners).toHaveLength(1));
+				attachmentWrapper.listeners[0]!({ type: "agent_settled", sessionId: "session-1" });
+			}
+			await expect(request("agent.state", "run-bounded-0")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+			await expect(request("agent.state", "run-bounded-32")).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
 		} finally {
 			if (workerListener) process.removeListener("message", workerListener);
 			process.argv[2] = originalArg;
 			Object.defineProperty(process, "send", { configurable: true, value: originalSend });
 			vi.doUnmock("@earendil-works/pi-coding-agent");
 			vi.doUnmock("./agent-session.js");
+			vi.doUnmock("./session-reader.js");
 			vi.doUnmock("./images.js");
 		}
 	});
