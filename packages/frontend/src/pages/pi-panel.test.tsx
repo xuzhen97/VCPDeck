@@ -122,8 +122,7 @@ function makeSdk() {
 	return sdk;
 }
 
-function renderPanel(client: ClientInfo) {
-	const sdk = makeSdk();
+function renderPanel(client: ClientInfo, sdk = makeSdk()) {
 	const view = render(
 		<SdkProvider client={sdk}>
 			<PiPanel client={client} />
@@ -230,6 +229,94 @@ describe("PiPanel", () => {
 		});
 		await Promise.resolve();
 		expect(sdk.pi.agent.setThinking).toHaveBeenCalledTimes(thinkingCalls);
+	});
+
+	it("真实 Observer fixture 的所有写操作均不发请求", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const sdk = makeSdk();
+		(sdk.pi.sessions.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{ id: "s1", name: "observed", firstMessage: null, messageCount: 1, modified: "2026-08-08T00:00:00.000Z", running: true },
+		]);
+		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
+			job: { jobId: "s1", sessionId: "s1", status: "running", runId: "run-1", ownerName: "Other", isOwner: false },
+			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+		});
+		renderPanel(makeClient(), sdk);
+
+		await screen.getAllByText("选择")[0]!.click();
+		await screen.findByText("D:\\");
+		await screen.getByText("D:\\").click();
+		await screen.findByText("📁 repo");
+		await screen.getByText("📁 repo").click();
+		await vi.waitFor(() => expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0));
+		await screen.getByText("选择此目录").click();
+		await screen.findAllByText("observed");
+		await screen.getAllByText("observed")[0]!.click();
+		await vi.waitFor(() => expect(sdk.pi.agent.open).toHaveBeenCalled());
+
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(screen.getByRole("textbox", { name: "Pi 输入" })).toBeDisabled();
+		expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Follow-up" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "中止" })).toBeNull();
+		expect(screen.queryByRole("button", { name: /标记完成/ })).toBeNull();
+		expect(screen.queryByRole("button", { name: "重命名" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "克隆" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Fork" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "删除" })).toBeNull();
+		expect(screen.getAllByRole("combobox", { name: "模型" })[0]).toBeDisabled();
+		expect(screen.getAllByRole("combobox", { name: "思考深度" })[0]).toBeDisabled();
+
+		expect(sdk.pi.agent.prompt).not.toHaveBeenCalled();
+		expect(sdk.pi.agent.steer).not.toHaveBeenCalled();
+		expect(sdk.pi.agent.followUp).not.toHaveBeenCalled();
+		expect(sdk.pi.agent.abort).not.toHaveBeenCalled();
+		expect(sdk.pi.agent.complete).not.toHaveBeenCalled();
+		expect(sdk.pi.agent.setModel).not.toHaveBeenCalled();
+		expect(sdk.pi.agent.setThinking).not.toHaveBeenCalled();
+		expect(sdk.pi.sessions.rename).not.toHaveBeenCalled();
+		expect(sdk.pi.sessions.fork).not.toHaveBeenCalled();
+		expect(sdk.pi.sessions.clone).not.toHaveBeenCalled();
+		expect(sdk.pi.sessions.navigate).not.toHaveBeenCalled();
+		expect(sdk.pi.sessions.delete).not.toHaveBeenCalled();
+	});
+
+	it("实时 Extension 等待与恢复同步显示运行详情", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const sdk = makeSdk();
+		(sdk.pi.sessions.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{ id: "s1", name: "owned", firstMessage: null, messageCount: 1, modified: "2026-08-08T00:00:00.000Z", running: true },
+		]);
+		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
+			job: { jobId: "s1", sessionId: "s1", status: "running", runId: "run-1", ownerName: "User", isOwner: true },
+			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+		});
+		renderPanel(makeClient(), sdk);
+		await screen.getAllByText("选择")[0]!.click();
+		await screen.findByText("D:\\");
+		await screen.getByText("D:\\").click();
+		await screen.findByText("📁 repo");
+		await screen.getByText("📁 repo").click();
+		await vi.waitFor(() => expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0));
+		await screen.getByText("选择此目录").click();
+		await screen.findAllByText("owned");
+		await screen.getAllByText("owned")[0]!.click();
+		await vi.waitFor(() =>
+			expect(screen.getAllByText("运行中").length).toBeGreaterThan(0),
+		);
+
+		MockEventSource.instances.at(-1)?.onmessage?.({
+			data: JSON.stringify({ type: "extension_request", sessionId: "s1", runId: "run-1", ui: { requestId: "u1", extensionId: "e", kind: "confirm", message: "continue?" } }),
+		});
+		await vi.waitFor(() =>
+			expect(screen.getAllByText("等待扩展输入").length).toBeGreaterThan(0),
+		);
+		MockEventSource.instances.at(-1)?.onmessage?.({
+			data: JSON.stringify({ type: "extension_resolved", sessionId: "s1", runId: "run-1", requestId: "u1", reason: "answered", hasPending: false }),
+		});
+		await vi.waitFor(() =>
+			expect(screen.getAllByText("运行中").length).toBeGreaterThan(0),
+		);
 	});
 
 	it("选择目录后新建会话并打开事件流", async () => {

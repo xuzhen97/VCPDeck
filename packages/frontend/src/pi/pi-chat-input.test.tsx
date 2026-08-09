@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PiChatInput } from "./pi-chat-input.js";
 
@@ -8,13 +8,17 @@ function renderInput(overrides: Partial<Parameters<typeof PiChatInput>[0]> = {})
 
 describe("PiChatInput", () => {
 	it("Observer 禁用正文并隐藏所有运行和附件 mutation", () => {
-		renderInput({ status: "running", disabled: true });
+		const onAbort = vi.fn();
+		renderInput({ status: "running", disabled: true, onAbort });
 		expect(screen.getByRole("textbox", { name: "Pi 输入" })).toBeDisabled();
 		expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Follow-up" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "中止" })).toBeNull();
 		expect(screen.queryByText("🖼️ 添加")).toBeNull();
+
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(onAbort).not.toHaveBeenCalled();
 	});
 	it.each(["error", "running", "waiting_input"] as const)("%s 禁止普通 Prompt", (status) => {
 		renderInput({ status });

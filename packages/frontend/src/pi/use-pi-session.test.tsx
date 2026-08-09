@@ -199,7 +199,20 @@ describe("usePiSession", () => {
 		expect(result.current.state.pendingExtension).toBeNull();
 	});
 
-	it("Observer 与 error Job 都不能发送", async () => {
+	it("Observer 不能发送", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			job: { jobId: "s1", sessionId: "s1", status: "idle", runId: null, ownerName: "Other", isOwner: false },
+			agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+		await act(async () => result.current.actions.send({ prompt: "no" }));
+		expect(pi.agent.prompt).not.toHaveBeenCalled();
+	});
+
+	it("error Job 不能发送", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -496,6 +509,34 @@ describe("usePiSession", () => {
 		expect(result.current.state.status).toBe("running");
 	});
 
+	it("旧 /open 结果不覆盖新 Session", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const firstOpenResult = deferred<unknown>();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockImplementation(
+			(_clientId: string, sessionId: string) =>
+				sessionId === "a"
+					? firstOpenResult.promise
+					: Promise.resolve({
+							job: { jobId: "b", sessionId: "b", status: "done", runId: null, ownerName: "User", isOwner: true },
+							agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+						}),
+		);
+		const { result } = renderHook(() => usePiSession(pi));
+
+		const firstOpen = result.current.actions.openSession("c1", "a", CWD);
+		await waitFor(() => expect(pi.agent.open).toHaveBeenCalledTimes(1));
+		await act(async () => result.current.actions.openSession("c1", "b", CWD));
+		firstOpenResult.resolve({
+			job: { jobId: "a", sessionId: "a", status: "error", runId: null, ownerName: "User", isOwner: true },
+			agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+		});
+		await act(async () => firstOpen);
+
+		expect(result.current.state.job?.sessionId).toBe("b");
+		expect(result.current.state.status).toBe("done");
+	});
+
 	it("快速切换 Session 时旧请求结果不覆盖新 Session", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
@@ -683,6 +724,21 @@ describe("usePiSession", () => {
 		expect(result.current.state.runId).toBe("j1");
 	});
 
+	it("settlement grace 中可以立即发送下一条", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.prompt as ReturnType<typeof vi.fn>)
+			.mockResolvedValueOnce({ jobId: "s1", runId: "j1", sessionId: "s1" })
+			.mockResolvedValueOnce({ jobId: "s1", runId: "j2", sessionId: "s1" });
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.createSession("c1", CWD));
+		await act(async () => result.current.actions.send({ prompt: "first" }));
+		act(() => emit({ type: "prompt_done", sessionId: "s1", runId: "j1" }));
+		await act(async () => result.current.actions.send({ prompt: "second" }));
+		expect(pi.agent.prompt).toHaveBeenCalledTimes(2);
+		expect(result.current.state.runId).toBe("j2");
+	});
+
 	it("extension_request 进入 waiting_input，回答后恢复 running", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
@@ -709,6 +765,7 @@ describe("usePiSession", () => {
 			});
 		});
 		expect(result.current.state.status).toBe("waiting_input");
+		expect(result.current.state.job?.status).toBe("waiting_input");
 		expect(result.current.state.pendingExtension?.requestId).toBe("u1");
 
 		await act(async () => {
@@ -721,5 +778,35 @@ describe("usePiSession", () => {
 			expect.objectContaining({ requestId: "u1", confirmed: true }),
 		);
 		await waitFor(() => expect(result.current.state.status).toBe("running"));
+		expect(result.current.state.job?.status).toBe("running");
+	});
+
+	it("旧 Extension 响应完成后保留期间收到的新弹框", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const response = deferred<unknown>();
+		(pi.agent.extensionResponse as ReturnType<typeof vi.fn>).mockImplementation(
+			() => response.promise,
+		);
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.createSession("c1", CWD));
+		await act(async () => result.current.actions.send({ prompt: "hi" }));
+		act(() => emit({
+			type: "extension_request", sessionId: "s1", runId: "j1",
+			ui: { requestId: "u1", extensionId: "e", kind: "input", message: "first" },
+		}));
+
+		const firstResponse = result.current.actions.extensionResponse("u1", "answer");
+		await waitFor(() => expect(pi.agent.extensionResponse).toHaveBeenCalledOnce());
+		act(() => emit({
+			type: "extension_request", sessionId: "s1", runId: "j1",
+			ui: { requestId: "u2", extensionId: "e", kind: "confirm", message: "second" },
+		}));
+		response.resolve({});
+		await act(async () => firstResponse);
+
+		expect(result.current.state.pendingExtension?.requestId).toBe("u2");
+		expect(result.current.state.status).toBe("waiting_input");
+		expect(result.current.state.job?.status).toBe("waiting_input");
 	});
 });

@@ -33,7 +33,7 @@ export interface PiSessionState {
 	messages: PiMessage[];
 	session: PiSessionDetail | null;
 	agentState: PiAgentState | null;
-	job?: PiSessionJobSnapshot | null;
+	job: PiSessionJobSnapshot | null;
 	runId: string | null;
 	status: PiSessionStatus;
 	error: string | null;
@@ -122,6 +122,7 @@ export function usePiSession(
 	const clientIdRef = useRef<string | null>(null);
 	const cwdRefRef = useRef<PiCwdRef | null>(null);
 	const activeRunIdRef = useRef<string | null>(null);
+	const isOwnerRef = useRef(false);
 	const retiredRunIdsRef = useRef(new Set<string>());
 	const promptGenerationRef = useRef(0);
 	const sessionGenerationRef = useRef(0);
@@ -329,8 +330,8 @@ export function usePiSession(
 								scheduleGrace();
 								return;
 							case "prompt_done":
-								// prompt_done 只表示 prompt Promise 已完成；等待 settlement grace
-								// 期间的 agent activity，避免过早允许下一次 prompt。
+								// prompt_done 只表示 prompt Promise 已完成；Server 可在 grace 内
+								// 权威收敛上一 run 并接受下一条 Prompt。
 								scheduleGrace();
 								return;
 							case "agent_settled":
@@ -360,6 +361,7 @@ export function usePiSession(
 								setState((s) => ({
 									...s,
 									status: "waiting_input",
+									job: s.job ? { ...s.job, status: "waiting_input" } : null,
 									pendingExtension: {
 										requestId: event.ui.requestId,
 										kind: event.ui.kind,
@@ -379,7 +381,12 @@ export function usePiSession(
 							case "extension_resolved":
 								setState((s) =>
 									s.pendingExtension?.requestId === event.requestId
-										? { ...s, pendingExtension: null, status: "running" }
+										? {
+												...s,
+												pendingExtension: null,
+												status: "running",
+												job: s.job ? { ...s.job, status: "running" } : null,
+											}
 										: s,
 								);
 								return;
@@ -415,7 +422,9 @@ export function usePiSession(
 			sessionIdRef.current = sessionId;
 			cwdRefRef.current = cwdRef;
 			promptGenerationRef.current = 0;
+			pendingSubmissionsRef.current.clear();
 			activeRunIdRef.current = null;
+			isOwnerRef.current = false;
 			retiredRunIdsRef.current.clear();
 			nextCursorRef.current = null;
 			setState({ ...INITIAL_STATE, status: "loading" });
@@ -446,6 +455,7 @@ export function usePiSession(
 			if (sessionGenerationRef.current !== sessionGeneration) return;
 			const { job, agentState } = openResult;
 			activeRunIdRef.current = job.runId;
+			isOwnerRef.current = job.isOwner;
 			if (job.runId) retiredRunIdsRef.current.delete(job.runId);
 			const pendingExtension = job.runId ? agentState.pendingExtension ?? null : null;
 			setState((s) => ({
@@ -483,8 +493,10 @@ export function usePiSession(
 				return;
 			}
 			if (
-				!stateRef.current.job?.isOwner ||
-				!(["idle", "done"] as PiSessionStatus[]).includes(stateRef.current.status)
+				!isOwnerRef.current ||
+				(!(["idle", "done"] as PiSessionStatus[]).includes(
+					stateRef.current.status,
+				) && !graceTimerRef.current)
 			)
 				return;
 			const stream = streamRef.current;
@@ -496,6 +508,9 @@ export function usePiSession(
 			await stream.connected();
 			if (sessionGenerationRef.current !== sessionGeneration) return;
 
+			const settlingRunId = graceTimerRef.current
+				? activeRunIdRef.current
+				: null;
 			promptGenerationRef.current += 1;
 			const generation = promptGenerationRef.current;
 			const submissionId = crypto.randomUUID();
@@ -514,7 +529,11 @@ export function usePiSession(
 					sessionGenerationRef.current === sessionGeneration &&
 					promptGenerationRef.current === generation
 				) {
-					if (activeRunIdRef.current === null) {
+					if (
+						activeRunIdRef.current === null ||
+						activeRunIdRef.current === settlingRunId
+					) {
+						if (settlingRunId) retiredRunIdsRef.current.add(settlingRunId);
 						activeRunIdRef.current = accepted.runId;
 						setState((s) => ({
 							...s,
@@ -555,7 +574,7 @@ export function usePiSession(
 			const sessionId = sessionIdRef.current;
 			const runId = activeRunIdRef.current;
 			const sessionGeneration = sessionGenerationRef.current;
-			if (!clientId || !sessionId || !runId) return;
+			if (!clientId || !sessionId || !runId || !isOwnerRef.current) return;
 			await fn(clientId, sessionId, runId, sessionGeneration);
 		},
 		[],
@@ -666,24 +685,31 @@ export function usePiSession(
 						...(confirmed !== undefined ? { confirmed } : {}),
 					});
 					if (sessionGenerationRef.current !== sessionGeneration) return;
-					setState((st) => ({
-						...st,
-						status: "running",
-						pendingExtension: null,
-					}));
+					setState((st) =>
+						st.pendingExtension?.requestId === requestId
+							? {
+									...st,
+									status: "running",
+									pendingExtension: null,
+									job: st.job ? { ...st.job, status: "running" } : null,
+								}
+							: st,
+					);
 				}),
 			navigate: async (targetId) => {
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;
 				const cwdRef = cwdRefRef.current;
-				if (!clientId || !sessionId || !cwdRef) return;
+				if (!clientId || !sessionId || !cwdRef || !stateRef.current.job?.isOwner)
+					return;
 				await pi.sessions.navigate(clientId, sessionId, cwdRef, targetId);
 			},
 			fork: async (messageId) => {
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;
 				const cwdRef = cwdRefRef.current;
-				if (!clientId || !sessionId || !cwdRef) return;
+				if (!clientId || !sessionId || !cwdRef || !stateRef.current.job?.isOwner)
+					return;
 				await pi.sessions.fork(clientId, sessionId, cwdRef, messageId);
 			},
 			clone: async () => {

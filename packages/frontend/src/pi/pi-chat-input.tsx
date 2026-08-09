@@ -55,11 +55,11 @@ export function PiChatInput({
 	useEffect(() => {
 		// Esc 仅在运行中 abort
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape" && running) onAbort();
+			if (e.key === "Escape" && running && !disabled) onAbort();
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [running, onAbort]);
+	}, [running, disabled, onAbort]);
 
 	return (
 		<div className="space-y-1.5 border-t border-border pt-2">
