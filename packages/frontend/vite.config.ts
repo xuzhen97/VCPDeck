@@ -11,6 +11,11 @@ export default defineConfig({
 			"@": sourceDir,
 		},
 	},
+	build: {
+		commonjsOptions: {
+			include: [/node_modules/, /packages[\\/]shared[\\/]/],
+		},
+	},
 	server: {
 		host: "0.0.0.0",
 		proxy: {
