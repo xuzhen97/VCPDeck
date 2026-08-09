@@ -41,6 +41,7 @@ export {
 	PI_ERROR_CODES,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
 	PI_THINKING_LEVELS,
+	isPiAgentIdle,
 	isPiThinkingLevel,
 	parsePiAgentState,
 	safePiErrorMessage,

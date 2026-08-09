@@ -391,13 +391,16 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 							confirmed,
 						)
 					}
-					onCancel={() =>
+					onCancel={() => {
+						const pending = state.pendingExtension!;
+						// confirm 取消 = 拒绝（confirmed:false）；其他类型取消 = cancelled:true
 						void actions.extensionResponse(
-							state.pendingExtension!.requestId,
+							pending.requestId,
 							undefined,
-							undefined,
-						)
-					}
+							pending.kind === "confirm" ? false : undefined,
+							pending.kind === "confirm" ? undefined : true,
+						);
+					}}
 				/>
 			)}
 		</div>

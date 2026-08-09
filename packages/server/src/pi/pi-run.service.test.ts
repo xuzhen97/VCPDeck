@@ -714,6 +714,23 @@ describe("PiRunService generation reconcile", () => {
 		).toBe(true);
 		expect(current().status).toBe("idle");
 	});
+
+	it("reconcileOpen 在 followUp 排队时不收敛 idle", async () => {
+		const { service, running, current } = setup();
+		const run = await running();
+		expect(
+			await service.reconcileOpen("s1", run.runId, {
+				status: "idle",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: "off",
+				queuedMessages: { steering: [], followUp: ["follow"] },
+			}),
+		).toBe(true);
+		expect(current().status).toBe("running");
+		expect(current().payload).toBe(JSON.stringify({ runId: run.runId }));
+	});
 });
 
 describe("PiRunService safe failures", () => {

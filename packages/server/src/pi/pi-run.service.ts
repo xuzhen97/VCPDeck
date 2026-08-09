@@ -9,6 +9,7 @@ import type {
 	PiStateReport,
 } from "@vcpdeck/shared";
 import { JobStatus } from "@vcpdeck/shared";
+import { isPiAgentIdle } from "@vcpdeck/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 interface ProjectLock {
@@ -340,7 +341,7 @@ export class PiRunService {
 	}
 
 	async reconcileOpen(jobId: string, runId: string, state: PiAgentState): Promise<boolean> {
-		if (state.status === "idle" && !state.streaming && !state.prompting && !state.compacting) {
+		if (isPiAgentIdle(state)) {
 			return this.finishRun(jobId, runId);
 		}
 		const target = state.waitingForExtensionInput || state.status === "waiting_for_extension_input"
@@ -407,25 +408,16 @@ export class PiRunService {
 		}
 	}
 
-	async scheduleSettlement(jobId: string, runId: string, onSettle: () => Promise<void>): Promise<void>;
-	async scheduleSettlement(jobId: string, onSettle: () => Promise<void>): Promise<void>;
-	async scheduleSettlement(jobId: string, runIdOrSettle: string | (() => Promise<void>), onSettle?: () => Promise<void>): Promise<void> {
-		const legacy = typeof runIdOrSettle === "function";
-		const runId = legacy ? jobId : runIdOrSettle;
-		const settle = legacy ? runIdOrSettle : onSettle!;
+	async scheduleSettlement(jobId: string, runId: string, onSettle: () => Promise<void>): Promise<void> {
 		this.cancelSettlement(jobId, runId);
 		const key = this.settlementKey(jobId, runId);
 		const timer = setTimeout(() => {
 			this.settlementTimers.delete(key);
-			if (legacy) {
-				void settle().catch(() => {});
-				return;
-			}
 			void this.findSession(jobId)
 				.then((job) => {
 					if (job.payload === runPayload(runId)
 						&& ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])) {
-						return settle();
+						return onSettle();
 					}
 				})
 				.catch(() => {});
@@ -433,8 +425,8 @@ export class PiRunService {
 		this.settlementTimers.set(key, timer);
 	}
 
-	cancelSettlement(jobId: string, runId?: string): void {
-		const key = this.settlementKey(jobId, runId ?? jobId);
+	cancelSettlement(jobId: string, runId: string): void {
+		const key = this.settlementKey(jobId, runId);
 		const timer = this.settlementTimers.get(key);
 		if (timer) {
 			clearTimeout(timer);

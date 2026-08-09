@@ -414,6 +414,20 @@ export interface PiAgentState {
 	pendingExtension?: PiExtensionUiRequest;
 }
 
+/** 严格空闲判定：四标志空闲 + 无排队 Extension + 无等待输入 + steering/followUp 队列空。 */
+export function isPiAgentIdle(state: PiAgentState): boolean {
+	return (
+		state.status === "idle" &&
+		state.streaming === false &&
+		state.prompting === false &&
+		state.compacting === false &&
+		state.pendingExtension === undefined &&
+		state.waitingForExtensionInput !== true &&
+		state.queuedMessages.steering.length === 0 &&
+		state.queuedMessages.followUp.length === 0
+	);
+}
+
 // ── 运行时校验（trust boundary parsers） ──
 
 /** 协议解析错误：Server/Client 在信任边界使用 payload 前调用 */

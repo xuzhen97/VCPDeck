@@ -3,6 +3,7 @@ import { JobStatus, JobType } from "./index.js";
 import {
 	PI_ERROR_CODES,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
+	isPiAgentIdle,
 	isPiThinkingLevel,
 	MAX_PI_IMAGES_PER_PROMPT,
 	parsePiAgentState,
@@ -10,6 +11,7 @@ import {
 	parsePiRequest,
 	parsePiResponse,
 	parsePiStateReport,
+	type PiAgentState,
 } from "./pi.js";
 
 describe("Pi thinking levels", () => {
@@ -17,6 +19,53 @@ describe("Pi thinking levels", () => {
 		expect(isPiThinkingLevel("high")).toBe(true);
 		expect(isPiThinkingLevel("auto")).toBe(false);
 		expect(isPiThinkingLevel("unknown")).toBe(false);
+	});
+});
+
+describe("isPiAgentIdle", () => {
+	const base: PiAgentState = {
+		status: "idle",
+		streaming: false,
+		prompting: false,
+		compacting: false,
+		thinkingLevel: "off",
+		queuedMessages: { steering: [], followUp: [] },
+	};
+	it("四标志空闲且无扩展/排队才返回 true", () => {
+		expect(isPiAgentIdle(base)).toBe(true);
+	});
+	it.each([
+		["status running", { status: "running" }],
+		["streaming", { streaming: true }],
+		["prompting", { prompting: true }],
+		["compacting", { compacting: true }],
+		["waitingForExtensionInput", { waitingForExtensionInput: true }],
+	] as const)("%s 不算空闲", (_name, patch) => {
+		expect(isPiAgentIdle({ ...base, ...patch })).toBe(false);
+	});
+	it("pendingExtension 或排队 steering/followUp 不算空闲", () => {
+		expect(
+			isPiAgentIdle({
+				...base,
+				pendingExtension: {
+					requestId: "u1",
+					extensionId: "e",
+					kind: "confirm",
+				},
+			}),
+		).toBe(false);
+		expect(
+			isPiAgentIdle({
+				...base,
+				queuedMessages: { steering: ["s"], followUp: [] },
+			}),
+		).toBe(false);
+		expect(
+			isPiAgentIdle({
+				...base,
+				queuedMessages: { steering: [], followUp: ["f"] },
+			}),
+		).toBe(false);
 	});
 });
 

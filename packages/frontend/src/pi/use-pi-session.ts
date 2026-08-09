@@ -72,6 +72,7 @@ export interface PiSessionActions {
 		requestId: string,
 		value?: string,
 		confirmed?: boolean,
+		cancelled?: boolean,
 	): Promise<void>;
 	navigate(targetId: string): Promise<void>;
 	fork(messageId: string): Promise<void>;
@@ -382,16 +383,21 @@ export function usePiSession(
 								});
 								return;
 							case "extension_resolved":
-								setState((s) =>
-									s.pendingExtension?.requestId === event.requestId
-										? {
-												...s,
-												pendingExtension: null,
-												status: "running",
-												job: s.job ? { ...s.job, status: "running" } : null,
-											}
-										: s,
-								);
+								setState((s) => {
+									if (s.pendingExtension?.requestId !== event.requestId) return s;
+									const hasPending = event.hasPending === true;
+									return {
+										...s,
+										pendingExtension: null,
+										status: hasPending ? "waiting_input" : "running",
+										job: s.job
+											? {
+													...s.job,
+													status: hasPending ? "waiting_input" : "running",
+												}
+											: null,
+									};
+								});
 								return;
 							case "history_changed":
 							case "message_update":
@@ -699,12 +705,13 @@ export function usePiSession(
 					throw err;
 				}
 			},
-			extensionResponse: (requestId, value, confirmed) =>
+			extensionResponse: (requestId, value, confirmed, cancelled) =>
 				withRun(async (c, s, runId, sessionGeneration) => {
 					await pi.agent.extensionResponse(c, s, runId, {
 						requestId,
 						...(value !== undefined ? { value } : {}),
 						...(confirmed !== undefined ? { confirmed } : {}),
+						...(cancelled === true ? { cancelled: true } : {}),
 					});
 					if (sessionGenerationRef.current !== sessionGeneration) return;
 					setState((st) =>

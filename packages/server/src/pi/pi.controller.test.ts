@@ -515,6 +515,7 @@ describe("PiController", () => {
 	it.each([
 		["active", { ...idleAgentState, status: "running", streaming: true }, "accept"],
 		["not-started", idleAgentState, "finishRun"],
+		["pending-extension", { ...idleAgentState, pendingExtension: { requestId: "u1", extensionId: "e", kind: "confirm", message: "trust?" } }, "accept"],
 	] as const)("prompt dispatch timeout 后按权威 %s state 对账", async (_name, state, transition) => {
 		const timeout = Object.assign(new Error("timeout"), { code: "PI_REQUEST_TIMEOUT" });
 		const { controller, requests, runs } = makeController();
@@ -532,7 +533,28 @@ describe("PiController", () => {
 			expect.objectContaining({ action: "agent.state", jobId: "s1", runId: "run-1" }),
 		);
 		expect(runs[transition]).toHaveBeenCalledWith("s1", "run-1");
-		if (transition === "accept") expect(runs.reconcileOpen).toHaveBeenCalledWith("s1", "run-1", state);
+		if (transition === "accept") {
+			expect(runs.finishRun).not.toHaveBeenCalled();
+			expect(runs.reconcileOpen).toHaveBeenCalledWith("s1", "run-1", state);
+		}
+	});
+
+	it("extension-response 成功后不再乐观 resume（状态只由 matching extension_resolved 驱动）", async () => {
+		const { controller, requests, runs } = makeController();
+		await expect(
+			controller.extensionResponse("c1", "s1", { runId: "run-1", requestId: "unknown-ui" }, actor),
+		).resolves.toEqual({ ok: true });
+		expect(requests.request).toHaveBeenCalledWith(
+			{ clientId: "c1", socketId: "socket-1" },
+			expect.objectContaining({
+				action: "extension.respond",
+				sessionId: "s1",
+				jobId: "s1",
+				runId: "run-1",
+				payload: { requestId: "unknown-ui" },
+			}),
+		);
+		expect(runs.resume).not.toHaveBeenCalled();
 	});
 
 	it("prompt dispatch disconnect 将 matching run CAS 为 disconnected", async () => {

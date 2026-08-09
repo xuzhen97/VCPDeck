@@ -16,8 +16,9 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
-	isPiThinkingLevel,
-	parsePiAgentState,
+isPiAgentIdle,
+isPiThinkingLevel,
+parsePiAgentState,
 	PI_ERROR_CODES,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
 	type ActorContext,
@@ -709,7 +710,7 @@ export class PiController {
 						});
 						if (stateResponse.ok) {
 							const state = parsePiAgentState(stateResponse.data);
-							if (state.status === "idle" && !state.streaming && !state.prompting && !state.compacting) {
+							if (isPiAgentIdle(state)) {
 								await this.runs.finishRun(jobId, runId);
 							} else {
 								await this.runs.accept(jobId, runId);
@@ -925,7 +926,6 @@ export class PiController {
 				...(body.cancelled === true ? { cancelled: true } : {}),
 			},
 		});
-		await this.runs.resume(sessionId, runId);
 		return { ok: true };
 	}
 

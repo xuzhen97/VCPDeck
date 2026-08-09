@@ -199,6 +199,37 @@ describe("usePiSession", () => {
 		expect(result.current.state.pendingExtension).toBeNull();
 	});
 
+	it("extension_resolved hasPending=true 保持 waiting_input", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
+			job: {
+				jobId: "s1", sessionId: "s1", status: "waiting_input", runId: "j1",
+				ownerName: "User", isOwner: true,
+			},
+			agentState: {
+				status: "waiting_for_extension_input", streaming: false, prompting: true,
+				compacting: false, thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+				pendingExtension: { requestId: "u1", extensionId: "trust", kind: "confirm", message: "trust?" },
+			},
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+		expect(result.current.state.status).toBe("waiting_input");
+
+		act(() => emit({ type: "extension_resolved", sessionId: "s1", runId: "j1", requestId: "u1", reason: "answered", hasPending: true }));
+		expect(result.current.state.status).toBe("waiting_input");
+		expect(result.current.state.job?.status).toBe("waiting_input");
+		expect(result.current.state.pendingExtension).toBeNull();
+
+		act(() => emit({ type: "extension_request", sessionId: "s1", runId: "j1", ui: { requestId: "u2", extensionId: "e", kind: "input", message: "next" } }));
+		expect(result.current.state.status).toBe("waiting_input");
+		act(() => emit({ type: "extension_resolved", sessionId: "s1", runId: "j1", requestId: "u2", reason: "answered", hasPending: false }));
+		expect(result.current.state.status).toBe("running");
+	});
+
 	it("Observer 不能发送", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
@@ -831,5 +862,37 @@ describe("usePiSession", () => {
 		expect(result.current.state.pendingExtension?.requestId).toBe("u2");
 		expect(result.current.state.status).toBe("waiting_input");
 		expect(result.current.state.job?.status).toBe("waiting_input");
+	});
+
+	it("extensionResponse cancelled:true 转发 cancelled 参数", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const { result } = renderHook(() => usePiSession(pi));
+
+		await act(async () => {
+			await result.current.actions.createSession("c1", CWD);
+		});
+		await act(async () => {
+			await result.current.actions.send({ prompt: "hi" });
+		});
+		act(() => {
+			emit({
+				type: "extension_request",
+				sessionId: "s1",
+				runId: "j1",
+				ui: { requestId: "u1", extensionId: "e", kind: "input", message: "name?" },
+			});
+		});
+
+		await act(async () => {
+			await result.current.actions.extensionResponse("u1", undefined, undefined, true);
+		});
+		expect(pi.agent.extensionResponse).toHaveBeenCalledWith(
+			"c1",
+			"s1",
+			"j1",
+			expect.objectContaining({ requestId: "u1", cancelled: true }),
+		);
+		await waitFor(() => expect(result.current.state.status).toBe("running"));
 	});
 });

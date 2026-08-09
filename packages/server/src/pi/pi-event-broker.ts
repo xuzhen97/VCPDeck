@@ -4,8 +4,8 @@ import { map } from "rxjs/operators";
 import type {
 	MessageEvent,
 } from "@nestjs/common";
-import { parsePiAgentState } from "@vcpdeck/shared";
-import type { PiAgentState, PiEvent } from "@vcpdeck/shared";
+import { parsePiAgentState, isPiAgentIdle } from "@vcpdeck/shared";
+import type { PiEvent } from "@vcpdeck/shared";
 import { PiRequestBroker } from "./pi-request-broker.js";
 import { PiRunService } from "./pi-run.service.js";
 
@@ -26,18 +26,6 @@ const ACTIVITY_EVENTS = new Set([
 interface SessionStream {
 	subject: Subject<MessageEvent>;
 	subscribers: number;
-}
-
-function isIdleState(state: unknown): boolean {
-	if (typeof state !== "object" || state === null) return false;
-	const s = state as PiAgentState;
-	return (
-		s.status === "idle" &&
-		s.streaming === false &&
-		s.prompting === false &&
-		s.compacting === false &&
-		s.waitingForExtensionInput !== true
-	);
 }
 
 /**
@@ -138,11 +126,7 @@ export class PiEventBroker {
 					});
 					if (!response.ok) return;
 					const state = parsePiAgentState(response.data);
-					if (
-						isIdleState(state) &&
-						state.queuedMessages.steering.length === 0 &&
-						state.queuedMessages.followUp.length === 0
-					) {
+					if (isPiAgentIdle(state)) {
 						await this.runs.finishRun(jobId, runId);
 					}
 				});
