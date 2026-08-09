@@ -313,6 +313,75 @@ describe("PiAgentSessionWrapperImpl", () => {
 		expect(wrapper.getState().status).toBe("idle");
 	});
 
+	it("abort 等待 streaming 停止，5 秒后返回 PI_REQUEST_TIMEOUT", async () => {
+		vi.useFakeTimers();
+		const { inner, wrapper } = makeWrapper();
+		inner.isStreaming = true;
+
+		const result = expect(wrapper.send("agent.abort")).rejects.toMatchObject({
+			code: "PI_REQUEST_TIMEOUT",
+		});
+		await vi.advanceTimersByTimeAsync(5_000);
+		await result;
+	});
+
+	it("abort 等待期间 streaming 收敛则成功", async () => {
+		vi.useFakeTimers();
+		const { inner, wrapper } = makeWrapper();
+		inner.isStreaming = true;
+
+		const result = wrapper.send("agent.abort");
+		await vi.advanceTimersByTimeAsync(4_975);
+		inner.isStreaming = false;
+		await vi.advanceTimersByTimeAsync(25);
+		await expect(result).resolves.toBeNull();
+	});
+
+	it("destroy 只为活动请求发一次 cancelled，排队请求静默解决", async () => {
+		const { inner, wrapper } = makeWrapper();
+		const events: PiClientEvent[] = [];
+		wrapper.onEvent((event) => events.push(event));
+		const active = (inner.uiContext?.confirm as Function)("第一项", "A");
+		const queued = (inner.uiContext?.input as Function)("第二项", "B");
+		const activeId = wrapper.getState().pendingExtension!.requestId;
+
+		wrapper.destroy();
+
+		await expect(active).resolves.toBe(false);
+		await expect(queued).resolves.toBeUndefined();
+		expect(
+			events.filter((event) => event.type === "extension_resolved"),
+		).toEqual([
+			expect.objectContaining({
+				requestId: activeId,
+				reason: "cancelled",
+				hasPending: false,
+			}),
+		]);
+		expect(
+			events.filter((event) => event.type === "extension_request"),
+		).toHaveLength(1);
+	});
+
+	it("answered 后重复响应不重复发 extension_resolved", async () => {
+		const { inner, wrapper } = makeWrapper();
+		const events: PiClientEvent[] = [];
+		wrapper.onEvent((event) => events.push(event));
+		const answer = (inner.uiContext?.input as Function)("输入", "内容");
+		const requestId = wrapper.getState().pendingExtension!.requestId;
+
+		await wrapper.send("extension.respond", { requestId, value: "first" });
+		await wrapper.send("extension.respond", { requestId, value: "second" });
+
+		await expect(answer).resolves.toBe("first");
+		expect(
+			events.filter(
+				(event) =>
+					event.type === "extension_resolved" && event.requestId === requestId,
+			),
+		).toHaveLength(1);
+	});
+
 	it("model.set 不在交集返回 PI_MODEL_NOT_FOUND", async () => {
 		const { wrapper } = makeWrapper();
 		const result = await wrapper.send("model.set", {
