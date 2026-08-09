@@ -351,6 +351,7 @@ describe("PiSupervisor", () => {
 			type: "request", request: expect.objectContaining({ action: "agent.abort", runId: "run-1" }),
 		}));
 		expect(supervisor.getStateReport().runs.some((run) => run.runId === "run-1")).toBe(false);
+		await expect(supervisor.request(prompt("run-2", CWD_REF_A))).resolves.toMatchObject({ ok: true });
 	});
 
 	it("closed run abort 失败时保留并在下一次 PI_STATE 重报", async () => {

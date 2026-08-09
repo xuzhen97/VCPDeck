@@ -3,7 +3,14 @@
  * 通过 IPC 与 parent（Supervisor）通信；只服务一个 canonical cwd。
  * 主进程不静态 import Pi SDK；本文件由 fork 启动，运行时才动态加载 SDK。
  */
-import type { PiAttachmentDescriptor, PiErrorCode, PiRequest } from "@vcpdeck/shared";
+import {
+	PI_ERROR_CODES,
+	safePiErrorMessage,
+	type PiAttachmentDescriptor,
+	type PiClientEvent,
+	type PiErrorCode,
+	type PiRequest,
+} from "@vcpdeck/shared";
 import {
 	createPiSessionReader,
 	type PiSessionReader,
@@ -38,25 +45,47 @@ interface ActivePrompt {
 	runId: string;
 	sessionId: string;
 	cancelToken: { cancelled: boolean };
+	unsubscribe: (() => void) | null;
 }
 let active: ActivePrompt | null = null;
 let promptPipeline: Promise<void> | null = null;
 let lastActivity = Date.now();
+
+const PI_ERROR_CODE_SET: ReadonlySet<string> = new Set(PI_ERROR_CODES);
+const PI_ERROR_MESSAGES: Record<PiErrorCode, string> = {
+	PI_PROTOCOL_INVALID: "Invalid Pi request",
+	PI_CLIENT_UNSUPPORTED: "Pi client is unsupported",
+	PI_NODE_UNSUPPORTED: "Node.js version is unsupported",
+	PI_BASH_NOT_FOUND: "Bash is unavailable",
+	PI_RUNTIME_UNAVAILABLE: "Pi runtime is unavailable",
+	PI_AUTH_UNAVAILABLE: "Pi authentication is unavailable",
+	PI_MODEL_NOT_FOUND: "Pi model was not found",
+	PI_PROJECT_NOT_ALLOWED: "Pi project is not allowed",
+	PI_SESSION_NOT_FOUND: "Pi session was not found",
+	PI_PROJECT_BUSY: "Pi project is busy",
+	PI_CONTROL_FORBIDDEN: "No matching active Pi run",
+	PI_CLIENT_DISCONNECTED: "Pi client is disconnected",
+	PI_WORKER_EXITED: "Pi worker exited",
+	PI_CLIENT_RESTARTED: "Pi client restarted",
+	PI_IMAGE_INVALID: "Pi image is invalid",
+	PI_IMAGE_TOO_LARGE: "Pi image is too large",
+	PI_REQUEST_TIMEOUT: "Pi request timed out",
+	PI_STATE_PENDING: "Pi state is pending",
+};
 
 function send(msg: PiWorkerOutboundMessage): void {
 	if (process.send) process.send(msg);
 }
 
 function normalizeError(err: unknown): { code: PiErrorCode; message: string } {
-	if (typeof err === "object" && err !== null && "code" in err) {
-		return {
-			code: String((err as { code: unknown }).code) as PiErrorCode,
-			message: err instanceof Error ? err.message : "Request failed",
-		};
-	}
-	if (err instanceof Error)
-		return { code: "PI_RUNTIME_UNAVAILABLE", message: err.message };
-	return { code: "PI_RUNTIME_UNAVAILABLE", message: String(err) };
+	const rawCode =
+		typeof err === "object" && err !== null && "code" in err
+			? String((err as { code: unknown }).code)
+			: "PI_RUNTIME_UNAVAILABLE";
+	const code = PI_ERROR_CODE_SET.has(rawCode)
+		? (rawCode as PiErrorCode)
+		: "PI_RUNTIME_UNAVAILABLE";
+	return { code, message: safePiErrorMessage(PI_ERROR_MESSAGES[code]) };
 }
 
 async function ensureWrapper(
@@ -76,14 +105,54 @@ async function ensureWrapper(
 			code: "PI_SESSION_NOT_FOUND",
 		});
 	}
-	const w = await startPiAgentSession({ cwd, sessionFile: found.path });
-	w.onEvent((event) => {
-		const run = active;
-		if (!run || event.sessionId !== run.sessionId) return;
-		if (event.type === "agent_settled" || event.type === "prompt_error") {
-			run.cancelToken.cancelled = true;
-			active = null;
-			promptPipeline = null;
+	wrapper = await startPiAgentSession({ cwd, sessionFile: found.path });
+	return wrapper;
+}
+
+function matchesRun(
+	run: ActivePrompt | null,
+	jobId: string,
+	sessionId: string,
+	runId: string,
+	cancelToken: ActivePrompt["cancelToken"],
+): run is ActivePrompt {
+	return run !== null &&
+		run.jobId === jobId &&
+		run.sessionId === sessionId &&
+		run.runId === runId &&
+		run.cancelToken === cancelToken;
+}
+
+function matchesRequest(run: ActivePrompt | null, request: PiRequest): run is ActivePrompt {
+	return run !== null &&
+		request.jobId === run.jobId &&
+		request.sessionId === run.sessionId &&
+		request.runId === run.runId;
+}
+
+function isCurrentRun(run: ActivePrompt): boolean {
+	return matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken) &&
+		!run.cancelToken.cancelled;
+}
+
+function clearRun(run: ActivePrompt): void {
+	if (!matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken)) return;
+	run.unsubscribe?.();
+	run.unsubscribe = null;
+	active = null;
+	promptPipeline = null;
+}
+
+function bindWrapperEvents(w: PiAgentSessionWrapper, run: ActivePrompt): void {
+	run.unsubscribe?.();
+	run.unsubscribe = w.onEvent((rawEvent) => {
+		if (rawEvent.sessionId !== run.sessionId) return;
+		const terminal = rawEvent.type === "agent_settled" || rawEvent.type === "prompt_error";
+		const event: PiClientEvent = rawEvent.type === "prompt_error"
+			? { type: "prompt_error", sessionId: run.sessionId, ...normalizeError(rawEvent) }
+			: rawEvent;
+		if (terminal) {
+			clearRun(run);
 		}
 		send({
 			type: "event",
@@ -93,18 +162,11 @@ async function ensureWrapper(
 			event,
 		});
 	});
-	wrapper = w;
-	return w;
-}
-
-function isCurrentRun(run: ActivePrompt): boolean {
-	return active === run && !run.cancelToken.cancelled;
 }
 
 function emitPromptError(run: ActivePrompt, error: unknown): void {
 	if (!isCurrentRun(run)) return;
-	active = null;
-	promptPipeline = null;
+	clearRun(run);
 	const normalized = normalizeError(error);
 	send({
 		type: "event",
@@ -117,8 +179,10 @@ function emitPromptError(run: ActivePrompt, error: unknown): void {
 
 async function runPrompt(run: ActivePrompt, request: PiRequest): Promise<void> {
 	let w = await ensureWrapper(run.sessionId);
+	bindWrapperEvents(w, run);
 	if (!isCurrentRun(run)) {
 		await w.shutdown();
+		if (wrapper === w) wrapper = null;
 		return;
 	}
 	const trusted = await w.ensureProjectTrust();
@@ -132,14 +196,18 @@ async function runPrompt(run: ActivePrompt, request: PiRequest): Promise<void> {
 		if (wrapper === w) wrapper = null;
 		if (!isCurrentRun(run)) return;
 		w = await ensureWrapper(run.sessionId);
+		bindWrapperEvents(w, run);
 		if (!isCurrentRun(run)) {
 			await w.shutdown();
+			if (wrapper === w) wrapper = null;
 			return;
 		}
 	}
 	const payload = { ...(request.payload ?? {}) };
 	if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
-		const downloaded = await downloadPromptImages(payload.attachments as PiAttachmentDescriptor[]);
+		const downloaded = await downloadPromptImages(
+			payload.attachments as PiAttachmentDescriptor[],
+		);
 		if (!isCurrentRun(run)) {
 			await w.shutdown();
 			if (wrapper === w) wrapper = null;
@@ -264,38 +332,53 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 		}
 		default: {
 			const sessionId = request.sessionId ?? active?.sessionId;
-			if (!sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
-			if (request.action === "agent.state" && !request.runId) return reader.state(sessionId);
+			if (!sessionId)
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
+			if (request.action === "agent.state" && !request.runId)
+				return reader.state(sessionId);
 			if (request.action === "agent.prompt") {
-				if (active) throw Object.assign(new Error("Pi project is busy"), { code: "PI_PROJECT_BUSY" });
+				if (active)
+					throw Object.assign(new Error("Pi project is busy"), {
+						code: "PI_PROJECT_BUSY",
+					});
 				const run: ActivePrompt = {
 					jobId: request.jobId ?? "",
 					runId: request.runId ?? "",
 					sessionId,
 					cancelToken: { cancelled: false },
+					unsubscribe: null,
 				};
 				active = run;
 				promptPipeline = runPrompt(run, request);
 				void promptPipeline.catch((error) => emitPromptError(run, error));
 				return { accepted: true };
 			}
-			if (!active || (request.runId && request.runId !== active.runId)) {
-				throw Object.assign(new Error("No matching active run"), { code: "PI_CONTROL_FORBIDDEN" });
+			if (!matchesRequest(active, request)) {
+				throw Object.assign(new Error("No matching active run"), {
+					code: "PI_CONTROL_FORBIDDEN",
+				});
 			}
 			if (request.action === "agent.abort") {
 				const run = active;
 				run.cancelToken.cancelled = true;
-				active = null;
 				const pipeline = promptPipeline;
-				promptPipeline = null;
 				const w = wrapper;
 				if (w) await w.send("agent.abort", request.payload ?? {});
 				await pipeline?.catch(() => {});
+				clearRun(run);
 				return null;
 			}
+			const run = active;
 			const w = await ensureWrapper(sessionId);
-			if (!active || (request.runId && request.runId !== active.runId)) throw Object.assign(new Error("No matching active run"), { code: "PI_CONTROL_FORBIDDEN" });
-			return request.action === "agent.state" ? w.getState() : w.send(request.action, request.payload ?? {});
+			if (!matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken))
+				throw Object.assign(new Error("No matching active run"), {
+					code: "PI_CONTROL_FORBIDDEN",
+				});
+			return request.action === "agent.state"
+				? w.getState()
+				: w.send(request.action, request.payload ?? {});
 		}
 	}
 }

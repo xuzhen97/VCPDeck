@@ -13,6 +13,7 @@ let roots: string[] = [];
 let seq = 0;
 
 afterEach(async () => {
+	vi.useRealTimers();
 	vi.restoreAllMocks();
 	await Promise.all(roots.map((r) => rm(r, { recursive: true, force: true })));
 	roots = [];
@@ -254,6 +255,83 @@ describe("attachPiBridge", () => {
 		await bridge.onConnected();
 		(emitCalls.filter((call) => call.event === Events.REGISTER)[1]!.args[1] as () => void)();
 		expect(emitCalls.filter((call) => call.event === Events.PI_STATE)).toHaveLength(2);
+	});
+
+	it("closed abort 首次失败后重试成功并再次报告 PI_STATE", async () => {
+		vi.useFakeTimers();
+		const { socket, emitCalls } = fakeSocket();
+		const { deps } = await makeDeps();
+		vi.spyOn(deps.supervisor, "applyStateAck")
+			.mockResolvedValueOnce({ allClosed: false })
+			.mockResolvedValueOnce({ allClosed: true });
+		const bridge = attachPiBridge(socket, deps);
+		await bridge.onConnected();
+		(emitCalls.find((call) => call.event === Events.REGISTER)!.args[1] as () => void)();
+
+		const firstAck = emitCalls.filter((call) => call.event === Events.PI_STATE)[0]!.args[1] as Function;
+		await firstAck({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+		await vi.advanceTimersByTimeAsync(100);
+		const secondAck = emitCalls.filter((call) => call.event === Events.PI_STATE)[1]!.args[1] as Function;
+		await secondAck({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+
+		expect(deps.supervisor.applyStateAck).toHaveBeenCalledTimes(2);
+		expect(emitCalls.filter((call) => call.event === Events.PI_STATE)).toHaveLength(3);
+		expect(socket.disconnect).not.toHaveBeenCalled();
+	});
+
+	it("closed abort 重试耗尽后 disconnect 并显式 connect", async () => {
+		vi.useFakeTimers();
+		const { socket, emitCalls } = fakeSocket();
+		const { deps } = await makeDeps();
+		vi.spyOn(deps.supervisor, "applyStateAck").mockResolvedValue({ allClosed: false });
+		const bridge = attachPiBridge(socket, deps);
+		await bridge.onConnected();
+		(emitCalls.find((call) => call.event === Events.REGISTER)!.args[1] as () => void)();
+
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const ack = emitCalls.filter((call) => call.event === Events.PI_STATE)[attempt]!.args[1] as Function;
+			await ack({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+			await vi.advanceTimersByTimeAsync(100);
+		}
+
+		expect(socket.disconnect).toHaveBeenCalledOnce();
+		expect(socket.connect).toHaveBeenCalledOnce();
+	});
+
+	it("旧 generation reconnect timer 不扰动新代次", async () => {
+		vi.useFakeTimers();
+		const { socket, emitCalls } = fakeSocket();
+		const { deps } = await makeDeps();
+		vi.spyOn(deps.supervisor, "applyStateAck").mockResolvedValue({ allClosed: false });
+		const bridge = attachPiBridge(socket, deps);
+		await bridge.onConnected();
+		(emitCalls.find((call) => call.event === Events.REGISTER)!.args[1] as () => void)();
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const ack = emitCalls.filter((call) => call.event === Events.PI_STATE)[attempt]!.args[1] as Function;
+			await ack({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+			if (attempt < 2) await vi.advanceTimersByTimeAsync(100);
+		}
+		await bridge.onConnected();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(socket.connect).not.toHaveBeenCalled();
+	});
+
+	it("同 generation 已连接时 reconnect timer 不重复连接", async () => {
+		vi.useFakeTimers();
+		const { socket, emitCalls } = fakeSocket();
+		const { deps } = await makeDeps();
+		vi.spyOn(deps.supervisor, "applyStateAck").mockResolvedValue({ allClosed: false });
+		const bridge = attachPiBridge(socket, deps);
+		await bridge.onConnected();
+		(emitCalls.find((call) => call.event === Events.REGISTER)!.args[1] as () => void)();
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const ack = emitCalls.filter((call) => call.event === Events.PI_STATE)[attempt]!.args[1] as Function;
+			await ack({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+			if (attempt < 2) await vi.advanceTimersByTimeAsync(100);
+		}
+		(socket as unknown as { connected: boolean }).connected = true;
+		await vi.advanceTimersByTimeAsync(100);
+		expect(socket.connect).not.toHaveBeenCalled();
 	});
 
 	it("旧 Server 'ack' event 也能触发注册后流程", async () => {

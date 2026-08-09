@@ -112,7 +112,7 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 		}, 100);
 	}
 
-	function reportState(generation: number, retry = 0): void {
+	function reportState(generation: number, retry = 0, closureConfirmed = false): void {
 		if (generation !== connectionGeneration || !socket.connected) return;
 		socket.emit(Events.PI_STATE, deps.supervisor.getStateReport(), async (raw?: Partial<PiStateAck>) => {
 			if (generation !== connectionGeneration) return;
@@ -124,7 +124,7 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 			const { allClosed } = await deps.supervisor.applyStateAck(ack);
 			if (generation !== connectionGeneration) return;
 			if (!ack.reportAgain) return;
-			if (allClosed && retry === 0) reportState(generation, 1);
+			if (allClosed && !closureConfirmed) reportState(generation, retry, true);
 			else if (!allClosed && retry < 2) setTimeout(() => reportState(generation, retry + 1), 100);
 			else scheduleControlledReconnect(generation);
 		});

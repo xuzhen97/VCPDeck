@@ -73,7 +73,7 @@ const DESTRUCTIVE_ACTIONS = new Set([
 export interface PiSupervisor {
 	request(request: PiRequest, timeoutMs?: number): Promise<PiResponse>;
 	getStateReport(): PiStateReport;
-	applyStateAck(ack: PiStateAck): Promise<{ allClosed: boolean }>; 
+	applyStateAck(ack: PiStateAck): Promise<{ allClosed: boolean }>;
 	onEvent(listener: (event: PiEvent) => void): () => void;
 	shutdown(): Promise<void>;
 }

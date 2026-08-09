@@ -337,6 +337,22 @@ describe("PiAgentSessionWrapperImpl", () => {
 		await expect(result).resolves.toBeNull();
 	});
 
+	it("abort 首次失败仍取消 pending UI，第二次会重试底层 abort", async () => {
+		const { inner, wrapper } = makeWrapper();
+		const trust = (inner.uiContext?.confirm as Function)(
+			"Project Trust",
+			"信任？",
+		);
+		inner.abort.mockRejectedValueOnce(new Error("abort failed"));
+
+		await expect(wrapper.send("agent.abort")).rejects.toThrow("abort failed");
+		await expect(trust).resolves.toBe(false);
+		expect(wrapper.getState().pendingExtension).toBeUndefined();
+
+		await expect(wrapper.send("agent.abort")).resolves.toBeNull();
+		expect(inner.abort).toHaveBeenCalledTimes(2);
+	});
+
 	it("destroy 只为活动请求发一次 cancelled，排队请求静默解决", async () => {
 		const { inner, wrapper } = makeWrapper();
 		const events: PiClientEvent[] = [];
@@ -434,7 +450,9 @@ describe("PiAgentSessionWrapperImpl", () => {
 
 	it("ensureProjectTrust 复用 confirm 且只执行一次 resolver", async () => {
 		const { inner, wrapper } = makeWrapper();
-		const resolver = vi.fn(async (ask: (message: string) => Promise<boolean>) => ask("信任？"));
+		const resolver = vi.fn(async (ask: (message: string) => Promise<boolean>) =>
+			ask("信任？"),
+		);
 		wrapper.setProjectTrustResolver(resolver);
 		const pending = wrapper.ensureProjectTrust();
 		const requestId = wrapper.getState().pendingExtension!.requestId;
@@ -443,6 +461,15 @@ describe("PiAgentSessionWrapperImpl", () => {
 		await expect(wrapper.ensureProjectTrust()).resolves.toBe(true);
 		expect(resolver).toHaveBeenCalledOnce();
 		expect(inner.dispose).not.toHaveBeenCalled();
+	});
+
+	it("ensureProjectTrust 返回 false 时不要求重建", async () => {
+		const { wrapper } = makeWrapper();
+		const resolver = vi.fn(async () => false);
+		wrapper.setProjectTrustResolver(resolver);
+		await expect(wrapper.ensureProjectTrust()).resolves.toBe(false);
+		await expect(wrapper.ensureProjectTrust()).resolves.toBe(false);
+		expect(resolver).toHaveBeenCalledOnce();
 	});
 
 	it("shutdown 先发 session_shutdown 再 dispose", async () => {

@@ -53,6 +53,22 @@ function requestOnce(
 	});
 }
 
+function waitForEvent(
+	child: ChildProcess,
+	predicate: (message: PiWorkerOutboundMessage) => boolean,
+): Promise<PiWorkerOutboundMessage> {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error("worker event timeout")), 10_000);
+		const onMessage = (message: PiWorkerOutboundMessage) => {
+			if (!predicate(message)) return;
+			clearTimeout(timer);
+			child.removeListener("message", onMessage);
+			resolve(message);
+		};
+		child.on("message", onMessage);
+	});
+}
+
 describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 	it("真实 Worker 列出临时 agent 目录下的 Session", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
@@ -328,6 +344,50 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 				thinkingLevel: "max",
 			},
 		});
+	});
+
+	it("trust pending 可 abort，控制请求必须匹配完整 envelope", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
+		const cwd = join(agentDir, "project");
+		await mkdir(join(cwd, ".pi", "extensions"), { recursive: true });
+		await writeFile(join(cwd, ".pi", "extensions", "test.ts"), "export default {};\n", "utf8");
+		roots.push(agentDir);
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+		const sm = SessionManager.create(cwd);
+		const sessionId = sm.getSessionId();
+		await writeFile(
+			sm.getSessionFile()!,
+			JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd }) + "\n",
+			"utf8",
+		);
+
+		const child = spawnWorker(cwd, { PI_CODING_AGENT_DIR: agentDir });
+		const trustRequest = waitForEvent(child, (message) =>
+			message.type === "event" && message.runId === "run-1" && message.event.type === "extension_request",
+		);
+		await expect(requestOnce(child, {
+			requestId: "prompt-1", action: "agent.prompt", jobId: sessionId,
+			sessionId, runId: "run-1", payload: { prompt: "do not run" },
+		})).resolves.toMatchObject({ type: "response", ok: true, data: { accepted: true } });
+		await trustRequest;
+
+		await expect(requestOnce(child, {
+			requestId: "state-wrong", action: "agent.state", jobId: sessionId,
+			sessionId, runId: "run-wrong",
+		})).resolves.toMatchObject({ type: "response", ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+		await expect(requestOnce(child, {
+			requestId: "state-right", action: "agent.state", jobId: sessionId,
+			sessionId, runId: "run-1",
+		})).resolves.toMatchObject({ type: "response", ok: true, data: { status: "waiting_for_extension_input" } });
+		await expect(requestOnce(child, {
+			requestId: "abort-1", action: "agent.abort", jobId: sessionId,
+			sessionId, runId: "run-1",
+		})).resolves.toMatchObject({ type: "response", ok: true });
+		await expect(requestOnce(child, {
+			requestId: "state-after", action: "agent.state", jobId: sessionId,
+			sessionId, runId: "run-1",
+		})).resolves.toMatchObject({ type: "response", ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
 	});
 
 	it("parent disconnect 后 Worker 退出", async () => {

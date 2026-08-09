@@ -87,7 +87,8 @@ export function startPiAgentSession(
 			agentDir,
 			resourceLoaderReloadOptions: {
 				// 未决定信任时先创建不加载项目资源的受限 Session。
-				resolveProjectTrust: async () => trustStore.get(sessionManager.getCwd()) === true,
+				resolveProjectTrust: async () =>
+					trustStore.get(sessionManager.getCwd()) === true,
 			},
 		});
 
@@ -165,11 +166,13 @@ export function startPiAgentSession(
 		wrapper.setProjectTrustResolver(async (ask) => {
 			const projectCwd = sessionManager.getCwd();
 			const existing = trustStore.get(projectCwd);
-			if (existing !== null) return existing;
+			if (existing !== null) return false;
 			if (!sdk.hasTrustRequiringProjectResources(projectCwd)) return false;
 			const confirmed = options.trustResolver
 				? await options.trustResolver(projectCwd, ask)
-				: await ask(`此项目包含本地扩展/Skills（.pi/extensions 或 .agents/skills），是否信任并加载？`);
+				: await ask(
+						`此项目包含本地扩展/Skills（.pi/extensions 或 .agents/skills），是否信任并加载？`,
+					);
 			trustStore.set(projectCwd, confirmed);
 			return confirmed;
 		});
@@ -217,7 +220,9 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	private idleTimer: ReturnType<typeof setTimeout> | null = null;
 	private onDestroyCallback: (() => void) | null = null;
 	private shutdownPromise: Promise<void> | null = null;
-	private projectTrustResolver: ((ask: (message: string) => Promise<boolean>) => Promise<boolean>) | null = null;
+	private projectTrustResolver:
+		| ((ask: (message: string) => Promise<boolean>) => Promise<boolean>)
+		| null = null;
 	private projectTrustPromise: Promise<boolean> | null = null;
 	private _alive = true;
 
@@ -373,10 +378,11 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				await this.inner.followUp(payload.message as string);
 				return null;
 			case "agent.abort": {
-				await this.inner.abort();
 				const queued = this.extensionUiQueue.splice(0);
 				for (const pending of queued) {
-					pending.resolve(pending.request.kind === "confirm" ? false : undefined);
+					pending.resolve(
+						pending.request.kind === "confirm" ? false : undefined,
+					);
 				}
 				if (this.pendingUi) {
 					this.finishExtensionUi(
@@ -385,6 +391,7 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 						this.pendingUi.request.kind === "confirm" ? false : undefined,
 					);
 				}
+				await this.inner.abort();
 				await this.waitForStopped(5_000);
 				return null;
 			}
@@ -834,7 +841,9 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	async ensureProjectTrust(): Promise<boolean> {
 		if (!this.projectTrustResolver) return false;
 		if (!this.projectTrustPromise) {
-			this.projectTrustPromise = this.projectTrustResolver((message) => this.askConfirm(message));
+			this.projectTrustPromise = this.projectTrustResolver((message) =>
+				this.askConfirm(message),
+			);
 		}
 		return this.projectTrustPromise;
 	}
