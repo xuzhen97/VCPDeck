@@ -2,24 +2,68 @@
 // 本模块自包含，不 import 同包其他模块，供 Shared/Server/Client/SDK/Frontend 共用。
 
 // ── 稳定错误码 ──
-export type PiErrorCode =
-	| "PI_PROTOCOL_INVALID"
-	| "PI_CLIENT_UNSUPPORTED"
-	| "PI_NODE_UNSUPPORTED"
-	| "PI_BASH_NOT_FOUND"
-	| "PI_RUNTIME_UNAVAILABLE"
-	| "PI_AUTH_UNAVAILABLE"
-	| "PI_MODEL_NOT_FOUND"
-	| "PI_PROJECT_NOT_ALLOWED"
-	| "PI_SESSION_NOT_FOUND"
-	| "PI_PROJECT_BUSY"
-	| "PI_CONTROL_FORBIDDEN"
-	| "PI_CLIENT_DISCONNECTED"
-	| "PI_WORKER_EXITED"
-	| "PI_CLIENT_RESTARTED"
-	| "PI_IMAGE_INVALID"
-	| "PI_IMAGE_TOO_LARGE"
-	| "PI_REQUEST_TIMEOUT";
+export const PI_ERROR_CODES = [
+	"PI_PROTOCOL_INVALID",
+	"PI_CLIENT_UNSUPPORTED",
+	"PI_NODE_UNSUPPORTED",
+	"PI_BASH_NOT_FOUND",
+	"PI_RUNTIME_UNAVAILABLE",
+	"PI_AUTH_UNAVAILABLE",
+	"PI_MODEL_NOT_FOUND",
+	"PI_PROJECT_NOT_ALLOWED",
+	"PI_SESSION_NOT_FOUND",
+	"PI_PROJECT_BUSY",
+	"PI_CONTROL_FORBIDDEN",
+	"PI_CLIENT_DISCONNECTED",
+	"PI_WORKER_EXITED",
+	"PI_CLIENT_RESTARTED",
+	"PI_IMAGE_INVALID",
+	"PI_IMAGE_TOO_LARGE",
+	"PI_REQUEST_TIMEOUT",
+	"PI_STATE_PENDING",
+] as const;
+
+export type PiErrorCode = (typeof PI_ERROR_CODES)[number];
+
+/** Session Job 协议版本；Server 与新 Client 必须精确匹配。 */
+export const PI_SESSION_JOB_PROTOCOL_VERSION = 1;
+
+export type PiSessionJobStatus =
+	| "idle"
+	| "pending"
+	| "running"
+	| "waiting_input"
+	| "done"
+	| "disconnected"
+	| "error"
+	| "cancelled";
+
+export interface PiSessionJobSnapshot {
+	jobId: string;
+	sessionId: string;
+	status: PiSessionJobStatus;
+	runId: string | null;
+	ownerName: string | null;
+	isOwner: boolean;
+	errorCode?: PiErrorCode;
+	errorMessage?: string;
+}
+
+export interface PiSessionCreated {
+	sessionId: string;
+	jobId: string;
+}
+
+export interface PiSessionOpenResult {
+	job: PiSessionJobSnapshot;
+	agentState: PiAgentState;
+}
+
+export interface PiStateAck {
+	acceptedRunIds: string[];
+	closedRunIds: string[];
+	reportAgain: boolean;
+}
 
 /** 项目目录引用：由 Files roots 选定，Client 负责 canonicalize 后再使用 */
 export interface PiCwdRef {
@@ -42,6 +86,8 @@ export type PiCapabilityStatus =
 			sdkVersion: string;
 			nodeVersion: string;
 			shellKind: "configured" | "git-bash" | "path" | "system";
+			/** 旧 Client 缺省；新 Client 固定上报当前版本。 */
+			sessionJobProtocolVersion?: number;
 	  }
 	| {
 			available: false;
@@ -172,6 +218,13 @@ export type PiClientEvent =
 			durationMs?: number;
 	  }
 	| { type: "extension_request"; sessionId: string; ui: PiExtensionUiRequest }
+	| {
+			type: "extension_resolved";
+			sessionId: string;
+			requestId: string;
+			reason: "answered" | "cancelled" | "timeout";
+			hasPending: boolean;
+	  }
 	| { type: "message_update"; sessionId: string; text?: string; role?: string }
 	| {
 			type: "run_created";
@@ -207,7 +260,7 @@ export interface PiRunSummary {
 	jobId: string;
 	runId: string;
 	sessionId: string;
-	status: "running" | "waiting_input" | "done" | "error";
+	status: "running" | "waiting_input" | "idle" | "done" | "error";
 	projectKey?: PiProjectKey;
 }
 
@@ -358,6 +411,7 @@ export interface PiAgentState {
 	};
 	model?: PiModelInfo;
 	waitingForExtensionInput?: boolean;
+	pendingExtension?: PiExtensionUiRequest;
 }
 
 // ── 运行时校验（trust boundary parsers） ──
@@ -419,6 +473,7 @@ const EVENT_TYPES: ReadonlySet<string> = new Set<PiClientEvent["type"]>([
 	"agent_settled",
 	"thinking_progress",
 	"extension_request",
+	"extension_resolved",
 	"message_update",
 	"run_created",
 	"usage_update",
@@ -428,9 +483,40 @@ const EVENT_TYPES: ReadonlySet<string> = new Set<PiClientEvent["type"]>([
 const RUN_STATUSES: ReadonlySet<string> = new Set([
 	"running",
 	"waiting_input",
+	"idle",
 	"done",
 	"error",
 ]);
+const ERROR_CODES: ReadonlySet<string> = new Set(PI_ERROR_CODES);
+const EXTENSION_UI_KINDS = new Set([
+	"select",
+	"confirm",
+	"input",
+	"editor",
+	"notify",
+	"setStatus",
+	"setWidget",
+	"setTitle",
+	"set_editor_text",
+]);
+const INTERACTIVE_EXTENSION_UI_KINDS = new Set([
+	"select",
+	"confirm",
+	"input",
+	"editor",
+]);
+const AGENT_STATUSES = new Set([
+	"idle",
+	"running",
+	"compacting",
+	"waiting_for_extension_input",
+]);
+const MAX_TEXT_CHARS = 16_384;
+const MAX_ERROR_MESSAGE_CHARS = 4_096;
+const MAX_OPTION_CHARS = 4_096;
+const MAX_EXTENSION_OPTIONS = 100;
+const MAX_QUEUE_ITEMS = 1_000;
+const MAX_STATE_RUNS = 1_000;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -454,15 +540,85 @@ function assertKeys(
 	}
 }
 
-function assertString(v: unknown, what: string): asserts v is string {
+function assertString(
+	v: unknown,
+	what: string,
+	maxLength?: number,
+): asserts v is string {
 	if (typeof v !== "string" || v.length === 0)
 		throw new PiProtocolError(`${what} 必须是非空字符串`);
+	if (maxLength !== undefined && v.length > maxLength)
+		throw new PiProtocolError(`${what} 长度超过上限 ${maxLength}`);
 }
 
-function assertIdPair(jobId: unknown, runId: unknown): void {
-	if (jobId !== undefined && runId !== undefined && jobId !== runId) {
-		throw new PiProtocolError("runId 必须等于 jobId");
+function assertOptionalString(v: unknown, what: string, maxLength: number): void {
+	if (v !== undefined) assertString(v, what, maxLength);
+}
+
+function assertSessionJobPair(sessionId: unknown, jobId: unknown): void {
+	if (sessionId !== undefined && jobId !== undefined && sessionId !== jobId) {
+		throw new PiProtocolError("jobId 必须等于 sessionId");
 	}
+}
+
+function assertErrorCode(v: unknown, what: string): asserts v is PiErrorCode {
+	assertString(v, what);
+	if (!ERROR_CODES.has(v)) throw new PiProtocolError(`${what} 不在 allowlist`);
+}
+
+/** 返回可安全出站的 Pi 错误消息，避免泄露任意对象内容。 */
+export function safePiErrorMessage(value: unknown): string {
+	return typeof value === "string" && value.length > 0
+		? value.slice(0, MAX_ERROR_MESSAGE_CHARS)
+		: "Pi request failed";
+}
+
+function parseExtensionUi(
+	value: unknown,
+	what: string,
+	interactiveOnly = false,
+): PiExtensionUiRequest {
+	assertRecord(value, what);
+	assertKeys(
+		value,
+		new Set([
+			"requestId",
+			"extensionId",
+			"kind",
+			"title",
+			"message",
+			"options",
+			"timeoutMs",
+		]),
+		what,
+	);
+	assertString(value.requestId, `${what}.requestId`, MAX_TEXT_CHARS);
+	assertString(value.extensionId, `${what}.extensionId`, MAX_TEXT_CHARS);
+	assertString(value.kind, `${what}.kind`);
+	const kinds = interactiveOnly
+		? INTERACTIVE_EXTENSION_UI_KINDS
+		: EXTENSION_UI_KINDS;
+	if (!kinds.has(value.kind))
+		throw new PiProtocolError(`${what}.kind 不受支持`);
+	assertOptionalString(value.title, `${what}.title`, MAX_TEXT_CHARS);
+	assertOptionalString(value.message, `${what}.message`, MAX_TEXT_CHARS);
+	if (value.options !== undefined) {
+		if (!Array.isArray(value.options))
+			throw new PiProtocolError(`${what}.options 必须是数组`);
+		if (value.options.length > MAX_EXTENSION_OPTIONS)
+			throw new PiProtocolError(`${what}.options 数量超过上限`);
+		for (const option of value.options)
+			assertString(option, `${what}.options 项`, MAX_OPTION_CHARS);
+	}
+	if (
+		value.timeoutMs !== undefined &&
+		(typeof value.timeoutMs !== "number" ||
+			!Number.isFinite(value.timeoutMs) ||
+			value.timeoutMs < 0)
+	) {
+		throw new PiProtocolError(`${what}.timeoutMs 必须是非负数字`);
+	}
+	return value as unknown as PiExtensionUiRequest;
 }
 
 function parseCwdRef(v: unknown): PiCwdRef {
@@ -516,10 +672,12 @@ export function parsePiRequest(input: unknown): PiRequest {
 	assertString(input.action, "action");
 	if (!ACTIONS.has(input.action))
 		throw new PiProtocolError(`未知 action ${String(input.action)}`);
-	assertIdPair(input.jobId, input.runId);
+	assertSessionJobPair(input.sessionId, input.jobId);
 
 	if (input.cwdRef !== undefined) input.cwdRef = parseCwdRef(input.cwdRef);
 	if (input.sessionId !== undefined) assertString(input.sessionId, "sessionId");
+	if (input.jobId !== undefined) assertString(input.jobId, "jobId");
+	if (input.runId !== undefined) assertString(input.runId, "runId");
 
 	// prompt 必须携带完整关联 ID
 	if (input.action === "agent.prompt") {
@@ -557,8 +715,9 @@ export function parsePiResponse(input: unknown): PiResponse {
 		return { requestId: input.requestId, ok: true, data: input.data };
 	}
 	assertRecord(input.error, "error");
-	assertString(input.error.code, "error.code");
-	assertString(input.error.message, "error.message");
+	assertKeys(input.error, new Set(["code", "message"]), "error");
+	assertErrorCode(input.error.code, "error.code");
+	assertString(input.error.message, "error.message", MAX_ERROR_MESSAGE_CHARS);
 	return {
 		requestId: input.requestId,
 		ok: false,
@@ -570,6 +729,67 @@ export function parsePiResponse(input: unknown): PiResponse {
 }
 
 const MAX_THINKING_TEXT_CHARS = 16_384;
+
+/** 严格校验 Agent 状态快照。 */
+export function parsePiAgentState(input: unknown): PiAgentState {
+	assertRecord(input, "PiAgentState");
+	assertKeys(
+		input,
+		new Set([
+			"status",
+			"streaming",
+			"prompting",
+			"compacting",
+			"thinkingLevel",
+			"queuedMessages",
+			"model",
+			"waitingForExtensionInput",
+			"pendingExtension",
+		]),
+		"PiAgentState",
+	);
+	assertString(input.status, "status");
+	if (!AGENT_STATUSES.has(input.status))
+		throw new PiProtocolError("status 不受支持");
+	for (const key of ["streaming", "prompting", "compacting"] as const) {
+		if (typeof input[key] !== "boolean")
+			throw new PiProtocolError(`${key} 必须是布尔`);
+	}
+	if (!isPiThinkingLevel(input.thinkingLevel))
+		throw new PiProtocolError("thinkingLevel 不受支持");
+	assertRecord(input.queuedMessages, "queuedMessages");
+	assertKeys(
+		input.queuedMessages,
+		new Set(["steering", "followUp"]),
+		"queuedMessages",
+	);
+	for (const key of ["steering", "followUp"] as const) {
+		const queue = input.queuedMessages[key];
+		if (!Array.isArray(queue))
+			throw new PiProtocolError(`queuedMessages.${key} 必须是数组`);
+		if (queue.length > MAX_QUEUE_ITEMS)
+			throw new PiProtocolError(`queuedMessages.${key} 数量超过上限`);
+	}
+	if (input.model !== undefined) {
+		assertRecord(input.model, "model");
+		assertKeys(input.model, new Set(["provider", "modelId"]), "model");
+		assertString(input.model.provider, "model.provider", MAX_TEXT_CHARS);
+		assertString(input.model.modelId, "model.modelId", MAX_TEXT_CHARS);
+	}
+	if (
+		input.waitingForExtensionInput !== undefined &&
+		typeof input.waitingForExtensionInput !== "boolean"
+	) {
+		throw new PiProtocolError("waitingForExtensionInput 必须是布尔");
+	}
+	if (input.pendingExtension !== undefined)
+		input.pendingExtension = parseExtensionUi(
+			input.pendingExtension,
+			"pendingExtension",
+			true,
+		);
+	return input as unknown as PiAgentState;
+}
 
 const EVENT_KEYS = new Set([
 	"clientId",
@@ -587,18 +807,91 @@ export function parsePiEvent(input: unknown): PiEvent {
 	assertString(input.sessionId, "sessionId");
 	assertString(input.jobId, "jobId");
 	assertString(input.runId, "runId");
-	assertIdPair(input.jobId, input.runId);
+	assertSessionJobPair(input.sessionId, input.jobId);
 	assertRecord(input.event, "event");
 	assertString(input.event.type, "event.type");
-	if (!EVENT_TYPES.has(input.event.type)) {
+	if (!EVENT_TYPES.has(input.event.type))
 		throw new PiProtocolError(`未知 event 类型 ${String(input.event.type)}`);
-	}
-	if (
-		input.event.type === "thinking_progress" &&
-		typeof input.event.text === "string" &&
-		input.event.text.length > MAX_THINKING_TEXT_CHARS
-	) {
-		input.event.text = input.event.text.slice(0, MAX_THINKING_TEXT_CHARS);
+	assertString(input.event.sessionId, "event.sessionId");
+	if (input.event.sessionId !== input.sessionId)
+		throw new PiProtocolError("event.sessionId 必须等于外层 sessionId");
+
+	const common = ["type", "sessionId"];
+	switch (input.event.type) {
+		case "connected":
+		case "history_changed":
+		case "agent_start":
+		case "agent_end":
+		case "prompt_done":
+		case "agent_settled":
+			assertKeys(input.event, new Set(common), "event");
+			break;
+		case "prompt_error":
+			assertKeys(input.event, new Set([...common, "code", "message"]), "event");
+			assertErrorCode(input.event.code, "event.code");
+			assertString(input.event.message, "event.message", MAX_ERROR_MESSAGE_CHARS);
+			break;
+		case "thinking_progress":
+			assertKeys(
+				input.event,
+				new Set([...common, "stage", "text", "durationMs"]),
+				"event",
+			);
+			assertString(input.event.stage, "event.stage", MAX_TEXT_CHARS);
+			if (input.event.text !== undefined) {
+				assertString(input.event.text, "event.text");
+				input.event.text = input.event.text.slice(0, MAX_THINKING_TEXT_CHARS);
+			}
+			if (
+				input.event.durationMs !== undefined &&
+				(typeof input.event.durationMs !== "number" ||
+					!Number.isFinite(input.event.durationMs) ||
+					input.event.durationMs < 0)
+			)
+				throw new PiProtocolError("event.durationMs 必须是非负数字");
+			break;
+		case "extension_request":
+			assertKeys(input.event, new Set([...common, "ui"]), "event");
+			input.event.ui = parseExtensionUi(input.event.ui, "event.ui");
+			break;
+		case "extension_resolved":
+			assertKeys(
+				input.event,
+				new Set([...common, "requestId", "reason", "hasPending"]),
+				"event",
+			);
+			assertString(input.event.requestId, "event.requestId", MAX_TEXT_CHARS);
+			if (
+				input.event.reason !== "answered" &&
+				input.event.reason !== "cancelled" &&
+				input.event.reason !== "timeout"
+			)
+				throw new PiProtocolError("event.reason 不受支持");
+			if (typeof input.event.hasPending !== "boolean")
+				throw new PiProtocolError("event.hasPending 必须是布尔");
+			break;
+		case "message_update":
+			assertKeys(input.event, new Set([...common, "text", "role"]), "event");
+			assertOptionalString(input.event.text, "event.text", MAX_TEXT_CHARS);
+			assertOptionalString(input.event.role, "event.role", MAX_TEXT_CHARS);
+			break;
+		case "run_created":
+			assertKeys(
+				input.event,
+				new Set([...common, "submissionId", "runId"]),
+				"event",
+			);
+			assertString(input.event.submissionId, "event.submissionId", MAX_TEXT_CHARS);
+			assertString(input.event.runId, "event.runId", MAX_TEXT_CHARS);
+			break;
+		case "usage_update":
+			assertKeys(input.event, new Set([...common, "usage"]), "event");
+			assertRecord(input.event.usage, "event.usage");
+			break;
+		case "status_update":
+			assertKeys(input.event, new Set([...common, "status"]), "event");
+			assertString(input.event.status, "event.status", MAX_TEXT_CHARS);
+			break;
 	}
 	return input as unknown as PiEvent;
 }
@@ -611,16 +904,26 @@ export function parsePiStateReport(input: unknown): PiStateReport {
 	assertKeys(input, STATE_KEYS, "PiStateReport");
 	assertString(input.clientId, "clientId");
 	if (!Array.isArray(input.runs)) throw new PiProtocolError("runs 必须是数组");
+	if (input.runs.length > MAX_STATE_RUNS)
+		throw new PiProtocolError("runs 数量超过上限 1000");
 	const runs: PiRunSummary[] = [];
 	for (const item of input.runs) {
 		assertRecord(item, "run");
+		assertKeys(
+			item,
+			new Set(["jobId", "runId", "sessionId", "status", "projectKey"]),
+			"run",
+		);
 		assertString(item.jobId, "run.jobId");
 		assertString(item.runId, "run.runId");
 		assertString(item.sessionId, "run.sessionId");
-		assertIdPair(item.jobId, item.runId);
+		assertSessionJobPair(item.sessionId, item.jobId);
 		assertString(item.status, "run.status");
 		if (!RUN_STATUSES.has(item.status)) {
 			throw new PiProtocolError(`未知 run 状态 ${String(item.status)}`);
+		}
+		if (item.status === "running" || item.status === "waiting_input") {
+			assertString(item.projectKey, "run.projectKey");
 		}
 		if (item.projectKey !== undefined) {
 			assertString(item.projectKey, "run.projectKey");

@@ -31,6 +31,7 @@ describe("probePiCapability", () => {
 			sdkVersion: "0.84.0",
 			nodeVersion: "22.19.0",
 			shellKind: "git-bash",
+			sessionJobProtocolVersion: 1,
 		});
 	});
 
@@ -93,6 +94,7 @@ describe("probePiCapability", () => {
 			available: false,
 			code: "PI_BASH_NOT_FOUND",
 		});
+		expect(result).not.toHaveProperty("sessionJobProtocolVersion");
 	});
 
 	it("Worker 失败返回 PI_RUNTIME_UNAVAILABLE", async () => {

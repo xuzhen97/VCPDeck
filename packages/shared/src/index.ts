@@ -21,6 +21,11 @@ export type {
 	PiRequest,
 	PiResponse,
 	PiRunSummary,
+	PiSessionCreated,
+	PiSessionJobSnapshot,
+	PiSessionJobStatus,
+	PiSessionOpenResult,
+	PiStateAck,
 	PiSessionContextPage,
 	PiSessionDetail,
 	PiSessionInfo,
@@ -32,7 +37,14 @@ export type {
 	PiToolCallContent,
 	PiModelInfo,
 } from "./pi.js";
-export { PI_THINKING_LEVELS, isPiThinkingLevel } from "./pi.js";
+export {
+	PI_ERROR_CODES,
+	PI_SESSION_JOB_PROTOCOL_VERSION,
+	PI_THINKING_LEVELS,
+	isPiThinkingLevel,
+	parsePiAgentState,
+	safePiErrorMessage,
+} from "./pi.js";
 
 // ── Event names ──
 export const Events = {
@@ -67,6 +79,7 @@ export enum JobType {
 	FILE_EXPORT = "file.export",
 	FILE_IMPORT = "file.import",
 	AGENT_RUN = "agent.run",
+	AGENT_SESSION = "agent.session",
 	FRP_CREATE = "frp.create",
 	FRP_DELETE = "frp.delete",
 	FRP_LIST = "frp.list",
@@ -75,6 +88,7 @@ export enum JobType {
 
 // ── Job status ──
 export enum JobStatus {
+	IDLE = "idle",
 	PENDING = "pending",
 	RUNNING = "running",
 	WAITING_INPUT = "waiting_input",

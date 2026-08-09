@@ -2,7 +2,10 @@ import { access, readFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { delimiter, join } from "node:path";
 import { fork } from "node:child_process";
-import type { PiCapabilityStatus } from "@vcpdeck/shared";
+import {
+	PI_SESSION_JOB_PROTOCOL_VERSION,
+	type PiCapabilityStatus,
+} from "@vcpdeck/shared";
 import { isSupportedNodeVersion } from "./node-version.js";
 
 /** probe-worker 的结果（不含路径/凭据） */
@@ -210,5 +213,6 @@ export async function probePiCapability(
 		sdkVersion: worker.sdkVersion,
 		nodeVersion: env.nodeVersion,
 		shellKind,
+		sessionJobProtocolVersion: PI_SESSION_JOB_PROTOCOL_VERSION,
 	};
 }
