@@ -61,8 +61,29 @@ function piError(code: string, message: string): Error {
 function parsePayload(raw: string): RunPayload {
 	try {
 		const value: unknown = JSON.parse(raw);
+		if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+		const payload = value as Record<string, unknown>;
+		const keys = Object.keys(payload);
+		if (keys.length === 1 && keys[0] === "runId"
+			&& typeof payload.runId === "string" && payload.runId.length > 0) {
+			return { runId: payload.runId };
+		}
+		if (keys.length === 2 && keys.includes("deleteToken") && keys.includes("previousStatus")
+			&& typeof payload.deleteToken === "string" && payload.deleteToken.length > 0
+			&& (payload.previousStatus === "idle" || payload.previousStatus === "done" || payload.previousStatus === "error")) {
+			return { deleteToken: payload.deleteToken, previousStatus: payload.previousStatus };
+		}
+		return {};
+	} catch {
+		return {};
+	}
+}
+
+function parseLegacyPayload(raw: string): { sessionId?: string } {
+	try {
+		const value: unknown = JSON.parse(raw);
 		return value && typeof value === "object" && !Array.isArray(value)
-			? value as RunPayload
+			? value as { sessionId?: string }
 			: {};
 	} catch {
 		return {};
@@ -400,13 +421,25 @@ export class PiRunService {
 	async scheduleSettlement(jobId: string, runId: string, onSettle: () => Promise<void>): Promise<void>;
 	async scheduleSettlement(jobId: string, onSettle: () => Promise<void>): Promise<void>;
 	async scheduleSettlement(jobId: string, runIdOrSettle: string | (() => Promise<void>), onSettle?: () => Promise<void>): Promise<void> {
-		const runId = typeof runIdOrSettle === "string" ? runIdOrSettle : jobId;
-		const settle = typeof runIdOrSettle === "function" ? runIdOrSettle : onSettle!;
+		const legacy = typeof runIdOrSettle === "function";
+		const runId = legacy ? jobId : runIdOrSettle;
+		const settle = legacy ? runIdOrSettle : onSettle!;
 		this.cancelSettlement(jobId, runId);
 		const key = this.settlementKey(jobId, runId);
 		const timer = setTimeout(() => {
 			this.settlementTimers.delete(key);
-			void Promise.resolve(settle()).catch(() => {});
+			if (legacy) {
+				void settle().catch(() => {});
+				return;
+			}
+			void this.findSession(jobId)
+				.then((job) => {
+					if (job.payload === runPayload(runId)
+						&& ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])) {
+						return settle();
+					}
+				})
+				.catch(() => {});
 		}, SETTLEMENT_GRACE_MS);
 		this.settlementTimers.set(key, timer);
 	}
@@ -483,6 +516,7 @@ export class PiRunService {
 		}
 		for (const run of activeReports) {
 			if (run.projectKey && duplicateKeys.has(run.projectKey)) {
+				await this.failSession(run.jobId, run.runId, "PI_PROTOCOL_INVALID");
 				closedRunIds.push(run.runId);
 				continue;
 			}
@@ -497,8 +531,13 @@ export class PiRunService {
 				if (run.projectKey) this.setLock(clientId, run.projectKey, run.jobId, run.runId);
 			}
 		}
-		for (const run of report.runs.filter((candidate) => candidate.status === "idle")) {
+		for (const run of report.runs.filter((candidate) => candidate.status === "idle" || candidate.status === "done")) {
 			if (await this.finishRun(run.jobId, run.runId)) acceptedRunIds.push(run.runId);
+		}
+		for (const run of report.runs.filter((candidate) => candidate.status === "error")) {
+			if (await this.failSession(run.jobId, run.runId, "PI_WORKER_EXITED")) {
+				acceptedRunIds.push(run.runId);
+			}
 		}
 		const reported = new Set(report.runs.map((run) => `${run.jobId}:${run.runId}`));
 		for (const job of await this.listActiveSessionJobs(clientId)) {
@@ -551,7 +590,7 @@ export class PiRunService {
 		this.cancelSettlement(jobId, jobId);
 		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
 		if (!job) throw piError("PI_SESSION_NOT_FOUND", "Run not found");
-		const payload = parsePayload(job.payload) as RunPayload & { sessionId?: string };
+		const payload = parseLegacyPayload(job.payload);
 		await this.legacyTransition(jobId, [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.WAITING_INPUT, JobStatus.DISCONNECTED], {
 			status: JobStatus.DONE,
 			result: JSON.stringify({ sessionId: payload.sessionId ?? "", runId: jobId, stopReason: "settled", ...(state.model ? { model: state.model } : {}) }),
@@ -563,11 +602,7 @@ export class PiRunService {
 	async fail(jobId: string, code: string, _message: string): Promise<void> {
 		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
 		if (!job) throw piError("PI_SESSION_NOT_FOUND", "Run not found");
-		if (job.type === "agent.session") {
-			const runId = parsePayload(job.payload).runId;
-			if (runId) await this.failSession(jobId, runId, code as PiErrorCode);
-			return;
-		}
+		if (job.type !== "agent.run") return;
 		await this.legacyTransition(jobId, ACTIVE_STATUSES, {
 			status: JobStatus.ERROR,
 			errorCode: code,
@@ -592,10 +627,8 @@ export class PiRunService {
 	async assertOwner(jobId: string, identityId: string): Promise<void> {
 		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
 		if (!job) throw piError("PI_SESSION_NOT_FOUND", "Run not found");
-		if (job.type === "agent.session") {
-			const runId = parsePayload(job.payload).runId;
-			if (!runId) throw piError("PI_CONTROL_FORBIDDEN", "Session has no active run");
-			return this.assertCurrentRunOwner(jobId, runId, identityId);
+		if (job.type !== "agent.run") {
+			throw piError("PI_CONTROL_FORBIDDEN", "Legacy control cannot operate a Pi session");
 		}
 		if (job.createdByIdentityId !== identityId || !ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])) {
 			throw piError("PI_CONTROL_FORBIDDEN", "Only the run owner can control this turn");
