@@ -323,12 +323,15 @@ export function createPiSupervisor(options: {
 					return result;
 				}
 
+				const run = entry.activeRun;
 				const result = await requestViaWorker(entry, key, request, timeoutMs);
 				if (
-					request.action === "agent.prompt" &&
-					!result.ok &&
-					entry.activeRun?.jobId === request.jobId &&
-					entry.activeRun?.runId === request.runId
+					((request.action === "agent.prompt" && !result.ok) ||
+						(request.action === "agent.abort" && result.ok)) &&
+					run?.jobId === request.jobId &&
+					run?.sessionId === request.sessionId &&
+					run?.runId === request.runId &&
+					entry.activeRun === run
 				) {
 					entry.activeRun = null;
 				}
@@ -393,8 +396,11 @@ export function createPiSupervisor(options: {
 					},
 					REQUEST_TIMEOUT_MS,
 				);
-				if (response.ok && entry.activeRun === run) entry.activeRun = null;
-				else allClosed = false;
+				if (response.ok) {
+					if (entry.activeRun === run) entry.activeRun = null;
+				} else {
+					allClosed = false;
+				}
 			}
 			return { allClosed };
 		},

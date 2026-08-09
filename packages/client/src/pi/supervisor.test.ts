@@ -343,6 +343,21 @@ describe("PiSupervisor", () => {
 		expect(supervisor.getStateReport().runs.find((run) => run.runId === "run-1")?.status).toBe("running");
 	});
 
+	it("普通 matching abort 成功后清理活动 run", async () => {
+		const { supervisor } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(prompt("run-1", CWD_REF_A));
+
+		await expect(supervisor.request(req({
+			action: "agent.abort",
+			jobId: "s1",
+			sessionId: "s1",
+			runId: "run-1",
+		}))).resolves.toMatchObject({ ok: true });
+
+		expect(supervisor.getStateReport().runs.some((run) => run.runId === "run-1")).toBe(false);
+		await expect(supervisor.request(prompt("run-2", CWD_REF_A))).resolves.toMatchObject({ ok: true });
+	});
+
 	it("PI_STATE ack 只在权威 abort 成功后清理 closed run", async () => {
 		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
 		await supervisor.request(prompt("run-1", CWD_REF_A));
@@ -352,6 +367,41 @@ describe("PiSupervisor", () => {
 		}));
 		expect(supervisor.getStateReport().runs.some((run) => run.runId === "run-1")).toBe(false);
 		await expect(supervisor.request(prompt("run-2", CWD_REF_A))).resolves.toMatchObject({ ok: true });
+	});
+
+	it("PI_STATE abort response 前 matching terminal 已清理时仍判定 allClosed", async () => {
+		const { supervisor, handles } = makeSupervisor();
+		const promptRequest = prompt("run-1", CWD_REF_A);
+		const accepted = supervisor.request(promptRequest);
+		await vi.waitFor(() => expect(handles[0]?.sent).toHaveLength(1));
+		handles[0]!.emitMessage({
+			type: "response", requestId: promptRequest.requestId, ok: true,
+			data: { accepted: true },
+		});
+		await accepted;
+
+		const ack = supervisor.applyStateAck({
+			acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: false,
+		});
+		await vi.waitFor(() => expect(handles[0]!.sent).toHaveLength(2));
+		const abortMessage = handles[0]!.sent[1];
+		expect(abortMessage).toMatchObject({
+			type: "request", request: { action: "agent.abort", runId: "run-1" },
+		});
+		handles[0]!.emitMessage({
+			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			event: { type: "agent_settled", sessionId: "s1" },
+		});
+		if (abortMessage?.type === "request") {
+			handles[0]!.emitMessage({
+				type: "response", requestId: abortMessage.request.requestId, ok: true,
+			});
+		}
+
+		await expect(ack).resolves.toEqual({ allClosed: true });
+		expect(supervisor.getStateReport().runs.some((run) =>
+			run.runId === "run-1" && run.status === "running",
+		)).toBe(false);
 	});
 
 	it("closed run abort 失败时保留并在下一次 PI_STATE 重报", async () => {

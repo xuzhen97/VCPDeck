@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fork, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -67,6 +67,22 @@ function waitForEvent(
 		};
 		child.on("message", onMessage);
 	});
+}
+
+interface Deferred<T> {
+	promise: Promise<T>;
+	resolve: (value: T) => void;
+	reject: (reason?: unknown) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
 }
 
 describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
@@ -408,5 +424,190 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 			new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
 		]);
 		expect(code).not.toBeNull();
+	});
+});
+
+describe("Pi Worker prompt pipeline seam", () => {
+	it("覆盖 wrapper/trust/附件/旧事件/abort retry 的竞态矩阵", async () => {
+		type EventListener = (event: {
+			type: string;
+			sessionId: string;
+			code?: string;
+			message?: string;
+		}) => void;
+		interface WrapperStub {
+			sessionId: string;
+			alive: boolean;
+			listeners: EventListener[];
+			send: ReturnType<typeof vi.fn>;
+			getState: ReturnType<typeof vi.fn>;
+			ensureProjectTrust: ReturnType<typeof vi.fn>;
+			shutdown: ReturnType<typeof vi.fn>;
+			isAlive: () => boolean;
+			onEvent: (listener: EventListener) => () => void;
+		}
+		const makeWrapper = (trust: boolean | Promise<boolean> = false): WrapperStub => {
+			const stub: WrapperStub = {
+				sessionId: "session-1",
+				alive: true,
+				listeners: [],
+				send: vi.fn().mockResolvedValue(null),
+				getState: vi.fn(() => ({ status: "running" })),
+				ensureProjectTrust: vi.fn(() => Promise.resolve(trust)),
+				shutdown: vi.fn(async () => { stub.alive = false; }),
+				isAlive: () => stub.alive,
+				onEvent: (listener) => {
+					stub.listeners.push(listener);
+					return () => {
+						const index = stub.listeners.indexOf(listener);
+						if (index !== -1) stub.listeners.splice(index, 1);
+					};
+				},
+			};
+			return stub;
+		};
+
+		const wrapperStarts: Array<Promise<WrapperStub>> = [];
+		const startPiAgentSession = vi.fn(() => {
+			const next = wrapperStarts.shift();
+			if (!next) throw new Error("unexpected wrapper start");
+			return next;
+		});
+		const downloadPromptImages = vi.fn().mockResolvedValue([]);
+		vi.doMock("@earendil-works/pi-coding-agent", () => ({
+			SessionManager: { list: vi.fn().mockResolvedValue([{ id: "session-1", path: "session.jsonl" }]) },
+		}));
+		vi.doMock("./agent-session.js", () => ({ startPiAgentSession }));
+		vi.doMock("./images.js", () => ({
+			downloadPromptImages,
+			toSdkImages: vi.fn(() => []),
+		}));
+
+		const sent: PiWorkerOutboundMessage[] = [];
+		const originalArg = process.argv[2];
+		const originalSend = process.send;
+		const beforeMessageListeners = new Set(process.listeners("message"));
+		process.argv[2] = "/tmp/pi-worker-seam";
+		Object.defineProperty(process, "send", {
+			configurable: true,
+			value: vi.fn((message: PiWorkerOutboundMessage) => sent.push(message)),
+		});
+		await import("./worker.js");
+		const workerListener = process.listeners("message").find(
+			(listener) => !beforeMessageListeners.has(listener),
+		);
+		expect(workerListener).toBeDefined();
+
+		let requestSeq = 0;
+		const request = async (
+			action: string,
+			runId: string,
+			payload?: Record<string, unknown>,
+		): Promise<PiWorkerOutboundMessage> => {
+			const requestId = `seam-${++requestSeq}`;
+			workerListener?.({
+				type: "request",
+				projectKey: "project",
+				request: {
+					requestId,
+					action,
+					jobId: "session-1",
+					sessionId: "session-1",
+					runId,
+					...(payload ? { payload } : {}),
+				},
+			}, {} as never);
+			await vi.waitFor(() => {
+				expect(sent.some((message) =>
+					message.type === "response" && message.requestId === requestId,
+				)).toBe(true);
+			});
+			return sent.find((message) =>
+				message.type === "response" && message.requestId === requestId,
+			)!;
+		};
+		const fireAndGetId = (
+			action: string,
+			runId: string,
+			payload?: Record<string, unknown>,
+		): string => {
+			const requestId = `seam-${++requestSeq}`;
+			workerListener?.({
+				type: "request",
+				projectKey: "project",
+				request: { requestId, action, jobId: "session-1", sessionId: "session-1", runId, ...(payload ? { payload } : {}) },
+			}, {} as never);
+			return requestId;
+		};
+
+		try {
+			// accepted 先于 wrapper；abort 使唯一 pipeline 失效，晚到 wrapper 只 shutdown。
+			const firstWrapper = deferred<WrapperStub>();
+			wrapperStarts.push(firstWrapper.promise);
+			await expect(request("agent.prompt", "run-wrapper", { prompt: "never" })).resolves.toMatchObject({ ok: true, data: { accepted: true } });
+			await expect(request("agent.prompt", "run-busy", { prompt: "never" })).resolves.toMatchObject({ ok: false, error: { code: "PI_PROJECT_BUSY" } });
+			const abortPendingId = fireAndGetId("agent.abort", "run-wrapper");
+			const wrapper = makeWrapper();
+			firstWrapper.resolve(wrapper);
+			await vi.waitFor(() => expect(sent).toContainEqual(expect.objectContaining({ type: "response", requestId: abortPendingId, ok: true })));
+			expect(wrapper.shutdown).toHaveBeenCalledOnce();
+			expect(wrapper.send).not.toHaveBeenCalledWith("agent.prompt", expect.anything());
+			await expect(request("agent.state", "run-wrapper")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+
+			// trust=true 后重建 pending 时 abort：新 wrapper 晚到后 shutdown，不 prompt。
+			const trust = deferred<boolean>();
+			const restricted = makeWrapper(trust.promise);
+			const rebuilt = deferred<WrapperStub>();
+			wrapperStarts.push(Promise.resolve(restricted), rebuilt.promise);
+			await request("agent.prompt", "run-rebuild", { prompt: "never" });
+			await vi.waitFor(() => expect(restricted.ensureProjectTrust).toHaveBeenCalledOnce());
+			trust.resolve(true);
+			await vi.waitFor(() => expect(startPiAgentSession).toHaveBeenCalledTimes(3));
+			const abortRebuildId = fireAndGetId("agent.abort", "run-rebuild");
+			const rebuiltWrapper = makeWrapper();
+			rebuilt.resolve(rebuiltWrapper);
+			await vi.waitFor(() => expect(sent).toContainEqual(expect.objectContaining({ type: "response", requestId: abortRebuildId, ok: true })));
+			expect(rebuiltWrapper.shutdown).toHaveBeenCalledOnce();
+			expect(rebuiltWrapper.send).not.toHaveBeenCalledWith("agent.prompt", expect.anything());
+
+			// 附件失败清 matching envelope；后续 run 可进入。
+			const attachmentWrapper = makeWrapper();
+			wrapperStarts.push(Promise.resolve(attachmentWrapper));
+			downloadPromptImages.mockRejectedValueOnce(Object.assign(new Error("secret"), { code: "PI_IMAGE_INVALID" }));
+			await request("agent.prompt", "run-attachment", {
+				prompt: "never",
+				attachments: [{ url: "https://invalid", mimeType: "image/png", size: 1, sha256: "0".repeat(64) }],
+			});
+			await vi.waitFor(() => expect(sent).toContainEqual(expect.objectContaining({
+				type: "event", runId: "run-attachment", event: expect.objectContaining({ type: "prompt_error", code: "PI_IMAGE_INVALID" }),
+			})));
+			await expect(request("agent.state", "run-attachment")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+
+			// 旧 wrapper listener 不能清理/重标当前新 run。
+			await request("agent.prompt", "run-old", { prompt: "ok" });
+			await vi.waitFor(() => expect(attachmentWrapper.send).toHaveBeenCalledWith("agent.prompt", expect.anything()));
+			const oldListener = attachmentWrapper.listeners[0]!;
+			oldListener({ type: "agent_settled", sessionId: "session-1" });
+			await request("agent.prompt", "run-current", { prompt: "ok" });
+			oldListener({ type: "agent_settled", sessionId: "session-1" });
+			await expect(request("agent.state", "run-current")).resolves.toMatchObject({ ok: true, data: { status: "running" } });
+
+			// abort 失败保留 run；第二次仍到达同 wrapper 并最终清理。
+			attachmentWrapper.send.mockImplementationOnce(async (action: string) => {
+				if (action === "agent.abort") throw Object.assign(new Error("failed"), { code: "PI_REQUEST_TIMEOUT" });
+				return null;
+			});
+			await expect(request("agent.abort", "run-current")).resolves.toMatchObject({ ok: false, error: { code: "PI_REQUEST_TIMEOUT" } });
+			await expect(request("agent.abort", "run-current")).resolves.toMatchObject({ ok: true });
+			expect(attachmentWrapper.send.mock.calls.filter(([action]) => action === "agent.abort")).toHaveLength(2);
+			await expect(request("agent.state", "run-current")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+		} finally {
+			if (workerListener) process.removeListener("message", workerListener);
+			process.argv[2] = originalArg;
+			Object.defineProperty(process, "send", { configurable: true, value: originalSend });
+			vi.doUnmock("@earendil-works/pi-coding-agent");
+			vi.doUnmock("./agent-session.js");
+			vi.doUnmock("./images.js");
+		}
 	});
 });
