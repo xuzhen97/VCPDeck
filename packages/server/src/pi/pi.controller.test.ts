@@ -98,7 +98,7 @@ describe("PiController", () => {
 		);
 	});
 
-	it("prompt 先 createRun 再发布 run_created 再 dispatch，返回 accepted", async () => {
+	it("prompt 在单一 generation lease 内 resolve、建 Job 并 dispatch", async () => {
 		const { controller, requests, events, runs } = makeController();
 		requests.request.mockImplementation(
 			async (_lease: { clientId: string; socketId: string }, req: { action: string }) => {
@@ -120,6 +120,7 @@ describe("PiController", () => {
 			actor,
 		);
 
+		expect(runs.withReconciledClient).toHaveBeenCalledTimes(1);
 		expect(runs.createRun).toHaveBeenCalledWith(
 			actor,
 			expect.objectContaining({
@@ -139,6 +140,67 @@ describe("PiController", () => {
 			}),
 		);
 		expect(result).toEqual({ jobId: "j1", runId: "j1", sessionId: "s1" });
+	});
+
+	it("pending generation 映射为稳定 PI_STATE_PENDING HTTP 错误且不创建 Job", async () => {
+		const pending = Object.assign(
+			new Error("Pi client state reconciliation is pending"),
+			{ code: "PI_STATE_PENDING" },
+		);
+		const { controller, requests, runs } = makeController({
+			runs: {
+				withReconciledClient: vi.fn(async () => { throw pending; }),
+			},
+		});
+
+		await expect(controller.prompt(
+			"c1",
+			"s1",
+			{
+				rootDir: "D:\\",
+				relativePath: "repo",
+				type: "prompt",
+				submissionId: "sub-1",
+				prompt: "hello",
+			},
+			actor,
+		)).rejects.toMatchObject({
+			response: {
+				code: "PI_STATE_PENDING",
+				message: "Pi client state reconciliation is pending",
+			},
+		});
+		expect(requests.request).not.toHaveBeenCalled();
+		expect(runs.createRun).not.toHaveBeenCalled();
+	});
+
+	it("project mutation 在同一 lease 内 resolve、锁检查并请求", async () => {
+		const { controller, requests, runs } = makeController();
+		requests.request.mockImplementation(
+			async (_lease: { clientId: string; socketId: string }, req: { action: string }) =>
+				req.action === "project.resolve"
+					? { ok: true, data: { projectKey: "k".repeat(64) } }
+					: { ok: true, data: {} },
+		);
+
+		await controller.setThinking("c1", "s1", {
+			rootDir: "D:\\",
+			relativePath: "repo",
+			level: "high",
+		});
+
+		expect(runs.withReconciledClient).toHaveBeenCalledTimes(1);
+		expect(runs.assertIdleMutation).toHaveBeenCalledWith("c1", "k".repeat(64));
+		expect(requests.request).toHaveBeenNthCalledWith(
+			1,
+			{ clientId: "c1", socketId: "socket-1" },
+			expect.objectContaining({ action: "project.resolve" }),
+		);
+		expect(requests.request).toHaveBeenNthCalledWith(
+			2,
+			{ clientId: "c1", socketId: "socket-1" },
+			expect.objectContaining({ action: "thinking.set" }),
+		);
 	});
 
 	it("prompt 请求失败时 Job fail", async () => {

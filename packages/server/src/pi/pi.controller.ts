@@ -25,7 +25,10 @@ import {
 import { Actor } from "../auth/actor.decorator.js";
 import { ClientService } from "../client/client.service.js";
 import { PiEventBroker } from "./pi-event-broker.js";
-import { PiRequestBroker } from "./pi-request-broker.js";
+import {
+	PiRequestBroker,
+	type PiGenerationLease,
+} from "./pi-request-broker.js";
 import { PiRunService } from "./pi-run.service.js";
 import { PiAttachmentService } from "./pi-attachment.service.js";
 
@@ -63,35 +66,59 @@ export class PiController {
 		}
 	}
 
-	/** 每次写操作先解析不透明 projectKey（不持久化） */
-	private async resolveProjectKey(
+	/** 在单一 ready generation 内执行 REST 编排，并稳定映射 broker/generation 错误。 */
+	private async withReconciledClient<T>(
 		clientId: string,
+		operation: (lease: PiGenerationLease) => Promise<T>,
+	): Promise<T> {
+		try {
+			return await this.runs.withReconciledClient(clientId, operation);
+		} catch (err) {
+			if (err instanceof Error && "code" in err) {
+				throw badRequest(String((err as { code: unknown }).code), err.message);
+			}
+			throw err;
+		}
+	}
+
+	/** 使用已有 generation lease 解析不透明 projectKey（不持久化）。 */
+	private async resolveProjectKey(
+		lease: PiGenerationLease,
 		cwdRef: PiCwdRef,
 	): Promise<string> {
-		return this.runs.withReconciledClient(clientId, async (lease) => {
-			const response = await this.requests.request(lease, {
-				requestId: randomUUID(),
-				action: "project.resolve",
-				cwdRef,
-			});
-			if (!response.ok) {
-				throw badRequest(response.error.code, response.error.message);
-			}
-			return (response.data as { projectKey: string }).projectKey;
+		const response = await this.requests.request(lease, {
+			requestId: randomUUID(),
+			action: "project.resolve",
+			cwdRef,
 		});
+		if (!response.ok) {
+			throw badRequest(response.error.code, response.error.message);
+		}
+		return (response.data as { projectKey: string }).projectKey;
 	}
 
 	private async requestOnce(
-		clientId: string,
+		lease: PiGenerationLease,
 		request: PiRequest,
 	): Promise<unknown> {
-		return this.runs.withReconciledClient(clientId, async (lease) => {
+		try {
 			const response = await this.requests.request(lease, request);
 			if (!response.ok) {
 				throw badRequest(response.error.code, response.error.message);
 			}
 			return response.data;
-		});
+		} catch (err) {
+			if (err instanceof Error && "code" in err) {
+				throw badRequest(String((err as { code: unknown }).code), err.message);
+			}
+			throw err;
+		}
+	}
+
+	private requestForClient(clientId: string, request: PiRequest): Promise<unknown> {
+		return this.withReconciledClient(clientId, (lease) =>
+			this.requestOnce(lease, request),
+		);
 	}
 
 	private async assertActiveOwner(jobId: string, actor: ActorContext): Promise<void> {
@@ -154,7 +181,7 @@ export class PiController {
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
 		}
-		const data = await this.requestOnce(clientId, {
+		const data = await this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "models.list",
 			cwdRef: { rootDir, relativePath },
@@ -174,7 +201,7 @@ export class PiController {
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
 		}
-		const data = await this.requestOnce(clientId, {
+		const data = await this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "sessions.list",
 			cwdRef: { rootDir, relativePath },
@@ -190,7 +217,7 @@ export class PiController {
 		@Query("relativePath") relativePath: string,
 	) {
 		await this.requirePiClient(clientId);
-		return this.requestOnce(clientId, {
+		return this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "session.get",
 			cwdRef: { rootDir, relativePath },
@@ -208,7 +235,7 @@ export class PiController {
 		@Query("cursor") cursor?: string,
 	) {
 		await this.requirePiClient(clientId);
-		return this.requestOnce(clientId, {
+		return this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "session.context",
 			cwdRef: { rootDir, relativePath },
@@ -230,7 +257,7 @@ export class PiController {
 		@Query("blockIndex") blockIndex?: string,
 	) {
 		await this.requirePiClient(clientId);
-		return this.requestOnce(clientId, {
+		return this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "session.entryContent",
 			cwdRef: { rootDir, relativePath },
@@ -256,14 +283,16 @@ export class PiController {
 		if (typeof name !== "string" || name.trim() === "") {
 			throw badRequest("PI_PROTOCOL_INVALID", "name required");
 		}
-		const projectKey = await this.resolveProjectKey(clientId, { rootDir, relativePath });
-		await this.assertIdle(clientId, projectKey);
-		await this.requestOnce(clientId, {
-			requestId: randomUUID(),
-			action: "session.rename",
-			cwdRef: { rootDir, relativePath },
-			sessionId,
-			payload: { name },
+		await this.withReconciledClient(clientId, async (lease) => {
+			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			await this.assertIdle(clientId, projectKey);
+			await this.requestOnce(lease, {
+				requestId: randomUUID(),
+				action: "session.rename",
+				cwdRef: { rootDir, relativePath },
+				sessionId,
+				payload: { name },
+			});
 		});
 		return { ok: true };
 	}
@@ -280,13 +309,15 @@ export class PiController {
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
 		}
-		const projectKey = await this.resolveProjectKey(clientId, { rootDir, relativePath });
-		await this.assertIdle(clientId, projectKey);
-		await this.requestOnce(clientId, {
-			requestId: randomUUID(),
-			action: "session.delete",
-			cwdRef: { rootDir, relativePath },
-			sessionId,
+		await this.withReconciledClient(clientId, async (lease) => {
+			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			await this.assertIdle(clientId, projectKey);
+			await this.requestOnce(lease, {
+				requestId: randomUUID(),
+				action: "session.delete",
+				cwdRef: { rootDir, relativePath },
+				sessionId,
+			});
 		});
 		return { ok: true };
 	}
@@ -305,16 +336,17 @@ export class PiController {
 		if (typeof messageId !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "messageId required");
 		}
-		const projectKey = await this.resolveProjectKey(clientId, { rootDir, relativePath });
-		await this.assertIdle(clientId, projectKey);
-		const data = await this.requestOnce(clientId, {
-			requestId: randomUUID(),
-			action: "session.fork",
-			cwdRef: { rootDir, relativePath },
-			sessionId,
-			payload: { messageId },
+		return this.withReconciledClient(clientId, async (lease) => {
+			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			await this.assertIdle(clientId, projectKey);
+			return this.requestOnce(lease, {
+				requestId: randomUUID(),
+				action: "session.fork",
+				cwdRef: { rootDir, relativePath },
+				sessionId,
+				payload: { messageId },
+			});
 		});
-		return data;
 	}
 
 	@Post("sessions/:sessionId/clone")
@@ -328,15 +360,16 @@ export class PiController {
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
 		}
-		const projectKey = await this.resolveProjectKey(clientId, { rootDir, relativePath });
-		await this.assertIdle(clientId, projectKey);
-		const data = await this.requestOnce(clientId, {
-			requestId: randomUUID(),
-			action: "session.clone",
-			cwdRef: { rootDir, relativePath },
-			sessionId,
+		return this.withReconciledClient(clientId, async (lease) => {
+			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			await this.assertIdle(clientId, projectKey);
+			return this.requestOnce(lease, {
+				requestId: randomUUID(),
+				action: "session.clone",
+				cwdRef: { rootDir, relativePath },
+				sessionId,
+			});
 		});
-		return data;
 	}
 
 	@Post("sessions/:sessionId/navigate")
@@ -353,16 +386,17 @@ export class PiController {
 		if (typeof targetId !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "targetId required");
 		}
-		const projectKey = await this.resolveProjectKey(clientId, { rootDir, relativePath });
-		await this.assertIdle(clientId, projectKey);
-		const data = await this.requestOnce(clientId, {
-			requestId: randomUUID(),
-			action: "session.navigate",
-			cwdRef: { rootDir, relativePath },
-			sessionId,
-			payload: { targetId },
+		return this.withReconciledClient(clientId, async (lease) => {
+			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			await this.assertIdle(clientId, projectKey);
+			return this.requestOnce(lease, {
+				requestId: randomUUID(),
+				action: "session.navigate",
+				cwdRef: { rootDir, relativePath },
+				sessionId,
+				payload: { targetId },
+			});
 		});
-		return data;
 	}
 
 	// ── agent ──
@@ -377,7 +411,7 @@ export class PiController {
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
 		}
-		const data = await this.requestOnce(clientId, {
+		const data = await this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "session.new",
 			cwdRef: { rootDir, relativePath },
@@ -396,7 +430,7 @@ export class PiController {
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
 		}
-		return this.requestOnce(clientId, {
+		return this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "agent.state",
 			cwdRef: { rootDir, relativePath },
@@ -434,70 +468,71 @@ export class PiController {
 			throw badRequest("PI_PROTOCOL_INVALID", "prompt required");
 		}
 
-		const projectKey = await this.resolveProjectKey(clientId, { rootDir, relativePath });
-		let run: { jobId: string; runId: string };
-		try {
-			run = await this.runs.createRun(actor, {
-				clientId,
-				sessionId,
-				projectKey,
-				imageCount: Array.isArray(body.images) ? body.images.length : 0,
-			});
-		} catch (err) {
-			if (
-				err instanceof Error &&
-				(err as { code?: unknown }).code === "PI_PROJECT_BUSY"
-			) {
-				throw new ConflictException({
-					code: "PI_PROJECT_BUSY",
-					message: err.message,
+		return this.withReconciledClient(clientId, async (lease) => {
+			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			let run: { jobId: string; runId: string };
+			try {
+				run = await this.runs.createRun(actor, {
+					clientId,
+					sessionId,
+					projectKey,
+					imageCount: Array.isArray(body.images) ? body.images.length : 0,
 				});
+			} catch (err) {
+				if (
+					err instanceof Error &&
+					(err as { code?: unknown }).code === "PI_PROJECT_BUSY"
+				) {
+					throw new ConflictException({
+						code: "PI_PROJECT_BUSY",
+						message: err.message,
+					});
+				}
+				throw err;
 			}
-			throw err;
-		}
-		const { jobId, runId } = run;
+			const { jobId, runId } = run;
 
-		// 先发布 run_created（submissionId 绑定），再 dispatch，保证首个 Agent 事件不丢
-		await this.events.publish({
-			clientId,
-			sessionId,
-			jobId,
-			runId,
-			event: { type: "run_created", sessionId, submissionId, runId },
-		});
-
-		try {
-			const response = await this.runs.withReconciledClient(clientId, (lease) =>
-				this.requests.request(lease, {
-				requestId: randomUUID(),
-				action: "agent.prompt",
-				cwdRef: { rootDir, relativePath },
+			// 先发布 run_created（submissionId 绑定），再 dispatch，保证首个 Agent 事件不丢
+			await this.events.publish({
+				clientId,
 				sessionId,
 				jobId,
 				runId,
-			payload: {
-				prompt: body.prompt,
-				submissionId,
-				...(Array.isArray(body.images) && body.images.length > 0
-					? { attachments: body.images }
-					: {}),
-				},
-			}));
-			if (!response.ok) {
-				await this.runs.fail(jobId, response.error.code, response.error.message);
-				throw badRequest(response.error.code, response.error.message);
-			}
-			await this.runs.accept(jobId);
-		} catch (err) {
-			if (err instanceof Error && "code" in err) {
-				const code = String((err as { code: unknown }).code);
-				if (code === "PI_REQUEST_TIMEOUT" || code === "PI_CLIENT_DISCONNECTED") {
-					await this.runs.fail(jobId, code, err.message);
+				event: { type: "run_created", sessionId, submissionId, runId },
+			});
+
+			try {
+				const response = await this.requests.request(lease, {
+					requestId: randomUUID(),
+					action: "agent.prompt",
+					cwdRef: { rootDir, relativePath },
+					sessionId,
+					jobId,
+					runId,
+					payload: {
+						prompt: body.prompt,
+						submissionId,
+						...(Array.isArray(body.images) && body.images.length > 0
+							? { attachments: body.images }
+							: {}),
+					},
+				});
+				if (!response.ok) {
+					await this.runs.fail(jobId, response.error.code, response.error.message);
+					throw badRequest(response.error.code, response.error.message);
 				}
+				await this.runs.accept(jobId);
+			} catch (err) {
+				if (err instanceof Error && "code" in err) {
+					const code = String((err as { code: unknown }).code);
+					if (code === "PI_REQUEST_TIMEOUT" || code === "PI_CLIENT_DISCONNECTED") {
+						await this.runs.fail(jobId, code, err.message);
+					}
+				}
+				throw err;
 			}
-			throw err;
-		}
-		return { jobId, runId, sessionId };
+			return { jobId, runId, sessionId };
+		});
 	}
 
 	@Sse("agent/:sessionId/events")
@@ -573,7 +608,7 @@ export class PiController {
 		payload?: Record<string, unknown>,
 	): Promise<unknown> {
 		await this.assertActiveOwner(jobId, actor);
-		return this.requestOnce(clientId, {
+		return this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action,
 			sessionId,
@@ -620,7 +655,7 @@ export class PiController {
 	) {
 		if (typeof body.jobId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "jobId required");
 		await this.assertActiveOwner(body.jobId, actor);
-		await this.requestOnce(clientId, {
+		await this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "agent.abort",
 			sessionId,
@@ -667,7 +702,7 @@ export class PiController {
 		if (typeof body.jobId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "jobId required");
 		if (typeof body.requestId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "requestId required");
 		await this.assertActiveOwner(body.jobId, actor);
-		await this.requestOnce(clientId, {
+		await this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "extension.respond",
 			sessionId,
@@ -694,14 +729,16 @@ export class PiController {
 		sessionId?: string,
 		payload?: Record<string, unknown>,
 	): Promise<unknown> {
-		const projectKey = await this.resolveProjectKey(clientId, { rootDir, relativePath });
-		await this.assertIdle(clientId, projectKey);
-		return this.requestOnce(clientId, {
-			requestId: randomUUID(),
-			action,
-			cwdRef: { rootDir, relativePath },
-			...(sessionId ? { sessionId } : {}),
-			...(payload ? { payload } : {}),
+		return this.withReconciledClient(clientId, async (lease) => {
+			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			await this.assertIdle(clientId, projectKey);
+			return this.requestOnce(lease, {
+				requestId: randomUUID(),
+				action,
+				cwdRef: { rootDir, relativePath },
+				...(sessionId ? { sessionId } : {}),
+				...(payload ? { payload } : {}),
+			});
 		});
 	}
 
