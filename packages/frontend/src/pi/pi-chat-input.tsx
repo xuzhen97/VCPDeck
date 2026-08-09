@@ -28,7 +28,10 @@ export function PiChatInput({
 	onCompact: () => void;
 	onAbortCompact: () => void;
 	/** 附件草稿（仅 idle prompt 可用） */
-	attachments?: Array<{ name: string; status: "uploading" | "ready" | "error" }>;
+	attachments?: Array<{
+		name: string;
+		status: "uploading" | "ready" | "error";
+	}>;
 	onPickFiles?: (files: FileList) => void;
 	onRemoveAttachment?: (index: number) => void;
 }) {
@@ -61,19 +64,39 @@ export function PiChatInput({
 		<div className="space-y-1.5 border-t border-border pt-2">
 			{running && (
 				<div className="flex items-center gap-1.5 text-xs">
-					<Button type="button" size="sm" variant="outline" onClick={() => setMode("steer")}>
+					<Button
+						type="button"
+						size="sm"
+						variant="outline"
+						onClick={() => setMode("steer")}
+					>
 						Steer
 					</Button>
-					<Button type="button" size="sm" variant="outline" onClick={() => setMode("followUp")}>
+					<Button
+						type="button"
+						size="sm"
+						variant="outline"
+						onClick={() => setMode("followUp")}
+					>
 						Follow-up
 					</Button>
 					<Button type="button" size="sm" variant="outline" onClick={onCompact}>
 						Compact
 					</Button>
-					<Button type="button" size="sm" variant="outline" onClick={onAbortCompact}>
+					<Button
+						type="button"
+						size="sm"
+						variant="outline"
+						onClick={onAbortCompact}
+					>
 						Abort compact
 					</Button>
-					<Button type="button" size="sm" variant="destructive" onClick={onAbort}>
+					<Button
+						type="button"
+						size="sm"
+						variant="destructive"
+						onClick={onAbort}
+					>
 						中止
 					</Button>
 					<span className="ml-1 text-muted-foreground">
@@ -92,7 +115,12 @@ export function PiChatInput({
 							key={`${a.name}-${i}`}
 							className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px]"
 						>
-							{a.status === "uploading" ? "⏳" : a.status === "error" ? "❌" : "🖼️"} {a.name}
+							{a.status === "uploading"
+								? "⏳"
+								: a.status === "error"
+									? "❌"
+									: "🖼️"}{" "}
+							{a.name}
 							{onRemoveAttachment && (
 								<button
 									type="button"
@@ -133,7 +161,7 @@ export function PiChatInput({
 					disabled={disabled || running}
 					placeholder={
 						disabled
-							? "Pi 不可用"
+							? "请先选择项目和会话"
 							: running
 								? "运行中…"
 								: "输入消息，Enter 发送，Shift+Enter 换行"

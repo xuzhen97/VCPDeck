@@ -32,7 +32,9 @@ describe("parsePiRequest", () => {
 	});
 
 	it("拒绝未知 action", () => {
-		expect(() => parsePiRequest({ requestId: "r1", action: "agent.unknown" })).toThrow();
+		expect(() =>
+			parsePiRequest({ requestId: "r1", action: "agent.unknown" }),
+		).toThrow();
 	});
 
 	it("拒绝未知顶层字段", () => {
@@ -57,7 +59,11 @@ describe("parsePiRequest", () => {
 			parsePiRequest({ requestId: "r1", action: "agent.prompt" }),
 		).toThrow();
 		expect(() =>
-			parsePiRequest({ requestId: "r1", action: "agent.prompt", sessionId: "s1" }),
+			parsePiRequest({
+				requestId: "r1",
+				action: "agent.prompt",
+				sessionId: "s1",
+			}),
 		).toThrow();
 	});
 
@@ -74,12 +80,15 @@ describe("parsePiRequest", () => {
 	});
 
 	it("拒绝图片数量超限的 prompt", () => {
-		const attachments = Array.from({ length: MAX_PI_IMAGES_PER_PROMPT + 1 }, () => ({
-			fileId: "f",
-			sha256: "a".repeat(64),
-			size: 1024,
-			mimeType: "image/png",
-		}));
+		const attachments = Array.from(
+			{ length: MAX_PI_IMAGES_PER_PROMPT + 1 },
+			() => ({
+				fileId: "f",
+				sha256: "a".repeat(64),
+				size: 1024,
+				mimeType: "image/png",
+			}),
+		);
 		expect(() =>
 			parsePiRequest({
 				requestId: "r1",
@@ -114,12 +123,15 @@ describe("parsePiRequest", () => {
 	});
 
 	it("拒绝总量超限的 prompt", () => {
-		const attachments = Array.from({ length: MAX_PI_IMAGES_PER_PROMPT }, () => ({
-			fileId: "f",
-			sha256: "a".repeat(64),
-			size: 11 * 1024 * 1024,
-			mimeType: "image/png",
-		}));
+		const attachments = Array.from(
+			{ length: MAX_PI_IMAGES_PER_PROMPT },
+			() => ({
+				fileId: "f",
+				sha256: "a".repeat(64),
+				size: 11 * 1024 * 1024,
+				mimeType: "image/png",
+			}),
+		);
 		expect(() =>
 			parsePiRequest({
 				requestId: "r1",
@@ -150,7 +162,9 @@ describe("parsePiResponse", () => {
 	});
 
 	it("拒绝未知字段", () => {
-		expect(() => parsePiResponse({ requestId: "r1", ok: true, evil: 1 })).toThrow();
+		expect(() =>
+			parsePiResponse({ requestId: "r1", ok: true, evil: 1 }),
+		).toThrow();
 	});
 
 	it("拒绝错误响应缺 code/message", () => {
@@ -171,6 +185,24 @@ describe("parsePiEvent", () => {
 			event: { type: "agent_end" },
 		});
 		expect(ev.event.type).toBe("agent_end");
+	});
+
+	it("限制 thinking_progress 单次正文大小", () => {
+		const ev = parsePiEvent({
+			clientId: "c1",
+			sessionId: "s1",
+			jobId: "j1",
+			runId: "j1",
+			event: {
+				type: "thinking_progress",
+				sessionId: "s1",
+				stage: "delta",
+				text: "x".repeat(16_385),
+			},
+		});
+		expect((ev.event as { text?: string }).text?.length).toBeLessThanOrEqual(
+			16_384,
+		);
 	});
 
 	it("拒绝 jobId/runId 不一致", () => {
@@ -230,7 +262,9 @@ describe("parsePiStateReport", () => {
 		expect(() =>
 			parsePiStateReport({
 				clientId: "c1",
-				runs: [{ jobId: "j1", runId: "j1", sessionId: "s1", status: "mystery" }],
+				runs: [
+					{ jobId: "j1", runId: "j1", sessionId: "s1", status: "mystery" },
+				],
 			}),
 		).toThrow();
 	});

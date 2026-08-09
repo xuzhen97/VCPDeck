@@ -11,7 +11,11 @@ import { CLIENT_ID, getRegisterInfo } from "./register.js";
 import { getHeartbeat } from "./heartbeat.js";
 import { killJob, getRunningJobIds, getStatusReport } from "./executor.js";
 import { dispatch } from "./dispatcher.js";
-import { createPiSupervisor, type PiSupervisor, type PiWorkerHandle } from "./pi/supervisor.js";
+import {
+	createPiSupervisor,
+	type PiSupervisor,
+	type PiWorkerHandle,
+} from "./pi/supervisor.js";
 import type { PiWorkerRequestMessage } from "./pi/worker-protocol.js";
 import { probePiCapability } from "./pi/capability.js";
 import { fork } from "node:child_process";
@@ -80,7 +84,7 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 				raw !== null &&
 				"requestId" in raw &&
 				typeof (raw as { requestId: unknown }).requestId === "string"
-					? ((raw as { requestId: string }).requestId)
+					? (raw as { requestId: string }).requestId
 					: "";
 			if (socket.connected) {
 				socket.emit(Events.PI_RESPONSE, {

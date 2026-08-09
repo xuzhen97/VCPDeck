@@ -1,16 +1,17 @@
 import type { PiAgentState, PiModelInfo } from "@vcpdeck/shared";
 import type { PiThinkingSelection } from "./use-pi-session.js";
 
-const THINKING_OPTIONS: ReadonlyArray<readonly [PiThinkingSelection, string]> = [
-	["auto", "自动"],
-	["off", "关闭"],
-	["minimal", "最低"],
-	["low", "低"],
-	["medium", "中"],
-	["high", "高"],
-	["xhigh", "超高"],
-	["max", "最大"],
-];
+const THINKING_OPTIONS: ReadonlyArray<readonly [PiThinkingSelection, string]> =
+	[
+		["auto", "自动"],
+		["off", "关闭"],
+		["minimal", "最低"],
+		["low", "低"],
+		["medium", "中"],
+		["high", "高"],
+		["xhigh", "超高"],
+		["max", "最大"],
+	];
 
 function modelValue(model: PiModelInfo | undefined): string {
 	return model ? `${model.provider}\u0000${model.modelId}` : "";
@@ -84,7 +85,10 @@ export function PiRunDetails({
 				</h3>
 				{agentState?.model && (
 					<div className="text-xs text-muted-foreground">
-						当前：<span className="font-mono">{agentState.model.provider} / {agentState.model.modelId}</span>
+						当前：
+						<span className="font-mono">
+							{agentState.model.provider} / {agentState.model.modelId}
+						</span>
 					</div>
 				)}
 				<label className="block text-xs">
@@ -122,10 +126,14 @@ export function PiRunDetails({
 						className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs"
 						disabled={disabled}
 						value={thinkingSelection}
-						onChange={(event) => onThinkingChange(event.target.value as PiThinkingSelection)}
+						onChange={(event) =>
+							onThinkingChange(event.target.value as PiThinkingSelection)
+						}
 					>
 						{THINKING_OPTIONS.map(([value, label]) => (
-							<option key={value} value={value}>{label}</option>
+							<option key={value} value={value}>
+								{label}
+							</option>
 						))}
 					</select>
 				</label>
@@ -136,9 +144,7 @@ export function PiRunDetails({
 					队列
 				</h3>
 				<div className="text-xs">
-					<div>
-						Steer: {agentState?.queuedMessages.steering.length ?? 0}
-					</div>
+					<div>Steer: {agentState?.queuedMessages.steering.length ?? 0}</div>
 					<div>
 						Follow-up: {agentState?.queuedMessages.followUp.length ?? 0}
 					</div>

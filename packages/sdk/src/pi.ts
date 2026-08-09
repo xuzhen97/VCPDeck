@@ -14,8 +14,17 @@ function cwdQuery(cwdRef: PiCwdRef): string {
 }
 
 export interface PiSessionsApi {
-	list(clientId: string, cwdRef: PiCwdRef, signal?: AbortSignal): Promise<unknown>;
-	get(clientId: string, sessionId: string, cwdRef: PiCwdRef, signal?: AbortSignal): Promise<unknown>;
+	list(
+		clientId: string,
+		cwdRef: PiCwdRef,
+		signal?: AbortSignal,
+	): Promise<unknown>;
+	get(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		signal?: AbortSignal,
+	): Promise<unknown>;
 	context(
 		clientId: string,
 		sessionId: string,
@@ -31,16 +40,48 @@ export interface PiSessionsApi {
 		blockIndex: number,
 		signal?: AbortSignal,
 	): Promise<unknown>;
-	rename(clientId: string, sessionId: string, cwdRef: PiCwdRef, name: string): Promise<unknown>;
-	delete(clientId: string, sessionId: string, cwdRef: PiCwdRef): Promise<unknown>;
-	fork(clientId: string, sessionId: string, cwdRef: PiCwdRef, messageId: string): Promise<unknown>;
-	clone(clientId: string, sessionId: string, cwdRef: PiCwdRef): Promise<unknown>;
-	navigate(clientId: string, sessionId: string, cwdRef: PiCwdRef, targetId: string): Promise<unknown>;
+	rename(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		name: string,
+	): Promise<unknown>;
+	delete(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+	): Promise<unknown>;
+	fork(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		messageId: string,
+	): Promise<unknown>;
+	clone(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+	): Promise<unknown>;
+	navigate(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		targetId: string,
+	): Promise<unknown>;
 }
 
 export interface PiAgentApi {
-	newSession(clientId: string, cwdRef: PiCwdRef, signal?: AbortSignal): Promise<{ sessionId: string }>;
-	state(clientId: string, sessionId: string, cwdRef: PiCwdRef, signal?: AbortSignal): Promise<unknown>;
+	newSession(
+		clientId: string,
+		cwdRef: PiCwdRef,
+		signal?: AbortSignal,
+	): Promise<{ sessionId: string }>;
+	state(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		signal?: AbortSignal,
+	): Promise<unknown>;
 	prompt(
 		clientId: string,
 		sessionId: string,
@@ -48,12 +89,37 @@ export interface PiAgentApi {
 		input: { submissionId: string; prompt: string; images?: unknown[] },
 		signal?: AbortSignal,
 	): Promise<PiPromptAccepted>;
-	steer(clientId: string, sessionId: string, jobId: string, message: string): Promise<unknown>;
-	followUp(clientId: string, sessionId: string, jobId: string, message: string): Promise<unknown>;
+	steer(
+		clientId: string,
+		sessionId: string,
+		jobId: string,
+		message: string,
+	): Promise<unknown>;
+	followUp(
+		clientId: string,
+		sessionId: string,
+		jobId: string,
+		message: string,
+	): Promise<unknown>;
 	abort(clientId: string, sessionId: string, jobId: string): Promise<unknown>;
-	compact(clientId: string, sessionId: string, jobId: string, customInstructions?: string): Promise<unknown>;
-	abortCompact(clientId: string, sessionId: string, jobId: string): Promise<unknown>;
-	setModel(clientId: string, sessionId: string, cwdRef: PiCwdRef, provider: string, modelId: string): Promise<unknown>;
+	compact(
+		clientId: string,
+		sessionId: string,
+		jobId: string,
+		customInstructions?: string,
+	): Promise<unknown>;
+	abortCompact(
+		clientId: string,
+		sessionId: string,
+		jobId: string,
+	): Promise<unknown>;
+	setModel(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		provider: string,
+		modelId: string,
+	): Promise<unknown>;
 	setThinking(
 		clientId: string,
 		sessionId: string,
@@ -64,7 +130,12 @@ export interface PiAgentApi {
 		clientId: string,
 		sessionId: string,
 		jobId: string,
-		response: { requestId: string; value?: string; confirmed?: boolean; cancelled?: boolean },
+		response: {
+			requestId: string;
+			value?: string;
+			confirmed?: boolean;
+			cancelled?: boolean;
+		},
 	): Promise<unknown>;
 	/** SSE path（session 级；cookie 认证浏览器用 EventSource 连接） */
 	eventsPath(clientId: string, sessionId: string): string;
@@ -86,7 +157,11 @@ export interface PiAttachmentsApi {
 
 export interface PiApi {
 	capability(clientId: string, signal?: AbortSignal): Promise<unknown>;
-	models(clientId: string, cwdRef: PiCwdRef, signal?: AbortSignal): Promise<PiModelInfo[]>;
+	models(
+		clientId: string,
+		cwdRef: PiCwdRef,
+		signal?: AbortSignal,
+	): Promise<PiModelInfo[]>;
 	sessions: PiSessionsApi;
 	agent: PiAgentApi;
 	attachments: PiAttachmentsApi;
@@ -101,7 +176,12 @@ function enc(s: string): string {
 export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 	return {
 		capability: (clientId, signal) =>
-			client.request("GET", `/api/clients/${enc(clientId)}/pi/capability`, undefined, signal),
+			client.request(
+				"GET",
+				`/api/clients/${enc(clientId)}/pi/capability`,
+				undefined,
+				signal,
+			),
 
 		models: (clientId, cwdRef, signal) =>
 			client.request(
@@ -137,7 +217,14 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 					signal,
 				);
 			},
-			entryContent: (clientId, sessionId, entryId, cwdRef, blockIndex, signal) => {
+			entryContent: (
+				clientId,
+				sessionId,
+				entryId,
+				cwdRef,
+				blockIndex,
+				signal,
+			) => {
 				const params = new URLSearchParams(cwdQuery(cwdRef));
 				params.set("blockIndex", String(blockIndex));
 				return client.request(
@@ -148,33 +235,58 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 				);
 			},
 			rename: (clientId, sessionId, cwdRef, name) =>
-				client.request("PATCH", `/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}`, {
-					...cwdRef,
-					name,
-				}),
+				client.request(
+					"PATCH",
+					`/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}`,
+					{
+						...cwdRef,
+						name,
+					},
+				),
 			delete: (clientId, sessionId, cwdRef) =>
-				client.request("DELETE", `/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}`, {
-					...cwdRef,
-				}),
+				client.request(
+					"DELETE",
+					`/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}`,
+					{
+						...cwdRef,
+					},
+				),
 			fork: (clientId, sessionId, cwdRef, messageId) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}/fork`, {
-					...cwdRef,
-					messageId,
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}/fork`,
+					{
+						...cwdRef,
+						messageId,
+					},
+				),
 			clone: (clientId, sessionId, cwdRef) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}/clone`, {
-					...cwdRef,
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}/clone`,
+					{
+						...cwdRef,
+					},
+				),
 			navigate: (clientId, sessionId, cwdRef, targetId) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}/navigate`, {
-					...cwdRef,
-					targetId,
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}/navigate`,
+					{
+						...cwdRef,
+						targetId,
+					},
+				),
 		},
 
 		agent: {
 			newSession: (clientId, cwdRef, signal) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/new`, { ...cwdRef }, signal),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/new`,
+					{ ...cwdRef },
+					signal,
+				),
 			state: (clientId, sessionId, cwdRef, signal) =>
 				client.request(
 					"GET",
@@ -196,39 +308,67 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 					signal,
 				),
 			steer: (clientId, sessionId, jobId, message) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/steer`, {
-					jobId,
-					message,
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/steer`,
+					{
+						jobId,
+						message,
+					},
+				),
 			followUp: (clientId, sessionId, jobId, message) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/follow-up`, {
-					jobId,
-					message,
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/follow-up`,
+					{
+						jobId,
+						message,
+					},
+				),
 			abort: (clientId, sessionId, jobId) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/abort`, {
-					jobId,
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/abort`,
+					{
+						jobId,
+					},
+				),
 			compact: (clientId, sessionId, jobId, customInstructions) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/compact`, {
-					jobId,
-					...(customInstructions ? { customInstructions } : {}),
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/compact`,
+					{
+						jobId,
+						...(customInstructions ? { customInstructions } : {}),
+					},
+				),
 			abortCompact: (clientId, sessionId, jobId) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/abort-compact`, {
-					jobId,
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/abort-compact`,
+					{
+						jobId,
+					},
+				),
 			setModel: (clientId, sessionId, cwdRef, provider, modelId) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/model`, {
-					...cwdRef,
-					provider,
-					modelId,
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/model`,
+					{
+						...cwdRef,
+						provider,
+						modelId,
+					},
+				),
 			setThinking: (clientId, sessionId, cwdRef, level) =>
-				client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/thinking`, {
-					...cwdRef,
-					level,
-				}),
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/thinking`,
+					{
+						...cwdRef,
+						level,
+					},
+				),
 			extensionResponse: (clientId, sessionId, jobId, response) =>
 				client.request(
 					"POST",
@@ -262,6 +402,11 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 		},
 
 		running: (clientId, signal) =>
-			client.request("GET", `/api/clients/${enc(clientId)}/pi/running`, undefined, signal),
+			client.request(
+				"GET",
+				`/api/clients/${enc(clientId)}/pi/running`,
+				undefined,
+				signal,
+			),
 	};
 }

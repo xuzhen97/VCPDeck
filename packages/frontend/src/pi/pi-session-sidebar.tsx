@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import type { PiCwdRef, PiSessionInfo, PiSessionTreeNode } from "@vcpdeck/shared";
+import type {
+	PiCwdRef,
+	PiSessionInfo,
+	PiSessionTreeNode,
+} from "@vcpdeck/shared";
 import type { PiApi } from "@vcpdeck/sdk";
 import { PiProjectPicker, type PiFilesApiLike } from "./pi-project-picker.js";
 import { Button } from "@/components/ui/button";
@@ -38,7 +42,10 @@ export function PiSessionSidebar({
 		setError(null);
 		try {
 			// Server 返回裸数组（GET /pi/sessions），直接作为列表使用
-			const list = (await pi.sessions.list(clientId, cwdRef)) as PiSessionInfo[];
+			const list = (await pi.sessions.list(
+				clientId,
+				cwdRef,
+			)) as PiSessionInfo[];
 			const withTree = await Promise.all(
 				list.slice(0, 50).map(async (s) => {
 					try {
@@ -110,7 +117,12 @@ export function PiSessionSidebar({
 			const messageId = window.prompt("从哪条消息 fork？（消息 ID）");
 			if (!messageId || !cwdRef) return;
 			try {
-				const result = (await pi.sessions.fork(clientId, sessionId, cwdRef, messageId)) as {
+				const result = (await pi.sessions.fork(
+					clientId,
+					sessionId,
+					cwdRef,
+					messageId,
+				)) as {
 					sessionId: string;
 				};
 				onCreated(result.sessionId);
@@ -126,7 +138,11 @@ export function PiSessionSidebar({
 		async (sessionId: string) => {
 			if (!cwdRef) return;
 			try {
-				const result = (await pi.sessions.clone(clientId, sessionId, cwdRef)) as {
+				const result = (await pi.sessions.clone(
+					clientId,
+					sessionId,
+					cwdRef,
+				)) as {
 					sessionId: string;
 				};
 				onCreated(result.sessionId);
@@ -151,7 +167,12 @@ export function PiSessionSidebar({
 
 			<div className="flex items-center justify-between">
 				<span className="text-sm font-medium">会话</span>
-				<Button type="button" size="sm" disabled={!cwdRef} onClick={() => void createNew()}>
+				<Button
+					type="button"
+					size="sm"
+					disabled={!cwdRef}
+					onClick={() => void createNew()}
+				>
 					新建
 				</Button>
 			</div>
@@ -182,11 +203,15 @@ export function PiSessionSidebar({
 									{s.name || s.firstMessage || "(无标题)"}
 								</span>
 								{s.running && (
-									<span className="size-1.5 shrink-0 rounded-full bg-green-500" aria-label="运行中" />
+									<span
+										className="size-1.5 shrink-0 rounded-full bg-green-500"
+										aria-label="运行中"
+									/>
 								)}
 							</div>
 							<div className="mt-0.5 text-[10px] text-muted-foreground">
-								{s.messageCount} 条消息 · {new Date(s.modified).toLocaleString()}
+								{s.messageCount} 条消息 ·{" "}
+								{new Date(s.modified).toLocaleString()}
 							</div>
 						</button>
 						<div className="mt-1 flex gap-1">
@@ -221,10 +246,7 @@ export function PiSessionSidebar({
 						</div>
 						{s.tree.length > 0 && (
 							<div className="mt-1 border-t border-border/60 pt-1">
-								<SessionTree
-									nodes={s.tree}
-									onNavigate={onSelectSession}
-								/>
+								<SessionTree nodes={s.tree} onNavigate={onSelectSession} />
 							</div>
 						)}
 					</div>
@@ -292,11 +314,16 @@ function SessionTreeNode({
 					onClick={() => onNavigate(node.id)}
 					title="分支节点（会话内导航）"
 				>
-					{node.running ? "●" : "○"} {node.name || `分支 ${node.id.slice(0, 6)}`}
+					{node.running ? "●" : "○"}{" "}
+					{node.name || `分支 ${node.id.slice(0, 6)}`}
 				</button>
 			</div>
 			{open && hasChildren && (
-				<SessionTree nodes={node.children} onNavigate={onNavigate} depth={depth + 1} />
+				<SessionTree
+					nodes={node.children}
+					onNavigate={onNavigate}
+					depth={depth + 1}
+				/>
 			)}
 		</div>
 	);

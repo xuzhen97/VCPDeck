@@ -10,10 +10,12 @@ function runServiceMock() {
 		waitForInput: vi.fn(async () => {}),
 		resume: vi.fn(async () => {}),
 		cancelSettlement: vi.fn(),
-		scheduleSettlement: vi.fn(async (_jobId: string, onSettle: () => Promise<void>) => {
-			// 测试直接触发 onSettle（不等待 30s）
-			void onSettle;
-		}),
+		scheduleSettlement: vi.fn(
+			async (_jobId: string, onSettle: () => Promise<void>) => {
+				// 测试直接触发 onSettle（不等待 30s）
+				void onSettle;
+			},
+		),
 		settle: vi.fn(async () => {}),
 		reconcileState: vi.fn(async () => {}),
 	} as unknown as PiRunService;
@@ -30,7 +32,9 @@ function makeEvent(overrides: Partial<PiEvent> = {}): PiEvent {
 	} as PiEvent;
 }
 
-function makeBroker(overrides: { runs?: ReturnType<typeof runServiceMock> } = {}) {
+function makeBroker(
+	overrides: { runs?: ReturnType<typeof runServiceMock> } = {},
+) {
 	const requests = new PiRequestBroker();
 	requests.bindEmitter(() => {});
 	const runs = overrides.runs ?? runServiceMock();
@@ -45,7 +49,9 @@ async function collectStream(
 	count: number,
 ): Promise<string[]> {
 	const events = await firstValueFrom(
-		broker.stream(clientId, sessionId).pipe(take(count), toArray(), timeout(2000)),
+		broker
+			.stream(clientId, sessionId)
+			.pipe(take(count), toArray(), timeout(2000)),
 	);
 	return events.map((e) => String(e.data));
 }
@@ -59,7 +65,13 @@ describe("PiEventBroker", () => {
 		const { broker } = makeBroker();
 		const streamPromise = collectStream(broker, "c1", "s1", 1);
 
-		await broker.publish(makeEvent({ clientId: "c1", sessionId: "s1", event: { type: "agent_end", sessionId: "s1" } }));
+		await broker.publish(
+			makeEvent({
+				clientId: "c1",
+				sessionId: "s1",
+				event: { type: "agent_end", sessionId: "s1" },
+			}),
+		);
 
 		const events = await streamPromise;
 		expect(events).toHaveLength(1);
@@ -101,11 +113,35 @@ describe("PiEventBroker", () => {
 		expect(runs.waitForInput).toHaveBeenCalledWith("j1");
 	});
 
+	it("notify extension_request 不触发 waitForInput", async () => {
+		const runs = runServiceMock();
+		const { broker } = makeBroker({ runs });
+
+		await broker.publish(
+			makeEvent({
+				event: {
+					type: "extension_request",
+					sessionId: "s1",
+					ui: {
+						requestId: "u-notify",
+						extensionId: "e",
+						kind: "notify",
+						message: "info: Agent finished its current task.",
+					},
+				},
+			}),
+		);
+		expect(runs.waitForInput).not.toHaveBeenCalled();
+		expect(runs.cancelSettlement).not.toHaveBeenCalled();
+	});
+
 	it("agent_start 取消 settlement grace", async () => {
 		const runs = runServiceMock();
 		const { broker } = makeBroker({ runs });
 
-		await broker.publish(makeEvent({ event: { type: "agent_start", sessionId: "s1" } }));
+		await broker.publish(
+			makeEvent({ event: { type: "agent_start", sessionId: "s1" } }),
+		);
 		expect(runs.cancelSettlement).toHaveBeenCalledWith("j1");
 	});
 
@@ -113,12 +149,18 @@ describe("PiEventBroker", () => {
 		const runs = runServiceMock();
 		const { broker } = makeBroker({ runs });
 
-		await broker.publish(makeEvent({ event: { type: "prompt_done", sessionId: "s1" } }));
-		const scheduleMock = runs.scheduleSettlement as unknown as ReturnType<typeof vi.fn>;
+		await broker.publish(
+			makeEvent({ event: { type: "prompt_done", sessionId: "s1" } }),
+		);
+		const scheduleMock = runs.scheduleSettlement as unknown as ReturnType<
+			typeof vi.fn
+		>;
 		expect(scheduleMock).toHaveBeenCalledTimes(1);
 		expect(scheduleMock.mock.calls[0]?.[0]).toBe("j1");
 
-		await broker.publish(makeEvent({ event: { type: "agent_settled", sessionId: "s1" } }));
+		await broker.publish(
+			makeEvent({ event: { type: "agent_settled", sessionId: "s1" } }),
+		);
 		expect(scheduleMock).toHaveBeenCalledTimes(2);
 	});
 
@@ -128,9 +170,11 @@ describe("PiEventBroker", () => {
 			waitForInput: vi.fn(async () => {}),
 			resume: vi.fn(async () => {}),
 			cancelSettlement: vi.fn(),
-			scheduleSettlement: vi.fn(async (_jobId: string, cb: () => Promise<void>) => {
-				onSettle = cb;
-			}),
+			scheduleSettlement: vi.fn(
+				async (_jobId: string, cb: () => Promise<void>) => {
+					onSettle = cb;
+				},
+			),
 			settle: vi.fn(async () => {}),
 			reconcileState: vi.fn(async () => {}),
 		} as unknown as PiRunService;
@@ -156,7 +200,9 @@ describe("PiEventBroker", () => {
 			compacting: false,
 			queuedMessages: { steering: [], followUp: [] },
 		});
-		await broker.publish(makeEvent({ event: { type: "agent_settled", sessionId: "s1" } }));
+		await broker.publish(
+			makeEvent({ event: { type: "agent_settled", sessionId: "s1" } }),
+		);
 		expect(getOnSettle()).not.toBeNull();
 
 		await getOnSettle()!();
@@ -174,7 +220,9 @@ describe("PiEventBroker", () => {
 			compacting: false,
 			queuedMessages: { steering: ["s1"], followUp: [] },
 		});
-		await broker.publish(makeEvent({ event: { type: "prompt_done", sessionId: "s1" } }));
+		await broker.publish(
+			makeEvent({ event: { type: "prompt_done", sessionId: "s1" } }),
+		);
 
 		await getOnSettle()!();
 		expect(runs.settle).not.toHaveBeenCalled();
@@ -188,7 +236,9 @@ describe("PiEventBroker", () => {
 			compacting: false,
 			queuedMessages: { steering: [], followUp: [] },
 		});
-		await broker.publish(makeEvent({ event: { type: "agent_settled", sessionId: "s1" } }));
+		await broker.publish(
+			makeEvent({ event: { type: "agent_settled", sessionId: "s1" } }),
+		);
 
 		await getOnSettle()!();
 		expect(runs.settle).not.toHaveBeenCalled();

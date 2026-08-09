@@ -12,14 +12,16 @@ const actor = {
 	requestId: "req-1",
 } as const;
 
-function makeController(overrides: Partial<Record<"requests" | "events" | "runs" | "clients", unknown>> = {}) {
+function makeController(
+	overrides: Partial<
+		Record<"requests" | "events" | "runs" | "clients", unknown>
+	> = {},
+) {
 	const requests = {
-		request: vi.fn(
-			async (_clientId: string, _req: { action: string }) => ({
-				ok: true,
-				data: {},
-			}),
-		),
+		request: vi.fn(async (_clientId: string, _req: { action: string }) => ({
+			ok: true,
+			data: {},
+		})),
 		bindEmitter: vi.fn(),
 		...((overrides.requests as object) ?? {}),
 	};
@@ -96,26 +98,42 @@ describe("PiController", () => {
 
 	it("prompt 先 createRun 再发布 run_created 再 dispatch，返回 accepted", async () => {
 		const { controller, requests, events, runs } = makeController();
-		requests.request.mockImplementation(async (_clientId: string, req: { action: string }) => {
-			if (req.action === "project.resolve") return { ok: true, data: { projectKey: "k".repeat(64) } };
-			return { ok: true, data: { accepted: true } };
-		});
-		const result = await controller.prompt("c1", "s1", {
-			rootDir: "D:\\",
-			relativePath: "repo",
-			type: "prompt",
-			submissionId: "sub-1",
-			prompt: "hello",
-		}, actor);
+		requests.request.mockImplementation(
+			async (_clientId: string, req: { action: string }) => {
+				if (req.action === "project.resolve")
+					return { ok: true, data: { projectKey: "k".repeat(64) } };
+				return { ok: true, data: { accepted: true } };
+			},
+		);
+		const result = await controller.prompt(
+			"c1",
+			"s1",
+			{
+				rootDir: "D:\\",
+				relativePath: "repo",
+				type: "prompt",
+				submissionId: "sub-1",
+				prompt: "hello",
+			},
+			actor,
+		);
 
 		expect(runs.createRun).toHaveBeenCalledWith(
 			actor,
-			expect.objectContaining({ clientId: "c1", sessionId: "s1", imageCount: 0 }),
+			expect.objectContaining({
+				clientId: "c1",
+				sessionId: "s1",
+				imageCount: 0,
+			}),
 		);
 		expect(events.publish).toHaveBeenCalledWith(
 			expect.objectContaining({
 				jobId: "j1",
-				event: expect.objectContaining({ type: "run_created", submissionId: "sub-1", runId: "j1" }),
+				event: expect.objectContaining({
+					type: "run_created",
+					submissionId: "sub-1",
+					runId: "j1",
+				}),
 			}),
 		);
 		expect(result).toEqual({ jobId: "j1", runId: "j1", sessionId: "s1" });
@@ -123,31 +141,50 @@ describe("PiController", () => {
 
 	it("prompt 请求失败时 Job fail", async () => {
 		const { controller, requests, runs } = makeController();
-		requests.request.mockImplementation((async (_clientId: string, req: { action: string }) => {
-			if (req.action === "project.resolve") return { ok: true, data: { projectKey: "k".repeat(64) } };
-			return { ok: false, error: { code: "PI_WORKER_EXITED", message: "died" } };
+		requests.request.mockImplementation((async (
+			_clientId: string,
+			req: { action: string },
+		) => {
+			if (req.action === "project.resolve")
+				return { ok: true, data: { projectKey: "k".repeat(64) } };
+			return {
+				ok: false,
+				error: { code: "PI_WORKER_EXITED", message: "died" },
+			};
 		}) as never);
 		await expect(
-			controller.prompt("c1", "s1", {
-				rootDir: "D:\\",
-				relativePath: "repo",
-				type: "prompt",
-				submissionId: "sub-1",
-				prompt: "hello",
-			}, actor),
+			controller.prompt(
+				"c1",
+				"s1",
+				{
+					rootDir: "D:\\",
+					relativePath: "repo",
+					type: "prompt",
+					submissionId: "sub-1",
+					prompt: "hello",
+				},
+				actor,
+			),
 		).rejects.toBeInstanceOf(BadRequestException);
 		expect(runs.fail).toHaveBeenCalledWith("j1", "PI_WORKER_EXITED", "died");
 	});
 
 	it("非法 body 返回 400", async () => {
 		const { controller } = makeController();
-		await expect(controller.prompt("c1", "s1", {
-			rootDir: "D:\\",
-			relativePath: "repo",
-			type: "steer", // 错误 type
-			submissionId: "s",
-			prompt: "x",
-		}, actor)).rejects.toBeInstanceOf(BadRequestException);
+		await expect(
+			controller.prompt(
+				"c1",
+				"s1",
+				{
+					rootDir: "D:\\",
+					relativePath: "repo",
+					type: "steer", // 错误 type
+					submissionId: "s",
+					prompt: "x",
+				},
+				actor,
+			),
+		).rejects.toBeInstanceOf(BadRequestException);
 	});
 
 	it("steer 先校验 Owner", async () => {
@@ -162,7 +199,10 @@ describe("PiController", () => {
 
 	it("活动回合时 model.set 拒绝（assertIdle 失败）", async () => {
 		const { controller, requests, runs } = makeController();
-		requests.request.mockResolvedValue({ ok: true, data: { projectKey: "k".repeat(64) } });
+		requests.request.mockResolvedValue({
+			ok: true,
+			data: { projectKey: "k".repeat(64) },
+		});
 		(runs.assertIdleMutation as ReturnType<typeof vi.fn>).mockRejectedValue(
 			Object.assign(new Error("busy"), { code: "PI_PROJECT_BUSY" }),
 		);
@@ -178,7 +218,10 @@ describe("PiController", () => {
 
 	it("thinking.set 校验 SDK 原生 level 并转发 cwd/session", async () => {
 		const { controller, requests, runs } = makeController();
-		requests.request.mockResolvedValue({ ok: true, data: { projectKey: "k".repeat(64) } });
+		requests.request.mockResolvedValue({
+			ok: true,
+			data: { projectKey: "k".repeat(64) },
+		});
 
 		await controller.setThinking("c1", "s1", {
 			rootDir: "D:\\",
@@ -187,21 +230,26 @@ describe("PiController", () => {
 		});
 
 		expect(runs.assertIdleMutation).toHaveBeenCalledWith("c1", "k".repeat(64));
-		expect(requests.request).toHaveBeenLastCalledWith("c1", expect.objectContaining({
-			action: "thinking.set",
-			sessionId: "s1",
-			cwdRef: { rootDir: "D:\\", relativePath: "repo" },
-			payload: { level: "high" },
-		}));
+		expect(requests.request).toHaveBeenLastCalledWith(
+			"c1",
+			expect.objectContaining({
+				action: "thinking.set",
+				sessionId: "s1",
+				cwdRef: { rootDir: "D:\\", relativePath: "repo" },
+				payload: { level: "high" },
+			}),
+		);
 	});
 
 	it("thinking.set 拒绝 auto 和未知 level", async () => {
 		const { controller } = makeController();
-		await expect(controller.setThinking("c1", "s1", {
-			rootDir: "D:\\",
-			relativePath: "repo",
-			level: "auto",
-		})).rejects.toMatchObject({ response: { code: "PI_PROTOCOL_INVALID" } });
+		await expect(
+			controller.setThinking("c1", "s1", {
+				rootDir: "D:\\",
+				relativePath: "repo",
+				level: "auto",
+			}),
+		).rejects.toMatchObject({ response: { code: "PI_PROTOCOL_INVALID" } });
 	});
 
 	it("SSE stream 不要求 Owner", async () => {

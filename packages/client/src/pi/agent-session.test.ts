@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type {
+	AgentSession,
+	AgentSessionEvent,
+} from "@earendil-works/pi-coding-agent";
 import type { PiThinkingLevel } from "@vcpdeck/shared";
 import { PiAgentSessionWrapperImpl } from "./agent-session.js";
 
@@ -11,10 +14,16 @@ class FakeInner {
 	isStreaming = false;
 	isCompacting = false;
 	thinkingLevel: PiThinkingLevel = "off";
-	model: { provider: string; id: string } | undefined = { provider: "p", id: "m1" };
+	model: { provider: string; id: string } | undefined = {
+		provider: "p",
+		id: "m1",
+	};
 	modelRuntime = {
 		getAvailable: vi.fn(async () => [{ provider: "p", id: "m1" }]),
-		getModel: vi.fn((_provider: string, _modelId: string) => ({ provider: "p", id: "m1" })),
+		getModel: vi.fn((_provider: string, _modelId: string) => ({
+			provider: "p",
+			id: "m1",
+		})),
 	};
 	sessionManager = {
 		getCwd: () => "/tmp/project",
@@ -89,7 +98,9 @@ class FakeInner {
 
 function makeWrapper() {
 	const inner = new FakeInner();
-	const wrapper = new PiAgentSessionWrapperImpl(inner as unknown as AgentSession);
+	const wrapper = new PiAgentSessionWrapperImpl(
+		inner as unknown as AgentSession,
+	);
 	wrapper.start();
 	return { inner, wrapper };
 }
@@ -106,7 +117,10 @@ describe("PiAgentSessionWrapperImpl", () => {
 		wrapper.onEvent((e) => events.push(e.type));
 
 		await wrapper.send("agent.prompt", { prompt: "hi" });
-		expect(inner.prompt).toHaveBeenCalledWith("hi", expect.objectContaining({ source: "rpc" }));
+		expect(inner.prompt).toHaveBeenCalledWith(
+			"hi",
+			expect.objectContaining({ source: "rpc" }),
+		);
 		inner.resolvePrompt();
 		await Promise.resolve();
 		expect(events).toContain("prompt_done");
@@ -140,7 +154,11 @@ describe("PiAgentSessionWrapperImpl", () => {
 		wrapper.onEvent((e) => events.push(e));
 
 		const ui = inner.uiContext as {
-			confirm: (title: string, message: string, opts?: unknown) => Promise<unknown>;
+			confirm: (
+				title: string,
+				message: string,
+				opts?: unknown,
+			) => Promise<unknown>;
 		};
 		const promise = ui.confirm("Trust?", "Load extensions?");
 		await Promise.resolve();
@@ -166,7 +184,9 @@ describe("PiAgentSessionWrapperImpl", () => {
 		const events: unknown[] = [];
 		wrapper.onEvent((e) => events.push(e));
 
-		const ui = inner.uiContext as { select: (title: string, options: string[]) => Promise<unknown> };
+		const ui = inner.uiContext as {
+			select: (title: string, options: string[]) => Promise<unknown>;
+		};
 		void ui.select("Pick", ["a", "b"]);
 		await Promise.resolve();
 
@@ -200,8 +220,14 @@ describe("PiAgentSessionWrapperImpl", () => {
 
 	it("model.set 不在交集返回 PI_MODEL_NOT_FOUND", async () => {
 		const { wrapper } = makeWrapper();
-		const result = await wrapper.send("model.set", { provider: "x", modelId: "nope" });
-		expect(result).toMatchObject({ ok: false, error: { code: "PI_MODEL_NOT_FOUND" } });
+		const result = await wrapper.send("model.set", {
+			provider: "x",
+			modelId: "nope",
+		});
+		expect(result).toMatchObject({
+			ok: false,
+			error: { code: "PI_MODEL_NOT_FOUND" },
+		});
 	});
 
 	it("agent.state 返回当前 thinking level", () => {
@@ -215,14 +241,19 @@ describe("PiAgentSessionWrapperImpl", () => {
 		await wrapper.send("thinking.set", { level: "high" });
 		expect(inner.setThinkingLevel).toHaveBeenCalledWith("high");
 		const result = await wrapper.send("thinking.set", { level: "auto" });
-		expect(result).toMatchObject({ ok: false, error: { code: "PI_PROTOCOL_INVALID" } });
+		expect(result).toMatchObject({
+			ok: false,
+			error: { code: "PI_PROTOCOL_INVALID" },
+		});
 		expect(inner.setThinkingLevel).toHaveBeenCalledTimes(1);
 	});
 
 	it("get_state 在等待 Extension input 时映射 waiting_for_extension_input", async () => {
 		const { inner, wrapper } = makeWrapper();
 		await vi.waitFor(() => expect(inner.uiContext).not.toBeNull());
-		const ui = inner.uiContext as { input: (title: string) => Promise<unknown> };
+		const ui = inner.uiContext as {
+			input: (title: string) => Promise<unknown>;
+		};
 		void ui.input("Name?");
 		await Promise.resolve();
 

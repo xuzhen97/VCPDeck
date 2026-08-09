@@ -66,12 +66,18 @@ export class PiEventBroker {
 		const key = this.key(clientId, sessionId);
 		const stream = this.streams.get(key);
 
-		// Extension dialog → waiting_input；Owner 响应后回 running（controller 调 resume）
-		if (event.event.type === "extension_request") {
+		const interactiveExtension =
+			event.event.type === "extension_request" &&
+			isDialogKind(event.event.ui.kind);
+		// 只有交互式 Extension UI 才进入 waiting_input；notify 等状态通知不阻塞回合。
+		if (interactiveExtension) {
 			await this.runs.waitForInput(jobId).catch(() => {});
 		}
-		// grace 内新 activity 取消 settlement
-		if (ACTIVITY_EVENTS.has(event.event.type)) {
+		// grace 内新 activity 取消 settlement；普通 notify 不算 activity。
+		if (
+			ACTIVITY_EVENTS.has(event.event.type) &&
+			(event.event.type !== "extension_request" || interactiveExtension)
+		) {
 			this.runs.cancelSettlement(jobId);
 		}
 		// 终态触发 settlement 检查
@@ -148,4 +154,13 @@ export class PiEventBroker {
 			}
 		});
 	}
+}
+
+function isDialogKind(kind: unknown): boolean {
+	return (
+		kind === "select" ||
+		kind === "confirm" ||
+		kind === "input" ||
+		kind === "editor"
+	);
 }

@@ -54,9 +54,15 @@ function makePi() {
 	return {
 		sessions: {
 			list: vi.fn(async () => ({ sessions: [] })),
-			get: vi.fn(async () => ({ info: { id: "s1", name: "s", firstMessage: "hi" }, tree: [], activeLeafId: null })),
+			get: vi.fn(async () => ({
+				info: { id: "s1", name: "s", firstMessage: "hi" },
+				tree: [],
+				activeLeafId: null,
+			})),
 			context: vi.fn(async () => ({
-				messages: [{ id: "m1", role: "user", content: [{ type: "text", text: "hi" }] }],
+				messages: [
+					{ id: "m1", role: "user", content: [{ type: "text", text: "hi" }] },
+				],
 				nextCursor: null,
 			})),
 			entryContent: vi.fn(),
@@ -79,7 +85,11 @@ function makePi() {
 				queuedMessages: { steering: [], followUp: [] },
 			})),
 
-			prompt: vi.fn(async () => ({ jobId: "j1", runId: "j1", sessionId: "s1" })),
+			prompt: vi.fn(async () => ({
+				jobId: "j1",
+				runId: "j1",
+				sessionId: "s1",
+			})),
 			steer: vi.fn(),
 			followUp: vi.fn(),
 			abort: vi.fn(),
@@ -165,7 +175,12 @@ describe("usePiSession 重连集成", () => {
 				type: "extension_request",
 				sessionId: "s1",
 				runId: "j1",
-				ui: { requestId: "u1", extensionId: "e", kind: "input", message: "name?" },
+				ui: {
+					requestId: "u1",
+					extensionId: "e",
+					kind: "input",
+					message: "name?",
+				},
 			});
 		});
 		expect(result.current.state.status).toBe("waiting_input");
@@ -193,6 +208,11 @@ describe("usePiSession 重连集成", () => {
 		await act(async () => {
 			await result.current.actions.navigate("branch-1");
 		});
-		expect(pi.sessions.navigate).toHaveBeenCalledWith("c1", "s1", CWD, "branch-1");
+		expect(pi.sessions.navigate).toHaveBeenCalledWith(
+			"c1",
+			"s1",
+			CWD,
+			"branch-1",
+		);
 	});
 });

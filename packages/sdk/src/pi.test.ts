@@ -17,7 +17,10 @@ function makeClient() {
 describe("VcpDeckClient.pi", () => {
 	it("sessions.list 编码 clientId 与查询参数", async () => {
 		const { client, fetcher } = makeClient();
-		await client.pi.sessions.list("c/1", { rootDir: "D:\\", relativePath: "repo" });
+		await client.pi.sessions.list("c/1", {
+			rootDir: "D:\\",
+			relativePath: "repo",
+		});
 		expect(fetcher).toHaveBeenCalledWith(
 			expect.stringContaining("/api/clients/c%2F1/pi/sessions?"),
 			expect.any(Object),
@@ -36,10 +39,15 @@ describe("VcpDeckClient.pi", () => {
 
 	it("agent.prompt 发送 submissionId 与 prompt", async () => {
 		const { client, fetcher } = makeClient();
-		await client.pi.agent.prompt("c1", "s1", { rootDir: "D:\\", relativePath: "r" }, {
-			submissionId: "sub-1",
-			prompt: "hello",
-		});
+		await client.pi.agent.prompt(
+			"c1",
+			"s1",
+			{ rootDir: "D:\\", relativePath: "r" },
+			{
+				submissionId: "sub-1",
+				prompt: "hello",
+			},
+		);
 		expect(fetcher).toHaveBeenCalledWith(
 			expect.stringContaining("/api/clients/c1/pi/agent/s1"),
 			expect.objectContaining({
@@ -77,9 +85,13 @@ describe("VcpDeckClient.pi", () => {
 		await client.pi.agent.setModel("c1", "s1", cwdRef, "provider", "model");
 		await client.pi.agent.setThinking("c1", "s1", cwdRef, "high");
 
-		expect(fetcher.mock.calls[0]?.[0]).toContain("/api/clients/c1/pi/agent/s1/model");
+		expect(fetcher.mock.calls[0]?.[0]).toContain(
+			"/api/clients/c1/pi/agent/s1/model",
+		);
 		expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
-		expect(fetcher.mock.calls[1]?.[0]).toContain("/api/clients/c1/pi/agent/s1/thinking");
+		expect(fetcher.mock.calls[1]?.[0]).toContain(
+			"/api/clients/c1/pi/agent/s1/thinking",
+		);
 		expect(fetcher.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
 	});
 
@@ -88,15 +100,21 @@ describe("VcpDeckClient.pi", () => {
 		await client.pi.attachments.create("c1", [
 			{ filename: "a.png", size: 100, mimeType: "image/png" },
 		]);
-		expect(fetcher.mock.calls[0]?.[0]).toContain("/api/clients/c1/pi/attachments");
+		expect(fetcher.mock.calls[0]?.[0]).toContain(
+			"/api/clients/c1/pi/attachments",
+		);
 		expect(fetcher.mock.calls[0]?.[1]?.method).toBe("POST");
 
 		await client.pi.attachments.complete("c1", "f1");
-		expect(fetcher.mock.calls[1]?.[0]).toContain("/api/clients/c1/pi/attachments/f1/complete");
+		expect(fetcher.mock.calls[1]?.[0]).toContain(
+			"/api/clients/c1/pi/attachments/f1/complete",
+		);
 		expect(fetcher.mock.calls[1]?.[1]?.method).toBe("POST");
 
 		await client.pi.attachments.delete("c1", "f1");
-		expect(fetcher.mock.calls[2]?.[0]).toContain("/api/clients/c1/pi/attachments/f1");
+		expect(fetcher.mock.calls[2]?.[0]).toContain(
+			"/api/clients/c1/pi/attachments/f1",
+		);
 		expect(fetcher.mock.calls[2]?.[1]?.method).toBe("DELETE");
 	});
 });

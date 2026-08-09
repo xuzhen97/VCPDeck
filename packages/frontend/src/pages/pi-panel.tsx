@@ -38,11 +38,19 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 
 	const [cwdRef, setCwdRef] = useState<PiCwdRef | null>(null);
 	const [sessionId, setSessionId] = useState<string | null>(null);
-	const [info, setInfo] = useState<{ id: string; name: string; firstMessage: string | null } | null>(null);
+	const [info, setInfo] = useState<{
+		id: string;
+		name: string;
+		firstMessage: string | null;
+	} | null>(null);
 	const [leftOpen, setLeftOpen] = useState(false);
 	const [rightOpen, setRightOpen] = useState(false);
 	const [attachments, setAttachments] = useState<
-		Array<{ name: string; status: "uploading" | "ready" | "error"; ref?: PiAttachmentRef }>
+		Array<{
+			name: string;
+			status: "uploading" | "ready" | "error";
+			ref?: PiAttachmentRef;
+		}>
 	>([]);
 	const [loadedImages, setLoadedImages] = useState<Record<string, string>>({});
 
@@ -54,7 +62,11 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 			setSessionId(sid);
 			await actions.openSession(client.clientId, sid, cwdRef);
 			try {
-				const detail = (await sdk.pi.sessions.get(client.clientId, sid, cwdRef)) as {
+				const detail = (await sdk.pi.sessions.get(
+					client.clientId,
+					sid,
+					cwdRef,
+				)) as {
 					info: { id: string; name: string; firstMessage: string | null };
 				};
 				setInfo(detail.info);
@@ -91,13 +103,24 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 		async (files: FileList) => {
 			const list = Array.from(files);
 			if (attachments.length + list.length > 10) return;
-			const pending = list.map((f) => ({ name: f.name, status: "uploading" as const }));
+			const pending = list.map((f) => ({
+				name: f.name,
+				status: "uploading" as const,
+			}));
 			setAttachments((prev) => [...prev, ...pending]);
 			for (const file of list) {
 				try {
 					const [session] = (await sdk.pi.attachments.create(client.clientId, [
-						{ filename: file.name, size: file.size, mimeType: file.type || "image/png" },
-					])) as Array<{ fileId: string; uploadUrl: string; expiresAt: number }>;
+						{
+							filename: file.name,
+							size: file.size,
+							mimeType: file.type || "image/png",
+						},
+					])) as Array<{
+						fileId: string;
+						uploadUrl: string;
+						expiresAt: number;
+					}>;
 					if (!session) throw new Error("create failed");
 					await uploadFile(session.uploadUrl, file);
 					const ref = (await sdk.pi.attachments.complete(
@@ -114,7 +137,9 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 				} catch {
 					setAttachments((prev) =>
 						prev.map((a) =>
-							a.name === file.name ? { name: a.name, status: "error" as const } : a,
+							a.name === file.name
+								? { name: a.name, status: "error" as const }
+								: a,
 						),
 					);
 				}
@@ -181,7 +206,9 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 
 	const isObserver = false; // 首版单用户环境无多身份；Owner 语义由 Server 保证
 	const settingsDisabled =
-		!sessionId || state.status !== "idle" || state.agentState?.status !== "idle";
+		!sessionId ||
+		state.status !== "idle" ||
+		state.agentState?.status !== "idle";
 
 	const filesApi = useMemo(
 		() => ({
@@ -233,8 +260,8 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 								if (cwdRef && sessionId && state.nextCursor) {
 									void sdk.pi.sessions
 										.context(client.clientId, sessionId, cwdRef, {
-												cursor: state.nextCursor,
-											})
+											cursor: state.nextCursor,
+										})
 										.then((page) => {
 											// 追加更早消息（简化：交给 reconcile 轮询）
 											void page;
@@ -249,7 +276,10 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					<PiChatInput
 						status={state.status}
 						disabled={!cwdRef || !sessionId}
-						attachments={attachments.map((a) => ({ name: a.name, status: a.status }))}
+						attachments={attachments.map((a) => ({
+							name: a.name,
+							status: a.status,
+						}))}
 						onPickFiles={(files) => void handlePickFiles(files)}
 						onRemoveAttachment={(index) =>
 							setAttachments((prev) => prev.filter((_, i) => i !== index))
@@ -259,7 +289,10 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 								.filter((a) => a.status === "ready" && a.ref)
 								.map((a) => a.ref!);
 							setAttachments([]);
-							void actions.send({ prompt, images: refs.length > 0 ? refs : undefined });
+							void actions.send({
+								prompt,
+								images: refs.length > 0 ? refs : undefined,
+							});
 						}}
 						onSteer={(message) => void actions.steer(message)}
 						onFollowUp={(message) => void actions.followUp(message)}
@@ -284,7 +317,9 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 						models={state.models}
 						thinkingSelection={state.thinkingSelection}
 						disabled={settingsDisabled}
-						onModelChange={(provider, modelId) => void actions.setModel(provider, modelId)}
+						onModelChange={(provider, modelId) =>
+							void actions.setModel(provider, modelId)
+						}
 						onThinkingChange={(level) => void actions.setThinking(level)}
 					/>
 				</aside>
@@ -307,7 +342,12 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					详情
 				</button>
 			</div>
-			<Drawer open={leftOpen} onClose={() => setLeftOpen(false)} title="项目与会话" side="left">
+			<Drawer
+				open={leftOpen}
+				onClose={() => setLeftOpen(false)}
+				title="项目与会话"
+				side="left"
+			>
 				<PiSessionSidebar
 					pi={sdk.pi}
 					files={filesApi}
@@ -319,7 +359,11 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					onCreated={handleCreated}
 				/>
 			</Drawer>
-			<Drawer open={rightOpen} onClose={() => setRightOpen(false)} title="运行详情">
+			<Drawer
+				open={rightOpen}
+				onClose={() => setRightOpen(false)}
+				title="运行详情"
+			>
 				<PiRunDetails
 					agentState={state.agentState}
 					runId={state.runId}
@@ -329,7 +373,9 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					models={state.models}
 					thinkingSelection={state.thinkingSelection}
 					disabled={settingsDisabled}
-					onModelChange={(provider, modelId) => void actions.setModel(provider, modelId)}
+					onModelChange={(provider, modelId) =>
+						void actions.setModel(provider, modelId)
+					}
 					onThinkingChange={(level) => void actions.setThinking(level)}
 				/>
 			</Drawer>
@@ -339,10 +385,18 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					request={state.pendingExtension}
 					disabled={false}
 					onRespond={(value, confirmed) =>
-						void actions.extensionResponse(state.pendingExtension!.requestId, value, confirmed)
+						void actions.extensionResponse(
+							state.pendingExtension!.requestId,
+							value,
+							confirmed,
+						)
 					}
 					onCancel={() =>
-						void actions.extensionResponse(state.pendingExtension!.requestId, undefined, undefined)
+						void actions.extensionResponse(
+							state.pendingExtension!.requestId,
+							undefined,
+							undefined,
+						)
 					}
 				/>
 			)}

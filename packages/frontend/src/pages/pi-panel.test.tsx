@@ -181,13 +181,21 @@ describe("PiPanel", () => {
 		await screen.getByText("D:\\").click();
 		await screen.findByText("📁 repo");
 		await screen.getByText("📁 repo").click();
-		await vi.waitFor(() => expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0));
+		await vi.waitFor(() =>
+			expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0),
+		);
 		await screen.getByText("选择此目录").click();
 		await screen.getAllByText("新建")[0]!.click();
 		await vi.waitFor(() => expect(sdk.pi.agent.newSession).toHaveBeenCalled());
-		await vi.waitFor(() => expect(screen.getAllByRole("combobox", { name: "模型" })[0]).toBeEnabled());
+		await vi.waitFor(() =>
+			expect(
+				screen.getAllByRole("combobox", { name: "模型" })[0],
+			).toBeEnabled(),
+		);
 		const modelSelect = screen.getAllByRole("combobox", { name: "模型" })[0]!;
-		const thinkingSelect = screen.getAllByRole("combobox", { name: "思考深度" })[0]!;
+		const thinkingSelect = screen.getAllByRole("combobox", {
+			name: "思考深度",
+		})[0]!;
 
 		fireEvent.change(modelSelect, {
 			target: { value: "p\u0000m2" },
@@ -197,13 +205,21 @@ describe("PiPanel", () => {
 		});
 		await vi.waitFor(() => {
 			expect(sdk.pi.agent.setModel).toHaveBeenCalledWith(
-				"c1", "s1", { rootDir: "D:\\", relativePath: "repo" }, "p", "m2",
+				"c1",
+				"s1",
+				{ rootDir: "D:\\", relativePath: "repo" },
+				"p",
+				"m2",
 			);
 			expect(sdk.pi.agent.setThinking).toHaveBeenCalledWith(
-				"c1", "s1", { rootDir: "D:\\", relativePath: "repo" }, "high",
+				"c1",
+				"s1",
+				{ rootDir: "D:\\", relativePath: "repo" },
+				"high",
 			);
 		});
-		const thinkingCalls = (sdk.pi.agent.setThinking as ReturnType<typeof vi.fn>).mock.calls.length;
+		const thinkingCalls = (sdk.pi.agent.setThinking as ReturnType<typeof vi.fn>)
+			.mock.calls.length;
 		fireEvent.change(thinkingSelect, {
 			target: { value: "auto" },
 		});

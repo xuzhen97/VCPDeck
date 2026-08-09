@@ -77,7 +77,9 @@ describe("probePiCapability", () => {
 	});
 
 	it("Node 过旧返回 PI_NODE_UNSUPPORTED", async () => {
-		const result = await probePiCapability(fakeEnv({ nodeVersion: "22.18.99" }));
+		const result = await probePiCapability(
+			fakeEnv({ nodeVersion: "22.18.99" }),
+		);
 		expect(result).toMatchObject({
 			available: false,
 			code: "PI_NODE_UNSUPPORTED",
@@ -144,7 +146,8 @@ describe("probePiCapability", () => {
 		const result = await probePiCapability(
 			fakeEnv({
 				existsGitBash: async () => true,
-				readSettingsShellPath: async () => "C:\\Users\\test\\AppData\\Roaming\\npm\\bash.exe",
+				readSettingsShellPath: async () =>
+					"C:\\Users\\test\\AppData\\Roaming\\npm\\bash.exe",
 			}),
 		);
 		expect(JSON.stringify(result)).not.toContain("Users");

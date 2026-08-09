@@ -58,7 +58,9 @@ describe("PiMessageView", () => {
 				},
 			],
 		};
-		render(<PiMessageView message={message} toolResults={{ t1: "output here" }} />);
+		render(
+			<PiMessageView message={message} toolResults={{ t1: "output here" }} />,
+		);
 		expect(screen.getByTestId("tool-call")).toBeTruthy();
 		expect(screen.getByText("bash")).toBeTruthy();
 		expect(screen.queryByText("output here")).toBeNull();

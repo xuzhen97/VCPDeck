@@ -38,8 +38,15 @@ export function openPiEventStream(
 		source.onmessage = (event) => {
 			try {
 				const parsed = JSON.parse(event.data as string) as unknown;
-				if (isRecord(parsed) && typeof parsed.type === "string") {
-					handlers.onEvent(parsed as unknown as PiClientEvent);
+				const envelope =
+					isRecord(parsed) && isRecord(parsed.event) ? parsed : null;
+				const clientEvent = envelope ? envelope.event : parsed;
+				if (isRecord(clientEvent) && typeof clientEvent.type === "string") {
+					const eventWithRun =
+						envelope && typeof envelope.runId === "string"
+							? { ...clientEvent, runId: envelope.runId }
+							: clientEvent;
+					handlers.onEvent(eventWithRun as unknown as PiClientEvent);
 				} else {
 					handlers.onDiagnostics?.("SSE event 缺少 type 字段");
 				}
@@ -50,7 +57,9 @@ export function openPiEventStream(
 		source.onerror = () => {
 			// EventSource 自动重连；readyState CLOSED 表示无法再连
 			if (source?.readyState === EventSource.CLOSED && !closed) {
-				handlers.onFatal?.(new Error("SSE connection closed"));
+				const error = new Error("SSE connection closed");
+				resolveConnected();
+				handlers.onFatal?.(error);
 			}
 		};
 		return source;
@@ -65,6 +74,7 @@ export function openPiEventStream(
 		connected: () => connectedPromise ?? Promise.resolve(),
 		close() {
 			closed = true;
+			resolveConnected();
 			source?.close();
 		},
 	};

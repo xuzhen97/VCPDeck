@@ -30,27 +30,38 @@ function makePrismaMemory() {
 				jobs.push({ ...args.data });
 				return { id: args.data.id };
 			}),
-			update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
-				calls.push(args);
-				const job = jobs.find((j) => j.id === args.where.id);
-				if (!job) throw new Error("not found");
-				Object.assign(job, args.data);
-				return job;
-			}),
-			updateMany: vi.fn(async (args: {
-				where: { clientId: string; status?: { in: string[] } };
-				data: Record<string, unknown>;
-			}) => {
-				for (const j of jobs) {
-					const statuses = args.where.status?.in;
-					if (j.clientId === args.where.clientId && (!statuses || statuses.includes(String(j.status)))) {
-						Object.assign(j, args.data);
+			update: vi.fn(
+				async (args: {
+					where: { id: string };
+					data: Record<string, unknown>;
+				}) => {
+					calls.push(args);
+					const job = jobs.find((j) => j.id === args.where.id);
+					if (!job) throw new Error("not found");
+					Object.assign(job, args.data);
+					return job;
+				},
+			),
+			updateMany: vi.fn(
+				async (args: {
+					where: { clientId: string; status?: { in: string[] } };
+					data: Record<string, unknown>;
+				}) => {
+					for (const j of jobs) {
+						const statuses = args.where.status?.in;
+						if (
+							j.clientId === args.where.clientId &&
+							(!statuses || statuses.includes(String(j.status)))
+						) {
+							Object.assign(j, args.data);
+						}
 					}
-				}
-				return { count: 0 };
-			}),
-			findUnique: vi.fn(async (args: { where: { id: string } }) =>
-				jobs.find((j) => j.id === args.where.id) ?? null,
+					return { count: 0 };
+				},
+			),
+			findUnique: vi.fn(
+				async (args: { where: { id: string } }) =>
+					jobs.find((j) => j.id === args.where.id) ?? null,
 			),
 			findMany: vi.fn(async () => jobs),
 		},
@@ -146,9 +157,13 @@ describe("Pi 端到端 loopback 集成", () => {
 			queuedMessages: { steering: [], followUp: [] },
 		});
 
-		const job = (prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs()[0];
+		const job = (
+			prisma as { _getJobs: () => Array<Record<string, unknown>> }
+		)._getJobs()[0];
 		expect(job?.status).toBe("done");
-		expect(JSON.parse(String(job?.result))).toMatchObject({ stopReason: "settled" });
+		expect(JSON.parse(String(job?.result))).toMatchObject({
+			stopReason: "settled",
+		});
 	});
 
 	it("数据库与 prisma 调用不含 prompt/URL/thinking/tool 正文", async () => {
@@ -170,7 +185,12 @@ describe("Pi 端到端 loopback 集成", () => {
 		const leaked = JSON.stringify(
 			(prisma as { _getCalls: () => unknown[] })._getCalls(),
 		);
-		for (const sentinel of [PROMPT_SENTINEL, URL_SENTINEL, THINKING_SENTINEL, TOOL_SENTINEL]) {
+		for (const sentinel of [
+			PROMPT_SENTINEL,
+			URL_SENTINEL,
+			THINKING_SENTINEL,
+			TOOL_SENTINEL,
+		]) {
 			expect(leaked).not.toContain(sentinel);
 		}
 		// projectKey（64 hex）也不得持久化
@@ -189,17 +209,29 @@ describe("Pi 端到端 loopback 集成", () => {
 		// 断线：pending request 失败 + Job disconnected
 		requests.disconnect("c1");
 		await runs.markDisconnected("c1");
-		const jobs = (prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs();
+		const jobs = (
+			prisma as { _getJobs: () => Array<Record<string, unknown>> }
+		)._getJobs();
 		expect(jobs[0]?.status).toBe("disconnected");
 
 		// 重连：PI_STATE 恢复
 		await runs.reconcileState("c1", {
 			clientId: "c1",
-			runs: [{ jobId, runId: jobId, sessionId: "s1", status: "running", projectKey: "k".repeat(64) }],
+			runs: [
+				{
+					jobId,
+					runId: jobId,
+					sessionId: "s1",
+					status: "running",
+					projectKey: "k".repeat(64),
+				},
+			],
 		});
-		expect((prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs()[0]?.status).toBe(
-			"running",
-		);
+		expect(
+			(
+				prisma as { _getJobs: () => Array<Record<string, unknown>> }
+			)._getJobs()[0]?.status,
+		).toBe("running");
 		void emitEvent;
 	});
 
@@ -220,7 +252,9 @@ describe("Pi 端到端 loopback 集成", () => {
 			runId: "unknown-job",
 			event: { type: "agent_settled", sessionId: "other" },
 		});
-		const jobs = (prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs();
+		const jobs = (
+			prisma as { _getJobs: () => Array<Record<string, unknown>> }
+		)._getJobs();
 		expect(jobs[0]?.status).toBe("running"); // 未被影响
 	});
 });

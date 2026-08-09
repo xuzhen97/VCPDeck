@@ -65,7 +65,10 @@ export interface PiSessionReader {
 	): Promise<{ mimeType: string; data: string }>;
 	rename(sessionId: string, name: string): Promise<void>;
 	delete(sessionId: string): Promise<void>;
-	fork(sessionId: string, upToMessageId: string): Promise<{ sessionId: string }>;
+	fork(
+		sessionId: string,
+		upToMessageId: string,
+	): Promise<{ sessionId: string }>;
 	clone(sessionId: string): Promise<{ sessionId: string }>;
 	navigate(sessionId: string, leafId: string): Promise<PiSessionContextPage>;
 }
@@ -80,7 +83,9 @@ export function createPiSessionReader(
 
 	async function loadList(): Promise<PiSessionInfo[]> {
 		if (listCache) return listCache;
-		const piSessions: PiSdkSessionInfo[] = await (await getSdk()).SessionManager.list(cwd, sessionDir);
+		const piSessions: PiSdkSessionInfo[] = await (
+			await getSdk()
+		).SessionManager.list(cwd, sessionDir);
 		const pathToId = new Map<string, string>();
 		for (const s of piSessions) pathToId.set(pathKey(s.path), s.id);
 		const out: PiSessionInfo[] = [];
@@ -146,10 +151,17 @@ export function createPiSessionReader(
 							if (!isRecord(block)) return null;
 							switch (block.type) {
 								case "text":
-									return { type: "text", text: String(block.text ?? "") } satisfies PiTextContent;
+									return {
+										type: "text",
+										text: String(block.text ?? ""),
+									} satisfies PiTextContent;
 								case "thinking": {
-									const placeholder: PiThinkingPlaceholder = { type: "thinking", deferred: true };
-									if (typeof block.durationMs === "number") placeholder.durationMs = block.durationMs;
+									const placeholder: PiThinkingPlaceholder = {
+										type: "thinking",
+										deferred: true,
+									};
+									if (typeof block.durationMs === "number")
+										placeholder.durationMs = block.durationMs;
 									return placeholder;
 								}
 								case "toolCall":
@@ -160,7 +172,11 @@ export function createPiSessionReader(
 										input: isRecord(block.arguments) ? block.arguments : {},
 									} satisfies PiToolCallContent;
 								case "image":
-									return imagePlaceholder(entry.id, i, String(block.mimeType ?? "image/png"));
+									return imagePlaceholder(
+										entry.id,
+										i,
+										String(block.mimeType ?? "image/png"),
+									);
 								default:
 									return null;
 							}
@@ -205,10 +221,17 @@ export function createPiSessionReader(
 						.map((block, i) => {
 							if (!isRecord(block)) return null;
 							if (block.type === "text") {
-								return { type: "text", text: String(block.text ?? "") } satisfies PiTextContent;
+								return {
+									type: "text",
+									text: String(block.text ?? ""),
+								} satisfies PiTextContent;
 							}
 							if (block.type === "image") {
-								return imagePlaceholder(entry.id, i, String(block.mimeType ?? "image/png"));
+								return imagePlaceholder(
+									entry.id,
+									i,
+									String(block.mimeType ?? "image/png"),
+								);
 							}
 							return null;
 						})
@@ -228,7 +251,10 @@ export function createPiSessionReader(
 				return {
 					id: entry.id,
 					role: "custom",
-					kind: String((entry as unknown as { customType?: string }).customType ?? "custom"),
+					kind: String(
+						(entry as unknown as { customType?: string }).customType ??
+							"custom",
+					),
 				};
 			default:
 				return null;
@@ -245,7 +271,11 @@ export function createPiSessionReader(
 		const entries = sm.getEntries() as unknown as SessionEntry[];
 		const byId = new Map<string, SessionEntry>();
 		for (const e of entries) byId.set(e.id, e);
-		const selected = (await getSdk()).buildContextEntries(entries, leafId ?? sm.getLeafId(), byId);
+		const selected = (await getSdk()).buildContextEntries(
+			entries,
+			leafId ?? sm.getLeafId(),
+			byId,
+		);
 		const all: PiMessage[] = [];
 		for (const entry of selected) {
 			const m = entryToMessage(entry);
@@ -253,14 +283,21 @@ export function createPiSessionReader(
 		}
 		if (cursor) {
 			const idx = all.findIndex((m) => m.id === cursor);
-			if (idx === -1) throw piError("PI_SESSION_NOT_FOUND", "Cursor entry not found");
+			if (idx === -1)
+				throw piError("PI_SESSION_NOT_FOUND", "Cursor entry not found");
 			const start = Math.max(0, idx - PI_CONTEXT_PAGE_SIZE);
 			const window = all.slice(start, idx);
-			return { messages: window, nextCursor: start > 0 ? (all[start]?.id ?? null) : null };
+			return {
+				messages: window,
+				nextCursor: start > 0 ? (all[start]?.id ?? null) : null,
+			};
 		}
 		const start = Math.max(0, all.length - PI_CONTEXT_PAGE_SIZE);
 		const window = all.slice(start);
-		return { messages: window, nextCursor: start > 0 ? (all[start]?.id ?? null) : null };
+		return {
+			messages: window,
+			nextCursor: start > 0 ? (all[start]?.id ?? null) : null,
+		};
 	}
 
 	return {
@@ -298,7 +335,9 @@ export function createPiSessionReader(
 					created: header?.timestamp ?? new Date().toISOString(),
 					modified: header?.timestamp ?? new Date().toISOString(),
 					messageCount: messages.length,
-					firstMessage: truncatePreview(textOf(messages.find((m) => m.role === "user")?.content)),
+					firstMessage: truncatePreview(
+						textOf(messages.find((m) => m.role === "user")?.content),
+					),
 					parentSessionId: header?.parentSession
 						? sessionIdFromPath(header.parentSession) || null
 						: null,
@@ -318,7 +357,8 @@ export function createPiSessionReader(
 			if (!entry || entry.type !== "message") {
 				throw piError("PI_SESSION_NOT_FOUND", "Entry not found");
 			}
-			const content = (entry.message as unknown as { content?: unknown }).content;
+			const content = (entry.message as unknown as { content?: unknown })
+				.content;
 			if (!Array.isArray(content) || !isRecord(content[blockIndex])) {
 				throw piError("PI_IMAGE_INVALID", "Block is not an image");
 			}
@@ -326,11 +366,15 @@ export function createPiSessionReader(
 			if (block.type !== "image" || typeof block.data !== "string") {
 				throw piError("PI_IMAGE_INVALID", "Block is not an image");
 			}
-			return { mimeType: String(block.mimeType ?? "image/png"), data: block.data };
+			return {
+				mimeType: String(block.mimeType ?? "image/png"),
+				data: block.data,
+			};
 		},
 		async rename(sessionId, name) {
 			const trimmed = name.trim();
-			if (!trimmed) throw piError("PI_PROTOCOL_INVALID", "Session name must not be empty");
+			if (!trimmed)
+				throw piError("PI_PROTOCOL_INVALID", "Session name must not be empty");
 			const path = await resolvePath(sessionId);
 			const sm = (await getSdk()).SessionManager.open(path);
 			sm.appendSessionInfo(trimmed);
@@ -359,7 +403,11 @@ export function createPiSessionReader(
 						type?: string;
 						parentSession?: string;
 					};
-					if (header.type === "session" && header.parentSession && pathKey(header.parentSession) === targetKey) {
+					if (
+						header.type === "session" &&
+						header.parentSession &&
+						pathKey(header.parentSession) === targetKey
+					) {
 						header.parentSession = parentSessionPath ?? undefined;
 						lines[0] = JSON.stringify(header);
 						const tmp = `${childPath}.vcpdeck-reparent-${randomUUID()}`;
@@ -455,5 +503,7 @@ function projectTree(
 			children: projectedChildren,
 		};
 	};
-	return nodes.map((n) => toNode(n, 1)).filter((n): n is PiSessionTreeNode => n !== null);
+	return nodes
+		.map((n) => toNode(n, 1))
+		.filter((n): n is PiSessionTreeNode => n !== null);
 }

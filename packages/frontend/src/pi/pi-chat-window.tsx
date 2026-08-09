@@ -47,6 +47,35 @@ function ProcessDetails({ group }: { group: PiTurnGroup }) {
 	);
 }
 
+function LiveThinkingBlock({ state }: { state: PiSessionState }) {
+	const [expanded, setExpanded] = useState(false);
+	if (!state.thinkingText) return null;
+	const label =
+		typeof state.thinkingDurationMs === "number"
+			? `已思考 ${(state.thinkingDurationMs / 1000).toFixed(1)} 秒`
+			: "思考中…";
+	return (
+		<div
+			className="my-1 rounded border border-border/70 bg-secondary/20 text-xs"
+			data-testid="live-thinking-block"
+		>
+			<button
+				type="button"
+				className="flex w-full items-center gap-2 px-2 py-1 text-left text-muted-foreground"
+				onClick={() => setExpanded((value) => !value)}
+			>
+				<span className="italic">{label}</span>
+				<span className="ml-auto">{expanded ? "收起思考" : "展开思考"}</span>
+			</button>
+			{expanded && (
+				<pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words border-t border-border/60 px-2 py-1.5 text-muted-foreground">
+					{state.thinkingText}
+				</pre>
+			)}
+		</div>
+	);
+}
+
 function toolResultsOf(messages: PiMessage[]): Record<string, string> {
 	const out: Record<string, string> = {};
 	for (const m of messages) {
@@ -74,12 +103,21 @@ export function PiChatWindow({
 	onImageLoad?: (block: PiImagePlaceholder) => void;
 	imageUrls?: Record<string, string>;
 }) {
-	const groups = useMemo(() => buildTurnGroups(state.messages), [state.messages]);
-	const toolResults = useMemo(() => toolResultsOf(state.messages), [state.messages]);
+	const groups = useMemo(
+		() => buildTurnGroups(state.messages),
+		[state.messages],
+	);
+	const toolResults = useMemo(
+		() => toolResultsOf(state.messages),
+		[state.messages],
+	);
 
 	return (
 		<div className="flex h-full min-h-0 flex-col">
-			<div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3" data-testid="pi-chat-window">
+			<div
+				className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
+				data-testid="pi-chat-window"
+			>
 				{info && (
 					<div className="text-center text-xs text-muted-foreground">
 						{info.name || info.firstMessage || "新会话"}
@@ -92,7 +130,12 @@ export function PiChatWindow({
 				)}
 				{state.hasMore && (
 					<div className="text-center">
-						<Button type="button" size="sm" variant="outline" onClick={onLoadMore}>
+						<Button
+							type="button"
+							size="sm"
+							variant="outline"
+							onClick={onLoadMore}
+						>
 							加载更早消息
 						</Button>
 					</div>
@@ -102,6 +145,7 @@ export function PiChatWindow({
 						开始一段新的 Pi 会话
 					</div>
 				)}
+				<LiveThinkingBlock state={state} />
 				{groups.map((group, gi) => (
 					<div key={group.userMessage?.id ?? `g${gi}`} className="space-y-2">
 						{group.userMessage && (
@@ -127,7 +171,10 @@ export function PiChatWindow({
 					</div>
 				))}
 				{state.status === "running" && (
-					<div className="text-xs text-muted-foreground" data-testid="streaming-indicator">
+					<div
+						className="text-xs text-muted-foreground"
+						data-testid="streaming-indicator"
+					>
 						运行中…
 					</div>
 				)}

@@ -68,7 +68,13 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 		const timestamp = new Date().toISOString();
 		await writeFile(
 			join(sessionDir, `${timestamp.replace(/[:.]/g, "-")}_test-session.jsonl`),
-			JSON.stringify({ type: "session", version: 3, id: "test-1", timestamp, cwd }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "test-1",
+				timestamp,
+				cwd,
+			}) + "\n",
 			"utf8",
 		);
 
@@ -82,7 +88,8 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 		if (msg.type === "response") {
 			expect(msg.ok).toBe(true);
 			if (msg.ok) {
-				const sessions = (msg.data as { sessions: Array<{ id: string }> }).sessions;
+				const sessions = (msg.data as { sessions: Array<{ id: string }> })
+					.sessions;
 				expect(sessions.length).toBeGreaterThanOrEqual(1);
 			}
 		}
@@ -115,8 +122,11 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 				});
 				expect(listed.type).toBe("response");
 				if (listed.type === "response" && listed.ok) {
-					const sessions = (listed.data as { sessions: Array<{ id: string }> }).sessions;
-					expect(sessions.some((session) => session.id === sessionId)).toBe(true);
+					const sessions = (listed.data as { sessions: Array<{ id: string }> })
+						.sessions;
+					expect(sessions.some((session) => session.id === sessionId)).toBe(
+						true,
+					);
 				}
 
 				const detail = await requestOnce(child, {
@@ -130,6 +140,196 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 			}
 		}
 	});
+	it("已有 Session 重建时保留 JSONL 中的模型与思考深度", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
+		const cwd = join(agentDir, "project");
+		await mkdir(cwd, { recursive: true });
+		roots.push(agentDir);
+		await writeFile(
+			join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					AxonHub: {
+						baseUrl: "http://127.0.0.1:1/v1",
+						api: "openai-completions",
+						apiKey: "test-key",
+						models: [
+							{
+								id: "gpt-5.5",
+								name: "GPT-5.5",
+								reasoning: true,
+								input: ["text"],
+								contextWindow: 128000,
+								maxTokens: 8192,
+								thinkingLevelMap: { off: "none", max: "max" },
+							},
+							{
+								id: "deepseek-v4-flash",
+								name: "DeepSeek Flash",
+								reasoning: true,
+								input: ["text"],
+								contextWindow: 128000,
+								maxTokens: 8192,
+								thinkingLevelMap: { off: "none", max: "max" },
+							},
+						],
+					},
+				},
+			}),
+			"utf8",
+		);
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+
+		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+		const sm = SessionManager.create(cwd);
+		const sessionDir = sm.getSessionDir();
+		const sessionFile = join(
+			sessionDir,
+			`${new Date().toISOString().replace(/[:.]/g, "-")}_restore.jsonl`,
+		);
+		await writeFile(
+			sessionFile,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "restore-session",
+					timestamp: new Date().toISOString(),
+					cwd,
+				}),
+				JSON.stringify({
+					type: "model_change",
+					id: "model-1",
+					parentId: null,
+					timestamp: new Date().toISOString(),
+					provider: "AxonHub",
+					modelId: "deepseek-v4-flash",
+				}),
+				JSON.stringify({
+					type: "thinking_level_change",
+					id: "thinking-1",
+					parentId: "model-1",
+					timestamp: new Date().toISOString(),
+					thinkingLevel: "max",
+				}),
+				JSON.stringify({
+					type: "message",
+					id: "message-1",
+					parentId: "thinking-1",
+					timestamp: new Date().toISOString(),
+					message: {
+						role: "user",
+						content: [{ type: "text", text: "hello" }],
+						timestamp: Date.now(),
+					},
+				}),
+			].join("\n") + "\n",
+			"utf8",
+		);
+
+		const child = spawnWorker(cwd, { PI_CODING_AGENT_DIR: agentDir });
+		const msg = await requestOnce(child, {
+			requestId: "r-state-restore",
+			action: "agent.state",
+			sessionId: "restore-session",
+			cwdRef: { rootDir: agentDir, relativePath: "project" },
+		});
+
+		expect(msg).toMatchObject({
+			type: "response",
+			ok: true,
+			data: {
+				model: { provider: "AxonHub", modelId: "deepseek-v4-flash" },
+				thinkingLevel: "max",
+			},
+		});
+	});
+
+	it("只有模型与思考记录的 Session 也保留持久化偏好", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
+		const cwd = join(agentDir, "project");
+		await mkdir(cwd, { recursive: true });
+		roots.push(agentDir);
+		await writeFile(
+			join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					AxonHub: {
+						baseUrl: "http://127.0.0.1:1/v1",
+						api: "openai-completions",
+						apiKey: "test-key",
+						models: [
+							{
+								id: "gpt-5.5",
+								reasoning: true,
+								input: ["text"],
+								thinkingLevelMap: { off: "none", max: "max" },
+							},
+							{
+								id: "deepseek-v4-flash",
+								reasoning: true,
+								input: ["text"],
+								thinkingLevelMap: { off: "none", max: "max" },
+							},
+						],
+					},
+				},
+			}),
+			"utf8",
+		);
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+		const sm = SessionManager.create(cwd);
+		const sessionFile = join(
+			sm.getSessionDir(),
+			`${new Date().toISOString().replace(/[:.]/g, "-")}_prefs-only.jsonl`,
+		);
+		await writeFile(
+			sessionFile,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "prefs-only",
+					timestamp: new Date().toISOString(),
+					cwd,
+				}),
+				JSON.stringify({
+					type: "model_change",
+					id: "model-1",
+					parentId: null,
+					timestamp: new Date().toISOString(),
+					provider: "AxonHub",
+					modelId: "deepseek-v4-flash",
+				}),
+				JSON.stringify({
+					type: "thinking_level_change",
+					id: "thinking-1",
+					parentId: "model-1",
+					timestamp: new Date().toISOString(),
+					thinkingLevel: "max",
+				}),
+			].join("\n") + "\n",
+			"utf8",
+		);
+
+		const child = spawnWorker(cwd, { PI_CODING_AGENT_DIR: agentDir });
+		const msg = await requestOnce(child, {
+			requestId: "r-prefs-only",
+			action: "agent.state",
+			sessionId: "prefs-only",
+			cwdRef: { rootDir: agentDir, relativePath: "project" },
+		});
+		expect(msg).toMatchObject({
+			type: "response",
+			ok: true,
+			data: {
+				model: { provider: "AxonHub", modelId: "deepseek-v4-flash" },
+				thinkingLevel: "max",
+			},
+		});
+	});
+
 	it("parent disconnect 后 Worker 退出", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
 		const cwd = join(agentDir, "project");

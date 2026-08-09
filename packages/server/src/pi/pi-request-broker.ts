@@ -22,7 +22,8 @@ function piError(code: string, message: string): Error {
  */
 @Injectable()
 export class PiRequestBroker {
-	private emitter: ((clientId: string, request: PiRequest) => void) | null = null;
+	private emitter: ((clientId: string, request: PiRequest) => void) | null =
+		null;
 	private readonly pending = new Map<string, PendingRequest>();
 
 	/** Gateway afterInit 时绑定 emitter（避免循环依赖） */
@@ -61,7 +62,9 @@ export class PiRequestBroker {
 			if (pending.clientId === clientId) {
 				clearTimeout(pending.timer);
 				this.pending.delete(requestId);
-				pending.reject(piError("PI_CLIENT_DISCONNECTED", "Client disconnected"));
+				pending.reject(
+					piError("PI_CLIENT_DISCONNECTED", "Client disconnected"),
+				);
 			}
 		}
 	}

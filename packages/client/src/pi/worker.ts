@@ -4,7 +4,10 @@
  * 主进程不静态 import Pi SDK；本文件由 fork 启动，运行时才动态加载 SDK。
  */
 import type { PiAttachmentDescriptor, PiRequest } from "@vcpdeck/shared";
-import { createPiSessionReader, type PiSessionReader } from "./session-reader.js";
+import {
+	createPiSessionReader,
+	type PiSessionReader,
+} from "./session-reader.js";
 import {
 	startPiAgentSession,
 	type PiAgentSessionWrapper,
@@ -44,11 +47,14 @@ function normalizeError(err: unknown): { code: string; message: string } {
 			message: err instanceof Error ? err.message : "Request failed",
 		};
 	}
-	if (err instanceof Error) return { code: "PI_RUNTIME_UNAVAILABLE", message: err.message };
+	if (err instanceof Error)
+		return { code: "PI_RUNTIME_UNAVAILABLE", message: err.message };
 	return { code: "PI_RUNTIME_UNAVAILABLE", message: String(err) };
 }
 
-async function ensureWrapper(sessionId: string): Promise<PiAgentSessionWrapper> {
+async function ensureWrapper(
+	sessionId: string,
+): Promise<PiAgentSessionWrapper> {
 	if (wrapper && wrapper.sessionId === sessionId && wrapper.isAlive()) {
 		return wrapper;
 	}
@@ -59,7 +65,9 @@ async function ensureWrapper(sessionId: string): Promise<PiAgentSessionWrapper> 
 	const sessions = await (await getSdk()).SessionManager.list(cwd);
 	const found = sessions.find((s) => s.id === sessionId);
 	if (!found) {
-		throw Object.assign(new Error("Session not found"), { code: "PI_SESSION_NOT_FOUND" });
+		throw Object.assign(new Error("Session not found"), {
+			code: "PI_SESSION_NOT_FOUND",
+		});
 	}
 	const w = await startPiAgentSession({ cwd, sessionFile: found.path });
 	w.onEvent((event) => {
@@ -86,53 +94,103 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 		case "session.new":
 			return await reader.newSession();
 		case "session.get":
-			if (!request.sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
+			if (!request.sessionId)
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
 			return await reader.get(request.sessionId);
 		case "session.context":
-			if (!request.sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
+			if (!request.sessionId)
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
 			return await reader.context(
 				request.sessionId,
-				typeof request.payload?.leafId === "string" ? request.payload.leafId : undefined,
-				typeof request.payload?.cursor === "string" ? request.payload.cursor : undefined,
+				typeof request.payload?.leafId === "string"
+					? request.payload.leafId
+					: undefined,
+				typeof request.payload?.cursor === "string"
+					? request.payload.cursor
+					: undefined,
 			);
 		case "session.entryContent":
-			if (!request.sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
+			if (!request.sessionId)
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
 			return await reader.entryContent(
 				request.sessionId,
 				String(request.payload?.entryId ?? ""),
 				Number(request.payload?.blockIndex ?? 0),
 			);
 		case "session.rename":
-			if (!request.sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
-			await reader.rename(request.sessionId, String(request.payload?.name ?? ""));
+			if (!request.sessionId)
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
+			await reader.rename(
+				request.sessionId,
+				String(request.payload?.name ?? ""),
+			);
 			return { ok: true };
 		case "session.delete":
-			if (!request.sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
+			if (!request.sessionId)
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
 			await reader.delete(request.sessionId);
 			return { ok: true };
 		case "session.fork":
-			if (!request.sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
-			return await reader.fork(request.sessionId, String(request.payload?.messageId ?? ""));
+			if (!request.sessionId)
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
+			return await reader.fork(
+				request.sessionId,
+				String(request.payload?.messageId ?? ""),
+			);
 		case "session.clone":
-			if (!request.sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
+			if (!request.sessionId)
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
 			return await reader.clone(request.sessionId);
 		case "session.navigate":
-			if (!request.sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
-			return await reader.navigate(request.sessionId, String(request.payload?.targetId ?? ""));
+			if (!request.sessionId)
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
+			return await reader.navigate(
+				request.sessionId,
+				String(request.payload?.targetId ?? ""),
+			);
 		case "models.list": {
 			// 项目级模型列表：可用模型 ∩ enabledModels（无 session 依赖）
-			const settings = (await getSdk()).SettingsManager.create(cwd, (await getSdk()).getAgentDir());
+			const settings = (await getSdk()).SettingsManager.create(
+				cwd,
+				(await getSdk()).getAgentDir(),
+			);
 			const runtime = await (await getSdk()).ModelRuntime.create();
 			const available = await runtime.getAvailable();
 			const enabled = settings.getEnabledModels();
 			if (!enabled || enabled.length === 0) {
-				return { models: available.map((m) => ({ provider: m.provider, modelId: m.id })) };
+				return {
+					models: available.map((m) => ({
+						provider: m.provider,
+						modelId: m.id,
+					})),
+				};
 			}
 			const { resolveModelScopeWithDiagnostics } = await import(
 				"@earendil-works/pi-coding-agent"
 			);
-			const { scopedModels } = await resolveModelScopeWithDiagnostics(enabled, runtime);
-			const allowed = new Set(scopedModels.map((s) => `${s.model.provider}/${s.model.id}`));
+			const { scopedModels } = await resolveModelScopeWithDiagnostics(
+				enabled,
+				runtime,
+			);
+			const allowed = new Set(
+				scopedModels.map((s) => `${s.model.provider}/${s.model.id}`),
+			);
 			return {
 				models: available
 					.filter((m) => allowed.has(`${m.provider}/${m.id}`))
@@ -143,7 +201,9 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 			// Agent 操作：需要 wrapper
 			const sessionId = request.sessionId ?? active?.sessionId;
 			if (!sessionId) {
-				throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
+				throw Object.assign(new Error("sessionId required"), {
+					code: "PI_PROTOCOL_INVALID",
+				});
 			}
 			const w = await ensureWrapper(sessionId);
 			if (request.action === "agent.prompt") {
@@ -154,7 +214,10 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 				};
 				const payload = { ...(request.payload ?? {}) };
 				// 图片附件：下载校验后转为 SDK image content（失败清空并抛稳定错误）
-				if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
+				if (
+					Array.isArray(payload.attachments) &&
+					payload.attachments.length > 0
+				) {
 					const downloaded = await downloadPromptImages(
 						payload.attachments as PiAttachmentDescriptor[],
 					);

@@ -47,12 +47,58 @@ describe("openPiEventStream", () => {
 	it("转发解析后的事件", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const events: PiClientEvent[] = [];
-		const stream = openPiEventStream("/events", { onEvent: (e) => events.push(e) });
+		const stream = openPiEventStream("/events", {
+			onEvent: (e) => events.push(e),
+		});
 
-		last().onmessage?.({ data: JSON.stringify({ type: "agent_end", sessionId: "s1" }) });
+		last().onmessage?.({
+			data: JSON.stringify({ type: "agent_end", sessionId: "s1" }),
+		});
 		expect(events).toHaveLength(1);
 		expect(events[0]).toMatchObject({ type: "agent_end", sessionId: "s1" });
 		void stream;
+	});
+
+	it("解包 Server 的 PiEvent envelope 后转发内层事件", () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const events: PiClientEvent[] = [];
+		openPiEventStream("/events", { onEvent: (e) => events.push(e) });
+
+		last().onmessage?.({
+			data: JSON.stringify({
+				clientId: "c1",
+				sessionId: "s1",
+				jobId: "j1",
+				runId: "j1",
+				event: { type: "agent_settled", sessionId: "s1" },
+			}),
+		});
+
+		expect(events).toEqual([
+			{ type: "agent_settled", sessionId: "s1", runId: "j1" },
+		]);
+	});
+
+	it("envelope runId 覆盖内层冲突值", () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const events: PiClientEvent[] = [];
+		openPiEventStream("/events", { onEvent: (e) => events.push(e) });
+
+		last().onmessage?.({
+			data: JSON.stringify({
+				clientId: "c1",
+				runId: "outer-run",
+				event: {
+					type: "agent_start",
+					sessionId: "s1",
+					runId: "inner-run",
+				},
+			}),
+		});
+
+		expect(events).toEqual([
+			{ type: "agent_start", sessionId: "s1", runId: "outer-run" },
+		]);
 	});
 
 	it("解析失败只上报诊断信息，不抛异常", async () => {

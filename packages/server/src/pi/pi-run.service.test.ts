@@ -19,28 +19,38 @@ function prismaMock() {
 				jobs.push({ ...args.data });
 				return Promise.resolve({ id: args.data.id });
 			}),
-			update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
-				const job = jobs.find((j) => j.id === args.where.id);
-				if (!job) throw new Error("not found");
-				Object.assign(job, args.data);
-				return job;
-			}),
+			update: vi.fn(
+				async (args: {
+					where: { id: string };
+					data: Record<string, unknown>;
+				}) => {
+					const job = jobs.find((j) => j.id === args.where.id);
+					if (!job) throw new Error("not found");
+					Object.assign(job, args.data);
+					return job;
+				},
+			),
 			findUnique: vi.fn(async (args: { where: { id: string } }) => {
 				return jobs.find((j) => j.id === args.where.id) ?? null;
 			}),
 			findMany: vi.fn(async () => jobs),
-			updateMany: vi.fn(async (args: {
-				where: { clientId: string; status?: { in: string[] } };
-				data: Record<string, unknown>;
-			}) => {
-				for (const j of jobs) {
-					const statuses = args.where.status?.in;
-					if (j.clientId === args.where.clientId && (!statuses || statuses.includes(String(j.status)))) {
-						Object.assign(j, args.data);
+			updateMany: vi.fn(
+				async (args: {
+					where: { clientId: string; status?: { in: string[] } };
+					data: Record<string, unknown>;
+				}) => {
+					for (const j of jobs) {
+						const statuses = args.where.status?.in;
+						if (
+							j.clientId === args.where.clientId &&
+							(!statuses || statuses.includes(String(j.status)))
+						) {
+							Object.assign(j, args.data);
+						}
 					}
-				}
-				return { count: 0 };
-			}),
+					return { count: 0 };
+				},
+			),
 		},
 		_getJobs: () => jobs,
 	};
@@ -59,7 +69,9 @@ describe("PiRunService", () => {
 		});
 
 		expect(jobId).toBe(runId);
-		const created = (prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs()[0];
+		const created = (
+			prisma as { _getJobs: () => Array<Record<string, unknown>> }
+		)._getJobs()[0];
 		expect(created?.type).toBe("agent.run");
 		expect(created?.status).toBe("pending");
 		expect(JSON.parse(String(created?.payload))).toEqual({
@@ -82,12 +94,20 @@ describe("PiRunService", () => {
 			projectKey: "k1",
 		});
 		await expect(
-			service.createRun(actor, { clientId: "c1", sessionId: "s2", projectKey: "k1" }),
+			service.createRun(actor, {
+				clientId: "c1",
+				sessionId: "s2",
+				projectKey: "k1",
+			}),
 		).rejects.toMatchObject({ code: "PI_PROJECT_BUSY" });
 
 		// 不同项目可并行
 		await expect(
-			service.createRun(actor, { clientId: "c1", sessionId: "s3", projectKey: "k2" }),
+			service.createRun(actor, {
+				clientId: "c1",
+				sessionId: "s3",
+				projectKey: "k2",
+			}),
 		).resolves.toBeDefined();
 	});
 
@@ -101,7 +121,9 @@ describe("PiRunService", () => {
 		});
 		await service.accept(jobId);
 
-		await expect(service.assertOwner(jobId, "other-user")).rejects.toMatchObject({
+		await expect(
+			service.assertOwner(jobId, "other-user"),
+		).rejects.toMatchObject({
 			code: "PI_CONTROL_FORBIDDEN",
 		});
 		await expect(service.assertOwner(jobId, "user-1")).resolves.toBeUndefined();
@@ -119,12 +141,16 @@ describe("PiRunService", () => {
 		await service.accept(jobId);
 		await service.waitForInput(jobId);
 		expect(
-			(prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs()[0]?.status,
+			(
+				prisma as { _getJobs: () => Array<Record<string, unknown>> }
+			)._getJobs()[0]?.status,
 		).toBe("waiting_input");
 
 		await service.resume(jobId);
 		expect(
-			(prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs()[0]?.status,
+			(
+				prisma as { _getJobs: () => Array<Record<string, unknown>> }
+			)._getJobs()[0]?.status,
 		).toBe("running");
 	});
 
@@ -146,7 +172,9 @@ describe("PiRunService", () => {
 			queuedMessages: { steering: [], followUp: [] },
 			model: { provider: "p", modelId: "m" },
 		});
-		const job = (prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs()[0];
+		const job = (
+			prisma as { _getJobs: () => Array<Record<string, unknown>> }
+		)._getJobs()[0];
 		expect(job?.status).toBe("done");
 		const result = JSON.parse(String(job?.result));
 		expect(result).toEqual({
@@ -171,7 +199,11 @@ describe("PiRunService", () => {
 
 		// 项目锁释放
 		await expect(
-			service.createRun(actor, { clientId: "c1", sessionId: "s9", projectKey: "k1" }),
+			service.createRun(actor, {
+				clientId: "c1",
+				sessionId: "s9",
+				projectKey: "k1",
+			}),
 		).resolves.toBeDefined();
 	});
 
@@ -184,7 +216,9 @@ describe("PiRunService", () => {
 			projectKey: "k1",
 		});
 		await service.fail(jobId, "PI_WORKER_EXITED", "worker died");
-		const job = (prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs()[0];
+		const job = (
+			prisma as { _getJobs: () => Array<Record<string, unknown>> }
+		)._getJobs()[0];
 		expect(job?.status).toBe("error");
 		expect(job?.errorCode).toBe("PI_WORKER_EXITED");
 	});
@@ -200,7 +234,9 @@ describe("PiRunService", () => {
 		await service.accept(jobId);
 		await service.markDisconnected("c1");
 		expect(
-			(prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs()[0]?.status,
+			(
+				prisma as { _getJobs: () => Array<Record<string, unknown>> }
+			)._getJobs()[0]?.status,
 		).toBe("disconnected");
 
 		await service.reconcileState("c1", {
@@ -216,7 +252,9 @@ describe("PiRunService", () => {
 			],
 		});
 		expect(
-			(prisma as { _getJobs: () => Array<Record<string, unknown>> })._getJobs()[0]?.status,
+			(
+				prisma as { _getJobs: () => Array<Record<string, unknown>> }
+			)._getJobs()[0]?.status,
 		).toBe("running");
 	});
 
@@ -231,6 +269,8 @@ describe("PiRunService", () => {
 		await expect(service.assertIdleMutation("c1", "k1")).rejects.toMatchObject({
 			code: "PI_PROJECT_BUSY",
 		});
-		await expect(service.assertIdleMutation("c1", "k2")).resolves.toBeUndefined();
+		await expect(
+			service.assertIdleMutation("c1", "k2"),
+		).resolves.toBeUndefined();
 	});
 });

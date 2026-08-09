@@ -107,7 +107,12 @@ export type PiResponse =
 export const MAX_PI_IMAGES_PER_PROMPT = 10;
 export const MAX_PI_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_PI_IMAGES_TOTAL_BYTES = 100 * 1024 * 1024;
-export const PI_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+export const PI_IMAGE_MIME_TYPES = [
+	"image/png",
+	"image/jpeg",
+	"image/gif",
+	"image/webp",
+] as const;
 
 /** prompt 附件描述符（transient，不进 Job/日志） */
 export interface PiAttachmentDescriptor {
@@ -152,12 +157,28 @@ export type PiClientEvent =
 	| { type: "agent_start"; sessionId: string }
 	| { type: "agent_end"; sessionId: string }
 	| { type: "prompt_done"; sessionId: string }
-	| { type: "prompt_error"; sessionId: string; code: PiErrorCode; message: string }
+	| {
+			type: "prompt_error";
+			sessionId: string;
+			code: PiErrorCode;
+			message: string;
+	  }
 	| { type: "agent_settled"; sessionId: string }
-	| { type: "thinking_progress"; sessionId: string; stage: string; durationMs?: number }
+	| {
+			type: "thinking_progress";
+			sessionId: string;
+			stage: string;
+			text?: string;
+			durationMs?: number;
+	  }
 	| { type: "extension_request"; sessionId: string; ui: PiExtensionUiRequest }
 	| { type: "message_update"; sessionId: string; text?: string; role?: string }
-	| { type: "run_created"; sessionId: string; submissionId: string; runId: string }
+	| {
+			type: "run_created";
+			sessionId: string;
+			submissionId: string;
+			runId: string;
+	  }
 	| { type: "usage_update"; sessionId: string; usage: Record<string, unknown> }
 	| { type: "status_update"; sessionId: string; status: string };
 
@@ -215,6 +236,8 @@ export interface PiImagePlaceholder {
 export interface PiThinkingPlaceholder {
 	type: "thinking";
 	deferred: true;
+	/** 当前回合实时思考正文；历史 Session 不填充。 */
+	text?: string;
 	durationMs?: number;
 }
 
@@ -316,8 +339,10 @@ export interface PiModelInfo {
 
 /** 判断值是否为 Pi SDK 支持的思考深度 */
 export function isPiThinkingLevel(value: unknown): value is PiThinkingLevel {
-	return typeof value === "string" &&
-		(PI_THINKING_LEVELS as readonly string[]).includes(value);
+	return (
+		typeof value === "string" &&
+		(PI_THINKING_LEVELS as readonly string[]).includes(value)
+	);
 }
 
 /** Agent 状态快照（settlement check 使用） */
@@ -400,24 +425,38 @@ const EVENT_TYPES: ReadonlySet<string> = new Set<PiClientEvent["type"]>([
 	"status_update",
 ]);
 
-const RUN_STATUSES: ReadonlySet<string> = new Set(["running", "waiting_input", "done", "error"]);
+const RUN_STATUSES: ReadonlySet<string> = new Set([
+	"running",
+	"waiting_input",
+	"done",
+	"error",
+]);
 
 function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function assertRecord(v: unknown, what: string): asserts v is Record<string, unknown> {
+function assertRecord(
+	v: unknown,
+	what: string,
+): asserts v is Record<string, unknown> {
 	if (!isRecord(v)) throw new PiProtocolError(`${what} 必须是对象`);
 }
 
-function assertKeys(v: Record<string, unknown>, allowed: Set<string>, what: string): void {
+function assertKeys(
+	v: Record<string, unknown>,
+	allowed: Set<string>,
+	what: string,
+): void {
 	for (const key of Object.keys(v)) {
-		if (!allowed.has(key)) throw new PiProtocolError(`${what} 含未知字段 ${key}`);
+		if (!allowed.has(key))
+			throw new PiProtocolError(`${what} 含未知字段 ${key}`);
 	}
 }
 
 function assertString(v: unknown, what: string): asserts v is string {
-	if (typeof v !== "string" || v.length === 0) throw new PiProtocolError(`${what} 必须是非空字符串`);
+	if (typeof v !== "string" || v.length === 0)
+		throw new PiProtocolError(`${what} 必须是非空字符串`);
 }
 
 function assertIdPair(jobId: unknown, runId: unknown): void {
@@ -434,7 +473,8 @@ function parseCwdRef(v: unknown): PiCwdRef {
 }
 
 function parseAttachments(v: unknown): PiAttachmentDescriptor[] {
-	if (!Array.isArray(v)) throw new PiProtocolError("payload.attachments 必须是数组");
+	if (!Array.isArray(v))
+		throw new PiProtocolError("payload.attachments 必须是数组");
 	if (v.length > MAX_PI_IMAGES_PER_PROMPT) {
 		throw new PiProtocolError(`图片数量超过上限 ${MAX_PI_IMAGES_PER_PROMPT}`);
 	}
@@ -453,7 +493,9 @@ function parseAttachments(v: unknown): PiAttachmentDescriptor[] {
 		}
 		total += item.size;
 		if (total > MAX_PI_IMAGES_TOTAL_BYTES) {
-			throw new PiProtocolError(`图片总量超过上限 ${MAX_PI_IMAGES_TOTAL_BYTES} 字节`);
+			throw new PiProtocolError(
+				`图片总量超过上限 ${MAX_PI_IMAGES_TOTAL_BYTES} 字节`,
+			);
 		}
 		out.push({
 			fileId: item.fileId,
@@ -472,7 +514,8 @@ export function parsePiRequest(input: unknown): PiRequest {
 	assertKeys(input, REQUEST_KEYS, "PiRequest");
 	assertString(input.requestId, "requestId");
 	assertString(input.action, "action");
-	if (!ACTIONS.has(input.action)) throw new PiProtocolError(`未知 action ${String(input.action)}`);
+	if (!ACTIONS.has(input.action))
+		throw new PiProtocolError(`未知 action ${String(input.action)}`);
 	assertIdPair(input.jobId, input.runId);
 
 	if (input.cwdRef !== undefined) input.cwdRef = parseCwdRef(input.cwdRef);
@@ -480,10 +523,14 @@ export function parsePiRequest(input: unknown): PiRequest {
 
 	// prompt 必须携带完整关联 ID
 	if (input.action === "agent.prompt") {
-		if (input.sessionId === undefined) throw new PiProtocolError("agent.prompt 缺 sessionId");
-		if (input.jobId === undefined) throw new PiProtocolError("agent.prompt 缺 jobId");
-		if (input.runId === undefined) throw new PiProtocolError("agent.prompt 缺 runId");
-		if (input.cwdRef === undefined) throw new PiProtocolError("agent.prompt 缺 cwdRef");
+		if (input.sessionId === undefined)
+			throw new PiProtocolError("agent.prompt 缺 sessionId");
+		if (input.jobId === undefined)
+			throw new PiProtocolError("agent.prompt 缺 jobId");
+		if (input.runId === undefined)
+			throw new PiProtocolError("agent.prompt 缺 runId");
+		if (input.cwdRef === undefined)
+			throw new PiProtocolError("agent.prompt 缺 cwdRef");
 	}
 
 	if (input.payload !== undefined) {
@@ -498,9 +545,14 @@ export function parsePiRequest(input: unknown): PiRequest {
 /** 校验 Client → Server 响应（Server Gateway 收到后必须先调用） */
 export function parsePiResponse(input: unknown): PiResponse {
 	assertRecord(input, "PiResponse");
-	assertKeys(input, new Set(["requestId", "ok", "data", "error"]), "PiResponse");
+	assertKeys(
+		input,
+		new Set(["requestId", "ok", "data", "error"]),
+		"PiResponse",
+	);
 	assertString(input.requestId, "requestId");
-	if (input.ok !== true && input.ok !== false) throw new PiProtocolError("ok 必须是布尔");
+	if (input.ok !== true && input.ok !== false)
+		throw new PiProtocolError("ok 必须是布尔");
 	if (input.ok === true) {
 		return { requestId: input.requestId, ok: true, data: input.data };
 	}
@@ -510,11 +562,22 @@ export function parsePiResponse(input: unknown): PiResponse {
 	return {
 		requestId: input.requestId,
 		ok: false,
-		error: { code: input.error.code as PiErrorCode, message: input.error.message },
+		error: {
+			code: input.error.code as PiErrorCode,
+			message: input.error.message,
+		},
 	};
 }
 
-const EVENT_KEYS = new Set(["clientId", "sessionId", "jobId", "runId", "event"]);
+const MAX_THINKING_TEXT_CHARS = 16_384;
+
+const EVENT_KEYS = new Set([
+	"clientId",
+	"sessionId",
+	"jobId",
+	"runId",
+	"event",
+]);
 
 /** 校验 Client → Server 事件包装（Server Gateway 收到后必须先调用） */
 export function parsePiEvent(input: unknown): PiEvent {
@@ -529,6 +592,13 @@ export function parsePiEvent(input: unknown): PiEvent {
 	assertString(input.event.type, "event.type");
 	if (!EVENT_TYPES.has(input.event.type)) {
 		throw new PiProtocolError(`未知 event 类型 ${String(input.event.type)}`);
+	}
+	if (
+		input.event.type === "thinking_progress" &&
+		typeof input.event.text === "string" &&
+		input.event.text.length > MAX_THINKING_TEXT_CHARS
+	) {
+		input.event.text = input.event.text.slice(0, MAX_THINKING_TEXT_CHARS);
 	}
 	return input as unknown as PiEvent;
 }

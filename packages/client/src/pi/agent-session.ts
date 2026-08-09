@@ -1,6 +1,7 @@
 import type {
 	AgentSession,
 	AgentSessionEvent,
+	SessionEntry,
 	SlashCommandInfo,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -43,7 +44,10 @@ export interface PiAgentSessionOptions {
 	initialModel?: { provider: string; modelId: string };
 	thinkingLevel?: ThinkingLevel;
 	/** 项目信任决策（默认：ProjectTrustStore + Owner confirm） */
-	trustResolver?: (cwd: string, ask: (message: string) => Promise<boolean>) => Promise<boolean>;
+	trustResolver?: (
+		cwd: string,
+		ask: (message: string) => Promise<boolean>,
+	) => Promise<boolean>;
 }
 
 export interface PiAgentSessionWrapper {
@@ -80,11 +84,18 @@ export function startPiAgentSession(
 			agentDir,
 			resourceLoaderReloadOptions: {
 				resolveProjectTrust: async ({ extensionsResult }) => {
-					if (!extensionsResult || extensionsResult.extensions.length === 0) return false;
+					if (!extensionsResult || extensionsResult.extensions.length === 0)
+						return false;
 					if (options.trustResolver) {
-						return options.trustResolver(sessionManager.getCwd(), trustAsk ?? noAsk);
+						return options.trustResolver(
+							sessionManager.getCwd(),
+							trustAsk ?? noAsk,
+						);
 					}
-					return defaultTrustResolver(sessionManager.getCwd(), trustAsk ?? noAsk);
+					return defaultTrustResolver(
+						sessionManager.getCwd(),
+						trustAsk ?? noAsk,
+					);
 				},
 			},
 		});
@@ -92,22 +103,71 @@ export function startPiAgentSession(
 		// 模型 scope：可用模型 ∩ enabledModels（委托 SDK resolver，不自行匹配）
 		const available = await services.modelRuntime.getAvailable();
 		const enabled = services.settingsManager.getEnabledModels();
-		let scopedModels: Array<{ model: unknown; thinkingLevel?: ThinkingLevel }> = [];
+		let scopedModels: Array<{ model: unknown; thinkingLevel?: ThinkingLevel }> =
+			[];
 		if (enabled && enabled.length > 0) {
-			const { scopedModels: resolved } = await (await getSdk()).resolveModelScopeWithDiagnostics(
-				enabled,
-				services.modelRuntime,
-			);
-			scopedModels = resolved as Array<{ model: unknown; thinkingLevel?: ThinkingLevel }>;
+			const { scopedModels: resolved } = await (
+				await getSdk()
+			).resolveModelScopeWithDiagnostics(enabled, services.modelRuntime);
+			scopedModels = resolved as Array<{
+				model: unknown;
+				thinkingLevel?: ThinkingLevel;
+			}>;
 		}
 
-		const initial = selectInitialModel(available, scopedModels, options);
-		const { session: inner } = await (await getSdk()).createAgentSessionFromServices({
+		const branch = sessionManager.getBranch();
+		const hasExistingMessages = branch.some(
+			(entry) => entry.type === "message",
+		);
+		const persistedModel = [...branch]
+			.reverse()
+			.find((entry) => entry.type === "model_change") as
+			| Extract<SessionEntry, { type: "model_change" }>
+			| undefined;
+		const persistedThinking = [...branch]
+			.reverse()
+			.find((entry) => entry.type === "thinking_level_change") as
+			| Extract<SessionEntry, { type: "thinking_level_change" }>
+			| undefined;
+		const restoredModel = persistedModel
+			? available.find(
+					(model) =>
+						model.provider === persistedModel.provider &&
+						model.id === persistedModel.modelId,
+				)
+			: undefined;
+		const restoredThinking = persistedThinking?.thinkingLevel;
+		const initial: {
+			model?: unknown;
+			thinkingLevel?: ThinkingLevel;
+			scopedModels?: Array<{
+				model: unknown;
+				thinkingLevel?: ThinkingLevel;
+			}>;
+		} = hasExistingMessages
+			? { scopedModels }
+			: restoredModel || isPiThinkingLevel(restoredThinking)
+				? {
+						...(restoredModel ? { model: restoredModel } : {}),
+						...(isPiThinkingLevel(restoredThinking)
+							? { thinkingLevel: restoredThinking as ThinkingLevel }
+							: {}),
+					}
+				: selectInitialModel(available, scopedModels, options);
+		const { session: inner } = await (
+			await getSdk()
+		).createAgentSessionFromServices({
 			services,
 			sessionManager,
 			...(initial.model ? { model: initial.model as never } : {}),
-			...(initial.thinkingLevel ? { thinkingLevel: initial.thinkingLevel } : {}),
-			...(scopedModels.length > 0 ? { scopedModels: scopedModels as never } : {}),
+			...(initial.thinkingLevel
+				? { thinkingLevel: initial.thinkingLevel }
+				: {}),
+			...(initial.scopedModels?.length
+				? { scopedModels: initial.scopedModels as never }
+				: scopedModels.length > 0
+					? { scopedModels: scopedModels as never }
+					: {}),
 		});
 
 		const wrapper = new PiAgentSessionWrapperImpl(inner);
@@ -124,13 +184,20 @@ function selectInitialModel(
 ): { model?: unknown; thinkingLevel?: ThinkingLevel } {
 	if (options.initialModel) {
 		const match = available.find(
-			(m) => m.provider === options.initialModel?.provider && m.id === options.initialModel?.modelId,
+			(m) =>
+				m.provider === options.initialModel?.provider &&
+				m.id === options.initialModel?.modelId,
 		);
 		if (match) return { model: match };
 	}
-	const first = scopedModels[0] as { model?: unknown; thinkingLevel?: ThinkingLevel } | undefined;
+	const first = scopedModels[0] as
+		| { model?: unknown; thinkingLevel?: ThinkingLevel }
+		| undefined;
 	if (first?.model) {
-		return { model: first.model, thinkingLevel: first.thinkingLevel ?? options.thinkingLevel };
+		return {
+			model: first.model,
+			thinkingLevel: first.thinkingLevel ?? options.thinkingLevel,
+		};
 	}
 	if (available[0]) return { model: available[0] };
 	return { thinkingLevel: options.thinkingLevel };
@@ -207,7 +274,10 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	}
 
 	private emit(event: PiClientEvent): void {
-		const withSession = { ...event, sessionId: this.sessionId } as PiClientEvent;
+		const withSession = {
+			...event,
+			sessionId: this.sessionId,
+		} as PiClientEvent;
 		for (const l of this.listeners) l(withSession);
 	}
 
@@ -233,11 +303,17 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			if (!this._alive) return;
 			const uiContext = this.createExtensionUiContext();
 			if (typeof this.inner.bindExtensions === "function") {
-				await (this.inner.bindExtensions as (bindings: {
-					uiContext?: unknown;
-					mode?: "rpc";
-					onError?: (error: { extensionPath: string; event: string; error: string }) => void;
-				}) => Promise<void>).call(this.inner, {
+				await (
+					this.inner.bindExtensions as (bindings: {
+						uiContext?: unknown;
+						mode?: "rpc";
+						onError?: (error: {
+							extensionPath: string;
+							event: string;
+							error: string;
+						}) => void;
+					}) => Promise<void>
+				).call(this.inner, {
 					uiContext,
 					mode: "rpc",
 					onError: (error) => {
@@ -258,16 +334,26 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 		return this.extensionBindingPromise;
 	}
 
-	async send(action: PiAction, payload: Record<string, unknown> = {}): Promise<unknown> {
+	async send(
+		action: PiAction,
+		payload: Record<string, unknown> = {},
+	): Promise<unknown> {
 		if (!this._alive) throw new Error("Session is closed");
 		this.resetIdleTimer();
 		switch (action) {
 			case "agent.prompt": {
 				const message = payload.prompt as string;
 				const images = Array.isArray(payload.images)
-					? (payload.images as Array<{ type: "image"; data: string; mimeType: string }>)
+					? (payload.images as Array<{
+							type: "image";
+							data: string;
+							mimeType: string;
+						}>)
 					: undefined;
-				const streamingBehavior = payload.streamingBehavior as "steer" | "followUp" | undefined;
+				const streamingBehavior = payload.streamingBehavior as
+					| "steer"
+					| "followUp"
+					| undefined;
 				this.promptRunning = true;
 				this.inner
 					.prompt(message, {
@@ -331,14 +417,20 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				if (!allowed) {
 					return {
 						ok: false,
-						error: { code: "PI_MODEL_NOT_FOUND", message: `Model not found: ${provider}/${modelId}` },
+						error: {
+							code: "PI_MODEL_NOT_FOUND",
+							message: `Model not found: ${provider}/${modelId}`,
+						},
 					};
 				}
 				const model = this.inner.modelRuntime.getModel(provider, modelId);
 				if (!model) {
 					return {
 						ok: false,
-						error: { code: "PI_MODEL_NOT_FOUND", message: `Model not found: ${provider}/${modelId}` },
+						error: {
+							code: "PI_MODEL_NOT_FOUND",
+							message: `Model not found: ${provider}/${modelId}`,
+						},
 					};
 				}
 				await this.inner.setModel(model as never);
@@ -348,7 +440,10 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				if (!isPiThinkingLevel(payload.level)) {
 					return {
 						ok: false,
-						error: { code: "PI_PROTOCOL_INVALID", message: "Invalid thinking level" },
+						error: {
+							code: "PI_PROTOCOL_INVALID",
+							message: "Invalid thinking level",
+						},
 					};
 				}
 				this.inner.setThinkingLevel(payload.level as ThinkingLevel);
@@ -357,7 +452,13 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			case "session.rename": {
 				const name = (payload.name as string | undefined)?.trim();
 				if (!name) {
-					return { ok: false, error: { code: "PI_PROTOCOL_INVALID", message: "Session name cannot be empty" } };
+					return {
+						ok: false,
+						error: {
+							code: "PI_PROTOCOL_INVALID",
+							message: "Session name cannot be empty",
+						},
+					};
 				}
 				this.inner.setSessionName(name);
 				return { ok: true };
@@ -367,7 +468,10 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			case "session.clone":
 				return this.clone();
 			case "session.navigate": {
-				const result = await this.inner.navigateTree(payload.targetId as string, {});
+				const result = await this.inner.navigateTree(
+					payload.targetId as string,
+					{},
+				);
 				return { cancelled: result.cancelled };
 			}
 			case "extension.respond": {
@@ -375,23 +479,29 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				return null;
 			}
 			default:
-				return { ok: false, error: { code: "PI_PROTOCOL_INVALID", message: `Unsupported action: ${action}` } };
+				return {
+					ok: false,
+					error: {
+						code: "PI_PROTOCOL_INVALID",
+						message: `Unsupported action: ${action}`,
+					},
+				};
 		}
 	}
 
 	private async listModels(): Promise<unknown[]> {
-		const available = (await this.inner.modelRuntime.getAvailable()) as readonly {
-			provider: string;
-			id: string;
-		}[];
+		const available =
+			(await this.inner.modelRuntime.getAvailable()) as readonly {
+				provider: string;
+				id: string;
+			}[];
 		const enabled = this.inner.settingsManager.getEnabledModels();
 		if (!enabled || enabled.length === 0) {
 			return available.map((m) => ({ provider: m.provider, modelId: m.id }));
 		}
-		const { scopedModels } = await (await getSdk()).resolveModelScopeWithDiagnostics(
-			enabled,
-			this.inner.modelRuntime,
-		);
+		const { scopedModels } = await (
+			await getSdk()
+		).resolveModelScopeWithDiagnostics(enabled, this.inner.modelRuntime);
 		const allowed = new Set(
 			scopedModels.map((s) => `${s.model.provider}/${s.model.id}`),
 		);
@@ -452,17 +562,25 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				followUp: [...this.inner.getFollowUpMessages()],
 			},
 			...(this.inner.model
-				? { model: { provider: this.inner.model.provider, modelId: this.inner.model.id } }
+				? {
+						model: {
+							provider: this.inner.model.provider,
+							modelId: this.inner.model.id,
+						},
+					}
 				: {}),
 			waitingForExtensionInput: waiting,
 		};
 	}
 
-	private async fork(entryId: string): Promise<{ cancelled: boolean; newSessionId?: string }> {
+	private async fork(
+		entryId: string,
+	): Promise<{ cancelled: boolean; newSessionId?: string }> {
 		if (this.inner.isCompacting) return { cancelled: true };
 		const sessionManager = this.inner.sessionManager;
 		const currentSessionFile = this.inner.sessionFile;
-		if (!sessionManager.isPersisted() || !currentSessionFile) return { cancelled: true };
+		if (!sessionManager.isPersisted() || !currentSessionFile)
+			return { cancelled: true };
 
 		const entry = sessionManager.getEntry(entryId);
 		if (!entry) return { cancelled: true };
@@ -471,31 +589,47 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 		let newSessionFile: string;
 		if (entry.parentId) {
 			// 历史中 fork：复制到 fork 点之前
-			const sourceManager = (await getSdk()).SessionManager.open(currentSessionFile, sessionDir);
+			const sourceManager = (await getSdk()).SessionManager.open(
+				currentSessionFile,
+				sessionDir,
+			);
 			const forkedPath = sourceManager.createBranchedSession(entry.parentId);
 			if (!forkedPath) return { cancelled: true };
 			newSessionFile = forkedPath;
 		} else {
 			// 首条消息前 fork：创建指向当前 Session 的空 Session
-			const newManager = (await getSdk()).SessionManager.create(sessionManager.getCwd(), sessionDir);
+			const newManager = (await getSdk()).SessionManager.create(
+				sessionManager.getCwd(),
+				sessionDir,
+			);
 			newManager.newSession({ parentSession: currentSessionFile });
 			newSessionFile = newManager.getSessionFile() as string;
 		}
 
-		const newSessionId = (await getSdk()).SessionManager.open(newSessionFile, sessionDir).getSessionId();
+		const newSessionId = (await getSdk()).SessionManager.open(
+			newSessionFile,
+			sessionDir,
+		).getSessionId();
 		await this.shutdown();
 		return { cancelled: false, newSessionId };
 	}
 
-	private async clone(): Promise<{ cancelled: boolean; newSessionId?: string }> {
+	private async clone(): Promise<{
+		cancelled: boolean;
+		newSessionId?: string;
+	}> {
 		const sessionManager = this.inner.sessionManager;
 		const currentSessionFile = this.inner.sessionFile;
-		if (!sessionManager.isPersisted() || !currentSessionFile) return { cancelled: true };
+		if (!sessionManager.isPersisted() || !currentSessionFile)
+			return { cancelled: true };
 		const leafId = sessionManager.getLeafId();
 		if (!leafId) return { cancelled: true };
 		const newPath = sessionManager.createBranchedSession(leafId);
 		if (!newPath) return { cancelled: true };
-		const newSessionId = (await getSdk()).SessionManager.open(newPath, sessionManager.getSessionDir()).getSessionId();
+		const newSessionId = (await getSdk()).SessionManager.open(
+			newPath,
+			sessionManager.getSessionDir(),
+		).getSessionId();
 		await this.shutdown();
 		return { cancelled: false, newSessionId };
 	}
@@ -508,7 +642,11 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				this.requestExtensionUi("select", title, { options }, opts?.timeout),
 			confirm: (title: string, message: string, opts?: { timeout?: number }) =>
 				this.requestExtensionUi("confirm", title, { message }, opts?.timeout),
-			input: (title: string, placeholder?: string, opts?: { timeout?: number }) =>
+			input: (
+				title: string,
+				placeholder?: string,
+				opts?: { timeout?: number },
+			) =>
 				this.requestExtensionUi("input", title, { placeholder }, opts?.timeout),
 			editor: (title: string, prefill?: string, opts?: { timeout?: number }) =>
 				this.requestExtensionUi("editor", title, { prefill }, opts?.timeout),
@@ -523,7 +661,11 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			setStatus: (key: string, text?: string) => {
 				this.emitUi({ kind: "setStatus", title: key, message: text });
 			},
-			setWidget: (key: string, content?: unknown, options?: { placement?: string }) => {
+			setWidget: (
+				key: string,
+				content?: unknown,
+				options?: { placement?: string },
+			) => {
 				if (content !== undefined && !Array.isArray(content)) return;
 				this.emitUi({
 					kind: "setWidget",
@@ -536,13 +678,25 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				this.emitUi({ kind: "setTitle", title, message: undefined });
 			},
 			pasteToEditor: (text: string) => {
-				this.emitUi({ kind: "set_editor_text", title: undefined, message: text });
+				this.emitUi({
+					kind: "set_editor_text",
+					title: undefined,
+					message: text,
+				});
 			},
 			setEditorText: (text: string) => {
-				this.emitUi({ kind: "set_editor_text", title: undefined, message: text });
+				this.emitUi({
+					kind: "set_editor_text",
+					title: undefined,
+					message: text,
+				});
 			},
 			custom: () => {
-				this.emitUi({ kind: "notify", title: "Custom UI", message: "custom UI 不支持" });
+				this.emitUi({
+					kind: "notify",
+					title: "Custom UI",
+					message: "custom UI 不支持",
+				});
 				return Promise.resolve(undefined);
 			},
 			getEditorText: () => "",
@@ -584,8 +738,12 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			kind,
 			title,
 			...(typeof extra.message === "string" ? { message: extra.message } : {}),
-			...(Array.isArray(extra.options) ? { options: extra.options as string[] } : {}),
-			...(typeof extra.placeholder === "string" ? { message: extra.placeholder } : {}),
+			...(Array.isArray(extra.options)
+				? { options: extra.options as string[] }
+				: {}),
+			...(typeof extra.placeholder === "string"
+				? { message: extra.placeholder }
+				: {}),
 			...(typeof extra.prefill === "string" ? { message: extra.prefill } : {}),
 			timeoutMs,
 		};
@@ -614,7 +772,9 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			pending.resolve(payload.confirmed === true);
 			return;
 		}
-		pending.resolve(typeof payload.value === "string" ? payload.value : undefined);
+		pending.resolve(
+			typeof payload.value === "string" ? payload.value : undefined,
+		);
 	}
 
 	/** Project Trust confirm：通过 Extension UI 事件流交给 Owner */
@@ -640,7 +800,10 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				} catch {
 					// 忽略绑定失败，继续销毁
 				}
-				await this.inner.extensionRunner.emit?.({ type: "session_shutdown", reason: "quit" });
+				await this.inner.extensionRunner.emit?.({
+					type: "session_shutdown",
+					reason: "quit",
+				});
 			} finally {
 				this.destroy();
 			}

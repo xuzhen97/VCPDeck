@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 const POLL_MS = 500;
 const ACTIVE_STATUSES = new Set(["pending", "running", "waiting_input"]);
 const HIDDEN_JOB_TYPES = new Set([
+	"agent.run",
 	"file.roots",
 	"file.list",
 	"file.stat",

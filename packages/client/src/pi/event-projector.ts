@@ -3,6 +3,8 @@ import type { PiClientEvent, PiExtensionUiRequest } from "@vcpdeck/shared";
 /** 单个投影事件 JSON 上限 */
 export const MAX_EVENT_BYTES = 256 * 1024;
 
+const MAX_THINKING_DELTA_CHARS = 16_384;
+
 const UI_KINDS = new Set([
 	"select",
 	"confirm",
@@ -35,17 +37,23 @@ function num(v: unknown): number | undefined {
 
 function bounded(event: PiClientEvent): PiClientEvent {
 	if (Buffer.byteLength(JSON.stringify(event)) <= MAX_EVENT_BYTES) return event;
-	return { type: "history_changed", sessionId: (event as { sessionId: string }).sessionId };
+	return {
+		type: "history_changed",
+		sessionId: (event as { sessionId: string }).sessionId,
+	};
 }
 
 /**
  * 把 Pi SDK 原生事件投影为可出站的裁剪事件。
  * - 去掉 turn_start/turn_end/tool_execution_update；
- * - thinking 只保留阶段/耗时；
+ * - thinking 只保留受限阶段、正文增量和耗时；
  * - message_update 不携带完整 partial；
  * - 超大事件兜底为 history_changed。
  */
-export function projectPiEvent(event: unknown, sessionId: string): PiClientEvent | null {
+export function projectPiEvent(
+	event: unknown,
+	sessionId: string,
+): PiClientEvent | null {
 	if (!isRecord(event)) return null;
 	switch (event.type) {
 		case "turn_start":
@@ -68,10 +76,37 @@ export function projectPiEvent(event: unknown, sessionId: string): PiClientEvent
 				message: str(event.errorMessage) ?? "Prompt failed",
 			});
 		case "message_update": {
+			const assistantEvent = isRecord(event.assistantMessageEvent)
+				? event.assistantMessageEvent
+				: null;
+			if (
+				assistantEvent?.type === "thinking_start" ||
+				assistantEvent?.type === "thinking_delta" ||
+				assistantEvent?.type === "thinking_end"
+			) {
+				const stage = assistantEvent.type.replace("thinking_", "") as
+					| "start"
+					| "delta"
+					| "end";
+				const text =
+					stage === "delta"
+						? str(assistantEvent.delta)
+						: str(assistantEvent.content);
+				return {
+					type: "thinking_progress",
+					sessionId,
+					stage,
+					...(text !== undefined
+						? { text: text.slice(0, MAX_THINKING_DELTA_CHARS) }
+						: {}),
+				};
+			}
 			const projected: PiClientEvent = {
 				type: "message_update",
 				sessionId,
-				...(str(event.text) !== undefined ? { text: str(event.text) as string } : {}),
+				...(str(event.text) !== undefined
+					? { text: str(event.text) as string }
+					: {}),
 			};
 			return projected;
 		}
@@ -84,7 +119,17 @@ export function projectPiEvent(event: unknown, sessionId: string): PiClientEvent
 				type: "thinking_progress",
 				sessionId,
 				stage: "end",
-				...(num(event.durationMs) !== undefined ? { durationMs: num(event.durationMs) as number } : {}),
+				...(str(event.content) !== undefined
+					? {
+							text: (str(event.content) as string).slice(
+								0,
+								MAX_THINKING_DELTA_CHARS,
+							),
+						}
+					: {}),
+				...(num(event.durationMs) !== undefined
+					? { durationMs: num(event.durationMs) as number }
+					: {}),
 			};
 		case "auto_compaction_start":
 		case "compaction_start":
@@ -113,7 +158,11 @@ function projectExtensionRequest(
 	const method = str(event.method);
 	if (method === undefined || !UI_KINDS.has(method)) {
 		if (method === "custom") {
-			return { type: "status_update", sessionId, status: "custom_ui_unsupported" };
+			return {
+				type: "status_update",
+				sessionId,
+				status: "custom_ui_unsupported",
+			};
 		}
 		return null;
 	}
@@ -121,10 +170,18 @@ function projectExtensionRequest(
 		requestId: str(event.id) ?? "",
 		extensionId: str(event.extensionId) ?? "",
 		kind: method as PiExtensionUiRequest["kind"],
-		...(str(event.title) !== undefined ? { title: str(event.title) as string } : {}),
-		...(str(event.message) !== undefined ? { message: str(event.message) as string } : {}),
-		...(strArr(event.options) !== undefined ? { options: strArr(event.options) as string[] } : {}),
-		...(num(event.timeout) !== undefined ? { timeoutMs: num(event.timeout) as number } : {}),
+		...(str(event.title) !== undefined
+			? { title: str(event.title) as string }
+			: {}),
+		...(str(event.message) !== undefined
+			? { message: str(event.message) as string }
+			: {}),
+		...(strArr(event.options) !== undefined
+			? { options: strArr(event.options) as string[] }
+			: {}),
+		...(num(event.timeout) !== undefined
+			? { timeoutMs: num(event.timeout) as number }
+			: {}),
 	};
 	return { type: "extension_request", sessionId, ui };
 }

@@ -11,13 +11,40 @@ import type {
 
 /** thinking 阶段展示（正文永不渲染） */
 function ThinkingBlock({ block }: { block: PiThinkingPlaceholder }) {
+	const [expanded, setExpanded] = useState(false);
 	const label =
 		typeof block.durationMs === "number"
 			? `已思考 ${(block.durationMs / 1000).toFixed(1)} 秒`
 			: "思考中…";
+	const hasText = typeof block.text === "string" && block.text.length > 0;
+	if (!hasText) {
+		return (
+			<div
+				className="text-muted-foreground text-xs italic"
+				data-testid="thinking-block"
+			>
+				{label}
+			</div>
+		);
+	}
 	return (
-		<div className="text-muted-foreground text-xs italic" data-testid="thinking-block">
-			{label}
+		<div
+			className="my-1 rounded border border-border/70 bg-secondary/20 text-xs"
+			data-testid="thinking-block"
+		>
+			<button
+				type="button"
+				className="flex w-full items-center gap-2 px-2 py-1 text-left text-muted-foreground"
+				onClick={() => setExpanded((value) => !value)}
+			>
+				<span className="italic">{label}</span>
+				<span className="ml-auto">{expanded ? "收起思考" : "展开思考"}</span>
+			</button>
+			{expanded && (
+				<pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words border-t border-border/60 px-2 py-1.5 text-muted-foreground">
+					{block.text}
+				</pre>
+			)}
 		</div>
 	);
 }
@@ -33,7 +60,14 @@ function ImageBlock({
 	src?: string;
 }) {
 	if (src) {
-		return <img src={src} alt="历史图片" className="max-h-64 rounded" data-testid="loaded-image" />;
+		return (
+			<img
+				src={src}
+				alt="历史图片"
+				className="max-h-64 rounded"
+				data-testid="loaded-image"
+			/>
+		);
 	}
 	return (
 		<button
@@ -57,7 +91,10 @@ function ToolCallBlock({
 }) {
 	const [expanded, setExpanded] = useState(false);
 	return (
-		<div className="my-1 rounded border border-zinc-700 bg-zinc-900 text-xs" data-testid="tool-call">
+		<div
+			className="my-1 rounded border border-zinc-700 bg-zinc-900 text-xs"
+			data-testid="tool-call"
+		>
 			<button
 				type="button"
 				className="flex w-full items-center gap-2 px-2 py-1 text-left"
@@ -133,9 +170,13 @@ export function PiMessageView({
 }) {
 	if (message.role === "user") {
 		return (
-			<div className="rounded-lg bg-blue-950/40 px-3 py-2" data-testid="user-message">
+			<div
+				className="rounded-lg bg-blue-950/40 px-3 py-2"
+				data-testid="user-message"
+			>
 				{message.content.map((block, i) => {
-					if (block.type === "text") return <Markdown key={i} text={block.text} />;
+					if (block.type === "text")
+						return <Markdown key={i} text={block.text} />;
 					if (block.type === "image")
 						return (
 							<ImageBlock
@@ -191,8 +232,13 @@ export function PiMessageView({
 			.map((b) => b.text)
 			.join("\n");
 		return (
-			<div className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-400" data-testid="tool-result">
-				<pre className="overflow-x-auto whitespace-pre-wrap break-all">{text}</pre>
+			<div
+				className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-400"
+				data-testid="tool-result"
+			>
+				<pre className="overflow-x-auto whitespace-pre-wrap break-all">
+					{text}
+				</pre>
 			</div>
 		);
 	}

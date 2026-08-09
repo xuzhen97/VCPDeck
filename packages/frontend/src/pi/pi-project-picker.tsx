@@ -42,7 +42,10 @@ function loadRecent(): RecentProject[] {
 
 function saveRecent(projects: RecentProject[]): void {
 	try {
-		localStorage.setItem(RECENT_KEY, JSON.stringify(projects.slice(0, MAX_RECENT)));
+		localStorage.setItem(
+			RECENT_KEY,
+			JSON.stringify(projects.slice(0, MAX_RECENT)),
+		);
 	} catch {
 		// 忽略 localStorage 配额错误
 	}
@@ -59,7 +62,10 @@ function formatCwdRef(ref: PiCwdRef): string {
 	const relative = ref.relativePath
 		.replace(/^[\\/]+|[\\/]+$/g, "")
 		.replace(/[\\/]+/g, separator);
-	if (!relative) return ref.rootDir.endsWith(separator) ? ref.rootDir : `${ref.rootDir}${separator}`;
+	if (!relative)
+		return ref.rootDir.endsWith(separator)
+			? ref.rootDir
+			: `${ref.rootDir}${separator}`;
 	return root ? `${root}${separator}${relative}` : `${separator}${relative}`;
 }
 
@@ -80,7 +86,9 @@ export function PiProjectPicker({
 }) {
 	const [roots, setRoots] = useState<string[]>([]);
 	const [root, setRoot] = useState<string | null>(null);
-	const [entries, setEntries] = useState<Array<{ name: string; kind: "file" | "dir" }>>([]);
+	const [entries, setEntries] = useState<
+		Array<{ name: string; kind: "file" | "dir" }>
+	>([]);
 	const [path, setPath] = useState("");
 	const [recent, setRecent] = useState<RecentProject[]>(() => loadRecent());
 	const [open, setOpen] = useState(false);
@@ -131,7 +139,10 @@ export function PiProjectPicker({
 	const pickRecent = useCallback(
 		(project: RecentProject) => {
 			if (project.clientId !== clientId) return;
-			onSelect({ rootDir: project.rootDir, relativePath: project.relativePath });
+			onSelect({
+				rootDir: project.rootDir,
+				relativePath: project.relativePath,
+			});
 			setOpen(false);
 		},
 		[clientId, onSelect],
@@ -161,7 +172,9 @@ export function PiProjectPicker({
 
 			{open && (
 				<div className="space-y-2 rounded border border-border p-2">
-					<div className="text-xs font-medium text-muted-foreground">最近项目</div>
+					<div className="text-xs font-medium text-muted-foreground">
+						最近项目
+					</div>
 					{myRecent.length === 0 && (
 						<div className="text-xs text-muted-foreground">暂无最近项目</div>
 					)}
@@ -178,14 +191,18 @@ export function PiProjectPicker({
 						))}
 					</div>
 
-					<div className="text-xs font-medium text-muted-foreground">浏览目录</div>
+					<div className="text-xs font-medium text-muted-foreground">
+						浏览目录
+					</div>
 					<div className="flex flex-wrap gap-1">
 						{roots.map((r) => (
 							<button
 								key={r}
 								type="button"
 								className={`rounded px-2 py-0.5 text-xs ${
-									r === root ? "bg-primary text-primary-foreground" : "bg-secondary/60"
+									r === root
+										? "bg-primary text-primary-foreground"
+										: "bg-secondary/60"
 								}`}
 								onClick={() => void listDir(r, "")}
 							>
@@ -203,7 +220,9 @@ export function PiProjectPicker({
 								↑ 上级
 							</button>
 							<span className="ml-2 text-muted-foreground">
-								{root ? formatCwdRef({ rootDir: root, relativePath: path }) : "/"}
+								{root
+									? formatCwdRef({ rootDir: root, relativePath: path })
+									: "/"}
 							</span>
 						</div>
 					)}
@@ -215,7 +234,9 @@ export function PiProjectPicker({
 									key={e.name}
 									type="button"
 									className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-secondary/60"
-									onClick={() => void listDir(root!, path ? `${path}/${e.name}` : e.name)}
+									onClick={() =>
+										void listDir(root!, path ? `${path}/${e.name}` : e.name)
+									}
 								>
 									📁 {e.name}
 								</button>

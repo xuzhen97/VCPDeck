@@ -66,7 +66,10 @@ Pi SDK 0.84.0 → 远程用户 ~/.pi/agent（凭据/模型/扩展/skills）
 
 ## 隐私
 
-- thinking 正文永不离开远程 Session JSONL；界面只显示"思考中/已思考 N 秒"。
+- 当前回合的 thinking 正文会通过受限 SSE 实时发送到前端，仅保存在当前页面内存，默认折叠，可手动展开；不写入 Job、数据库或日志。
+- 重新打开已有 Session 时不恢复 thinking 正文，只显示历史耗时占位。
+- thinking 单次实时增量限制为 16 KiB；超出部分截断。
+
 - Server 数据库与日志不保存 prompt、回答、Tool 参数/结果、thinking、图片、签名 URL 或项目路径。
 - 图片使用 15 分钟 TTL 的临时 Storage 引用，Client 校验 SHA-256/MIME/魔数后使用，过期自动清理。
 - Pi 继承远程机器用户权限：工作目录不是沙箱；项目扩展可执行任意代码（Project Trust 需 Owner 确认）。

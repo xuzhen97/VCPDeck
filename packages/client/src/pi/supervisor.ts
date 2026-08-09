@@ -9,7 +9,11 @@ import type {
 	PiStateReport,
 } from "@vcpdeck/shared";
 import { discoverRoots } from "../filesystem-roots.js";
-import { canonicalPath, projectKeyFor, resolveProjectCwd } from "./project-path.js";
+import {
+	canonicalPath,
+	projectKeyFor,
+	resolveProjectCwd,
+} from "./project-path.js";
 import type {
 	PiWorkerOutboundMessage,
 	PiWorkerRequestMessage,
@@ -47,7 +51,11 @@ function piResponse(requestId: string, data?: unknown): PiResponse {
 	return { requestId, ok: true, data };
 }
 
-function piError(requestId: string, code: PiErrorCode, message: string): PiResponse {
+function piError(
+	requestId: string,
+	code: PiErrorCode,
+	message: string,
+): PiResponse {
 	return { requestId, ok: false, error: { code, message } };
 }
 
@@ -109,11 +117,17 @@ export function createPiSupervisor(options: {
 			// settlement 在 activeRun 清除（agent_settled）后才查询：回退到终态记录
 			const settledCwd = terminalCwd.get(request.jobId);
 			if (settledCwd) {
-				return { key: projectKeyFor(canonicalPath(settledCwd)), cwd: settledCwd };
+				return {
+					key: projectKeyFor(canonicalPath(settledCwd)),
+					cwd: settledCwd,
+				};
 			}
 			throw { code: "PI_SESSION_NOT_FOUND", message: "No active run for job" };
 		}
-		throw { code: "PI_PROTOCOL_INVALID", message: "Request needs cwdRef or jobId" };
+		throw {
+			code: "PI_PROTOCOL_INVALID",
+			message: "Request needs cwdRef or jobId",
+		};
 	}
 
 	function entryFor(key: string, cwd: string): ProjectEntry {
@@ -141,7 +155,10 @@ export function createPiSupervisor(options: {
 						p.resolve({
 							requestId: msg.requestId,
 							ok: false,
-							error: { code: msg.error.code as PiErrorCode, message: msg.error.message },
+							error: {
+								code: msg.error.code as PiErrorCode,
+								message: msg.error.message,
+							},
 						});
 					}
 				}
@@ -217,7 +234,13 @@ export function createPiSupervisor(options: {
 		return new Promise((resolve) => {
 			const timer = setTimeout(() => {
 				pending.delete(request.requestId);
-				resolve(piError(request.requestId, "PI_REQUEST_TIMEOUT", "Worker did not respond in time"));
+				resolve(
+					piError(
+						request.requestId,
+						"PI_REQUEST_TIMEOUT",
+						"Worker did not respond in time",
+					),
+				);
 			}, timeoutMs);
 			pending.set(request.requestId, { resolve, timer });
 			entry.handle.send({ type: "request", projectKey, request });
@@ -229,7 +252,11 @@ export function createPiSupervisor(options: {
 			try {
 				if (request.action === "project.resolve") {
 					if (!request.cwdRef) {
-						return piError(request.requestId, "PI_PROTOCOL_INVALID", "project.resolve needs cwdRef");
+						return piError(
+							request.requestId,
+							"PI_PROTOCOL_INVALID",
+							"project.resolve needs cwdRef",
+						);
 					}
 					const { key } = await resolveKey(request);
 					return piResponse(request.requestId, { projectKey: key });
@@ -240,7 +267,11 @@ export function createPiSupervisor(options: {
 
 				if (request.action === "agent.prompt") {
 					if (entry.activeRun) {
-						return piError(request.requestId, "PI_PROJECT_BUSY", "Project has an active turn");
+						return piError(
+							request.requestId,
+							"PI_PROJECT_BUSY",
+							"Project has an active turn",
+						);
 					}
 					entry.activeRun = {
 						jobId: request.jobId ?? "",
@@ -255,7 +286,11 @@ export function createPiSupervisor(options: {
 					}
 				} else if (DESTRUCTIVE_ACTIONS.has(request.action)) {
 					if (entry.activeRun) {
-						return piError(request.requestId, "PI_PROJECT_BUSY", "Project has an active turn");
+						return piError(
+							request.requestId,
+							"PI_PROJECT_BUSY",
+							"Project has an active turn",
+						);
 					}
 					// 空闲 mutation 串行：等前一个完成
 					const previous = entry.mutationQueue;
@@ -303,7 +338,8 @@ export function createPiSupervisor(options: {
 		ackTerminalRuns(runIds: string[]): void {
 			const accepted = new Set(runIds);
 			for (let i = orphanTerminals.length - 1; i >= 0; i--) {
-				if (accepted.has(orphanTerminals[i]?.jobId ?? "")) orphanTerminals.splice(i, 1);
+				if (accepted.has(orphanTerminals[i]?.jobId ?? ""))
+					orphanTerminals.splice(i, 1);
 			}
 			for (const entry of registry.values()) {
 				entry.terminals = entry.terminals.filter((t) => !accepted.has(t.jobId));
