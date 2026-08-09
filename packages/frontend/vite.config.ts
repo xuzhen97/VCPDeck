@@ -16,6 +16,10 @@ export default defineConfig({
 			include: [/node_modules/, /packages[\\/]shared[\\/]/],
 		},
 	},
+	optimizeDeps: {
+		// 链接的 CJS workspace 包需 esbuild 预打包才能在 dev 提供命名导出
+		include: ["@vcpdeck/shared"],
+	},
 	server: {
 		host: "0.0.0.0",
 		proxy: {
