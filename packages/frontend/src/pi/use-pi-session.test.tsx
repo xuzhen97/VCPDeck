@@ -391,6 +391,29 @@ describe("usePiSession", () => {
 		expect(pi.sessions.context).toHaveBeenCalled();
 	});
 
+	it("grace 内 Prompt 失败时恢复旧 run 并阻止连续发送", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.prompt as ReturnType<typeof vi.fn>)
+			.mockResolvedValueOnce({ jobId: "s1", runId: "j1", sessionId: "s1" })
+			.mockRejectedValueOnce(new Error("network failed"));
+		const { result } = renderHook(() => usePiSession(pi));
+
+		await act(async () => result.current.actions.createSession("c1", CWD));
+		await act(async () => result.current.actions.send({ prompt: "first" }));
+		act(() => emit({ type: "prompt_done", sessionId: "s1", runId: "j1" }));
+
+		await act(async () => result.current.actions.send({ prompt: "second" }));
+
+		expect(result.current.state.status).toBe("running");
+		expect(result.current.state.runId).toBe("j1");
+		expect(result.current.state.job?.status).toBe("running");
+		expect(result.current.state.error).toBe("network failed");
+
+		await act(async () => result.current.actions.send({ prompt: "third" }));
+		expect(pi.agent.prompt).toHaveBeenCalledTimes(2);
+	});
+
 	it("agent_settled 收敛为空闲并允许下一回合绑定新 run", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();

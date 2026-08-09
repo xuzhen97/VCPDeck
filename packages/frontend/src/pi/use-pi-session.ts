@@ -124,6 +124,7 @@ export function usePiSession(
 	const activeRunIdRef = useRef<string | null>(null);
 	const isOwnerRef = useRef(false);
 	const retiredRunIdsRef = useRef(new Set<string>());
+	const rejectedSettlingRunIdRef = useRef<string | null>(null);
 	const promptGenerationRef = useRef(0);
 	const sessionGenerationRef = useRef(0);
 	const nextCursorRef = useRef<string | null>(null);
@@ -337,6 +338,8 @@ export function usePiSession(
 							case "agent_settled":
 								clearGrace();
 								if (runId) retiredRunIdsRef.current.add(runId);
+								if (rejectedSettlingRunIdRef.current === runId)
+									rejectedSettlingRunIdRef.current = null;
 								activeRunIdRef.current = null;
 								setState((s) => ({
 									...s,
@@ -426,6 +429,7 @@ export function usePiSession(
 			activeRunIdRef.current = null;
 			isOwnerRef.current = false;
 			retiredRunIdsRef.current.clear();
+			rejectedSettlingRunIdRef.current = null;
 			nextCursorRef.current = null;
 			setState({ ...INITIAL_STATE, status: "loading" });
 
@@ -494,6 +498,8 @@ export function usePiSession(
 			}
 			if (
 				!isOwnerRef.current ||
+				(rejectedSettlingRunIdRef.current !== null &&
+					rejectedSettlingRunIdRef.current === activeRunIdRef.current) ||
 				(!(["idle", "done"] as PiSessionStatus[]).includes(
 					stateRef.current.status,
 				) && !graceTimerRef.current)
@@ -534,6 +540,7 @@ export function usePiSession(
 						activeRunIdRef.current === settlingRunId
 					) {
 						if (settlingRunId) retiredRunIdsRef.current.add(settlingRunId);
+						rejectedSettlingRunIdRef.current = null;
 						activeRunIdRef.current = accepted.runId;
 						setState((s) => ({
 							...s,
@@ -550,15 +557,30 @@ export function usePiSession(
 					sessionGenerationRef.current === sessionGeneration &&
 					promptGenerationRef.current === generation
 				) {
+					const restoreSettlingRun =
+						settlingRunId !== null &&
+						activeRunIdRef.current === settlingRunId;
+					if (restoreSettlingRun) {
+						rejectedSettlingRunIdRef.current = settlingRunId;
+						scheduleGrace();
+					}
 					setState((s) => ({
 						...s,
-						status: "idle",
+						...(restoreSettlingRun
+							? {
+									status: "running" as const,
+									runId: settlingRunId,
+									job: s.job
+										? { ...s.job, status: "running" as const, runId: settlingRunId }
+										: s.job,
+								}
+							: { status: "idle" as const }),
 						error: err instanceof Error ? err.message : String(err),
 					}));
 				}
 			}
 		},
-		[pi, clearGrace],
+		[pi, clearGrace, scheduleGrace],
 	);
 
 	const withRun = useCallback(
