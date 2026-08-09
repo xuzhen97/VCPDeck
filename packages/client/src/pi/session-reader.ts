@@ -16,7 +16,9 @@ function getSdk(): Promise<PiSdk> {
 	if (!sdkPromise) sdkPromise = import("@earendil-works/pi-coding-agent");
 	return sdkPromise;
 }
+import { isPiThinkingLevel } from "@vcpdeck/shared";
 import type {
+	PiAgentState,
 	PiImagePlaceholder,
 	PiMessage,
 	PiSessionContextPage,
@@ -53,6 +55,7 @@ export interface PiSessionReader {
 	list(): Promise<PiSessionInfo[]>;
 	newSession(): Promise<{ sessionId: string }>;
 	get(sessionId: string): Promise<PiSessionDetail>;
+	state(sessionId: string): Promise<PiAgentState>;
 	context(
 		sessionId: string,
 		leafId?: string | null,
@@ -345,6 +348,29 @@ export function createPiSessionReader(
 				},
 				tree: projected,
 				activeLeafId: leafId,
+			};
+		},
+		async state(sessionId) {
+			const path = await resolvePath(sessionId);
+			const entries = (await getSdk()).SessionManager.open(path).getBranch();
+			const model = [...entries].reverse().find(
+				(entry) => entry.type === "model_change",
+			) as Extract<SessionEntry, { type: "model_change" }> | undefined;
+			const thinking = [...entries].reverse().find(
+				(entry) => entry.type === "thinking_level_change",
+			) as Extract<SessionEntry, { type: "thinking_level_change" }> | undefined;
+			return {
+				status: "idle",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: isPiThinkingLevel(thinking?.thinkingLevel)
+					? thinking.thinkingLevel
+					: "off",
+				queuedMessages: { steering: [], followUp: [] },
+				...(model
+					? { model: { provider: model.provider, modelId: model.modelId } }
+					: {}),
 			};
 		},
 		async context(sessionId, leafId, cursor) {

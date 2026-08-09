@@ -4,6 +4,7 @@ import type {
 	MachineRegister,
 	PiCapabilityStatus,
 	PiEvent,
+	PiStateAck,
 	StatusReport,
 } from "@vcpdeck/shared";
 import { parsePiRequest } from "@vcpdeck/shared";
@@ -101,34 +102,56 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 		if (socket.connected) socket.emit(Events.PI_EVENT, event);
 	});
 
-	let registered = false;
-	const onRegistered = () => {
-		if (registered) return;
-		registered = true;
-		socket.emit(Events.STATUS_REPORT, deps.getStatusReport());
-		socket.emit(
-			Events.PI_STATE,
-			deps.supervisor.getStateReport(),
-			(ack?: { acceptedRunIds?: string[] }) => {
-				deps.supervisor.ackTerminalRuns(ack?.acceptedRunIds ?? []);
-			},
-		);
-	};
-	// 兼容旧 Server：现有 "ack" event
+	let connectionGeneration = 0;
+	let currentRegistered: (() => void) | null = null;
+
+	function scheduleControlledReconnect(generation: number): void {
+		socket.disconnect();
+		setTimeout(() => {
+			if (generation === connectionGeneration && !socket.connected) socket.connect();
+		}, 100);
+	}
+
+	function reportState(generation: number, retry = 0): void {
+		if (generation !== connectionGeneration || !socket.connected) return;
+		socket.emit(Events.PI_STATE, deps.supervisor.getStateReport(), async (raw?: Partial<PiStateAck>) => {
+			if (generation !== connectionGeneration) return;
+			const ack: PiStateAck = {
+				acceptedRunIds: raw?.acceptedRunIds ?? [],
+				closedRunIds: raw?.closedRunIds ?? [],
+				reportAgain: raw?.reportAgain ?? false,
+			};
+			const { allClosed } = await deps.supervisor.applyStateAck(ack);
+			if (generation !== connectionGeneration) return;
+			if (!ack.reportAgain) return;
+			if (allClosed && retry === 0) reportState(generation, 1);
+			else if (!allClosed && retry < 2) setTimeout(() => reportState(generation, retry + 1), 100);
+			else scheduleControlledReconnect(generation);
+		});
+	}
+
+	// 兼容旧 Server：现有 "ack" event，始终绑定当前连接代次
 	socket.on("ack", (data: { event?: string }) => {
-		if (data?.event === Events.REGISTER) onRegistered();
+		if (data?.event === Events.REGISTER) currentRegistered?.();
 	});
 
 	return {
 		async onConnected() {
+			const generation = ++connectionGeneration;
+			let reported = false;
+			const onRegistered = () => {
+				if (generation !== connectionGeneration || reported) return;
+				reported = true;
+				socket.emit(Events.STATUS_REPORT, deps.getStatusReport());
+				reportState(generation);
+			};
+			currentRegistered = onRegistered;
 			// probe 最多等待 3 秒：超时降级为无 Pi 能力，不阻塞注册
 			const piStatus = await Promise.race([
 				deps.getPiStatus(),
-				new Promise<undefined>((resolve) =>
-					setTimeout(() => resolve(undefined), 3000),
-				),
+				new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 3000)),
 			]).catch(() => undefined);
-			socket.emit(Events.REGISTER, deps.getRegister(piStatus), onRegistered);
+			if (generation === connectionGeneration) socket.emit(Events.REGISTER, deps.getRegister(piStatus), onRegistered);
 		},
 	};
 }

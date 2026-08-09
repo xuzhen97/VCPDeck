@@ -432,6 +432,19 @@ describe("PiAgentSessionWrapperImpl", () => {
 		expect(inner.compact).toHaveBeenCalledWith("summarize");
 	});
 
+	it("ensureProjectTrust 复用 confirm 且只执行一次 resolver", async () => {
+		const { inner, wrapper } = makeWrapper();
+		const resolver = vi.fn(async (ask: (message: string) => Promise<boolean>) => ask("信任？"));
+		wrapper.setProjectTrustResolver(resolver);
+		const pending = wrapper.ensureProjectTrust();
+		const requestId = wrapper.getState().pendingExtension!.requestId;
+		await wrapper.send("extension.respond", { requestId, confirmed: true });
+		await expect(pending).resolves.toBe(true);
+		await expect(wrapper.ensureProjectTrust()).resolves.toBe(true);
+		expect(resolver).toHaveBeenCalledOnce();
+		expect(inner.dispose).not.toHaveBeenCalled();
+	});
+
 	it("shutdown 先发 session_shutdown 再 dispose", async () => {
 		const { inner, wrapper } = makeWrapper();
 		await wrapper.shutdown();

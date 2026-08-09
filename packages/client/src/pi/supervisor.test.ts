@@ -17,11 +17,11 @@ function req(overrides: Partial<PiRequest>): PiRequest {
 	} as PiRequest;
 }
 
-function prompt(jobId: string, cwdRef?: PiCwdRef): PiRequest {
+function prompt(runId: string, cwdRef?: PiCwdRef): PiRequest {
 	return req({
 		action: "agent.prompt",
-		jobId,
-		runId: jobId,
+		jobId: "s1",
+		runId,
 		sessionId: "s1",
 		cwdRef: cwdRef ?? { rootDir: "D:\\", relativePath: "a" },
 		payload: { prompt: "hi" },
@@ -95,7 +95,11 @@ async function makeCwdRef(relative: string): Promise<PiCwdRef> {
 	return { rootDir: base, relativePath: relative };
 }
 
-function makeSupervisor(opts: { autoRespond?: boolean; roots?: string[] } = {}) {
+function makeSupervisor(opts: {
+	autoRespond?: boolean;
+	roots?: string[];
+	requestOutcomes?: Partial<Record<PiRequest["action"], "timeout">>;
+} = {}) {
 	const handles: FakeHandle[] = [];
 	const supervisor = createPiSupervisor({
 		clientId: "c1",
@@ -103,6 +107,19 @@ function makeSupervisor(opts: { autoRespond?: boolean; roots?: string[] } = {}) 
 		forkWorker: (cwd: string) => {
 			const h = makeHandle();
 			if (opts.autoRespond) autoRespond(h);
+			if (opts.requestOutcomes) {
+				const send = h.send;
+				h.send = (message) => {
+					send(message);
+					if (message.type === "request") {
+						queueMicrotask(() => h.emitMessage(
+							opts.requestOutcomes?.[message.request.action] === "timeout"
+								? { type: "response", requestId: message.request.requestId, ok: false, error: { code: "PI_REQUEST_TIMEOUT", message: "timeout" } }
+								: { type: "response", requestId: message.request.requestId, ok: true, data: { accepted: true } },
+						));
+					}
+				};
+			}
 			handles.push(h);
 			void cwd;
 			return h;
@@ -167,7 +184,7 @@ describe("PiSupervisor", () => {
 		handles[0].emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "job-a",
+			jobId: "s1",
 			runId: "job-a",
 			event: {
 				type: "extension_request",
@@ -181,17 +198,21 @@ describe("PiSupervisor", () => {
 		const busy = await supervisor.request(prompt("job-b", CWD_REF_A));
 		expect(busy).toMatchObject({ ok: false, error: { code: "PI_PROJECT_BUSY" } });
 
-		// Owner 响应 → running
+		// Owner 响应本身不乐观解锁；只由 Worker 的 resolved 事件恢复
 		await supervisor.request(
 			req({
 				action: "extension.respond",
 				cwdRef: undefined,
-				jobId: "job-a",
+				jobId: "s1",
 				runId: "job-a",
 				sessionId: "s1",
 				payload: { requestId: "u1", confirmed: true },
 			}),
 		);
+		handles[0]!.emitMessage({
+			type: "event", sessionId: "s1", jobId: "s1", runId: "job-a",
+			event: { type: "extension_resolved", sessionId: "s1", requestId: "u1", reason: "answered", hasPending: false },
+		});
 		expect(supervisor.getStateReport().runs[0]?.status).toBe("running");
 	});
 
@@ -222,7 +243,7 @@ describe("PiSupervisor", () => {
 			req({
 				action: "agent.compact",
 				cwdRef: undefined,
-				jobId: "job-a",
+				jobId: "s1",
 				runId: "job-a",
 				sessionId: "s1",
 			}),
@@ -236,7 +257,7 @@ describe("PiSupervisor", () => {
 		handles[0].emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "job-a",
+			jobId: "s1",
 			runId: "job-a",
 			event: { type: "agent_settled", sessionId: "s1" },
 		});
@@ -247,11 +268,11 @@ describe("PiSupervisor", () => {
 
 		// terminal summary 保留
 		const report = supervisor.getStateReport();
-		expect(report.runs.some((r) => r.jobId === "job-a" && r.status === "done")).toBe(true);
+		expect(report.runs.some((r) => r.runId === "job-a" && r.status === "done")).toBe(true);
 
-		supervisor.ackTerminalRuns(["job-a"]);
+		await supervisor.applyStateAck({ acceptedRunIds: ["job-a"], closedRunIds: [], reportAgain: false });
 		expect(
-			supervisor.getStateReport().runs.some((r) => r.jobId === "job-a"),
+			supervisor.getStateReport().runs.some((r) => r.runId === "job-a"),
 		).toBe(false);
 	});
 
@@ -261,7 +282,7 @@ describe("PiSupervisor", () => {
 		handles[0].emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "job-a",
+			jobId: "s1",
 			runId: "job-a",
 			event: { type: "prompt_error", sessionId: "s1", code: "PI_RUNTIME_UNAVAILABLE", message: "boom" },
 		});
@@ -284,6 +305,60 @@ describe("PiSupervisor", () => {
 		const result = await supervisor.request(prompt("job-a", CWD_REF_A), 50);
 		expect(result).toMatchObject({ ok: false, error: { code: "PI_REQUEST_TIMEOUT" } });
 		expect(Date.now() - started).toBeGreaterThanOrEqual(40);
+	});
+
+	it("同一 Session 后续 Prompt 使用新 runId，旧 run 事件不清理新 run", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(prompt("run-1", CWD_REF_A));
+		handles[0]!.emitMessage({
+			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			event: { type: "agent_settled", sessionId: "s1" },
+		});
+		await supervisor.request(prompt("run-2", CWD_REF_A));
+		handles[0]!.emitMessage({
+			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			event: { type: "agent_settled", sessionId: "s1" },
+		});
+		expect(supervisor.getStateReport().runs).toContainEqual(expect.objectContaining({
+			jobId: "s1", sessionId: "s1", runId: "run-2", status: "running",
+		}));
+	});
+
+	it("只在最后一个 Extension 解决后恢复 running", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(prompt("run-1", CWD_REF_A));
+		handles[0]!.emitMessage({
+			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			event: { type: "extension_request", sessionId: "s1", ui: { requestId: "u1", extensionId: "e", kind: "confirm" } },
+		});
+		handles[0]!.emitMessage({
+			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			event: { type: "extension_resolved", sessionId: "s1", requestId: "u1", reason: "answered", hasPending: true },
+		});
+		expect(supervisor.getStateReport().runs.find((run) => run.runId === "run-1")?.status).toBe("waiting_input");
+		handles[0]!.emitMessage({
+			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			event: { type: "extension_resolved", sessionId: "s1", requestId: "u2", reason: "answered", hasPending: false },
+		});
+		expect(supervisor.getStateReport().runs.find((run) => run.runId === "run-1")?.status).toBe("running");
+	});
+
+	it("PI_STATE ack 只在权威 abort 成功后清理 closed run", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(prompt("run-1", CWD_REF_A));
+		await expect(supervisor.applyStateAck({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: false })).resolves.toEqual({ allClosed: true });
+		expect(handles[0]!.sent).toContainEqual(expect.objectContaining({
+			type: "request", request: expect.objectContaining({ action: "agent.abort", runId: "run-1" }),
+		}));
+		expect(supervisor.getStateReport().runs.some((run) => run.runId === "run-1")).toBe(false);
+	});
+
+	it("closed run abort 失败时保留并在下一次 PI_STATE 重报", async () => {
+		const { supervisor } = makeSupervisor({ requestOutcomes: { "agent.abort": "timeout" } });
+		await supervisor.request(prompt("run-1", CWD_REF_A), 5);
+		const ack = await supervisor.applyStateAck({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+		expect(ack).toEqual({ allClosed: false });
+		expect(supervisor.getStateReport().runs).toContainEqual(expect.objectContaining({ runId: "run-1" }));
 	});
 
 	it("shutdown 通知所有 Worker", async () => {

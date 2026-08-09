@@ -27,6 +27,8 @@ function fakeSocket(): {
 	const emitCalls: Array<{ event: string; args: unknown[] }> = [];
 	const socket = {
 		connected: true,
+		disconnect: vi.fn(() => { socket.connected = false; return socket; }),
+		connect: vi.fn(() => socket),
 		on: (event: string, cb: (...args: unknown[]) => void) => {
 			const list = listeners.get(event) ?? [];
 			list.push(cb);
@@ -243,10 +245,22 @@ describe("attachPiBridge", () => {
 		expect(deps.supervisor.getStateReport().runs.some((r) => r.jobId === "j1")).toBe(false);
 	});
 
+	it("每次 reconnect 的 REGISTER ack 都重新发送 PI_STATE", async () => {
+		const { socket, emitCalls } = fakeSocket();
+		const { deps } = await makeDeps();
+		const bridge = attachPiBridge(socket, deps);
+		await bridge.onConnected();
+		(emitCalls.filter((call) => call.event === Events.REGISTER)[0]!.args[1] as () => void)();
+		await bridge.onConnected();
+		(emitCalls.filter((call) => call.event === Events.REGISTER)[1]!.args[1] as () => void)();
+		expect(emitCalls.filter((call) => call.event === Events.PI_STATE)).toHaveLength(2);
+	});
+
 	it("旧 Server 'ack' event 也能触发注册后流程", async () => {
 		const { socket, emitCalls, listeners } = fakeSocket();
 		const { deps } = await makeDeps();
-		attachPiBridge(socket, deps);
+		const bridge = attachPiBridge(socket, deps);
+		await bridge.onConnected();
 
 		fire(listeners, "ack", { event: Events.REGISTER });
 		expect(emitCalls.some((c) => c.event === Events.STATUS_REPORT)).toBe(true);

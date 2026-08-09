@@ -3,7 +3,7 @@
  * 通过 IPC 与 parent（Supervisor）通信；只服务一个 canonical cwd。
  * 主进程不静态 import Pi SDK；本文件由 fork 启动，运行时才动态加载 SDK。
  */
-import type { PiAttachmentDescriptor, PiRequest } from "@vcpdeck/shared";
+import type { PiAttachmentDescriptor, PiErrorCode, PiRequest } from "@vcpdeck/shared";
 import {
 	createPiSessionReader,
 	type PiSessionReader,
@@ -33,17 +33,24 @@ function getSdk(): Promise<PiSdk> {
 
 const reader: PiSessionReader = createPiSessionReader(cwd);
 let wrapper: PiAgentSessionWrapper | null = null;
-let active: { jobId: string; runId: string; sessionId: string } | null = null;
+interface ActivePrompt {
+	jobId: string;
+	runId: string;
+	sessionId: string;
+	cancelToken: { cancelled: boolean };
+}
+let active: ActivePrompt | null = null;
+let promptPipeline: Promise<void> | null = null;
 let lastActivity = Date.now();
 
 function send(msg: PiWorkerOutboundMessage): void {
 	if (process.send) process.send(msg);
 }
 
-function normalizeError(err: unknown): { code: string; message: string } {
+function normalizeError(err: unknown): { code: PiErrorCode; message: string } {
 	if (typeof err === "object" && err !== null && "code" in err) {
 		return {
-			code: String((err as { code: unknown }).code),
+			code: String((err as { code: unknown }).code) as PiErrorCode,
 			message: err instanceof Error ? err.message : "Request failed",
 		};
 	}
@@ -71,18 +78,76 @@ async function ensureWrapper(
 	}
 	const w = await startPiAgentSession({ cwd, sessionFile: found.path });
 	w.onEvent((event) => {
-		if (active && event.sessionId === active.sessionId) {
-			send({
-				type: "event",
-				sessionId: active.sessionId,
-				jobId: active.jobId,
-				runId: active.runId,
-				event,
-			});
+		const run = active;
+		if (!run || event.sessionId !== run.sessionId) return;
+		if (event.type === "agent_settled" || event.type === "prompt_error") {
+			run.cancelToken.cancelled = true;
+			active = null;
+			promptPipeline = null;
 		}
+		send({
+			type: "event",
+			sessionId: run.sessionId,
+			jobId: run.jobId,
+			runId: run.runId,
+			event,
+		});
 	});
 	wrapper = w;
 	return w;
+}
+
+function isCurrentRun(run: ActivePrompt): boolean {
+	return active === run && !run.cancelToken.cancelled;
+}
+
+function emitPromptError(run: ActivePrompt, error: unknown): void {
+	if (!isCurrentRun(run)) return;
+	active = null;
+	promptPipeline = null;
+	const normalized = normalizeError(error);
+	send({
+		type: "event",
+		sessionId: run.sessionId,
+		jobId: run.jobId,
+		runId: run.runId,
+		event: { type: "prompt_error", sessionId: run.sessionId, ...normalized },
+	});
+}
+
+async function runPrompt(run: ActivePrompt, request: PiRequest): Promise<void> {
+	let w = await ensureWrapper(run.sessionId);
+	if (!isCurrentRun(run)) {
+		await w.shutdown();
+		return;
+	}
+	const trusted = await w.ensureProjectTrust();
+	if (!isCurrentRun(run)) {
+		await w.shutdown();
+		if (wrapper === w) wrapper = null;
+		return;
+	}
+	if (trusted) {
+		await w.shutdown();
+		if (wrapper === w) wrapper = null;
+		if (!isCurrentRun(run)) return;
+		w = await ensureWrapper(run.sessionId);
+		if (!isCurrentRun(run)) {
+			await w.shutdown();
+			return;
+		}
+	}
+	const payload = { ...(request.payload ?? {}) };
+	if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
+		const downloaded = await downloadPromptImages(payload.attachments as PiAttachmentDescriptor[]);
+		if (!isCurrentRun(run)) {
+			await w.shutdown();
+			if (wrapper === w) wrapper = null;
+			return;
+		}
+		payload.images = toSdkImages(downloaded);
+	}
+	if (isCurrentRun(run)) await w.send("agent.prompt", payload);
 }
 
 async function dispatch(request: PiRequest): Promise<unknown> {
@@ -198,34 +263,39 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 			};
 		}
 		default: {
-			// Agent 操作：需要 wrapper
 			const sessionId = request.sessionId ?? active?.sessionId;
-			if (!sessionId) {
-				throw Object.assign(new Error("sessionId required"), {
-					code: "PI_PROTOCOL_INVALID",
-				});
+			if (!sessionId) throw Object.assign(new Error("sessionId required"), { code: "PI_PROTOCOL_INVALID" });
+			if (request.action === "agent.state" && !request.runId) return reader.state(sessionId);
+			if (request.action === "agent.prompt") {
+				if (active) throw Object.assign(new Error("Pi project is busy"), { code: "PI_PROJECT_BUSY" });
+				const run: ActivePrompt = {
+					jobId: request.jobId ?? "",
+					runId: request.runId ?? "",
+					sessionId,
+					cancelToken: { cancelled: false },
+				};
+				active = run;
+				promptPipeline = runPrompt(run, request);
+				void promptPipeline.catch((error) => emitPromptError(run, error));
+				return { accepted: true };
+			}
+			if (!active || (request.runId && request.runId !== active.runId)) {
+				throw Object.assign(new Error("No matching active run"), { code: "PI_CONTROL_FORBIDDEN" });
+			}
+			if (request.action === "agent.abort") {
+				const run = active;
+				run.cancelToken.cancelled = true;
+				active = null;
+				const pipeline = promptPipeline;
+				promptPipeline = null;
+				const w = wrapper;
+				if (w) await w.send("agent.abort", request.payload ?? {});
+				await pipeline?.catch(() => {});
+				return null;
 			}
 			const w = await ensureWrapper(sessionId);
-			if (request.action === "agent.prompt") {
-				active = {
-					jobId: request.jobId ?? "",
-					runId: request.runId ?? request.jobId ?? "",
-					sessionId,
-				};
-				const payload = { ...(request.payload ?? {}) };
-				// 图片附件：下载校验后转为 SDK image content（失败清空并抛稳定错误）
-				if (
-					Array.isArray(payload.attachments) &&
-					payload.attachments.length > 0
-				) {
-					const downloaded = await downloadPromptImages(
-						payload.attachments as PiAttachmentDescriptor[],
-					);
-					payload.images = toSdkImages(downloaded);
-				}
-				return await w.send(request.action, payload);
-			}
-			return await w.send(request.action, request.payload ?? {});
+			if (!active || (request.runId && request.runId !== active.runId)) throw Object.assign(new Error("No matching active run"), { code: "PI_CONTROL_FORBIDDEN" });
+			return request.action === "agent.state" ? w.getState() : w.send(request.action, request.payload ?? {});
 		}
 	}
 }

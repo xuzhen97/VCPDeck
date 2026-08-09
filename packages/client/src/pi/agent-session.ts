@@ -57,6 +57,7 @@ export interface PiAgentSessionWrapper {
 	onEvent(listener: (event: PiClientEvent) => void): () => void;
 	send(action: PiAction, payload?: Record<string, unknown>): Promise<unknown>;
 	getState(): PiAgentState;
+	ensureProjectTrust(): Promise<boolean>;
 	shutdown(): Promise<void>;
 	destroy(): void;
 }
@@ -78,26 +79,15 @@ export function startPiAgentSession(
 			? (await getSdk()).SessionManager.open(options.sessionFile, undefined)
 			: (await getSdk()).SessionManager.create(options.cwd, undefined);
 
-		let trustAsk: ((message: string) => Promise<boolean>) | null = null;
-		const noAsk = () => Promise.resolve(false);
+		const sdk = await getSdk();
+		const trustStore = new sdk.ProjectTrustStore(agentDir);
+		let wrapper: PiAgentSessionWrapperImpl | null = null;
 		const services = await (await getSdk()).createAgentSessionServices({
 			cwd: sessionManager.getCwd(),
 			agentDir,
 			resourceLoaderReloadOptions: {
-				resolveProjectTrust: async ({ extensionsResult }) => {
-					if (!extensionsResult || extensionsResult.extensions.length === 0)
-						return false;
-					if (options.trustResolver) {
-						return options.trustResolver(
-							sessionManager.getCwd(),
-							trustAsk ?? noAsk,
-						);
-					}
-					return defaultTrustResolver(
-						sessionManager.getCwd(),
-						trustAsk ?? noAsk,
-					);
-				},
+				// 未决定信任时先创建不加载项目资源的受限 Session。
+				resolveProjectTrust: async () => trustStore.get(sessionManager.getCwd()) === true,
 			},
 		});
 
@@ -171,8 +161,18 @@ export function startPiAgentSession(
 					: {}),
 		});
 
-		const wrapper = new PiAgentSessionWrapperImpl(inner);
-		trustAsk = (message) => wrapper.askConfirm(message);
+		wrapper = new PiAgentSessionWrapperImpl(inner);
+		wrapper.setProjectTrustResolver(async (ask) => {
+			const projectCwd = sessionManager.getCwd();
+			const existing = trustStore.get(projectCwd);
+			if (existing !== null) return existing;
+			if (!sdk.hasTrustRequiringProjectResources(projectCwd)) return false;
+			const confirmed = options.trustResolver
+				? await options.trustResolver(projectCwd, ask)
+				: await ask(`此项目包含本地扩展/Skills（.pi/extensions 或 .agents/skills），是否信任并加载？`);
+			trustStore.set(projectCwd, confirmed);
+			return confirmed;
+		});
 		wrapper.start();
 		return wrapper;
 	})();
@@ -204,23 +204,6 @@ function selectInitialModel(
 	return { thinkingLevel: options.thinkingLevel };
 }
 
-/** 缺省信任流程：先读 ProjectTrustStore，未决定时通过 confirm 询问 Owner */
-async function defaultTrustResolver(
-	cwd: string,
-	ask: (message: string) => Promise<boolean>,
-): Promise<boolean> {
-	const sdk = await getSdk();
-	const store = new sdk.ProjectTrustStore(sdk.getAgentDir());
-	const existing = store.get(cwd);
-	if (existing !== null) return existing;
-	if (!(await getSdk()).hasTrustRequiringProjectResources(cwd)) return false;
-	const confirmed = await ask(
-		`此项目包含本地扩展/Skills（.pi/extensions 或 .agents/skills），是否信任并加载？`,
-	);
-	store.set(cwd, confirmed);
-	return confirmed;
-}
-
 /** confirm 询问通过 Extension UI 事件流交给 Owner */
 
 export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
@@ -234,6 +217,8 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	private idleTimer: ReturnType<typeof setTimeout> | null = null;
 	private onDestroyCallback: (() => void) | null = null;
 	private shutdownPromise: Promise<void> | null = null;
+	private projectTrustResolver: ((ask: (message: string) => Promise<boolean>) => Promise<boolean>) | null = null;
+	private projectTrustPromise: Promise<boolean> | null = null;
 	private _alive = true;
 
 	constructor(public readonly inner: AgentSession) {}
@@ -838,6 +823,20 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 					? payload.value
 					: undefined,
 		);
+	}
+
+	setProjectTrustResolver(
+		resolver: (ask: (message: string) => Promise<boolean>) => Promise<boolean>,
+	): void {
+		this.projectTrustResolver = resolver;
+	}
+
+	async ensureProjectTrust(): Promise<boolean> {
+		if (!this.projectTrustResolver) return false;
+		if (!this.projectTrustPromise) {
+			this.projectTrustPromise = this.projectTrustResolver((message) => this.askConfirm(message));
+		}
+		return this.projectTrustPromise;
 	}
 
 	/** Project Trust confirm：通过 Extension UI 事件流交给 Owner */

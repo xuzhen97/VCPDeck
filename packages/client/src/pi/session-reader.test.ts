@@ -132,6 +132,30 @@ describe("PiSessionReader", () => {
 		expect(JSON.stringify(page)).toContain("Tool result truncated");
 	});
 
+	it("只读 state 投影最近模型与思考深度且固定 idle", async () => {
+		const { cwd, sessionDir } = await makeDirs();
+		await writeSession(sessionDir, cwd, "s1", [
+			{ type: "model_change", id: "model-1", parentId: null, timestamp: new Date().toISOString(), provider: "AxonHub", modelId: "gpt-5.5" },
+			{ type: "thinking_level_change", id: "thinking-1", parentId: "model-1", timestamp: new Date().toISOString(), thinkingLevel: "max" },
+		]);
+
+		await expect(createPiSessionReader(cwd, sessionDir).state("s1")).resolves.toEqual({
+			status: "idle",
+			streaming: false,
+			prompting: false,
+			compacting: false,
+			thinkingLevel: "max",
+			queuedMessages: { steering: [], followUp: [] },
+			model: { provider: "AxonHub", modelId: "gpt-5.5" },
+		});
+	});
+
+	it("只读 state 在无 thinking 记录时使用 off", async () => {
+		const { cwd, sessionDir } = await makeDirs();
+		await writeSession(sessionDir, cwd, "s1", []);
+		expect((await createPiSessionReader(cwd, sessionDir).state("s1")).thinkingLevel).toBe("off");
+	});
+
 	it("重命名 Session", async () => {
 		const { cwd, sessionDir } = await makeDirs();
 		await writeSession(sessionDir, cwd, "s1", [msg("m1", null, "user", [text("hi")])]);

@@ -6,6 +6,7 @@ import type {
 	PiRequest,
 	PiResponse,
 	PiRunSummary,
+	PiStateAck,
 	PiStateReport,
 } from "@vcpdeck/shared";
 import { discoverRoots } from "../filesystem-roots.js";
@@ -72,7 +73,7 @@ const DESTRUCTIVE_ACTIONS = new Set([
 export interface PiSupervisor {
 	request(request: PiRequest, timeoutMs?: number): Promise<PiResponse>;
 	getStateReport(): PiStateReport;
-	ackTerminalRuns(runIds: string[]): void;
+	applyStateAck(ack: PiStateAck): Promise<{ allClosed: boolean }>; 
 	onEvent(listener: (event: PiEvent) => void): () => void;
 	shutdown(): Promise<void>;
 }
@@ -88,8 +89,11 @@ export function createPiSupervisor(options: {
 	const registry = new Map<string, ProjectEntry>();
 	/** 已退出 Worker 的终态摘要（registry 清理后仍保留直到 ack） */
 	const orphanTerminals: PiRunSummary[] = [];
-	/** jobId → cwd（终态后 settlement 查询回退；仅内存，不上报） */
-	const terminalCwd = new Map<string, string>();
+	/** runId → envelope/cwd（终态后 settlement 查询回退；仅内存，不上报） */
+	const terminalCwd = new Map<
+		string,
+		{ cwd: string; jobId: string; sessionId: string }
+	>();
 	const eventListeners: ((event: PiEvent) => void)[] = [];
 	const pending = new Map<
 		string,
@@ -110,16 +114,21 @@ export function createPiSupervisor(options: {
 		}
 		if (request.jobId) {
 			for (const [key, entry] of registry) {
-				if (entry.activeRun?.jobId === request.jobId) {
+				if (
+					entry.activeRun?.jobId === request.jobId &&
+					(!request.runId || entry.activeRun.runId === request.runId)
+				) {
 					return { key, cwd: entry.cwd };
 				}
 			}
-			// settlement 在 activeRun 清除（agent_settled）后才查询：回退到终态记录
-			const settledCwd = terminalCwd.get(request.jobId);
-			if (settledCwd) {
+			// settlement 在 activeRun 清除后查询：按 runId 回退，避免同 Session 多轮冲突
+			const settled = request.runId
+				? terminalCwd.get(request.runId)
+				: undefined;
+			if (settled && settled.jobId === request.jobId) {
 				return {
-					key: projectKeyFor(canonicalPath(settledCwd)),
-					cwd: settledCwd,
+					key: projectKeyFor(canonicalPath(settled.cwd)),
+					cwd: settled.cwd,
 				};
 			}
 			throw { code: "PI_SESSION_NOT_FOUND", message: "No active run for job" };
@@ -173,6 +182,12 @@ export function createPiSupervisor(options: {
 					) {
 						run.status = "waiting_input";
 					}
+					if (
+						msg.event.type === "extension_resolved" &&
+						msg.event.hasPending === false
+					) {
+						run.status = "running";
+					}
 					if (msg.event.type === "agent_settled") {
 						entry.terminals.push({
 							jobId: run.jobId,
@@ -181,7 +196,11 @@ export function createPiSupervisor(options: {
 							status: "done",
 							projectKey: run.projectKey,
 						});
-						terminalCwd.set(run.jobId, entry.cwd);
+						terminalCwd.set(run.runId, {
+							cwd: entry.cwd,
+							jobId: run.jobId,
+							sessionId: run.sessionId,
+						});
 						entry.activeRun = null;
 					}
 					if (msg.event.type === "prompt_error") {
@@ -192,7 +211,11 @@ export function createPiSupervisor(options: {
 							status: "error",
 							projectKey: run.projectKey,
 						});
-						terminalCwd.set(run.jobId, entry.cwd);
+						terminalCwd.set(run.runId, {
+							cwd: entry.cwd,
+							jobId: run.jobId,
+							sessionId: run.sessionId,
+						});
 						entry.activeRun = null;
 					}
 				}
@@ -280,10 +303,6 @@ export function createPiSupervisor(options: {
 						projectKey: key,
 						status: "running",
 					};
-				} else if (request.action === "extension.respond") {
-					if (entry.activeRun?.status === "waiting_input") {
-						entry.activeRun.status = "running";
-					}
 				} else if (DESTRUCTIVE_ACTIONS.has(request.action)) {
 					if (entry.activeRun) {
 						return piError(
@@ -304,7 +323,16 @@ export function createPiSupervisor(options: {
 					return result;
 				}
 
-				return requestViaWorker(entry, key, request, timeoutMs);
+				const result = await requestViaWorker(entry, key, request, timeoutMs);
+				if (
+					request.action === "agent.prompt" &&
+					!result.ok &&
+					entry.activeRun?.jobId === request.jobId &&
+					entry.activeRun?.runId === request.runId
+				) {
+					entry.activeRun = null;
+				}
+				return result;
 			} catch (err) {
 				const code =
 					typeof err === "object" && err !== null && "code" in err
@@ -335,16 +363,40 @@ export function createPiSupervisor(options: {
 			return { clientId, runs };
 		},
 
-		ackTerminalRuns(runIds: string[]): void {
-			const accepted = new Set(runIds);
+		async applyStateAck(ack): Promise<{ allClosed: boolean }> {
+			const accepted = new Set(ack.acceptedRunIds);
 			for (let i = orphanTerminals.length - 1; i >= 0; i--) {
-				if (accepted.has(orphanTerminals[i]?.jobId ?? ""))
+				if (accepted.has(orphanTerminals[i]?.runId ?? ""))
 					orphanTerminals.splice(i, 1);
 			}
 			for (const entry of registry.values()) {
-				entry.terminals = entry.terminals.filter((t) => !accepted.has(t.jobId));
+				entry.terminals = entry.terminals.filter((t) => !accepted.has(t.runId));
 			}
-			for (const jobId of accepted) terminalCwd.delete(jobId);
+			for (const runId of accepted) terminalCwd.delete(runId);
+
+			let allClosed = true;
+			for (const runId of ack.closedRunIds) {
+				const entry = [...registry.values()].find(
+					(candidate) => candidate.activeRun?.runId === runId,
+				);
+				const run = entry?.activeRun;
+				if (!entry || !run) continue;
+				const response = await requestViaWorker(
+					entry,
+					run.projectKey,
+					{
+						requestId: randomUUID(),
+						action: "agent.abort",
+						jobId: run.jobId,
+						runId: run.runId,
+						sessionId: run.sessionId,
+					},
+					REQUEST_TIMEOUT_MS,
+				);
+				if (response.ok && entry.activeRun === run) entry.activeRun = null;
+				else allClosed = false;
+			}
+			return { allClosed };
 		},
 
 		onEvent(listener) {
