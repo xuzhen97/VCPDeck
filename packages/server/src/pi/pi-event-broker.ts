@@ -4,11 +4,8 @@ import { map } from "rxjs/operators";
 import type {
 	MessageEvent,
 } from "@nestjs/common";
-import type {
-	PiAgentState,
-	PiEvent,
-	PiStateReport,
-} from "@vcpdeck/shared";
+import { parsePiAgentState } from "@vcpdeck/shared";
+import type { PiAgentState, PiEvent } from "@vcpdeck/shared";
 import { PiRequestBroker } from "./pi-request-broker.js";
 import { PiRunService } from "./pi-run.service.js";
 
@@ -71,14 +68,21 @@ export class PiEventBroker {
 			isDialogKind(event.event.ui.kind);
 		// 只有交互式 Extension UI 才进入 waiting_input；notify 等状态通知不阻塞回合。
 		if (interactiveExtension) {
-			await this.runs.waitForInput(jobId).catch(() => {});
+			await this.runs.waitForInput(jobId, runId).catch(() => {});
+		}
+		if (event.event.type === "extension_resolved" && !event.event.hasPending) {
+			await this.runs.resume(jobId, runId).catch(() => {});
 		}
 		// grace 内新 activity 取消 settlement；普通 notify 不算 activity。
 		if (
 			ACTIVITY_EVENTS.has(event.event.type) &&
 			(event.event.type !== "extension_request" || interactiveExtension)
 		) {
-			this.runs.cancelSettlement(jobId);
+			this.runs.cancelSettlement(jobId, runId);
+		}
+		if (event.event.type === "prompt_error") {
+			this.runs.cancelSettlement(jobId, runId);
+			await this.runs.finishRun(jobId, runId).catch(() => {});
 		}
 		// 终态触发 settlement 检查
 		if (SETTLEMENT_TRIGGERS.has(event.event.type)) {
@@ -115,14 +119,6 @@ export class PiEventBroker {
 		});
 	}
 
-	/** Client 重连状态报告：恢复 Job 状态并返回 accepted run ids */
-	async handleState(clientId: string, report: PiStateReport): Promise<string[]> {
-		await this.runs.reconcileState(clientId, report);
-		return report.runs
-			.filter((r) => r.status === "done" || r.status === "error")
-			.map((r) => r.jobId);
-	}
-
 	/** 触发 settlement：30 秒 grace 后再查一次 state，仍 idle 才 settle */
 	private async scheduleSettlementCheck(
 		clientId: string,
@@ -130,27 +126,28 @@ export class PiEventBroker {
 		jobId: string,
 		runId: string,
 	): Promise<void> {
-		await this.runs.scheduleSettlement(jobId, async () => {
-			let state: PiAgentState;
+		await this.runs.scheduleSettlement(jobId, runId, async () => {
 			try {
-				const response = await this.requests.request(clientId, {
-					requestId: `settle-${jobId}-${Date.now()}`,
-					action: "agent.state",
-					sessionId,
-					jobId,
-					runId,
+				await this.runs.withReconciledClient(clientId, async (lease) => {
+					const response = await this.requests.request(lease, {
+						requestId: `settle-${jobId}-${Date.now()}`,
+						action: "agent.state",
+						sessionId,
+						jobId,
+						runId,
+					});
+					if (!response.ok) return;
+					const state = parsePiAgentState(response.data);
+					if (
+						isIdleState(state) &&
+						state.queuedMessages.steering.length === 0 &&
+						state.queuedMessages.followUp.length === 0
+					) {
+						await this.runs.finishRun(jobId, runId);
+					}
 				});
-				if (!response.ok) return;
-				state = response.data as PiAgentState;
 			} catch {
-				return; // Client 断线等：留给重连 reconcile
-			}
-			if (
-				isIdleState(state) &&
-				state.queuedMessages.steering.length === 0 &&
-				state.queuedMessages.followUp.length === 0
-			) {
-				await this.runs.settle(jobId, state);
+				// Client 断线、generation 切换或畸形响应：留给重连 reconcile。
 			}
 		});
 	}

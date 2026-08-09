@@ -18,7 +18,7 @@ function makeController(
 	> = {},
 ) {
 	const requests = {
-		request: vi.fn(async (_clientId: string, _req: { action: string }) => ({
+		request: vi.fn(async (_lease: { clientId: string; socketId: string }, _req: { action: string }) => ({
 			ok: true,
 			data: {},
 		})),
@@ -39,6 +39,8 @@ function makeController(
 		assertOwner: vi.fn(async () => {}),
 		assertIdleMutation: vi.fn(async () => {}),
 		listActiveByClient: vi.fn(async () => []),
+		withReconciledClient: vi.fn(async (clientId: string, operation: (lease: { clientId: string; socketId: string }) => Promise<unknown>) =>
+			operation({ clientId, socketId: "socket-1" })),
 		...((overrides.runs as object) ?? {}),
 	};
 	const clients = {
@@ -88,7 +90,7 @@ describe("PiController", () => {
 		const { controller, requests } = makeController();
 		await controller.sessions("c1", "D:\\", "repo");
 		expect(requests.request).toHaveBeenCalledWith(
-			"c1",
+			{ clientId: "c1", socketId: "socket-1" },
 			expect.objectContaining({
 				action: "sessions.list",
 				cwdRef: { rootDir: "D:\\", relativePath: "repo" },
@@ -99,7 +101,7 @@ describe("PiController", () => {
 	it("prompt 先 createRun 再发布 run_created 再 dispatch，返回 accepted", async () => {
 		const { controller, requests, events, runs } = makeController();
 		requests.request.mockImplementation(
-			async (_clientId: string, req: { action: string }) => {
+			async (_lease: { clientId: string; socketId: string }, req: { action: string }) => {
 				if (req.action === "project.resolve")
 					return { ok: true, data: { projectKey: "k".repeat(64) } };
 				return { ok: true, data: { accepted: true } };
@@ -142,7 +144,7 @@ describe("PiController", () => {
 	it("prompt 请求失败时 Job fail", async () => {
 		const { controller, requests, runs } = makeController();
 		requests.request.mockImplementation((async (
-			_clientId: string,
+			_lease: { clientId: string; socketId: string },
 			req: { action: string },
 		) => {
 			if (req.action === "project.resolve")
@@ -231,7 +233,7 @@ describe("PiController", () => {
 
 		expect(runs.assertIdleMutation).toHaveBeenCalledWith("c1", "k".repeat(64));
 		expect(requests.request).toHaveBeenLastCalledWith(
-			"c1",
+			{ clientId: "c1", socketId: "socket-1" },
 			expect.objectContaining({
 				action: "thinking.set",
 				sessionId: "s1",

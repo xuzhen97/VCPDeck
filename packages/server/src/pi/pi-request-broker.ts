@@ -3,8 +3,12 @@ import type { PiRequest, PiResponse } from "@vcpdeck/shared";
 
 export const PI_REQUEST_TIMEOUT_MS = 15_000;
 
-interface PendingRequest {
+export interface PiGenerationLease {
 	clientId: string;
+	socketId: string;
+}
+
+interface PendingRequest extends PiGenerationLease {
 	resolve: (response: PiResponse) => void;
 	reject: (error: Error) => void;
 	timer: ReturnType<typeof setTimeout>;
@@ -17,22 +21,22 @@ function piError(code: string, message: string): Error {
 /**
  * Pi 请求代理：把 REST 请求通过 Socket.IO 发到目标 Client，以 requestId 关联响应。
  * - 不记录 request payload 正文；
- * - Client 断线时失败所有 pending；
- * - 只接受来自原目标 Client 的响应（防伪造）。
+ * - socket 断线时只失败该连接的 pending；
+ * - 只接受来自原 lease socket 的响应（防串线）。
  */
 @Injectable()
 export class PiRequestBroker {
-	private emitter: ((clientId: string, request: PiRequest) => void) | null =
+	private emitter: ((socketId: string, request: PiRequest) => void) | null =
 		null;
 	private readonly pending = new Map<string, PendingRequest>();
 
 	/** Gateway afterInit 时绑定 emitter（避免循环依赖） */
-	bindEmitter(fn: (clientId: string, request: PiRequest) => void): void {
+	bindEmitter(fn: (socketId: string, request: PiRequest) => void): void {
 		this.emitter = fn;
 	}
 
 	request(
-		clientId: string,
+		lease: PiGenerationLease,
 		request: PiRequest,
 		timeoutMs: number = PI_REQUEST_TIMEOUT_MS,
 	): Promise<PiResponse> {
@@ -41,25 +45,25 @@ export class PiRequestBroker {
 				this.pending.delete(request.requestId);
 				reject(piError("PI_REQUEST_TIMEOUT", "Client did not respond in time"));
 			}, timeoutMs);
-			this.pending.set(request.requestId, { clientId, resolve, reject, timer });
-			this.emitter?.(clientId, request);
+			this.pending.set(request.requestId, { ...lease, resolve, reject, timer });
+			this.emitter?.(lease.socketId, request);
 		});
 	}
 
-	/** Client 响应：校验来源 clientId 后 resolve */
-	resolve(clientId: string, response: PiResponse): void {
+	/** Client 响应：校验来源 socketId 后 resolve */
+	resolve(socketId: string, response: PiResponse): void {
 		const pending = this.pending.get(response.requestId);
 		if (!pending) return; // 未知/重复响应忽略
-		if (pending.clientId !== clientId) return; // 伪造响应拒绝
+		if (pending.socketId !== socketId) return; // 旧连接或伪造响应拒绝
 		clearTimeout(pending.timer);
 		this.pending.delete(response.requestId);
 		pending.resolve(response);
 	}
 
-	/** Client 断线：失败其全部 pending request */
-	disconnect(clientId: string): void {
+	/** socket 断线：只失败该连接的 pending request */
+	disconnect(socketId: string): void {
 		for (const [requestId, pending] of this.pending) {
-			if (pending.clientId === clientId) {
+			if (pending.socketId === socketId) {
 				clearTimeout(pending.timer);
 				this.pending.delete(requestId);
 				pending.reject(

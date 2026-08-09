@@ -16,7 +16,9 @@ function runServiceMock() {
 				void onSettle;
 			},
 		),
-		settle: vi.fn(async () => {}),
+		finishRun: vi.fn(async () => true),
+		withReconciledClient: vi.fn(async (_clientId: string, operation: (lease: { clientId: string; socketId: string }) => Promise<unknown>) =>
+			operation({ clientId: "c1", socketId: "socket-1" })),
 		reconcileState: vi.fn(async () => {}),
 	} as unknown as PiRunService;
 }
@@ -97,7 +99,7 @@ describe("PiEventBroker", () => {
 		await otherPromise.catch(() => {});
 	});
 
-	it("extension_request 触发 waitForInput", async () => {
+	it("interactive request 使用 jobId + runId 进入 waiting", async () => {
 		const runs = runServiceMock();
 		const { broker } = makeBroker({ runs });
 
@@ -110,7 +112,7 @@ describe("PiEventBroker", () => {
 				},
 			}),
 		);
-		expect(runs.waitForInput).toHaveBeenCalledWith("j1");
+		expect(runs.waitForInput).toHaveBeenCalledWith("j1", "j1");
 	});
 
 	it("notify extension_request 不触发 waitForInput", async () => {
@@ -142,7 +144,7 @@ describe("PiEventBroker", () => {
 		await broker.publish(
 			makeEvent({ event: { type: "agent_start", sessionId: "s1" } }),
 		);
-		expect(runs.cancelSettlement).toHaveBeenCalledWith("j1");
+		expect(runs.cancelSettlement).toHaveBeenCalledWith("j1", "j1");
 	});
 
 	it("prompt_done/agent_settled 触发 settlement 检查", async () => {
@@ -156,7 +158,7 @@ describe("PiEventBroker", () => {
 			typeof vi.fn
 		>;
 		expect(scheduleMock).toHaveBeenCalledTimes(1);
-		expect(scheduleMock.mock.calls[0]?.[0]).toBe("j1");
+		expect(scheduleMock.mock.calls[0]?.slice(0, 2)).toEqual(["j1", "j1"]);
 
 		await broker.publish(
 			makeEvent({ event: { type: "agent_settled", sessionId: "s1" } }),
@@ -171,17 +173,19 @@ describe("PiEventBroker", () => {
 			resume: vi.fn(async () => {}),
 			cancelSettlement: vi.fn(),
 			scheduleSettlement: vi.fn(
-				async (_jobId: string, cb: () => Promise<void>) => {
+				async (_jobId: string, _runId: string, cb: () => Promise<void>) => {
 					onSettle = cb;
 				},
 			),
-			settle: vi.fn(async () => {}),
+			finishRun: vi.fn(async () => true),
+			withReconciledClient: vi.fn(async (_clientId: string, operation: (lease: { clientId: string; socketId: string }) => Promise<unknown>) =>
+				operation({ clientId: "c1", socketId: "socket-1" })),
 			reconcileState: vi.fn(async () => {}),
 		} as unknown as PiRunService;
 		const requests = new PiRequestBroker();
-		requests.bindEmitter((_clientId, request) => {
+		requests.bindEmitter((_socketId, request) => {
 			queueMicrotask(() => {
-				requests.resolve("c1", {
+				requests.resolve("socket-1", {
 					requestId: request.requestId,
 					ok: true,
 					data: state,
@@ -192,12 +196,13 @@ describe("PiEventBroker", () => {
 		return { broker, runs, getOnSettle: () => onSettle };
 	}
 
-	it("settlement 回调只在 idle + queue empty 时 settle", async () => {
+	it("settlement 只把当前 run 收敛为 idle", async () => {
 		const { broker, runs, getOnSettle } = makeSettleBroker({
 			status: "idle",
 			streaming: false,
 			prompting: false,
 			compacting: false,
+			thinkingLevel: "off",
 			queuedMessages: { steering: [], followUp: [] },
 		});
 		await broker.publish(
@@ -206,10 +211,12 @@ describe("PiEventBroker", () => {
 		expect(getOnSettle()).not.toBeNull();
 
 		await getOnSettle()!();
-		expect(runs.settle).toHaveBeenCalledWith(
+		expect(runs.scheduleSettlement).toHaveBeenCalledWith(
 			"j1",
-			expect.objectContaining({ status: "idle" }),
+			"j1",
+			expect.any(Function),
 		);
+		expect(runs.finishRun).toHaveBeenCalledWith("j1", "j1");
 	});
 
 	it("settlement 回调在 queue 非空时不 settle", async () => {
@@ -218,6 +225,7 @@ describe("PiEventBroker", () => {
 			streaming: false,
 			prompting: false,
 			compacting: false,
+			thinkingLevel: "off",
 			queuedMessages: { steering: ["s1"], followUp: [] },
 		});
 		await broker.publish(
@@ -225,7 +233,7 @@ describe("PiEventBroker", () => {
 		);
 
 		await getOnSettle()!();
-		expect(runs.settle).not.toHaveBeenCalled();
+		expect(runs.finishRun).not.toHaveBeenCalled();
 	});
 
 	it("settlement 回调在非 idle 状态时不 settle", async () => {
@@ -234,6 +242,7 @@ describe("PiEventBroker", () => {
 			streaming: true,
 			prompting: true,
 			compacting: false,
+			thinkingLevel: "off",
 			queuedMessages: { steering: [], followUp: [] },
 		});
 		await broker.publish(
@@ -241,21 +250,53 @@ describe("PiEventBroker", () => {
 		);
 
 		await getOnSettle()!();
-		expect(runs.settle).not.toHaveBeenCalled();
+		expect(runs.finishRun).not.toHaveBeenCalled();
 	});
 
-	it("handleState 恢复并返回 accepted run ids", async () => {
+	it("仍有排队 Extension 时不恢复 running", async () => {
 		const runs = runServiceMock();
 		const { broker } = makeBroker({ runs });
+		await broker.publish(makeEvent({
+			event: {
+				type: "extension_resolved",
+				sessionId: "s1",
+				requestId: "ui-1",
+				reason: "answered",
+				hasPending: true,
+			},
+		}));
+		expect(runs.resume).not.toHaveBeenCalled();
+	});
 
-		const accepted = await broker.handleState("c1", {
-			clientId: "c1",
-			runs: [
-				{ jobId: "j1", runId: "j1", sessionId: "s1", status: "running" },
-				{ jobId: "j2", runId: "j2", sessionId: "s2", status: "done" },
-			],
-		});
-		expect(runs.reconcileState).toHaveBeenCalledWith("c1", expect.any(Object));
-		expect(accepted).toEqual(["j2"]);
+	it("最后一个 Extension 解决后恢复 running", async () => {
+		const runs = runServiceMock();
+		const { broker } = makeBroker({ runs });
+		await broker.publish(makeEvent({
+			event: {
+				type: "extension_resolved",
+				sessionId: "s1",
+				requestId: "ui-2",
+				reason: "timeout",
+				hasPending: false,
+			},
+		}));
+		expect(runs.resume).toHaveBeenCalledWith("j1", "j1");
+	});
+
+	it("prompt_error 只结束当前 run，错误正文仅保留在 SSE", async () => {
+		const runs = runServiceMock();
+		const { broker } = makeBroker({ runs });
+		const streamPromise = collectStream(broker, "c1", "s1", 1);
+		await broker.publish(makeEvent({
+			event: {
+				type: "prompt_error",
+				sessionId: "s1",
+				code: "PI_WORKER_EXITED",
+				message: "SENTINEL_PROMPT_ERROR",
+			},
+		}));
+		expect(runs.cancelSettlement).toHaveBeenCalledWith("j1", "j1");
+		expect(runs.finishRun).toHaveBeenCalledWith("j1", "j1");
+		expect((await streamPromise)[0]).toContain("SENTINEL_PROMPT_ERROR");
 	});
 });

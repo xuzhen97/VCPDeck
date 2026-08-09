@@ -1,9 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClientGateway } from "./client.gateway.js";
+import type { PiEvent, PiStateAck, PiStateReport } from "@vcpdeck/shared";
+import type { Socket } from "socket.io";
+
+function makeSocket(id = "socket-1") {
+	return {
+		id,
+		data: {} as { clientId?: string },
+		join: vi.fn(),
+		emit: vi.fn(),
+	} as unknown as Socket;
+}
 
 function makeGateway() {
+	const clientService = {
+		register: vi.fn(async () => {}),
+		getClientIdBySocketId: vi.fn(async () => "c1"),
+		markOfflineBySocketId: vi.fn(async () => {}),
+	};
 	const jobService = {
 		markDone: vi.fn().mockResolvedValue(null),
+		markDisconnected: vi.fn(async () => {}),
 	};
 	const fileService = {
 		confirmUpload: vi.fn().mockResolvedValue({
@@ -11,29 +28,136 @@ function makeGateway() {
 			size: 158601385,
 		}),
 	};
+	const frpService = {
+		updateStatus: vi.fn(),
+		markInactiveByClientId: vi.fn(async () => {}),
+	};
+	const piRequests = {
+		bindEmitter: vi.fn(),
+		request: vi.fn(),
+		resolve: vi.fn(),
+		disconnect: vi.fn(),
+	};
+	const piEvents = {
+		publish: vi.fn(async () => {}),
+		stream: vi.fn(),
+	};
+	const piRuns = {
+		markReconcilePending: vi.fn(async () => {}),
+		reconcileGeneration: vi.fn(async (): Promise<PiStateAck> => ({
+			acceptedRunIds: [], closedRunIds: [], reportAgain: false,
+		})),
+		withReconciledSocket: vi.fn(async (_clientId: string, _socketId: string, operation: () => Promise<void>) => operation()),
+		disconnectGeneration: vi.fn(async () => true),
+	};
 	const gateway = new ClientGateway(
-		{} as never,
+		clientService as never,
 		jobService as never,
 		fileService as never,
-		{ updateStatus: vi.fn() } as never,
-		{
-			bindEmitter: vi.fn(),
-			request: vi.fn(),
-			resolve: vi.fn(),
-			disconnect: vi.fn(),
-		} as never,
-		{
-			publish: vi.fn(),
-			stream: vi.fn(),
-			handleState: vi.fn().mockResolvedValue([]),
-		} as never,
-		{
-			markDisconnected: vi.fn().mockResolvedValue(undefined),
-		} as never,
+		frpService as never,
+		piRequests as never,
+		piEvents as never,
+		piRuns as never,
 	);
-	gateway.server = { emit: vi.fn() } as never;
-	return { gateway, jobService, fileService };
+	const emit = vi.fn();
+	const to = vi.fn(() => ({ emit }));
+	gateway.server = { emit: vi.fn(), to } as never;
+	return {
+		gateway, clientService, jobService, fileService, frpService,
+		piRequests, piEvents, piRuns, emit, to,
+	};
 }
+
+const report: PiStateReport = { clientId: "c1", runs: [] };
+
+const event: PiEvent = {
+	clientId: "c1",
+	sessionId: "s1",
+	jobId: "s1",
+	runId: "r1",
+	event: { type: "agent_start", sessionId: "s1" },
+};
+
+describe("ClientGateway Pi generation routing", () => {
+	it("afterInit 精确投递 socketId，不使用 clientId room", () => {
+		const { gateway, piRequests, to, emit } = makeGateway();
+		gateway.afterInit();
+		const binder = piRequests.bindEmitter.mock.calls[0]?.[0];
+		binder("socket-2", { requestId: "r1", action: "sessions.list" });
+		expect(to).toHaveBeenCalledWith("socket-2");
+		expect(emit).toHaveBeenCalledWith("pi:request", expect.objectContaining({ requestId: "r1" }));
+	});
+
+	it("REGISTER 在 ack 前绑定身份并进入 pending generation", async () => {
+		const { gateway, piRuns } = makeGateway();
+		const socket = makeSocket();
+		const order: string[] = [];
+		piRuns.markReconcilePending.mockImplementation(async () => { order.push("pending"); });
+		const ack = vi.fn(() => order.push("ack"));
+		await gateway.handleRegister(socket, {
+			clientId: "c1", hostname: "host", os: "win32", cpuModel: "cpu",
+			totalMemMB: 1024, clientVersion: "1", capabilities: ["agent.pi"],
+			capabilityDetails: {},
+		}, ack);
+		expect(socket.data.clientId).toBe("c1");
+		expect(piRuns.markReconcilePending).toHaveBeenCalledWith("c1", "socket-1");
+		expect(order).toEqual(["pending", "ack"]);
+	});
+
+	it("PI_STATE 只经 reconcileGeneration 并原样 ack", async () => {
+		const { gateway, piRuns, piEvents } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		const expected = {
+			acceptedRunIds: ["run-idle"],
+			closedRunIds: ["run-stale"],
+			reportAgain: true,
+		};
+		piRuns.reconcileGeneration.mockResolvedValue(expected);
+		const ack = vi.fn();
+		await gateway.handlePiState(socket, report, ack);
+		expect(piRuns.reconcileGeneration).toHaveBeenCalledWith("c1", "socket-1", report);
+		expect(ack).toHaveBeenCalledWith(expected);
+		expect(piEvents).not.toHaveProperty("handleState");
+	});
+
+	it("PI_RESPONSE 直接按响应 socket resolve，不查 DB socketId", async () => {
+		const { gateway, piRequests, clientService } = makeGateway();
+		const socket = makeSocket("old-socket");
+		socket.data.clientId = "c1";
+		const response = { requestId: "r1", ok: true, data: {} } as const;
+		await gateway.handlePiResponse(socket, response);
+		expect(piRequests.resolve).toHaveBeenCalledWith("old-socket", response);
+		expect(clientService.getClientIdBySocketId).not.toHaveBeenCalled();
+	});
+
+	it("旧 socket 的迟到 PI_EVENT 不进入状态机", async () => {
+		const { gateway, piRuns, piEvents } = makeGateway();
+		const socket = makeSocket("old-socket");
+		socket.data.clientId = "c1";
+		piRuns.withReconciledSocket.mockRejectedValue(
+			Object.assign(new Error("stale"), { code: "PI_STATE_PENDING" }),
+		);
+		await gateway.handlePiEvent(socket, event);
+		expect(piEvents.publish).not.toHaveBeenCalled();
+	});
+
+	it("断线先失败 socket pending request，再处理 matching generation", async () => {
+		const { gateway, piRequests, piRuns } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		const order: string[] = [];
+		piRequests.disconnect.mockImplementation(() => { order.push("request-disconnected"); });
+		piRuns.disconnectGeneration.mockImplementation(async () => {
+			order.push("generation-disconnected");
+			return true;
+		});
+		await gateway.handleDisconnect(socket);
+		expect(piRequests.disconnect).toHaveBeenCalledWith("socket-1");
+		expect(piRuns.disconnectGeneration).toHaveBeenCalledWith("c1", "socket-1");
+		expect(order).toEqual(["request-disconnected", "generation-disconnected"]);
+	});
+});
 
 describe("ClientGateway.handleJobDone", () => {
 	it("用数据库中的真实 key 覆盖 Client 回传的临时 key", async () => {

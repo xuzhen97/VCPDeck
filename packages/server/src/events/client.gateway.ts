@@ -22,6 +22,7 @@ import {
   parsePiResponse,
   parsePiStateReport,
   type JobProgress,
+  type PiStateAck,
 } from "@vcpdeck/shared";
 import type {
   MachineRegister,
@@ -58,8 +59,8 @@ export class ClientGateway {
 
   // ── Pi request 发送通道（避免与 PiModule 循环依赖） ──
   afterInit() {
-    this.piRequests.bindEmitter((clientId, request) => {
-      this.server.to(clientId).emit(Events.PI_REQUEST, request);
+    this.piRequests.bindEmitter((socketId, request) => {
+      this.server.to(socketId).emit(Events.PI_REQUEST, request);
     });
   }
 
@@ -75,13 +76,12 @@ export class ClientGateway {
   }
 
   async handleDisconnect(client: Socket) {
-    const clientId = await this.clientService.getClientIdBySocketId(client.id);
-    if (clientId) {
+    const clientId = client.data.clientId as string | undefined;
+    // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
+    this.piRequests.disconnect(client.id);
+    if (clientId && await this.piRuns.disconnectGeneration(clientId, client.id)) {
       await this.jobService.markDisconnected(clientId);
       await this.frpService.markInactiveByClientId(clientId);
-      // Pi：失败 pending request + 标记活动回合 disconnected；不请求 Client 停 Worker
-      this.piRequests.disconnect(clientId);
-      await this.piRuns.markDisconnected(clientId);
     }
     await this.clientService.markOfflineBySocketId(client.id);
     console.log(`[ws] disconnected: ${clientId ?? client.id}`);
@@ -95,7 +95,9 @@ export class ClientGateway {
     @Ack() ack?: () => void,
   ) {
     await this.clientService.register(data, client.id);
+    client.data.clientId = data.clientId;
     client.join(data.clientId);
+    await this.piRuns.markReconcilePending(data.clientId, client.id);
     client.emit("ack", { event: Events.REGISTER });
     if (typeof ack === "function") ack();
     console.log(`[ws] registered: ${data.clientId} (${data.hostname})`);
@@ -108,12 +110,11 @@ export class ClientGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: PiResponse,
   ) {
-    const clientId = await this.clientService.getClientIdBySocketId(client.id);
-    if (!clientId) return;
+    if (typeof client.data.clientId !== "string") return;
     try {
       const parsed = parsePiResponse(data);
-      // 只接受来自原请求目标 Client 的响应
-      this.piRequests.resolve(clientId, parsed);
+      // response 不进入 generation queue；pending lease 直接校验 socketId。
+      this.piRequests.resolve(client.id, parsed);
     } catch {
       // 非法响应忽略
     }
@@ -124,12 +125,14 @@ export class ClientGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: PiEvent,
   ) {
-    const clientId = await this.clientService.getClientIdBySocketId(client.id);
+    const clientId = client.data.clientId as string | undefined;
     if (!clientId) return;
     try {
       const parsed = parsePiEvent(data);
       if (parsed.clientId !== clientId) return; // 身份绑定：禁止伪造其他 Client 事件
-      await this.piEvents.publish(parsed);
+      await this.piRuns.withReconciledSocket(clientId, client.id, () =>
+        this.piEvents.publish(parsed),
+      );
     } catch {
       // 非法事件忽略
     }
@@ -139,15 +142,15 @@ export class ClientGateway {
   async handlePiState(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: PiStateReport,
-    @Ack() ack?: (result: { acceptedRunIds: string[] }) => void,
+    @Ack() ack?: (result: PiStateAck) => void,
   ) {
-    const clientId = await this.clientService.getClientIdBySocketId(client.id);
+    const clientId = client.data.clientId as string | undefined;
     if (!clientId) return;
     try {
       const parsed = parsePiStateReport(data);
       if (parsed.clientId !== clientId) return; // 身份绑定
-      const acceptedRunIds = await this.piEvents.handleState(clientId, parsed);
-      if (typeof ack === "function") ack({ acceptedRunIds });
+      const result = await this.piRuns.reconcileGeneration(clientId, client.id, parsed);
+      if (typeof ack === "function") ack(result);
     } catch {
       // 非法报告忽略
     }

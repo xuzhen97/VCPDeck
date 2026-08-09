@@ -68,26 +68,30 @@ export class PiController {
 		clientId: string,
 		cwdRef: PiCwdRef,
 	): Promise<string> {
-		const response = await this.requests.request(clientId, {
-			requestId: randomUUID(),
-			action: "project.resolve",
-			cwdRef,
+		return this.runs.withReconciledClient(clientId, async (lease) => {
+			const response = await this.requests.request(lease, {
+				requestId: randomUUID(),
+				action: "project.resolve",
+				cwdRef,
+			});
+			if (!response.ok) {
+				throw badRequest(response.error.code, response.error.message);
+			}
+			return (response.data as { projectKey: string }).projectKey;
 		});
-		if (!response.ok) {
-			throw badRequest(response.error.code, response.error.message);
-		}
-		return (response.data as { projectKey: string }).projectKey;
 	}
 
 	private async requestOnce(
 		clientId: string,
 		request: PiRequest,
 	): Promise<unknown> {
-		const response = await this.requests.request(clientId, request);
-		if (!response.ok) {
-			throw badRequest(response.error.code, response.error.message);
-		}
-		return response.data;
+		return this.runs.withReconciledClient(clientId, async (lease) => {
+			const response = await this.requests.request(lease, request);
+			if (!response.ok) {
+				throw badRequest(response.error.code, response.error.message);
+			}
+			return response.data;
+		});
 	}
 
 	private async assertActiveOwner(jobId: string, actor: ActorContext): Promise<void> {
@@ -463,7 +467,8 @@ export class PiController {
 		});
 
 		try {
-			const response = await this.requests.request(clientId, {
+			const response = await this.runs.withReconciledClient(clientId, (lease) =>
+				this.requests.request(lease, {
 				requestId: randomUUID(),
 				action: "agent.prompt",
 				cwdRef: { rootDir, relativePath },
@@ -476,8 +481,8 @@ export class PiController {
 				...(Array.isArray(body.images) && body.images.length > 0
 					? { attachments: body.images }
 					: {}),
-			},
-			});
+				},
+			}));
 			if (!response.ok) {
 				await this.runs.fail(jobId, response.error.code, response.error.message);
 				throw badRequest(response.error.code, response.error.message);

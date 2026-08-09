@@ -79,10 +79,10 @@ function makeLoopback() {
 	// 协议 fake Client：响应 project.resolve 与 agent.prompt；可注入事件
 	const emitEvent = (event: PiEvent) => void events.publish(event);
 	let stateOverride: Record<string, unknown> | null = null;
-	requests.bindEmitter((_clientId, request: PiRequest) => {
+	requests.bindEmitter((_socketId, request: PiRequest) => {
 		if (request.action === "project.resolve") {
 			queueMicrotask(() =>
-				requests.resolve("c1", {
+				requests.resolve("socket-1", {
 					requestId: request.requestId,
 					ok: true,
 					data: { projectKey: "k".repeat(64) },
@@ -92,7 +92,7 @@ function makeLoopback() {
 		}
 		if (request.action === "agent.state") {
 			queueMicrotask(() =>
-				requests.resolve("c1", {
+				requests.resolve("socket-1", {
 					requestId: request.requestId,
 					ok: true,
 					data: stateOverride ?? {
@@ -107,7 +107,7 @@ function makeLoopback() {
 			return;
 		}
 		queueMicrotask(() =>
-			requests.resolve("c1", {
+			requests.resolve("socket-1", {
 				requestId: request.requestId,
 				ok: true,
 				data: { accepted: true },
@@ -207,7 +207,7 @@ describe("Pi 端到端 loopback 集成", () => {
 		await runs.accept(jobId);
 
 		// 断线：pending request 失败 + Job disconnected
-		requests.disconnect("c1");
+		requests.disconnect("socket-1");
 		await runs.markDisconnected("c1");
 		const jobs = (
 			prisma as { _getJobs: () => Array<Record<string, unknown>> }
