@@ -16,9 +16,9 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
-isPiAgentIdle,
-isPiThinkingLevel,
-parsePiAgentState,
+	isPiAgentIdle,
+	isPiThinkingLevel,
+	parsePiAgentState,
 	PI_ERROR_CODES,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
 	type ActorContext,
