@@ -582,6 +582,36 @@ describe("PiRunService generation reconcile", () => {
 			.resolves.toBe("ready");
 	});
 
+	it("跨 client 的 duplicate/done/error 报告不收敛他人 Job 或释放锁", async () => {
+		for (const status of ["duplicate", "done", "error"] as const) {
+			const { prisma, service } = setup();
+			await service.ensureSession(actor, { clientId: "client-B", sessionId: "b-session" });
+			const run = await service.startRun(actor, {
+				clientId: "client-B", sessionId: "b-session", projectKey: "b-project",
+			});
+			await service.accept(run.jobId, run.runId);
+			await service.markReconcilePending("client-A", "socket-A");
+			const reportedRun = {
+				jobId: run.jobId, runId: run.runId, sessionId: "b-session",
+			};
+			await service.reconcileGeneration("client-A", "socket-A", {
+				clientId: "client-A",
+				runs: status === "duplicate"
+					? [
+						{ ...reportedRun, status: "running", projectKey: "duplicate" },
+						{ ...reportedRun, status: "waiting_input", projectKey: "duplicate" },
+					]
+					: [{ ...reportedRun, status }],
+			});
+			expect(prisma._jobs.find((job) => job.id === run.jobId)).toMatchObject({
+				clientId: "client-B",
+				status: "running",
+				payload: JSON.stringify({ runId: run.runId }),
+			});
+			expect(service.hasLock(run.jobId, run.runId)).toBe(true);
+		}
+	});
+
 	it("reconcileOpen 根据 agent state 精确收敛", async () => {
 		const { service, running, current } = setup();
 		const run = await running();

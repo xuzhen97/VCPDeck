@@ -515,13 +515,13 @@ export class PiRunService {
 			seenKeys.add(run.projectKey);
 		}
 		for (const run of activeReports) {
-			if (run.projectKey && duplicateKeys.has(run.projectKey)) {
-				await this.failSession(run.jobId, run.runId, "PI_PROTOCOL_INVALID");
+			const job = await this.prisma.job.findUnique({ where: { id: run.jobId } }) as JobRecord | null;
+			if (!job || job.clientId !== clientId || job.type !== "agent.session" || job.payload !== runPayload(run.runId) || !ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])) {
 				closedRunIds.push(run.runId);
 				continue;
 			}
-			const job = await this.prisma.job.findUnique({ where: { id: run.jobId } }) as JobRecord | null;
-			if (!job || job.clientId !== clientId || job.type !== "agent.session" || job.payload !== runPayload(run.runId) || !ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])) {
+			if (run.projectKey && duplicateKeys.has(run.projectKey)) {
+				await this.failSession(run.jobId, run.runId, "PI_PROTOCOL_INVALID");
 				closedRunIds.push(run.runId);
 				continue;
 			}
@@ -532,10 +532,12 @@ export class PiRunService {
 			}
 		}
 		for (const run of report.runs.filter((candidate) => candidate.status === "idle" || candidate.status === "done")) {
-			if (await this.finishRun(run.jobId, run.runId)) acceptedRunIds.push(run.runId);
+			const job = await this.prisma.job.findUnique({ where: { id: run.jobId } });
+			if (job?.clientId === clientId && await this.finishRun(run.jobId, run.runId)) acceptedRunIds.push(run.runId);
 		}
 		for (const run of report.runs.filter((candidate) => candidate.status === "error")) {
-			if (await this.failSession(run.jobId, run.runId, "PI_WORKER_EXITED")) {
+			const job = await this.prisma.job.findUnique({ where: { id: run.jobId } });
+			if (job?.clientId === clientId && await this.failSession(run.jobId, run.runId, "PI_WORKER_EXITED")) {
 				acceptedRunIds.push(run.runId);
 			}
 		}
