@@ -463,6 +463,16 @@ const REQUEST_KEYS = new Set([
 	"payload",
 ]);
 
+const RUN_SCOPED_ACTIONS: ReadonlySet<PiAction> = new Set([
+	"agent.prompt",
+	"agent.steer",
+	"agent.followUp",
+	"agent.abort",
+	"agent.compact",
+	"agent.abortCompact",
+	"extension.respond",
+]);
+
 const EVENT_TYPES: ReadonlySet<string> = new Set<PiClientEvent["type"]>([
 	"connected",
 	"history_changed",
@@ -679,17 +689,16 @@ export function parsePiRequest(input: unknown): PiRequest {
 	if (input.jobId !== undefined) assertString(input.jobId, "jobId");
 	if (input.runId !== undefined) assertString(input.runId, "runId");
 
-	// prompt 必须携带完整关联 ID
-	if (input.action === "agent.prompt") {
+	if (RUN_SCOPED_ACTIONS.has(input.action as PiAction)) {
 		if (input.sessionId === undefined)
-			throw new PiProtocolError("agent.prompt 缺 sessionId");
+			throw new PiProtocolError(`${input.action} 缺 sessionId`);
 		if (input.jobId === undefined)
-			throw new PiProtocolError("agent.prompt 缺 jobId");
+			throw new PiProtocolError(`${input.action} 缺 jobId`);
 		if (input.runId === undefined)
-			throw new PiProtocolError("agent.prompt 缺 runId");
-		if (input.cwdRef === undefined)
-			throw new PiProtocolError("agent.prompt 缺 cwdRef");
+			throw new PiProtocolError(`${input.action} 缺 runId`);
 	}
+	if (input.action === "agent.prompt" && input.cwdRef === undefined)
+		throw new PiProtocolError("agent.prompt 缺 cwdRef");
 
 	if (input.payload !== undefined) {
 		assertRecord(input.payload, "payload");
@@ -852,7 +861,7 @@ export function parsePiEvent(input: unknown): PiEvent {
 			break;
 		case "extension_request":
 			assertKeys(input.event, new Set([...common, "ui"]), "event");
-			input.event.ui = parseExtensionUi(input.event.ui, "event.ui");
+			input.event.ui = parseExtensionUi(input.event.ui, "event.ui", true);
 			break;
 		case "extension_resolved":
 			assertKeys(

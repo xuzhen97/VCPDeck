@@ -94,6 +94,24 @@ describe("parsePiRequest", () => {
 		).toThrow();
 	});
 
+	it.each([
+		"agent.prompt",
+		"agent.steer",
+		"agent.followUp",
+		"agent.abort",
+		"agent.compact",
+		"agent.abortCompact",
+		"extension.respond",
+	] as const)("拒绝 run-scoped action %s 缺完整关联 ID", (action) => {
+		expect(() =>
+			parsePiRequest({
+				requestId: "r1",
+				action,
+				sessionId: "s1",
+				jobId: "s1",
+			}),
+		).toThrow(/runId/);
+	});
 
 	it("拒绝图片数量超限的 prompt", () => {
 		const attachments = Array.from(
@@ -301,6 +319,22 @@ describe("parsePiEvent", () => {
 				event: { type: "agent_end", sessionId: "other-session" },
 			}),
 		).toThrow(/sessionId/);
+	});
+
+	it("拒绝非交互式 extension_request", () => {
+		expect(() =>
+			parsePiEvent({
+				clientId: "c1",
+				sessionId: "s1",
+				jobId: "s1",
+				runId: "r1",
+				event: {
+					type: "extension_request",
+					sessionId: "s1",
+					ui: { requestId: "ui", extensionId: "e", kind: "notify" },
+				},
+			}),
+		).toThrow(/ui.kind/);
 	});
 
 	it("拒绝畸形事件专属字段和 Extension UI", () => {
