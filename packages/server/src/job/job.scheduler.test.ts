@@ -34,7 +34,11 @@ describe("JobScheduler", () => {
 			(prisma as { job: { findFirst: ReturnType<typeof vi.fn> } }).job.findFirst,
 		).toHaveBeenCalledWith(
 			expect.objectContaining({
-				where: { clientId: "c1", status: "pending", type: { not: "agent.run" } },
+				where: {
+					clientId: "c1",
+					status: "pending",
+					type: { notIn: ["agent.run", "agent.session"] },
+				},
 			}),
 		);
 	});
@@ -56,12 +60,36 @@ describe("JobScheduler", () => {
 			(prisma as { job: { findFirst: ReturnType<typeof vi.fn> } }).job.findFirst,
 		).toHaveBeenCalledWith(
 			expect.objectContaining({
-				where: { clientId: "c1", status: "pending", type: { not: "agent.run" } },
+				where: {
+					clientId: "c1",
+					status: "pending",
+					type: { notIn: ["agent.run", "agent.session"] },
+				},
 			}),
 		);
 		expect(
 			(prisma as { job: { update: ReturnType<typeof vi.fn> } }).job.update,
 		).not.toHaveBeenCalled();
+	});
+
+	it("Session Job 不计入普通任务并发额度", async () => {
+		const prisma = prismaMock() as unknown as {
+			job: {
+				count: ReturnType<typeof vi.fn>;
+				findFirst: ReturnType<typeof vi.fn>;
+				update: ReturnType<typeof vi.fn>;
+			};
+		};
+		const scheduler = new JobScheduler(prisma as never);
+
+		await scheduler.tryDispatch("c1");
+		expect(prisma.job.count).toHaveBeenCalledWith({
+			where: {
+				clientId: "c1",
+				status: "running",
+				type: { notIn: ["agent.run", "agent.session"] },
+			},
+		});
 	});
 
 	it("并发上限仍生效", async () => {

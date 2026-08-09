@@ -17,11 +17,16 @@ import {
 import { randomUUID } from "node:crypto";
 import {
 	isPiThinkingLevel,
+	parsePiAgentState,
 	PI_ERROR_CODES,
+	PI_SESSION_JOB_PROTOCOL_VERSION,
 	type ActorContext,
 	type PiCwdRef,
 	type PiPromptAccepted,
 	type PiRequest,
+	type PiSessionCreated,
+	type PiSessionJobSnapshot,
+	type PiSessionOpenResult,
 } from "@vcpdeck/shared";
 import { Actor } from "../auth/actor.decorator.js";
 import { ClientService } from "../client/client.service.js";
@@ -41,6 +46,29 @@ function isPiError(error: unknown): error is Error & { code: string } {
 	return error instanceof Error && "code" in error &&
 		typeof error.code === "string" &&
 		(PI_ERROR_CODES as readonly string[]).includes(error.code);
+}
+
+function requireObject(body: unknown): asserts body is Record<string, unknown> {
+	if (!body || typeof body !== "object" || Array.isArray(body)) {
+		throw badRequest("PI_PROTOCOL_INVALID", "body must be an object");
+	}
+}
+
+function requireCwd(body: unknown): PiCwdRef {
+	requireObject(body);
+	if (typeof body.rootDir !== "string" || typeof body.relativePath !== "string") {
+		throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
+	}
+	return { rootDir: body.rootDir, relativePath: body.relativePath };
+}
+
+function optionalRunId(body: unknown): string | undefined {
+	requireObject(body);
+	if (body.runId === undefined) return undefined;
+	if (typeof body.runId !== "string" || body.runId.length === 0 || body.runId.length > 256) {
+		throw badRequest("PI_PROTOCOL_INVALID", "invalid runId");
+	}
+	return body.runId;
 }
 
 /** 机器命名空间的远程 Pi REST/SSE 接口 */
@@ -65,7 +93,11 @@ export class PiController {
 				message: `Client "${clientId}" is offline or unknown`,
 			});
 		}
-		if (!client.capabilities.includes("agent.pi")) {
+		if (
+			!client.capabilities.includes("agent.pi") ||
+			client.capabilityDetails.pi?.available !== true ||
+			client.capabilityDetails.pi.sessionJobProtocolVersion !== PI_SESSION_JOB_PROTOCOL_VERSION
+		) {
 			throw badRequest(
 				"PI_CLIENT_UNSUPPORTED",
 				`Client "${clientId}" does not support Pi`,
@@ -128,9 +160,9 @@ export class PiController {
 		);
 	}
 
-	private async assertActiveOwner(jobId: string, actor: ActorContext): Promise<void> {
+	private async assertActiveOwner(jobId: string, runId: string, actor: ActorContext): Promise<void> {
 		try {
-			await this.runs.assertOwner(jobId, actor.identityId);
+			await this.runs.assertCurrentRunOwner(jobId, runId, actor.identityId);
 		} catch (err) {
 			if (err instanceof Error && "code" in err) {
 				throw badRequest(
@@ -408,22 +440,92 @@ export class PiController {
 
 	// ── agent ──
 
+	private async ensureCreatedSession(
+		lease: PiGenerationLease,
+		actor: ActorContext,
+		clientId: string,
+		cwdRef: PiCwdRef,
+		data: unknown,
+	): Promise<PiSessionCreated> {
+		const sessionId = (data as { sessionId?: unknown })?.sessionId;
+		if (typeof sessionId !== "string" || sessionId.length === 0) {
+			throw badRequest("PI_PROTOCOL_INVALID", "Client returned invalid sessionId");
+		}
+		let original: unknown;
+		for (let attempt = 0; attempt < 2; attempt++) {
+			try {
+				await this.runs.ensureSession(actor, { clientId, sessionId });
+				return { sessionId, jobId: sessionId };
+			} catch (error) {
+				original ??= error;
+			}
+		}
+		try {
+			await this.requestOnce(lease, { requestId: randomUUID(), action: "session.delete", cwdRef, sessionId });
+		} catch { /* best effort; timeout/disconnect remains uncertain */ }
+		throw original;
+	}
+
 	@Post("agent/new")
 	async newSession(
 		@Param("clientId") clientId: string,
-		@Body() body: { rootDir?: string; relativePath?: string },
-	) {
+		@Body() body: unknown,
+		@Actor() actor: ActorContext,
+	): Promise<PiSessionCreated> {
 		await this.requirePiClient(clientId);
-		const { rootDir, relativePath } = body;
-		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
-			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
-		}
-		const data = await this.requestForClient(clientId, {
-			requestId: randomUUID(),
-			action: "session.new",
-			cwdRef: { rootDir, relativePath },
+		const cwdRef = requireCwd(body);
+		return this.withReconciledClient(clientId, async (lease) => {
+			const data = await this.requestOnce(lease, { requestId: randomUUID(), action: "session.new", cwdRef });
+			return this.ensureCreatedSession(lease, actor, clientId, cwdRef, data);
 		});
-		return data as { sessionId: string };
+	}
+
+	@Post("agent/:sessionId/open")
+	async openSession(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Body() body: unknown,
+		@Actor() actor: ActorContext,
+	): Promise<PiSessionOpenResult> {
+		await this.requirePiClient(clientId);
+		const cwdRef = requireCwd(body);
+		return this.withReconciledClient(clientId, async (lease) => {
+			await this.requestOnce(lease, { requestId: randomUUID(), action: "session.get", cwdRef, sessionId });
+			await this.runs.ensureSession(actor, { clientId, sessionId });
+			const snapshot = await this.runs.snapshot(sessionId, actor.identityId);
+			const agentState = parsePiAgentState(await this.requestOnce(lease, {
+				requestId: randomUUID(), action: "agent.state", cwdRef, sessionId,
+				jobId: snapshot.runId ? sessionId : undefined,
+				runId: snapshot.runId ?? undefined,
+			}));
+			if (snapshot.runId) await this.runs.reconcileOpen(sessionId, snapshot.runId, agentState);
+			return { job: await this.runs.snapshot(sessionId, actor.identityId), agentState };
+		});
+	}
+
+	@Post("agent/:sessionId/complete")
+	async completeSession(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Body() body: unknown,
+		@Actor() actor: ActorContext,
+	): Promise<PiSessionJobSnapshot> {
+		await this.requirePiClient(clientId);
+		const requestedRunId = optionalRunId(body);
+		return this.withReconciledClient(clientId, async (lease) => {
+			await this.runs.assertSessionOwner(sessionId, actor.identityId);
+			const before = await this.runs.snapshot(sessionId, actor.identityId);
+			if (requestedRunId && before.runId !== requestedRunId) throw new ConflictException({ code: "PI_CONTROL_FORBIDDEN", message: "Run is no longer current" });
+			const runId = before.runId ?? requestedRunId;
+			if ((before.status === "running" || before.status === "waiting_input") && runId) {
+				await this.requestOnce(lease, { requestId: randomUUID(), action: "agent.abort", sessionId, jobId: sessionId, runId });
+			}
+			if (!await this.runs.completeSession(sessionId, runId)) {
+				const current = await this.runs.snapshot(sessionId, actor.identityId);
+				if (current.runId !== runId) throw new ConflictException({ code: "PI_CONTROL_FORBIDDEN", message: "Session run changed during completion" });
+			}
+			return this.runs.snapshot(sessionId, actor.identityId);
+		});
 	}
 
 	@Get("agent/:sessionId")
@@ -477,25 +579,27 @@ export class PiController {
 
 		return this.withReconciledClient(clientId, async (lease) => {
 			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			await this.runs.ensureSession(actor, { clientId, sessionId });
 			let run: { jobId: string; runId: string };
 			try {
-				run = await this.runs.createRun(actor, {
-					clientId,
-					sessionId,
-					projectKey,
-					imageCount: Array.isArray(body.images) ? body.images.length : 0,
-				});
+				run = await this.runs.startRun(actor, { clientId, sessionId, projectKey });
 			} catch (err) {
-				if (
-					err instanceof Error &&
-					(err as { code?: unknown }).code === "PI_PROJECT_BUSY"
-				) {
-					throw new ConflictException({
-						code: "PI_PROJECT_BUSY",
-						message: err.message,
-					});
+				if (!isPiError(err) || err.code !== "PI_PROJECT_BUSY") throw err;
+				const previous = await this.runs.snapshot(sessionId, actor.identityId);
+				if (!previous.runId) throw new ConflictException({ code: err.code, message: err.message });
+				const state = parsePiAgentState(await this.requestOnce(lease, {
+					requestId: randomUUID(), action: "agent.state", cwdRef: { rootDir, relativePath },
+					sessionId, jobId: sessionId, runId: previous.runId,
+				}));
+				await this.runs.reconcileOpen(sessionId, previous.runId, state);
+				try {
+					run = await this.runs.startRun(actor, { clientId, sessionId, projectKey });
+				} catch (retryError) {
+					if (isPiError(retryError) && retryError.code === "PI_PROJECT_BUSY") {
+						throw new ConflictException({ code: retryError.code, message: retryError.message });
+					}
+					throw retryError;
 				}
-				throw err;
 			}
 			const { jobId, runId } = run;
 
@@ -525,15 +629,15 @@ export class PiController {
 					},
 				});
 				if (!response.ok) {
-					await this.runs.fail(jobId, response.error.code, response.error.message);
+					await this.runs.finishRun(jobId, runId);
 					throw badRequest(response.error.code, response.error.message);
 				}
-				await this.runs.accept(jobId);
+				await this.runs.accept(jobId, runId);
 			} catch (err) {
 				if (err instanceof Error && "code" in err) {
 					const code = String((err as { code: unknown }).code);
 					if (code === "PI_REQUEST_TIMEOUT" || code === "PI_CLIENT_DISCONNECTED") {
-						await this.runs.fail(jobId, code, err.message);
+						await this.runs.finishRun(jobId, runId);
 					}
 				}
 				throw err;
@@ -609,18 +713,18 @@ export class PiController {
 	private async controlAction(
 		clientId: string,
 		sessionId: string,
-		jobId: string,
+		runId: string,
 		action: PiRequest["action"],
 		actor: ActorContext,
 		payload?: Record<string, unknown>,
 	): Promise<unknown> {
-		await this.assertActiveOwner(jobId, actor);
+		await this.assertActiveOwner(sessionId, runId, actor);
 		return this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action,
 			sessionId,
-			jobId,
-			runId: jobId,
+			jobId: sessionId,
+			runId,
 			...(payload ? { payload } : {}),
 		});
 	}
@@ -629,12 +733,12 @@ export class PiController {
 	async steer(
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
-		@Body() body: { jobId?: string; message?: string },
+		@Body() body: { runId?: string; message?: string },
 		@Actor() actor: ActorContext,
 	) {
-		if (typeof body.jobId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "jobId required");
+		if (typeof body.runId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "runId required");
 		if (typeof body.message !== "string") throw badRequest("PI_PROTOCOL_INVALID", "message required");
-		return this.controlAction(clientId, sessionId, body.jobId, "agent.steer", actor, {
+		return this.controlAction(clientId, sessionId, body.runId, "agent.steer", actor, {
 			message: body.message,
 		});
 	}
@@ -643,12 +747,12 @@ export class PiController {
 	async followUp(
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
-		@Body() body: { jobId?: string; message?: string },
+		@Body() body: { runId?: string; message?: string },
 		@Actor() actor: ActorContext,
 	) {
-		if (typeof body.jobId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "jobId required");
+		if (typeof body.runId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "runId required");
 		if (typeof body.message !== "string") throw badRequest("PI_PROTOCOL_INVALID", "message required");
-		return this.controlAction(clientId, sessionId, body.jobId, "agent.followUp", actor, {
+		return this.controlAction(clientId, sessionId, body.runId, "agent.followUp", actor, {
 			message: body.message,
 		});
 	}
@@ -657,19 +761,19 @@ export class PiController {
 	async abort(
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
-		@Body() body: { jobId?: string },
+		@Body() body: { runId?: string },
 		@Actor() actor: ActorContext,
 	) {
-		if (typeof body.jobId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "jobId required");
-		await this.assertActiveOwner(body.jobId, actor);
+		if (typeof body.runId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "runId required");
+		await this.assertActiveOwner(sessionId, body.runId, actor);
 		await this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "agent.abort",
 			sessionId,
-			jobId: body.jobId,
-			runId: body.jobId,
+			jobId: sessionId,
+			runId: body.runId,
 		});
-		await this.runs.cancel(body.jobId);
+		await this.runs.finishRun(sessionId, body.runId);
 		return { ok: true };
 	}
 
@@ -677,11 +781,11 @@ export class PiController {
 	async compact(
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
-		@Body() body: { jobId?: string; customInstructions?: string },
+		@Body() body: { runId?: string; customInstructions?: string },
 		@Actor() actor: ActorContext,
 	) {
-		if (typeof body.jobId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "jobId required");
-		return this.controlAction(clientId, sessionId, body.jobId, "agent.compact", actor, {
+		if (typeof body.runId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "runId required");
+		return this.controlAction(clientId, sessionId, body.runId, "agent.compact", actor, {
 			...(typeof body.customInstructions === "string"
 				? { customInstructions: body.customInstructions }
 				: {}),
@@ -692,29 +796,29 @@ export class PiController {
 	async abortCompact(
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
-		@Body() body: { jobId?: string },
+		@Body() body: { runId?: string },
 		@Actor() actor: ActorContext,
 	) {
-		if (typeof body.jobId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "jobId required");
-		return this.controlAction(clientId, sessionId, body.jobId, "agent.abortCompact", actor);
+		if (typeof body.runId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "runId required");
+		return this.controlAction(clientId, sessionId, body.runId, "agent.abortCompact", actor);
 	}
 
 	@Post("agent/:sessionId/extension-response")
 	async extensionResponse(
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
-		@Body() body: { jobId?: string; requestId?: string; value?: string; confirmed?: boolean; cancelled?: boolean },
+		@Body() body: { runId?: string; requestId?: string; value?: string; confirmed?: boolean; cancelled?: boolean },
 		@Actor() actor: ActorContext,
 	) {
-		if (typeof body.jobId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "jobId required");
+		if (typeof body.runId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "runId required");
 		if (typeof body.requestId !== "string") throw badRequest("PI_PROTOCOL_INVALID", "requestId required");
-		await this.assertActiveOwner(body.jobId, actor);
+		await this.assertActiveOwner(sessionId, body.runId, actor);
 		await this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "extension.respond",
 			sessionId,
-			jobId: body.jobId,
-			runId: body.jobId,
+			jobId: sessionId,
+			runId: body.runId,
 			payload: {
 				requestId: body.requestId,
 				...(body.value !== undefined ? { value: body.value } : {}),
@@ -722,7 +826,7 @@ export class PiController {
 				...(body.cancelled === true ? { cancelled: true } : {}),
 			},
 		});
-		await this.runs.resume(body.jobId);
+		await this.runs.resume(sessionId, body.runId);
 		return { ok: true };
 	}
 

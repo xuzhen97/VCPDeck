@@ -20,12 +20,20 @@ export class JobScheduler {
 
   async tryDispatch(clientId: string): Promise<DispatchPayload | null> {
     const runningCount = await this.prisma.job.count({
-      where: { clientId, status: "running" },
+      where: {
+        clientId,
+        status: "running",
+        type: { notIn: ["agent.run", "agent.session"] },
+      },
     });
     if (runningCount >= MAX_CONCURRENT_JOBS) return null;
 
     const pending = await this.prisma.job.findFirst({
-      where: { clientId, status: "pending", type: { not: "agent.run" } },
+      where: {
+        clientId,
+        status: "pending",
+        type: { notIn: ["agent.run", "agent.session"] },
+      },
       orderBy: { createdAt: "asc" },
     });
     if (!pending) return null;

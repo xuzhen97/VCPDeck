@@ -79,17 +79,6 @@ function parsePayload(raw: string): RunPayload {
 	}
 }
 
-function parseLegacyPayload(raw: string): { sessionId?: string } {
-	try {
-		const value: unknown = JSON.parse(raw);
-		return value && typeof value === "object" && !Array.isArray(value)
-			? value as { sessionId?: string }
-			: {};
-	} catch {
-		return {};
-	}
-}
-
 function runPayload(runId: string): string {
 	return JSON.stringify({ runId });
 }
@@ -120,13 +109,6 @@ function safePiErrorMessage(code: string): string {
 		PI_STATE_PENDING: "Pi client state reconciliation is pending",
 	};
 	return messages[code as PiErrorCode] ?? "Pi session failed";
-}
-
-export interface CreateRunInput {
-	clientId: string;
-	sessionId: string;
-	projectKey: string;
-	imageCount?: number;
 }
 
 /** Pi Session Job 的原子状态机与短期连接代次租约。 */
@@ -280,24 +262,15 @@ export class PiRunService {
 		}
 	}
 
-	async accept(jobId: string, runId: string): Promise<boolean>;
-	async accept(jobId: string): Promise<void>;
-	async accept(jobId: string, runId?: string): Promise<boolean | void> {
-		if (runId === undefined) return this.legacyTransition(jobId, [JobStatus.PENDING], { status: JobStatus.RUNNING, startedAt: new Date() });
+	async accept(jobId: string, runId: string): Promise<boolean> {
 		return this.runTransition(jobId, runId, [JobStatus.PENDING], { status: JobStatus.RUNNING, startedAt: new Date() });
 	}
 
-	async waitForInput(jobId: string, runId: string): Promise<boolean>;
-	async waitForInput(jobId: string): Promise<void>;
-	async waitForInput(jobId: string, runId?: string): Promise<boolean | void> {
-		if (runId === undefined) return this.legacyTransition(jobId, [JobStatus.PENDING, JobStatus.RUNNING], { status: JobStatus.WAITING_INPUT });
+	async waitForInput(jobId: string, runId: string): Promise<boolean> {
 		return this.runTransition(jobId, runId, [JobStatus.PENDING, JobStatus.RUNNING], { status: JobStatus.WAITING_INPUT });
 	}
 
-	async resume(jobId: string, runId: string): Promise<boolean>;
-	async resume(jobId: string): Promise<void>;
-	async resume(jobId: string, runId?: string): Promise<boolean | void> {
-		if (runId === undefined) return this.legacyTransition(jobId, [JobStatus.WAITING_INPUT], { status: JobStatus.RUNNING });
+	async resume(jobId: string, runId: string): Promise<boolean> {
 		return this.runTransition(jobId, runId, [JobStatus.WAITING_INPUT], { status: JobStatus.RUNNING });
 	}
 
@@ -550,93 +523,6 @@ export class PiRunService {
 		return { acceptedRunIds, closedRunIds, reportAgain: closedRunIds.length > 0 };
 	}
 
-	/** Task 5/6 迁移前的 legacy agent.run adapter。 */
-	async reconcileState(clientId: string, report: PiStateReport): Promise<void> {
-		for (const run of report.runs) {
-			const job = await this.prisma.job.findUnique({ where: { id: run.jobId } });
-			if (!job || job.clientId !== clientId || job.type !== "agent.run") continue;
-			if (run.projectKey) this.setLock(clientId, run.projectKey, run.jobId, run.runId);
-			if (run.status === "running" || run.status === "waiting_input") {
-				await this.legacyTransition(run.jobId, ACTIVE_STATUSES, { status: run.status });
-			} else if (run.status === "done" || run.status === "error") {
-				await this.legacyTransition(run.jobId, ACTIVE_STATUSES, {
-					status: run.status === "done" ? JobStatus.DONE : JobStatus.ERROR,
-					finishedAt: new Date(),
-				});
-				this.releaseLock(run.jobId, run.runId);
-			}
-		}
-	}
-
-	async createRun(actor: ActorContext, input: CreateRunInput): Promise<{ jobId: string; runId: string }> {
-		const key = this.lockKey(input.clientId, input.projectKey);
-		if (this.locks.has(key)) throw piError("PI_PROJECT_BUSY", "Project has an active turn");
-		const jobId = randomUUID();
-		await this.prisma.job.create({
-			data: {
-				id: jobId,
-				clientId: input.clientId,
-				type: "agent.run",
-				status: JobStatus.PENDING,
-				payload: JSON.stringify({ mode: "interactive", operation: "prompt", sessionId: input.sessionId, hasImages: (input.imageCount ?? 0) > 0, imageCount: input.imageCount ?? 0 }),
-				createdByIdentityId: actor.identityId,
-				createdByName: actor.displayName,
-				createdVia: actor.source,
-			},
-		});
-		this.setLock(input.clientId, input.projectKey, jobId, jobId);
-		return { jobId, runId: jobId };
-	}
-
-	async settle(jobId: string, state: PiAgentState): Promise<void> {
-		this.cancelSettlement(jobId, jobId);
-		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
-		if (!job) throw piError("PI_SESSION_NOT_FOUND", "Run not found");
-		const payload = parseLegacyPayload(job.payload);
-		await this.legacyTransition(jobId, [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.WAITING_INPUT, JobStatus.DISCONNECTED], {
-			status: JobStatus.DONE,
-			result: JSON.stringify({ sessionId: payload.sessionId ?? "", runId: jobId, stopReason: "settled", ...(state.model ? { model: state.model } : {}) }),
-			finishedAt: new Date(),
-		});
-		this.releaseLock(jobId, jobId);
-	}
-
-	async fail(jobId: string, code: string, _message: string): Promise<void> {
-		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
-		if (!job) throw piError("PI_SESSION_NOT_FOUND", "Run not found");
-		if (job.type !== "agent.run") return;
-		await this.legacyTransition(jobId, ACTIVE_STATUSES, {
-			status: JobStatus.ERROR,
-			errorCode: code,
-			errorMessage: safePiErrorMessage(code),
-			finishedAt: new Date(),
-		});
-		this.releaseLock(jobId, jobId);
-	}
-
-	async cancel(jobId: string): Promise<void> {
-		await this.legacyTransition(jobId, ACTIVE_STATUSES, { status: JobStatus.CANCELLED, finishedAt: new Date() });
-		this.releaseLock(jobId, jobId);
-	}
-
-	async markDisconnected(clientId: string): Promise<void> {
-		await this.prisma.job.updateMany({
-			where: { clientId, type: "agent.run", status: { in: [JobStatus.RUNNING, JobStatus.WAITING_INPUT] } },
-			data: { status: JobStatus.DISCONNECTED },
-		});
-	}
-
-	async assertOwner(jobId: string, identityId: string): Promise<void> {
-		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
-		if (!job) throw piError("PI_SESSION_NOT_FOUND", "Run not found");
-		if (job.type !== "agent.run") {
-			throw piError("PI_CONTROL_FORBIDDEN", "Legacy control cannot operate a Pi session");
-		}
-		if (job.createdByIdentityId !== identityId || !ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])) {
-			throw piError("PI_CONTROL_FORBIDDEN", "Only the run owner can control this turn");
-		}
-	}
-
 	async assertIdleMutation(clientId: string, projectKey: string): Promise<void> {
 		if (this.locks.has(this.lockKey(clientId, projectKey))) throw piError("PI_PROJECT_BUSY", "Project has an active turn");
 	}
@@ -669,11 +555,4 @@ export class PiRunService {
 		return updated.count > 0;
 	}
 
-	private async legacyTransition(jobId: string, statuses: readonly string[], data: Record<string, unknown>): Promise<void> {
-		// Task 6 删除：仅为旧 agent.run 调用保持原有非 CAS 行为，不供 agent.session 使用。
-		const existing = await this.prisma.job.findUnique({ where: { id: jobId } });
-		if (!existing) throw piError("PI_SESSION_NOT_FOUND", "Run not found");
-		if (existing.type !== "agent.run" || !statuses.includes(existing.status)) return;
-		await this.prisma.job.update({ where: { id: jobId }, data });
-	}
 }

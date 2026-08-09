@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import type { PiAgentState } from "@vcpdeck/shared";
+import { createPiApi } from "./pi.js";
 import { VcpDeckClient } from "./client.js";
 
 function makeClient() {
@@ -13,6 +15,61 @@ function makeClient() {
 	});
 	return { client, fetcher };
 }
+
+describe("createPiApi", () => {
+	it("open/complete 使用 Session Job endpoint 与 body", async () => {
+		const request = vi.fn(async () => ({}));
+		const pi = createPiApi({ request: request as never });
+		const cwdRef = { rootDir: "D:\\", relativePath: "repo" };
+
+		await pi.agent.open("c1", "s1", cwdRef);
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c1/pi/agent/s1/open",
+			cwdRef,
+			undefined,
+		);
+
+		await pi.agent.complete("c1", "s1", "run-1");
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c1/pi/agent/s1/complete",
+			{ runId: "run-1" },
+			undefined,
+		);
+	});
+
+	it("run-scoped control body 使用 runId", async () => {
+		const request = vi.fn(async () => ({}));
+		const pi = createPiApi({ request: request as never });
+
+		await pi.agent.abort("c1", "s1", "run-1");
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c1/pi/agent/s1/abort",
+			{ runId: "run-1" },
+		);
+	});
+
+	it("state 严格解析响应并拒绝畸形状态", async () => {
+		const valid: PiAgentState = {
+			status: "idle",
+			streaming: false,
+			prompting: false,
+			compacting: false,
+			thinkingLevel: "medium",
+			queuedMessages: { steering: [], followUp: [] },
+		};
+		const request = vi.fn(async () => valid);
+		const pi = createPiApi({ request: request as never });
+		await expect(pi.agent.state("c1", "s1", { rootDir: "D:\\", relativePath: "repo" }))
+			.resolves.toEqual(valid);
+
+		request.mockResolvedValueOnce({ ...valid, streaming: "yes" } as unknown as PiAgentState);
+		await expect(pi.agent.state("c1", "s1", { rootDir: "D:\\", relativePath: "repo" }))
+			.rejects.toMatchObject({ code: "PI_PROTOCOL_INVALID" });
+	});
+});
 
 describe("VcpDeckClient.pi", () => {
 	it("sessions.list 编码 clientId 与查询参数", async () => {

@@ -641,7 +641,7 @@ describe("PiRunService generation reconcile", () => {
 	});
 });
 
-describe("PiRunService safe failures and legacy adapters", () => {
+describe("PiRunService safe failures", () => {
 	it("safePiErrorMessage 对全部 allowlist 有固定消息，未知 code 固定 fallback", async () => {
 		for (const code of PI_ERROR_CODES) {
 			const { service, running, current } = setup();
@@ -664,40 +664,5 @@ describe("PiRunService safe failures and legacy adapters", () => {
 		expect(current().errorMessage).toBe(
 			"Client restarted before the Pi run could be recovered",
 		);
-	});
-
-	it("jobId-only legacy fail/assertOwner 不得服务 agent.session", async () => {
-		const { service, running, current } = setup();
-		const run = await running();
-		await service.fail(run.jobId, "PI_WORKER_EXITED", "late legacy error");
-		await expect(
-			service.assertOwner(run.jobId, actor.identityId),
-		).rejects.toMatchObject({
-			code: "PI_CONTROL_FORBIDDEN",
-		});
-		expect(current()).toMatchObject({
-			status: "running",
-			payload: JSON.stringify({ runId: run.runId }),
-			errorCode: null,
-		});
-		expect(service.hasLock(run.jobId, run.runId)).toBe(true);
-	});
-
-	it("legacy agent.run adapter 保持独立 build，且新 overload 不猜 session runId", async () => {
-		const prisma = prismaMock();
-		const service = new PiRunService(prisma as never);
-		const legacy = await service.createRun(actor, { ...input, imageCount: 2 });
-		expect(legacy.jobId).toBe(legacy.runId);
-		expect(prisma._jobs[0]).toMatchObject({
-			type: "agent.run",
-			status: "pending",
-		});
-		await service.accept(legacy.jobId);
-		expect(prisma._jobs[0].status).toBe("running");
-		await service.fail(legacy.jobId, "PI_WORKER_EXITED", "secret");
-		expect(prisma._jobs[0]).toMatchObject({
-			status: "error",
-			errorMessage: "Pi worker exited unexpectedly",
-		});
 	});
 });

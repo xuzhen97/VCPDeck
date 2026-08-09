@@ -1,8 +1,13 @@
-import type {
-	PiCwdRef,
-	PiModelInfo,
-	PiPromptAccepted,
-	PiThinkingLevel,
+import {
+	parsePiAgentState,
+	type PiAgentState,
+	type PiCwdRef,
+	type PiModelInfo,
+	type PiPromptAccepted,
+	type PiSessionCreated,
+	type PiSessionJobSnapshot,
+	type PiSessionOpenResult,
+	type PiThinkingLevel,
 } from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
 
@@ -75,13 +80,25 @@ export interface PiAgentApi {
 		clientId: string,
 		cwdRef: PiCwdRef,
 		signal?: AbortSignal,
-	): Promise<{ sessionId: string }>;
+	): Promise<PiSessionCreated>;
+	open(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		signal?: AbortSignal,
+	): Promise<PiSessionOpenResult>;
+	complete(
+		clientId: string,
+		sessionId: string,
+		runId?: string,
+		signal?: AbortSignal,
+	): Promise<PiSessionJobSnapshot>;
 	state(
 		clientId: string,
 		sessionId: string,
 		cwdRef: PiCwdRef,
 		signal?: AbortSignal,
-	): Promise<unknown>;
+	): Promise<PiAgentState>;
 	prompt(
 		clientId: string,
 		sessionId: string,
@@ -287,13 +304,26 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 					{ ...cwdRef },
 					signal,
 				),
-			state: (clientId, sessionId, cwdRef, signal) =>
+			open: (clientId, sessionId, cwdRef, signal) =>
 				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/open`,
+					cwdRef,
+					signal,
+				),
+			complete: (clientId, sessionId, runId, signal) =>
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/complete`,
+					...(runId === undefined ? [undefined, signal] as const : [{ runId }, signal] as const),
+				),
+			state: async (clientId, sessionId, cwdRef, signal) =>
+				parsePiAgentState(await client.request(
 					"GET",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}?${cwdQuery(cwdRef)}`,
 					undefined,
 					signal,
-				),
+				)),
 			prompt: (clientId, sessionId, cwdRef, input, signal) =>
 				client.request(
 					"POST",
@@ -307,47 +337,47 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 					},
 					signal,
 				),
-			steer: (clientId, sessionId, jobId, message) =>
+			steer: (clientId, sessionId, runId, message) =>
 				client.request(
 					"POST",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/steer`,
 					{
-						jobId,
+						runId,
 						message,
 					},
 				),
-			followUp: (clientId, sessionId, jobId, message) =>
+			followUp: (clientId, sessionId, runId, message) =>
 				client.request(
 					"POST",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/follow-up`,
 					{
-						jobId,
+						runId,
 						message,
 					},
 				),
-			abort: (clientId, sessionId, jobId) =>
+			abort: (clientId, sessionId, runId) =>
 				client.request(
 					"POST",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/abort`,
 					{
-						jobId,
+						runId,
 					},
 				),
-			compact: (clientId, sessionId, jobId, customInstructions) =>
+			compact: (clientId, sessionId, runId, customInstructions) =>
 				client.request(
 					"POST",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/compact`,
 					{
-						jobId,
+						runId,
 						...(customInstructions ? { customInstructions } : {}),
 					},
 				),
-			abortCompact: (clientId, sessionId, jobId) =>
+			abortCompact: (clientId, sessionId, runId) =>
 				client.request(
 					"POST",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/abort-compact`,
 					{
-						jobId,
+						runId,
 					},
 				),
 			setModel: (clientId, sessionId, cwdRef, provider, modelId) =>
@@ -369,11 +399,11 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 						level,
 					},
 				),
-			extensionResponse: (clientId, sessionId, jobId, response) =>
+			extensionResponse: (clientId, sessionId, runId, response) =>
 				client.request(
 					"POST",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/extension-response`,
-					{ jobId, ...response },
+					{ runId, ...response },
 				),
 			eventsPath: (clientId, sessionId) =>
 				`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/events`,
