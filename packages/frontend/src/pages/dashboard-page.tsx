@@ -27,7 +27,8 @@ const JOB_TYPE_LABEL: Record<string, string> = {
 	"frp.create": "FRP 创建",
 	"frp.delete": "FRP 删除",
 	"frp.list": "FRP 列表",
-	"agent.run": "Agent 执行",
+	"agent.run": "Pi 运行",
+	"agent.session": "Pi 会话",
 };
 
 function jobTypeLabel(type: string): string {
@@ -41,6 +42,8 @@ function jobStatusLabel(status: string): {
 	switch (status) {
 		case "done":
 			return { label: "已完成", tone: "success" };
+		case "idle":
+			return { label: "空闲", tone: "neutral" };
 		case "running":
 			return { label: "执行中", tone: "warning" };
 		case "pending":

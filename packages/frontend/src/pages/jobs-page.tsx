@@ -70,6 +70,7 @@ export function JobsPage({ clientId }: { clientId?: string }) {
 						}}
 					>
 						<option value="">全部状态</option>
+						<option value="idle">空闲</option>
 						<option value="pending">等待中</option>
 						<option value="running">执行中</option>
 						<option value="waiting_input">等待输入</option>
@@ -451,6 +452,8 @@ function jobTypeLabel(type: string): string {
 			"frp.create": "创建 FRP",
 			"frp.delete": "删除 FRP",
 			"frp.list": "读取 FRP",
+			"agent.run": "Pi 运行",
+			"agent.session": "Pi 会话",
 		}[type] ?? type
 	);
 }
@@ -458,6 +461,7 @@ function jobTypeLabel(type: string): string {
 function statusLabel(status: string): string {
 	return (
 		{
+			idle: "空闲",
 			pending: "等待中",
 			running: "执行中",
 			waiting_input: "等待输入",
@@ -470,9 +474,10 @@ function statusLabel(status: string): string {
 	);
 }
 
-function statusTone(status: string): "success" | "danger" | "warning" {
+function statusTone(status: string): "success" | "danger" | "warning" | "neutral" {
 	if (status === "done") return "success";
 	if (status === "error" || status === "cancelled") return "danger";
+	if (status === "idle") return "neutral";
 	return "warning";
 }
 

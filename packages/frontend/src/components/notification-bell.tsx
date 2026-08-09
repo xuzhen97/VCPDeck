@@ -16,6 +16,7 @@ const POLL_MS = 500;
 const ACTIVE_STATUSES = new Set(["pending", "running", "waiting_input"]);
 const HIDDEN_JOB_TYPES = new Set([
 	"agent.run",
+	"agent.session",
 	"file.roots",
 	"file.list",
 	"file.stat",

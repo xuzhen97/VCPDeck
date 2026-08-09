@@ -74,7 +74,12 @@ function makePi() {
 		},
 		models: vi.fn(async () => [{ provider: "p", modelId: "m1" }]),
 		agent: {
-			newSession: vi.fn(async () => ({ sessionId: "s1" })),
+			newSession: vi.fn(async () => ({ sessionId: "s1", jobId: "s1" })),
+			open: vi.fn(async (_clientId: string, sessionId: string) => ({
+				job: { jobId: sessionId, sessionId, status: "idle", runId: null, ownerName: "User", isOwner: true },
+				agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+			})),
+			complete: vi.fn(async (_clientId: string, sessionId: string) => ({ jobId: sessionId, sessionId, status: "done", runId: null, ownerName: "User", isOwner: true })),
 			state: vi.fn(async () => ({
 				status: "idle",
 				streaming: false,

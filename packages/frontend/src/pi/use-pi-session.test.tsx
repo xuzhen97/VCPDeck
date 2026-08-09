@@ -77,7 +77,26 @@ function makePi() {
 		]),
 		running: vi.fn(async () => []),
 		agent: {
-			newSession: vi.fn(async () => ({ sessionId: "s1" })),
+			newSession: vi.fn(async () => ({ sessionId: "s1", jobId: "s1" })),
+			open: vi.fn(async (_clientId: string, sessionId: string) => ({
+				job: {
+					jobId: sessionId,
+					sessionId,
+					status: "idle",
+					runId: null,
+					ownerName: "User",
+					isOwner: true,
+				},
+				agentState: {
+					status: "idle",
+					streaming: false,
+					prompting: false,
+					compacting: false,
+					thinkingLevel: "off",
+					model: { provider: "p", modelId: "m1" },
+					queuedMessages: { steering: [], followUp: [] },
+				},
+			})),
 			state: vi.fn(async () => ({
 				status: "idle",
 				streaming: false,
@@ -87,9 +106,16 @@ function makePi() {
 				model: { provider: "p", modelId: "m1" },
 				queuedMessages: { steering: [], followUp: [] },
 			})),
-
+			complete: vi.fn(async (_clientId: string, sessionId: string) => ({
+				jobId: sessionId,
+				sessionId,
+				status: "done",
+				runId: null,
+				ownerName: "User",
+				isOwner: true,
+			})),
 			prompt: vi.fn(async () => ({
-				jobId: "j1",
+				jobId: "s1",
 				runId: "j1",
 				sessionId: "s1",
 			})),
@@ -115,6 +141,90 @@ afterEach(() => {
 });
 
 describe("usePiSession", () => {
+	it("open 以 Session Job 为权威且不查询 running", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			job: {
+				jobId: "s1",
+				sessionId: "s1",
+				status: "done",
+				runId: null,
+				ownerName: "User",
+				isOwner: true,
+			},
+			agentState: {
+				status: "idle",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+
+		expect(pi.agent.open).toHaveBeenCalledWith("c1", "s1", CWD);
+		expect(pi.running).not.toHaveBeenCalled();
+		expect(result.current.state.status).toBe("done");
+		expect(result.current.state.job?.status).toBe("done");
+	});
+
+	it("恢复 matching pendingExtension 并按 requestId 关闭", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
+			job: {
+				jobId: "s1", sessionId: "s1", status: "waiting_input", runId: "j1",
+				ownerName: "User", isOwner: true,
+			},
+			agentState: {
+				status: "waiting_for_extension_input", streaming: false, prompting: true,
+				compacting: false, thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+				pendingExtension: { requestId: "u1", extensionId: "trust", kind: "confirm", message: "trust?" },
+			},
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+		expect(result.current.state.pendingExtension?.requestId).toBe("u1");
+
+		act(() => emit({ type: "extension_resolved", sessionId: "s1", runId: "j1", requestId: "old", reason: "answered", hasPending: true }));
+		expect(result.current.state.pendingExtension?.requestId).toBe("u1");
+		act(() => emit({ type: "extension_resolved", sessionId: "s1", runId: "j1", requestId: "u1", reason: "answered", hasPending: false }));
+		expect(result.current.state.pendingExtension).toBeNull();
+	});
+
+	it("Observer 与 error Job 都不能发送", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			job: { jobId: "s1", sessionId: "s1", status: "error", runId: null, ownerName: "User", isOwner: true, errorCode: "PI_WORKER_EXITED", errorMessage: "worker exited" },
+			agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+		await act(async () => result.current.actions.send({ prompt: "no" }));
+		expect(pi.agent.prompt).not.toHaveBeenCalled();
+	});
+
+	it("complete 使用当前 runId 并采用返回 Job", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			job: { jobId: "s1", sessionId: "s1", status: "running", runId: "run-1", ownerName: "User", isOwner: true },
+			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+		await act(async () => result.current.actions.complete());
+		expect(pi.agent.complete).toHaveBeenCalledWith("c1", "s1", "run-1");
+		expect(result.current.state.status).toBe("done");
+	});
 	it("createSession → stream ready → prompt（两阶段）", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
@@ -272,12 +382,14 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.prompt as ReturnType<typeof vi.fn>)
-			.mockResolvedValueOnce({ jobId: "j1", runId: "j1", sessionId: "s1" })
+			.mockResolvedValueOnce({ jobId: "s1", runId: "j1", sessionId: "s1" })
 			.mockResolvedValueOnce({ jobId: "j2", runId: "j2", sessionId: "s1" });
 		const { result } = renderHook(() => usePiSession(pi));
 
 		await act(async () => {
 			await result.current.actions.createSession("c1", CWD);
+		});
+		await act(async () => {
 			await result.current.actions.send({ prompt: "first" });
 		});
 		act(() => {
@@ -321,24 +433,14 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		const abortRequest = deferred<unknown>();
-		(pi.agent.state as ReturnType<typeof vi.fn>)
+		(pi.agent.open as ReturnType<typeof vi.fn>)
 			.mockResolvedValueOnce({
-				status: "idle",
-				streaming: false,
-				prompting: false,
-				compacting: false,
-				thinkingLevel: "off",
-				model: { provider: "p", modelId: "m1" },
-				queuedMessages: { steering: [], followUp: [] },
+				job: { jobId: "s1", sessionId: "s1", status: "idle", runId: null, ownerName: "User", isOwner: true },
+				agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
 			})
 			.mockResolvedValue({
-				status: "running",
-				streaming: true,
-				prompting: true,
-				compacting: false,
-				thinkingLevel: "off",
-				model: { provider: "p", modelId: "m1" },
-				queuedMessages: { steering: [], followUp: [] },
+				job: { jobId: "s2", sessionId: "s2", status: "running", runId: "j2", ownerName: "User", isOwner: true },
+				agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
 			});
 		(pi.agent.abort as ReturnType<typeof vi.fn>).mockImplementation(
 			() => abortRequest.promise,
@@ -364,22 +466,9 @@ describe("usePiSession", () => {
 	it("打开仍在运行的 Session 绑定活动 runId", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
-		(pi.running as ReturnType<typeof vi.fn>).mockResolvedValue([
-			{
-				jobId: "j-active",
-				runId: "j-active",
-				sessionId: "s1",
-				status: "running",
-			},
-		]);
-		(pi.agent.state as ReturnType<typeof vi.fn>).mockResolvedValue({
-			status: "running",
-			streaming: true,
-			prompting: true,
-			compacting: false,
-			thinkingLevel: "off",
-			model: { provider: "p", modelId: "m1" },
-			queuedMessages: { steering: [], followUp: [] },
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
+			job: { jobId: "s1", runId: "j-active", sessionId: "s1", status: "running", ownerName: "User", isOwner: true },
+			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 
@@ -394,14 +483,9 @@ describe("usePiSession", () => {
 	it("打开仍在运行的 Session 采用权威 agent state", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
-		(pi.agent.state as ReturnType<typeof vi.fn>).mockResolvedValue({
-			status: "running",
-			streaming: true,
-			prompting: true,
-			compacting: false,
-			thinkingLevel: "off",
-			model: { provider: "p", modelId: "m1" },
-			queuedMessages: { steering: [], followUp: [] },
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
+			job: { jobId: "s1", runId: "j-active", sessionId: "s1", status: "running", ownerName: "User", isOwner: true },
+			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 
@@ -542,6 +626,8 @@ describe("usePiSession", () => {
 
 		await act(async () => {
 			await result.current.actions.createSession("c1", CWD);
+		});
+		await act(async () => {
 			await result.current.actions.send({ prompt: "hi" });
 		});
 		act(() => {

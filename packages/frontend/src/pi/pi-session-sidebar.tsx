@@ -20,6 +20,7 @@ export function PiSessionSidebar({
 	cwdRef,
 	onCwdChange,
 	activeSessionId,
+	mutableSessionId,
 	onSelectSession,
 	onCreated,
 }: {
@@ -29,6 +30,8 @@ export function PiSessionSidebar({
 	cwdRef: PiCwdRef | null;
 	onCwdChange: (ref: PiCwdRef) => void;
 	activeSessionId: string | null;
+	/** 当前身份可管理的 Session；其他卡片仅可打开观察。 */
+	mutableSessionId: string | null;
 	onSelectSession: (sessionId: string) => void;
 	onCreated: (sessionId: string) => void;
 }) {
@@ -214,36 +217,14 @@ export function PiSessionSidebar({
 								{new Date(s.modified).toLocaleString()}
 							</div>
 						</button>
-						<div className="mt-1 flex gap-1">
-							<button
-								type="button"
-								className="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary/60"
-								onClick={() => void rename(s.id)}
-							>
-								重命名
-							</button>
-							<button
-								type="button"
-								className="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary/60"
-								onClick={() => void clone(s.id)}
-							>
-								克隆
-							</button>
-							<button
-								type="button"
-								className="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary/60"
-								onClick={() => void fork(s.id)}
-							>
-								Fork
-							</button>
-							<button
-								type="button"
-								className="ml-auto rounded px-1 py-0.5 text-[10px] text-red-500 hover:bg-red-500/10"
-								onClick={() => void remove(s.id)}
-							>
-								删除
-							</button>
-						</div>
+						{s.id === mutableSessionId && (
+							<div className="mt-1 flex gap-1">
+								<button type="button" className="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary/60" onClick={() => void rename(s.id)}>重命名</button>
+								<button type="button" className="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary/60" onClick={() => void clone(s.id)}>克隆</button>
+								<button type="button" className="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary/60" onClick={() => void fork(s.id)}>Fork</button>
+								<button type="button" className="ml-auto rounded px-1 py-0.5 text-[10px] text-red-500 hover:bg-red-500/10" onClick={() => void remove(s.id)}>删除</button>
+							</div>
+						)}
 						{s.tree.length > 0 && (
 							<div className="mt-1 border-t border-border/60 pt-1">
 								<SessionTree nodes={s.tree} onNavigate={onSelectSession} />

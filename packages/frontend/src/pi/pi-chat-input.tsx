@@ -40,7 +40,8 @@ export function PiChatInput({
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
 	const running = status === "running" || status === "waiting_input";
-	const canSend = !disabled && !running && text.trim().length > 0;
+	const promptable = status === "idle" || status === "done";
+	const canSend = !disabled && promptable && text.trim().length > 0;
 
 	const submit = () => {
 		if (!canSend) return;
@@ -62,7 +63,7 @@ export function PiChatInput({
 
 	return (
 		<div className="space-y-1.5 border-t border-border pt-2">
-			{running && (
+			{running && !disabled && (
 				<div className="flex items-center gap-1.5 text-xs">
 					<Button
 						type="button"
@@ -121,7 +122,7 @@ export function PiChatInput({
 									? "❌"
 									: "🖼️"}{" "}
 							{a.name}
-							{onRemoveAttachment && (
+							{onRemoveAttachment && !disabled && promptable && (
 								<button
 									type="button"
 									className="text-muted-foreground"
@@ -136,7 +137,7 @@ export function PiChatInput({
 				</div>
 			)}
 			<div className="flex items-end gap-2">
-				{onPickFiles && (
+				{onPickFiles && !disabled && promptable && (
 					<label className="shrink-0 cursor-pointer rounded border border-border px-2 py-1.5 text-xs">
 						🖼️ 添加
 						<input
@@ -158,13 +159,15 @@ export function PiChatInput({
 					ref={textareaRef}
 					value={text}
 					rows={2}
-					disabled={disabled || running}
+					disabled={disabled || !promptable}
 					placeholder={
 						disabled
 							? "请先选择项目和会话"
 							: running
 								? "运行中…"
-								: "输入消息，Enter 发送，Shift+Enter 换行"
+								: status === "error"
+									? "运行错误，请先标记完成"
+									: "输入消息，Enter 发送，Shift+Enter 换行"
 					}
 					className="min-h-10 flex-1 resize-none rounded border border-border bg-background p-2 text-sm disabled:opacity-50"
 					onChange={(e) => setText(e.target.value)}

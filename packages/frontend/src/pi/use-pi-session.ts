@@ -6,6 +6,8 @@ import type {
 	PiModelInfo,
 	PiSessionContextPage,
 	PiSessionDetail,
+	PiSessionJobSnapshot,
+	PiSessionOpenResult,
 	PiThinkingLevel,
 } from "@vcpdeck/shared";
 import type { PiApi } from "@vcpdeck/sdk";
@@ -21,6 +23,8 @@ export type PiSessionStatus =
 	| "loading"
 	| "running"
 	| "waiting_input"
+	| "done"
+	| "disconnected"
 	| "error";
 
 export type PiThinkingSelection = "auto" | PiThinkingLevel;
@@ -29,6 +33,7 @@ export interface PiSessionState {
 	messages: PiMessage[];
 	session: PiSessionDetail | null;
 	agentState: PiAgentState | null;
+	job?: PiSessionJobSnapshot | null;
 	runId: string | null;
 	status: PiSessionStatus;
 	error: string | null;
@@ -71,19 +76,27 @@ export interface PiSessionActions {
 	navigate(targetId: string): Promise<void>;
 	fork(messageId: string): Promise<void>;
 	clone(): Promise<void>;
+	complete(): Promise<void>;
 	close(): void;
 }
 
-function statusFromAgentState(agentState: PiAgentState): PiSessionStatus {
-	if (agentState.status === "waiting_for_extension_input")
+function effectiveStatus(
+	job: PiSessionJobSnapshot,
+	agentState: PiAgentState,
+): PiSessionStatus {
+	if (job.status === "done" || job.status === "cancelled") return "done";
+	if (job.status === "disconnected") return "disconnected";
+	if (job.status === "error") return "error";
+	if (job.status === "waiting_input" || agentState.pendingExtension)
 		return "waiting_input";
-	return agentState.status === "idle" ? "idle" : "running";
+	return job.status === "idle" ? "idle" : "running";
 }
 
 const INITIAL_STATE: PiSessionState = {
 	messages: [],
 	session: null,
 	agentState: null,
+	job: null,
 	runId: null,
 	status: "idle",
 	error: null,
@@ -270,6 +283,9 @@ export function usePiSession(
 											...s,
 											runId: event.runId,
 											status: "running",
+											job: s.job
+												? { ...s.job, status: "running", runId: event.runId }
+												: s.job,
 										}));
 									}
 								}
@@ -321,7 +337,12 @@ export function usePiSession(
 								clearGrace();
 								if (runId) retiredRunIdsRef.current.add(runId);
 								activeRunIdRef.current = null;
-								setState((s) => ({ ...s, status: "idle", runId: null }));
+								setState((s) => ({
+									...s,
+									status: "idle",
+									runId: null,
+									job: s.job ? { ...s.job, status: "idle", runId: null } : null,
+								}));
 								void reloadHistory();
 								void refreshState();
 								return;
@@ -354,6 +375,13 @@ export function usePiSession(
 									...(event.ui.message ? { message: event.ui.message } : {}),
 									...(event.ui.options ? { options: event.ui.options } : {}),
 								});
+								return;
+							case "extension_resolved":
+								setState((s) =>
+									s.pendingExtension?.requestId === event.requestId
+										? { ...s, pendingExtension: null, status: "running" }
+										: s,
+								);
 								return;
 							case "history_changed":
 							case "message_update":
@@ -401,48 +429,34 @@ export function usePiSession(
 			await stream.connected();
 			if (sessionGenerationRef.current !== sessionGeneration) return;
 
-			// 附着：读取历史、权威状态和当前可用模型
-			const modelsPromise = pi
-				.models(clientId, cwdRef)
-				.catch((err: unknown) => {
-					if (sessionGenerationRef.current !== sessionGeneration) return null;
-					setState((s) => ({
-						...s,
-						error: err instanceof Error ? err.message : String(err),
-					}));
-					return null;
-				});
-			const activeRunsPromise = pi.running
-				? pi.running(clientId).catch(() => null)
-				: Promise.resolve(null);
-			const [, agentState, models, activeRuns] = await Promise.all([
+			// /open 补建并返回权威 Session Job；历史和模型只补充展示细节。
+			const modelsPromise = pi.models(clientId, cwdRef).catch((err: unknown) => {
+				if (sessionGenerationRef.current !== sessionGeneration) return null;
+				setState((s) => ({
+					...s,
+					error: err instanceof Error ? err.message : String(err),
+				}));
+				return null;
+			});
+			const [openResult, , models] = await Promise.all([
+				pi.agent.open(clientId, sessionId, cwdRef) as Promise<PiSessionOpenResult>,
 				reloadHistory(),
-				refreshState(),
 				modelsPromise,
-				activeRunsPromise,
 			]);
 			if (sessionGenerationRef.current !== sessionGeneration) return;
-			const attachedRunId =
-				agentState && agentState.status !== "idle" && Array.isArray(activeRuns)
-					? (
-							activeRuns.find(
-								(run) =>
-									typeof run === "object" &&
-									run !== null &&
-									(run as { sessionId?: unknown }).sessionId === sessionId,
-							) as { runId?: unknown } | undefined
-						)?.runId
-					: undefined;
-			if (typeof attachedRunId === "string") {
-				activeRunIdRef.current = attachedRunId;
-				retiredRunIdsRef.current.delete(attachedRunId);
-			}
+			const { job, agentState } = openResult;
+			activeRunIdRef.current = job.runId;
+			if (job.runId) retiredRunIdsRef.current.delete(job.runId);
+			const pendingExtension = job.runId ? agentState.pendingExtension ?? null : null;
 			setState((s) => ({
 				...s,
-				status: agentState ? statusFromAgentState(agentState) : "idle",
-				runId: typeof attachedRunId === "string" ? attachedRunId : null,
+				job,
+				agentState,
+				status: effectiveStatus(job, agentState),
+				runId: job.runId,
+				pendingExtension,
 				...(models ? { models } : {}),
-				...(agentState ? { thinkingSelection: agentState.thinkingLevel } : {}),
+				thinkingSelection: agentState.thinkingLevel,
 			}));
 		},
 		[openStream, reloadHistory, refreshState, pi],
@@ -468,6 +482,11 @@ export function usePiSession(
 				setState((s) => ({ ...s, error: "尚未打开会话" }));
 				return;
 			}
+			if (
+				!stateRef.current.job?.isOwner ||
+				!(["idle", "done"] as PiSessionStatus[]).includes(stateRef.current.status)
+			)
+				return;
 			const stream = streamRef.current;
 			if (!stream) {
 				setState((s) => ({ ...s, error: "事件流未就绪" }));
@@ -497,7 +516,13 @@ export function usePiSession(
 				) {
 					if (activeRunIdRef.current === null) {
 						activeRunIdRef.current = accepted.runId;
-						setState((s) => ({ ...s, runId: accepted.runId }));
+						setState((s) => ({
+							...s,
+							runId: accepted.runId,
+							job: s.job
+								? { ...s.job, status: "running", runId: accepted.runId }
+								: s.job,
+						}));
 					}
 				}
 			} catch (err) {
@@ -551,7 +576,12 @@ export function usePiSession(
 					if (sessionGenerationRef.current !== sessionGeneration) return;
 					clearGrace();
 					retiredRunIdsRef.current.add(runId);
-					setState((st) => ({ ...st, status: "idle", runId: null }));
+					setState((st) => ({
+						...st,
+						status: "idle",
+						runId: null,
+						job: st.job ? { ...st.job, status: "idle", runId: null } : null,
+					}));
 					activeRunIdRef.current = null;
 				}),
 			compact: (customInstructions) =>
@@ -660,8 +690,30 @@ export function usePiSession(
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;
 				const cwdRef = cwdRefRef.current;
-				if (!clientId || !sessionId || !cwdRef) return;
+				if (!clientId || !sessionId || !cwdRef || !stateRef.current.job?.isOwner)
+					return;
 				await pi.sessions.clone(clientId, sessionId, cwdRef);
+			},
+			complete: async () => {
+				const clientId = clientIdRef.current;
+				const sessionId = sessionIdRef.current;
+				const job = stateRef.current.job;
+				const sessionGeneration = sessionGenerationRef.current;
+				if (!clientId || !sessionId || !job?.isOwner) return;
+				const snapshot = await pi.agent.complete(
+					clientId,
+					sessionId,
+					activeRunIdRef.current ?? undefined,
+				);
+				if (sessionGenerationRef.current !== sessionGeneration) return;
+				activeRunIdRef.current = snapshot.runId;
+				setState((s) => ({
+					...s,
+					job: snapshot,
+					runId: snapshot.runId,
+					status: snapshot.status === "error" ? "error" : "done",
+					pendingExtension: null,
+				}));
 			},
 			close,
 		}),

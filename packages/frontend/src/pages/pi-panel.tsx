@@ -204,11 +204,13 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 		);
 	}
 
-	const isObserver = false; // 首版单用户环境无多身份；Owner 语义由 Server 保证
+	const isObserver = state.job?.isOwner === false;
 	const settingsDisabled =
 		!sessionId ||
+		isObserver ||
 		state.status !== "idle" ||
 		state.agentState?.status !== "idle";
+	const mutableSessionId = state.job?.isOwner ? state.job.sessionId : null;
 
 	const filesApi = useMemo(
 		() => ({
@@ -241,6 +243,7 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 						cwdRef={cwdRef}
 						onCwdChange={handleCwdChange}
 						activeSessionId={sessionId}
+						mutableSessionId={mutableSessionId}
 						onSelectSession={(sid) => void openSession(sid)}
 						onCreated={handleCreated}
 					/>
@@ -275,7 +278,7 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					</div>
 					<PiChatInput
 						status={state.status}
-						disabled={!cwdRef || !sessionId}
+						disabled={!cwdRef || !sessionId || isObserver}
 						attachments={attachments.map((a) => ({
 							name: a.name,
 							status: a.status,
@@ -309,11 +312,8 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					data-testid="pi-right-panel"
 				>
 					<PiRunDetails
+						job={state.job ?? null}
 						agentState={state.agentState}
-						runId={state.runId}
-						sessionId={sessionId}
-						ownerName={null}
-						isObserver={isObserver}
 						models={state.models}
 						thinkingSelection={state.thinkingSelection}
 						disabled={settingsDisabled}
@@ -321,6 +321,7 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 							void actions.setModel(provider, modelId)
 						}
 						onThinkingChange={(level) => void actions.setThinking(level)}
+						onComplete={() => void actions.complete()}
 					/>
 				</aside>
 			</div>
@@ -355,6 +356,7 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					cwdRef={cwdRef}
 					onCwdChange={handleCwdChange}
 					activeSessionId={sessionId}
+					mutableSessionId={mutableSessionId}
 					onSelectSession={(sid) => void openSession(sid)}
 					onCreated={handleCreated}
 				/>
@@ -365,11 +367,8 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 				title="运行详情"
 			>
 				<PiRunDetails
+					job={state.job ?? null}
 					agentState={state.agentState}
-					runId={state.runId}
-					sessionId={sessionId}
-					ownerName={null}
-					isObserver={isObserver}
 					models={state.models}
 					thinkingSelection={state.thinkingSelection}
 					disabled={settingsDisabled}
@@ -377,13 +376,14 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 						void actions.setModel(provider, modelId)
 					}
 					onThinkingChange={(level) => void actions.setThinking(level)}
+					onComplete={() => void actions.complete()}
 				/>
 			</Drawer>
 
 			{state.pendingExtension && (
 				<PiExtensionDialog
 					request={state.pendingExtension}
-					disabled={false}
+					disabled={isObserver}
 					onRespond={(value, confirmed) =>
 						void actions.extensionResponse(
 							state.pendingExtension!.requestId,

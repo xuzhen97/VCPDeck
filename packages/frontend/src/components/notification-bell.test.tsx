@@ -89,12 +89,12 @@ describe("NotificationBell", () => {
 		expect(screen.getByText(/42%/)).toBeInTheDocument();
 	});
 
-	it("agent.run 不出现在全局任务通知中", async () => {
+	it.each(["agent.run", "agent.session"])("%s 不出现在全局任务通知中", async (type) => {
 		const list = vi.fn().mockResolvedValue({
 			data: [
 				job({
 					jobId: "agent-run-1",
-					type: "agent.run",
+					type,
 					status: "waiting_input" as JobInfo["status"],
 					payload: {
 						mode: "interactive",
@@ -117,7 +117,7 @@ describe("NotificationBell", () => {
 		fireEvent.click(screen.getByRole("button", { name: "任务通知" }));
 
 		expect(screen.getByText("暂无任务")).toBeInTheDocument();
-		expect(screen.queryByText(/agent\.run/)).not.toBeInTheDocument();
+		expect(screen.queryByText(new RegExp(type.replace(".", "\\.")))).not.toBeInTheDocument();
 	});
 
 	it("waiting_input 文件上传显示 Storage 上传状态", async () => {
