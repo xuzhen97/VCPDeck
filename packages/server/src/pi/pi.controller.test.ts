@@ -191,6 +191,83 @@ describe("PiController", () => {
 		expect(requests.request).not.toHaveBeenCalled();
 	});
 
+	it("complete 延迟 abort 时新 run 抢先则稳定冲突且不 abort 新 run", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const first = { ...idleSnapshot, status: "running" as const, runId: "run-1" };
+		const next = { ...idleSnapshot, status: "pending" as const, runId: "run-2" };
+		const { controller, requests } = makeController({
+			requests: { request: vi.fn(async (_lease, request: { action: string }) => {
+				if (request.action === "agent.abort") await gate;
+				return { ok: true, data: {} };
+			}) },
+			runs: {
+				snapshot: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(next),
+				completeSession: vi.fn(async () => false),
+			},
+		});
+		const completion = controller.completeSession("c1", "s1", { runId: "run-1" }, actor);
+		await vi.waitFor(() => expect(requests.request).toHaveBeenCalledOnce());
+		release();
+		await expect(completion).rejects.toMatchObject({
+			response: { code: "PI_CONTROL_FORBIDDEN" },
+		});
+		expect(requests.request).toHaveBeenCalledTimes(1);
+		expect(requests.request).toHaveBeenCalledWith(
+			{ clientId: "c1", socketId: "socket-1" },
+			expect.objectContaining({ action: "agent.abort", runId: "run-1" }),
+		);
+	});
+
+	it("delete 先 reservation，成功或不存在 commit；明确拒绝 rollback", async () => {
+		const { controller, requests, runs } = makeController();
+		requests.request
+			.mockResolvedValueOnce({ ok: true, data: { ok: true } })
+			.mockResolvedValueOnce({ ok: false, error: { code: "PI_SESSION_NOT_FOUND", message: "gone" } } as never)
+			.mockResolvedValueOnce({ ok: false, error: { code: "PI_PROJECT_NOT_ALLOWED", message: "denied" } } as never);
+
+		const remove = () => Reflect.apply(controller.deleteSession, controller, ["c1", "s1", cwdRef, actor]);
+		await expect(remove()).resolves.toEqual({ ok: true });
+		await expect(remove()).resolves.toEqual({ ok: true });
+		await expect(remove()).rejects.toMatchObject({
+			response: { code: "PI_PROJECT_NOT_ALLOWED" },
+		});
+		expect(runs.beginDelete).toHaveBeenCalledTimes(3);
+		expect(runs.commitDelete).toHaveBeenCalledTimes(2);
+		expect(runs.rollbackDelete).toHaveBeenCalledTimes(1);
+		expect(requests.request.mock.calls.map((call) => call[1])).toEqual([
+			expect.objectContaining({ action: "session.delete", sessionId: "s1" }),
+			expect.objectContaining({ action: "session.delete", sessionId: "s1" }),
+			expect.objectContaining({ action: "session.delete", sessionId: "s1" }),
+		]);
+	});
+
+	it.each(["PI_REQUEST_TIMEOUT", "PI_CLIENT_DISCONNECTED"])(
+		"delete %s 保留 reservation 供重试",
+		async (code) => {
+			const failure = Object.assign(new Error(code), { code });
+			const { controller, runs } = makeController({
+				requests: { request: vi.fn(async () => { throw failure; }) },
+			});
+			await expect(Reflect.apply(controller.deleteSession, controller, ["c1", "s1", cwdRef, actor])).rejects.toMatchObject({
+				response: { code },
+			});
+			expect(runs.rollbackDelete).not.toHaveBeenCalled();
+			expect(runs.commitDelete).not.toHaveBeenCalled();
+		},
+	);
+
+	it("delete 未取得 reservation 不请求 Client", async () => {
+		const busy = Object.assign(new Error("busy"), { code: "PI_PROJECT_BUSY" });
+		const { controller, requests } = makeController({
+			runs: { beginDelete: vi.fn(async () => { throw busy; }) },
+		});
+		await expect(Reflect.apply(controller.deleteSession, controller, ["c1", "s1", cwdRef, actor])).rejects.toMatchObject({
+			response: { code: "PI_PROJECT_BUSY" },
+		});
+		expect(requests.request).not.toHaveBeenCalled();
+	});
+
 	it("sessions.list 转发 cwdRef", async () => {
 		const { controller, requests } = makeController();
 		await controller.sessions("c1", "D:\\", "repo");
@@ -313,7 +390,7 @@ describe("PiController", () => {
 			rootDir: "D:\\",
 			relativePath: "repo",
 			level: "high",
-		});
+		}, actor);
 
 		expect(runs.withReconciledClient).toHaveBeenCalledTimes(1);
 		expect(runs.assertIdleMutation).toHaveBeenCalledWith("c1", "k".repeat(64));
@@ -327,6 +404,77 @@ describe("PiController", () => {
 			{ clientId: "c1", socketId: "socket-1" },
 			expect.objectContaining({ action: "thinking.set" }),
 		);
+	});
+
+	it.each(["success", "error", "timeout", "disconnect"])(
+		"pending complete 后 dispatch %s 仍补发同 run abort",
+		async (outcome) => {
+			const { controller, requests } = makeController({
+				runs: { snapshot: vi.fn(async () => ({ ...idleSnapshot, status: "done", runId: null })) },
+			});
+			requests.request.mockImplementation((async (_lease: unknown, request: { action: string }) => {
+				if (request.action === "project.resolve") return { ok: true, data: { projectKey: "k".repeat(64) } };
+				if (request.action === "agent.abort") return { ok: true, data: {} };
+				if (outcome === "success") return { ok: true, data: { accepted: true } };
+				if (outcome === "error") return { ok: false, error: { code: "PI_WORKER_EXITED", message: "died" } };
+				throw Object.assign(new Error(outcome), {
+					code: outcome === "timeout" ? "PI_REQUEST_TIMEOUT" : "PI_CLIENT_DISCONNECTED",
+				});
+			}) as never);
+			const operation = controller.prompt("c1", "s1", {
+				rootDir: "D:\\", relativePath: "repo", type: "prompt",
+				submissionId: "sub-1", prompt: "hello",
+			}, actor);
+			await expect(operation).rejects.toMatchObject({
+				response: { code: "PI_CONTROL_FORBIDDEN" },
+			});
+			expect(requests.request).toHaveBeenCalledWith(
+				{ clientId: "c1", socketId: "socket-1" },
+				expect.objectContaining({ action: "agent.abort", jobId: "s1", runId: "run-1" }),
+			);
+		},
+	);
+
+	it("new/fork/clone 建 Job 失败重试一次并按 lease 补偿删除", async () => {
+		const dbError = new Error("db down");
+		for (const kind of ["fork", "clone"] as const) {
+			const { controller, requests, runs } = makeController({
+				runs: { ensureSession: vi.fn(async () => { throw dbError; }) },
+			});
+			requests.request.mockImplementation(async (_lease, request: { action: string }) => {
+				if (request.action === "project.resolve") return { ok: true, data: { projectKey: "k".repeat(64) } };
+				if (request.action === `session.${kind}`) return { ok: true, data: { sessionId: `${kind}-1` } };
+				return { ok: true, data: {} };
+			});
+			const operation = kind === "fork"
+				? Reflect.apply(controller.forkSession, controller, ["c1", "s1", { ...cwdRef, messageId: "m1" }, actor])
+				: Reflect.apply(controller.cloneSession, controller, ["c1", "s1", cwdRef, actor]);
+			await expect(operation).rejects.toBe(dbError);
+			expect(runs.ensureSession).toHaveBeenCalledTimes(2);
+			expect(requests.request).toHaveBeenCalledWith(
+				{ clientId: "c1", socketId: "socket-1" },
+				expect.objectContaining({ action: "session.delete", sessionId: `${kind}-1` }),
+			);
+		}
+	});
+
+	it("fixed Owner mutation 在任何 Client request 前拒绝非 Owner", async () => {
+		const forbidden = Object.assign(new Error("forbidden"), { code: "PI_CONTROL_FORBIDDEN" });
+		const { controller, requests } = makeController({
+			runs: { assertSessionOwner: vi.fn(async () => { throw forbidden; }) },
+		});
+		const operations = [
+			() => Reflect.apply(controller.renameSession, controller, ["c1", "s1", { ...cwdRef, name: "n" }, actor]),
+			() => Reflect.apply(controller.forkSession, controller, ["c1", "s1", { ...cwdRef, messageId: "m1" }, actor]),
+			() => Reflect.apply(controller.cloneSession, controller, ["c1", "s1", cwdRef, actor]),
+			() => Reflect.apply(controller.navigateSession, controller, ["c1", "s1", { ...cwdRef, targetId: "m1" }, actor]),
+			() => Reflect.apply(controller.setModel, controller, ["c1", "s1", { ...cwdRef, provider: "p", modelId: "m" }, actor]),
+			() => Reflect.apply(controller.setThinking, controller, ["c1", "s1", { ...cwdRef, level: "high" }, actor]),
+		];
+		for (const operation of operations) {
+			await expect(operation()).rejects.toMatchObject({ response: { code: "PI_CONTROL_FORBIDDEN" } });
+		}
+		expect(requests.request).not.toHaveBeenCalled();
 	});
 
 	it("prompt 请求失败时 matching run 回 idle", async () => {
@@ -402,7 +550,7 @@ describe("PiController", () => {
 				relativePath: "repo",
 				provider: "p",
 				modelId: "m",
-			}),
+			}, actor),
 		).rejects.toBeInstanceOf(BadRequestException);
 	});
 
@@ -417,7 +565,7 @@ describe("PiController", () => {
 			rootDir: "D:\\",
 			relativePath: "repo",
 			level: "high",
-		});
+		}, actor);
 
 		expect(runs.assertIdleMutation).toHaveBeenCalledWith("c1", "k".repeat(64));
 		expect(requests.request).toHaveBeenLastCalledWith(
@@ -438,7 +586,7 @@ describe("PiController", () => {
 				rootDir: "D:\\",
 				relativePath: "repo",
 				level: "auto",
-			}),
+			}, actor),
 		).rejects.toMatchObject({ response: { code: "PI_PROTOCOL_INVALID" } });
 	});
 

@@ -160,6 +160,15 @@ export class PiController {
 		);
 	}
 
+	private async assertSessionOwner(jobId: string, actor: ActorContext): Promise<void> {
+		try {
+			await this.runs.assertSessionOwner(jobId, actor.identityId);
+		} catch (err) {
+			if (isPiError(err)) throw badRequest(err.code, err.message);
+			throw err;
+		}
+	}
+
 	private async assertActiveOwner(jobId: string, runId: string, actor: ActorContext): Promise<void> {
 		try {
 			await this.runs.assertCurrentRunOwner(jobId, runId, actor.identityId);
@@ -312,7 +321,8 @@ export class PiController {
 	async renameSession(
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
-		@Body() body: { rootDir?: string; relativePath?: string; name?: string }
+		@Body() body: { rootDir?: string; relativePath?: string; name?: string },
+		@Actor() actor: ActorContext,
 	) {
 		await this.requirePiClient(clientId);
 		const { rootDir, relativePath, name } = body;
@@ -322,6 +332,7 @@ export class PiController {
 		if (typeof name !== "string" || name.trim() === "") {
 			throw badRequest("PI_PROTOCOL_INVALID", "name required");
 		}
+		await this.assertSessionOwner(sessionId, actor);
 		await this.withReconciledClient(clientId, async (lease) => {
 			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
 			await this.assertIdle(clientId, projectKey);
@@ -341,24 +352,33 @@ export class PiController {
 	async deleteSession(
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
-		@Body() body: { rootDir?: string; relativePath?: string }
+		@Body() body: { rootDir?: string; relativePath?: string },
+		@Actor() actor: ActorContext,
 	) {
 		await this.requirePiClient(clientId);
-		const { rootDir, relativePath } = body ?? {};
-		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
-			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
-		}
-		await this.withReconciledClient(clientId, async (lease) => {
-			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
-			await this.assertIdle(clientId, projectKey);
-			await this.requestOnce(lease, {
-				requestId: randomUUID(),
-				action: "session.delete",
-				cwdRef: { rootDir, relativePath },
-				sessionId,
-			});
+		const cwdRef = requireCwd(body);
+		return this.withReconciledClient(clientId, async (lease) => {
+			const reservation = await this.runs.beginDelete(sessionId, actor.identityId);
+			try {
+				const response = await this.requests.request(lease, {
+					requestId: randomUUID(), action: "session.delete", cwdRef, sessionId,
+				});
+				if (response.ok || response.error.code === "PI_SESSION_NOT_FOUND") {
+					await this.runs.commitDelete(sessionId, reservation.deleteToken);
+					return { ok: true };
+				}
+				await this.runs.rollbackDelete(sessionId, reservation.deleteToken);
+				throw badRequest(response.error.code, response.error.message);
+			} catch (error) {
+				const code = error instanceof Error && "code" in error
+					? String((error as { code: unknown }).code)
+					: undefined;
+				if (code === "PI_REQUEST_TIMEOUT" || code === "PI_CLIENT_DISCONNECTED") {
+					throw badRequest(code, error instanceof Error ? error.message : code);
+				}
+				throw error;
+			}
 		});
-		return { ok: true };
 	}
 
 	@Post("sessions/:sessionId/fork")
@@ -366,7 +386,8 @@ export class PiController {
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
 		@Body() body: { rootDir?: string; relativePath?: string; messageId?: string },
-	) {
+		@Actor() actor: ActorContext,
+	): Promise<PiSessionCreated> {
 		await this.requirePiClient(clientId);
 		const { rootDir, relativePath, messageId } = body;
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
@@ -375,16 +396,16 @@ export class PiController {
 		if (typeof messageId !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "messageId required");
 		}
+		await this.assertSessionOwner(sessionId, actor);
 		return this.withReconciledClient(clientId, async (lease) => {
-			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			const cwdRef = { rootDir, relativePath };
+			const projectKey = await this.resolveProjectKey(lease, cwdRef);
 			await this.assertIdle(clientId, projectKey);
-			return this.requestOnce(lease, {
-				requestId: randomUUID(),
-				action: "session.fork",
-				cwdRef: { rootDir, relativePath },
-				sessionId,
+			const data = await this.requestOnce(lease, {
+				requestId: randomUUID(), action: "session.fork", cwdRef, sessionId,
 				payload: { messageId },
 			});
+			return this.ensureCreatedSession(lease, actor, clientId, cwdRef, data);
 		});
 	}
 
@@ -393,21 +414,22 @@ export class PiController {
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
 		@Body() body: { rootDir?: string; relativePath?: string },
-	) {
+		@Actor() actor: ActorContext,
+	): Promise<PiSessionCreated> {
 		await this.requirePiClient(clientId);
 		const { rootDir, relativePath } = body;
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
 		}
+		await this.assertSessionOwner(sessionId, actor);
 		return this.withReconciledClient(clientId, async (lease) => {
-			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+			const cwdRef = { rootDir, relativePath };
+			const projectKey = await this.resolveProjectKey(lease, cwdRef);
 			await this.assertIdle(clientId, projectKey);
-			return this.requestOnce(lease, {
-				requestId: randomUUID(),
-				action: "session.clone",
-				cwdRef: { rootDir, relativePath },
-				sessionId,
+			const data = await this.requestOnce(lease, {
+				requestId: randomUUID(), action: "session.clone", cwdRef, sessionId,
 			});
+			return this.ensureCreatedSession(lease, actor, clientId, cwdRef, data);
 		});
 	}
 
@@ -416,6 +438,7 @@ export class PiController {
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
 		@Body() body: { rootDir?: string; relativePath?: string; targetId?: string },
+		@Actor() actor: ActorContext,
 	) {
 		await this.requirePiClient(clientId);
 		const { rootDir, relativePath, targetId } = body;
@@ -425,6 +448,7 @@ export class PiController {
 		if (typeof targetId !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "targetId required");
 		}
+		await this.assertSessionOwner(sessionId, actor);
 		return this.withReconciledClient(clientId, async (lease) => {
 			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
 			await this.assertIdle(clientId, projectKey);
@@ -578,8 +602,10 @@ export class PiController {
 		}
 
 		return this.withReconciledClient(clientId, async (lease) => {
-			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
-			await this.runs.ensureSession(actor, { clientId, sessionId });
+			const [projectKey] = await Promise.all([
+				this.resolveProjectKey(lease, { rootDir, relativePath }),
+				this.runs.ensureSession(actor, { clientId, sessionId }),
+			]);
 			let run: { jobId: string; runId: string };
 			try {
 				run = await this.runs.startRun(actor, { clientId, sessionId, projectKey });
@@ -612,6 +638,7 @@ export class PiController {
 				event: { type: "run_created", sessionId, submissionId, runId },
 			});
 
+			let dispatchError: unknown;
 			try {
 				const response = await this.requests.request(lease, {
 					requestId: randomUUID(),
@@ -630,18 +657,28 @@ export class PiController {
 				});
 				if (!response.ok) {
 					await this.runs.finishRun(jobId, runId);
-					throw badRequest(response.error.code, response.error.message);
+					dispatchError = badRequest(response.error.code, response.error.message);
+				} else {
+					await this.runs.accept(jobId, runId);
 				}
-				await this.runs.accept(jobId, runId);
-			} catch (err) {
-				if (err instanceof Error && "code" in err) {
-					const code = String((err as { code: unknown }).code);
-					if (code === "PI_REQUEST_TIMEOUT" || code === "PI_CLIENT_DISCONNECTED") {
-						await this.runs.finishRun(jobId, runId);
-					}
-				}
-				throw err;
+			} catch (error) {
+				dispatchError = error;
 			}
+
+			const current = await this.runs.snapshot(sessionId, actor.identityId);
+			if (current.status === "done" || current.status === "cancelled") {
+				try {
+					await this.requests.request(lease, {
+						requestId: randomUUID(), action: "agent.abort",
+						sessionId, jobId, runId,
+					});
+				} catch { /* best effort: only the dispatched run is addressed */ }
+				throw new ConflictException({
+					code: "PI_CONTROL_FORBIDDEN",
+					message: "Session completed while the prompt was dispatching",
+				});
+			}
+			if (dispatchError) throw dispatchError;
 			return { jobId, runId, sessionId };
 		});
 	}
@@ -839,7 +876,9 @@ export class PiController {
 		action: PiRequest["action"],
 		sessionId?: string,
 		payload?: Record<string, unknown>,
+		actor?: ActorContext,
 	): Promise<unknown> {
+		if (sessionId && actor) await this.assertSessionOwner(sessionId, actor);
 		return this.withReconciledClient(clientId, async (lease) => {
 			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
 			await this.assertIdle(clientId, projectKey);
@@ -858,6 +897,7 @@ export class PiController {
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
 		@Body() body: { rootDir?: string; relativePath?: string; provider?: string; modelId?: string },
+		@Actor() actor: ActorContext,
 	) {
 		const { rootDir, relativePath, provider, modelId } = body;
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
@@ -869,7 +909,7 @@ export class PiController {
 		return this.idleAction(clientId, rootDir, relativePath, "model.set", sessionId, {
 			provider,
 			modelId,
-		});
+		}, actor);
 	}
 
 	@Post("agent/:sessionId/thinking")
@@ -877,6 +917,7 @@ export class PiController {
 		@Param("clientId") clientId: string,
 		@Param("sessionId") sessionId: string,
 		@Body() body: { rootDir?: string; relativePath?: string; level?: string },
+		@Actor() actor: ActorContext,
 	) {
 		const { rootDir, relativePath, level } = body;
 		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
@@ -887,6 +928,6 @@ export class PiController {
 		}
 		return this.idleAction(clientId, rootDir, relativePath, "thinking.set", sessionId, {
 			level,
-		});
+		}, actor);
 	}
 }

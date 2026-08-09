@@ -137,7 +137,7 @@ function makeLoopback() {
 		listOnline: vi.fn(async () => [{
 			clientId: "c1",
 			capabilities: ["agent.pi"],
-			capabilityDetails: { pi: { available: true } },
+			capabilityDetails: { pi: { available: true, sessionJobProtocolVersion: 1 } },
 		}]),
 	};
 	const jobService = {
@@ -236,6 +236,8 @@ function idleState() {
 }
 
 async function flush(): Promise<void> {
+	await Promise.resolve();
+	await Promise.resolve();
 	await Promise.resolve();
 	await Promise.resolve();
 }
