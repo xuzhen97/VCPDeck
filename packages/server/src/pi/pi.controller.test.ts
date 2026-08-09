@@ -62,6 +62,7 @@ function makeController(
 		finishRun: vi.fn(async () => true),
 		completeSession: vi.fn(async () => true),
 		reconcileOpen: vi.fn(async () => true),
+		markRunDisconnected: vi.fn(async () => true),
 		beginDelete: vi.fn(async () => ({ deleteToken: "delete-1", previousStatus: "idle", existingReservation: false })),
 		rollbackDelete: vi.fn(async () => true),
 		commitDelete: vi.fn(async () => true),
@@ -182,6 +183,17 @@ describe("PiController", () => {
 		expect(runs.completeSession).toHaveBeenCalledWith("s1", "run-1");
 	});
 
+	it("error complete 不请求 Client 并直接完成", async () => {
+		const snapshot = { ...idleSnapshot, status: "error" as const };
+		const done = { ...idleSnapshot, status: "done" as const };
+		const { controller, requests, runs } = makeController({
+			runs: { snapshot: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValueOnce(done) },
+		});
+		await expect(controller.completeSession("c1", "s1", {}, actor)).resolves.toEqual(done);
+		expect(requests.request).not.toHaveBeenCalled();
+		expect(runs.completeSession).toHaveBeenCalledWith("s1", undefined);
+	});
+
 	it("disconnected complete 不请求 Client", async () => {
 		const snapshot = { ...idleSnapshot, status: "disconnected" as const, runId: "run-1" };
 		const { controller, requests } = makeController({
@@ -219,7 +231,7 @@ describe("PiController", () => {
 		);
 	});
 
-	it("delete 先 reservation，成功或不存在 commit；明确拒绝 rollback", async () => {
+	it("delete 成功/不存在 commit，执行前拒绝直接 rollback", async () => {
 		const { controller, requests, runs } = makeController();
 		requests.request
 			.mockResolvedValueOnce({ ok: true, data: { ok: true } })
@@ -229,17 +241,40 @@ describe("PiController", () => {
 		const remove = () => Reflect.apply(controller.deleteSession, controller, ["c1", "s1", cwdRef, actor]);
 		await expect(remove()).resolves.toEqual({ ok: true });
 		await expect(remove()).resolves.toEqual({ ok: true });
-		await expect(remove()).rejects.toMatchObject({
-			response: { code: "PI_PROJECT_NOT_ALLOWED" },
-		});
+		await expect(remove()).rejects.toMatchObject({ response: { code: "PI_PROJECT_NOT_ALLOWED" } });
 		expect(runs.beginDelete).toHaveBeenCalledTimes(3);
 		expect(runs.commitDelete).toHaveBeenCalledTimes(2);
 		expect(runs.rollbackDelete).toHaveBeenCalledTimes(1);
-		expect(requests.request.mock.calls.map((call) => call[1])).toEqual([
-			expect.objectContaining({ action: "session.delete", sessionId: "s1" }),
-			expect.objectContaining({ action: "session.delete", sessionId: "s1" }),
-			expect.objectContaining({ action: "session.delete", sessionId: "s1" }),
-		]);
+	});
+
+	it.each([
+		["exists", { ok: true, data: { sessionId: "s1" } }, "rollbackDelete"],
+		["gone", { ok: false, error: { code: "PI_SESSION_NOT_FOUND", message: "gone" } }, "commitDelete"],
+	] as const)("delete 不确定错误经 session.get 确认 %s", async (_name, confirmation, transition) => {
+		const { controller, requests, runs } = makeController();
+		requests.request
+			.mockResolvedValueOnce({ ok: false, error: { code: "PI_WORKER_EXITED", message: "died" } } as never)
+			.mockResolvedValueOnce(confirmation as never);
+		const operation = Reflect.apply(controller.deleteSession, controller, ["c1", "s1", cwdRef, actor]);
+		if (transition === "commitDelete") await expect(operation).resolves.toEqual({ ok: true });
+		else await expect(operation).rejects.toMatchObject({ response: { code: "PI_WORKER_EXITED" } });
+		expect(requests.request).toHaveBeenLastCalledWith(
+			{ clientId: "c1", socketId: "socket-1" },
+			expect.objectContaining({ action: "session.get", sessionId: "s1", cwdRef }),
+		);
+		expect(runs[transition]).toHaveBeenCalledWith("s1", "delete-1");
+	});
+
+	it("delete 确认超时保留 reservation", async () => {
+		const timeout = Object.assign(new Error("timeout"), { code: "PI_REQUEST_TIMEOUT" });
+		const { controller, requests, runs } = makeController();
+		requests.request
+			.mockResolvedValueOnce({ ok: false, error: { code: "PI_WORKER_EXITED", message: "died" } } as never)
+			.mockRejectedValueOnce(timeout);
+		await expect(Reflect.apply(controller.deleteSession, controller, ["c1", "s1", cwdRef, actor]))
+			.rejects.toMatchObject({ response: { code: "PI_REQUEST_TIMEOUT" } });
+		expect(runs.rollbackDelete).not.toHaveBeenCalled();
+		expect(runs.commitDelete).not.toHaveBeenCalled();
 	});
 
 	it.each(["PI_REQUEST_TIMEOUT", "PI_CLIENT_DISCONNECTED"])(
@@ -477,6 +512,42 @@ describe("PiController", () => {
 		expect(requests.request).not.toHaveBeenCalled();
 	});
 
+	it.each([
+		["active", { ...idleAgentState, status: "running", streaming: true }, "accept"],
+		["not-started", idleAgentState, "finishRun"],
+	] as const)("prompt dispatch timeout 后按权威 %s state 对账", async (_name, state, transition) => {
+		const timeout = Object.assign(new Error("timeout"), { code: "PI_REQUEST_TIMEOUT" });
+		const { controller, requests, runs } = makeController();
+		requests.request.mockImplementation((async (_lease: unknown, request: { action: string }) => {
+			if (request.action === "project.resolve") return { ok: true, data: { projectKey: "k".repeat(64) } };
+			if (request.action === "agent.prompt") throw timeout;
+			if (request.action === "agent.state") return { ok: true, data: state };
+			return { ok: true, data: {} };
+		}) as never);
+		await expect(controller.prompt("c1", "s1", {
+			...cwdRef, type: "prompt", submissionId: "sub-1", prompt: "hello",
+		}, actor)).rejects.toMatchObject({ response: { code: "PI_REQUEST_TIMEOUT" } });
+		expect(requests.request).toHaveBeenCalledWith(
+			{ clientId: "c1", socketId: "socket-1" },
+			expect.objectContaining({ action: "agent.state", jobId: "s1", runId: "run-1" }),
+		);
+		expect(runs[transition]).toHaveBeenCalledWith("s1", "run-1");
+		if (transition === "accept") expect(runs.reconcileOpen).toHaveBeenCalledWith("s1", "run-1", state);
+	});
+
+	it("prompt dispatch disconnect 将 matching run CAS 为 disconnected", async () => {
+		const disconnected = Object.assign(new Error("disconnected"), { code: "PI_CLIENT_DISCONNECTED" });
+		const { controller, requests, runs } = makeController();
+		requests.request.mockImplementation((async (_lease: unknown, request: { action: string }) => {
+			if (request.action === "project.resolve") return { ok: true, data: { projectKey: "k".repeat(64) } };
+			throw disconnected;
+		}) as never);
+		await expect(controller.prompt("c1", "s1", {
+			...cwdRef, type: "prompt", submissionId: "sub-1", prompt: "hello",
+		}, actor)).rejects.toMatchObject({ response: { code: "PI_CLIENT_DISCONNECTED" } });
+		expect(runs.markRunDisconnected).toHaveBeenCalledWith("s1", "run-1");
+	});
+
 	it("prompt 请求失败时 matching run 回 idle", async () => {
 		const { controller, requests, runs } = makeController();
 		requests.request.mockImplementation((async (
@@ -505,6 +576,37 @@ describe("PiController", () => {
 			),
 		).rejects.toBeInstanceOf(BadRequestException);
 		expect(runs.finishRun).toHaveBeenCalledWith("s1", "run-1");
+	});
+
+	it.each([
+		["steer", (controller: PiController, body: unknown) => Reflect.apply(controller.steer, controller, ["c1", "s1", body, actor])],
+		["follow-up", (controller: PiController, body: unknown) => Reflect.apply(controller.followUp, controller, ["c1", "s1", body, actor])],
+		["abort", (controller: PiController, body: unknown) => Reflect.apply(controller.abort, controller, ["c1", "s1", body, actor])],
+		["compact", (controller: PiController, body: unknown) => Reflect.apply(controller.compact, controller, ["c1", "s1", body, actor])],
+		["abort-compact", (controller: PiController, body: unknown) => Reflect.apply(controller.abortCompact, controller, ["c1", "s1", body, actor])],
+		["extension-response", (controller: PiController, body: unknown) => Reflect.apply(controller.extensionResponse, controller, ["c1", "s1", body, actor])],
+	] as const)("%s 严格校验 run-scoped body", async (_name, invoke) => {
+		for (const body of [null, [], { runId: "" }, { runId: "x".repeat(257) }]) {
+			const { controller, requests } = makeController();
+			await expect(invoke(controller, body)).rejects.toMatchObject({ response: { code: "PI_PROTOCOL_INVALID" } });
+			expect(requests.request).not.toHaveBeenCalled();
+		}
+	});
+
+	it.each([
+		["steer", (controller: PiController) => controller.steer("c1", "s1", { runId: "run-1", message: "go" }, actor)],
+		["follow-up", (controller: PiController) => controller.followUp("c1", "s1", { runId: "run-1", message: "go" }, actor)],
+		["abort", (controller: PiController) => controller.abort("c1", "s1", { runId: "run-1" }, actor)],
+		["compact", (controller: PiController) => controller.compact("c1", "s1", { runId: "run-1" }, actor)],
+		["abort-compact", (controller: PiController) => controller.abortCompact("c1", "s1", { runId: "run-1" }, actor)],
+		["extension-response", (controller: PiController) => controller.extensionResponse("c1", "s1", { runId: "run-1", requestId: "ui-1" }, actor)],
+		["model", (controller: PiController) => controller.setModel("c1", "s1", { ...cwdRef, provider: "p", modelId: "m" }, actor)],
+		["thinking", (controller: PiController) => controller.setThinking("c1", "s1", { ...cwdRef, level: "high" }, actor)],
+	] as const)("旧 Client 调用 %s 返回 PI_CLIENT_UNSUPPORTED", async (_name, invoke) => {
+		const { controller, clients, requests } = makeController();
+		clients.listOnline.mockResolvedValue([{ clientId: "c1", capabilities: ["agent.pi"], capabilityDetails: { pi: { available: true } } }] as never);
+		await expect(invoke(controller)).rejects.toMatchObject({ response: { code: "PI_CLIENT_UNSUPPORTED" } });
+		expect(requests.request).not.toHaveBeenCalled();
 	});
 
 	it("非法 body 返回 400", async () => {

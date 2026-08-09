@@ -315,7 +315,8 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 				client.request(
 					"POST",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/complete`,
-					...(runId === undefined ? [undefined, signal] as const : [{ runId }, signal] as const),
+					runId === undefined ? {} : { runId },
+					signal,
 				),
 			state: async (clientId, sessionId, cwdRef, signal) =>
 				parsePiAgentState(await client.request(

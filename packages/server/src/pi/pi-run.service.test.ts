@@ -220,6 +220,14 @@ describe("PiRunService session CAS", () => {
 		});
 	});
 
+	it("无 runId complete 将 error 原子完成为 done", async () => {
+		const { service, current, running } = setup();
+		const run = await running();
+		await service.failSession(run.jobId, run.runId, "PI_WORKER_EXITED");
+		expect(await service.completeSession(run.jobId)).toBe(true);
+		expect(current()).toMatchObject({ status: "done", payload: "{}" });
+	});
+
 	it("complete 处理 pending/active/disconnected 且 active 必须匹配 runId", async () => {
 		for (const status of activeStatuses) {
 			const { service, current, start } = setup();
@@ -365,8 +373,13 @@ describe("PiRunService session CAS", () => {
 		expect(await service.finishRun("s1", run.runId)).toBe(false);
 
 		current().status = "cancelled";
-		current().payload = JSON.stringify({ deleteToken: "token", previousStatus: "running" });
-		await expect(service.beginDelete("s1", actor.identityId)).rejects.toMatchObject({
+		current().payload = JSON.stringify({
+			deleteToken: "token",
+			previousStatus: "running",
+		});
+		await expect(
+			service.beginDelete("s1", actor.identityId),
+		).rejects.toMatchObject({
 			code: "PI_PROJECT_BUSY",
 		});
 		expect(await service.rollbackDelete("s1", "token")).toBe(false);
@@ -446,6 +459,18 @@ describe("PiRunService generation reconcile", () => {
 		expect(current().status).toBe("running");
 	});
 
+	it("markRunDisconnected 只 CAS matching active run", async () => {
+		const { service, current, running } = setup();
+		const run = await running();
+		expect(await service.markRunDisconnected(run.jobId, "wrong")).toBe(false);
+		expect(current().status).toBe("running");
+		expect(await service.markRunDisconnected(run.jobId, run.runId)).toBe(true);
+		expect(current()).toMatchObject({
+			status: "disconnected",
+			payload: JSON.stringify({ runId: run.runId }),
+		});
+	});
+
 	it("当前 generation 断线 CAS disconnected，matching report 恢复", async () => {
 		const { service, running, current } = setup();
 		const run = await running();
@@ -501,7 +526,9 @@ describe("PiRunService generation reconcile", () => {
 		const ack = await service.reconcileGeneration(
 			"c1",
 			"socket-1",
-			report([{ jobId: "s1", runId: run.runId, sessionId: "s1", status: "error" }]),
+			report([
+				{ jobId: "s1", runId: run.runId, sessionId: "s1", status: "error" },
+			]),
 		);
 		expect(ack.acceptedRunIds).toEqual([run.runId]);
 		expect(current()).toMatchObject({
@@ -548,7 +575,9 @@ describe("PiRunService generation reconcile", () => {
 		const first = await running();
 		await service.ensureSession(actor, { clientId: "c1", sessionId: "s2" });
 		const second = await service.startRun(actor, {
-			clientId: "c1", sessionId: "s2", projectKey: "k2",
+			clientId: "c1",
+			sessionId: "s2",
+			projectKey: "k2",
 		});
 		await service.accept(second.jobId, second.runId);
 		await service.markReconcilePending("c1", "socket-1");
@@ -556,8 +585,20 @@ describe("PiRunService generation reconcile", () => {
 			"c1",
 			"socket-1",
 			report([
-				{ jobId: "s1", runId: first.runId, sessionId: "s1", status: "running", projectKey: "same" },
-				{ jobId: "s2", runId: second.runId, sessionId: "s2", status: "running", projectKey: "same" },
+				{
+					jobId: "s1",
+					runId: first.runId,
+					sessionId: "s1",
+					status: "running",
+					projectKey: "same",
+				},
+				{
+					jobId: "s2",
+					runId: second.runId,
+					sessionId: "s2",
+					status: "running",
+					projectKey: "same",
+				},
 			]),
 		);
 		expect(ack).toEqual({
@@ -575,33 +616,50 @@ describe("PiRunService generation reconcile", () => {
 		}
 		expect(service.hasLock(first.jobId, first.runId)).toBe(false);
 		expect(service.hasLock(second.jobId, second.runId)).toBe(false);
-		expect(await service.reconcileGeneration("c1", "socket-1", report([]))).toEqual({
-			acceptedRunIds: [], closedRunIds: [], reportAgain: false,
+		expect(
+			await service.reconcileGeneration("c1", "socket-1", report([])),
+		).toEqual({
+			acceptedRunIds: [],
+			closedRunIds: [],
+			reportAgain: false,
 		});
-		await expect(service.withReconciledClient("c1", async () => "ready"))
-			.resolves.toBe("ready");
+		await expect(
+			service.withReconciledClient("c1", async () => "ready"),
+		).resolves.toBe("ready");
 	});
 
 	it("跨 client 的 duplicate/done/error 报告不收敛他人 Job 或释放锁", async () => {
 		for (const status of ["duplicate", "done", "error"] as const) {
 			const { prisma, service } = setup();
-			await service.ensureSession(actor, { clientId: "client-B", sessionId: "b-session" });
+			await service.ensureSession(actor, {
+				clientId: "client-B",
+				sessionId: "b-session",
+			});
 			const run = await service.startRun(actor, {
-				clientId: "client-B", sessionId: "b-session", projectKey: "b-project",
+				clientId: "client-B",
+				sessionId: "b-session",
+				projectKey: "b-project",
 			});
 			await service.accept(run.jobId, run.runId);
 			await service.markReconcilePending("client-A", "socket-A");
 			const reportedRun = {
-				jobId: run.jobId, runId: run.runId, sessionId: "b-session",
+				jobId: run.jobId,
+				runId: run.runId,
+				sessionId: "b-session",
 			};
 			await service.reconcileGeneration("client-A", "socket-A", {
 				clientId: "client-A",
-				runs: status === "duplicate"
-					? [
-						{ ...reportedRun, status: "running", projectKey: "duplicate" },
-						{ ...reportedRun, status: "waiting_input", projectKey: "duplicate" },
-					]
-					: [{ ...reportedRun, status }],
+				runs:
+					status === "duplicate"
+						? [
+								{ ...reportedRun, status: "running", projectKey: "duplicate" },
+								{
+									...reportedRun,
+									status: "waiting_input",
+									projectKey: "duplicate",
+								},
+							]
+						: [{ ...reportedRun, status }],
 			});
 			expect(prisma._jobs.find((job) => job.id === run.jobId)).toMatchObject({
 				clientId: "client-B",

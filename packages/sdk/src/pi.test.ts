@@ -37,6 +37,14 @@ describe("createPiApi", () => {
 			{ runId: "run-1" },
 			undefined,
 		);
+
+		await pi.agent.complete("c1", "s1");
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c1/pi/agent/s1/complete",
+			{},
+			undefined,
+		);
 	});
 
 	it("run-scoped control body 使用 runId", async () => {
@@ -62,12 +70,17 @@ describe("createPiApi", () => {
 		};
 		const request = vi.fn(async () => valid);
 		const pi = createPiApi({ request: request as never });
-		await expect(pi.agent.state("c1", "s1", { rootDir: "D:\\", relativePath: "repo" }))
-			.resolves.toEqual(valid);
+		await expect(
+			pi.agent.state("c1", "s1", { rootDir: "D:\\", relativePath: "repo" }),
+		).resolves.toEqual(valid);
 
-		request.mockResolvedValueOnce({ ...valid, streaming: "yes" } as unknown as PiAgentState);
-		await expect(pi.agent.state("c1", "s1", { rootDir: "D:\\", relativePath: "repo" }))
-			.rejects.toMatchObject({ code: "PI_PROTOCOL_INVALID" });
+		request.mockResolvedValueOnce({
+			...valid,
+			streaming: "yes",
+		} as unknown as PiAgentState);
+		await expect(
+			pi.agent.state("c1", "s1", { rootDir: "D:\\", relativePath: "repo" }),
+		).rejects.toMatchObject({ code: "PI_PROTOCOL_INVALID" });
 	});
 });
 

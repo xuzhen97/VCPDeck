@@ -297,17 +297,17 @@ export class PiRunService {
 			if (updated) this.releaseLock(jobId, runId);
 			if (updated) return true;
 		}
-		const done = await this.prisma.job.updateMany({
-			where: { id: jobId, type: "agent.session", status: JobStatus.DONE, payload: EMPTY_SESSION_PAYLOAD },
-			data: { status: JobStatus.DONE },
-		});
-		if (done.count > 0) return true;
 		if (runId !== undefined) return false;
-		const idle = await this.prisma.job.updateMany({
-			where: { id: jobId, type: "agent.session", status: JobStatus.IDLE, payload: EMPTY_SESSION_PAYLOAD },
+		const completed = await this.prisma.job.updateMany({
+			where: {
+				id: jobId,
+				type: "agent.session",
+				status: { in: [JobStatus.IDLE, JobStatus.ERROR, JobStatus.DONE] },
+				payload: EMPTY_SESSION_PAYLOAD,
+			},
 			data: { status: JobStatus.DONE, progress: null, finishedAt: now },
 		});
-		return idle.count > 0;
+		return completed.count > 0;
 	}
 
 	async failSession(jobId: string, runId: string, code: PiErrorCode): Promise<boolean> {
@@ -459,6 +459,16 @@ export class PiRunService {
 			if (!ack.reportAgain) generation.ready = true;
 			return ack;
 		});
+	}
+
+	/** 将不确定 dispatch 的 matching run 精确标记为断线。 */
+	async markRunDisconnected(jobId: string, runId: string): Promise<boolean> {
+		return this.runTransition(
+			jobId,
+			runId,
+			[JobStatus.PENDING, JobStatus.RUNNING, JobStatus.WAITING_INPUT],
+			{ status: JobStatus.DISCONNECTED },
+		);
 	}
 
 	async disconnectGeneration(clientId: string, socketId: string): Promise<boolean> {

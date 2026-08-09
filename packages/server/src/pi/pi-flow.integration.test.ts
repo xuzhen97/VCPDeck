@@ -426,6 +426,38 @@ describe("Pi Gateway loopback 集成", () => {
 		}
 	});
 
+	it.each([
+		["active", { ...idleState(), status: "running", streaming: true }, "running"],
+		["not-started", idleState(), "idle"],
+	] as const)("prompt timeout 但 Worker %s 时按权威 state 收敛", async (_name, state, expectedStatus) => {
+		vi.useFakeTimers();
+		const loop = makeLoopback();
+		const socket = loop.addSocket("socket-1");
+		await loop.register(socket);
+		await loop.reconcile(socket);
+		loop.requestHandlers.set(socket.id, (request) => {
+			if (request.action === "project.resolve") {
+				queueMicrotask(() => void loop.respond(socket, {
+					requestId: request.requestId, ok: true, data: { projectKey: PROJECT_KEY },
+				}));
+			} else if (request.action === "agent.state") {
+				queueMicrotask(() => void loop.respond(socket, {
+					requestId: request.requestId, ok: true, data: state,
+				}));
+			}
+		});
+
+		const prompt = loop.controller.prompt("c1", "session-timeout", {
+			rootDir: "D:\\", relativePath: "repo", type: "prompt",
+			submissionId: "submission-timeout", prompt: PROMPT_SENTINEL,
+		}, actor);
+		const outcome = expect(prompt).rejects.toMatchObject({ response: { code: "PI_REQUEST_TIMEOUT" } });
+		await flush();
+		await vi.advanceTimersByTimeAsync(15_000);
+		await outcome;
+		expect(loop.current("session-timeout").status).toBe(expectedStatus);
+	});
+
 	it("REST lease 跨 await 阻塞 REGISTER，且新旧 socket 响应/断线隔离", async () => {
 		const loop = makeLoopback();
 		const oldSocket = loop.addSocket("socket-1");
