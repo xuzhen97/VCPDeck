@@ -63,9 +63,10 @@ export interface PiAgentSessionWrapper {
 
 type UiKind = PiExtensionUiRequest["kind"];
 interface PendingUi {
-	kind: UiKind;
+	request: PiExtensionUiRequest;
 	resolve: (value: unknown) => void;
-	timer: ReturnType<typeof setTimeout>;
+	timeoutMs: number;
+	timer: ReturnType<typeof setTimeout> | null;
 }
 
 export function startPiAgentSession(
@@ -224,7 +225,8 @@ async function defaultTrustResolver(
 
 export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	private listeners: ((event: PiClientEvent) => void)[] = [];
-	private pendingUi = new Map<string, PendingUi>();
+	private pendingUi: PendingUi | null = null;
+	private extensionUiQueue: PendingUi[] = [];
 	private promptRunning = false;
 	private extensionsBound = false;
 	private extensionBindingPromise: Promise<void> | null = null;
@@ -250,7 +252,8 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			(this.promptRunning ||
 				this.inner.isStreaming ||
 				this.inner.isCompacting ||
-				this.pendingUi.size > 0)
+				this.pendingUi !== null ||
+				this.extensionUiQueue.length > 0)
 		);
 	}
 
@@ -384,9 +387,22 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			case "agent.followUp":
 				await this.inner.followUp(payload.message as string);
 				return null;
-			case "agent.abort":
+			case "agent.abort": {
 				await this.inner.abort();
+				const queued = this.extensionUiQueue.splice(0);
+				for (const pending of queued) {
+					pending.resolve(pending.request.kind === "confirm" ? false : undefined);
+				}
+				if (this.pendingUi) {
+					this.finishExtensionUi(
+						this.pendingUi.request.requestId,
+						"cancelled",
+						this.pendingUi.request.kind === "confirm" ? false : undefined,
+					);
+				}
+				await this.waitForStopped(5_000);
 				return null;
+			}
 			case "agent.compact":
 				return this.inner.compact(
 					typeof payload.customInstructions === "string"
@@ -540,7 +556,7 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	}
 
 	getState(): PiAgentState {
-		const waiting = this.pendingUi.size > 0;
+		const waiting = this.pendingUi !== null;
 		let status: PiAgentState["status"];
 		if (this.inner.isCompacting) {
 			status = "compacting";
@@ -570,6 +586,9 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 					}
 				: {}),
 			waitingForExtensionInput: waiting,
+			...(this.pendingUi
+				? { pendingExtension: { ...this.pendingUi.request } }
+				: {}),
 		};
 	}
 
@@ -748,32 +767,76 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			timeoutMs,
 		};
 		return new Promise((resolve) => {
-			const timer = setTimeout(() => {
-				this.pendingUi.delete(requestId);
-				resolve(undefined);
-			}, timeoutMs);
-			this.pendingUi.set(requestId, { kind, resolve, timer });
-			this.emit({ type: "extension_request", sessionId: this.sessionId, ui });
+			this.extensionUiQueue.push({
+				request: ui,
+				resolve,
+				timeoutMs,
+				timer: null,
+			});
+			this.activateNextExtensionUi();
 		});
+	}
+
+	private activateNextExtensionUi(): void {
+		if (this.pendingUi || this.extensionUiQueue.length === 0) return;
+		const pending = this.extensionUiQueue.shift()!;
+		this.pendingUi = pending;
+		pending.timer = setTimeout(() => {
+			this.finishExtensionUi(
+				pending.request.requestId,
+				"timeout",
+				pending.request.kind === "confirm" ? false : undefined,
+			);
+		}, pending.timeoutMs);
+		this.emit({
+			type: "extension_request",
+			sessionId: this.sessionId,
+			ui: pending.request,
+		});
+	}
+
+	private finishExtensionUi(
+		requestId: string,
+		reason: "answered" | "cancelled" | "timeout",
+		value: unknown,
+	): void {
+		const pending = this.pendingUi;
+		if (!pending || pending.request.requestId !== requestId) return;
+		this.pendingUi = null;
+		if (pending.timer) clearTimeout(pending.timer);
+		pending.timer = null;
+		pending.resolve(value);
+		this.emit({
+			type: "extension_resolved",
+			sessionId: this.sessionId,
+			requestId,
+			reason,
+			hasPending: this.extensionUiQueue.length > 0,
+		});
+		this.activateNextExtensionUi();
 	}
 
 	private resolveExtensionUiResponse(payload: Record<string, unknown>): void {
 		const requestId = payload.requestId as string | undefined;
-		if (!requestId) return;
-		const pending = this.pendingUi.get(requestId);
-		if (!pending) return;
-		this.pendingUi.delete(requestId);
-		clearTimeout(pending.timer);
+		const pending = this.pendingUi;
+		if (!requestId || !pending || pending.request.requestId !== requestId)
+			return;
 		if (payload.cancelled === true) {
-			pending.resolve(undefined);
+			this.finishExtensionUi(
+				requestId,
+				"cancelled",
+				pending.request.kind === "confirm" ? false : undefined,
+			);
 			return;
 		}
-		if (pending.kind === "confirm") {
-			pending.resolve(payload.confirmed === true);
-			return;
-		}
-		pending.resolve(
-			typeof payload.value === "string" ? payload.value : undefined,
+		this.finishExtensionUi(
+			requestId,
+			"answered",
+			pending.request.kind === "confirm"
+				? payload.confirmed === true
+				: typeof payload.value === "string"
+					? payload.value
+					: undefined,
 		);
 	}
 
@@ -789,6 +852,27 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	}
 
 	// ── 生命周期 ──
+
+	private async waitForStopped(timeoutMs: number): Promise<void> {
+		const deadline = Date.now() + timeoutMs;
+		while (
+			this.promptRunning ||
+			this.inner.isStreaming ||
+			this.inner.isCompacting ||
+			this.pendingUi ||
+			this.extensionUiQueue.length > 0
+		) {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) {
+				throw Object.assign(new Error("Pi session did not stop in time"), {
+					code: "PI_REQUEST_TIMEOUT",
+				});
+			}
+			await new Promise((resolve) =>
+				setTimeout(resolve, Math.min(25, remaining)),
+			);
+		}
+	}
 
 	async shutdown(): Promise<void> {
 		if (this.shutdownPromise) return this.shutdownPromise;
@@ -816,11 +900,17 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 		this._alive = false;
 		if (this.idleTimer) clearTimeout(this.idleTimer);
 		this.unsubscribe?.();
-		for (const pending of this.pendingUi.values()) {
-			clearTimeout(pending.timer);
-			pending.resolve(undefined);
+		const queued = this.extensionUiQueue.splice(0);
+		for (const pending of queued) {
+			pending.resolve(pending.request.kind === "confirm" ? false : undefined);
 		}
-		this.pendingUi.clear();
+		if (this.pendingUi) {
+			this.finishExtensionUi(
+				this.pendingUi.request.requestId,
+				"cancelled",
+				this.pendingUi.request.kind === "confirm" ? false : undefined,
+			);
+		}
 		try {
 			this.inner.dispose();
 		} finally {

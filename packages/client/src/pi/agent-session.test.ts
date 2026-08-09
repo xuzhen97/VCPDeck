@@ -3,7 +3,7 @@ import type {
 	AgentSession,
 	AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import type { PiThinkingLevel } from "@vcpdeck/shared";
+import type { PiClientEvent, PiThinkingLevel } from "@vcpdeck/shared";
 import { PiAgentSessionWrapperImpl } from "./agent-session.js";
 
 type Listener = (event: AgentSessionEvent) => void;
@@ -216,6 +216,101 @@ describe("PiAgentSessionWrapperImpl", () => {
 				(e as { type: string }).type === "extension_request",
 		) as { ui?: { kind: string } };
 		expect(req?.ui?.kind).toBe("notify");
+	});
+
+	it("agent.state 暴露当前活动 Extension 摘要", () => {
+		const { inner, wrapper } = makeWrapper();
+		void (inner.uiContext?.confirm as Function)("确认", "继续吗？");
+		expect(wrapper.getState().pendingExtension).toMatchObject({
+			kind: "confirm",
+			title: "确认",
+			message: "继续吗？",
+		});
+	});
+
+	it("回答后发出 answered 并清空状态", async () => {
+		const { inner, wrapper } = makeWrapper();
+		const events: PiClientEvent[] = [];
+		wrapper.onEvent((event) => events.push(event));
+		const promise = (inner.uiContext?.input as Function)("输入", "内容");
+		const requestId = wrapper.getState().pendingExtension!.requestId;
+		await wrapper.send("extension.respond", { requestId, value: "answer" });
+		await expect(promise).resolves.toBe("answer");
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				type: "extension_resolved",
+				requestId,
+				reason: "answered",
+				hasPending: false,
+			}),
+		);
+		expect(wrapper.getState().pendingExtension).toBeUndefined();
+	});
+
+	it("超时发出 timeout", async () => {
+		vi.useFakeTimers();
+		const { inner, wrapper } = makeWrapper();
+		const events: PiClientEvent[] = [];
+		wrapper.onEvent((event) => events.push(event));
+		const promise = (inner.uiContext?.input as Function)("输入", "内容", {
+			timeout: 25,
+		});
+		await vi.advanceTimersByTimeAsync(25);
+		await expect(promise).resolves.toBeUndefined();
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				type: "extension_resolved",
+				reason: "timeout",
+				hasPending: false,
+			}),
+		);
+	});
+
+	it("并发请求串行展示，解决一个后仍保持 pending", async () => {
+		const { inner, wrapper } = makeWrapper();
+		const events: PiClientEvent[] = [];
+		wrapper.onEvent((event) => events.push(event));
+		const first = (inner.uiContext?.confirm as Function)("第一项", "A");
+		const second = (inner.uiContext?.input as Function)("第二项", "B");
+		const firstId = wrapper.getState().pendingExtension!.requestId;
+		await wrapper.send("extension.respond", {
+			requestId: firstId,
+			confirmed: true,
+		});
+		await expect(first).resolves.toBe(true);
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				type: "extension_resolved",
+				requestId: firstId,
+				hasPending: true,
+			}),
+		);
+		expect(wrapper.getState().pendingExtension).toMatchObject({
+			title: "第二项",
+		});
+		expect(second).toBeInstanceOf(Promise);
+	});
+
+	it("abort 只关闭已展示请求并清除排队请求", async () => {
+		const { inner, wrapper } = makeWrapper();
+		const events: PiClientEvent[] = [];
+		wrapper.onEvent((event) => events.push(event));
+		void (inner.uiContext?.confirm as Function)("第一项", "A");
+		void (inner.uiContext?.input as Function)("第二项", "B");
+		const displayedId = wrapper.getState().pendingExtension!.requestId;
+		await wrapper.send("agent.abort");
+		expect(inner.abort).toHaveBeenCalledOnce();
+		expect(
+			events.filter((event) => event.type === "extension_resolved"),
+		).toEqual([
+			expect.objectContaining({
+				requestId: displayedId,
+				reason: "cancelled",
+				hasPending: false,
+			}),
+		]);
+		expect(wrapper.getState().pendingExtension).toBeUndefined();
+		expect(wrapper.getState().status).toBe("idle");
 	});
 
 	it("model.set 不在交集返回 PI_MODEL_NOT_FOUND", async () => {
