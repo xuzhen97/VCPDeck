@@ -6,6 +6,7 @@ import { ErrorState, LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
 import { DownloadLinkCard } from "@/components/download-link-card";
+import { MarkDoneButton } from "@/components/mark-done-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Drawer } from "@/components/ui/drawer";
@@ -148,7 +149,15 @@ export function JobsPage({ clientId }: { clientId?: string }) {
 				onClose={() => setSelectedJob(null)}
 				title="任务详情"
 			>
-				{selectedJob && <JobDetails job={selectedJob} />}
+				{selectedJob && (
+					<JobDetails
+						job={selectedJob}
+						onChanged={async () => {
+							resource.reload();
+							setSelectedJob(await sdk.jobs.get(selectedJob.jobId));
+						}}
+					/>
+				)}
 			</Drawer>
 		</div>
 	);
@@ -216,7 +225,13 @@ function JobRow({
 					>
 						查看详情
 					</Button>
-					<JobCancelButton job={job} onChanged={onChanged} stopPropagation />
+						<JobCancelButton job={job} onChanged={onChanged} stopPropagation />
+						<MarkDoneButton
+							job={job}
+							onChanged={onChanged}
+							stopPropagation
+							size="sm"
+						/>
 				</div>
 			</td>
 		</tr>
@@ -260,7 +275,13 @@ function JobCancelButton({
 	);
 }
 
-function JobDetails({ job }: { job: JobInfo }) {
+function JobDetails({
+	job,
+	onChanged,
+}: {
+	job: JobInfo;
+	onChanged: () => void;
+}) {
 	const stdout =
 		typeof job.result?.stdout === "string" ? job.result.stdout : null;
 	const stderr =
@@ -274,6 +295,7 @@ function JobDetails({ job }: { job: JobInfo }) {
 					label={statusLabel(job.status)}
 					tone={statusTone(job.status)}
 				/>
+				<MarkDoneButton job={job} onChanged={onChanged} size="sm" />
 			</div>
 			<div className="grid gap-4 sm:grid-cols-2">
 				<Field label="任务 ID" value={job.jobId} wide />

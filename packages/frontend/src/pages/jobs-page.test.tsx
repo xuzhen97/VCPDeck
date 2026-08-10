@@ -396,3 +396,98 @@ it("shows the permanent download link in the job drawer for a completed file.imp
 	expect(link).toHaveAttribute("download", "app.log");
 	expect(downloadUrl).toHaveBeenCalledWith("aliyun-fileid-456");
 });
+
+it("从列表行把 Pi 会话标记为完成并刷新列表", async () => {
+	const list = vi.fn().mockResolvedValue({
+		data: [
+			job({
+				jobId: "s1",
+				type: "agent.session",
+				status: "idle" as JobInfo["status"],
+				payload: {},
+			}),
+		],
+		total: 1,
+		page: 1,
+		pageSize: 20,
+		totalPages: 1,
+	});
+	const complete = vi.fn().mockResolvedValue({});
+	const client = {
+		auth: { me: async () => identity },
+		jobs: { list },
+		pi: { agent: { complete } },
+	} as unknown as VcpDeckClient;
+	render(
+		<MemoryRouter>
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<JobsPage />
+				</AuthProvider>
+			</SdkProvider>
+		</MemoryRouter>,
+	);
+
+	const table = await screen.findByRole("table", { name: "任务记录" });
+	await userEvent.click(
+		within(table).getByRole("button", { name: "标记完成" }),
+	);
+	await userEvent.click(screen.getByRole("button", { name: "确认完成" }));
+	await waitFor(() =>
+		expect(complete).toHaveBeenCalledWith(
+			"c1",
+			"s1",
+			undefined,
+			expect.any(AbortSignal),
+		),
+	);
+	await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+});
+
+it("从抽屉把 Pi 会话标记为完成并回填抽屉", async () => {
+	const session = job({
+		jobId: "s1",
+		type: "agent.session",
+		status: "waiting_input" as JobInfo["status"],
+		payload: {},
+	});
+	const list = vi.fn().mockResolvedValue({
+		data: [session],
+		total: 1,
+		page: 1,
+		pageSize: 20,
+		totalPages: 1,
+	});
+	const get = vi.fn().mockResolvedValue({
+		...session,
+		status: "done" as JobInfo["status"],
+	});
+	const complete = vi.fn().mockResolvedValue({});
+	const client = {
+		auth: { me: async () => identity },
+		jobs: { list, get },
+		pi: { agent: { complete } },
+	} as unknown as VcpDeckClient;
+	render(
+		<MemoryRouter>
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<JobsPage />
+				</AuthProvider>
+			</SdkProvider>
+		</MemoryRouter>,
+	);
+
+	const table = await screen.findByRole("table", { name: "任务记录" });
+	// 类型列与摘要列都显示「Pi 会话」，取第一个（类型列）点击行
+	await userEvent.click(within(table).getAllByText("Pi 会话")[0]);
+	const dialog = screen.getByRole("dialog", { name: "任务详情" });
+	await userEvent.click(
+		within(dialog).getByRole("button", { name: "标记完成" }),
+	);
+	await userEvent.click(screen.getByRole("button", { name: "确认完成" }));
+	await waitFor(() => expect(get).toHaveBeenCalledWith("s1"));
+	await waitFor(() =>
+		expect(within(dialog).getByText("已完成")).toBeVisible(),
+	);
+});
