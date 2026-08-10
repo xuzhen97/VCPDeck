@@ -7,6 +7,7 @@ import { useResource } from "@/api/hooks/use-resource";
 import { DownloadLinkCard } from "@/components/download-link-card";
 import { ErrorState, LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
+import { MarkDoneButton } from "@/components/mark-done-button";
 
 export function JobDetailPage() {
 	const sdk = useSdk();
@@ -19,15 +20,19 @@ export function JobDetailPage() {
 	if (resource.loading) return <LoadingState label="正在加载任务详情…" />;
 	if (resource.error || !resource.data)
 		return <ErrorState message="无法加载任务详情" onRetry={resource.reload} />;
-	return <JobDetail job={resource.data} />;
+	return <JobDetail job={resource.data} onChanged={resource.reload} />;
 }
 
-function JobDetail({ job }: { job: JobInfo }) {
+function JobDetail({ job, onChanged }: { job: JobInfo; onChanged: () => void }) {
 	const stdout = job.result?.stdout as string | undefined;
 	const stderr = job.result?.stderr as string | undefined;
 	return (
 		<div className="space-y-6">
-			<PageHeading title={job.type} description={job.jobId} />
+			<PageHeading
+				title={job.type}
+				description={job.jobId}
+				actions={<MarkDoneButton job={job} onChanged={onChanged} />}
+			/>
 			<Card>
 				<CardContent className="grid gap-4 pt-6 text-sm sm:grid-cols-2">
 					<Field label="状态" value={job.status} />

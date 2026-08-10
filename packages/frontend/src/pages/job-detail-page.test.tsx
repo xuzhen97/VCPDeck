@@ -1,7 +1,8 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import type { IdentityInfo, JobInfo } from "@vcpdeck/shared";
 import { JobStatus } from "@vcpdeck/shared";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
@@ -36,11 +37,16 @@ const identity: IdentityInfo = {
 	createdAt: "2026-07-26T00:00:00.000Z",
 };
 
-function renderDetail(job: JobInfo, downloadUrl: ReturnType<typeof vi.fn>) {
+function renderDetail(
+	job: JobInfo,
+	downloadUrl: ReturnType<typeof vi.fn>,
+	extra: Record<string, unknown> = {},
+) {
 	const client = {
 		auth: { me: vi.fn().mockResolvedValue(identity) },
 		jobs: { get: vi.fn().mockResolvedValue(job) },
 		storage: { downloadUrl },
+		...extra,
 	} as unknown as VcpDeckClient;
 	return render(
 		<MemoryRouter initialEntries={["/jobs/job-1"]}>
@@ -138,4 +144,33 @@ describe("JobDetailPage 下载链接", () => {
 		).not.toBeInTheDocument();
 		expect(downloadUrl).not.toHaveBeenCalled();
 	});
+});
+
+it("Pi 会话任务可从头部标记完成并重新加载", async () => {
+	const session = {
+		...exportJob,
+		type: "agent.session",
+		status: JobStatus.WAITING_INPUT,
+		result: null,
+		payload: {},
+	};
+	// 可变 current：complete 成功后置 done，随后的 reload 必然读到新状态（无时序竞态）
+	let current: JobInfo = session;
+	const get = vi.fn().mockImplementation(() => Promise.resolve(current));
+	const complete = vi.fn().mockImplementation(async () => {
+		current = { ...session, status: JobStatus.DONE };
+	});
+	renderDetail(session, vi.fn(), { jobs: { get }, pi: { agent: { complete } } });
+
+	const button = await screen.findByRole("button", { name: "标记完成" });
+	await userEvent.click(button);
+	await userEvent.click(screen.getByRole("button", { name: "确认完成" }));
+	expect(complete).toHaveBeenCalledWith(
+		"c1",
+		"job-1",
+		undefined,
+		expect.any(AbortSignal),
+	);
+	await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+	expect(await screen.findByText("done")).toBeVisible();
 });
