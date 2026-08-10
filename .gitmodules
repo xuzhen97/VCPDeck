@@ -1,0 +1,3 @@
+[submodule "examples/pi-web"]
+	path = examples/pi-web
+	url = https://github.com/agegr/pi-web.git
