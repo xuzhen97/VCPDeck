@@ -118,27 +118,37 @@ function matchesRun(
 	runId: string,
 	cancelToken: ActivePrompt["cancelToken"],
 ): run is ActivePrompt {
-	return run !== null &&
+	return (
+		run !== null &&
 		run.jobId === jobId &&
 		run.sessionId === sessionId &&
 		run.runId === runId &&
-		run.cancelToken === cancelToken;
+		run.cancelToken === cancelToken
+	);
 }
 
-function matchesRequest(run: ActivePrompt | null, request: PiRequest): run is ActivePrompt {
-	return run !== null &&
+function matchesRequest(
+	run: ActivePrompt | null,
+	request: PiRequest,
+): run is ActivePrompt {
+	return (
+		run !== null &&
 		request.jobId === run.jobId &&
 		request.sessionId === run.sessionId &&
-		request.runId === run.runId;
+		request.runId === run.runId
+	);
 }
 
 function isCurrentRun(run: ActivePrompt): boolean {
-	return matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken) &&
-		!run.cancelToken.cancelled;
+	return (
+		matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken) &&
+		!run.cancelToken.cancelled
+	);
 }
 
 function clearRun(run: ActivePrompt): void {
-	if (!matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken)) return;
+	if (!matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken))
+		return;
 	run.unsubscribe?.();
 	run.unsubscribe = null;
 	active = null;
@@ -156,10 +166,16 @@ function bindWrapperEvents(w: PiAgentSessionWrapper, run: ActivePrompt): void {
 	run.unsubscribe?.();
 	run.unsubscribe = w.onEvent((rawEvent) => {
 		if (rawEvent.sessionId !== run.sessionId) return;
-		const terminal = rawEvent.type === "agent_settled" || rawEvent.type === "prompt_error";
-		const event: PiClientEvent = rawEvent.type === "prompt_error"
-			? { type: "prompt_error", sessionId: run.sessionId, ...normalizeError(rawEvent) }
-			: rawEvent;
+		const terminal =
+			rawEvent.type === "agent_settled" || rawEvent.type === "prompt_error";
+		const event: PiClientEvent =
+			rawEvent.type === "prompt_error"
+				? {
+						type: "prompt_error",
+						sessionId: run.sessionId,
+						...normalizeError(rawEvent),
+					}
+				: rawEvent;
 		if (terminal && isCurrentRun(run)) {
 			rememberSettledRun(run);
 			clearRun(run);
@@ -349,8 +365,12 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 			if (request.action === "agent.state") {
 				if (!request.runId) return reader.state(sessionId);
 				const settled = settledRunIds.get(request.runId);
-				if (!matchesRequest(active, request) && settled &&
-					settled.jobId === request.jobId && settled.sessionId === sessionId) {
+				if (
+					!matchesRequest(active, request) &&
+					settled &&
+					settled.jobId === request.jobId &&
+					settled.sessionId === sessionId
+				) {
 					return reader.state(sessionId);
 				}
 			}
@@ -401,7 +421,15 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 			}
 			const run = active;
 			const w = await ensureWrapper(sessionId);
-			if (!matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken))
+			if (
+				!matchesRun(
+					active,
+					run.jobId,
+					run.sessionId,
+					run.runId,
+					run.cancelToken,
+				)
+			)
 				throw Object.assign(new Error("No matching active run"), {
 					code: "PI_CONTROL_FORBIDDEN",
 				});

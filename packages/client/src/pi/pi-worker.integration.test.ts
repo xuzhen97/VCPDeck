@@ -58,7 +58,10 @@ function waitForEvent(
 	predicate: (message: PiWorkerOutboundMessage) => boolean,
 ): Promise<PiWorkerOutboundMessage> {
 	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error("worker event timeout")), 10_000);
+		const timer = setTimeout(
+			() => reject(new Error("worker event timeout")),
+			10_000,
+		);
 		const onMessage = (message: PiWorkerOutboundMessage) => {
 			if (!predicate(message)) return;
 			clearTimeout(timer);
@@ -366,7 +369,11 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
 		const cwd = join(agentDir, "project");
 		await mkdir(join(cwd, ".pi", "extensions"), { recursive: true });
-		await writeFile(join(cwd, ".pi", "extensions", "test.ts"), "export default {};\n", "utf8");
+		await writeFile(
+			join(cwd, ".pi", "extensions", "test.ts"),
+			"export default {};\n",
+			"utf8",
+		);
 		roots.push(agentDir);
 		process.env.PI_CODING_AGENT_DIR = agentDir;
 		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
@@ -374,36 +381,88 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", () => {
 		const sessionId = sm.getSessionId();
 		await writeFile(
 			sm.getSessionFile()!,
-			JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: sessionId,
+				timestamp: new Date().toISOString(),
+				cwd,
+			}) + "\n",
 			"utf8",
 		);
 
 		const child = spawnWorker(cwd, { PI_CODING_AGENT_DIR: agentDir });
-		const trustRequest = waitForEvent(child, (message) =>
-			message.type === "event" && message.runId === "run-1" && message.event.type === "extension_request",
+		const trustRequest = waitForEvent(
+			child,
+			(message) =>
+				message.type === "event" &&
+				message.runId === "run-1" &&
+				message.event.type === "extension_request",
 		);
-		await expect(requestOnce(child, {
-			requestId: "prompt-1", action: "agent.prompt", jobId: sessionId,
-			sessionId, runId: "run-1", payload: { prompt: "do not run" },
-		})).resolves.toMatchObject({ type: "response", ok: true, data: { accepted: true } });
+		await expect(
+			requestOnce(child, {
+				requestId: "prompt-1",
+				action: "agent.prompt",
+				jobId: sessionId,
+				sessionId,
+				runId: "run-1",
+				payload: { prompt: "do not run" },
+			}),
+		).resolves.toMatchObject({
+			type: "response",
+			ok: true,
+			data: { accepted: true },
+		});
 		await trustRequest;
 
-		await expect(requestOnce(child, {
-			requestId: "state-wrong", action: "agent.state", jobId: sessionId,
-			sessionId, runId: "run-wrong",
-		})).resolves.toMatchObject({ type: "response", ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
-		await expect(requestOnce(child, {
-			requestId: "state-right", action: "agent.state", jobId: sessionId,
-			sessionId, runId: "run-1",
-		})).resolves.toMatchObject({ type: "response", ok: true, data: { status: "waiting_for_extension_input" } });
-		await expect(requestOnce(child, {
-			requestId: "abort-1", action: "agent.abort", jobId: sessionId,
-			sessionId, runId: "run-1",
-		})).resolves.toMatchObject({ type: "response", ok: true });
-		await expect(requestOnce(child, {
-			requestId: "state-after", action: "agent.state", jobId: sessionId,
-			sessionId, runId: "run-1",
-		})).resolves.toMatchObject({ type: "response", ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+		await expect(
+			requestOnce(child, {
+				requestId: "state-wrong",
+				action: "agent.state",
+				jobId: sessionId,
+				sessionId,
+				runId: "run-wrong",
+			}),
+		).resolves.toMatchObject({
+			type: "response",
+			ok: false,
+			error: { code: "PI_CONTROL_FORBIDDEN" },
+		});
+		await expect(
+			requestOnce(child, {
+				requestId: "state-right",
+				action: "agent.state",
+				jobId: sessionId,
+				sessionId,
+				runId: "run-1",
+			}),
+		).resolves.toMatchObject({
+			type: "response",
+			ok: true,
+			data: { status: "waiting_for_extension_input" },
+		});
+		await expect(
+			requestOnce(child, {
+				requestId: "abort-1",
+				action: "agent.abort",
+				jobId: sessionId,
+				sessionId,
+				runId: "run-1",
+			}),
+		).resolves.toMatchObject({ type: "response", ok: true });
+		await expect(
+			requestOnce(child, {
+				requestId: "state-after",
+				action: "agent.state",
+				jobId: sessionId,
+				sessionId,
+				runId: "run-1",
+			}),
+		).resolves.toMatchObject({
+			type: "response",
+			ok: false,
+			error: { code: "PI_CONTROL_FORBIDDEN" },
+		});
 	});
 
 	it("parent disconnect 后 Worker 退出", async () => {
@@ -446,7 +505,9 @@ describe("Pi Worker prompt pipeline seam", () => {
 			isAlive: () => boolean;
 			onEvent: (listener: EventListener) => () => void;
 		}
-		const makeWrapper = (trust: boolean | Promise<boolean> = false): WrapperStub => {
+		const makeWrapper = (
+			trust: boolean | Promise<boolean> = false,
+		): WrapperStub => {
 			const stub: WrapperStub = {
 				sessionId: "session-1",
 				alive: true,
@@ -454,7 +515,9 @@ describe("Pi Worker prompt pipeline seam", () => {
 				send: vi.fn().mockResolvedValue(null),
 				getState: vi.fn(() => ({ status: "running" })),
 				ensureProjectTrust: vi.fn(() => Promise.resolve(trust)),
-				shutdown: vi.fn(async () => { stub.alive = false; }),
+				shutdown: vi.fn(async () => {
+					stub.alive = false;
+				}),
 				isAlive: () => stub.alive,
 				onEvent: (listener) => {
 					stub.listeners.push(listener);
@@ -475,7 +538,11 @@ describe("Pi Worker prompt pipeline seam", () => {
 		});
 		const downloadPromptImages = vi.fn().mockResolvedValue([]);
 		vi.doMock("@earendil-works/pi-coding-agent", () => ({
-			SessionManager: { list: vi.fn().mockResolvedValue([{ id: "session-1", path: "session.jsonl" }]) },
+			SessionManager: {
+				list: vi
+					.fn()
+					.mockResolvedValue([{ id: "session-1", path: "session.jsonl" }]),
+			},
 		}));
 		vi.doMock("./agent-session.js", () => ({ startPiAgentSession }));
 		vi.doMock("./session-reader.js", () => ({
@@ -498,9 +565,9 @@ describe("Pi Worker prompt pipeline seam", () => {
 			value: vi.fn((message: PiWorkerOutboundMessage) => sent.push(message)),
 		});
 		await import("./worker.js");
-		const workerListener = process.listeners("message").find(
-			(listener) => !beforeMessageListeners.has(listener),
-		);
+		const workerListener = process
+			.listeners("message")
+			.find((listener) => !beforeMessageListeners.has(listener));
 		expect(workerListener).toBeDefined();
 
 		let requestSeq = 0;
@@ -510,25 +577,32 @@ describe("Pi Worker prompt pipeline seam", () => {
 			payload?: Record<string, unknown>,
 		): Promise<PiWorkerOutboundMessage> => {
 			const requestId = `seam-${++requestSeq}`;
-			workerListener?.({
-				type: "request",
-				projectKey: "project",
-				request: {
-					requestId,
-					action,
-					jobId: "session-1",
-					sessionId: "session-1",
-					runId,
-					...(payload ? { payload } : {}),
+			workerListener?.(
+				{
+					type: "request",
+					projectKey: "project",
+					request: {
+						requestId,
+						action,
+						jobId: "session-1",
+						sessionId: "session-1",
+						runId,
+						...(payload ? { payload } : {}),
+					},
 				},
-			}, {} as never);
+				{} as never,
+			);
 			await vi.waitFor(() => {
-				expect(sent.some((message) =>
-					message.type === "response" && message.requestId === requestId,
-				)).toBe(true);
+				expect(
+					sent.some(
+						(message) =>
+							message.type === "response" && message.requestId === requestId,
+					),
+				).toBe(true);
 			});
-			return sent.find((message) =>
-				message.type === "response" && message.requestId === requestId,
+			return sent.find(
+				(message) =>
+					message.type === "response" && message.requestId === requestId,
 			)!;
 		};
 		const fireAndGetId = (
@@ -537,11 +611,21 @@ describe("Pi Worker prompt pipeline seam", () => {
 			payload?: Record<string, unknown>,
 		): string => {
 			const requestId = `seam-${++requestSeq}`;
-			workerListener?.({
-				type: "request",
-				projectKey: "project",
-				request: { requestId, action, jobId: "session-1", sessionId: "session-1", runId, ...(payload ? { payload } : {}) },
-			}, {} as never);
+			workerListener?.(
+				{
+					type: "request",
+					projectKey: "project",
+					request: {
+						requestId,
+						action,
+						jobId: "session-1",
+						sessionId: "session-1",
+						runId,
+						...(payload ? { payload } : {}),
+					},
+				},
+				{} as never,
+			);
 			return requestId;
 		};
 
@@ -549,15 +633,38 @@ describe("Pi Worker prompt pipeline seam", () => {
 			// accepted 先于 wrapper；abort 使唯一 pipeline 失效，晚到 wrapper 只 shutdown。
 			const firstWrapper = deferred<WrapperStub>();
 			wrapperStarts.push(firstWrapper.promise);
-			await expect(request("agent.prompt", "run-wrapper", { prompt: "never" })).resolves.toMatchObject({ ok: true, data: { accepted: true } });
-			await expect(request("agent.prompt", "run-busy", { prompt: "never" })).resolves.toMatchObject({ ok: false, error: { code: "PI_PROJECT_BUSY" } });
+			await expect(
+				request("agent.prompt", "run-wrapper", { prompt: "never" }),
+			).resolves.toMatchObject({ ok: true, data: { accepted: true } });
+			await expect(
+				request("agent.prompt", "run-busy", { prompt: "never" }),
+			).resolves.toMatchObject({
+				ok: false,
+				error: { code: "PI_PROJECT_BUSY" },
+			});
 			const abortPendingId = fireAndGetId("agent.abort", "run-wrapper");
 			const wrapper = makeWrapper();
 			firstWrapper.resolve(wrapper);
-			await vi.waitFor(() => expect(sent).toContainEqual(expect.objectContaining({ type: "response", requestId: abortPendingId, ok: true })));
+			await vi.waitFor(() =>
+				expect(sent).toContainEqual(
+					expect.objectContaining({
+						type: "response",
+						requestId: abortPendingId,
+						ok: true,
+					}),
+				),
+			);
 			expect(wrapper.shutdown).toHaveBeenCalledOnce();
-			expect(wrapper.send).not.toHaveBeenCalledWith("agent.prompt", expect.anything());
-			await expect(request("agent.state", "run-wrapper")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+			expect(wrapper.send).not.toHaveBeenCalledWith(
+				"agent.prompt",
+				expect.anything(),
+			);
+			await expect(
+				request("agent.state", "run-wrapper"),
+			).resolves.toMatchObject({
+				ok: false,
+				error: { code: "PI_CONTROL_FORBIDDEN" },
+			});
 
 			// trust=true 后重建 pending 时 abort：新 wrapper 晚到后 shutdown，不 prompt。
 			const trust = deferred<boolean>();
@@ -565,91 +672,217 @@ describe("Pi Worker prompt pipeline seam", () => {
 			const rebuilt = deferred<WrapperStub>();
 			wrapperStarts.push(Promise.resolve(restricted), rebuilt.promise);
 			await request("agent.prompt", "run-rebuild", { prompt: "never" });
-			await vi.waitFor(() => expect(restricted.ensureProjectTrust).toHaveBeenCalledOnce());
+			await vi.waitFor(() =>
+				expect(restricted.ensureProjectTrust).toHaveBeenCalledOnce(),
+			);
 			trust.resolve(true);
-			await vi.waitFor(() => expect(startPiAgentSession).toHaveBeenCalledTimes(3));
+			await vi.waitFor(() =>
+				expect(startPiAgentSession).toHaveBeenCalledTimes(3),
+			);
 			const abortRebuildId = fireAndGetId("agent.abort", "run-rebuild");
 			const rebuiltWrapper = makeWrapper();
 			rebuilt.resolve(rebuiltWrapper);
-			await vi.waitFor(() => expect(sent).toContainEqual(expect.objectContaining({ type: "response", requestId: abortRebuildId, ok: true })));
+			await vi.waitFor(() =>
+				expect(sent).toContainEqual(
+					expect.objectContaining({
+						type: "response",
+						requestId: abortRebuildId,
+						ok: true,
+					}),
+				),
+			);
 			expect(rebuiltWrapper.shutdown).toHaveBeenCalledOnce();
-			expect(rebuiltWrapper.send).not.toHaveBeenCalledWith("agent.prompt", expect.anything());
+			expect(rebuiltWrapper.send).not.toHaveBeenCalledWith(
+				"agent.prompt",
+				expect.anything(),
+			);
 
 			// 附件失败清 matching envelope；后续 run 可进入。
 			const attachmentWrapper = makeWrapper();
 			wrapperStarts.push(Promise.resolve(attachmentWrapper));
-			downloadPromptImages.mockRejectedValueOnce(Object.assign(new Error("secret"), { code: "PI_IMAGE_INVALID" }));
+			downloadPromptImages.mockRejectedValueOnce(
+				Object.assign(new Error("secret"), { code: "PI_IMAGE_INVALID" }),
+			);
 			await request("agent.prompt", "run-attachment", {
 				prompt: "never",
-				attachments: [{ url: "https://invalid", mimeType: "image/png", size: 1, sha256: "0".repeat(64) }],
+				attachments: [
+					{
+						url: "https://invalid",
+						mimeType: "image/png",
+						size: 1,
+						sha256: "0".repeat(64),
+					},
+				],
 			});
-			await vi.waitFor(() => expect(sent).toContainEqual(expect.objectContaining({
-				type: "event", runId: "run-attachment", event: expect.objectContaining({ type: "prompt_error", code: "PI_IMAGE_INVALID" }),
-			})));
-			await expect(request("agent.state", "run-attachment")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+			await vi.waitFor(() =>
+				expect(sent).toContainEqual(
+					expect.objectContaining({
+						type: "event",
+						runId: "run-attachment",
+						event: expect.objectContaining({
+							type: "prompt_error",
+							code: "PI_IMAGE_INVALID",
+						}),
+					}),
+				),
+			);
+			await expect(
+				request("agent.state", "run-attachment"),
+			).resolves.toMatchObject({
+				ok: false,
+				error: { code: "PI_CONTROL_FORBIDDEN" },
+			});
 
 			// matching prompt_error 释放 active，但保留该 envelope 的只读 state 权限。
 			await request("agent.prompt", "run-old", { prompt: "ok" });
-			await vi.waitFor(() => expect(attachmentWrapper.send).toHaveBeenCalledWith("agent.prompt", expect.anything()));
+			await vi.waitFor(() =>
+				expect(attachmentWrapper.send).toHaveBeenCalledWith(
+					"agent.prompt",
+					expect.anything(),
+				),
+			);
 			const oldListener = attachmentWrapper.listeners[0]!;
-			oldListener({ type: "prompt_error", sessionId: "session-1", code: "PI_RUNTIME_UNAVAILABLE" });
-			await expect(request("agent.state", "run-old")).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
-			await expect(request("agent.state", "run-unknown")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+			oldListener({
+				type: "prompt_error",
+				sessionId: "session-1",
+				code: "PI_RUNTIME_UNAVAILABLE",
+			});
+			await expect(request("agent.state", "run-old")).resolves.toMatchObject({
+				ok: true,
+				data: { status: "idle" },
+			});
+			await expect(
+				request("agent.state", "run-unknown"),
+			).resolves.toMatchObject({
+				ok: false,
+				error: { code: "PI_CONTROL_FORBIDDEN" },
+			});
 
 			// agent_settled 同样保留只读 state 权限。
 			await request("agent.prompt", "run-settled", { prompt: "ok" });
 			const settledListener = attachmentWrapper.listeners[0]!;
 			settledListener({ type: "agent_settled", sessionId: "session-1" });
-			await expect(request("agent.state", "run-settled")).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
+			await expect(
+				request("agent.state", "run-settled"),
+			).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
 
 			// 新 envelope 不清历史记录，旧 listener 不能清理/重标当前新 run。
 			await request("agent.prompt", "run-current", { prompt: "ok" });
 			settledListener({ type: "agent_settled", sessionId: "session-1" });
-			await expect(request("agent.state", "run-current")).resolves.toMatchObject({ ok: true, data: { status: "running" } });
-			await expect(request("agent.state", "run-old")).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
+			await expect(
+				request("agent.state", "run-current"),
+			).resolves.toMatchObject({ ok: true, data: { status: "running" } });
+			await expect(request("agent.state", "run-old")).resolves.toMatchObject({
+				ok: true,
+				data: { status: "idle" },
+			});
 
 			// abort 失败保留 run；第二次仍到达同 wrapper 并最终清理。
 			attachmentWrapper.send.mockImplementationOnce(async (action: string) => {
-				if (action === "agent.abort") throw Object.assign(new Error("failed"), { code: "PI_REQUEST_TIMEOUT" });
+				if (action === "agent.abort")
+					throw Object.assign(new Error("failed"), {
+						code: "PI_REQUEST_TIMEOUT",
+					});
 				return null;
 			});
-			await expect(request("agent.abort", "run-current")).resolves.toMatchObject({ ok: false, error: { code: "PI_REQUEST_TIMEOUT" } });
-			await expect(request("agent.abort", "run-current")).resolves.toMatchObject({ ok: true });
-			expect(attachmentWrapper.send.mock.calls.filter(([action]) => action === "agent.abort")).toHaveLength(2);
-			await expect(request("agent.state", "run-current")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
+			await expect(
+				request("agent.abort", "run-current"),
+			).resolves.toMatchObject({
+				ok: false,
+				error: { code: "PI_REQUEST_TIMEOUT" },
+			});
+			await expect(
+				request("agent.abort", "run-current"),
+			).resolves.toMatchObject({ ok: true });
+			expect(
+				attachmentWrapper.send.mock.calls.filter(
+					([action]) => action === "agent.abort",
+				),
+			).toHaveLength(2);
+			await expect(
+				request("agent.state", "run-current"),
+			).resolves.toMatchObject({
+				ok: false,
+				error: { code: "PI_CONTROL_FORBIDDEN" },
+			});
 
 			// settled run 缓存按 FIFO 限制为 32 条。
 			for (let index = 0; index < 33; index += 1) {
 				await request("agent.prompt", `run-bounded-${index}`, { prompt: "ok" });
-				await vi.waitFor(() => expect(attachmentWrapper.listeners).toHaveLength(1));
-				attachmentWrapper.listeners[0]!({ type: "agent_settled", sessionId: "session-1" });
+				await vi.waitFor(() =>
+					expect(attachmentWrapper.listeners).toHaveLength(1),
+				);
+				attachmentWrapper.listeners[0]!({
+					type: "agent_settled",
+					sessionId: "session-1",
+				});
 			}
-			await expect(request("agent.state", "run-bounded-0")).resolves.toMatchObject({ ok: false, error: { code: "PI_CONTROL_FORBIDDEN" } });
-			await expect(request("agent.state", "run-bounded-32")).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
+			await expect(
+				request("agent.state", "run-bounded-0"),
+			).resolves.toMatchObject({
+				ok: false,
+				error: { code: "PI_CONTROL_FORBIDDEN" },
+			});
+			await expect(
+				request("agent.state", "run-bounded-32"),
+			).resolves.toMatchObject({ ok: true, data: { status: "idle" } });
 
 			// 空闲 idle mutation：model.set/thinking.set 无需 active run，直接到达 wrapper。
-			const idleSet = async (action: string, payload: Record<string, unknown>) => {
+			const idleSet = async (
+				action: string,
+				payload: Record<string, unknown>,
+			) => {
 				const requestId = `seam-idle-${++requestSeq}`;
-				workerListener?.({
-					type: "request",
-					projectKey: "project",
-					request: { requestId, action, jobId: "session-1", sessionId: "session-1", payload },
-				}, {} as never);
-				await vi.waitFor(() => expect(sent.some((message) =>
-					message.type === "response" && message.requestId === requestId,
-				)).toBe(true));
-				return sent.find((message) =>
-					message.type === "response" && message.requestId === requestId,
+				workerListener?.(
+					{
+						type: "request",
+						projectKey: "project",
+						request: {
+							requestId,
+							action,
+							jobId: "session-1",
+							sessionId: "session-1",
+							payload,
+						},
+					},
+					{} as never,
+				);
+				await vi.waitFor(() =>
+					expect(
+						sent.some(
+							(message) =>
+								message.type === "response" && message.requestId === requestId,
+						),
+					).toBe(true),
+				);
+				return sent.find(
+					(message) =>
+						message.type === "response" && message.requestId === requestId,
 				)!;
 			};
-			await expect(idleSet("model.set", { provider: "AxonHub", modelId: "deepseek-v4-flash" })).resolves.toMatchObject({ ok: true });
-			expect(attachmentWrapper.send).toHaveBeenCalledWith("model.set", { provider: "AxonHub", modelId: "deepseek-v4-flash" });
-			await expect(idleSet("thinking.set", { level: "high" })).resolves.toMatchObject({ ok: true });
-			expect(attachmentWrapper.send).toHaveBeenCalledWith("thinking.set", { level: "high" });
+			await expect(
+				idleSet("model.set", {
+					provider: "AxonHub",
+					modelId: "deepseek-v4-flash",
+				}),
+			).resolves.toMatchObject({ ok: true });
+			expect(attachmentWrapper.send).toHaveBeenCalledWith("model.set", {
+				provider: "AxonHub",
+				modelId: "deepseek-v4-flash",
+			});
+			await expect(
+				idleSet("thinking.set", { level: "high" }),
+			).resolves.toMatchObject({ ok: true });
+			expect(attachmentWrapper.send).toHaveBeenCalledWith("thinking.set", {
+				level: "high",
+			});
 		} finally {
 			if (workerListener) process.removeListener("message", workerListener);
 			process.argv[2] = originalArg;
-			Object.defineProperty(process, "send", { configurable: true, value: originalSend });
+			Object.defineProperty(process, "send", {
+				configurable: true,
+				value: originalSend,
+			});
 			vi.doUnmock("@earendil-works/pi-coding-agent");
 			vi.doUnmock("./agent-session.js");
 			vi.doUnmock("./session-reader.js");
