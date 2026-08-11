@@ -339,6 +339,8 @@ export class PiController {
 		if (typeof name !== "string" || name.trim() === "") {
 			throw badRequest("PI_PROTOCOL_INVALID", "name required");
 		}
+		// 从侧边栏对未打开的会话改名/删/克隆等：必须先把 Job 记录补上，再查 owner
+		await this.runs.ensureSession(actor, { clientId, sessionId });
 		await this.assertSessionOwner(sessionId, actor);
 		await this.withReconciledClient(clientId, async (lease) => {
 			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
@@ -365,6 +367,7 @@ export class PiController {
 		await this.requirePiClient(clientId);
 		const cwdRef = requireCwd(body);
 		return this.withReconciledClient(clientId, async (lease) => {
+			await this.runs.ensureSession(actor, { clientId, sessionId });
 			const reservation = await this.runs.beginDelete(sessionId, actor.identityId);
 			let response;
 			try {
