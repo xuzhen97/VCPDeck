@@ -471,9 +471,9 @@ function jobTypeLabel(type: string): string {
 			"file.move": "移动文件",
 			"file.export": "导出文件",
 			"file.import": "导入文件",
-			"frp.create": "创建 FRP",
-			"frp.delete": "删除 FRP",
-			"frp.list": "读取 FRP",
+			"frp.create": "创建映射",
+			"frp.delete": "删除映射",
+			"frp.list": "读取映射",
 			"agent.run": "Pi 运行",
 			"agent.session": "Pi 会话",
 		}[type] ?? type

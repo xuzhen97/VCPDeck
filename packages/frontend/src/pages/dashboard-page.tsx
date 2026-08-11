@@ -24,9 +24,9 @@ const JOB_TYPE_LABEL: Record<string, string> = {
 	"file.move": "文件移动",
 	"file.export": "文件导出",
 	"file.import": "文件导入",
-	"frp.create": "FRP 创建",
-	"frp.delete": "FRP 删除",
-	"frp.list": "FRP 列表",
+	"frp.create": "创建映射",
+	"frp.delete": "删除映射",
+	"frp.list": "读取映射",
 	"agent.run": "Pi 运行",
 	"agent.session": "Pi 会话",
 };
@@ -114,7 +114,7 @@ export function DashboardPage() {
 					detail={`最近 ${jobs.data.length} 条记录`}
 				/>
 				<Metric
-					title="FRP 映射"
+					title="映射"
 					value={mappings.total}
 					detail={`${mappings.data.filter((item) => item.status === "active").length} 个 active`}
 				/>

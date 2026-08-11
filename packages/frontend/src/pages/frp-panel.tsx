@@ -178,9 +178,9 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		clients.map((client) => [client.clientId, client.hostname]),
 	);
 
-	if (resource.loading) return <LoadingState label="正在加载 FRP 映射…" />;
+	if (resource.loading) return <LoadingState label="正在加载映射…" />;
 	if (resource.error)
-		return <ErrorState message="无法加载 FRP 映射" onRetry={resource.reload} />;
+		return <ErrorState message="无法加载映射" onRetry={resource.reload} />;
 	return (
 		<>
 			<Card>
@@ -513,7 +513,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 				<ConfirmTargetDialog
 					open
 					target={deleting.name}
-					title="删除 FRP 映射"
+					title="删除映射"
 					onOpenChange={(open) => {
 						if (!open) setDeleting(undefined);
 					}}

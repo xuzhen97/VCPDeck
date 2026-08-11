@@ -9,11 +9,11 @@ export function FrpPage() {
 	return (
 		<div className="space-y-6">
 			<PageHeading
-				title="FRP"
+				title="映射"
 				description="管理在线 Client 的公网映射与 frps 实例。"
 			/>
 			<nav
-				aria-label="FRP 导航"
+				aria-label="映射导航"
 				className="inline-flex rounded-2xl border border-border/70 bg-card/50 p-1 shadow-sm backdrop-blur-xl"
 			>
 				<Button

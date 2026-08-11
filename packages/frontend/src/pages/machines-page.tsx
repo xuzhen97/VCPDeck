@@ -111,7 +111,7 @@ function MachineCard({ client }: { client: ClientInfo }) {
 						className="inline-flex items-center gap-1 text-primary"
 						to={`${base}/frp`}
 					>
-						FRP
+						映射
 						<ArrowRight className="size-4" />
 					</Link>
 				</div>

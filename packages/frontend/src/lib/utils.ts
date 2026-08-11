@@ -19,7 +19,7 @@ export function capabilitiesLabel(raw: string[]): string[] {
 		seen.add("file.write");
 	}
 	if (raw.includes("frp")) {
-		labels.push("FRP 映射");
+		labels.push("映射");
 		seen.add("frp");
 	}
 	// 未映射的原始能力透传，确保显示不遗漏

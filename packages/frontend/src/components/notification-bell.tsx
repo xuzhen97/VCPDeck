@@ -103,7 +103,7 @@ export function NotificationBell() {
 				variant="ghost"
 				aria-label={open ? "收起任务通知" : "任务通知"}
 				onClick={() => setOpen((v) => !v)}
-				className="relative"
+				className="relative size-10 min-h-10 rounded-lg"
 			>
 				<Bell aria-hidden="true" className="size-4" />
 				{activeCount > 0 && (
@@ -383,9 +383,9 @@ function jobTypeLabel(type: string): string {
 			"file.move": "移动文件",
 			"file.export": "导出文件",
 			"file.import": "导入文件",
-			"frp.create": "创建 FRP",
-			"frp.delete": "删除 FRP",
-			"frp.list": "读取 FRP",
+			"frp.create": "创建映射",
+			"frp.delete": "删除映射",
+			"frp.list": "读取映射",
 		}[type] ?? type
 	);
 }

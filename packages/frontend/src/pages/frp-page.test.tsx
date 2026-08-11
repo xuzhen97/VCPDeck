@@ -148,6 +148,9 @@ describe("FrpPage", () => {
 			</MemoryRouter>,
 		);
 
+		expect(await screen.findByRole("heading", { name: "映射" })).toBeVisible();
+		expect(screen.getByRole("navigation", { name: "映射导航" })).toBeVisible();
+		expect(screen.queryByRole("heading", { name: "FRP" })).not.toBeInTheDocument();
 		expect(await screen.findByText("全部映射")).toBeVisible();
 		await userEvent.click(screen.getByRole("button", { name: "实例配置" }));
 		expect(await screen.findByText("frps 实例")).toBeVisible();
@@ -388,6 +391,8 @@ describe("FrpPanel", () => {
 			(await screen.findAllByRole("button", { name: "更多操作" }))[0]!,
 		);
 		await userEvent.click(screen.getByRole("button", { name: "删除映射" }));
+		expect(screen.getByText("删除映射")).toBeVisible();
+		expect(screen.queryByText("删除 FRP 映射")).not.toBeInTheDocument();
 		const confirm = screen.getByRole("button", { name: "确认删除" });
 		expect(confirm).toBeDisabled();
 		await userEvent.type(screen.getByLabelText("输入目标以确认"), "local-web");

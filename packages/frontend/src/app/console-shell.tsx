@@ -29,7 +29,7 @@ const navigation = [
 	{ to: "/dashboard", label: "概览", icon: LayoutDashboard },
 	{ to: "/machines", label: "机器", icon: MonitorCog },
 	{ to: "/jobs", label: "任务", icon: ListTodo },
-	{ to: "/frp", label: "FRP", icon: Cable },
+	{ to: "/frp", label: "映射", icon: Cable },
 	{ to: "/storage", label: "存储", icon: Database },
 	{ to: "/settings/profile", label: "设置", icon: Settings },
 ];
@@ -44,6 +44,7 @@ export function ConsoleShell({
 	children: ReactNode;
 }) {
 	const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
+	const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 	const [theme, setTheme] = useState<Theme>(readTheme);
 
 	function toggleTheme() {
@@ -64,12 +65,35 @@ export function ConsoleShell({
 			<div
 				className={`vcpdeck-shell ${collapsed ? "vcpdeck-shell-collapsed" : ""}`}
 			>
+				{mobileSidebarOpen && (
+					<button
+						type="button"
+						aria-label="关闭侧栏遮罩"
+						className="fixed inset-0 z-40 bg-background/60 backdrop-blur-sm lg:hidden"
+						onClick={() => setMobileSidebarOpen(false)}
+					/>
+				)}
 				<aside
-					className={`vcpdeck-sidebar ${collapsed ? "vcpdeck-sidebar-collapsed" : ""}`}
+					className={`vcpdeck-sidebar ${collapsed ? "vcpdeck-sidebar-collapsed" : ""} ${mobileSidebarOpen ? "vcpdeck-sidebar-mobile-open" : ""}`}
 				>
-					<div className="flex min-h-12 items-center gap-3 px-2">
-						<Boxes className="size-6 text-primary" />
-						<span className="vcpdeck-sidebar-label font-semibold">VCPDeck</span>
+					<div
+						data-testid="sidebar-brand"
+						className="flex min-h-12 items-center gap-3 px-2"
+					>
+						<Boxes className="size-6 shrink-0 text-primary" />
+						<span className="vcpdeck-sidebar-label min-w-0 flex-1 font-semibold">
+							VCPDeck
+						</span>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon"
+							className="size-10 min-h-10 shrink-0 rounded-lg lg:hidden"
+							onClick={() => setMobileSidebarOpen(false)}
+							aria-label="关闭侧栏"
+						>
+							<ChevronsLeft className="size-4" />
+						</Button>
 					</div>
 					<nav aria-label="主导航" className="mt-6 space-y-1">
 						{navigation.map(({ to, label, icon: Icon }) => (
@@ -85,17 +109,7 @@ export function ConsoleShell({
 							</NavLink>
 						))}
 					</nav>
-					<div className="mt-auto space-y-2">
-						<Button
-							type="button"
-							variant="ghost"
-							className="w-full justify-start"
-							onClick={toggleSidebar}
-							aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
-						>
-							{collapsed ? <ChevronsRight /> : <ChevronsLeft />}
-							<span className="vcpdeck-sidebar-label">收起侧栏</span>
-						</Button>
+					<div data-testid="sidebar-footer" className="mt-auto space-y-2">
 						<div className="border-t border-border/70 pt-3 text-sm">
 							<p className="vcpdeck-sidebar-label truncate font-medium">
 								{identity.displayName}
@@ -108,26 +122,56 @@ export function ConsoleShell({
 				</aside>
 				<section className="vcpdeck-main-column">
 					<header className="relative z-40 flex h-16 items-center justify-between border-b border-border/70 bg-card/30 px-4 backdrop-blur-xl sm:px-6">
-						<span className="font-semibold lg:hidden">VCPDeck</span>
+						<div className="flex items-center gap-2">
+							<div className="flex items-center gap-2 lg:hidden">
+								<span className="font-semibold">VCPDeck</span>
+								<Button
+									type="button"
+									size="icon"
+									variant="ghost"
+									className="size-10 min-h-10 rounded-lg lg:hidden"
+									onClick={() => setMobileSidebarOpen(true)}
+									aria-label="打开侧栏"
+								>
+									<ChevronsRight className="size-4" />
+								</Button>
+							</div>
+							<Button
+								type="button"
+								size="icon"
+								variant="ghost"
+								className="vcpdeck-sidebar-toggle hidden size-10 min-h-10 rounded-lg lg:inline-flex"
+								onClick={toggleSidebar}
+								aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
+							>
+								{collapsed ? (
+									<ChevronsRight className="size-4" />
+								) : (
+									<ChevronsLeft className="size-4" />
+								)}
+							</Button>
+						</div>
 						<div className="ml-auto flex items-center gap-2">
 							<NotificationBell />
 							<Button
 								type="button"
 								size="icon"
 								variant="ghost"
+								className="size-10 min-h-10 rounded-lg"
 								onClick={toggleTheme}
 								aria-label="切换主题"
 							>
-								{theme === "dark" ? <Sun /> : <Moon />}
+								{theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
 							</Button>
 							<Button
 								type="button"
 								size="icon"
 								variant="ghost"
+								className="size-10 min-h-10 rounded-lg"
 								onClick={onLogout}
 								aria-label="退出登录"
 							>
-								<LogOut />
+								<LogOut className="size-4" />
 							</Button>
 						</div>
 					</header>

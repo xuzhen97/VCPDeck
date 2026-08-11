@@ -27,7 +27,7 @@ const tabs = [
 	["overview", "概览"],
 	["execute", "执行"],
 	["files", "文件"],
-	["frp", "FRP"],
+	["frp", "映射"],
 	["jobs", "任务记录"],
 	["pi", "Pi"],
 ] as const;

@@ -1,6 +1,6 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import type { ClientInfo } from "@vcpdeck/shared";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { SdkProvider } from "@/api/context";
@@ -141,6 +141,12 @@ describe("MachineWorkspace overview", () => {
 		expect(screen.getByRole("tooltip")).toHaveTextContent(
 			"symlink 边界仍有已知风险",
 		);
+		const workspaceNav = screen.getByRole("navigation", { name: "机器工作区" });
+		expect(within(workspaceNav).getByRole("link", { name: "映射" })).toHaveAttribute(
+			"href",
+			"/machines/c1/frp",
+		);
+		expect(within(workspaceNav).queryByRole("link", { name: "FRP" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 

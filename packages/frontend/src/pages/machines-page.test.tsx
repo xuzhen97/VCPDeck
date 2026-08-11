@@ -88,8 +88,10 @@ describe("MachinesPage", () => {
 			"/machines/client-1/overview",
 		);
 		expect(screen.getByRole("img", { name: "Windows" })).toBeVisible();
-		for (const label of ["命令执行", "文件操作", "FRP 映射"])
+		for (const label of ["命令执行", "文件操作"])
 			expect(screen.getByText(label)).toBeVisible();
+		expect(screen.getAllByText("映射").length).toBeGreaterThanOrEqual(1);
+		expect(screen.queryByText("FRP 映射")).not.toBeInTheDocument();
 		expect(screen.getByRole("link", { name: "执行" })).toHaveAttribute(
 			"href",
 			"/machines/client-1/execute",
@@ -98,10 +100,11 @@ describe("MachinesPage", () => {
 			"href",
 			"/machines/client-1/files",
 		);
-		expect(screen.getByRole("link", { name: "FRP" })).toHaveAttribute(
+		expect(screen.getByRole("link", { name: "映射" })).toHaveAttribute(
 			"href",
 			"/machines/client-1/frp",
 		);
+		expect(screen.queryByRole("link", { name: "FRP" })).not.toBeInTheDocument();
 	});
 
 	it("renders unified Windows, Linux and macOS SVG icons", async () => {
