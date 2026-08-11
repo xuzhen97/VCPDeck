@@ -41,4 +41,39 @@ describe("PiChatWindow", () => {
 		await user.click(screen.getByRole("button", { name: /展开思考/ }));
 		expect(screen.getByText("先检查项目结构，再读取 README。")).toBeTruthy();
 	});
+
+	it("加载历史期间显示加载提示而非空状态", () => {
+		render(
+			<PiChatWindow
+				state={state({ messages: [], status: "loading" })}
+				info={null}
+				onLoadMore={() => {}}
+			/>,
+		);
+
+		const loading = screen.getByTestId("pi-history-loading");
+		expect(loading.textContent).toContain("正在加载历史消息");
+		expect(loading.querySelectorAll(".pi-chat-loading-dot")).toHaveLength(3);
+		expect(screen.queryByText("开始一段新的 Pi 会话")).toBeNull();
+	});
+
+	it("运行中状态显示动画处理提示", () => {
+		render(<PiChatWindow state={state()} info={null} onLoadMore={() => {}} />);
+
+		const indicator = screen.getByTestId("streaming-indicator");
+		expect(indicator.textContent).toContain("Pi 正在处理");
+		expect(indicator.querySelectorAll(".pi-chat-loading-dot")).toHaveLength(3);
+	});
+
+	it("空闲空消息时显示新会话空状态", () => {
+		render(
+			<PiChatWindow
+				state={state({ messages: [], status: "idle" })}
+				info={null}
+				onLoadMore={() => {}}
+			/>,
+		);
+
+		expect(screen.getByText("开始一段新的 Pi 会话")).toBeTruthy();
+	});
 });
