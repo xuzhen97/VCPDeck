@@ -250,11 +250,11 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 						cwdRef={cwdRef}
 						onCwdChange={handleCwdChange}
 						activeSessionId={sessionId}
-mutableSessionIds={mutableSessionIds}
+						mutableSessionIds={mutableSessionIds}
 						onSelectSession={handleSelectSession}
 						onCreated={handleCreated}
 					/>
-					</aside>
+				</aside>
 
 				{/* 中栏：对话时间线 */}
 				<main
@@ -267,17 +267,7 @@ mutableSessionIds={mutableSessionIds}
 							state={state}
 							info={info}
 							onLoadMore={() => {
-								if (cwdRef && sessionId && state.nextCursor) {
-									void sdk.pi.sessions
-										.context(client.clientId, sessionId, cwdRef, {
-											cursor: state.nextCursor,
-										})
-										.then((page) => {
-											// 追加更早消息（简化：交给 reconcile 轮询）
-											void page;
-										})
-										.catch(() => {});
-								}
+								if (cwdRef && sessionId) void actions.loadMore();
 							}}
 							onImageLoad={(block) => void handleImageLoad(block)}
 							imageUrls={loadedImages}

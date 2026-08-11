@@ -178,24 +178,54 @@ describe("usePiSession", () => {
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
 			job: {
-				jobId: "s1", sessionId: "s1", status: "waiting_input", runId: "j1",
-				ownerName: "User", isOwner: true,
+				jobId: "s1",
+				sessionId: "s1",
+				status: "waiting_input",
+				runId: "j1",
+				ownerName: "User",
+				isOwner: true,
 			},
 			agentState: {
-				status: "waiting_for_extension_input", streaming: false, prompting: true,
-				compacting: false, thinkingLevel: "off",
+				status: "waiting_for_extension_input",
+				streaming: false,
+				prompting: true,
+				compacting: false,
+				thinkingLevel: "off",
 				model: { provider: "p", modelId: "m1" },
 				queuedMessages: { steering: [], followUp: [] },
-				pendingExtension: { requestId: "u1", extensionId: "trust", kind: "confirm", message: "trust?" },
+				pendingExtension: {
+					requestId: "u1",
+					extensionId: "trust",
+					kind: "confirm",
+					message: "trust?",
+				},
 			},
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
 		expect(result.current.state.pendingExtension?.requestId).toBe("u1");
 
-		act(() => emit({ type: "extension_resolved", sessionId: "s1", runId: "j1", requestId: "old", reason: "answered", hasPending: true }));
+		act(() =>
+			emit({
+				type: "extension_resolved",
+				sessionId: "s1",
+				runId: "j1",
+				requestId: "old",
+				reason: "answered",
+				hasPending: true,
+			}),
+		);
 		expect(result.current.state.pendingExtension?.requestId).toBe("u1");
-		act(() => emit({ type: "extension_resolved", sessionId: "s1", runId: "j1", requestId: "u1", reason: "answered", hasPending: false }));
+		act(() =>
+			emit({
+				type: "extension_resolved",
+				sessionId: "s1",
+				runId: "j1",
+				requestId: "u1",
+				reason: "answered",
+				hasPending: false,
+			}),
+		);
 		expect(result.current.state.pendingExtension).toBeNull();
 	});
 
@@ -204,29 +234,71 @@ describe("usePiSession", () => {
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
 			job: {
-				jobId: "s1", sessionId: "s1", status: "waiting_input", runId: "j1",
-				ownerName: "User", isOwner: true,
+				jobId: "s1",
+				sessionId: "s1",
+				status: "waiting_input",
+				runId: "j1",
+				ownerName: "User",
+				isOwner: true,
 			},
 			agentState: {
-				status: "waiting_for_extension_input", streaming: false, prompting: true,
-				compacting: false, thinkingLevel: "off",
+				status: "waiting_for_extension_input",
+				streaming: false,
+				prompting: true,
+				compacting: false,
+				thinkingLevel: "off",
 				model: { provider: "p", modelId: "m1" },
 				queuedMessages: { steering: [], followUp: [] },
-				pendingExtension: { requestId: "u1", extensionId: "trust", kind: "confirm", message: "trust?" },
+				pendingExtension: {
+					requestId: "u1",
+					extensionId: "trust",
+					kind: "confirm",
+					message: "trust?",
+				},
 			},
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
 		expect(result.current.state.status).toBe("waiting_input");
 
-		act(() => emit({ type: "extension_resolved", sessionId: "s1", runId: "j1", requestId: "u1", reason: "answered", hasPending: true }));
+		act(() =>
+			emit({
+				type: "extension_resolved",
+				sessionId: "s1",
+				runId: "j1",
+				requestId: "u1",
+				reason: "answered",
+				hasPending: true,
+			}),
+		);
 		expect(result.current.state.status).toBe("waiting_input");
 		expect(result.current.state.job?.status).toBe("waiting_input");
 		expect(result.current.state.pendingExtension).toBeNull();
 
-		act(() => emit({ type: "extension_request", sessionId: "s1", runId: "j1", ui: { requestId: "u2", extensionId: "e", kind: "input", message: "next" } }));
+		act(() =>
+			emit({
+				type: "extension_request",
+				sessionId: "s1",
+				runId: "j1",
+				ui: {
+					requestId: "u2",
+					extensionId: "e",
+					kind: "input",
+					message: "next",
+				},
+			}),
+		);
 		expect(result.current.state.status).toBe("waiting_input");
-		act(() => emit({ type: "extension_resolved", sessionId: "s1", runId: "j1", requestId: "u2", reason: "answered", hasPending: false }));
+		act(() =>
+			emit({
+				type: "extension_resolved",
+				sessionId: "s1",
+				runId: "j1",
+				requestId: "u2",
+				reason: "answered",
+				hasPending: false,
+			}),
+		);
 		expect(result.current.state.status).toBe("running");
 	});
 
@@ -234,8 +306,23 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			job: { jobId: "s1", sessionId: "s1", status: "idle", runId: null, ownerName: "Other", isOwner: false },
-			agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+			job: {
+				jobId: "s1",
+				sessionId: "s1",
+				status: "idle",
+				runId: null,
+				ownerName: "Other",
+				isOwner: false,
+			},
+			agentState: {
+				status: "idle",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
@@ -247,8 +334,25 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			job: { jobId: "s1", sessionId: "s1", status: "error", runId: null, ownerName: "User", isOwner: true, errorCode: "PI_WORKER_EXITED", errorMessage: "worker exited" },
-			agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+			job: {
+				jobId: "s1",
+				sessionId: "s1",
+				status: "error",
+				runId: null,
+				ownerName: "User",
+				isOwner: true,
+				errorCode: "PI_WORKER_EXITED",
+				errorMessage: "worker exited",
+			},
+			agentState: {
+				status: "idle",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
@@ -260,8 +364,23 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			job: { jobId: "s1", sessionId: "s1", status: "running", runId: "run-1", ownerName: "User", isOwner: true },
-			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+			job: {
+				jobId: "s1",
+				sessionId: "s1",
+				status: "running",
+				runId: "run-1",
+				ownerName: "User",
+				isOwner: true,
+			},
+			agentState: {
+				status: "running",
+				streaming: true,
+				prompting: true,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
@@ -502,12 +621,42 @@ describe("usePiSession", () => {
 		const abortRequest = deferred<unknown>();
 		(pi.agent.open as ReturnType<typeof vi.fn>)
 			.mockResolvedValueOnce({
-				job: { jobId: "s1", sessionId: "s1", status: "idle", runId: null, ownerName: "User", isOwner: true },
-				agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+				job: {
+					jobId: "s1",
+					sessionId: "s1",
+					status: "idle",
+					runId: null,
+					ownerName: "User",
+					isOwner: true,
+				},
+				agentState: {
+					status: "idle",
+					streaming: false,
+					prompting: false,
+					compacting: false,
+					thinkingLevel: "off",
+					model: { provider: "p", modelId: "m1" },
+					queuedMessages: { steering: [], followUp: [] },
+				},
 			})
 			.mockResolvedValue({
-				job: { jobId: "s2", sessionId: "s2", status: "running", runId: "j2", ownerName: "User", isOwner: true },
-				agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+				job: {
+					jobId: "s2",
+					sessionId: "s2",
+					status: "running",
+					runId: "j2",
+					ownerName: "User",
+					isOwner: true,
+				},
+				agentState: {
+					status: "running",
+					streaming: true,
+					prompting: true,
+					compacting: false,
+					thinkingLevel: "off",
+					model: { provider: "p", modelId: "m1" },
+					queuedMessages: { steering: [], followUp: [] },
+				},
 			});
 		(pi.agent.abort as ReturnType<typeof vi.fn>).mockImplementation(
 			() => abortRequest.promise,
@@ -534,8 +683,23 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: { jobId: "s1", runId: "j-active", sessionId: "s1", status: "running", ownerName: "User", isOwner: true },
-			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+			job: {
+				jobId: "s1",
+				runId: "j-active",
+				sessionId: "s1",
+				status: "running",
+				ownerName: "User",
+				isOwner: true,
+			},
+			agentState: {
+				status: "running",
+				streaming: true,
+				prompting: true,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 
@@ -551,8 +715,23 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: { jobId: "s1", runId: "j-active", sessionId: "s1", status: "running", ownerName: "User", isOwner: true },
-			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+			job: {
+				jobId: "s1",
+				runId: "j-active",
+				sessionId: "s1",
+				status: "running",
+				ownerName: "User",
+				isOwner: true,
+			},
+			agentState: {
+				status: "running",
+				streaming: true,
+				prompting: true,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 
@@ -572,8 +751,23 @@ describe("usePiSession", () => {
 				sessionId === "a"
 					? firstOpenResult.promise
 					: Promise.resolve({
-							job: { jobId: "b", sessionId: "b", status: "done", runId: null, ownerName: "User", isOwner: true },
-							agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+							job: {
+								jobId: "b",
+								sessionId: "b",
+								status: "done",
+								runId: null,
+								ownerName: "User",
+								isOwner: true,
+							},
+							agentState: {
+								status: "idle",
+								streaming: false,
+								prompting: false,
+								compacting: false,
+								thinkingLevel: "off",
+								model: { provider: "p", modelId: "m1" },
+								queuedMessages: { steering: [], followUp: [] },
+							},
 						}),
 		);
 		const { result } = renderHook(() => usePiSession(pi));
@@ -582,8 +776,23 @@ describe("usePiSession", () => {
 		await waitFor(() => expect(pi.agent.open).toHaveBeenCalledTimes(1));
 		await act(async () => result.current.actions.openSession("c1", "b", CWD));
 		firstOpenResult.resolve({
-			job: { jobId: "a", sessionId: "a", status: "error", runId: null, ownerName: "User", isOwner: true },
-			agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+			job: {
+				jobId: "a",
+				sessionId: "a",
+				status: "error",
+				runId: null,
+				ownerName: "User",
+				isOwner: true,
+			},
+			agentState: {
+				status: "idle",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
 		});
 		await act(async () => firstOpen);
 
@@ -875,17 +1084,40 @@ describe("usePiSession", () => {
 		const { result } = renderHook(() => usePiSession(pi));
 		await act(async () => result.current.actions.createSession("c1", CWD));
 		await act(async () => result.current.actions.send({ prompt: "hi" }));
-		act(() => emit({
-			type: "extension_request", sessionId: "s1", runId: "j1",
-			ui: { requestId: "u1", extensionId: "e", kind: "input", message: "first" },
-		}));
+		act(() =>
+			emit({
+				type: "extension_request",
+				sessionId: "s1",
+				runId: "j1",
+				ui: {
+					requestId: "u1",
+					extensionId: "e",
+					kind: "input",
+					message: "first",
+				},
+			}),
+		);
 
-		const firstResponse = result.current.actions.extensionResponse("u1", "answer");
-		await waitFor(() => expect(pi.agent.extensionResponse).toHaveBeenCalledOnce());
-		act(() => emit({
-			type: "extension_request", sessionId: "s1", runId: "j1",
-			ui: { requestId: "u2", extensionId: "e", kind: "confirm", message: "second" },
-		}));
+		const firstResponse = result.current.actions.extensionResponse(
+			"u1",
+			"answer",
+		);
+		await waitFor(() =>
+			expect(pi.agent.extensionResponse).toHaveBeenCalledOnce(),
+		);
+		act(() =>
+			emit({
+				type: "extension_request",
+				sessionId: "s1",
+				runId: "j1",
+				ui: {
+					requestId: "u2",
+					extensionId: "e",
+					kind: "confirm",
+					message: "second",
+				},
+			}),
+		);
 		response.resolve({});
 		await act(async () => firstResponse);
 
@@ -910,12 +1142,22 @@ describe("usePiSession", () => {
 				type: "extension_request",
 				sessionId: "s1",
 				runId: "j1",
-				ui: { requestId: "u1", extensionId: "e", kind: "input", message: "name?" },
+				ui: {
+					requestId: "u1",
+					extensionId: "e",
+					kind: "input",
+					message: "name?",
+				},
 			});
 		});
 
 		await act(async () => {
-			await result.current.actions.extensionResponse("u1", undefined, undefined, true);
+			await result.current.actions.extensionResponse(
+				"u1",
+				undefined,
+				undefined,
+				true,
+			);
 		});
 		expect(pi.agent.extensionResponse).toHaveBeenCalledWith(
 			"c1",
@@ -924,5 +1166,87 @@ describe("usePiSession", () => {
 			expect.objectContaining({ requestId: "u1", cancelled: true }),
 		);
 		await waitFor(() => expect(result.current.state.status).toBe("running"));
+	});
+
+	it("loadMore 追加更早历史并更新游标", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const ctx = pi.sessions.context as ReturnType<typeof vi.fn>;
+		ctx.mockResolvedValueOnce({
+			messages: [
+				{ id: "m2", role: "user", content: [] },
+				{ id: "m3", role: "user", content: [] },
+			],
+			nextCursor: "m1",
+		});
+		ctx.mockResolvedValueOnce({
+			messages: [{ id: "m1", role: "user", content: [] }],
+			nextCursor: null,
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+
+		expect(result.current.state.messages.map((m) => m.id)).toEqual([
+			"m2",
+			"m3",
+		]);
+		expect(result.current.state.hasMore).toBe(true);
+
+		await act(async () => result.current.actions.loadMore());
+
+		expect(ctx).toHaveBeenLastCalledWith("c1", "s1", CWD, { cursor: "m1" });
+		expect(result.current.state.messages.map((m) => m.id)).toEqual([
+			"m1",
+			"m2",
+			"m3",
+		]);
+		expect(result.current.state.hasMore).toBe(false);
+		expect(result.current.state.nextCursor).toBeNull();
+	});
+
+	it("loadMore 后对账不丢弃已加载的更早历史", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const ctx = pi.sessions.context as ReturnType<typeof vi.fn>;
+		ctx.mockResolvedValueOnce({
+			messages: [
+				{ id: "m2", role: "user", content: [] },
+				{ id: "m3", role: "user", content: [] },
+			],
+			nextCursor: "m1",
+		});
+		ctx.mockResolvedValueOnce({
+			messages: [{ id: "m1", role: "user", content: [] }],
+			nextCursor: null,
+		});
+		// 对账：最新窗口出现新消息 m4
+		ctx.mockResolvedValueOnce({
+			messages: [
+				{ id: "m2", role: "user", content: [] },
+				{ id: "m3", role: "user", content: [] },
+				{ id: "m4", role: "user", content: [] },
+			],
+			nextCursor: "m1",
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+		await act(async () => result.current.actions.loadMore());
+		expect(result.current.state.hasMore).toBe(false);
+
+		// agent_settled 触发 reloadHistory + refreshState
+		await act(async () => {
+			emit({ type: "agent_settled", sessionId: "s1" });
+		});
+		await waitFor(() => expect(ctx).toHaveBeenCalledTimes(3));
+
+		// 已加载的更早历史保留，最新窗口更新为含 m4
+		expect(result.current.state.messages.map((m) => m.id)).toEqual([
+			"m1",
+			"m2",
+			"m3",
+			"m4",
+		]);
+		// hasMore 不被对账重置回 true
+		expect(result.current.state.hasMore).toBe(false);
 	});
 });

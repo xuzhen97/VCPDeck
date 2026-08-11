@@ -60,6 +60,8 @@ export interface PiSessionActions {
 		sessionId: string,
 		cwdRef: PiCwdRef,
 	): Promise<void>;
+	/** 加载更早的历史消息（追加到消息列表头部）。 */
+	loadMore(): Promise<void>;
 	send(input: { prompt: string; images?: unknown[] }): Promise<void>;
 	steer(message: string): Promise<void>;
 	followUp(message: string): Promise<void>;
@@ -131,6 +133,8 @@ export function usePiSession(
 	const promptGenerationRef = useRef(0);
 	const sessionGenerationRef = useRef(0);
 	const nextCursorRef = useRef<string | null>(null);
+	/** 已加载过更早历史（reloadHistory 合并时不再把 hasMore 重置回最新窗口语义） */
+	const loadedMoreRef = useRef(false);
 	const pendingSubmissionsRef = useRef(new Map<string, number>());
 	const streamRef = useRef<PiEventStream | null>(null);
 	const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,7 +147,10 @@ export function usePiSession(
 		}
 	}, []);
 
-	/** 重新读取历史（generation 守卫：旧 run 结果不覆盖新 run） */
+	/**
+	 * 重新读取最新窗口（generation 守卫：旧 run 结果不覆盖新 run）。
+	 * 已加载的更早历史保持不变（旧消息不会变更），只更新最新窗口部分。
+	 */
 	const reloadHistory = useCallback(async () => {
 		const clientId = clientIdRef.current;
 		const sessionId = sessionIdRef.current;
@@ -152,21 +159,31 @@ export function usePiSession(
 		const sessionGeneration = sessionGenerationRef.current;
 		if (!clientId || !sessionId || !cwdRef) return;
 		try {
-			const page = (await pi.sessions.context(clientId, sessionId, cwdRef, {
-				...(nextCursorRef.current ? { cursor: nextCursorRef.current } : {}),
-			})) as PiSessionContextPage;
+			const page = (await pi.sessions.context(
+				clientId,
+				sessionId,
+				cwdRef,
+			)) as PiSessionContextPage;
 			if (
 				promptGenerationRef.current !== generation ||
 				sessionGenerationRef.current !== sessionGeneration
 			)
 				return; // 旧 run/session 不覆盖
 			nextCursorRef.current = page.nextCursor ?? null;
-			setState((s) => ({
-				...s,
-				messages: page.messages,
-				hasMore: page.nextCursor !== null,
-				nextCursor: page.nextCursor ?? null,
-			}));
+			setState((s) => {
+				const newIds = new Set(page.messages.map((m) => m.id));
+				// 最新窗口外的消息（更早历史）保持不变；分页窗口互不重叠
+				const older = s.messages.filter((m) => !newIds.has(m.id));
+				const messages = [...older, ...page.messages];
+				const firstLoad = s.messages.length === 0;
+				return {
+					...s,
+					messages,
+					// 追加后“更早”游标 = 当前最旧消息；hasMore 只在首载/loadMore 时更新
+					nextCursor: messages.length > 0 ? messages[0]!.id : null,
+					hasMore: firstLoad ? page.nextCursor !== null : s.hasMore,
+				};
+			});
 		} catch {
 			// 忽略：连接恢复后重试
 		}
@@ -445,6 +462,7 @@ export function usePiSession(
 			retiredRunIdsRef.current.clear();
 			rejectedSettlingRunIdRef.current = null;
 			nextCursorRef.current = null;
+			loadedMoreRef.current = false;
 			setState({ ...INITIAL_STATE, status: "loading" });
 
 			const stream = openStream(
@@ -628,10 +646,41 @@ export function usePiSession(
 		[],
 	);
 
+	const loadMore = useCallback(async () => {
+		const clientId = clientIdRef.current;
+		const sessionId = sessionIdRef.current;
+		const cwdRef = cwdRefRef.current;
+		const cursor = nextCursorRef.current;
+		const generation = promptGenerationRef.current;
+		const sessionGeneration = sessionGenerationRef.current;
+		if (!clientId || !sessionId || !cwdRef || !cursor) return;
+		try {
+			const page = (await pi.sessions.context(clientId, sessionId, cwdRef, {
+				cursor,
+			})) as PiSessionContextPage;
+			if (
+				promptGenerationRef.current !== generation ||
+				sessionGenerationRef.current !== sessionGeneration
+			)
+				return; // 旧 run/session 不覆盖
+			loadedMoreRef.current = true;
+			nextCursorRef.current = page.nextCursor ?? null;
+			setState((s) => ({
+				...s,
+				messages: [...page.messages, ...s.messages],
+				hasMore: page.nextCursor !== null,
+				nextCursor: page.nextCursor ?? null,
+			}));
+		} catch {
+			// 静默：可重试
+		}
+	}, [pi]);
+
 	const actions = useMemo<PiSessionActions>(
 		() => ({
 			createSession,
 			openSession,
+			loadMore,
 			send,
 			steer: (message) =>
 				withRun((c, s, runId) => pi.agent.steer(c, s, runId, message)),
@@ -811,6 +860,7 @@ export function usePiSession(
 		[
 			createSession,
 			openSession,
+			loadMore,
 			send,
 			withRun,
 			pi,
