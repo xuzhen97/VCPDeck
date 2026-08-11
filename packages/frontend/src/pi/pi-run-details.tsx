@@ -3,8 +3,8 @@ import { Button } from "@/components/ui/button";
 import type { PiThinkingSelection } from "./use-pi-session.js";
 
 const THINKING_OPTIONS: ReadonlyArray<readonly [PiThinkingSelection, string]> = [
-	["auto", "自动"], ["off", "关闭"], ["minimal", "最低"], ["low", "低"],
-	["medium", "中"], ["high", "高"], ["xhigh", "超高"], ["max", "最大"],
+	["auto", "Auto"], ["off", "Off"], ["minimal", "Minimal"], ["low", "Low"],
+	["medium", "Medium"], ["high", "High"], ["xhigh", "XHigh"], ["max", "Max"],
 ];
 
 function modelValue(model: PiModelInfo | undefined): string {

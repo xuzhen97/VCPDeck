@@ -49,4 +49,21 @@ describe("PiRunDetails", () => {
 		expect(onModelChange).toHaveBeenCalledWith("p", "m2");
 		expect(onThinkingChange).toHaveBeenCalledWith("high");
 	});
+
+	it("思考深度选项显示协议对应的英文标签", () => {
+		renderDetails();
+		const options = Array.from(
+			screen.getByRole("combobox", { name: "思考深度" }).querySelectorAll("option"),
+		).map((option) => option.textContent);
+		expect(options).toEqual([
+			"Auto",
+			"Off",
+			"Minimal",
+			"Low",
+			"Medium",
+			"High",
+			"XHigh",
+			"Max",
+		]);
+	});
 });
