@@ -212,7 +212,7 @@ export function PiProjectPicker({
 	const candidates = useMemo<PiCwdRef[]>(() => {
 		const map = new Map<string, PiCwdRef>();
 		for (const r of myRecent) {
-			if (dismissedRoots.has(r.rootDir)) continue;
+			if (r.relativePath === "" && dismissedRoots.has(r.rootDir)) continue;
 			map.set(keyOf(r), r);
 		}
 		for (const root of roots) {
@@ -345,9 +345,7 @@ export function PiProjectPicker({
 											key={keyOf(c)}
 											className={cn(
 												"group flex w-full items-center rounded text-xs transition",
-												selected
-													? "bg-primary/10"
-													: "hover:bg-secondary/70",
+												selected ? "bg-primary/10" : "hover:bg-secondary/70",
 											)}
 										>
 											<button
@@ -510,7 +508,7 @@ function BrowsePanel({
 		const ac = new AbortController();
 		setLoading(true);
 		files
-			.list(clientId, root, "", ac.signal)
+			.list(clientId, root, path, ac.signal)
 			.then((r) => {
 				if (!ac.signal.aborted) setEntries(r.entries);
 			})
@@ -521,7 +519,7 @@ function BrowsePanel({
 				if (!ac.signal.aborted) setLoading(false);
 			});
 		return () => ac.abort();
-	}, [root, clientId, files]);
+	}, [root, path, clientId, files]);
 
 	const enter = useCallback(
 		(name: string) => {

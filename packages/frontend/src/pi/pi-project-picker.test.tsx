@@ -125,6 +125,39 @@ describe("PiProjectPicker", () => {
 		});
 	});
 
+	it("浏览文件夹：点击目录后按当前路径加载下级目录", async () => {
+		const files: PiFilesApiLike = {
+			roots: vi.fn(async () => ["D:\\"]),
+			list: vi.fn(async (_clientId, _rootDir, relativePath) => ({
+				entries:
+					relativePath === ""
+						? [{ name: "OptiMinderHub", kind: "dir" as const }]
+						: [{ name: "src", kind: "dir" as const }],
+			})),
+		};
+		renderPicker({ files });
+		fireEvent.click(screen.getByRole("button", { name: /未选择项目/ }));
+		const dialog = await screen.findByRole("dialog");
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "浏览文件夹..." }),
+		);
+		fireEvent.click(
+			await within(dialog).findByRole("button", { name: /OptiMinderHub/ }),
+		);
+
+		await vi.waitFor(() => {
+			expect(files.list).toHaveBeenLastCalledWith(
+				"c1",
+				"D:\\",
+				"OptiMinderHub",
+				expect.any(AbortSignal),
+			);
+		});
+		expect(
+			await within(dialog).findByRole("button", { name: /src/ }),
+		).toBeInTheDocument();
+	});
+
 	it("自定义路径：root 下子路径经 Client list 校验后写入", async () => {
 		const onSelect = vi.fn();
 		const files = makeFiles(["D:\\"]);
@@ -287,7 +320,10 @@ describe("PiProjectPicker", () => {
 	});
 
 	it("dismissed roots 启动后从下拉中隐藏", async () => {
-		localStorage.setItem("vcpdeck:pi-dismissed-roots", JSON.stringify(["D:\\"]));
+		localStorage.setItem(
+			"vcpdeck:pi-dismissed-roots",
+			JSON.stringify(["D:\\"]),
+		);
 		const files = makeFiles(["D:\\", "E:\\"]);
 		renderPicker({ files });
 		fireEvent.click(screen.getByRole("button", { name: /未选择项目/ }));
@@ -300,5 +336,35 @@ describe("PiProjectPicker", () => {
 		expect(
 			within(dialog).getByRole("button", { name: "从下拉中移除 E:\\" }),
 		).toBeTruthy();
+	});
+
+	it("已隐藏 root 后，通过浏览选择的子目录仍会出现在历史项目中", async () => {
+		localStorage.setItem(
+			"vcpdeck:pi-dismissed-roots",
+			JSON.stringify(["D:\\"]),
+		);
+		const files = makeFiles(["D:\\"], [
+			{ name: "OptiMinderHub", kind: "dir" },
+		]);
+		renderPicker({ files });
+
+		fireEvent.click(screen.getByRole("button", { name: /未选择项目/ }));
+		let dialog = await screen.findByRole("dialog");
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "浏览文件夹..." }),
+		);
+		fireEvent.click(await within(dialog).findByRole("button", { name: "选择" }));
+		expect(screen.queryByRole("dialog")).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: /未选择项目/ }));
+		dialog = await screen.findByRole("dialog");
+		expect(
+			within(dialog).getByRole("button", {
+				name: "从下拉中移除 D:\\OptiMinderHub",
+			}),
+		).toBeTruthy();
+		expect(
+			within(dialog).queryByRole("button", { name: "从下拉中移除 D:\\" }),
+		).toBeNull();
 	});
 });
