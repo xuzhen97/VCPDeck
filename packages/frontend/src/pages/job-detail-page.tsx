@@ -23,7 +23,13 @@ export function JobDetailPage() {
 	return <JobDetail job={resource.data} onChanged={resource.reload} />;
 }
 
-function JobDetail({ job, onChanged }: { job: JobInfo; onChanged: () => void }) {
+function JobDetail({
+	job,
+	onChanged,
+}: {
+	job: JobInfo;
+	onChanged: () => void;
+}) {
 	const stdout = job.result?.stdout as string | undefined;
 	const stderr = job.result?.stderr as string | undefined;
 	return (

@@ -41,17 +41,40 @@ function job(overrides: Partial<JobInfo>): JobInfo {
 
 it("shows Session Job labels and supports the idle filter", async () => {
 	const list = vi.fn().mockResolvedValue({
-		data: [job({ type: "agent.session", status: "idle" as JobInfo["status"], payload: { sessionId: "s1" } })],
-		total: 1, page: 1, pageSize: 20, totalPages: 1,
+		data: [
+			job({
+				type: "agent.session",
+				status: "idle" as JobInfo["status"],
+				payload: { sessionId: "s1" },
+			}),
+		],
+		total: 1,
+		page: 1,
+		pageSize: 20,
+		totalPages: 1,
 	});
-	const client = { auth: { me: async () => identity }, jobs: { list } } as unknown as VcpDeckClient;
-	render(<MemoryRouter><SdkProvider client={client}><AuthProvider><JobsPage /></AuthProvider></SdkProvider></MemoryRouter>);
+	const client = {
+		auth: { me: async () => identity },
+		jobs: { list },
+	} as unknown as VcpDeckClient;
+	render(
+		<MemoryRouter>
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<JobsPage />
+				</AuthProvider>
+			</SdkProvider>
+		</MemoryRouter>,
+	);
 	expect((await screen.findAllByText("Pi 会话"))[0]).toBeVisible();
 	expect(screen.getAllByText("空闲")[0]).toBeVisible();
 	await userEvent.selectOptions(screen.getByLabelText("按状态筛选"), "idle");
-	await waitFor(() => expect(list).toHaveBeenLastCalledWith(
-		{ clientId: undefined, status: "idle", page: 1, pageSize: 20 }, expect.any(AbortSignal),
-	));
+	await waitFor(() =>
+		expect(list).toHaveBeenLastCalledWith(
+			{ clientId: undefined, status: "idle", page: 1, pageSize: 20 },
+			expect.any(AbortSignal),
+		),
+	);
 });
 
 it("shows the global jobs table and filters status through the paginated API", async () => {
@@ -487,7 +510,5 @@ it("从抽屉把 Pi 会话标记为完成并回填抽屉", async () => {
 	);
 	await userEvent.click(screen.getByRole("button", { name: "确认完成" }));
 	await waitFor(() => expect(get).toHaveBeenCalledWith("s1"));
-	await waitFor(() =>
-		expect(within(dialog).getByText("已完成")).toBeVisible(),
-	);
+	await waitFor(() => expect(within(dialog).getByText("已完成")).toBeVisible());
 });

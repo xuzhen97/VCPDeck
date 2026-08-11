@@ -46,14 +46,17 @@ export function MarkDoneButton({
 		setBusy(true);
 		setError(undefined);
 		try {
-			await sdk.pi.agent.complete(job.clientId, job.jobId, undefined, next.signal);
+			await sdk.pi.agent.complete(
+				job.clientId,
+				job.jobId,
+				undefined,
+				next.signal,
+			);
 			setOpen(false);
 			onChanged();
 		} catch (reason) {
 			if (!next.signal.aborted) {
-				setError(
-					reason instanceof Error ? reason.message : String(reason),
-				);
+				setError(reason instanceof Error ? reason.message : String(reason));
 			}
 		} finally {
 			if (!next.signal.aborted) setBusy(false);

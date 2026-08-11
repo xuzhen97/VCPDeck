@@ -225,13 +225,13 @@ function JobRow({
 					>
 						查看详情
 					</Button>
-						<JobCancelButton job={job} onChanged={onChanged} stopPropagation />
-						<MarkDoneButton
-							job={job}
-							onChanged={onChanged}
-							stopPropagation
-							size="sm"
-						/>
+					<JobCancelButton job={job} onChanged={onChanged} stopPropagation />
+					<MarkDoneButton
+						job={job}
+						onChanged={onChanged}
+						stopPropagation
+						size="sm"
+					/>
 				</div>
 			</td>
 		</tr>
@@ -496,7 +496,9 @@ function statusLabel(status: string): string {
 	);
 }
 
-function statusTone(status: string): "success" | "danger" | "warning" | "neutral" {
+function statusTone(
+	status: string,
+): "success" | "danger" | "warning" | "neutral" {
 	if (status === "done") return "success";
 	if (status === "error" || status === "cancelled") return "danger";
 	if (status === "idle") return "neutral";

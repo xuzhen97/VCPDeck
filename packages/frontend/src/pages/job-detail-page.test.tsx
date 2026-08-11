@@ -160,7 +160,10 @@ it("Pi 会话任务可从头部标记完成并重新加载", async () => {
 	const complete = vi.fn().mockImplementation(async () => {
 		current = { ...session, status: JobStatus.DONE };
 	});
-	renderDetail(session, vi.fn(), { jobs: { get }, pi: { agent: { complete } } });
+	renderDetail(session, vi.fn(), {
+		jobs: { get },
+		pi: { agent: { complete } },
+	});
 
 	const button = await screen.findByRole("button", { name: "标记完成" });
 	await userEvent.click(button);
