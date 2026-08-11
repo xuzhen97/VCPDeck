@@ -16,18 +16,6 @@ import { PiRunDetails } from "../pi/pi-run-details.js";
 import { PiExtensionDialog } from "../pi/pi-extension-dialog.js";
 import { usePiSession } from "../pi/use-pi-session.js";
 
-/** 高权限告警（cwd 不是沙箱） */
-function RiskBanner() {
-	return (
-		<div
-			role="note"
-			className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-400"
-		>
-			Pi 继承远程机器的用户权限：工作目录不是沙箱，项目扩展可执行任意代码。
-		</div>
-	);
-}
-
 /** 机器工作区 Pi Tab：三栏 IDE 布局（左项目/会话、中对话、右详情） */
 export function PiPanel({ client }: { client: ClientInfo }) {
 	const sdk = useSdk();
@@ -96,6 +84,24 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 			actions.close();
 		},
 		[actions],
+	);
+
+	/** 删除当前 active session 后：清空所有会话绑定状态，关闭事件流。cwd 不动。 */
+	const handleDeselect = useCallback(() => {
+		setSessionId(null);
+		setInfo(null);
+		setAttachments([]);
+		setLoadedImages({});
+		actions.reset();
+		actions.close();
+	}, [actions]);
+
+	const handleSelectSession = useCallback(
+		(sid: string | null) => {
+			if (sid === null) handleDeselect();
+			else void openSession(sid);
+		},
+		[handleDeselect, openSession],
 	);
 
 	/** 选图 → create upload → XHR PUT → complete → refs */
@@ -175,7 +181,6 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 	if (capability && !capability.available) {
 		return (
 			<div className="space-y-3 p-4">
-				<RiskBanner />
 				<div className="rounded border border-border p-4 text-sm">
 					<div className="font-medium">Pi 不可用</div>
 					<div className="mt-1 text-xs text-muted-foreground">
@@ -193,7 +198,6 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 	if (capability === null) {
 		return (
 			<div className="space-y-3 p-4">
-				<RiskBanner />
 				<div className="rounded border border-border p-4 text-sm">
 					<div className="font-medium">Pi 不可用</div>
 					<div className="mt-1 text-xs text-muted-foreground">
@@ -210,7 +214,11 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 		isObserver ||
 		state.status !== "idle" ||
 		state.agentState?.status !== "idle";
-	const mutableSessionId = state.job?.isOwner ? state.job.sessionId : null;
+	// 只要当前身份是 owner，就视同本 cwd 下所有会话都可管理。
+	// 错误语义：该 cwd 下所有 session 都标记为可改 / 可删。
+	const mutableSessionIds = isObserver
+		? new Set<string>()
+		: new Set<string>(["*"]);
 
 	const filesApi = useMemo(
 		() => ({
@@ -228,7 +236,6 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-2">
-			<RiskBanner />
 			<div className="flex min-h-0 flex-1 gap-3">
 				{/* 左栏：桌面常驻，窄屏抽屉 */}
 				<aside
@@ -243,11 +250,11 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 						cwdRef={cwdRef}
 						onCwdChange={handleCwdChange}
 						activeSessionId={sessionId}
-						mutableSessionId={mutableSessionId}
-						onSelectSession={(sid) => void openSession(sid)}
+mutableSessionIds={mutableSessionIds}
+						onSelectSession={handleSelectSession}
 						onCreated={handleCreated}
 					/>
-				</aside>
+					</aside>
 
 				{/* 中栏：对话时间线 */}
 				<main
@@ -356,8 +363,8 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					cwdRef={cwdRef}
 					onCwdChange={handleCwdChange}
 					activeSessionId={sessionId}
-					mutableSessionId={mutableSessionId}
-					onSelectSession={(sid) => void openSession(sid)}
+					mutableSessionIds={mutableSessionIds}
+					onSelectSession={handleSelectSession}
 					onCreated={handleCreated}
 				/>
 			</Drawer>

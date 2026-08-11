@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { PiPanel } from "./pi-panel.js";
 import { SdkProvider } from "@/api/context";
 import type { ClientInfo } from "@vcpdeck/shared";
@@ -83,10 +83,32 @@ function makeSdk() {
 			agent: {
 				newSession: vi.fn(async () => ({ sessionId: "s1", jobId: "s1" })),
 				open: vi.fn(async (_clientId: string, sessionId: string) => ({
-					job: { jobId: sessionId, sessionId, status: "idle", runId: null, ownerName: "User", isOwner: true },
-					agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+					job: {
+						jobId: sessionId,
+						sessionId,
+						status: "idle",
+						runId: null,
+						ownerName: "User",
+						isOwner: true,
+					},
+					agentState: {
+						status: "idle",
+						streaming: false,
+						prompting: false,
+						compacting: false,
+						thinkingLevel: "off",
+						model: { provider: "p", modelId: "m1" },
+						queuedMessages: { steering: [], followUp: [] },
+					},
 				})),
-				complete: vi.fn(async (_clientId: string, sessionId: string) => ({ jobId: sessionId, sessionId, status: "done", runId: null, ownerName: "User", isOwner: true })),
+				complete: vi.fn(async (_clientId: string, sessionId: string) => ({
+					jobId: sessionId,
+					sessionId,
+					status: "done",
+					runId: null,
+					ownerName: "User",
+					isOwner: true,
+				})),
 				state: vi.fn(async () => ({
 					status: "idle",
 					streaming: false,
@@ -131,6 +153,20 @@ function renderPanel(client: ClientInfo, sdk = makeSdk()) {
 	return { sdk, view };
 }
 
+/** 通过“自定义路径”选择 cwd：点击触发器 → 自定义路径 → 输入路径 → 选择。 */
+async function selectCwd(path: string) {
+	const triggers = screen.getAllByRole("button", {
+		name: /未选择项目|D:\\/,
+	});
+	await triggers[0]!.click();
+	const dialog = (await screen.findAllByRole("dialog"))[0]!;
+	await within(dialog).getByRole("button", { name: "自定义路径..." }).click();
+	const input = screen.getByLabelText("自定义路径");
+	fireEvent.change(input, { target: { value: path } });
+	const chooseButtons = screen.getAllByRole("button", { name: "选择" });
+	await chooseButtons[chooseButtons.length - 1]!.click();
+}
+
 afterEach(() => {
 	vi.unstubAllGlobals();
 	MockEventSource.instances = [];
@@ -144,12 +180,6 @@ describe("PiPanel", () => {
 		expect(screen.getByTestId("pi-left-panel")).toBeTruthy();
 		expect(screen.getByTestId("pi-center-panel")).toBeTruthy();
 		expect(screen.getByTestId("pi-right-panel")).toBeTruthy();
-	});
-
-	it("显示高权限告警", () => {
-		vi.stubGlobal("EventSource", MockEventSource);
-		renderPanel(makeClient());
-		expect(screen.getByText(/不是沙箱/)).toBeTruthy();
 	});
 
 	it("能力不可用时显示原因并禁用输入", () => {
@@ -180,16 +210,11 @@ describe("PiPanel", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const { sdk } = renderPanel(makeClient());
 
-		await screen.getAllByText("选择")[0]!.click();
-		await screen.findByText("D:\\");
-		await screen.getByText("D:\\").click();
-		await screen.findByText("📁 repo");
-		await screen.getByText("📁 repo").click();
+		await selectCwd("D:\\repo");
 		await vi.waitFor(() =>
 			expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0),
 		);
-		await screen.getByText("选择此目录").click();
-		await screen.getAllByText("新建")[0]!.click();
+		await screen.getAllByText("+ 新建会话")[0]!.click();
 		await vi.waitFor(() => expect(sdk.pi.agent.newSession).toHaveBeenCalled());
 		await vi.waitFor(() =>
 			expect(
@@ -235,21 +260,40 @@ describe("PiPanel", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const sdk = makeSdk();
 		(sdk.pi.sessions.list as ReturnType<typeof vi.fn>).mockResolvedValue([
-			{ id: "s1", name: "observed", firstMessage: null, messageCount: 1, modified: "2026-08-08T00:00:00.000Z", running: true },
+			{
+				id: "s1",
+				name: "observed",
+				firstMessage: null,
+				messageCount: 1,
+				modified: "2026-08-08T00:00:00.000Z",
+				running: true,
+			},
 		]);
 		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: { jobId: "s1", sessionId: "s1", status: "running", runId: "run-1", ownerName: "Other", isOwner: false },
-			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+			job: {
+				jobId: "s1",
+				sessionId: "s1",
+				status: "running",
+				runId: "run-1",
+				ownerName: "Other",
+				isOwner: false,
+			},
+			agentState: {
+				status: "running",
+				streaming: true,
+				prompting: true,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
 		});
 		renderPanel(makeClient(), sdk);
 
-		await screen.getAllByText("选择")[0]!.click();
-		await screen.findByText("D:\\");
-		await screen.getByText("D:\\").click();
-		await screen.findByText("📁 repo");
-		await screen.getByText("📁 repo").click();
-		await vi.waitFor(() => expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0));
-		await screen.getByText("选择此目录").click();
+		await selectCwd("D:\\repo");
+		await vi.waitFor(() =>
+			expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0),
+		);
 		await screen.findAllByText("observed");
 		await screen.getAllByText("observed")[0]!.click();
 		await vi.waitFor(() => expect(sdk.pi.agent.open).toHaveBeenCalled());
@@ -265,7 +309,9 @@ describe("PiPanel", () => {
 		expect(screen.queryByRole("button", { name: "Fork" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "删除" })).toBeNull();
 		expect(screen.getAllByRole("combobox", { name: "模型" })[0]).toBeDisabled();
-		expect(screen.getAllByRole("combobox", { name: "思考深度" })[0]).toBeDisabled();
+		expect(
+			screen.getAllByRole("combobox", { name: "思考深度" })[0],
+		).toBeDisabled();
 
 		expect(sdk.pi.agent.prompt).not.toHaveBeenCalled();
 		expect(sdk.pi.agent.steer).not.toHaveBeenCalled();
@@ -285,20 +331,39 @@ describe("PiPanel", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const sdk = makeSdk();
 		(sdk.pi.sessions.list as ReturnType<typeof vi.fn>).mockResolvedValue([
-			{ id: "s1", name: "owned", firstMessage: null, messageCount: 1, modified: "2026-08-08T00:00:00.000Z", running: true },
+			{
+				id: "s1",
+				name: "owned",
+				firstMessage: null,
+				messageCount: 1,
+				modified: "2026-08-08T00:00:00.000Z",
+				running: true,
+			},
 		]);
 		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: { jobId: "s1", sessionId: "s1", status: "running", runId: "run-1", ownerName: "User", isOwner: true },
-			agentState: { status: "running", streaming: true, prompting: true, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
+			job: {
+				jobId: "s1",
+				sessionId: "s1",
+				status: "running",
+				runId: "run-1",
+				ownerName: "User",
+				isOwner: true,
+			},
+			agentState: {
+				status: "running",
+				streaming: true,
+				prompting: true,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
 		});
 		renderPanel(makeClient(), sdk);
-		await screen.getAllByText("选择")[0]!.click();
-		await screen.findByText("D:\\");
-		await screen.getByText("D:\\").click();
-		await screen.findByText("📁 repo");
-		await screen.getByText("📁 repo").click();
-		await vi.waitFor(() => expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0));
-		await screen.getByText("选择此目录").click();
+		await selectCwd("D:\\repo");
+		await vi.waitFor(() =>
+			expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0),
+		);
 		await screen.findAllByText("owned");
 		await screen.getAllByText("owned")[0]!.click();
 		await vi.waitFor(() =>
@@ -306,13 +371,30 @@ describe("PiPanel", () => {
 		);
 
 		MockEventSource.instances.at(-1)?.onmessage?.({
-			data: JSON.stringify({ type: "extension_request", sessionId: "s1", runId: "run-1", ui: { requestId: "u1", extensionId: "e", kind: "confirm", message: "continue?" } }),
+			data: JSON.stringify({
+				type: "extension_request",
+				sessionId: "s1",
+				runId: "run-1",
+				ui: {
+					requestId: "u1",
+					extensionId: "e",
+					kind: "confirm",
+					message: "continue?",
+				},
+			}),
 		});
 		await vi.waitFor(() =>
 			expect(screen.getAllByText("等待扩展输入").length).toBeGreaterThan(0),
 		);
 		MockEventSource.instances.at(-1)?.onmessage?.({
-			data: JSON.stringify({ type: "extension_resolved", sessionId: "s1", runId: "run-1", requestId: "u1", reason: "answered", hasPending: false }),
+			data: JSON.stringify({
+				type: "extension_resolved",
+				sessionId: "s1",
+				runId: "run-1",
+				requestId: "u1",
+				reason: "answered",
+				hasPending: false,
+			}),
 		});
 		await vi.waitFor(() =>
 			expect(screen.getAllByText("运行中").length).toBeGreaterThan(0),
@@ -324,21 +406,14 @@ describe("PiPanel", () => {
 		const { sdk, view } = renderPanel(makeClient());
 		void view;
 
-		// 打开项目选择器
-		await screen.getAllByText("选择")[0]!.click();
-		// 选择 D:\ 根 → repo 目录 → 选择此目录
-		await screen.findByText("D:\\");
-		await screen.getByText("D:\\").click();
-		await screen.findByText("📁 repo");
-		await screen.getByText("📁 repo").click();
+		// 打开项目选择器 → 选择 D:\repo
+		await selectCwd("D:\\repo");
 		await vi.waitFor(() => {
 			expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0);
 		});
-		await screen.getByText("选择此目录").click();
-		expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0);
 
 		// 新建会话
-		await screen.getAllByText("新建")[0]!.click();
+		await screen.getAllByText("+ 新建会话")[0]!.click();
 		await vi.waitFor(() => {
 			expect(sdk.pi.agent.newSession).toHaveBeenCalledWith("c1", {
 				rootDir: "D:\\",
@@ -346,5 +421,91 @@ describe("PiPanel", () => {
 			});
 		});
 		expect(MockEventSource.instances.length).toBeGreaterThan(0);
+	});
+
+	it("删除当前 active session：右侧对话/详情同步清空，事件流关闭", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const sdk = makeSdk();
+		(sdk.pi.sessions.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{
+				id: "s1",
+				name: "owned",
+				firstMessage: null,
+				messageCount: 1,
+				modified: "2026-08-08T00:00:00.000Z",
+				running: true,
+			},
+		]);
+		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
+			job: {
+				jobId: "s1",
+				sessionId: "s1",
+				status: "running",
+				runId: "run-1",
+				ownerName: "User",
+				isOwner: true,
+			},
+			agentState: {
+				status: "running",
+				streaming: true,
+				prompting: true,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
+		});
+		(sdk.pi.sessions.context as ReturnType<typeof vi.fn>).mockResolvedValue({
+			messages: [],
+			nextCursor: null,
+		});
+		renderPanel(makeClient(), sdk);
+		await selectCwd("D:\\repo");
+		await vi.waitFor(() =>
+			expect(screen.getAllByText("D:\\repo").length).toBeGreaterThan(0),
+		);
+		await screen.findAllByText("owned");
+		await screen.getAllByText("owned")[0]!.click();
+		await vi.waitFor(
+			() => expect(screen.getAllByText("运行中").length).toBeGreaterThan(0),
+			{ timeout: 3000 },
+		);
+
+		// 打开 ⋯ 菜单，点删除，确认。
+		const ownedCard = screen.getAllByText("owned")[0]!.closest("li")!;
+		fireEvent.click(within(ownedCard).getByRole("button", { name: "操作" }));
+		fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+		fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+
+		// 后端 delete 被调用，事件流被关闭。
+		await vi.waitFor(() =>
+			expect(sdk.pi.sessions.delete).toHaveBeenCalledWith(
+				"c1",
+				"s1",
+				{ rootDir: "D:\\", relativePath: "repo" },
+			),
+		);
+		const lastStream = MockEventSource.instances.at(-1)!;
+		await vi.waitFor(() => expect(lastStream.closed).toBe(true));
+
+		// 对话窗：恢复“开始一段新的 Pi 会话”提示。
+		await vi.waitFor(() =>
+			expect(
+				screen.getAllByText("开始一段新的 Pi 会话").length,
+			).toBeGreaterThan(0),
+		);
+
+		// 右侧详情：状态不再显示 “运行中”，恢复为空闲。
+		await vi.waitFor(() =>
+			expect(screen.queryAllByText("运行中")).toHaveLength(0),
+		);
+		await vi.waitFor(() =>
+			expect(
+				screen.getAllByText("空闲，可继续提问").length,
+			).toBeGreaterThan(0),
+		);
+
+		// 输入框已被禁用（无 active session）。
+		expect(screen.getByRole("textbox", { name: "Pi 输入" })).toBeDisabled();
 	});
 });

@@ -78,6 +78,8 @@ export interface PiSessionActions {
 	fork(messageId: string): Promise<void>;
 	clone(): Promise<void>;
 	complete(): Promise<void>;
+	/** 重置内部状态（用于删除会话后清空会话相关 UI）。 */
+	reset(): void;
 	close(): void;
 }
 
@@ -224,6 +226,11 @@ export function usePiSession(
 		clearGrace();
 		if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current);
 	}, [clearGrace]);
+
+	/** 清空所有会话相关 UI 状态（消息、运行详情、扩展请求等）。保留 stream/timers。 */
+	const reset = useCallback(() => {
+		setState({ ...INITIAL_STATE });
+	}, []);
 
 	useEffect(() => close, [close]);
 
@@ -384,7 +391,8 @@ export function usePiSession(
 								return;
 							case "extension_resolved":
 								setState((s) => {
-									if (s.pendingExtension?.requestId !== event.requestId) return s;
+									if (s.pendingExtension?.requestId !== event.requestId)
+										return s;
 									const hasPending = event.hasPending === true;
 									return {
 										...s,
@@ -449,16 +457,22 @@ export function usePiSession(
 			if (sessionGenerationRef.current !== sessionGeneration) return;
 
 			// /open 补建并返回权威 Session Job；历史和模型只补充展示细节。
-			const modelsPromise = pi.models(clientId, cwdRef).catch((err: unknown) => {
-				if (sessionGenerationRef.current !== sessionGeneration) return null;
-				setState((s) => ({
-					...s,
-					error: err instanceof Error ? err.message : String(err),
-				}));
-				return null;
-			});
+			const modelsPromise = pi
+				.models(clientId, cwdRef)
+				.catch((err: unknown) => {
+					if (sessionGenerationRef.current !== sessionGeneration) return null;
+					setState((s) => ({
+						...s,
+						error: err instanceof Error ? err.message : String(err),
+					}));
+					return null;
+				});
 			const [openResult, , models] = await Promise.all([
-				pi.agent.open(clientId, sessionId, cwdRef) as Promise<PiSessionOpenResult>,
+				pi.agent.open(
+					clientId,
+					sessionId,
+					cwdRef,
+				) as Promise<PiSessionOpenResult>,
 				reloadHistory(),
 				modelsPromise,
 			]);
@@ -467,7 +481,9 @@ export function usePiSession(
 			activeRunIdRef.current = job.runId;
 			isOwnerRef.current = job.isOwner;
 			if (job.runId) retiredRunIdsRef.current.delete(job.runId);
-			const pendingExtension = job.runId ? agentState.pendingExtension ?? null : null;
+			const pendingExtension = job.runId
+				? (agentState.pendingExtension ?? null)
+				: null;
 			setState((s) => ({
 				...s,
 				job,
@@ -508,7 +524,8 @@ export function usePiSession(
 					rejectedSettlingRunIdRef.current === activeRunIdRef.current) ||
 				(!(["idle", "done"] as PiSessionStatus[]).includes(
 					stateRef.current.status,
-				) && !graceTimerRef.current)
+				) &&
+					!graceTimerRef.current)
 			)
 				return;
 			const stream = streamRef.current;
@@ -564,8 +581,7 @@ export function usePiSession(
 					promptGenerationRef.current === generation
 				) {
 					const restoreSettlingRun =
-						settlingRunId !== null &&
-						activeRunIdRef.current === settlingRunId;
+						settlingRunId !== null && activeRunIdRef.current === settlingRunId;
 					if (restoreSettlingRun) {
 						rejectedSettlingRunIdRef.current = settlingRunId;
 						scheduleGrace();
@@ -577,7 +593,11 @@ export function usePiSession(
 									status: "running" as const,
 									runId: settlingRunId,
 									job: s.job
-										? { ...s.job, status: "running" as const, runId: settlingRunId }
+										? {
+												...s.job,
+												status: "running" as const,
+												runId: settlingRunId,
+											}
 										: s.job,
 								}
 							: { status: "idle" as const }),
@@ -670,7 +690,7 @@ export function usePiSession(
 					throw err;
 				}
 			},
-				setThinking: async (level) => {
+			setThinking: async (level) => {
 				if (level === "auto") {
 					setState((s) => ({ ...s, thinkingSelection: "auto", error: null }));
 					return;
@@ -729,7 +749,12 @@ export function usePiSession(
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;
 				const cwdRef = cwdRefRef.current;
-				if (!clientId || !sessionId || !cwdRef || !stateRef.current.job?.isOwner)
+				if (
+					!clientId ||
+					!sessionId ||
+					!cwdRef ||
+					!stateRef.current.job?.isOwner
+				)
 					return;
 				await pi.sessions.navigate(clientId, sessionId, cwdRef, targetId);
 			},
@@ -737,7 +762,12 @@ export function usePiSession(
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;
 				const cwdRef = cwdRefRef.current;
-				if (!clientId || !sessionId || !cwdRef || !stateRef.current.job?.isOwner)
+				if (
+					!clientId ||
+					!sessionId ||
+					!cwdRef ||
+					!stateRef.current.job?.isOwner
+				)
 					return;
 				await pi.sessions.fork(clientId, sessionId, cwdRef, messageId);
 			},
@@ -745,7 +775,12 @@ export function usePiSession(
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;
 				const cwdRef = cwdRefRef.current;
-				if (!clientId || !sessionId || !cwdRef || !stateRef.current.job?.isOwner)
+				if (
+					!clientId ||
+					!sessionId ||
+					!cwdRef ||
+					!stateRef.current.job?.isOwner
+				)
 					return;
 				await pi.sessions.clone(clientId, sessionId, cwdRef);
 			},
@@ -771,6 +806,7 @@ export function usePiSession(
 				}));
 			},
 			close,
+			reset,
 		}),
 		[
 			createSession,
@@ -781,6 +817,7 @@ export function usePiSession(
 			clearGrace,
 			close,
 			refreshState,
+			reset,
 		],
 	);
 
