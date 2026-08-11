@@ -28,4 +28,14 @@ describe("PiChatInput", () => {
 		renderInput({ status });
 		expect(screen.getByRole("textbox", { name: "Pi 输入" })).toBeEnabled();
 	});
+
+	it("输入区附件按钮、文本框和发送按钮使用统一高度类", () => {
+		renderInput();
+
+		expect(screen.getByText("🖼️ 添加")).toHaveClass("h-11");
+		expect(screen.getByRole("textbox", { name: "Pi 输入" })).toHaveClass(
+			"min-h-11",
+		);
+		expect(screen.getByRole("button", { name: "发送" })).toHaveClass("h-11");
+	});
 });

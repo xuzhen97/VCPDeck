@@ -62,9 +62,9 @@ export function PiChatInput({
 	}, [running, disabled, onAbort]);
 
 	return (
-		<div className="space-y-1.5 border-t border-border pt-2">
+		<div className="space-y-2 border-t border-border/70 bg-background/35 px-3 py-3 backdrop-blur">
 			{running && !disabled && (
-				<div className="flex items-center gap-1.5 text-xs">
+				<div className="flex flex-wrap items-center gap-1.5 text-xs">
 					<Button
 						type="button"
 						size="sm"
@@ -100,7 +100,7 @@ export function PiChatInput({
 					>
 						中止
 					</Button>
-					<span className="ml-1 text-muted-foreground">
+					<span className="ml-1 rounded-full bg-secondary/60 px-2 py-1 text-muted-foreground">
 						{mode === "steer"
 							? "Steer 模式"
 							: mode === "followUp"
@@ -114,7 +114,7 @@ export function PiChatInput({
 					{attachments.map((a, i) => (
 						<span
 							key={`${a.name}-${i}`}
-							className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px]"
+							className="flex items-center gap-1 rounded-full border border-border/70 bg-card/65 px-2 py-1 text-[10px] text-muted-foreground shadow-sm"
 						>
 							{a.status === "uploading"
 								? "⏳"
@@ -125,7 +125,7 @@ export function PiChatInput({
 							{onRemoveAttachment && !disabled && promptable && (
 								<button
 									type="button"
-									className="text-muted-foreground"
+									className="rounded-full px-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
 									onClick={() => onRemoveAttachment(i)}
 									aria-label={`移除附件 ${a.name}`}
 								>
@@ -136,9 +136,9 @@ export function PiChatInput({
 					))}
 				</div>
 			)}
-			<div className="flex items-end gap-2">
+			<div className="flex items-end gap-2 rounded-2xl border border-border/70 bg-card/70 p-2 shadow-sm backdrop-blur focus-within:ring-2 focus-within:ring-ring/30">
 				{onPickFiles && !disabled && promptable && (
-					<label className="shrink-0 cursor-pointer rounded border border-border px-2 py-1.5 text-xs">
+					<label className="flex h-11 shrink-0 cursor-pointer items-center rounded-xl border border-border/70 bg-background/60 px-3 text-xs text-muted-foreground transition hover:bg-secondary/60 hover:text-foreground">
 						🖼️ 添加
 						<input
 							type="file"
@@ -169,7 +169,7 @@ export function PiChatInput({
 									? "运行错误，请先标记完成"
 									: "输入消息，Enter 发送，Shift+Enter 换行"
 					}
-					className="min-h-10 flex-1 resize-none rounded border border-border bg-background p-2 text-sm disabled:opacity-50"
+					className="min-h-11 flex-1 resize-none rounded-xl border border-input bg-background/75 px-3 py-2 text-sm leading-6 transition placeholder:text-muted-foreground/80 focus:border-ring focus:outline-none disabled:opacity-50"
 					onChange={(e) => setText(e.target.value)}
 					onKeyDown={(e) => {
 						if (e.key === "Enter" && !e.shiftKey) {
@@ -179,7 +179,12 @@ export function PiChatInput({
 					}}
 					aria-label="Pi 输入"
 				/>
-				<Button type="button" disabled={!canSend} onClick={submit}>
+				<Button
+					type="button"
+					className="h-11 shrink-0 px-5"
+					disabled={!canSend}
+					onClick={submit}
+				>
 					{running ? "运行中" : mode === "prompt" ? "发送" : "发送"}
 				</Button>
 			</div>
