@@ -343,9 +343,7 @@ describe("PiProjectPicker", () => {
 			"vcpdeck:pi-dismissed-roots",
 			JSON.stringify(["D:\\"]),
 		);
-		const files = makeFiles(["D:\\"], [
-			{ name: "OptiMinderHub", kind: "dir" },
-		]);
+		const files = makeFiles(["D:\\"], [{ name: "OptiMinderHub", kind: "dir" }]);
 		renderPicker({ files });
 
 		fireEvent.click(screen.getByRole("button", { name: /未选择项目/ }));
@@ -353,7 +351,9 @@ describe("PiProjectPicker", () => {
 		fireEvent.click(
 			within(dialog).getByRole("button", { name: "浏览文件夹..." }),
 		);
-		fireEvent.click(await within(dialog).findByRole("button", { name: "选择" }));
+		fireEvent.click(
+			await within(dialog).findByRole("button", { name: "选择" }),
+		);
 		expect(screen.queryByRole("dialog")).toBeNull();
 
 		fireEvent.click(screen.getByRole("button", { name: /未选择项目/ }));

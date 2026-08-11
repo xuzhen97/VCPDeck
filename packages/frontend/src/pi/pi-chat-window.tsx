@@ -34,7 +34,9 @@ function ProcessDetails({ group }: { group: PiTurnGroup }) {
 				<span className="ml-auto min-w-0 truncate text-muted-foreground">
 					{toolNames.join(", ")}
 				</span>
-				<span className="shrink-0 text-primary">{expanded ? "收起" : "展开"}</span>
+				<span className="shrink-0 text-primary">
+					{expanded ? "收起" : "展开"}
+				</span>
 			</button>
 			{expanded && (
 				<div className="pi-chat-fade-in space-y-1.5 border-t border-border/60 bg-background/35 px-2.5 py-2">
@@ -153,7 +155,10 @@ export function PiChatWindow({
 					</div>
 				)}
 				{state.status === "loading" && (
-					<div className="flex justify-center py-16" data-testid="pi-history-loading">
+					<div
+						className="flex justify-center py-16"
+						data-testid="pi-history-loading"
+					>
 						<div className="pi-chat-fade-in inline-flex items-center gap-3 rounded-full border border-border/70 bg-card/70 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur">
 							<LoadingDots />
 							<span>正在加载历史消息…</span>
