@@ -3,7 +3,7 @@ import { getRegisterInfo } from "./register.js";
 import type { PiCapabilityStatus } from "@vcpdeck/shared";
 
 describe("getRegisterInfo", () => {
-	it("可用状态包含 pi.probe 与 agent.pi 及安全 details", () => {
+	it("可用状态包含 agent.pi 及安全 details", () => {
 		const status: PiCapabilityStatus = {
 			available: true,
 			sdkVersion: "0.84.0",
@@ -11,19 +11,19 @@ describe("getRegisterInfo", () => {
 			shellKind: "git-bash",
 		};
 		const info = getRegisterInfo(status);
-		expect(info.capabilities).toContain("pi.probe");
 		expect(info.capabilities).toContain("agent.pi");
+		expect(info.capabilities).not.toContain("pi.probe");
 		expect(info.capabilityDetails?.pi).toMatchObject({ available: true });
 	});
 
-	it("不可用状态只包含 pi.probe", () => {
+	it("不可用状态不声明 Pi 能力，仅保留 details 原因", () => {
 		const status: PiCapabilityStatus = {
 			available: false,
 			code: "PI_BASH_NOT_FOUND",
 			message: "no bash",
 		};
 		const info = getRegisterInfo(status);
-		expect(info.capabilities).toContain("pi.probe");
+		expect(info.capabilities).not.toContain("pi.probe");
 		expect(info.capabilities).not.toContain("agent.pi");
 		expect(info.capabilityDetails?.pi).toMatchObject({ available: false });
 	});

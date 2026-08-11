@@ -95,7 +95,7 @@ function makeController(
 		listOnline: vi.fn(async () => [
 			{
 				clientId: "c1",
-				capabilities: ["pi.probe", "agent.pi"],
+				capabilities: ["agent.pi"],
 				capabilityDetails: {
 					pi: { available: true, sessionJobProtocolVersion: 1 },
 				},

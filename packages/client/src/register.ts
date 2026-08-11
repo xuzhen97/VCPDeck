@@ -31,11 +31,8 @@ export function getRegisterInfo(
 	if (isFrpAvailable()) {
 		caps.push("frp");
 	}
-	if (piStatus !== undefined) {
-		caps.push("pi.probe");
-		if (piStatus.available) {
-			caps.push("agent.pi");
-		}
+	if (piStatus?.available) {
+		caps.push("agent.pi");
 	}
 	return {
 		clientId: CLIENT_ID,

@@ -21,7 +21,7 @@ describe("ClientService Pi capability details", () => {
 				cpuModel: "cpu",
 				totalMemMB: 1,
 				clientVersion: "1",
-				capabilities: ["pi.probe", "agent.pi"],
+				capabilities: ["agent.pi"],
 				capabilityDetails: {
 					pi: {
 						available: true,
@@ -59,7 +59,7 @@ describe("ClientService Pi capability details", () => {
 				cpuModel: "cpu",
 				totalMemMB: 1,
 				clientVersion: "1",
-				capabilities: ["pi.probe"],
+				capabilities: [],
 			},
 			"socket-1",
 		);
@@ -84,7 +84,7 @@ describe("ClientService Pi capability details", () => {
 						cpuModel: "cpu",
 						totalMemMB: 1,
 						clientVersion: "1",
-						capabilities: '["pi.probe","agent.pi"]',
+						capabilities: '["agent.pi"]',
 						capabilityDetails:
 							'{"pi":{"available":true,"sdkVersion":"0.84.0","nodeVersion":"22.19.0","shellKind":"git-bash"}}',
 						disks: "[]",

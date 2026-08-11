@@ -40,7 +40,7 @@ function makeClient(): ClientInfo {
 		cpuModel: "cpu",
 		totalMemMB: 1,
 		clientVersion: "1",
-		capabilities: ["pi.probe", "agent.pi"],
+		capabilities: ["agent.pi"],
 		capabilityDetails: {
 			pi: {
 				available: true,
@@ -185,7 +185,7 @@ describe("PiPanel", () => {
 	it("能力不可用时显示原因并禁用输入", () => {
 		const client: ClientInfo = {
 			...makeClient(),
-			capabilities: ["pi.probe"],
+			capabilities: [],
 			capabilityDetails: {
 				pi: {
 					available: false,

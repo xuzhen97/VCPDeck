@@ -111,9 +111,7 @@ async function makeDeps(overrides: Partial<PiBridgeDeps> = {}) {
 					cpuModel: "cpu",
 					totalMemMB: 1,
 					clientVersion: "1",
-					capabilities: piStatus?.available
-						? ["pi.probe", "agent.pi"]
-						: ["pi.probe"],
+					capabilities: piStatus?.available ? ["agent.pi"] : [],
 					...(piStatus ? { capabilityDetails: { pi: piStatus } } : {}),
 				}) as MachineRegister,
 			getStatusReport: () => ({ clientId: "c1", jobs: [] }),
