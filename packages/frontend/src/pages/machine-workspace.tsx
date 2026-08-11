@@ -154,7 +154,9 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				{tab === "frp" && <FrpPanel clientId={client.clientId} />}
 				{tab === "jobs" && <JobsPage clientId={client.clientId} />}
 				{tab === "pi" && <PiPanel client={client} />}
-				{!["overview", "execute", "files", "frp", "jobs", "pi"].includes(tab) && (
+				{!["overview", "execute", "files", "frp", "jobs", "pi"].includes(
+					tab,
+				) && (
 					<Card>
 						<CardContent className="pt-6 text-sm text-muted-foreground">
 							{tabs.find(([key]) => key === tab)?.[1] ?? "未知页面"}
@@ -305,8 +307,8 @@ function DiskCard({ disks = [] }: { disks?: DiskInfo[] }) {
 								bounded >= 90
 									? "bg-red-500"
 									: bounded >= 70
-											? "bg-amber-500"
-											: "bg-primary";
+										? "bg-amber-500"
+										: "bg-primary";
 							return (
 								<li key={disk.name}>
 									<div className="flex items-baseline justify-between gap-3">

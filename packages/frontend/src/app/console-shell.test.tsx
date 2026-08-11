@@ -31,7 +31,9 @@ describe("ConsoleShell", () => {
 		for (const label of ["概览", "机器", "任务", "映射", "存储", "设置"]) {
 			expect(navigation.getByRole("link", { name: label })).toBeVisible();
 		}
-		expect(navigation.queryByRole("link", { name: "FRP" })).not.toBeInTheDocument();
+		expect(
+			navigation.queryByRole("link", { name: "FRP" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("puts the sidebar toggle outside the sidebar at the main header edge", () => {
@@ -44,15 +46,23 @@ describe("ConsoleShell", () => {
 		);
 
 		const brand = screen.getByTestId("sidebar-brand");
-		expect(within(brand).queryByRole("button", { name: "收起侧栏" })).not.toBeInTheDocument();
+		expect(
+			within(brand).queryByRole("button", { name: "收起侧栏" }),
+		).not.toBeInTheDocument();
 		const mainHeader = screen.getByRole("banner");
 		const toggle = within(mainHeader).getByRole("button", { name: "收起侧栏" });
 		expect(toggle).toHaveClass("vcpdeck-sidebar-toggle", "lg:inline-flex");
-		expect(screen.getByRole("button", { name: "打开侧栏" })).toHaveClass("lg:hidden");
-		expect(screen.getByTestId("sidebar-footer")).not.toHaveTextContent("收起侧栏");
+		expect(screen.getByRole("button", { name: "打开侧栏" })).toHaveClass(
+			"lg:hidden",
+		);
+		expect(screen.getByTestId("sidebar-footer")).not.toHaveTextContent(
+			"收起侧栏",
+		);
 
 		fireEvent.click(toggle);
-		expect(within(mainHeader).getByRole("button", { name: "展开侧栏" })).toBeVisible();
+		expect(
+			within(mainHeader).getByRole("button", { name: "展开侧栏" }),
+		).toBeVisible();
 	});
 
 	it("uses matching icon button sizing for notification/theme/logout actions", () => {
@@ -65,7 +75,10 @@ describe("ConsoleShell", () => {
 		);
 
 		for (const name of ["任务通知", "切换主题", "退出登录"]) {
-			expect(screen.getByRole("button", { name })).toHaveClass("size-10", "rounded-lg");
+			expect(screen.getByRole("button", { name })).toHaveClass(
+				"size-10",
+				"rounded-lg",
+			);
 		}
 	});
 

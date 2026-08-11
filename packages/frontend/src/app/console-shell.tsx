@@ -161,7 +161,11 @@ export function ConsoleShell({
 								onClick={toggleTheme}
 								aria-label="切换主题"
 							>
-								{theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+								{theme === "dark" ? (
+									<Sun className="size-4" />
+								) : (
+									<Moon className="size-4" />
+								)}
 							</Button>
 							<Button
 								type="button"

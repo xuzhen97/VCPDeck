@@ -75,10 +75,9 @@ function renderPanel(overrides: Record<string, unknown>) {
 	const { clients, ...frp } = overrides;
 	const client = {
 		auth: { me: async () => identity },
-		clients:
-			(clients as Record<string, unknown> | undefined) ?? {
-				list: vi.fn().mockResolvedValue([clientInfo()]),
-			},
+		clients: (clients as Record<string, unknown> | undefined) ?? {
+			list: vi.fn().mockResolvedValue([clientInfo()]),
+		},
 		frp: {
 			instances: {
 				list: vi.fn().mockResolvedValue({
@@ -150,7 +149,9 @@ describe("FrpPage", () => {
 
 		expect(await screen.findByRole("heading", { name: "映射" })).toBeVisible();
 		expect(screen.getByRole("navigation", { name: "映射导航" })).toBeVisible();
-		expect(screen.queryByRole("heading", { name: "FRP" })).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("heading", { name: "FRP" }),
+		).not.toBeInTheDocument();
 		expect(await screen.findByText("全部映射")).toBeVisible();
 		await userEvent.click(screen.getByRole("button", { name: "实例配置" }));
 		expect(await screen.findByText("frps 实例")).toBeVisible();

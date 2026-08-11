@@ -142,11 +142,12 @@ describe("MachineWorkspace overview", () => {
 			"symlink 边界仍有已知风险",
 		);
 		const workspaceNav = screen.getByRole("navigation", { name: "机器工作区" });
-		expect(within(workspaceNav).getByRole("link", { name: "映射" })).toHaveAttribute(
-			"href",
-			"/machines/c1/frp",
-		);
-		expect(within(workspaceNav).queryByRole("link", { name: "FRP" })).not.toBeInTheDocument();
+		expect(
+			within(workspaceNav).getByRole("link", { name: "映射" }),
+		).toHaveAttribute("href", "/machines/c1/frp");
+		expect(
+			within(workspaceNav).queryByRole("link", { name: "FRP" }),
+		).not.toBeInTheDocument();
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
