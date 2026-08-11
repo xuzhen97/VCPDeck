@@ -29,19 +29,21 @@ function ThinkingBlock({ block }: { block: PiThinkingPlaceholder }) {
 	}
 	return (
 		<div
-			className="my-1 rounded border border-border/70 bg-secondary/20 text-xs"
+			className="my-2 overflow-hidden rounded-xl border border-border/70 bg-card/65 text-xs shadow-sm"
 			data-testid="thinking-block"
 		>
 			<button
 				type="button"
-				className="flex w-full items-center gap-2 px-2 py-1 text-left text-muted-foreground"
+				className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground transition hover:bg-secondary/45"
 				onClick={() => setExpanded((value) => !value)}
 			>
 				<span className="italic">{label}</span>
-				<span className="ml-auto">{expanded ? "收起思考" : "展开思考"}</span>
+				<span className="ml-auto text-primary">
+					{expanded ? "收起思考" : "展开思考"}
+				</span>
 			</button>
 			{expanded && (
-				<pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words border-t border-border/60 px-2 py-1.5 text-muted-foreground">
+				<pre className="pi-chat-fade-in max-h-96 overflow-auto whitespace-pre-wrap break-words border-t border-border/60 bg-background/35 px-3 py-2 text-muted-foreground">
 					{block.text}
 				</pre>
 			)}
@@ -92,31 +94,35 @@ function ToolCallBlock({
 	const [expanded, setExpanded] = useState(false);
 	return (
 		<div
-			className="my-1 rounded border border-zinc-700 bg-zinc-900 text-xs"
+			className="my-2 overflow-hidden rounded-xl border border-border/70 bg-card/70 text-xs shadow-sm"
 			data-testid="tool-call"
 		>
 			<button
 				type="button"
-				className="flex w-full items-center gap-2 px-2 py-1 text-left"
+				className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-secondary/45"
 				onClick={() => setExpanded((v) => !v)}
 			>
-				<span className="font-mono text-blue-400">{block.toolName}</span>
-				<span className="text-muted-foreground truncate">
+				<span className="shrink-0 rounded-full bg-primary/12 px-2 py-0.5 font-mono text-[11px] font-semibold text-primary">
+					{block.toolName}
+				</span>
+				<span className="min-w-0 truncate text-muted-foreground">
 					{summarizeInput(block.input)}
 				</span>
-				<span className="ml-auto">{expanded ? "收起" : "展开"}</span>
+				<span className="ml-auto shrink-0 text-primary">
+					{expanded ? "收起" : "展开"}
+				</span>
 			</button>
 			{expanded && (
-				<div className="border-t border-zinc-800 px-2 py-1">
+				<div className="pi-chat-fade-in border-t border-border/60 bg-background/40 px-3 py-2">
 					{Object.keys(block.input).length > 0 && (
-						<pre className="overflow-x-auto whitespace-pre-wrap break-all">
+						<pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-secondary/45 p-2 text-muted-foreground">
 							{JSON.stringify(block.input, null, 2)}
 						</pre>
 					)}
 					{resultText !== undefined && (
-						<div className="mt-1 border-t border-zinc-800 pt-1">
-							<div className="text-zinc-500">结果</div>
-							<pre className="overflow-x-auto whitespace-pre-wrap break-all">
+						<div className="mt-2 border-t border-border/60 pt-2">
+							<div className="text-muted-foreground">结果</div>
+							<pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-secondary/45 p-2 text-muted-foreground">
 								{resultText}
 							</pre>
 						</div>
@@ -171,7 +177,7 @@ export function PiMessageView({
 	if (message.role === "user") {
 		return (
 			<div
-				className="rounded-lg bg-blue-950/40 px-3 py-2"
+				className="rounded-2xl bg-gradient-to-br from-primary to-primary/80 px-3.5 py-2.5 text-primary-foreground shadow-lg shadow-primary/20"
 				data-testid="user-message"
 			>
 				{message.content.map((block, i) => {
@@ -194,7 +200,10 @@ export function PiMessageView({
 
 	if (message.role === "assistant") {
 		return (
-			<div data-testid="assistant-message">
+			<div
+				className="rounded-2xl border border-border/70 bg-card/70 px-3.5 py-2.5 shadow-sm backdrop-blur"
+				data-testid="assistant-message"
+			>
 				{message.content.map((block, i) => {
 					switch (block.type) {
 						case "text":
@@ -233,10 +242,10 @@ export function PiMessageView({
 			.join("\n");
 		return (
 			<div
-				className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-400"
+				className="rounded-xl border border-border/70 bg-card/60 px-2.5 py-2 text-xs text-muted-foreground shadow-sm"
 				data-testid="tool-result"
 			>
-				<pre className="overflow-x-auto whitespace-pre-wrap break-all">
+				<pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-secondary/35 p-2">
 					{text}
 				</pre>
 			</div>

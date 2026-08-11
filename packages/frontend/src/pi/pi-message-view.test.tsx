@@ -104,4 +104,23 @@ describe("PiMessageView", () => {
 		expect(screen.getByTestId("tool-result")).toBeTruthy();
 		expect(screen.getByText("result text")).toBeTruthy();
 	});
+
+	it("assistant 文本和工具结果使用语义卡片容器", () => {
+		const assistant: PiMessage = {
+			id: "a1",
+			role: "assistant",
+			content: [{ type: "text", text: "answer" }],
+		};
+		const result: PiMessage = {
+			id: "r1",
+			role: "tool_result",
+			toolCallId: "t1",
+			content: [{ type: "text", text: "result text" }],
+		};
+
+		const { rerender } = render(<PiMessageView message={assistant} />);
+		expect(screen.getByTestId("assistant-message")).toHaveClass("bg-card/70");
+		rerender(<PiMessageView message={result} />);
+		expect(screen.getByTestId("tool-result")).toHaveClass("bg-card/60");
+	});
 });
