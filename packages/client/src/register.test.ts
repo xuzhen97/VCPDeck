@@ -42,7 +42,9 @@ describe("getRegisterInfo", () => {
 			nodeVersion: "22.19.0",
 			shellKind: "configured",
 		};
-		vi.spyOn(require("node:os"), "homedir").mockReturnValue("C:\\Users\\secret-user");
+		vi.spyOn(require("node:os"), "homedir").mockReturnValue(
+			"C:\\Users\\secret-user",
+		);
 		const info = getRegisterInfo(status);
 		expect(JSON.stringify(info)).not.toContain("secret-user");
 		expect(JSON.stringify(info)).not.toContain("C:\\");

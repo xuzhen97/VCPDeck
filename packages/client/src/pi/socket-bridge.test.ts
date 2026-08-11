@@ -28,7 +28,10 @@ function fakeSocket(): {
 	const emitCalls: Array<{ event: string; args: unknown[] }> = [];
 	const socket = {
 		connected: true,
-		disconnect: vi.fn(() => { socket.connected = false; return socket; }),
+		disconnect: vi.fn(() => {
+			socket.connected = false;
+			return socket;
+		}),
 		connect: vi.fn(() => socket),
 		on: (event: string, cb: (...args: unknown[]) => void) => {
 			const list = listeners.get(event) ?? [];
@@ -51,14 +54,17 @@ function makeFakeHandle() {
 	};
 	return {
 		handle: {
-			send: (msg: { type: "request"; request: { requestId: string } } | unknown) => {
+			send: (
+				msg: { type: "request"; request: { requestId: string } } | unknown,
+			) => {
 				// 自动应答：收到请求立即 ok
 				if (
 					typeof msg === "object" &&
 					msg !== null &&
 					(msg as { type?: string }).type === "request"
 				) {
-					const requestId = (msg as { request: { requestId: string } }).request.requestId;
+					const requestId = (msg as { request: { requestId: string } }).request
+						.requestId;
 					queueMicrotask(() => {
 						emitMessage({
 							type: "response",
@@ -135,7 +141,8 @@ describe("attachPiBridge", () => {
 			const res = emitCalls.find((c) => c.event === Events.PI_RESPONSE);
 			expect(res).toBeDefined();
 		});
-		const res = emitCalls.find((c) => c.event === Events.PI_RESPONSE)?.args[0] as {
+		const res = emitCalls.find((c) => c.event === Events.PI_RESPONSE)
+			?.args[0] as {
 			requestId: string;
 			ok: boolean;
 		};
@@ -153,7 +160,8 @@ describe("attachPiBridge", () => {
 			const res = emitCalls.find((c) => c.event === Events.PI_RESPONSE);
 			expect(res).toBeDefined();
 		});
-		const res = emitCalls.find((c) => c.event === Events.PI_RESPONSE)?.args[0] as {
+		const res = emitCalls.find((c) => c.event === Events.PI_RESPONSE)
+			?.args[0] as {
 			ok: boolean;
 			error: { code: string };
 		};
@@ -218,7 +226,9 @@ describe("attachPiBridge", () => {
 			runId: "j1",
 			event: { type: "agent_settled", sessionId: "s1" },
 		});
-		expect(deps.supervisor.getStateReport().runs.some((r) => r.jobId === "j1")).toBe(true);
+		expect(
+			deps.supervisor.getStateReport().runs.some((r) => r.jobId === "j1"),
+		).toBe(true);
 
 		// 触发注册完成
 		await bridge.onConnected();
@@ -235,13 +245,19 @@ describe("attachPiBridge", () => {
 		expect(statusCall).toBeDefined();
 		const stateCall = emitCalls.find((c) => c.event === Events.PI_STATE);
 		expect(stateCall).toBeDefined();
-		const statePayload = stateCall?.args[0] as { runs: Array<{ jobId: string }> };
+		const statePayload = stateCall?.args[0] as {
+			runs: Array<{ jobId: string }>;
+		};
 		expect(statePayload.runs.some((r) => r.jobId === "j1")).toBe(true);
 
 		// 调用 PI_STATE 的 ack → terminal 清理
-		const stateAck = stateCall?.args[1] as (ack: { acceptedRunIds?: string[] }) => void;
+		const stateAck = stateCall?.args[1] as (ack: {
+			acceptedRunIds?: string[];
+		}) => void;
 		stateAck({ acceptedRunIds: ["j1"] });
-		expect(deps.supervisor.getStateReport().runs.some((r) => r.jobId === "j1")).toBe(false);
+		expect(
+			deps.supervisor.getStateReport().runs.some((r) => r.jobId === "j1"),
+		).toBe(false);
 	});
 
 	it("每次 reconnect 的 REGISTER ack 都重新发送 PI_STATE", async () => {
@@ -249,10 +265,18 @@ describe("attachPiBridge", () => {
 		const { deps } = await makeDeps();
 		const bridge = attachPiBridge(socket, deps);
 		await bridge.onConnected();
-		(emitCalls.filter((call) => call.event === Events.REGISTER)[0]!.args[1] as () => void)();
+		(
+			emitCalls.filter((call) => call.event === Events.REGISTER)[0]!
+				.args[1] as () => void
+		)();
 		await bridge.onConnected();
-		(emitCalls.filter((call) => call.event === Events.REGISTER)[1]!.args[1] as () => void)();
-		expect(emitCalls.filter((call) => call.event === Events.PI_STATE)).toHaveLength(2);
+		(
+			emitCalls.filter((call) => call.event === Events.REGISTER)[1]!
+				.args[1] as () => void
+		)();
+		expect(
+			emitCalls.filter((call) => call.event === Events.PI_STATE),
+		).toHaveLength(2);
 	});
 
 	it("closed abort 首次失败后重试成功并再次报告 PI_STATE", async () => {
@@ -264,16 +288,33 @@ describe("attachPiBridge", () => {
 			.mockResolvedValueOnce({ allClosed: true });
 		const bridge = attachPiBridge(socket, deps);
 		await bridge.onConnected();
-		(emitCalls.find((call) => call.event === Events.REGISTER)!.args[1] as () => void)();
+		(
+			emitCalls.find((call) => call.event === Events.REGISTER)!
+				.args[1] as () => void
+		)();
 
-		const firstAck = emitCalls.filter((call) => call.event === Events.PI_STATE)[0]!.args[1] as Function;
-		await firstAck({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+		const firstAck = emitCalls.filter(
+			(call) => call.event === Events.PI_STATE,
+		)[0]!.args[1] as Function;
+		await firstAck({
+			acceptedRunIds: [],
+			closedRunIds: ["run-1"],
+			reportAgain: true,
+		});
 		await vi.advanceTimersByTimeAsync(100);
-		const secondAck = emitCalls.filter((call) => call.event === Events.PI_STATE)[1]!.args[1] as Function;
-		await secondAck({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+		const secondAck = emitCalls.filter(
+			(call) => call.event === Events.PI_STATE,
+		)[1]!.args[1] as Function;
+		await secondAck({
+			acceptedRunIds: [],
+			closedRunIds: ["run-1"],
+			reportAgain: true,
+		});
 
 		expect(deps.supervisor.applyStateAck).toHaveBeenCalledTimes(2);
-		expect(emitCalls.filter((call) => call.event === Events.PI_STATE)).toHaveLength(3);
+		expect(
+			emitCalls.filter((call) => call.event === Events.PI_STATE),
+		).toHaveLength(3);
 		expect(socket.disconnect).not.toHaveBeenCalled();
 	});
 
@@ -281,14 +322,25 @@ describe("attachPiBridge", () => {
 		vi.useFakeTimers();
 		const { socket, emitCalls } = fakeSocket();
 		const { deps } = await makeDeps();
-		vi.spyOn(deps.supervisor, "applyStateAck").mockResolvedValue({ allClosed: false });
+		vi.spyOn(deps.supervisor, "applyStateAck").mockResolvedValue({
+			allClosed: false,
+		});
 		const bridge = attachPiBridge(socket, deps);
 		await bridge.onConnected();
-		(emitCalls.find((call) => call.event === Events.REGISTER)!.args[1] as () => void)();
+		(
+			emitCalls.find((call) => call.event === Events.REGISTER)!
+				.args[1] as () => void
+		)();
 
 		for (let attempt = 0; attempt < 3; attempt++) {
-			const ack = emitCalls.filter((call) => call.event === Events.PI_STATE)[attempt]!.args[1] as Function;
-			await ack({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+			const ack = emitCalls.filter((call) => call.event === Events.PI_STATE)[
+				attempt
+			]!.args[1] as Function;
+			await ack({
+				acceptedRunIds: [],
+				closedRunIds: ["run-1"],
+				reportAgain: true,
+			});
 			await vi.advanceTimersByTimeAsync(100);
 		}
 
@@ -300,13 +352,24 @@ describe("attachPiBridge", () => {
 		vi.useFakeTimers();
 		const { socket, emitCalls } = fakeSocket();
 		const { deps } = await makeDeps();
-		vi.spyOn(deps.supervisor, "applyStateAck").mockResolvedValue({ allClosed: false });
+		vi.spyOn(deps.supervisor, "applyStateAck").mockResolvedValue({
+			allClosed: false,
+		});
 		const bridge = attachPiBridge(socket, deps);
 		await bridge.onConnected();
-		(emitCalls.find((call) => call.event === Events.REGISTER)!.args[1] as () => void)();
+		(
+			emitCalls.find((call) => call.event === Events.REGISTER)!
+				.args[1] as () => void
+		)();
 		for (let attempt = 0; attempt < 3; attempt++) {
-			const ack = emitCalls.filter((call) => call.event === Events.PI_STATE)[attempt]!.args[1] as Function;
-			await ack({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+			const ack = emitCalls.filter((call) => call.event === Events.PI_STATE)[
+				attempt
+			]!.args[1] as Function;
+			await ack({
+				acceptedRunIds: [],
+				closedRunIds: ["run-1"],
+				reportAgain: true,
+			});
 			if (attempt < 2) await vi.advanceTimersByTimeAsync(100);
 		}
 		await bridge.onConnected();
@@ -318,13 +381,24 @@ describe("attachPiBridge", () => {
 		vi.useFakeTimers();
 		const { socket, emitCalls } = fakeSocket();
 		const { deps } = await makeDeps();
-		vi.spyOn(deps.supervisor, "applyStateAck").mockResolvedValue({ allClosed: false });
+		vi.spyOn(deps.supervisor, "applyStateAck").mockResolvedValue({
+			allClosed: false,
+		});
 		const bridge = attachPiBridge(socket, deps);
 		await bridge.onConnected();
-		(emitCalls.find((call) => call.event === Events.REGISTER)!.args[1] as () => void)();
+		(
+			emitCalls.find((call) => call.event === Events.REGISTER)!
+				.args[1] as () => void
+		)();
 		for (let attempt = 0; attempt < 3; attempt++) {
-			const ack = emitCalls.filter((call) => call.event === Events.PI_STATE)[attempt]!.args[1] as Function;
-			await ack({ acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: true });
+			const ack = emitCalls.filter((call) => call.event === Events.PI_STATE)[
+				attempt
+			]!.args[1] as Function;
+			await ack({
+				acceptedRunIds: [],
+				closedRunIds: ["run-1"],
+				reportAgain: true,
+			});
 			if (attempt < 2) await vi.advanceTimersByTimeAsync(100);
 		}
 		(socket as unknown as { connected: boolean }).connected = true;

@@ -34,7 +34,8 @@ describe("ClientService Pi capability details", () => {
 			"socket-1",
 		);
 
-		const upsert = (prisma as { client: { upsert: ReturnType<typeof vi.fn> } }).client.upsert;
+		const upsert = (prisma as { client: { upsert: ReturnType<typeof vi.fn> } })
+			.client.upsert;
 		expect(upsert).toHaveBeenCalledWith(
 			expect.objectContaining({
 				create: expect.objectContaining({
@@ -64,7 +65,8 @@ describe("ClientService Pi capability details", () => {
 			"socket-1",
 		);
 
-		const upsert = (prisma as { client: { upsert: ReturnType<typeof vi.fn> } }).client.upsert;
+		const upsert = (prisma as { client: { upsert: ReturnType<typeof vi.fn> } })
+			.client.upsert;
 		expect(upsert).toHaveBeenCalledWith(
 			expect.objectContaining({
 				create: expect.objectContaining({ capabilityDetails: "{}" }),
@@ -100,7 +102,9 @@ describe("ClientService Pi capability details", () => {
 
 		const [client] = await service.listOnline();
 		expect(client?.capabilityDetails.pi).toMatchObject({ available: true });
-		expect(client?.capabilityDetails.pi).toMatchObject({ sdkVersion: "0.84.0" });
+		expect(client?.capabilityDetails.pi).toMatchObject({
+			sdkVersion: "0.84.0",
+		});
 	});
 
 	it("listOnline 对损坏的 capabilityDetails 回退为 {}", async () => {

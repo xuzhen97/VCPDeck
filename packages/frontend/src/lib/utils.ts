@@ -22,6 +22,10 @@ export function capabilitiesLabel(raw: string[]): string[] {
 		labels.push("映射");
 		seen.add("frp");
 	}
+	if (raw.includes("agent.pi")) {
+		labels.push("Pi 运行");
+		seen.add("agent.pi");
+	}
 	// 未映射的原始能力透传，确保显示不遗漏
 	for (const cap of raw) {
 		if (!seen.has(cap)) labels.push(cap);

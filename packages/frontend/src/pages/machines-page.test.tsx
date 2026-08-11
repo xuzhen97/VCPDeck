@@ -71,7 +71,7 @@ describe("MachinesPage", () => {
 				totalMemMB: 16384,
 				disks: [],
 				clientVersion: "0.0.0",
-				capabilities: ["exec", "file.read", "frp"],
+				capabilities: ["exec", "file.read", "frp", "agent.pi"],
 				capabilityDetails: {},
 				online: true,
 				cpuPercent: null,
@@ -88,8 +88,9 @@ describe("MachinesPage", () => {
 			"/machines/client-1/overview",
 		);
 		expect(screen.getByRole("img", { name: "Windows" })).toBeVisible();
-		for (const label of ["命令执行", "文件操作"])
+		for (const label of ["命令执行", "文件操作", "Pi 运行"])
 			expect(screen.getByText(label)).toBeVisible();
+		expect(screen.queryByText("agent.pi")).not.toBeInTheDocument();
 		expect(screen.getAllByText("映射").length).toBeGreaterThanOrEqual(1);
 		expect(screen.queryByText("FRP 映射")).not.toBeInTheDocument();
 		expect(screen.getByRole("link", { name: "执行" })).toHaveAttribute(

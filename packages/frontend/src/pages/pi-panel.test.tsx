@@ -479,11 +479,10 @@ describe("PiPanel", () => {
 
 		// 后端 delete 被调用，事件流被关闭。
 		await vi.waitFor(() =>
-			expect(sdk.pi.sessions.delete).toHaveBeenCalledWith(
-				"c1",
-				"s1",
-				{ rootDir: "D:\\", relativePath: "repo" },
-			),
+			expect(sdk.pi.sessions.delete).toHaveBeenCalledWith("c1", "s1", {
+				rootDir: "D:\\",
+				relativePath: "repo",
+			}),
 		);
 		const lastStream = MockEventSource.instances.at(-1)!;
 		await vi.waitFor(() => expect(lastStream.closed).toBe(true));
@@ -500,9 +499,7 @@ describe("PiPanel", () => {
 			expect(screen.queryAllByText("运行中")).toHaveLength(0),
 		);
 		await vi.waitFor(() =>
-			expect(
-				screen.getAllByText("空闲，可继续提问").length,
-			).toBeGreaterThan(0),
+			expect(screen.getAllByText("空闲，可继续提问").length).toBeGreaterThan(0),
 		);
 
 		// 输入框已被禁用（无 active session）。
