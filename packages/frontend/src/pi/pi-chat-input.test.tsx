@@ -48,13 +48,19 @@ describe("PiChatInput", () => {
 		expect(screen.getByRole("textbox", { name: "Pi 输入" })).toBeEnabled();
 	});
 
-	it("输入区附件按钮、文本框和发送按钮使用统一高度类", () => {
+	it("输入区附件按钮、文本框和发送按钮使用统一高度", () => {
 		renderInput();
 
-		expect(screen.getByText("🖼️ 添加")).toHaveClass("h-11");
+		expect(screen.getByTestId("pi-chat-composer")).toHaveClass("p-3");
+		expect(screen.getByText("🖼️ 添加")).toHaveClass("h-12");
 		expect(screen.getByRole("textbox", { name: "Pi 输入" })).toHaveClass(
-			"min-h-11",
+			"h-12",
+			"min-h-12",
 		);
-		expect(screen.getByRole("button", { name: "发送" })).toHaveClass("h-11");
+		expect(screen.getByRole("textbox", { name: "Pi 输入" })).toHaveAttribute(
+			"rows",
+			"1",
+		);
+		expect(screen.getByRole("button", { name: "发送" })).toHaveClass("h-12");
 	});
 });

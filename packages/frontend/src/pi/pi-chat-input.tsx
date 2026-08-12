@@ -62,7 +62,10 @@ export function PiChatInput({
 	}, [running, disabled, onAbort]);
 
 	return (
-		<div className="space-y-2 border-t border-border/70 bg-background/35 px-3 py-3 backdrop-blur">
+		<div
+			className="space-y-2 border-t border-border/70 bg-background/55 p-3 backdrop-blur"
+			data-testid="pi-chat-composer"
+		>
 			{running && !disabled && (
 				<div className="flex flex-wrap items-center gap-1.5 text-xs">
 					<Button
@@ -136,9 +139,9 @@ export function PiChatInput({
 					))}
 				</div>
 			)}
-			<div className="flex items-end gap-2 rounded-2xl border border-border/70 bg-card/70 p-2 shadow-sm backdrop-blur focus-within:ring-2 focus-within:ring-ring/30">
+			<div className="flex items-stretch gap-1.5 rounded-2xl border border-border/80 bg-card/80 p-1.5 shadow-sm backdrop-blur transition focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20">
 				{onPickFiles && !disabled && promptable && (
-					<label className="flex h-11 shrink-0 cursor-pointer items-center rounded-xl border border-border/70 bg-background/60 px-3 text-xs text-muted-foreground transition hover:bg-secondary/60 hover:text-foreground">
+					<label className="flex h-12 shrink-0 cursor-pointer items-center rounded-xl px-3 text-xs text-muted-foreground transition hover:bg-secondary/70 hover:text-foreground">
 						🖼️ 添加
 						<input
 							type="file"
@@ -158,7 +161,7 @@ export function PiChatInput({
 				<textarea
 					ref={textareaRef}
 					value={text}
-					rows={2}
+					rows={1}
 					disabled={disabled || !promptable}
 					placeholder={
 						disabled
@@ -169,7 +172,7 @@ export function PiChatInput({
 									? "运行错误，请先标记完成"
 									: "输入消息，Enter 发送，Shift+Enter 换行"
 					}
-					className="min-h-11 flex-1 resize-none rounded-xl border border-input bg-background/75 px-3 py-2 text-sm leading-6 transition placeholder:text-muted-foreground/80 focus:border-ring focus:outline-none disabled:opacity-50"
+					className="h-12 min-h-12 flex-1 resize-none rounded-xl border-0 bg-background/55 px-3 py-3 text-sm leading-6 outline-none transition placeholder:text-muted-foreground/80 focus:bg-background/80 disabled:opacity-50"
 					onChange={(e) => setText(e.target.value)}
 					onKeyDown={(e) => {
 						if (e.key === "Enter" && !e.shiftKey) {
@@ -181,7 +184,7 @@ export function PiChatInput({
 				/>
 				<Button
 					type="button"
-					className="h-11 shrink-0 px-5"
+					className="h-12 shrink-0 rounded-xl px-5 shadow-sm"
 					disabled={!canSend}
 					onClick={submit}
 				>
