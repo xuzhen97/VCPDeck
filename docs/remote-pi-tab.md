@@ -40,7 +40,7 @@ Pi SDK 0.84.0 → 远程用户 ~/.pi/agent（凭据/模型/扩展/skills）
 3. 新建/选择 Session。旧 Session 首次打开时由 `/open` 校验远程 Session，并幂等补建同 ID 的 `agent.session` Job。
 4. 输入 prompt；运行中可 Steer / Follow-up / 中止 / Compact；Esc 中止。模型回答结束后 Job 回到 `idle`，不会自动标记完成。
 5. Owner 可在右侧“运行详情”手动**标记完成**：空闲时直接进入 `done`，活动时先权威中止当前 run 再进入 `done`。`done` 可继续提问并以新 `runId` 重新激活同一 Job。
-6. 中间过程折叠在 **Process Details**，最终回答单独展示；Tool Call 可展开参数与结果。
+6. 中间过程折叠在 **Process Details**，最终回答单独展示；Tool Call 可展开参数与结果；工具结果默认折叠，标题行展示行数与首行摘要，点击展开完整输出。
 7. 图片：仅空闲时可附加（最多 10 张、单张 ≤ 10 MiB、总量 ≤ 100 MiB；PNG/JPEG/GIF/WebP）。
 
 ### 模型与思考深度
