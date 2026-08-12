@@ -4,9 +4,9 @@
   "private": true,
   "main": "./dist/main.js",
   "scripts": {
-    "build": "tsc",
-    "start": "prisma db push && node dist/main.js",
-    "dev": "prisma db push && tsx watch src/main.ts",
+    "build": "prisma generate && tsc",
+    "start": "prisma generate && prisma db push && node dist/main.js",
+    "dev": "prisma generate && prisma db push && tsx watch src/main.ts",
     "test": "vitest run"
   },
   "dependencies": {

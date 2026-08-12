@@ -54,29 +54,54 @@ if (!asset) {
 	process.exit(1);
 }
 
+async function downloadArchive(archivePath, asset) {
+	// 下载源候选列表：先环境变量覆盖，再国内反代镜像，最后官方 GitHub 兜底
+	const officialBase = "https://github.com";
+	const bases = [
+		...(process.env.FRP_DOWNLOAD_BASE
+			? [process.env.FRP_DOWNLOAD_BASE.replace(/\/$/, "")]
+			: []),
+		"https://ghfast.top/https://github.com",
+		"https://ghproxy.net/https://github.com",
+		"https://gh-proxy.com/https://github.com",
+		officialBase,
+	];
+
+	let lastErr;
+	for (const base of bases) {
+		const url = `${base}/fatedier/frp/releases/download/v${FRP_VERSION}/${asset.name}`;
+		try {
+			console.log(`[ensure-frpc] 下载 ${url}`);
+			const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const buf = Buffer.from(await res.arrayBuffer());
+			fs.writeFileSync(archivePath, buf);
+			console.log(
+				`[ensure-frpc] 下载完成 ${(buf.length / 1024 / 1024).toFixed(1)} MB`,
+			);
+			return;
+		} catch (e) {
+			lastErr = e;
+			console.error(`[ensure-frpc] ${base} 不可用: ${e.message}`);
+		}
+	}
+	throw new Error(`所有下载源均失败: ${lastErr?.message ?? "未知错误"}`);
+}
+
 async function main() {
-	const RELEASE_URL = `https://api.github.com/repos/fatedier/frp/releases/tags/v${FRP_VERSION}`;
-
-	// 1. Get download URL
-	const releaseRes = await fetch(RELEASE_URL);
-	if (!releaseRes.ok) throw new Error(`GitHub API ${releaseRes.status}`);
-	const release = await releaseRes.json();
-	const assetData = release.assets?.find((a) => a.name === asset.name);
-	if (!assetData) throw new Error(`未找到 asset: ${asset.name}`);
-
-	// 2. Download
-	fs.mkdirSync(TARGET_DIR, { recursive: true });
 	const tmpDir = path.join(ROOT, ".tmp", "frp-download");
 	fs.mkdirSync(tmpDir, { recursive: true });
 
 	const archivePath = path.join(tmpDir, asset.name);
-	console.log(`[ensure-frpc] 下载 ${assetData.browser_download_url}`);
-	const fileRes = await fetch(assetData.browser_download_url);
-	if (!fileRes.ok) throw new Error(`下载失败: ${fileRes.status}`);
-	const buffer = Buffer.from(await fileRes.arrayBuffer());
-	fs.writeFileSync(archivePath, buffer);
 
-	// 3. Extract
+	// 已下载过且非空则复用，避免重复下载
+	if (!fs.existsSync(archivePath) || fs.statSync(archivePath).size === 0) {
+		await downloadArchive(archivePath, asset);
+	} else {
+		console.log(`[ensure-frpc] 复用已下载的 ${archivePath}`);
+	}
+
+	// 2. Extract
 	console.error(`[ensure-frpc] 解压...`);
 	try {
 		if (asset.name.endsWith(".zip")) {
@@ -93,13 +118,14 @@ async function main() {
 		throw new Error(`解压失败: ${e.message}`);
 	}
 
-	// 4. Copy frpc binary to target
+	// 3. Copy frpc binary to target
+	fs.mkdirSync(TARGET_DIR, { recursive: true });
 	const src = path.join(tmpDir, asset.extractDir, BINARY_NAME);
 	fs.copyFileSync(src, BINARY_PATH);
 	if (!IS_WIN) fs.chmodSync(BINARY_PATH, 0o755);
 	console.log(`[ensure-frpc] frpc → ${BINARY_PATH}`);
 
-	// 5. Cleanup
+	// 4. Cleanup
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 

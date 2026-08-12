@@ -20,3 +20,4 @@ packages/server/data/
 .superpowers/
 .playwright-mcp/
 .vscode/
+frps.log
