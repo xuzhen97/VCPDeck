@@ -38,21 +38,25 @@ function makePi(rename = vi.fn(), del = vi.fn()) {
 function renderSidebar(
 	pi = makePi(),
 	mutableSessionIds: ReadonlySet<string> = new Set(["*"]),
+	onSelectSession = vi.fn(),
 ) {
 	const files = { roots: vi.fn(), list: vi.fn() } as never;
-	return render(
-		<PiSessionSidebar
-			pi={pi}
-			files={files}
-			clientId="c1"
-			cwdRef={{ rootDir: "D:\\", relativePath: "repo" }}
-			onCwdChange={vi.fn()}
-			activeSessionId="s1"
-			mutableSessionIds={mutableSessionIds}
-			onSelectSession={vi.fn()}
-			onCreated={vi.fn()}
-		/>,
-	);
+	return {
+		onSelectSession,
+		...render(
+			<PiSessionSidebar
+				pi={pi}
+				files={files}
+				clientId="c1"
+				cwdRef={{ rootDir: "D:\\", relativePath: "repo" }}
+				onCwdChange={vi.fn()}
+				activeSessionId="s1"
+				mutableSessionIds={mutableSessionIds}
+				onSelectSession={onSelectSession}
+				onCreated={vi.fn()}
+			/>,
+		),
+	};
 }
 
 afterEach(() => {
@@ -60,6 +64,27 @@ afterEach(() => {
 });
 
 describe("PiSessionSidebar", () => {
+	it("整张会话卡片均可点击选择，包括元信息区域", async () => {
+		const { onSelectSession } = renderSidebar();
+		const cardButton = await screen.findByRole("button", {
+			name: "打开会话：owned",
+		});
+
+		fireEvent.click(within(cardButton).getByText("1 msgs"));
+		expect(onSelectSession).toHaveBeenCalledOnce();
+		expect(onSelectSession).toHaveBeenCalledWith("s1");
+	});
+
+	it("点击操作菜单不会同时选择会话", async () => {
+		const { onSelectSession } = renderSidebar();
+		const ownedCard = (await screen.findByText("owned")).closest("li")!;
+
+		fireEvent.click(within(ownedCard).getByRole("button", { name: "操作" }));
+
+		expect(onSelectSession).not.toHaveBeenCalled();
+		expect(await screen.findByRole("menuitem", { name: "重命名" })).toBeVisible();
+	});
+
 	it("mutable Session 显示 ⋯ 操作菜单，observer 不显示", async () => {
 		renderSidebar(makePi(), new Set(["s1"]));
 		expect(await screen.findByText("owned")).toBeVisible();

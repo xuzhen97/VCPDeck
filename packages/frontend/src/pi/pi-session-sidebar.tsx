@@ -363,85 +363,89 @@ function SessionRow({
 		return () => document.removeEventListener("mousedown", onDoc);
 	}, [menuOpen]);
 
+	const title = session.name || session.firstMessage || "(无标题)";
+
 	return (
-		<div
-			className={cn(
-				"group rounded-md px-2 py-1.5 transition",
-				isActive ? "bg-primary/10" : "hover:bg-secondary/60",
-			)}
-		>
-			<div className="flex items-center gap-2">
-				<span
-					className={cn(
-						"size-1.5 shrink-0 rounded-full",
-						session.running ? "bg-green-500" : "bg-muted-foreground/40",
-					)}
-					aria-label={session.running ? "运行中" : "空闲"}
-				/>
-				<button
-					type="button"
-					className="min-w-0 flex-1 truncate text-left text-xs font-medium text-foreground"
-					onClick={onSelect}
-					title={session.name || session.firstMessage || "(无标题)"}
-				>
-					{session.name || session.firstMessage || "(无标题)"}
-				</button>
-				{isMutable && (
-					<div className="relative" ref={menuRef}>
-						<button
-							type="button"
-							onClick={() => setMenuOpen((v) => !v)}
-							className={cn(
-								"rounded px-1.5 py-0.5 text-xs text-muted-foreground transition",
-								"hover:bg-secondary hover:text-foreground",
-								menuOpen && "bg-secondary text-foreground",
-							)}
-							aria-label="操作"
-							aria-haspopup="menu"
-							aria-expanded={menuOpen}
-						>
-							⋯
-						</button>
-						{menuOpen && (
-							<div
-								role="menu"
-								className="absolute right-0 top-full z-10 mt-1 min-w-28 overflow-hidden rounded-md border border-border bg-card py-1 shadow-xl"
-							>
-								<button
-									type="button"
-									role="menuitem"
-									onClick={() => {
-										setMenuOpen(false);
-										onRequestRename();
-									}}
-									className="block w-full px-3 py-1.5 text-left text-xs text-foreground hover:bg-secondary/70"
-								>
-									重命名
-								</button>
-								<button
-									type="button"
-									role="menuitem"
-									onClick={() => {
-										setMenuOpen(false);
-										onRequestDelete();
-									}}
-									className="block w-full px-3 py-1.5 text-left text-xs text-destructive hover:bg-destructive/10"
-								>
-									删除
-								</button>
-							</div>
+		<div className="group relative">
+			<button
+				type="button"
+				className={cn(
+					"block min-h-11 w-full cursor-pointer rounded-md px-2 py-1.5 text-left transition",
+					"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+					isActive ? "bg-primary/10" : "hover:bg-secondary/60",
+				)}
+				onClick={onSelect}
+				title={title}
+				aria-label={`打开会话：${title}`}
+			>
+				<div className={cn("flex items-center gap-2", isMutable && "pr-7")}>
+					<span
+						className={cn(
+							"size-1.5 shrink-0 rounded-full",
+							session.running ? "bg-green-500" : "bg-muted-foreground/40",
 						)}
-					</div>
-				)}
-			</div>
-			<div className="mt-0.5 flex items-center gap-1.5 pl-3.5 text-[10px] text-muted-foreground">
-				<span>{relativeTime(session.modified)}</span>
-				{session.messageCount > 0 && (
-					<span className="rounded bg-secondary/70 px-1.5 py-0.5">
-						{session.messageCount} msgs
+						aria-label={session.running ? "运行中" : "空闲"}
+					/>
+					<span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+						{title}
 					</span>
-				)}
-			</div>
+				</div>
+				<div className="mt-0.5 flex items-center gap-1.5 pl-3.5 text-[10px] text-muted-foreground">
+					<span>{relativeTime(session.modified)}</span>
+					{session.messageCount > 0 && (
+						<span className="rounded bg-secondary/70 px-1.5 py-0.5">
+							{session.messageCount} msgs
+						</span>
+					)}
+				</div>
+			</button>
+			{isMutable && (
+				<div className="absolute right-1.5 top-1" ref={menuRef}>
+					<button
+						type="button"
+						onClick={() => setMenuOpen((v) => !v)}
+						className={cn(
+							"rounded px-1.5 py-0.5 text-xs text-muted-foreground transition",
+							"hover:bg-secondary hover:text-foreground",
+							menuOpen && "bg-secondary text-foreground",
+						)}
+						aria-label="操作"
+						aria-haspopup="menu"
+						aria-expanded={menuOpen}
+					>
+						⋯
+					</button>
+					{menuOpen && (
+						<div
+							role="menu"
+							className="absolute right-0 top-full z-10 mt-1 min-w-28 overflow-hidden rounded-md border border-border bg-card py-1 shadow-xl"
+						>
+							<button
+								type="button"
+								role="menuitem"
+								onClick={() => {
+									setMenuOpen(false);
+									onRequestRename();
+								}}
+								className="block w-full px-3 py-1.5 text-left text-xs text-foreground hover:bg-secondary/70"
+							>
+								重命名
+							</button>
+							<button
+								type="button"
+								role="menuitem"
+								onClick={() => {
+									setMenuOpen(false);
+									onRequestDelete();
+								}}
+								className="block w-full px-3 py-1.5 text-left text-xs text-destructive hover:bg-destructive/10"
+							>
+								删除
+							</button>
+						</div>
+					)}
+				</div>
+			)}
 		</div>
 	);
 }
