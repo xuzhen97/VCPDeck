@@ -141,6 +141,46 @@ function summarizeInput(input: Record<string, unknown>): string {
 	return `${k}: ${value.slice(0, 80)}${value.length > 80 ? "…" : ""}`;
 }
 
+/** Tool Result：默认折叠，避免长输出挤占过程详情空间 */
+function ToolResultBlock({ text }: { text: string }) {
+	const [expanded, setExpanded] = useState(false);
+	const lines = text.split(/\r?\n/);
+	const firstLine = lines.find((line) => line.trim().length > 0)?.trim();
+	const summary = firstLine
+		? `${firstLine.slice(0, 100)}${firstLine.length > 100 ? "…" : ""}`
+		: "无文本输出";
+
+	return (
+		<div
+			className="overflow-hidden rounded-xl border border-border/70 bg-card/60 text-xs text-muted-foreground shadow-sm"
+			data-testid="tool-result"
+		>
+			<button
+				type="button"
+				className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-secondary/45"
+				onClick={() => setExpanded((value) => !value)}
+				aria-expanded={expanded}
+			>
+				<span className="shrink-0 font-semibold text-foreground">工具结果</span>
+				<span className="shrink-0 text-muted-foreground">{lines.length} 行</span>
+				<span className="min-w-0 flex-1 truncate font-mono text-[11px]">
+					{summary}
+				</span>
+				<span className="shrink-0 text-primary">
+					{expanded ? "收起" : "展开"}
+				</span>
+			</button>
+			{expanded && (
+				<div className="pi-chat-fade-in border-t border-border/60 bg-background/35 p-2.5">
+					<pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-secondary/35 p-2">
+						{text}
+					</pre>
+				</div>
+			)}
+		</div>
+	);
+}
+
 function Markdown({ text }: { text: string }) {
 	return (
 		<div className="markdown-body">
@@ -240,16 +280,7 @@ export function PiMessageView({
 			.filter((b): b is PiTextContent => b.type === "text")
 			.map((b) => b.text)
 			.join("\n");
-		return (
-			<div
-				className="rounded-xl border border-border/70 bg-card/60 px-2.5 py-2 text-xs text-muted-foreground shadow-sm"
-				data-testid="tool-result"
-			>
-				<pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-secondary/35 p-2">
-					{text}
-				</pre>
-			</div>
-		);
+		return <ToolResultBlock text={text} />;
 	}
 
 	// custom / compaction / 其他

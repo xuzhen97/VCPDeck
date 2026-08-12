@@ -93,16 +93,29 @@ describe("PiMessageView", () => {
 		expect(screen.getByText("hello there")).toBeTruthy();
 	});
 
-	it("tool_result 渲染结果文本", () => {
+	it("tool_result 默认折叠，展开后显示完整结果", async () => {
+		const user = userEvent.setup();
 		const message: PiMessage = {
 			id: "r1",
 			role: "tool_result",
 			toolCallId: "t1",
-			content: [{ type: "text", text: "result text" }],
+			content: [{ type: "text", text: "first line\nsecond line" }],
 		};
 		render(<PiMessageView message={message} />);
-		expect(screen.getByTestId("tool-result")).toBeTruthy();
-		expect(screen.getByText("result text")).toBeTruthy();
+
+		const result = screen.getByTestId("tool-result");
+		expect(result).toBeTruthy();
+		expect(screen.getByText("2 行")).toBeTruthy();
+		expect(result.querySelector("pre")).toBeNull();
+
+		await user.click(screen.getByRole("button", { name: /工具结果.*展开/ }));
+		expect(result.querySelector("pre")?.textContent).toBe(
+			"first line\nsecond line",
+		);
+		expect(screen.getByRole("button", { name: /工具结果.*收起/ })).toHaveAttribute(
+			"aria-expanded",
+			"true",
+		);
 	});
 
 	it("assistant 文本和工具结果使用语义卡片容器", () => {
