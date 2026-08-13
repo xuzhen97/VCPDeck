@@ -2,6 +2,10 @@ export const VERSION = "0.0.0";
 
 // ── 远程 Pi 协议 ──
 export * from "./pi.js";
+
+// ── 交互式终端协议 ──
+export * from "./terminal.js";
+import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { PiCapabilityStatus } from "./pi.js";
 // 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
 export type {
@@ -65,6 +69,24 @@ export const Events = {
 	PI_RESPONSE: "pi:response",
 	PI_EVENT: "pi:event",
 	PI_STATE: "pi:state",
+	TERMINAL_REQUEST: "terminal:request",
+	TERMINAL_RESPONSE: "terminal:response",
+	TERMINAL_OUTPUT: "terminal:output",
+	TERMINAL_EXIT: "terminal:exit",
+	TERMINAL_STATE: "terminal:state",
+	TERMINAL_ATTACH: "terminal:attach",
+	TERMINAL_DETACH: "terminal:detach",
+	TERMINAL_INPUT: "terminal:input",
+	TERMINAL_RESIZE: "terminal:resize",
+	TERMINAL_TAKEOVER: "terminal:takeover",
+	TERMINAL_ACK_OUTPUT: "terminal:ack-output",
+	TERMINAL_RESYNC: "terminal:resync",
+	TERMINAL_ATTACHED: "terminal:attached",
+	TERMINAL_SNAPSHOT: "terminal:snapshot",
+	TERMINAL_CONTROL: "terminal:control",
+	TERMINAL_SESSION_STATE: "terminal:session-state",
+	TERMINAL_RESYNC_REQUIRED: "terminal:resync-required",
+	TERMINAL_ERROR: "terminal:error",
 } as const;
 
 // ── Job type ──
@@ -109,7 +131,7 @@ export interface MachineRegister {
 	clientVersion: string;
 	capabilities: string[];
 	/** 可选：Client Pi 能力探测结果摘要（旧 Client 缺省） */
-	capabilityDetails?: { pi?: PiCapabilityStatus };
+	capabilityDetails?: { pi?: PiCapabilityStatus; terminal?: TerminalCapabilityStatus };
 }
 
 /** 单盘容量与占用率（容量与使用率来自同一次 statfs） */
@@ -251,8 +273,8 @@ export interface ClientInfo {
 	totalMemMB: number;
 	clientVersion: string;
 	capabilities: string[];
-	/** 解析后的 Pi 能力摘要（无探测/损坏时为 {}） */
-	capabilityDetails: { pi?: PiCapabilityStatus };
+	/** 解析后的能力摘要（pi/terminal；无探测/损坏时为 {}） */
+	capabilityDetails: { pi?: PiCapabilityStatus; terminal?: TerminalCapabilityStatus };
 	online: boolean;
 	cpuPercent: number | null;
 	memPercent: number | null;

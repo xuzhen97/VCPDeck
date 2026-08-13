@@ -109,7 +109,11 @@ async function makeDeps(overrides: Partial<PiBridgeDeps> = {}) {
 			clientId: "c1",
 			supervisor,
 			getPiStatus: async () => status,
-			getRegister: (piStatus) =>
+			getTerminalStatus: async () => ({
+				available: false,
+				code: "TERMINAL_NATIVE_BACKEND_UNAVAILABLE",
+			}),
+			getRegister: (piStatus, terminalStatus) =>
 				({
 					clientId: "c1",
 					hostname: "host",

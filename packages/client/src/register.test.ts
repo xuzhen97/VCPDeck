@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { getRegisterInfo } from "./register.js";
-import type { PiCapabilityStatus } from "@vcpdeck/shared";
+import type { PiCapabilityStatus, TerminalCapabilityStatus } from "@vcpdeck/shared";
 
 describe("getRegisterInfo", () => {
 	it("可用状态包含 agent.pi 及安全 details", () => {
@@ -32,7 +32,34 @@ describe("getRegisterInfo", () => {
 		const info = getRegisterInfo(undefined);
 		expect(info.capabilities).not.toContain("pi.probe");
 		expect(info.capabilities).not.toContain("agent.pi");
-		expect(info.capabilityDetails).toBeUndefined();
+		expect(info.capabilityDetails).toEqual({});
+	});
+
+	it("终端可用时声明 terminal.pty 并携带安全 details", () => {
+		const terminalStatus: TerminalCapabilityStatus = {
+			available: true,
+			backend: "conpty",
+		};
+		const info = getRegisterInfo(undefined, terminalStatus);
+		expect(info.capabilities).toContain("terminal.pty");
+		expect(info.capabilityDetails?.terminal).toMatchObject({ available: true });
+	});
+
+	it("终端不可用时只保留 details 原因，不声明能力", () => {
+		const terminalStatus: TerminalCapabilityStatus = {
+			available: false,
+			code: "TERMINAL_NATIVE_BACKEND_UNAVAILABLE",
+			message: "no backend",
+		};
+		const info = getRegisterInfo(undefined, terminalStatus);
+		expect(info.capabilities).not.toContain("terminal.pty");
+		expect(info.capabilityDetails?.terminal).toMatchObject({ available: false });
+	});
+
+	it("无终端探测时不声明能力", () => {
+		const info = getRegisterInfo(undefined, undefined);
+		expect(info.capabilities).not.toContain("terminal.pty");
+		expect(info.capabilityDetails?.terminal).toBeUndefined();
 	});
 
 	it("序列化结果不包含本地路径或凭据", () => {

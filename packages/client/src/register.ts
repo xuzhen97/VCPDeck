@@ -3,7 +3,11 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { MachineRegister, PiCapabilityStatus } from "@vcpdeck/shared";
+import type {
+	MachineRegister,
+	PiCapabilityStatus,
+	TerminalCapabilityStatus,
+} from "@vcpdeck/shared";
 import { isFrpAvailable } from "./frpc-daemon.js";
 
 const CLIENT_ID_DIR = path.join(os.homedir(), ".vcpdeck");
@@ -25,6 +29,7 @@ export const CLIENT_ID =
 
 export function getRegisterInfo(
 	piStatus?: PiCapabilityStatus,
+	terminalStatus?: TerminalCapabilityStatus,
 ): MachineRegister {
 	const cpus = os.cpus();
 	const caps: string[] = ["exec", "file.read", "file.write"];
@@ -34,6 +39,12 @@ export function getRegisterInfo(
 	if (piStatus?.available) {
 		caps.push("agent.pi");
 	}
+	if (terminalStatus?.available) {
+		caps.push("terminal.pty");
+	}
+	const capabilityDetails: MachineRegister["capabilityDetails"] = {};
+	if (piStatus !== undefined) capabilityDetails.pi = piStatus;
+	if (terminalStatus !== undefined) capabilityDetails.terminal = terminalStatus;
 	return {
 		clientId: CLIENT_ID,
 		hostname: os.hostname(),
@@ -42,6 +53,6 @@ export function getRegisterInfo(
 		totalMemMB: Math.round(os.totalmem() / 1024 / 1024),
 		clientVersion: "0.0.0",
 		capabilities: caps,
-		...(piStatus !== undefined ? { capabilityDetails: { pi: piStatus } } : {}),
+		capabilityDetails,
 	};
 }

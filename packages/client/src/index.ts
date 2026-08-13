@@ -6,6 +6,7 @@ import type {
 	PiEvent,
 	PiStateAck,
 	StatusReport,
+	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
 import { parsePiRequest } from "@vcpdeck/shared";
 import { CLIENT_ID, getRegisterInfo } from "./register.js";
@@ -19,6 +20,13 @@ import {
 } from "./pi/supervisor.js";
 import type { PiWorkerRequestMessage } from "./pi/worker-protocol.js";
 import { probePiCapability } from "./pi/capability.js";
+import { probeTerminalCapability } from "./terminal/capability.js";
+import { discoverShells, type ShellDiscoveryEnv } from "./terminal/shell-discovery.js";
+import { createTerminalManager, type PtyAdapter, type PtySpawnOptions } from "./terminal/terminal-manager.js";
+import { attachTerminalBridge, wireManagerToSocket } from "./terminal/protocol-bridge.js";
+import { killProcessTree } from "./terminal/process-tree.js";
+import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { fork } from "node:child_process";
 import { join } from "node:path";
 
@@ -58,7 +66,11 @@ export interface PiBridgeDeps {
 	clientId: string;
 	supervisor: PiSupervisor;
 	getPiStatus: () => Promise<PiCapabilityStatus>;
-	getRegister: (piStatus: PiCapabilityStatus | undefined) => MachineRegister;
+	getTerminalStatus: () => Promise<TerminalCapabilityStatus>;
+	getRegister: (
+		piStatus: PiCapabilityStatus | undefined,
+		terminalStatus: TerminalCapabilityStatus | undefined,
+	) => MachineRegister;
 	getStatusReport: () => StatusReport;
 }
 
@@ -151,7 +163,11 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 				deps.getPiStatus(),
 				new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 3000)),
 			]).catch(() => undefined);
-			if (generation === connectionGeneration) socket.emit(Events.REGISTER, deps.getRegister(piStatus), onRegistered);
+			const terminalStatus = await deps
+				.getTerminalStatus()
+				.catch(() => undefined);
+			if (generation === connectionGeneration)
+				socket.emit(Events.REGISTER, deps.getRegister(piStatus, terminalStatus), onRegistered);
 		},
 	};
 }
@@ -169,11 +185,44 @@ export function connect(): Socket {
 		forkWorker: forkProjectWorker,
 	});
 
+	// ── 终端能力（延迟探测；失败仅禁用 Terminal Tab） ──
+	const terminalGenerationId = randomUUID();
+	const terminalManager = createTerminalManager({
+		shells: [],
+		cwd: safeCwd(),
+		generationId: terminalGenerationId,
+		onOutput: () => undefined,
+		onSessionEnded: () => undefined,
+		spawnPty: createPtySpawner(),
+		killTree: (pid) => killProcessTree(pid),
+	});
+	wireManagerToSocket(socket, terminalManager);
+	attachTerminalBridge(socket, {
+		clientId: CLIENT_ID,
+		manager: terminalManager,
+	});
+
+	// 连接后：探测终端能力并发现 Shell（幂等，不阻塞注册超过 3 秒）
+	let terminalReady: Promise<void> | null = null;
+	function ensureTerminalReady(): Promise<void> {
+		if (!terminalReady) {
+			terminalReady = (async () => {
+				const status = await probeTerminalCapability();
+				if (!status.available) return;
+				const shells = await discoverShells(createShellDiscoveryEnv());
+				terminalManager.setShells(shells);
+			})();
+		}
+		return terminalReady;
+	}
+
 	const bridge = attachPiBridge(socket, {
 		clientId: CLIENT_ID,
 		supervisor,
 		getPiStatus: () => probePiCapability(),
-		getRegister: (piStatus) => getRegisterInfo(piStatus),
+		getTerminalStatus: () => probeTerminalCapability(),
+		getRegister: (piStatus, terminalStatus) =>
+			getRegisterInfo(piStatus, terminalStatus),
 		getStatusReport: () => ({
 			clientId: CLIENT_ID,
 			jobs: getStatusReport(),
@@ -182,7 +231,10 @@ export function connect(): Socket {
 
 	socket.on("connect", () => {
 		console.log(`[vcpdeck] connected as ${CLIENT_ID}`);
-		void bridge.onConnected();
+		void (async () => {
+			await ensureTerminalReady();
+			await bridge.onConnected();
+		})();
 	});
 
 	setInterval(() => {
@@ -210,4 +262,98 @@ export function connect(): Socket {
 	});
 
 	return socket;
+}
+
+/** 终端初始工作目录：home 优先，回退 process.cwd()。 */
+function safeCwd(): string {
+	try {
+		return homedir();
+	} catch {
+		return process.cwd();
+	}
+}
+
+/** 真实 Shell 探测环境（生产路径；兼容 MSYS 风格 PATH）。 */
+function createShellDiscoveryEnv(): ShellDiscoveryEnv {
+	const isWin = process.platform === "win32";
+	const pathEnv = process.env.PATH ?? "";
+	// MSYS/Git Bash 的 PATH 用 ":" 分隔且为虚拟路径；按实际分隔符拆分
+	const dirs = pathEnv.includes(";")
+		? pathEnv.split(";").filter(Boolean)
+		: pathEnv.split(":").filter(Boolean);
+	return {
+		platform: process.platform,
+		home: homedir(),
+		shellEnv: process.env.SHELL,
+		path: pathEnv,
+		pathExt: process.env.PATHEXT ?? "",
+		resolveExecutable: async (name) => {
+			const { access } = await import("node:fs/promises");
+			const exts = isWin
+				? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
+				: [""];
+			const seps = isWin ? ["\\", "/"] : ["/"];
+			for (const dir of dirs) {
+				for (const sep of seps) {
+					for (const ext of exts) {
+						const candidate = dir.endsWith(sep) ? `${dir}${name}${ext}` : `${dir}${sep}${name}${ext}`;
+						try {
+							await access(candidate);
+							return candidate;
+						} catch {
+							/* 继续查找 */
+						}
+					}
+				}
+			}
+			// 兜底：where.exe 非 shell 调用（Windows）
+			if (isWin) {
+				try {
+					const { spawnSync } = await import("node:child_process");
+					const result = spawnSync("where.exe", [name], { windowsHide: true, encoding: "utf8" });
+					if (result.status === 0 && result.stdout) {
+						const first = result.stdout.split(/\r?\n/)[0]?.trim();
+						if (first) return first;
+					}
+				} catch {
+					/* 忽略 */
+				}
+			}
+			return null;
+		},
+		isExecutable: async (path) => {
+			try {
+				const { access, constants } = await import("node:fs/promises");
+				await access(path, constants.X_OK);
+				return true;
+			} catch {
+				return false;
+			}
+		},
+	};
+}
+
+/** node-pty spawn 适配器（require 延迟到首次创建会话）。 */
+function createPtySpawner(): (opts: PtySpawnOptions) => PtyAdapter {
+	let ptyModule: typeof import("node-pty") | null = null;
+	return (opts) => {
+		if (!ptyModule) {
+			ptyModule = require("node-pty") as typeof import("node-pty");
+		}
+		const pty = ptyModule.spawn(opts.file, opts.args, {
+			name: opts.name,
+			cols: opts.cols,
+			rows: opts.rows,
+			cwd: opts.cwd,
+			env: opts.env,
+		});
+		return {
+			pid: pty.pid,
+			write: (d) => pty.write(d),
+			resize: (c, r) => pty.resize(c, r),
+			kill: () => pty.kill(),
+			onData: (cb) => pty.onData(cb),
+			onExit: (cb) => pty.onExit((e) => cb(e.exitCode)),
+		};
+	};
 }

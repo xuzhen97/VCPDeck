@@ -22,6 +22,7 @@ import { FilesPanel } from "@/pages/files-panel";
 import { FrpPanel } from "@/pages/frp-panel";
 import { JobsPage } from "@/pages/jobs-page";
 import { PiPanel } from "@/pages/pi-panel";
+import { TerminalPanel } from "@/pages/terminal-panel";
 
 const tabs = [
 	["overview", "概览"],
@@ -30,6 +31,7 @@ const tabs = [
 	["frp", "映射"],
 	["jobs", "任务记录"],
 	["pi", "Pi"],
+	["terminal", "终端"],
 ] as const;
 
 export function MachineWorkspace() {
@@ -146,7 +148,7 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 			</header>
 			<div
 				data-testid="machine-workspace-content"
-				className={`min-h-0 flex-1 ${tab === "files" ? "overflow-hidden" : "overflow-y-auto pr-1"}`}
+				className={`min-h-0 flex-1 ${tab === "files" || tab === "terminal" ? "overflow-hidden" : "overflow-y-auto pr-1"}`}
 			>
 				{tab === "overview" && <Overview client={client} />}
 				{tab === "execute" && <ExecutePanel clientId={client.clientId} />}
@@ -154,7 +156,8 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				{tab === "frp" && <FrpPanel clientId={client.clientId} />}
 				{tab === "jobs" && <JobsPage clientId={client.clientId} />}
 				{tab === "pi" && <PiPanel client={client} />}
-				{!["overview", "execute", "files", "frp", "jobs", "pi"].includes(
+				{tab === "terminal" && <TerminalPanel clientId={client.clientId} />}
+				{!["overview", "execute", "files", "frp", "jobs", "pi", "terminal"].includes(
 					tab,
 				) && (
 					<Card>

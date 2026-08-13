@@ -9,6 +9,7 @@ import { PrismaModule } from "../prisma/prisma.module.js";
 import { FrpModule } from "../frp/frp.module.js";
 import { StorageModule } from "../storage/storage.module.js";
 import { PiModule } from "../pi/pi.module.js";
+import { TerminalModule } from "../terminal/terminal.module.js";
 
 @Module({
 	imports: [
@@ -19,6 +20,7 @@ import { PiModule } from "../pi/pi.module.js";
 		StorageModule,
 		forwardRef(() => FrpModule),
 		PiModule,
+		TerminalModule,
 	],
 	providers: [ClientGateway, AppGateway],
 	exports: [ClientGateway],

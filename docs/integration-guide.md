@@ -1414,3 +1414,28 @@ bearerToken
 | Skill 骨架 | `skills/vcpdeck/SKILL.md` |
 | 通用集成测试 | `scripts/test.cjs` |
 | FRP 集成测试 | `scripts/test-frp.cjs` |
+
+## 11. 交互式终端（Terminal Tab）
+
+机器工作区「终端」Tab 提供真实交互式 PTY（Windows ConPTY / Linux PTY），
+支持多会话、刷新恢复、单写多读与最小审计。详细设计与验收见
+`docs/interactive-terminal-tab-design.md` 与 `docs/verification/interactive-terminal-windows.md`。
+
+### 使用方式
+
+1. 进入 `/machines/:clientId/terminal`，点击「新建」选择 Client 实际可用的 Shell
+   （Windows：pwsh/powershell/cmd；Linux：$SHELL/bash/zsh/sh，首个可用项为默认）。
+2. 终端支持方向键、Tab 补全、命令历史、Ctrl+C、中文输入输出与复制粘贴；
+   窗口尺寸自动同步（ResizeObserver + Fit）。
+3. 刷新页面或切换标签后重新打开，会恢复同一 PTY 进程（快照 + 增量回放）。
+4. 同一终端可被多个浏览器查看；只有最先打开者（operator）可输入，
+   其他页面只读。操作者断开后有 30 秒重连保护，保护期后只读页面可「接管」。
+5. 所有浏览器离开后会话保留 30 分钟，到期自动结束；也可随时手动关闭。
+6. 「记录」按钮查看最小审计（仅生命周期事件，不保存输入输出）。
+
+### 限制与安全
+
+- 终端继承远程 Client OS 用户权限，**不是沙箱**，勿输入敏感凭据。
+- 每台机器最多 5 个活动终端。
+- Client/机器重启后旧会话标记为「已中断」，不会伪恢复。
+- REST API：`/api/clients/:clientId/terminals*`（SDK `sdk.terminals`）。

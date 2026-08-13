@@ -149,6 +149,15 @@ function makeLoopback() {
 		markInactiveByClientId: vi.fn(async () => {}),
 		updateStatus: vi.fn(async () => {}),
 	};
+	const terminalService = {
+		handleClientResponse: vi.fn(async () => {}),
+		handleClientOutput: vi.fn(async () => {}),
+		handleClientExit: vi.fn(async () => {}),
+		handleClientState: vi.fn(async () => ({ acceptedSessionIds: [], closeSessionIds: [] })),
+		handleClientDisconnect: vi.fn(async () => {}),
+		handleClientRegistered: vi.fn(async () => {}),
+	};
+	const terminalBroker = { bindEmitter: vi.fn(), disconnect: vi.fn(), resolve: vi.fn() };
 	const gateway = new ClientGateway(
 		clientService as never,
 		jobService as never,
@@ -157,6 +166,8 @@ function makeLoopback() {
 		requests,
 		events,
 		runs,
+		terminalService as never,
+		terminalBroker as never,
 	);
 	gateway.server = {
 		emit: vi.fn(),
@@ -197,12 +208,11 @@ function makeLoopback() {
 		});
 	};
 	const register = async (socket: Socket) => {
-		await gateway.handleRegister(socket, registration(), vi.fn());
+		await gateway.handleRegister(socket, registration());
 	};
 	const reconcile = async (socket: Socket, stateReport = report()) => {
-		let ack: unknown;
-		await gateway.handlePiState(socket, stateReport, (value) => { ack = value; });
-		return ack;
+		const result = await gateway.handlePiState(socket, stateReport);
+		return result as unknown;
 	};
 	const current = (jobId: string) => prisma.jobs.find((job) => job.id === jobId)!;
 

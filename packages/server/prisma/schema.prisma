@@ -28,6 +28,7 @@ model Client {
   updatedAt         DateTime  @updatedAt
   jobs              Job[]
   frpMappings       FrpMapping[]
+  terminalSessions  TerminalSession[]
 }
 
 model Job {
@@ -145,4 +146,49 @@ model File {
   expiresAt   DateTime?
   createdAt   DateTime  @default(now())
   purpose     String    @default("job")
+}
+
+// ── 交互式终端会话（只存元数据；终端正文/快照/token 不入库） ──
+model TerminalSession {
+  id                  String   @id
+  clientId            String
+  client              Client   @relation(fields: [clientId], references: [id])
+  shellId             String
+  shellLabel          String
+  status              String   @default("starting")
+  cols                Int
+  rows                Int
+  createdByIdentityId String?
+  createdByName       String?
+  createdAt           DateTime @default(now())
+  lastAttachedAt      DateTime?
+  detachedAt          DateTime?
+  expiresAt           DateTime?
+  endedAt             DateTime?
+  endReason           String?
+  errorCode           String?
+  updatedAt           DateTime @updatedAt
+
+  audits TerminalAuditEvent[]
+
+  @@index([clientId, createdAt])
+  @@index([clientId, status])
+}
+
+// ── 终端最小审计（只记录生命周期事件，不记录输入输出） ──
+model TerminalAuditEvent {
+  id         String   @id
+  sessionId  String
+  session    TerminalSession @relation(fields: [sessionId], references: [id])
+  clientId   String
+  event      String
+  identityId String?
+  actorName  String?
+  source     String?
+  result     String   @default("ok")
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([sessionId, createdAt])
 }

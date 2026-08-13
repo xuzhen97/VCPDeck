@@ -17,8 +17,8 @@ CREATE TABLE "FrpsInstance" (
     "updatedAt" DATETIME NOT NULL
 );
 
--- AlterTable: FrpMapping add frpsInstanceId
-ALTER TABLE "FrpMapping" ADD COLUMN "frpsInstanceId" TEXT;
+-- FrpMapping 表与其 frpsInstanceId 列由 20260728000000_add_missing_base_tables 创建
+-- （原 ALTER TABLE ADD COLUMN 在迁移回放中因列已存在而失败，已移除）。
 CREATE INDEX "FrpMapping_frpsInstanceId_fkey" ON "FrpMapping" (
     "frpsInstanceId"
 );

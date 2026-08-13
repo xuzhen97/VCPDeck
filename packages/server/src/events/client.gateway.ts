@@ -1,5 +1,4 @@
 import { Inject } from "@nestjs/common";
-import { Ack } from "@nestjs/websockets/decorators/ack.decorator";
 import {
   ConnectedSocket,
   MessageBody,
@@ -15,12 +14,18 @@ import { FrpService } from "../frp/frp.service.js";
 import { PiRequestBroker } from "../pi/pi-request-broker.js";
 import { PiEventBroker } from "../pi/pi-event-broker.js";
 import { PiRunService } from "../pi/pi-run.service.js";
+import { TerminalService } from "../terminal/terminal.service.js";
+import { TerminalRequestBroker } from "../terminal/terminal-request-broker.js";
 import {
   Events,
   JobStatus,
   parsePiEvent,
   parsePiResponse,
   parsePiStateReport,
+  parseTerminalClientResponse,
+  parseTerminalExitReport,
+  parseTerminalOutputChunk,
+  parseTerminalStateReport,
   type JobProgress,
   type PiStateAck,
 } from "@vcpdeck/shared";
@@ -38,6 +43,11 @@ import type {
   PiEvent,
   PiResponse,
   PiStateReport,
+  TerminalClientResponse,
+  TerminalOutputChunk,
+  TerminalExitReport,
+  TerminalStateAck,
+  TerminalStateReport,
 } from "@vcpdeck/shared";
 
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
@@ -55,12 +65,17 @@ export class ClientGateway {
     @Inject(PiRequestBroker) private readonly piRequests: PiRequestBroker,
     @Inject(PiEventBroker) private readonly piEvents: PiEventBroker,
     @Inject(PiRunService) private readonly piRuns: PiRunService,
+    @Inject(TerminalService) private readonly terminalService: TerminalService,
+    @Inject(TerminalRequestBroker) private readonly terminalBroker: TerminalRequestBroker,
   ) {}
 
   // ── Pi request 发送通道（避免与 PiModule 循环依赖） ──
   afterInit() {
     this.piRequests.bindEmitter((socketId, request) => {
       this.server.to(socketId).emit(Events.PI_REQUEST, request);
+    });
+    this.terminalBroker.bindEmitter((socketId, request) => {
+      this.server.to(socketId).emit(Events.TERMINAL_REQUEST, request);
     });
   }
 
@@ -79,9 +94,13 @@ export class ClientGateway {
     const clientId = client.data.clientId as string | undefined;
     // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
     this.piRequests.disconnect(client.id);
+    this.terminalBroker.disconnect(client.id);
     if (clientId && await this.piRuns.disconnectGeneration(clientId, client.id)) {
       await this.jobService.markDisconnected(clientId);
       await this.frpService.markInactiveByClientId(clientId);
+    }
+    if (clientId) {
+      await this.terminalService.handleClientDisconnect(clientId, client.id);
     }
     await this.clientService.markOfflineBySocketId(client.id);
     console.log(`[ws] disconnected: ${clientId ?? client.id}`);
@@ -92,15 +111,15 @@ export class ClientGateway {
   async handleRegister(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: MachineRegister,
-    @Ack() ack?: () => void,
   ) {
     await this.clientService.register(data, client.id);
     client.data.clientId = data.clientId;
     client.join(data.clientId);
     await this.piRuns.markReconcilePending(data.clientId, client.id);
+    await this.terminalService.handleClientRegistered(data.clientId, client.id);
     client.emit("ack", { event: Events.REGISTER });
-    if (typeof ack === "function") ack();
     console.log(`[ws] registered: ${data.clientId} (${data.hostname})`);
+    return { ok: true };
   }
 
   // ── Pi 事件（复用现有 PSK 连接） ──
@@ -142,7 +161,6 @@ export class ClientGateway {
   async handlePiState(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: PiStateReport,
-    @Ack() ack?: (result: PiStateAck) => void,
   ) {
     const clientId = client.data.clientId as string | undefined;
     if (!clientId) return;
@@ -150,15 +168,83 @@ export class ClientGateway {
       const parsed = parsePiStateReport(data);
       if (parsed.clientId !== clientId) return; // 身份绑定
       const result = await this.piRuns.reconcileGeneration(clientId, client.id, parsed);
-      if (typeof ack === "function") ack(result);
+      return result;
     } catch {
       // 非法报告忽略
+      return { acceptedRunIds: [], closedRunIds: [], reportAgain: false };
     }
   }
 
   @SubscribeMessage(Events.HEARTBEAT)
   async handleHeartbeat(@MessageBody() data: Heartbeat) {
     await this.clientService.heartbeat(data);
+  }
+
+  // ── 终端事件（复用现有 PSK 连接；身份来自 socket 绑定） ──
+
+  @SubscribeMessage(Events.TERMINAL_RESPONSE)
+  async handleTerminalResponse(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: TerminalClientResponse,
+  ) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId) return;
+    try {
+      const parsed = parseTerminalClientResponse(data);
+      // 响应由 broker 关联；service 仅做防御性校验
+      this.terminalBroker.resolve(client.id, parsed);
+      await this.terminalService.handleClientResponse(clientId, client.id, parsed);
+    } catch {
+      // 非法响应忽略
+    }
+  }
+
+  @SubscribeMessage(Events.TERMINAL_OUTPUT)
+  async handleTerminalOutput(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: TerminalOutputChunk,
+  ) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId) return;
+    try {
+      const parsed = parseTerminalOutputChunk(data);
+      await this.terminalService.handleClientOutput(clientId, parsed);
+    } catch {
+      // 非法块忽略
+    }
+  }
+
+  @SubscribeMessage(Events.TERMINAL_EXIT)
+  async handleTerminalExit(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: TerminalExitReport,
+  ) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId) return;
+    try {
+      const parsed = parseTerminalExitReport(data);
+      await this.terminalService.handleClientExit(clientId, parsed);
+    } catch {
+      // 非法报告忽略
+    }
+  }
+
+  @SubscribeMessage(Events.TERMINAL_STATE)
+  async handleTerminalState(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: TerminalStateReport,
+  ) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId) return;
+    try {
+      const parsed = parseTerminalStateReport(data);
+      if (parsed.clientId !== clientId) return; // 身份绑定
+      const result = await this.terminalService.handleClientState(clientId, client.id, parsed);
+      return result;
+    } catch {
+      // 非法报告忽略
+      return { acceptedSessionIds: [], closeSessionIds: [] };
+    }
   }
 
   @SubscribeMessage(Events.STATUS_REPORT)
