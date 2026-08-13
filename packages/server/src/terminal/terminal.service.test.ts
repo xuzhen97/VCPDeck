@@ -316,6 +316,27 @@ describe("30 秒重连保护与接管", () => {
 	});
 });
 
+
+	it("慢消费者：ack 落后超过阈值时暂停增量并请求 resync，不影响其他 attachment", async () => {
+		const h = makeHarness();
+		h.broker.setResponder(okAttach);
+		const sessionId = await seedSession(h);
+		const b1 = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
+		const b2 = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: { ...ACTOR, identityId: "id2" }, socketId: "b2" });
+		await h.service.whenAttachSettled(sessionId);
+		void b1;
+		// b2 定期 ack；b1（operator）不 ack → 落后超过阈值
+		for (let seq = 1; seq <= TerminalLimits.slowConsumerGapBlocks + 10; seq++) {
+			await h.service.handleClientOutput("c1", { sessionId, seq, data: "x" });
+			if (seq % 100 === 0) {
+				await h.service.browserAckOutput({ socketId: "b2", sessionId, attachmentId: b2.attachmentId, seq });
+			}
+		}
+		const resyncRequired = h.emitter.browserEmits.filter((e) => e.event === "terminal:resync-required");
+		expect(resyncRequired.length).toBeGreaterThanOrEqual(1);
+		expect(resyncRequired[0]?.payload).toEqual({ sessionId });
+	});
+
 describe("输出同步与快照", () => {
 	it("attach 时先 snapshot 后增量（snapshotSeq 之前的块丢弃）", async () => {
 		const h = makeHarness();

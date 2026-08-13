@@ -85,6 +85,8 @@ export const TerminalLimits = {
 	maxSnapshotBytes: 8 * 1024 * 1024,
 	syncBacklogBytes: 2 * 1024 * 1024,
 	scrollbackLines: 2_000,
+	/** 慢消费者：live 状态下 ack 落后超过该块数即标记 resync */
+	slowConsumerGapBlocks: 512,
 	minCols: 20,
 	maxCols: 500,
 	minRows: 5,

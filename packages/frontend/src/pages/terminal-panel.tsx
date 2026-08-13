@@ -24,6 +24,7 @@ function SessionTab({
 	active,
 	onRequestClose,
 	onRequestAudit,
+	onSizeChange,
 	viewAdapterFactory,
 	viewResizeObserverFactory,
 }: {
@@ -33,6 +34,7 @@ function SessionTab({
 	active: boolean;
 	onRequestClose: () => void;
 	onRequestAudit: () => void;
+	onSizeChange: (cols: number, rows: number) => void;
 	viewAdapterFactory?: () => XtermAdapter;
 	viewResizeObserverFactory?: () => ResizeObserverLike;
 }) {
@@ -53,12 +55,22 @@ function SessionTab({
 		}),
 		[],
 	);
+	const sessionHookRef = useRef<ReturnType<typeof useTerminalSession> | null>(null);
 	const sessionHook = useTerminalSession({
 		socket,
 		clientId,
 		sessionId: session.sessionId,
 		view,
+		onGainedControl: () => {
+			// 接管/恢复操作权后：fit 并下发权威尺寸（设计 10.4）
+			const size = viewRef.current?.fit() ?? null;
+			if (size) {
+				onSizeChange(size.cols, size.rows);
+				sessionHookRef.current?.handleResize(size.cols, size.rows);
+			}
+		},
 	});
+	sessionHookRef.current = sessionHook;
 	const state: TerminalSessionState = sessionHook.state;
 
 	// 视图就绪后冲刷缓冲
@@ -83,7 +95,10 @@ function SessionTab({
 					ref={viewRef}
 					onReady={() => setViewReady(true)}
 					onData={sessionHook.handleInput}
-					onResize={sessionHook.handleResize}
+					onResize={(cols, rows) => {
+						onSizeChange(cols, rows);
+						sessionHook.handleResize(cols, rows);
+					}}
 					readOnly={state.mode !== "operator"}
 					adapterFactory={viewAdapterFactory}
 					resizeObserverFactory={viewResizeObserverFactory}
@@ -114,6 +129,11 @@ export function TerminalPanel({
 	const [closeTarget, setCloseTarget] = useState<TerminalSessionInfo | null>(null);
 	const [auditTarget, setAuditTarget] = useState<TerminalSessionInfo | null>(null);
 	const [closing, setClosing] = useState(false);
+	// 最近一次容器 fit 尺寸（创建会话时使用；无记录用安全默认）
+	const sizeRef = useRef({ cols: DEFAULT_COLS, rows: DEFAULT_ROWS });
+	const handleSizeChange = useCallback((cols: number, rows: number) => {
+		sizeRef.current = { cols, rows };
+	}, []);
 
 	const reload = useCallback(
 		async (signal?: AbortSignal) => {
@@ -153,8 +173,8 @@ export function TerminalPanel({
 			try {
 				const created = await sdk.terminals.create(clientId, {
 					shellId,
-					cols: DEFAULT_COLS,
-					rows: DEFAULT_ROWS,
+					cols: sizeRef.current.cols,
+					rows: sizeRef.current.rows,
 				});
 				setActiveId(created.sessionId);
 				await reload();
@@ -233,6 +253,7 @@ export function TerminalPanel({
 						active={session.sessionId === activeId}
 						onRequestClose={() => setCloseTarget(session)}
 						onRequestAudit={() => setAuditTarget(session)}
+						onSizeChange={handleSizeChange}
 						viewAdapterFactory={viewAdapterFactory}
 						viewResizeObserverFactory={viewResizeObserverFactory}
 					/>

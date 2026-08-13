@@ -672,6 +672,12 @@ export class TerminalService {
 					continue;
 				}
 			} else if (attachment.state === "live") {
+				// 慢消费者：ack 落后超过阈值 → 暂停增量并请求 resync（不影响其他 attachment）
+				if (chunk.seq - attachment.lastAckSeq > TerminalLimits.slowConsumerGapBlocks) {
+					this.emitBrowser(attachment.socketId, "terminal:resync-required", { sessionId: rt.sessionId });
+					attachment.state = "syncing";
+					continue;
+				}
 				this.emitBrowser(attachment.socketId, "terminal:output", chunk);
 			}
 		}

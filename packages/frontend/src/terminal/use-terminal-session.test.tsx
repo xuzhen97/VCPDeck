@@ -4,6 +4,7 @@ import { useTerminalSession, type TerminalViewHandle, type TerminalSocketEvents 
 import type { TerminalControlState, TerminalErrorMessage, TerminalOutputChunk, TerminalSessionStateMessage, TerminalSnapshotMessage } from "@vcpdeck/shared";
 
 function makeSocket() {
+	let connectionChange: ((connected: boolean) => void) | null = null;
 	const handlers: {
 		onSnapshot?: (m: TerminalSnapshotMessage) => void;
 		onOutput?: (c: TerminalOutputChunk) => void;
@@ -56,9 +57,12 @@ function makeSocket() {
 		onError: (cb: (e: TerminalErrorMessage) => void) => {
 			handlers.onError = cb;
 		},
+		onConnectionChange: (cb: (connected: boolean) => void) => {
+			connectionChange = cb;
+		},
 		dispose: vi.fn(() => undefined),
 	};
-	return { socket, handlers, calls };
+	return { socket, handlers, calls, getConnectionChange: () => connectionChange };
 }
 
 function makeView() {
@@ -250,5 +254,54 @@ describe("useTerminalSession", () => {
 		unmount();
 		expect(calls.find((c) => c.method === "detach")).toBeTruthy();
 		expect(calls.filter((c) => c.method === "close")).toHaveLength(0);
+	});
+});
+
+describe("断线重连与操作权", () => {
+	it("断线进入 reconnecting；重连后自动重新 attach（带 token）", async () => {
+		const { socket, handlers, calls, getConnectionChange } = makeSocket();
+		const { view } = makeView();
+		const storage = makeStorage();
+		storage.map.set("vcpdeck:term:c1:s1", "saved-tok");
+		const { result } = renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }));
+		await waitFor(() => expect(result.current.state.phase).toBe("syncing"));
+		act(() => {
+			getConnectionChange()?.(false);
+		});
+		expect(result.current.state.phase).toBe("reconnecting");
+		const attachCalls = calls.filter((c) => c.method === "attach").length;
+		act(() => {
+			getConnectionChange()?.(true);
+		});
+		await waitFor(() => expect(calls.filter((c) => c.method === "attach").length).toBe(attachCalls + 1));
+	});
+
+	it("获得操作权时触发 onGainedControl", async () => {
+		const { socket, handlers } = makeSocket();
+		const { view } = makeView();
+		const storage = makeStorage();
+		const onGainedControl = vi.fn();
+		renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage, onGainedControl }));
+		await waitFor(() => expect(onGainedControl).not.toHaveBeenCalled());
+		act(() => {
+			handlers.onControl?.({
+				sessionId: "s1",
+				mode: "viewer",
+				operatorName: "other",
+				controlProtectedUntil: null,
+				canTakeover: false,
+			});
+		});
+		expect(onGainedControl).not.toHaveBeenCalled();
+		act(() => {
+			handlers.onControl?.({
+				sessionId: "s1",
+				mode: "operator",
+				operatorName: null,
+				controlProtectedUntil: null,
+				canTakeover: false,
+			});
+		});
+		expect(onGainedControl).toHaveBeenCalledTimes(1);
 	});
 });

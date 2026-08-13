@@ -73,6 +73,8 @@ export interface ResizeObserverLike {
 export interface TerminalViewHandle {
 	write(data: string): void;
 	reset(): void;
+	/** 立即 fit 并返回当前尺寸（容器可见时）。 */
+	fit(): { cols: number; rows: number } | null;
 }
 
 export interface TerminalViewProps {
@@ -101,6 +103,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
 		() => ({
 			write: (data: string) => adapterRef.current?.write(data),
 			reset: () => adapterRef.current?.reset(),
+			fit: () => adapterRef.current?.fit() ?? null,
 		}),
 		[],
 	);

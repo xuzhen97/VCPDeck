@@ -2159,6 +2159,7 @@ git status --short
 | 2026-08-13 | 废弃 `@Ack()` 装饰器，浏览器/Client gateway 全部改用 handler 返回值自动 ack | NestJS 10.4.22 实测 @Ack() 注入的是对象而非函数；返回值路径工作正常（详见 docs/verification/interactive-terminal-windows.md） | Task 12、8、15、16 |
 | 2026-08-13 | Client 终端桥响应改为 TERMINAL_RESPONSE 事件（与 Server broker 关联机制一致），不依赖 socket ack 回调 | Server 经 broker 按事件关联响应；ack 回调路径在真实链路不可用 | Task 7、15、16 |
 | 2026-08-13 | Windows 端到端冒烟验收通过（创建/输入/中文/恢复/关闭/审计）；pwsh7 与全屏 TUI 等留待人工验收 | 详见 docs/verification/interactive-terminal-windows.md | Task 16 |
+| 2026-08-13 | 补齐四项实现缺口：创建会话使用容器 fit 尺寸（§16.4）；前端断线/重连状态与自动重新 attach（§16.5/14.6）；Server 慢消费者 ack 阈值检测（§11.3，TerminalLimits.slowConsumerGapBlocks=512）；接管后新 operator 主动 fit 并下发权威尺寸（§10.4） | 编码核查发现设计已定义但实现缺失的项 | Task 9、13、14 |
 
 后续任何协议、状态、依赖、超时、上限或安全边界变更都必须追加记录，不覆盖旧记录。
 

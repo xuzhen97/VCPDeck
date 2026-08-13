@@ -36,6 +36,7 @@ type Action =
 	| { type: "attached"; mode: "operator" | "viewer" }
 	| { type: "syncing" }
 	| { type: "live" }
+	| { type: "reconnecting" }
 	| { type: "control"; control: { mode: "operator" | "viewer"; operatorName: string | null; controlProtectedUntil: string | null; canTakeover: boolean } }
 	| { type: "output"; seq: number }
 	| { type: "resync-required" }
@@ -46,6 +47,8 @@ function reducer(state: TerminalSessionState, action: Action): TerminalSessionSt
 	switch (action.type) {
 		case "attaching":
 			return { ...state, phase: "attaching", error: null };
+		case "reconnecting":
+			return { ...state, phase: "reconnecting" };
 		case "attached":
 			return { ...state, phase: "syncing", mode: action.mode };
 		case "syncing":
@@ -85,6 +88,8 @@ export interface UseTerminalSessionOptions {
 	sessionId: string;
 	view: TerminalViewHandle;
 	storage?: TerminalStorage;
+	/** 本 attachment 获得操作权时回调（接管/重连恢复后触发，用于 fit + 下发尺寸）。 */
+	onGainedControl?: () => void;
 }
 
 /**
@@ -94,6 +99,8 @@ export interface UseTerminalSessionOptions {
 export function useTerminalSession(options: UseTerminalSessionOptions) {
 	const { socket, clientId, sessionId, view } = options;
 	const storage = options.storage ?? window.sessionStorage;
+	const onGainedControlRef = useRef(options.onGainedControl);
+	onGainedControlRef.current = options.onGainedControl;
 	const [state, dispatch] = useReducer(reducer, {
 		phase: "idle",
 		mode: "viewer",
@@ -175,7 +182,14 @@ export function useTerminalSession(options: UseTerminalSessionOptions) {
 			view.write(chunk.data);
 		});
 		socket.onControl((control) => {
+			const prevMode = phaseRef.current;
+			void prevMode;
+			const wasOperator = stateRef.current.mode === "operator";
 			dispatch({ type: "control", control });
+			// 新获得操作权：触发 fit + 权威尺寸下发（设计 10.4）
+			if (control.mode === "operator" && !wasOperator) {
+				onGainedControlRef.current?.();
+			}
 		});
 		socket.onSessionState((m) => {
 			dispatch({ type: "ended", status: m.status, reason: m.reason });
@@ -187,6 +201,14 @@ export function useTerminalSession(options: UseTerminalSessionOptions) {
 		});
 		socket.onError((e) => {
 			dispatch({ type: "error", code: e.code, message: e.message });
+		});
+		// 断线：展示恢复中；重连：自动重新 attach（token 恢复操作权）
+		socket.onConnectionChange((connected) => {
+			if (!connected) {
+				dispatch({ type: "reconnecting" });
+			} else if (phaseRef.current !== "idle" && phaseRef.current !== "ended") {
+				void attach();
+			}
 		});
 		return () => {
 			if (attachmentIdRef.current) {

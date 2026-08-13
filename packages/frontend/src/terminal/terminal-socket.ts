@@ -27,6 +27,8 @@ export interface TerminalSocketEvents {
 	onSessionState(cb: (m: TerminalSessionStateMessage) => void): void;
 	onResyncRequired(cb: () => void): void;
 	onError(cb: (e: TerminalErrorMessage) => void): void;
+	/** 连接状态变化（断线/重连），用于状态展示与自动重新 attach。 */
+	onConnectionChange(cb: (connected: boolean) => void): void;
 	dispose(): void;
 }
 
@@ -101,6 +103,10 @@ export function createTerminalSocket(socket: Socket): TerminalSocketEvents {
 		onSessionState: (cb) => subscribe<TerminalSessionStateMessage>(Events.TERMINAL_SESSION_STATE, cb),
 		onResyncRequired: (cb) => subscribe<unknown>(Events.TERMINAL_RESYNC_REQUIRED, () => cb()),
 		onError: (cb) => subscribe<TerminalErrorMessage>(Events.TERMINAL_ERROR, cb),
+		onConnectionChange: (cb) => {
+			subscribe<unknown>("connect", () => cb(true));
+			subscribe<unknown>("disconnect", () => cb(false));
+		},
 		dispose: () => {
 			for (const off of listeners) off();
 			listeners.length = 0;

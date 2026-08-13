@@ -97,7 +97,7 @@ describe("TerminalView", () => {
 
 	it("forwardRef 暴露 write/reset", () => {
 		const { adapter, writes, resets } = makeAdapter();
-		const ref = createRef<{ write: (d: string) => void; reset: () => void }>();
+		const ref = createRef<{ write: (d: string) => void; reset: () => void; fit: () => { cols: number; rows: number } | null }>();
 		render(
 			<TerminalView
 				ref={ref}
