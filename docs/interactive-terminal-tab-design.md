@@ -2160,6 +2160,7 @@ git status --short
 | 2026-08-13 | Client 终端桥响应改为 TERMINAL_RESPONSE 事件（与 Server broker 关联机制一致），不依赖 socket ack 回调 | Server 经 broker 按事件关联响应；ack 回调路径在真实链路不可用 | Task 7、15、16 |
 | 2026-08-13 | Windows 端到端冒烟验收通过（创建/输入/中文/恢复/关闭/审计）；pwsh7 与全屏 TUI 等留待人工验收 | 详见 docs/verification/interactive-terminal-windows.md | Task 16 |
 | 2026-08-13 | 补齐四项实现缺口：创建会话使用容器 fit 尺寸（§16.4）；前端断线/重连状态与自动重新 attach（§16.5/14.6）；Server 慢消费者 ack 阈值检测（§11.3，TerminalLimits.slowConsumerGapBlocks=512）；接管后新 operator 主动 fit 并下发权威尺寸（§10.4） | 编码核查发现设计已定义但实现缺失的项 | Task 9、13、14 |
+| 2026-08-14 | Windows 终端会话关闭时优先 `useConptyDll: true` 创建 PTY，DLL 缺失时回退默认 ConPTY 路径 | node-pty@1.1.0 的 ConPTY kill() 会 fork `conpty_console_list_agent` 枚举 console 进程；当 Client 自身持有 console（如 `pnpm dev` 终端中运行）时 `AttachConsole` 失败，辅助进程崩溃并输出噪音栈（上游已知问题，Codex Desktop/Gemini CLI 同样受影响）。改用 DLL 路径后 kill 不再 fork 该 agent；非 Windows 平台行为不变（UnixTerminal 不消费该选项） | Task 5、16 |
 
 后续任何协议、状态、依赖、超时、上限或安全边界变更都必须追加记录，不覆盖旧记录。
 

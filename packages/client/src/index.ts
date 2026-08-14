@@ -333,20 +333,33 @@ function createShellDiscoveryEnv(): ShellDiscoveryEnv {
 	};
 }
 
-/** node-pty spawn 适配器（require 延迟到首次创建会话）。 */
+/** node-pty spawn 适配器（require 延迟到首次创建会话）。
+ * Windows 下优先 useConptyDll（kill 时跳过 conpty_console_list_agent，避免
+ * 父进程持有 console 时 AttachConsole 失败）；构建缺少 conpty.dll 时回退默认路径。 */
 function createPtySpawner(): (opts: PtySpawnOptions) => PtyAdapter {
 	let ptyModule: typeof import("node-pty") | null = null;
 	return (opts) => {
 		if (!ptyModule) {
 			ptyModule = require("node-pty") as typeof import("node-pty");
 		}
-		const pty = ptyModule.spawn(opts.file, opts.args, {
+		const baseOptions = {
 			name: opts.name,
 			cols: opts.cols,
 			rows: opts.rows,
 			cwd: opts.cwd,
 			env: opts.env,
-		});
+		};
+		let pty: ReturnType<typeof ptyModule.spawn>;
+		if (process.platform === "win32") {
+			try {
+				pty = ptyModule.spawn(opts.file, opts.args, { ...baseOptions, useConptyDll: true });
+			} catch {
+				// 无 conpty.dll 的构建：回退默认 ConPTY 路径
+				pty = ptyModule.spawn(opts.file, opts.args, baseOptions);
+			}
+		} else {
+			pty = ptyModule.spawn(opts.file, opts.args, baseOptions);
+		}
 		return {
 			pid: pty.pid,
 			write: (d) => pty.write(d),
