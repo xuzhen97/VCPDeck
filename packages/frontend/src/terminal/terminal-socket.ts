@@ -14,21 +14,38 @@ import { parseTerminalBrowserAttached } from "@vcpdeck/shared";
 /** 终端 Socket 门面：类型化收发，错误统一为 TerminalError。 */
 export interface TerminalSocketEvents {
 	/** attach（可选重连 token）；失败 reject 稳定错误。 */
-	attach(sessionId: string, reconnectToken?: string | null): Promise<TerminalBrowserAttached>;
+	attach(
+		sessionId: string,
+		reconnectToken?: string | null,
+	): Promise<TerminalBrowserAttached>;
 	detach(sessionId: string, attachmentId: string): Promise<void>;
 	input(sessionId: string, attachmentId: string, data: string): Promise<void>;
-	resize(sessionId: string, attachmentId: string, cols: number, rows: number): Promise<void>;
-	takeover(sessionId: string, attachmentId: string): Promise<{ mode: "operator" | "viewer" }>;
-	ackOutput(sessionId: string, attachmentId: string, seq: number): Promise<void>;
+	resize(
+		sessionId: string,
+		attachmentId: string,
+		cols: number,
+		rows: number,
+	): Promise<void>;
+	takeover(
+		sessionId: string,
+		attachmentId: string,
+	): Promise<{ mode: "operator" | "viewer" }>;
+	ackOutput(
+		sessionId: string,
+		attachmentId: string,
+		seq: number,
+	): Promise<void>;
 	resync(sessionId: string, attachmentId: string): Promise<void>;
 	onSnapshot(cb: (m: TerminalSnapshotMessage) => void): void;
 	onOutput(cb: (c: TerminalOutputChunk) => void): void;
 	onControl(cb: (c: TerminalControlState) => void): void;
 	onSessionState(cb: (m: TerminalSessionStateMessage) => void): void;
-	onResyncRequired(cb: () => void): void;
+	onResyncRequired(cb: (m: { sessionId: string }) => void): void;
 	onError(cb: (e: TerminalErrorMessage) => void): void;
-	/** 连接状态变化（断线/重连），用于状态展示与自动重新 attach。 */
-	onConnectionChange(cb: (connected: boolean) => void): void;
+	/** 连接状态变化（断线/重连），用于状态展示与自动重新 attach。返回取消订阅函数。 */
+	onConnectionChange(cb: (connected: boolean) => void): () => void;
+	/** 当前 socket 是否已连接（attach 前检查，避免未连接时 emit 丢包）。 */
+	isConnected(): boolean;
 	dispose(): void;
 }
 
@@ -49,29 +66,42 @@ export function createAppSocket(): Socket {
 /** 包装共享 `/app` socket，提供类型化终端事件。 */
 export function createTerminalSocket(socket: Socket): TerminalSocketEvents {
 	const listeners: Array<() => void> = [];
-	const subscribe = <T,>(event: string, cb: (payload: T) => void): void => {
+	const subscribe = <T>(
+		event: string,
+		cb: (payload: T) => void,
+	): (() => void) => {
 		const handler = (raw: T) => cb(raw);
 		socket.on(event, handler as never);
-		listeners.push(() => {
+		const off = () => {
 			if (typeof socket.off === "function") socket.off(event, handler as never);
-		});
+		};
+		listeners.push(off);
+		return off;
 	};
 
 	/** 请求 + ack 判别联合。 */
 	function requestWithAck<T>(event: string, payload: unknown): Promise<T> {
 		return new Promise((resolve, reject) => {
-			socket.emit(event, payload, (result: { ok: true; data: T } | { ok: false; error: { code: string; message: string } }) => {
-				if (result?.ok) {
-					resolve(result.data);
-				} else {
-					reject(
-						terminalError(
-							result?.error?.code ?? "TERMINAL_PROTOCOL_INVALID",
-							result?.error?.message ?? "Terminal request failed",
-						),
-					);
-				}
-			});
+			socket.emit(
+				event,
+				payload,
+				(
+					result:
+						| { ok: true; data: T }
+						| { ok: false; error: { code: string; message: string } },
+				) => {
+					if (result?.ok) {
+						resolve(result.data);
+					} else {
+						reject(
+							terminalError(
+								result?.error?.code ?? "TERMINAL_PROTOCOL_INVALID",
+								result?.error?.message ?? "Terminal request failed",
+							),
+						);
+					}
+				},
+			);
 		});
 	}
 
@@ -86,30 +116,64 @@ export function createTerminalSocket(socket: Socket): TerminalSocketEvents {
 				...(reconnectToken ? { reconnectToken } : {}),
 			}).then((attached) => parseTerminalBrowserAttached(attached)),
 		detach: (sessionId, attachmentId) =>
-			requestWithAck<void>(Events.TERMINAL_DETACH, { sessionId, attachmentId }).then(() => undefined),
+			requestWithAck<void>(Events.TERMINAL_DETACH, {
+				sessionId,
+				attachmentId,
+			}).then(() => undefined),
 		input: (sessionId, attachmentId, data) =>
-			requestWithAck<void>(Events.TERMINAL_INPUT, { sessionId, attachmentId, data }).then(() => undefined),
+			requestWithAck<void>(Events.TERMINAL_INPUT, {
+				sessionId,
+				attachmentId,
+				data,
+			}).then(() => undefined),
 		resize: (sessionId, attachmentId, cols, rows) =>
-			requestWithAck<void>(Events.TERMINAL_RESIZE, { sessionId, attachmentId, cols, rows }).then(() => undefined),
+			requestWithAck<void>(Events.TERMINAL_RESIZE, {
+				sessionId,
+				attachmentId,
+				cols,
+				rows,
+			}).then(() => undefined),
 		takeover: (sessionId, attachmentId) =>
-			requestWithAck<{ mode: "operator" | "viewer" }>(Events.TERMINAL_TAKEOVER, { sessionId, attachmentId }),
+			requestWithAck<{ mode: "operator" | "viewer" }>(
+				Events.TERMINAL_TAKEOVER,
+				{ sessionId, attachmentId },
+			),
 		ackOutput: (sessionId, attachmentId, seq) =>
-			requestWithAck<void>(Events.TERMINAL_ACK_OUTPUT, { sessionId, attachmentId, seq }).then(() => undefined),
+			requestWithAck<void>(Events.TERMINAL_ACK_OUTPUT, {
+				sessionId,
+				attachmentId,
+				seq,
+			}).then(() => undefined),
 		resync: (sessionId, attachmentId) =>
-			requestWithAck<void>(Events.TERMINAL_RESYNC, { sessionId, attachmentId }).then(() => undefined),
-		onSnapshot: (cb) => subscribe<TerminalSnapshotMessage>(Events.TERMINAL_SNAPSHOT, cb),
-		onOutput: (cb) => subscribe<TerminalOutputChunk>(Events.TERMINAL_OUTPUT, cb),
-		onControl: (cb) => subscribe<TerminalControlState>(Events.TERMINAL_CONTROL, cb),
-		onSessionState: (cb) => subscribe<TerminalSessionStateMessage>(Events.TERMINAL_SESSION_STATE, cb),
-		onResyncRequired: (cb) => subscribe<unknown>(Events.TERMINAL_RESYNC_REQUIRED, () => cb()),
+			requestWithAck<void>(Events.TERMINAL_RESYNC, {
+				sessionId,
+				attachmentId,
+			}).then(() => undefined),
+		onSnapshot: (cb) =>
+			subscribe<TerminalSnapshotMessage>(Events.TERMINAL_SNAPSHOT, cb),
+		onOutput: (cb) =>
+			subscribe<TerminalOutputChunk>(Events.TERMINAL_OUTPUT, cb),
+		onControl: (cb) =>
+			subscribe<TerminalControlState>(Events.TERMINAL_CONTROL, cb),
+		onSessionState: (cb) =>
+			subscribe<TerminalSessionStateMessage>(Events.TERMINAL_SESSION_STATE, cb),
+		onResyncRequired: (cb) =>
+			subscribe<{ sessionId: string }>(Events.TERMINAL_RESYNC_REQUIRED, (m) =>
+				cb(m),
+			),
 		onError: (cb) => subscribe<TerminalErrorMessage>(Events.TERMINAL_ERROR, cb),
 		onConnectionChange: (cb) => {
-			subscribe<unknown>("connect", () => cb(true));
-			subscribe<unknown>("disconnect", () => cb(false));
+			const offConnect = subscribe<unknown>("connect", () => cb(true));
+			const offDisconnect = subscribe<unknown>("disconnect", () => cb(false));
+			return () => {
+				offConnect();
+				offDisconnect();
+			};
 		},
 		dispose: () => {
 			for (const off of listeners) off();
 			listeners.length = 0;
 		},
+		isConnected: () => socket.connected,
 	};
 }

@@ -1,7 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { useTerminalSession, type TerminalViewHandle, type TerminalSocketEvents } from "./use-terminal-session.js";
-import type { TerminalControlState, TerminalErrorMessage, TerminalOutputChunk, TerminalSessionStateMessage, TerminalSnapshotMessage } from "@vcpdeck/shared";
+import {
+	useTerminalSession,
+	type TerminalViewHandle,
+	type TerminalSocketEvents,
+} from "./use-terminal-session.js";
+import type {
+	TerminalControlState,
+	TerminalErrorMessage,
+	TerminalOutputChunk,
+	TerminalSessionStateMessage,
+	TerminalSnapshotMessage,
+} from "@vcpdeck/shared";
 
 function makeSocket() {
 	let connectionChange: ((connected: boolean) => void) | null = null;
@@ -10,32 +20,50 @@ function makeSocket() {
 		onOutput?: (c: TerminalOutputChunk) => void;
 		onControl?: (c: TerminalControlState) => void;
 		onSessionState?: (m: TerminalSessionStateMessage) => void;
-		onResyncRequired?: () => void;
+		onResyncRequired?: (m: { sessionId: string }) => void;
 		onError?: (e: TerminalErrorMessage) => void;
 	} = {};
 	const calls: Array<{ method: string; args: unknown[] }> = [];
-	const log = (method: string, ...args: unknown[]) => calls.push({ method, args });
+	const log = (method: string, ...args: unknown[]) =>
+		calls.push({ method, args });
 	const socket: TerminalSocketEvents = {
 		attach: vi.fn(async (sessionId: string, reconnectToken?: string | null) => {
 			log("attach", sessionId, reconnectToken ?? null);
-			return { sessionId, attachmentId: "ta1", reconnectToken: "tok-new", mode: "operator" as const, controlProtectedUntil: null };
+			return {
+				sessionId,
+				attachmentId: "ta1",
+				reconnectToken: "tok-new",
+				mode: "operator" as const,
+				controlProtectedUntil: null,
+			};
 		}),
 		detach: vi.fn(async (sessionId: string, attachmentId: string) => {
 			log("detach", sessionId, attachmentId);
 		}),
-		input: vi.fn(async (sessionId: string, attachmentId: string, data: string) => {
-			log("input", sessionId, attachmentId, data);
-		}),
-		resize: vi.fn(async (sessionId: string, attachmentId: string, cols: number, rows: number) => {
-			log("resize", sessionId, attachmentId, cols, rows);
-		}),
+		input: vi.fn(
+			async (sessionId: string, attachmentId: string, data: string) => {
+				log("input", sessionId, attachmentId, data);
+			},
+		),
+		resize: vi.fn(
+			async (
+				sessionId: string,
+				attachmentId: string,
+				cols: number,
+				rows: number,
+			) => {
+				log("resize", sessionId, attachmentId, cols, rows);
+			},
+		),
 		takeover: vi.fn(async (sessionId: string, attachmentId: string) => {
 			log("takeover", sessionId, attachmentId);
 			return { mode: "operator" as const };
 		}),
-		ackOutput: vi.fn(async (sessionId: string, attachmentId: string, seq: number) => {
-			log("ack-output", sessionId, attachmentId, seq);
-		}),
+		ackOutput: vi.fn(
+			async (sessionId: string, attachmentId: string, seq: number) => {
+				log("ack-output", sessionId, attachmentId, seq);
+			},
+		),
 		resync: vi.fn(async (sessionId: string, attachmentId: string) => {
 			log("resync", sessionId, attachmentId);
 		}),
@@ -51,7 +79,7 @@ function makeSocket() {
 		onSessionState: (cb: (m: TerminalSessionStateMessage) => void) => {
 			handlers.onSessionState = cb;
 		},
-		onResyncRequired: (cb: () => void) => {
+		onResyncRequired: (cb: (m: { sessionId: string }) => void) => {
 			handlers.onResyncRequired = cb;
 		},
 		onError: (cb: (e: TerminalErrorMessage) => void) => {
@@ -59,17 +87,29 @@ function makeSocket() {
 		},
 		onConnectionChange: (cb: (connected: boolean) => void) => {
 			connectionChange = cb;
+			return () => {
+				connectionChange = null;
+			};
 		},
+		isConnected: () => true,
 		dispose: vi.fn(() => undefined),
 	};
-	return { socket, handlers, calls, getConnectionChange: () => connectionChange };
+	return {
+		socket,
+		handlers,
+		calls,
+		getConnectionChange: () => connectionChange,
+	};
 }
 
 function makeView() {
 	const writes: string[] = [];
 	const resets: number[] = [];
 	const view: TerminalViewHandle = {
-		write: (data) => writes.push(data),
+		write: (data, cb) => {
+			writes.push(data);
+			cb?.();
+		},
 		reset: () => resets.push(1),
 	};
 	return { view, writes, resets };
@@ -86,7 +126,9 @@ function makeStorage() {
 }
 
 describe("useTerminalSession", () => {
-	function goLive(handlers: { onSnapshot?: (m: TerminalSnapshotMessage) => void }) {
+	function goLive(handlers: {
+		onSnapshot?: (m: TerminalSnapshotMessage) => void;
+	}) {
 		act(() => {
 			handlers.onSnapshot?.({
 				sessionId: "s1",
@@ -103,9 +145,20 @@ describe("useTerminalSession", () => {
 		const { view } = makeView();
 		const storage = makeStorage();
 		const { result } = renderHook(() =>
-			useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }),
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
 		);
-		await waitFor(() => expect(calls.find((c) => c.method === "attach")?.args).toEqual(["s1", null]));
+		await waitFor(() =>
+			expect(calls.find((c) => c.method === "attach")?.args).toEqual([
+				"s1",
+				null,
+			]),
+		);
 		expect(storage.map.get("vcpdeck:term:c1:s1")).toBe("tok-new");
 		await waitFor(() => expect(result.current.state.phase).toBe("syncing"));
 		goLive(handlers);
@@ -118,15 +171,36 @@ describe("useTerminalSession", () => {
 		const { view } = makeView();
 		const storage = makeStorage();
 		storage.map.set("vcpdeck:term:c1:s1", "old-tok");
-		renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }));
-		await waitFor(() => expect(calls.find((c) => c.method === "attach")?.args).toEqual(["s1", "old-tok"]));
+		renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
+		await waitFor(() =>
+			expect(calls.find((c) => c.method === "attach")?.args).toEqual([
+				"s1",
+				"old-tok",
+			]),
+		);
 	});
 
 	it("snapshot 后写入 view，期间增量缓冲后按序写出", async () => {
 		const { socket, handlers } = makeSocket();
 		const { view, writes } = makeView();
 		const storage = makeStorage();
-		const { result } = renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }));
+		const { result } = renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
 		await waitFor(() => expect(result.current.state.phase).toBe("syncing"));
 		// syncing 期间到达增量
 		act(() => {
@@ -150,10 +224,25 @@ describe("useTerminalSession", () => {
 		const { socket, handlers, calls } = makeSocket();
 		const { view, writes } = makeView();
 		const storage = makeStorage();
-		renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }));
+		renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
 		await waitFor(() => expect(writes.length).toBeGreaterThanOrEqual(0));
 		act(() => {
-			handlers.onSnapshot?.({ sessionId: "s1", snapshot: "S", snapshotSeq: 5, cols: 80, rows: 24, historyTruncated: false });
+			handlers.onSnapshot?.({
+				sessionId: "s1",
+				snapshot: "S",
+				snapshotSeq: 5,
+				cols: 80,
+				rows: 24,
+				historyTruncated: false,
+			});
 		});
 		await waitFor(() => expect(writes).toContain("S"));
 		act(() => {
@@ -171,14 +260,26 @@ describe("useTerminalSession", () => {
 		const { socket, handlers, calls } = makeSocket();
 		const { view } = makeView();
 		const storage = makeStorage();
-		const { result } = renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }));
+		const { result } = renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
 		await waitFor(() => expect(result.current.state.phase).toBe("syncing"));
 		goLive(handlers);
 		await waitFor(() => expect(result.current.state.phase).toBe("live"));
 		act(() => {
 			result.current.handleInput("ls\r");
 		});
-		expect(calls.find((c) => c.method === "input")?.args).toEqual(["s1", "ta1", "ls\r"]);
+		expect(calls.find((c) => c.method === "input")?.args).toEqual([
+			"s1",
+			"ta1",
+			"ls\r",
+		]);
 		// 变为 viewer
 		act(() => {
 			handlers.onControl?.({
@@ -199,7 +300,15 @@ describe("useTerminalSession", () => {
 		const { socket, handlers, calls } = makeSocket();
 		const { view } = makeView();
 		const storage = makeStorage();
-		const { result } = renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }));
+		const { result } = renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
 		goLive(handlers);
 		await waitFor(() => expect(result.current.state.phase).toBe("live"));
 		act(() => {
@@ -227,7 +336,9 @@ describe("useTerminalSession", () => {
 		act(() => {
 			void result.current.handleTakeover();
 		});
-		await waitFor(() => expect(calls.find((c) => c.method === "takeover")).toBeTruthy());
+		await waitFor(() =>
+			expect(calls.find((c) => c.method === "takeover")).toBeTruthy(),
+		);
 	});
 
 	it("session-state 终态进入 ended 并清理 token", async () => {
@@ -235,11 +346,23 @@ describe("useTerminalSession", () => {
 		const { view } = makeView();
 		const storage = makeStorage();
 		storage.map.set("vcpdeck:term:c1:s1", "tok");
-		const { result } = renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }));
+		const { result } = renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
 		goLive(handlers);
 		await waitFor(() => expect(result.current.state.phase).toBe("live"));
 		act(() => {
-			handlers.onSessionState?.({ sessionId: "s1", status: "exited", reason: "exit:0" });
+			handlers.onSessionState?.({
+				sessionId: "s1",
+				status: "exited",
+				reason: "exit:0",
+			});
 		});
 		expect(result.current.state.phase).toBe("ended");
 		expect(storage.map.has("vcpdeck:term:c1:s1")).toBe(false);
@@ -249,21 +372,135 @@ describe("useTerminalSession", () => {
 		const { socket, calls } = makeSocket();
 		const { view } = makeView();
 		const storage = makeStorage();
-		const { unmount } = renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }));
-		await waitFor(() => expect(calls.find((c) => c.method === "attach")).toBeTruthy());
+		const { unmount } = renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
+		await waitFor(() =>
+			expect(calls.find((c) => c.method === "attach")).toBeTruthy(),
+		);
 		unmount();
 		expect(calls.find((c) => c.method === "detach")).toBeTruthy();
 		expect(calls.filter((c) => c.method === "close")).toHaveLength(0);
+	});
+
+	it("共享 socket 多会话：其他会话的 snapshot/output/control/error 被忽略", async () => {
+		const { socket, handlers } = makeSocket();
+		const { view, writes } = makeView();
+		const storage = makeStorage();
+		const { result } = renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
+		await waitFor(() => expect(result.current.state.phase).toBe("syncing"));
+		// 其他会话（s2）的事件一律不得影响本会话
+		act(() => {
+			handlers.onSnapshot?.({
+				sessionId: "s2",
+				snapshot: "OTHER",
+				snapshotSeq: 9,
+				cols: 80,
+				rows: 24,
+				historyTruncated: false,
+			});
+			handlers.onOutput?.({ sessionId: "s2", seq: 99, data: "noise" });
+			handlers.onControl?.({
+				sessionId: "s2",
+				mode: "viewer",
+				operatorName: "x",
+				controlProtectedUntil: null,
+				canTakeover: false,
+			});
+			handlers.onSessionState?.({
+				sessionId: "s2",
+				status: "exited",
+				reason: "exit:0",
+			});
+			handlers.onError?.({
+				sessionId: "s2",
+				code: "TERMINAL_READ_ONLY",
+				message: "noise",
+			});
+		});
+		await waitFor(() => expect(result.current.state.phase).toBe("syncing"));
+		expect(result.current.state.status).toBeNull();
+		expect(result.current.state.error).toBeNull();
+		expect(writes).toHaveLength(0);
+		// 本会话（s1）的快照正常处理
+		act(() => {
+			handlers.onSnapshot?.({
+				sessionId: "s1",
+				snapshot: "MINE",
+				snapshotSeq: 3,
+				cols: 80,
+				rows: 24,
+				historyTruncated: false,
+			});
+		});
+		await waitFor(() => expect(writes).toContain("MINE"));
+		expect(result.current.state.phase).toBe("live");
+	});
+
+	it("StrictMode 双挂载：过期 attach 的响应被丢弃并立即 detach，新 attach 生效", async () => {
+		const { socket, calls } = makeSocket();
+		const { view } = makeView();
+		const storage = makeStorage();
+		// 模拟 StrictMode：挂载 → 立即卸载 → 再挂载（两次 attach 在途）
+		const first = renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
+		first.unmount();
+		const { result } = renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
+		await waitFor(() => expect(result.current.state.phase).toBe("syncing"));
+		expect(calls.filter((c) => c.method === "attach")).toHaveLength(2);
+		// 过期的第一次 attach 响应：detach 掉，不占用远端操作权
+		expect(calls.filter((c) => c.method === "detach")).toHaveLength(1);
+		expect(calls.find((c) => c.method === "detach")?.args).toEqual([
+			"s1",
+			"ta1",
+		]);
 	});
 });
 
 describe("断线重连与操作权", () => {
 	it("断线进入 reconnecting；重连后自动重新 attach（带 token）", async () => {
-		const { socket, handlers, calls, getConnectionChange } = makeSocket();
+		const { socket, calls, getConnectionChange } = makeSocket();
 		const { view } = makeView();
 		const storage = makeStorage();
 		storage.map.set("vcpdeck:term:c1:s1", "saved-tok");
-		const { result } = renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage }));
+		const { result } = renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+			}),
+		);
 		await waitFor(() => expect(result.current.state.phase).toBe("syncing"));
 		act(() => {
 			getConnectionChange()?.(false);
@@ -273,7 +510,11 @@ describe("断线重连与操作权", () => {
 		act(() => {
 			getConnectionChange()?.(true);
 		});
-		await waitFor(() => expect(calls.filter((c) => c.method === "attach").length).toBe(attachCalls + 1));
+		await waitFor(() =>
+			expect(calls.filter((c) => c.method === "attach").length).toBe(
+				attachCalls + 1,
+			),
+		);
 	});
 
 	it("获得操作权时触发 onGainedControl", async () => {
@@ -281,7 +522,16 @@ describe("断线重连与操作权", () => {
 		const { view } = makeView();
 		const storage = makeStorage();
 		const onGainedControl = vi.fn();
-		renderHook(() => useTerminalSession({ socket, clientId: "c1", sessionId: "s1", view, storage, onGainedControl }));
+		renderHook(() =>
+			useTerminalSession({
+				socket,
+				clientId: "c1",
+				sessionId: "s1",
+				view,
+				storage,
+				onGainedControl,
+			}),
+		);
 		await waitFor(() => expect(onGainedControl).not.toHaveBeenCalled());
 		act(() => {
 			handlers.onControl?.({

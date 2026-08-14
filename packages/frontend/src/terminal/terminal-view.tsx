@@ -6,7 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 /** xterm 适配器（测试可注入 fake）。 */
 export interface XtermAdapter {
 	open(container: HTMLElement): void;
-	write(data: string): void;
+	write(data: string, cb?: () => void): void;
 	reset(): void;
 	dispose(): void;
 	onData(cb: (data: string) => void): void;
@@ -37,8 +37,13 @@ export function createXtermAdapter(): XtermAdapter {
 				/* 容器不可见时忽略 */
 			}
 		},
-		write(data) {
-			terminal?.write(data);
+		write(data, cb) {
+			if (!terminal) {
+				cb?.();
+				return;
+			}
+			if (cb) terminal.write(data, cb);
+			else terminal.write(data);
 		},
 		reset() {
 			terminal?.reset();
@@ -71,7 +76,7 @@ export interface ResizeObserverLike {
 
 /** 终端视图组件：xterm + 自动 fit + 合并 resize。 */
 export interface TerminalViewHandle {
-	write(data: string): void;
+	write(data: string, cb?: () => void): void;
 	reset(): void;
 	/** 立即 fit 并返回当前尺寸（容器可见时）。 */
 	fit(): { cols: number; rows: number } | null;
@@ -87,78 +92,88 @@ export interface TerminalViewProps {
 	resizeObserverFactory?: () => ResizeObserverLike;
 }
 
-export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(function TerminalView(
-	{ onData, onResize, readOnly = false, onReady, adapterFactory = createXtermAdapter, resizeObserverFactory },
-	ref,
-) {
-	const containerRef = useRef<HTMLDivElement | null>(null);
-	const adapterRef = useRef<XtermAdapter | null>(null);
-	const onDataRef = useRef(onData);
-	const onResizeRef = useRef(onResize);
-	onDataRef.current = onData;
-	onResizeRef.current = onResize;
-
-	useImperativeHandle(
+export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
+	function TerminalView(
+		{
+			onData,
+			onResize,
+			readOnly = false,
+			onReady,
+			adapterFactory = createXtermAdapter,
+			resizeObserverFactory,
+		},
 		ref,
-		() => ({
-			write: (data: string) => adapterRef.current?.write(data),
-			reset: () => adapterRef.current?.reset(),
-			fit: () => adapterRef.current?.fit() ?? null,
-		}),
-		[],
-	);
+	) {
+		const containerRef = useRef<HTMLDivElement | null>(null);
+		const adapterRef = useRef<XtermAdapter | null>(null);
+		const onDataRef = useRef(onData);
+		const onResizeRef = useRef(onResize);
+		onDataRef.current = onData;
+		onResizeRef.current = onResize;
 
-	useEffect(() => {
-		const container = containerRef.current;
-		if (!container) return;
-		const adapter = adapterFactory();
-		adapterRef.current = adapter;
-		adapter.open(container);
-		onReady?.();
-		if (!readOnly) {
-			adapter.onData((data) => onDataRef.current(data));
-		}
-		// 50ms 合并 resize
-		let debounce: ReturnType<typeof setTimeout> | null = null;
-		let observer: ResizeObserverLike | null = null;
-		const doFit = () => {
-			debounce = null;
-			const size = adapter.fit();
-			if (size) onResizeRef.current(size.cols, size.rows);
-		};
-		if (resizeObserverFactory) {
-			observer = resizeObserverFactory();
-			observer.observe(container, () => {
-				if (debounce) clearTimeout(debounce);
-				debounce = setTimeout(doFit, 50);
-			});
-		} else if (typeof ResizeObserver !== "undefined") {
-			let realObserver: ResizeObserver | null = null;
-			observer = {
-				observe: (el, cb) => {
-					realObserver = new ResizeObserver(() => cb());
-					realObserver.observe(el);
-				},
-				disconnect: () => realObserver?.disconnect(),
+		useImperativeHandle(
+			ref,
+			() => ({
+				write: (data: string, cb?: () => void) =>
+					adapterRef.current?.write(data, cb),
+				reset: () => adapterRef.current?.reset(),
+				fit: () => adapterRef.current?.fit() ?? null,
+			}),
+			[],
+		);
+
+		useEffect(() => {
+			const container = containerRef.current;
+			if (!container) return;
+			const adapter = adapterFactory();
+			adapterRef.current = adapter;
+			adapter.open(container);
+			onReady?.();
+			if (!readOnly) {
+				adapter.onData((data) => onDataRef.current(data));
+			}
+			// 50ms 合并 resize
+			let debounce: ReturnType<typeof setTimeout> | null = null;
+			let observer: ResizeObserverLike | null = null;
+			const doFit = () => {
+				debounce = null;
+				const size = adapter.fit();
+				if (size) onResizeRef.current(size.cols, size.rows);
 			};
-			observer.observe(container, () => {
+			if (resizeObserverFactory) {
+				observer = resizeObserverFactory();
+				observer.observe(container, () => {
+					if (debounce) clearTimeout(debounce);
+					debounce = setTimeout(doFit, 50);
+				});
+			} else if (typeof ResizeObserver !== "undefined") {
+				let realObserver: ResizeObserver | null = null;
+				observer = {
+					observe: (el, cb) => {
+						realObserver = new ResizeObserver(() => cb());
+						realObserver.observe(el);
+					},
+					disconnect: () => realObserver?.disconnect(),
+				};
+				observer.observe(container, () => {
+					if (debounce) clearTimeout(debounce);
+					debounce = setTimeout(doFit, 50);
+				});
+			}
+			return () => {
 				if (debounce) clearTimeout(debounce);
-				debounce = setTimeout(doFit, 50);
-			});
-		}
-		return () => {
-			if (debounce) clearTimeout(debounce);
-			observer?.disconnect();
-			adapter.dispose();
-			adapterRef.current = null;
-		};
-	}, [adapterFactory, readOnly, resizeObserverFactory]);
+				observer?.disconnect();
+				adapter.dispose();
+				adapterRef.current = null;
+			};
+		}, [adapterFactory, readOnly, resizeObserverFactory]);
 
-	return (
-		<div
-			data-testid="terminal-view"
-			ref={containerRef}
-			className="h-full w-full overflow-hidden bg-black p-2"
-		/>
-	);
-});
+		return (
+			<div
+				data-testid="terminal-view"
+				ref={containerRef}
+				className="h-full w-full overflow-hidden bg-black p-2"
+			/>
+		);
+	},
+);

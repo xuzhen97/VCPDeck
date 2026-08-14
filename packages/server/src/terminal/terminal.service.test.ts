@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TerminalService, type TerminalServiceDeps } from "./terminal.service.js";
+import {
+	TerminalService,
+	type TerminalServiceDeps,
+} from "./terminal.service.js";
 import { TerminalLimits } from "@vcpdeck/shared";
 import type {
 	ActorContext,
@@ -10,6 +13,9 @@ import type {
 } from "@vcpdeck/shared";
 
 // ── fakes ──
+// 最近一次 terminalSession 查询的 where（listSessions 过滤断言用）
+let lastSessionWhere: Record<string, unknown> | null = null;
+
 function makePrisma() {
 	const sessions = new Map<string, Record<string, unknown>>();
 	const audits: unknown[] = [];
@@ -25,11 +31,18 @@ function makePrisma() {
 				),
 			},
 			terminalSession: {
-				findUnique: vi.fn(async ({ where }: { where: { id: string } }) => sessions.get(where.id) ?? null),
-				findMany: vi.fn(async () => [...sessions.values()]),
-				count: vi.fn(async ({ where }: { where?: { clientId?: string; status?: { notIn?: string[] } } }) => {
-					if (!where?.clientId) return sessions.size;
-					return [...sessions.values()].filter((s) => s.clientId === where.clientId).length;
+				findUnique: vi.fn(
+					async ({ where }: { where: { id: string } }) =>
+						sessions.get(where.id) ?? null,
+				),
+				// 记录 where（listSessions 过滤断言用）；不模拟 SQL 语义
+				findMany: vi.fn(async (args?: { where?: Record<string, unknown> }) => {
+					lastSessionWhere = args?.where ?? null;
+					return [...sessions.values()];
+				}),
+				count: vi.fn(async (args?: { where?: Record<string, unknown> }) => {
+					lastSessionWhere = args?.where ?? null;
+					return sessions.size;
 				}),
 				create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
 					const row: Record<string, unknown> = {
@@ -40,11 +53,19 @@ function makePrisma() {
 					sessions.set(row.id as string, row);
 					return row;
 				}),
-				update: vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-					const row = { ...sessions.get(where.id), ...data };
-					sessions.set(where.id, row);
-					return row;
-				}),
+				update: vi.fn(
+					async ({
+						where,
+						data,
+					}: {
+						where: { id: string };
+						data: Record<string, unknown>;
+					}) => {
+						const row = { ...sessions.get(where.id), ...data };
+						sessions.set(where.id, row);
+						return row;
+					},
+				),
 			},
 			terminalAuditEvent: {
 				create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -60,26 +81,45 @@ function makePrisma() {
 }
 
 function makeBroker() {
-	const requests: Array<{ lease: { clientId: string; socketId: string }; request: TerminalClientRequest }> = [];
-	let responder: ((req: TerminalClientRequest) => TerminalClientResponse) | null = null;
+	const requests: Array<{
+		lease: { clientId: string; socketId: string };
+		request: TerminalClientRequest;
+	}> = [];
+	let responder:
+		| ((req: TerminalClientRequest) => TerminalClientResponse)
+		| null = null;
 	return {
 		requests,
-		setResponder: (fn: (req: TerminalClientRequest) => TerminalClientResponse) => {
+		setResponder: (
+			fn: (req: TerminalClientRequest) => TerminalClientResponse,
+		) => {
 			responder = fn;
 		},
 		broker: {
-			request: vi.fn(async (lease: { clientId: string; socketId: string }, request: TerminalClientRequest) => {
-				requests.push({ lease, request });
-				if (!responder) throw Object.assign(new Error("no responder"), { code: "TERMINAL_CLIENT_OFFLINE" });
-				return responder(request);
-			}),
+			request: vi.fn(
+				async (
+					lease: { clientId: string; socketId: string },
+					request: TerminalClientRequest,
+				) => {
+					requests.push({ lease, request });
+					if (!responder)
+						throw Object.assign(new Error("no responder"), {
+							code: "TERMINAL_CLIENT_OFFLINE",
+						});
+					return responder(request);
+				},
+			),
 			disconnect: vi.fn(),
 		} as never,
 	};
 }
 
 function makeEmitter() {
-	const browserEmits: Array<{ socketId: string; event: string; payload: unknown }> = [];
+	const browserEmits: Array<{
+		socketId: string;
+		event: string;
+		payload: unknown;
+	}> = [];
 	return {
 		browserEmits,
 		emit: (socketId: string, event: string, payload: unknown) => {
@@ -114,10 +154,24 @@ function makeHarness(overrides: Partial<TerminalServiceDeps> = {}): Harness {
 	return { service, prisma, broker, emitter, sessions: prisma.sessions, clock };
 }
 
-const ACTOR: ActorContext = { identityId: "id1", displayName: "admin", isAdmin: true, credentialId: null, sessionId: null, source: "web", requestId: "r" };
+const ACTOR: ActorContext = {
+	identityId: "id1",
+	displayName: "admin",
+	isAdmin: true,
+	credentialId: null,
+	sessionId: null,
+	source: "web",
+	requestId: "r",
+};
 
 function okCreate(req: TerminalClientRequest): TerminalClientResponse {
-	return { requestId: req.requestId, ok: true, action: "session.create", sessionId: (req as { sessionId: string }).sessionId, status: "detached" };
+	return {
+		requestId: req.requestId,
+		ok: true,
+		action: "session.create",
+		sessionId: (req as { sessionId: string }).sessionId,
+		status: "detached",
+	};
 }
 function okAttach(req: TerminalClientRequest): TerminalClientResponse {
 	const sessionId = (req as { sessionId: string }).sessionId;
@@ -166,7 +220,9 @@ describe("createSession", () => {
 			audit: h.prisma.audit,
 			now: () => 0,
 		});
-		await expect(svc.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR)).rejects.toMatchObject({
+		await expect(
+			svc.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR),
+		).rejects.toMatchObject({
 			code: "TERMINAL_CLIENT_OFFLINE",
 		});
 	});
@@ -175,9 +231,19 @@ describe("createSession", () => {
 		const h = makeHarness();
 		h.broker.setResponder(okCreate);
 		for (let i = 0; i < TerminalLimits.maxSessionsPerClient; i++) {
-			await h.service.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR);
+			await h.service.createSession(
+				"c1",
+				{ shellId: "bash", cols: 80, rows: 24 },
+				ACTOR,
+			);
 		}
-		await expect(h.service.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR)).rejects.toMatchObject({
+		await expect(
+			h.service.createSession(
+				"c1",
+				{ shellId: "bash", cols: 80, rows: 24 },
+				ACTOR,
+			),
+		).rejects.toMatchObject({
 			code: "TERMINAL_SESSION_LIMIT_REACHED",
 		});
 	});
@@ -189,7 +255,13 @@ describe("createSession", () => {
 			ok: false,
 			error: { code: "TERMINAL_PTY_SPAWN_FAILED", message: "boom" },
 		}));
-		await expect(h.service.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR)).rejects.toMatchObject({
+		await expect(
+			h.service.createSession(
+				"c1",
+				{ shellId: "bash", cols: 80, rows: 24 },
+				ACTOR,
+			),
+		).rejects.toMatchObject({
 			code: "TERMINAL_PTY_SPAWN_FAILED",
 		});
 		const rows = [...h.sessions.values()];
@@ -207,15 +279,24 @@ describe("attach 与单写多读", () => {
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
 		const first = await h.service.attachBrowser({
-			clientId: "c1", sessionId, actor: ACTOR, socketId: "browser-1",
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "browser-1",
 		});
 		expect(first.mode).toBe("operator");
 		const second = await h.service.attachBrowser({
-			clientId: "c1", sessionId, actor: ACTOR, socketId: "browser-2",
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "browser-2",
 		});
 		expect(second.mode).toBe("viewer");
 		const third = await h.service.attachBrowser({
-			clientId: "c1", sessionId, actor: { ...ACTOR, identityId: "id2", displayName: "other" }, socketId: "browser-3",
+			clientId: "c1",
+			sessionId,
+			actor: { ...ACTOR, identityId: "id2", displayName: "other" },
+			socketId: "browser-3",
 		});
 		expect(third.mode).toBe("viewer");
 	});
@@ -224,15 +305,36 @@ describe("attach 与单写多读", () => {
 		const h = makeHarness();
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
-		const first = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
-		const second = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: { ...ACTOR, identityId: "id2" }, socketId: "b2" });
+		const first = await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b1",
+		});
+		const second = await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: { ...ACTOR, identityId: "id2" },
+			socketId: "b2",
+		});
 		await h.service.whenAttachSettled(sessionId);
 		const before = h.broker.requests.length;
 		await expect(
-			h.service.browserInput({ socketId: "b2", sessionId, attachmentId: second.attachmentId, data: "x" }),
+			h.service.browserInput({
+				socketId: "b2",
+				sessionId,
+				attachmentId: second.attachmentId,
+				data: "x",
+			}),
 		).rejects.toMatchObject({ code: "TERMINAL_READ_ONLY" });
 		await expect(
-			h.service.browserResize({ socketId: "b2", sessionId, attachmentId: second.attachmentId, cols: 100, rows: 40 }),
+			h.service.browserResize({
+				socketId: "b2",
+				sessionId,
+				attachmentId: second.attachmentId,
+				cols: 100,
+				rows: 40,
+			}),
 		).rejects.toMatchObject({ code: "TERMINAL_READ_ONLY" });
 		expect(h.broker.requests.length).toBe(before);
 		expect(first.mode).toBe("operator");
@@ -242,9 +344,21 @@ describe("attach 与单写多读", () => {
 		const h = makeHarness();
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
-		const first = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
-		await h.service.browserInput({ socketId: "b1", sessionId, attachmentId: first.attachmentId, data: "ls\r" });
-		const inputReq = h.broker.requests.find((r) => r.request.action === "session.input");
+		const first = await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b1",
+		});
+		await h.service.browserInput({
+			socketId: "b1",
+			sessionId,
+			attachmentId: first.attachmentId,
+			data: "ls\r",
+		});
+		const inputReq = h.broker.requests.find(
+			(r) => r.request.action === "session.input",
+		);
 		expect(inputReq).toBeTruthy();
 		expect((inputReq?.request as { data: string }).data).toBe("ls\r");
 	});
@@ -254,7 +368,12 @@ describe("attach 与单写多读", () => {
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
 		await expect(
-			h.service.browserInput({ socketId: "b1", sessionId, attachmentId: "nope", data: "x" }),
+			h.service.browserInput({
+				socketId: "b1",
+				sessionId,
+				attachmentId: "nope",
+				data: "x",
+			}),
 		).rejects.toMatchObject({ code: "TERMINAL_SESSION_NOT_FOUND" });
 	});
 });
@@ -264,16 +383,31 @@ describe("30 秒重连保护与接管", () => {
 		const h = makeHarness();
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
-		const first = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
+		const first = await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b1",
+		});
 		await h.service.whenAttachSettled(sessionId);
 		await h.service.detachBrowserSocket("b1");
 		// 错误 token
 		await expect(
-			h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b2", reconnectToken: "wrong" }),
+			h.service.attachBrowser({
+				clientId: "c1",
+				sessionId,
+				actor: ACTOR,
+				socketId: "b2",
+				reconnectToken: "wrong",
+			}),
 		).resolves.toMatchObject({ mode: "viewer" });
 		// 合法 token：viewer 已存在，token 重绑仍恢复 operator
 		const rebind = await h.service.attachBrowser({
-			clientId: "c1", sessionId, actor: ACTOR, socketId: "b3", reconnectToken: first.reconnectToken,
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b3",
+			reconnectToken: first.reconnectToken,
 		});
 		expect(rebind.mode).toBe("operator");
 		expect(rebind.attachmentId).not.toBe(first.attachmentId);
@@ -283,17 +417,35 @@ describe("30 秒重连保护与接管", () => {
 		const h = makeHarness();
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
-		await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
+		await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b1",
+		});
 		await h.service.whenAttachSettled(sessionId);
 		await h.service.detachBrowserSocket("b1");
-		const viewer = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: { ...ACTOR, identityId: "id2" }, socketId: "b2" });
+		const viewer = await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: { ...ACTOR, identityId: "id2" },
+			socketId: "b2",
+		});
 		await expect(
-			h.service.browserTakeover({ socketId: "b2", sessionId, attachmentId: viewer.attachmentId }),
+			h.service.browserTakeover({
+				socketId: "b2",
+				sessionId,
+				attachmentId: viewer.attachmentId,
+			}),
 		).rejects.toMatchObject({ code: "TERMINAL_CONTROL_PROTECTED" });
 		// 30 秒后
 		await vi.advanceTimersByTimeAsync(TerminalLimits.reconnectGraceMs + 1);
 		h.clock.now += TerminalLimits.reconnectGraceMs + 1;
-		const winner = await h.service.browserTakeover({ socketId: "b2", sessionId, attachmentId: viewer.attachmentId });
+		const winner = await h.service.browserTakeover({
+			socketId: "b2",
+			sessionId,
+			attachmentId: viewer.attachmentId,
+		});
 		expect(winner.mode).toBe("operator");
 	});
 
@@ -301,48 +453,87 @@ describe("30 秒重连保护与接管", () => {
 		const h = makeHarness();
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
-		const first = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
+		const first = await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b1",
+		});
 		await h.service.whenAttachSettled(sessionId);
 		await h.service.detachBrowserSocket("b1");
-		const viewer = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: { ...ACTOR, identityId: "id2" }, socketId: "b2" });
+		const viewer = await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: { ...ACTOR, identityId: "id2" },
+			socketId: "b2",
+		});
 		await vi.advanceTimersByTimeAsync(TerminalLimits.reconnectGraceMs + 1);
 		h.clock.now += TerminalLimits.reconnectGraceMs + 1;
-		await h.service.browserTakeover({ socketId: "b2", sessionId, attachmentId: viewer.attachmentId });
+		await h.service.browserTakeover({
+			socketId: "b2",
+			sessionId,
+			attachmentId: viewer.attachmentId,
+		});
 		const rebind = await h.service.attachBrowser({
-			clientId: "c1", sessionId, actor: ACTOR, socketId: "b3", reconnectToken: first.reconnectToken,
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b3",
+			reconnectToken: first.reconnectToken,
 		});
 		expect(rebind.mode).toBe("viewer");
 		expect(rebind.attachmentId).not.toBe(first.attachmentId);
 	});
 });
 
-
-	it("慢消费者：ack 落后超过阈值时暂停增量并请求 resync，不影响其他 attachment", async () => {
-		const h = makeHarness();
-		h.broker.setResponder(okAttach);
-		const sessionId = await seedSession(h);
-		const b1 = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
-		const b2 = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: { ...ACTOR, identityId: "id2" }, socketId: "b2" });
-		await h.service.whenAttachSettled(sessionId);
-		void b1;
-		// b2 定期 ack；b1（operator）不 ack → 落后超过阈值
-		for (let seq = 1; seq <= TerminalLimits.slowConsumerGapBlocks + 10; seq++) {
-			await h.service.handleClientOutput("c1", { sessionId, seq, data: "x" });
-			if (seq % 100 === 0) {
-				await h.service.browserAckOutput({ socketId: "b2", sessionId, attachmentId: b2.attachmentId, seq });
-			}
-		}
-		const resyncRequired = h.emitter.browserEmits.filter((e) => e.event === "terminal:resync-required");
-		expect(resyncRequired.length).toBeGreaterThanOrEqual(1);
-		expect(resyncRequired[0]?.payload).toEqual({ sessionId });
+it("慢消费者：ack 落后超过阈值时暂停增量并请求 resync，不影响其他 attachment", async () => {
+	const h = makeHarness();
+	h.broker.setResponder(okAttach);
+	const sessionId = await seedSession(h);
+	const b1 = await h.service.attachBrowser({
+		clientId: "c1",
+		sessionId,
+		actor: ACTOR,
+		socketId: "b1",
 	});
+	const b2 = await h.service.attachBrowser({
+		clientId: "c1",
+		sessionId,
+		actor: { ...ACTOR, identityId: "id2" },
+		socketId: "b2",
+	});
+	await h.service.whenAttachSettled(sessionId);
+	void b1;
+	// b2 定期 ack；b1（operator）不 ack → 落后超过阈值
+	for (let seq = 1; seq <= TerminalLimits.slowConsumerGapBlocks + 10; seq++) {
+		await h.service.handleClientOutput("c1", { sessionId, seq, data: "x" });
+		if (seq % 100 === 0) {
+			await h.service.browserAckOutput({
+				socketId: "b2",
+				sessionId,
+				attachmentId: b2.attachmentId,
+				seq,
+			});
+		}
+	}
+	const resyncRequired = h.emitter.browserEmits.filter(
+		(e) => e.event === "terminal:resync-required",
+	);
+	expect(resyncRequired.length).toBeGreaterThanOrEqual(1);
+	expect(resyncRequired[0]?.payload).toEqual({ sessionId });
+});
 
 describe("输出同步与快照", () => {
 	it("attach 时先 snapshot 后增量（snapshotSeq 之前的块丢弃）", async () => {
 		const h = makeHarness();
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
-		const attached = h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
+		const attached = h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b1",
+		});
 		// attach 请求发出但未返回时，Client 输出 seq=1（≤ snapshotSeq=0? 不，snapshotSeq 来自响应）
 		// 模拟响应 snapshotSeq=5，先到的输出 seq=2 应丢弃
 		h.broker.setResponder((req) => ({
@@ -356,52 +547,92 @@ describe("输出同步与快照", () => {
 			rows: 24,
 			historyTruncated: false,
 		}));
-		await h.service.handleClientOutput("c1", { sessionId, seq: 2, data: "early" });
+		await h.service.handleClientOutput("c1", {
+			sessionId,
+			seq: 2,
+			data: "early",
+		});
 		const result = await attached;
 		expect(result.mode).toBe("operator");
 		await h.service.whenAttachSettled(sessionId);
-		const snaps = h.emitter.browserEmits.filter((e) => e.event === "terminal:snapshot");
+		const snaps = h.emitter.browserEmits.filter(
+			(e) => e.event === "terminal:snapshot",
+		);
 		expect(snaps).toHaveLength(1);
 		expect(snaps[0]?.payload).toMatchObject({ snapshotSeq: 5 });
 		// seq=2 的 early 输出未转发给浏览器
-		expect(h.emitter.browserEmits.filter((e) => e.event === "terminal:output")).toHaveLength(0);
+		expect(
+			h.emitter.browserEmits.filter((e) => e.event === "terminal:output"),
+		).toHaveLength(0);
 	});
 
 	it("重复 seq 丢弃、gap 不转发", async () => {
 		const h = makeHarness();
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
-		await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
+		await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b1",
+		});
 		await h.service.whenAttachSettled(sessionId);
 		await h.service.handleClientOutput("c1", { sessionId, seq: 1, data: "a" });
-		await h.service.handleClientOutput("c1", { sessionId, seq: 1, data: "dup" });
-		await h.service.handleClientOutput("c1", { sessionId, seq: 3, data: "gap" });
+		await h.service.handleClientOutput("c1", {
+			sessionId,
+			seq: 1,
+			data: "dup",
+		});
+		await h.service.handleClientOutput("c1", {
+			sessionId,
+			seq: 3,
+			data: "gap",
+		});
 		await h.service.handleClientOutput("c1", { sessionId, seq: 2, data: "b" });
-		const outputs = h.emitter.browserEmits.filter((e) => e.event === "terminal:output");
-		expect(outputs.map((o) => (o.payload as { data: string }).data)).toEqual(["a", "b"]);
+		const outputs = h.emitter.browserEmits.filter(
+			(e) => e.event === "terminal:output",
+		);
+		expect(outputs.map((o) => (o.payload as { data: string }).data)).toEqual([
+			"a",
+			"b",
+		]);
 	});
 
 	it("最后 detach 通知 Client 一次；重新 attach 后恢复", async () => {
 		const h = makeHarness();
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
-		const first = await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
+		const first = await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b1",
+		});
 		await h.service.whenAttachSettled(sessionId);
 		await h.service.detachBrowserSocket("b1");
 		await h.service.detachBrowserSocket("b1"); // 幂等
 		await vi.advanceTimersByTimeAsync(0); // 等待 detach 请求发出
-		const detachReqs = h.broker.requests.filter((r) => r.request.action === "session.detach");
+		const detachReqs = h.broker.requests.filter(
+			(r) => r.request.action === "session.detach",
+		);
 		expect(detachReqs).toHaveLength(1);
 		// 重新 attach
 		const rebind = await h.service.attachBrowser({
-			clientId: "c1", sessionId, actor: ACTOR, socketId: "b2", reconnectToken: first.reconnectToken,
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b2",
+			reconnectToken: first.reconnectToken,
 		});
 		expect(rebind.mode).toBe("operator");
 	});
 });
 
 describe("Client 状态对账", () => {
-	function report(sessionIds: string[], generationId = "g1"): TerminalStateReport {
+	function report(
+		sessionIds: string[],
+		generationId = "g1",
+	): TerminalStateReport {
 		return {
 			clientId: "c1",
 			generationId,
@@ -419,9 +650,17 @@ describe("Client 状态对账", () => {
 	it("DB 非终态但 Client 未上报 → interrupted", async () => {
 		const h = makeHarness();
 		h.broker.setResponder(okCreate);
-		const created = await h.service.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR);
+		const created = await h.service.createSession(
+			"c1",
+			{ shellId: "bash", cols: 80, rows: 24 },
+			ACTOR,
+		);
 		const info = created as TerminalSessionInfo;
-		const ack = await h.service.handleClientState("c1", "client-sock-1", report([]));
+		const ack = await h.service.handleClientState(
+			"c1",
+			"client-sock-1",
+			report([]),
+		);
 		expect(ack.acceptedSessionIds).toEqual([]);
 		expect(ack.closeSessionIds).toEqual([]);
 		const row = h.sessions.get(info.sessionId);
@@ -432,19 +671,38 @@ describe("Client 状态对账", () => {
 	it("Client 上报但 DB 终态 → 加入 closeSessionIds", async () => {
 		const h = makeHarness();
 		h.broker.setResponder(okCreate);
-		const created = await h.service.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR);
+		const created = await h.service.createSession(
+			"c1",
+			{ shellId: "bash", cols: 80, rows: 24 },
+			ACTOR,
+		);
 		const info = created as TerminalSessionInfo;
-		h.sessions.set(info.sessionId, { ...h.sessions.get(info.sessionId), status: "closed" });
-		const ack = await h.service.handleClientState("c1", "client-sock-1", report([info.sessionId]));
+		h.sessions.set(info.sessionId, {
+			...h.sessions.get(info.sessionId),
+			status: "closed",
+		});
+		const ack = await h.service.handleClientState(
+			"c1",
+			"client-sock-1",
+			report([info.sessionId]),
+		);
 		expect(ack.closeSessionIds).toEqual([info.sessionId]);
 	});
 
 	it("Client 上报且 DB 非终态 → 接受", async () => {
 		const h = makeHarness();
 		h.broker.setResponder(okCreate);
-		const created = await h.service.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR);
+		const created = await h.service.createSession(
+			"c1",
+			{ shellId: "bash", cols: 80, rows: 24 },
+			ACTOR,
+		);
 		const info = created as TerminalSessionInfo;
-		const ack = await h.service.handleClientState("c1", "client-sock-1", report([info.sessionId]));
+		const ack = await h.service.handleClientState(
+			"c1",
+			"client-sock-1",
+			report([info.sessionId]),
+		);
 		expect(ack.acceptedSessionIds).toEqual([info.sessionId]);
 		expect(h.sessions.get(info.sessionId)?.status).toBe("detached");
 	});
@@ -454,7 +712,11 @@ describe("终态与竞态", () => {
 	it("close 幂等：终态后再次 close 不改写首次原因", async () => {
 		const h = makeHarness();
 		h.broker.setResponder(okCreate);
-		const created = await h.service.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR);
+		const created = await h.service.createSession(
+			"c1",
+			{ shellId: "bash", cols: 80, rows: 24 },
+			ACTOR,
+		);
 		const info = created as TerminalSessionInfo;
 		await h.service.closeSession("c1", info.sessionId, ACTOR);
 		await h.service.closeSession("c1", info.sessionId, ACTOR);
@@ -467,20 +729,84 @@ describe("终态与竞态", () => {
 		const h = makeHarness();
 		h.broker.setResponder(okAttach);
 		const sessionId = await seedSession(h);
-		await h.service.attachBrowser({ clientId: "c1", sessionId, actor: ACTOR, socketId: "b1" });
+		await h.service.attachBrowser({
+			clientId: "c1",
+			sessionId,
+			actor: ACTOR,
+			socketId: "b1",
+		});
 		await h.service.handleClientExit("c1", { sessionId, exitCode: 0 });
 		expect(h.sessions.get(sessionId)?.status).toBe("exited");
-		await h.service.handleClientOutput("c1", { sessionId, seq: 5, data: "late" });
-		expect(h.emitter.browserEmits.filter((e) => e.event === "terminal:output")).toHaveLength(0);
+		await h.service.handleClientOutput("c1", {
+			sessionId,
+			seq: 5,
+			data: "late",
+		});
+		expect(
+			h.emitter.browserEmits.filter((e) => e.event === "terminal:output"),
+		).toHaveLength(0);
 	});
 
 	it("跨 Client 的会话操作被拒绝", async () => {
 		const h = makeHarness();
 		h.broker.setResponder(okCreate);
-		const created = await h.service.createSession("c1", { shellId: "bash", cols: 80, rows: 24 }, ACTOR);
+		const created = await h.service.createSession(
+			"c1",
+			{ shellId: "bash", cols: 80, rows: 24 },
+			ACTOR,
+		);
 		const info = created as TerminalSessionInfo;
 		await expect(
-			h.service.attachBrowser({ clientId: "c2", sessionId: info.sessionId, actor: ACTOR, socketId: "b1" }),
+			h.service.attachBrowser({
+				clientId: "c2",
+				sessionId: info.sessionId,
+				actor: ACTOR,
+				socketId: "b1",
+			}),
 		).rejects.toMatchObject({ code: "TERMINAL_SESSION_NOT_FOUND" });
+	});
+});
+
+describe("listSessions 过滤", () => {
+	it("只查询非终态会话 + 最近 24h 内 interrupted（closed/exited 不返回）", async () => {
+		const h = makeHarness();
+		// 直接塞入各类状态的会话
+		const mk = (id: string, status: string, endedAt?: string) =>
+			h.sessions.set(id, {
+				id,
+				clientId: "c1",
+				shellId: "powershell",
+				status,
+				createdAt: new Date("2026-08-12T00:00:00.000Z"),
+				...(endedAt ? { endedAt: new Date(endedAt) } : {}),
+			});
+		mk("s-active", "detached");
+		mk("s-closed", "closed", "2026-08-12T01:00:00.000Z");
+		mk("s-interrupted-recent", "interrupted", "2026-08-12T23:00:00.000Z");
+		mk("s-interrupted-old", "interrupted", "2026-08-01T00:00:00.000Z");
+		mk("s-exited", "exited", "2026-08-12T02:00:00.000Z");
+
+		// 服务端时钟：2026-08-13 00:00（24h 窗口起点 2026-08-12 00:00）
+		const now = new Date("2026-08-13T00:00:00.000Z").getTime();
+		h.clock.now = now;
+		await h.service.listSessions("c1", 1, 20);
+
+		// where 必须包含 OR：非终态 或 interrupted 且 endedAt >= 窗口起点
+		expect(lastSessionWhere).toMatchObject({
+			clientId: "c1",
+			OR: [
+				{ status: { notIn: expect.any(Array) } },
+				{
+					status: "interrupted",
+					endedAt: { gte: new Date("2026-08-12T00:00:00.000Z") },
+				},
+			],
+		});
+		const endStatuses = (
+			lastSessionWhere?.OR as Array<{ status: { notIn: string[] } }>
+		)[0]?.status?.notIn;
+		expect(endStatuses).toEqual(
+			expect.arrayContaining(["closed", "exited", "expired", "error"]),
+		);
 	});
 });

@@ -19,6 +19,8 @@ export default defineConfig({
 	optimizeDeps: {
 		// 链接的 CJS workspace 包需 esbuild 预打包才能在 dev 提供命名导出
 		include: ["@vcpdeck/shared"],
+		// workspace 包 dist 变化后强制重新预打包，避免陈旧缓存（如 Buffer 实现替换）
+		force: true,
 	},
 	server: {
 		host: "0.0.0.0",

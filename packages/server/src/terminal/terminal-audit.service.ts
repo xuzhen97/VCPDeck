@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { TERMINAL_AUDIT_EVENTS, type TerminalAuditEventName, type PaginatedResult, type TerminalAuditInfo } from "@vcpdeck/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -19,7 +19,8 @@ export interface TerminalAuditRecordRequest {
 /** 终端最小审计：只记录生命周期事件，不记录输入输出。 */
 @Injectable()
 export class TerminalAuditService {
-	constructor(private readonly prisma: PrismaService) {}
+	// 显式 @Inject：tsx/esbuild 转译不 emit decorator metadata，无 @Inject 的类型注入会得到 undefined
+	constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
 	async record(request: TerminalAuditRecordRequest): Promise<void> {
 		if (!(TERMINAL_AUDIT_EVENTS as readonly string[]).includes(request.event)) {

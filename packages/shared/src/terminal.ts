@@ -67,12 +67,22 @@ export const TERMINAL_AUDIT_EVENTS = [
 ] as const;
 export type TerminalAuditEventName = (typeof TERMINAL_AUDIT_EVENTS)[number];
 
-export function isTerminalSessionStatus(v: unknown): v is TerminalSessionStatus {
-	return typeof v === "string" && (TERMINAL_SESSION_STATUSES as readonly string[]).includes(v);
+export function isTerminalSessionStatus(
+	v: unknown,
+): v is TerminalSessionStatus {
+	return (
+		typeof v === "string" &&
+		(TERMINAL_SESSION_STATUSES as readonly string[]).includes(v)
+	);
 }
 
-export function isTerminalAuditEventName(v: unknown): v is TerminalAuditEventName {
-	return typeof v === "string" && (TERMINAL_AUDIT_EVENTS as readonly string[]).includes(v);
+export function isTerminalAuditEventName(
+	v: unknown,
+): v is TerminalAuditEventName {
+	return (
+		typeof v === "string" &&
+		(TERMINAL_AUDIT_EVENTS as readonly string[]).includes(v)
+	);
 }
 
 // ── 边界常量（与设计文档 12.1 一致） ──
@@ -96,7 +106,8 @@ export const TerminalLimits = {
 
 /** 按 UTF-8 字节长度计算字符串大小（终端输入/输出限制按字节计）。 */
 export function utf8ByteLength(value: string): number {
-	return Buffer.byteLength(value, "utf8");
+	// TextEncoder 浏览器/Node 通用；Buffer.byteLength 在浏览器不可用
+	return new TextEncoder().encode(value).byteLength;
 }
 
 /** 校验终端尺寸是否在协议允许范围内。 */
@@ -125,24 +136,40 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function assertRecord(v: unknown, what: string): asserts v is Record<string, unknown> {
+function assertRecord(
+	v: unknown,
+	what: string,
+): asserts v is Record<string, unknown> {
 	if (!isRecord(v)) throw new TerminalProtocolError(`${what} 必须是对象`);
 }
 
-function assertKeys(v: Record<string, unknown>, allowed: Set<string>, what: string): void {
+function assertKeys(
+	v: Record<string, unknown>,
+	allowed: Set<string>,
+	what: string,
+): void {
 	for (const key of Object.keys(v)) {
-		if (!allowed.has(key)) throw new TerminalProtocolError(`${what} 含未知字段 ${key}`);
+		if (!allowed.has(key))
+			throw new TerminalProtocolError(`${what} 含未知字段 ${key}`);
 	}
 }
 
-function assertString(v: unknown, what: string, maxBytes?: number): asserts v is string {
+function assertString(
+	v: unknown,
+	what: string,
+	maxBytes?: number,
+): asserts v is string {
 	if (typeof v !== "string" || v.length === 0)
 		throw new TerminalProtocolError(`${what} 必须是非空字符串`);
 	if (maxBytes !== undefined && utf8ByteLength(v) > maxBytes)
 		throw new TerminalProtocolError(`${what} 超过 ${maxBytes} 字节上限`);
 }
 
-function assertOptionalString(v: unknown, what: string, maxBytes: number): void {
+function assertOptionalString(
+	v: unknown,
+	what: string,
+	maxBytes: number,
+): void {
 	if (v !== undefined) assertString(v, what, maxBytes);
 }
 
@@ -154,7 +181,10 @@ function assertRequestId(v: unknown): asserts v is string {
 	assertString(v, "requestId", 128);
 }
 
-function assertErrorCode(v: unknown, what: string): asserts v is TerminalErrorCode {
+function assertErrorCode(
+	v: unknown,
+	what: string,
+): asserts v is TerminalErrorCode {
 	assertString(v, what);
 	if (!(TERMINAL_ERROR_CODES as readonly string[]).includes(v))
 		throw new TerminalProtocolError(`${what} 不在 allowlist`);
@@ -163,14 +193,19 @@ function assertErrorCode(v: unknown, what: string): asserts v is TerminalErrorCo
 function assertTerminalSize(v: Record<string, unknown>, what: string): void {
 	const cols = v.cols;
 	const rows = v.rows;
-	if (typeof cols !== "number" || typeof rows !== "number" || !isValidTerminalSize(cols, rows)) {
+	if (
+		typeof cols !== "number" ||
+		typeof rows !== "number" ||
+		!isValidTerminalSize(cols, rows)
+	) {
 		throw new TerminalProtocolError(`${what} 尺寸非法`);
 	}
 }
 
 function assertDate(v: unknown, what: string): asserts v is string {
 	assertString(v, what, 64);
-	if (Number.isNaN(Date.parse(v))) throw new TerminalProtocolError(`${what} 不是合法日期`);
+	if (Number.isNaN(Date.parse(v)))
+		throw new TerminalProtocolError(`${what} 不是合法日期`);
 }
 
 function assertOptionalDate(v: unknown, what: string): void {
@@ -187,15 +222,30 @@ export interface TerminalCapabilityStatus {
 	message?: string;
 }
 
-export function parseTerminalCapabilityStatus(v: unknown): TerminalCapabilityStatus {
+export function parseTerminalCapabilityStatus(
+	v: unknown,
+): TerminalCapabilityStatus {
 	assertRecord(v, "capabilityDetails.terminal");
-	assertKeys(v, new Set(["available", "backend", "code", "message"]), "capabilityDetails.terminal");
+	assertKeys(
+		v,
+		new Set(["available", "backend", "code", "message"]),
+		"capabilityDetails.terminal",
+	);
 	if (typeof v.available !== "boolean")
-		throw new TerminalProtocolError("capabilityDetails.terminal.available 必须是布尔");
-	if (v.backend !== undefined && v.backend !== "conpty" && v.backend !== "pty") {
-		throw new TerminalProtocolError("capabilityDetails.terminal.backend 不受支持");
+		throw new TerminalProtocolError(
+			"capabilityDetails.terminal.available 必须是布尔",
+		);
+	if (
+		v.backend !== undefined &&
+		v.backend !== "conpty" &&
+		v.backend !== "pty"
+	) {
+		throw new TerminalProtocolError(
+			"capabilityDetails.terminal.backend 不受支持",
+		);
 	}
-	if (v.code !== undefined) assertErrorCode(v.code, "capabilityDetails.terminal.code");
+	if (v.code !== undefined)
+		assertErrorCode(v.code, "capabilityDetails.terminal.code");
 	if (v.message !== undefined)
 		assertString(v.message, "capabilityDetails.terminal.message", 200);
 	return v as unknown as TerminalCapabilityStatus;
@@ -211,7 +261,15 @@ export interface TerminalShellInfo {
 	isDefault: boolean;
 }
 
-export const TERMINAL_SHELL_KINDS = ["pwsh", "powershell", "cmd", "bash", "zsh", "sh", "other"] as const;
+export const TERMINAL_SHELL_KINDS = [
+	"pwsh",
+	"powershell",
+	"cmd",
+	"bash",
+	"zsh",
+	"sh",
+	"other",
+] as const;
 export type TerminalShellKind = (typeof TERMINAL_SHELL_KINDS)[number];
 
 export function parseTerminalShellInfo(v: unknown): TerminalShellInfo {
@@ -219,7 +277,10 @@ export function parseTerminalShellInfo(v: unknown): TerminalShellInfo {
 	assertKeys(v, new Set(["id", "label", "kind", "isDefault"]), "shell");
 	assertString(v.id, "shell.id", 64);
 	assertString(v.label, "shell.label", 64);
-	if (typeof v.kind !== "string" || !(TERMINAL_SHELL_KINDS as readonly string[]).includes(v.kind)) {
+	if (
+		typeof v.kind !== "string" ||
+		!(TERMINAL_SHELL_KINDS as readonly string[]).includes(v.kind)
+	) {
 		throw new TerminalProtocolError("shell.kind 不受支持");
 	}
 	if (typeof v.isDefault !== "boolean")
@@ -278,13 +339,19 @@ export function parseTerminalSessionInfo(v: unknown): TerminalSessionInfo {
 	assertString(r.clientId, "clientId", 128);
 	assertString(r.shellId, "shellId", 64);
 	assertString(r.shellLabel, "shellLabel", 64);
-	if (!isTerminalSessionStatus(r.status)) throw new TerminalProtocolError("session.status 不受支持");
+	if (!isTerminalSessionStatus(r.status))
+		throw new TerminalProtocolError("session.status 不受支持");
 	assertTerminalSize(r, "session");
 	for (const key of ["createdByIdentityId", "createdByName"] as const) {
 		if (r[key] !== null) assertOptionalString(r[key], key, 128);
 	}
 	assertDate(r.createdAt, "createdAt");
-	for (const key of ["lastAttachedAt", "detachedAt", "expiresAt", "endedAt"] as const) {
+	for (const key of [
+		"lastAttachedAt",
+		"detachedAt",
+		"expiresAt",
+		"endedAt",
+	] as const) {
 		if (r[key] !== null) assertOptionalDate(r[key], key);
 	}
 	for (const key of ["endReason", "errorCode"] as const) {
@@ -313,13 +380,25 @@ export function parseTerminalAuditInfo(v: unknown): TerminalAuditInfo {
 	assertRecord(v, "audit");
 	assertKeys(
 		v,
-		new Set(["id", "sessionId", "clientId", "event", "identityId", "actorName", "source", "result", "reason", "createdAt"]),
+		new Set([
+			"id",
+			"sessionId",
+			"clientId",
+			"event",
+			"identityId",
+			"actorName",
+			"source",
+			"result",
+			"reason",
+			"createdAt",
+		]),
 		"audit",
 	);
 	assertString(v.id, "audit.id", 128);
 	assertSessionId(v.sessionId);
 	assertString(v.clientId, "clientId", 128);
-	if (!isTerminalAuditEventName(v.event)) throw new TerminalProtocolError("audit.event 不受支持");
+	if (!isTerminalAuditEventName(v.event))
+		throw new TerminalProtocolError("audit.event 不受支持");
 	for (const key of ["identityId", "actorName", "source"] as const) {
 		if (v[key] !== null) assertOptionalString(v[key], key, 128);
 	}
@@ -339,11 +418,17 @@ export interface TerminalSessionCreateRequest {
 	rows: number;
 }
 
-export function parseTerminalSessionCreateRequest(v: unknown): TerminalSessionCreateRequest {
+export function parseTerminalSessionCreateRequest(
+	v: unknown,
+): TerminalSessionCreateRequest {
 	assertRecord(v, "create");
 	assertKeys(v, new Set(["shellId", "cols", "rows"]), "create");
 	assertString(v.shellId, "shellId", 64);
-	if (typeof v.cols !== "number" || typeof v.rows !== "number" || !isValidTerminalSize(v.cols, v.rows)) {
+	if (
+		typeof v.cols !== "number" ||
+		typeof v.rows !== "number" ||
+		!isValidTerminalSize(v.cols, v.rows)
+	) {
 		throw new TerminalProtocolError("create 尺寸非法");
 	}
 	return v as unknown as TerminalSessionCreateRequest;
@@ -374,18 +459,47 @@ export type TerminalClientRequest =
 	  }
 	| { requestId: string; action: "session.attach"; sessionId: string }
 	| { requestId: string; action: "session.detach"; sessionId: string }
-	| { requestId: string; action: "session.input"; sessionId: string; data: string }
-	| { requestId: string; action: "session.resize"; sessionId: string; cols: number; rows: number }
+	| {
+			requestId: string;
+			action: "session.input";
+			sessionId: string;
+			data: string;
+	  }
+	| {
+			requestId: string;
+			action: "session.resize";
+			sessionId: string;
+			cols: number;
+			rows: number;
+	  }
 	| { requestId: string; action: "session.snapshot"; sessionId: string }
-	| { requestId: string; action: "session.close"; sessionId: string; reason: "closed" | "expired" };
+	| {
+			requestId: string;
+			action: "session.close";
+			sessionId: string;
+			reason: "closed" | "expired";
+	  };
 
 const CLIENT_REQUEST_KEYS: Record<TerminalClientActionName, Set<string>> = {
 	"shells.list": new Set(["requestId", "action"]),
-	"session.create": new Set(["requestId", "action", "sessionId", "shellId", "cols", "rows"]),
+	"session.create": new Set([
+		"requestId",
+		"action",
+		"sessionId",
+		"shellId",
+		"cols",
+		"rows",
+	]),
 	"session.attach": new Set(["requestId", "action", "sessionId"]),
 	"session.detach": new Set(["requestId", "action", "sessionId"]),
 	"session.input": new Set(["requestId", "action", "sessionId", "data"]),
-	"session.resize": new Set(["requestId", "action", "sessionId", "cols", "rows"]),
+	"session.resize": new Set([
+		"requestId",
+		"action",
+		"sessionId",
+		"cols",
+		"rows",
+	]),
 	"session.snapshot": new Set(["requestId", "action", "sessionId"]),
 	"session.close": new Set(["requestId", "action", "sessionId", "reason"]),
 };
@@ -435,8 +549,19 @@ export function parseTerminalClientRequest(v: unknown): TerminalClientRequest {
 
 /** Client → Server 终端动作响应（判别联合；错误为稳定错误码）。 */
 export type TerminalClientResponse =
-	| { requestId: string; ok: true; action: "shells.list"; shells: TerminalShellInfo[] }
-	| { requestId: string; ok: true; action: "session.create"; sessionId: string; status: "active" | "detached" }
+	| {
+			requestId: string;
+			ok: true;
+			action: "shells.list";
+			shells: TerminalShellInfo[];
+	  }
+	| {
+			requestId: string;
+			ok: true;
+			action: "session.create";
+			sessionId: string;
+			status: "active" | "detached";
+	  }
 	| {
 			requestId: string;
 			ok: true;
@@ -450,15 +575,36 @@ export type TerminalClientResponse =
 	  }
 	| { requestId: string; ok: true; action: "session.detach"; sessionId: string }
 	| { requestId: string; ok: true; action: "session.input"; sessionId: string }
-	| { requestId: string; ok: true; action: "session.resize"; sessionId: string; cols: number; rows: number }
-	| { requestId: string; ok: true; action: "session.close"; sessionId: string; status: "closed" }
-	| { requestId: string; ok: false; action?: never; error: { code: TerminalErrorCode; message: string } };
+	| {
+			requestId: string;
+			ok: true;
+			action: "session.resize";
+			sessionId: string;
+			cols: number;
+			rows: number;
+	  }
+	| {
+			requestId: string;
+			ok: true;
+			action: "session.close";
+			sessionId: string;
+			status: "closed";
+	  }
+	| {
+			requestId: string;
+			ok: false;
+			action?: never;
+			error: { code: TerminalErrorCode; message: string };
+	  };
 
 /** 解析 Client → Server 终端响应；非法响应抛 TerminalProtocolError。 */
-export function parseTerminalClientResponse(v: unknown): TerminalClientResponse {
+export function parseTerminalClientResponse(
+	v: unknown,
+): TerminalClientResponse {
 	assertRecord(v, "response");
 	assertRequestId(v.requestId);
-	if (typeof v.ok !== "boolean") throw new TerminalProtocolError("response.ok 必须是布尔");
+	if (typeof v.ok !== "boolean")
+		throw new TerminalProtocolError("response.ok 必须是布尔");
 	if (v.ok === false) {
 		assertKeys(v, new Set(["requestId", "ok", "error"]), "response");
 		assertRecord(v.error, "response.error");
@@ -467,17 +613,26 @@ export function parseTerminalClientResponse(v: unknown): TerminalClientResponse 
 		assertString(v.error.message, "response.error.message", 200);
 		return v as unknown as TerminalClientResponse;
 	}
-	if (typeof v.action !== "string") throw new TerminalProtocolError("response.action 必须是字符串");
+	if (typeof v.action !== "string")
+		throw new TerminalProtocolError("response.action 必须是字符串");
 	switch (v.action) {
 		case "shells.list": {
-			assertKeys(v, new Set(["requestId", "ok", "action", "shells"]), "response");
+			assertKeys(
+				v,
+				new Set(["requestId", "ok", "action", "shells"]),
+				"response",
+			);
 			if (!Array.isArray(v.shells) || v.shells.length > 10)
 				throw new TerminalProtocolError("response.shells 必须是数组");
 			for (const shell of v.shells) parseTerminalShellInfo(shell);
 			return v as unknown as TerminalClientResponse;
 		}
 		case "session.create": {
-			assertKeys(v, new Set(["requestId", "ok", "action", "sessionId", "status"]), "response");
+			assertKeys(
+				v,
+				new Set(["requestId", "ok", "action", "sessionId", "status"]),
+				"response",
+			);
 			assertSessionId(v.sessionId);
 			if (v.status !== "active" && v.status !== "detached")
 				throw new TerminalProtocolError("create.status 不受支持");
@@ -487,12 +642,30 @@ export function parseTerminalClientResponse(v: unknown): TerminalClientResponse 
 		case "session.snapshot": {
 			assertKeys(
 				v,
-				new Set(["requestId", "ok", "action", "sessionId", "snapshot", "snapshotSeq", "cols", "rows", "historyTruncated"]),
+				new Set([
+					"requestId",
+					"ok",
+					"action",
+					"sessionId",
+					"snapshot",
+					"snapshotSeq",
+					"cols",
+					"rows",
+					"historyTruncated",
+				]),
 				"response",
 			);
 			assertSessionId(v.sessionId);
-			assertString(v.snapshot as unknown, "snapshot", TerminalLimits.maxSnapshotBytes);
-			if (typeof v.snapshotSeq !== "number" || !Number.isInteger(v.snapshotSeq) || v.snapshotSeq < 0) {
+			assertString(
+				v.snapshot as unknown,
+				"snapshot",
+				TerminalLimits.maxSnapshotBytes,
+			);
+			if (
+				typeof v.snapshotSeq !== "number" ||
+				!Number.isInteger(v.snapshotSeq) ||
+				v.snapshotSeq < 0
+			) {
 				throw new TerminalProtocolError("snapshotSeq 必须是正整数");
 			}
 			assertTerminalSize(v, "response");
@@ -502,20 +675,33 @@ export function parseTerminalClientResponse(v: unknown): TerminalClientResponse 
 		}
 		case "session.detach":
 		case "session.input": {
-			assertKeys(v, new Set(["requestId", "ok", "action", "sessionId"]), "response");
+			assertKeys(
+				v,
+				new Set(["requestId", "ok", "action", "sessionId"]),
+				"response",
+			);
 			assertSessionId(v.sessionId);
 			return v as unknown as TerminalClientResponse;
 		}
 		case "session.resize": {
-			assertKeys(v, new Set(["requestId", "ok", "action", "sessionId", "cols", "rows"]), "response");
+			assertKeys(
+				v,
+				new Set(["requestId", "ok", "action", "sessionId", "cols", "rows"]),
+				"response",
+			);
 			assertSessionId(v.sessionId);
 			assertTerminalSize(v, "response");
 			return v as unknown as TerminalClientResponse;
 		}
 		case "session.close": {
-			assertKeys(v, new Set(["requestId", "ok", "action", "sessionId", "status"]), "response");
+			assertKeys(
+				v,
+				new Set(["requestId", "ok", "action", "sessionId", "status"]),
+				"response",
+			);
 			assertSessionId(v.sessionId);
-			if (v.status !== "closed") throw new TerminalProtocolError("close.status 不受支持");
+			if (v.status !== "closed")
+				throw new TerminalProtocolError("close.status 不受支持");
 			return v as unknown as TerminalClientResponse;
 		}
 		default:
@@ -596,7 +782,10 @@ export function parseTerminalStateReport(v: unknown): TerminalStateReport {
 	assertKeys(v, new Set(["clientId", "generationId", "sessions"]), "state");
 	assertString(v.clientId, "clientId", 128);
 	assertString(v.generationId, "generationId", 128);
-	if (!Array.isArray(v.sessions) || v.sessions.length > TerminalLimits.maxStateSessions) {
+	if (
+		!Array.isArray(v.sessions) ||
+		v.sessions.length > TerminalLimits.maxStateSessions
+	) {
 		throw new TerminalProtocolError("state.sessions 数量超过上限");
 	}
 	const seen = new Set<string>();
@@ -604,18 +793,32 @@ export function parseTerminalStateReport(v: unknown): TerminalStateReport {
 		assertRecord(raw, "state.sessions[]");
 		assertKeys(
 			raw,
-			new Set(["sessionId", "shellId", "status", "cols", "rows", "lastSeq", "detachedAt", "expiresAt"]),
+			new Set([
+				"sessionId",
+				"shellId",
+				"status",
+				"cols",
+				"rows",
+				"lastSeq",
+				"detachedAt",
+				"expiresAt",
+			]),
 			"state.sessions[]",
 		);
 		assertSessionId(raw.sessionId);
-		if (seen.has(raw.sessionId)) throw new TerminalProtocolError("state.sessions 含重复 sessionId");
+		if (seen.has(raw.sessionId))
+			throw new TerminalProtocolError("state.sessions 含重复 sessionId");
 		seen.add(raw.sessionId);
 		assertString(raw.shellId, "shellId", 64);
 		if (raw.status !== "active" && raw.status !== "detached") {
 			throw new TerminalProtocolError("state.sessions[].status 不受支持");
 		}
 		assertTerminalSize(raw, "state.sessions[]");
-		if (typeof raw.lastSeq !== "number" || !Number.isInteger(raw.lastSeq) || raw.lastSeq < 0) {
+		if (
+			typeof raw.lastSeq !== "number" ||
+			!Number.isInteger(raw.lastSeq) ||
+			raw.lastSeq < 0
+		) {
 			throw new TerminalProtocolError("state.sessions[].lastSeq 必须是正整数");
 		}
 		assertOptionalDate(raw.detachedAt, "state.sessions[].detachedAt");
@@ -629,7 +832,8 @@ export function parseTerminalStateAck(v: unknown): TerminalStateAck {
 	assertRecord(v, "ack");
 	assertKeys(v, new Set(["acceptedSessionIds", "closeSessionIds"]), "ack");
 	for (const key of ["acceptedSessionIds", "closeSessionIds"] as const) {
-		if (!Array.isArray(v[key])) throw new TerminalProtocolError(`ack.${key} 必须是数组`);
+		if (!Array.isArray(v[key]))
+			throw new TerminalProtocolError(`ack.${key} 必须是数组`);
 		for (const id of v[key] as unknown[]) {
 			if (typeof id !== "string" || id.length === 0 || id.length > 128) {
 				throw new TerminalProtocolError(`ack.${key} 必须是非空字符串`);
@@ -651,7 +855,8 @@ export function parseTerminalBrowserAttach(v: unknown): TerminalBrowserAttach {
 	assertRecord(v, "attach");
 	assertKeys(v, new Set(["sessionId", "reconnectToken"]), "attach");
 	assertSessionId(v.sessionId);
-	if (v.reconnectToken !== undefined) assertString(v.reconnectToken, "reconnectToken", 128);
+	if (v.reconnectToken !== undefined)
+		assertString(v.reconnectToken, "reconnectToken", 128);
 	return v as unknown as TerminalBrowserAttach;
 }
 
@@ -681,7 +886,11 @@ export interface TerminalBrowserResize {
 
 export function parseTerminalBrowserResize(v: unknown): TerminalBrowserResize {
 	assertRecord(v, "resize");
-	assertKeys(v, new Set(["sessionId", "attachmentId", "cols", "rows"]), "resize");
+	assertKeys(
+		v,
+		new Set(["sessionId", "attachmentId", "cols", "rows"]),
+		"resize",
+	);
 	assertSessionId(v.sessionId);
 	assertString(v.attachmentId, "attachmentId", 128);
 	assertTerminalSize(v, "resize");
@@ -694,7 +903,9 @@ export interface TerminalBrowserTakeover {
 	attachmentId: string;
 }
 
-export function parseTerminalBrowserTakeover(v: unknown): TerminalBrowserTakeover {
+export function parseTerminalBrowserTakeover(
+	v: unknown,
+): TerminalBrowserTakeover {
 	assertRecord(v, "takeover");
 	assertKeys(v, new Set(["sessionId", "attachmentId"]), "takeover");
 	assertSessionId(v.sessionId);
@@ -723,7 +934,9 @@ export interface TerminalBrowserAckOutput {
 	seq: number;
 }
 
-export function parseTerminalBrowserAckOutput(v: unknown): TerminalBrowserAckOutput {
+export function parseTerminalBrowserAckOutput(
+	v: unknown,
+): TerminalBrowserAckOutput {
 	assertRecord(v, "ack-output");
 	assertKeys(v, new Set(["sessionId", "attachmentId", "seq"]), "ack-output");
 	assertSessionId(v.sessionId);
@@ -759,11 +972,19 @@ export interface TerminalBrowserAttached {
 	controlProtectedUntil: string | null;
 }
 
-export function parseTerminalBrowserAttached(v: unknown): TerminalBrowserAttached {
+export function parseTerminalBrowserAttached(
+	v: unknown,
+): TerminalBrowserAttached {
 	assertRecord(v, "attached");
 	assertKeys(
 		v,
-		new Set(["sessionId", "attachmentId", "reconnectToken", "mode", "controlProtectedUntil"]),
+		new Set([
+			"sessionId",
+			"attachmentId",
+			"reconnectToken",
+			"mode",
+			"controlProtectedUntil",
+		]),
 		"attached",
 	);
 	assertSessionId(v.sessionId);
@@ -771,7 +992,8 @@ export function parseTerminalBrowserAttached(v: unknown): TerminalBrowserAttache
 	assertString(v.reconnectToken, "reconnectToken", 128);
 	if (v.mode !== "operator" && v.mode !== "viewer")
 		throw new TerminalProtocolError("attached.mode 不受支持");
-	if (v.controlProtectedUntil !== null) assertOptionalDate(v.controlProtectedUntil, "controlProtectedUntil");
+	if (v.controlProtectedUntil !== null)
+		assertOptionalDate(v.controlProtectedUntil, "controlProtectedUntil");
 	return v as unknown as TerminalBrowserAttached;
 }
 
@@ -785,16 +1007,29 @@ export interface TerminalSnapshotMessage {
 	historyTruncated: boolean;
 }
 
-export function parseTerminalSnapshotMessage(v: unknown): TerminalSnapshotMessage {
+export function parseTerminalSnapshotMessage(
+	v: unknown,
+): TerminalSnapshotMessage {
 	assertRecord(v, "snapshot");
 	assertKeys(
 		v,
-		new Set(["sessionId", "snapshot", "snapshotSeq", "cols", "rows", "historyTruncated"]),
+		new Set([
+			"sessionId",
+			"snapshot",
+			"snapshotSeq",
+			"cols",
+			"rows",
+			"historyTruncated",
+		]),
 		"snapshot",
 	);
 	assertSessionId(v.sessionId);
 	assertString(v.snapshot, "snapshot", TerminalLimits.maxSnapshotBytes);
-	if (typeof v.snapshotSeq !== "number" || !Number.isInteger(v.snapshotSeq) || v.snapshotSeq < 0) {
+	if (
+		typeof v.snapshotSeq !== "number" ||
+		!Number.isInteger(v.snapshotSeq) ||
+		v.snapshotSeq < 0
+	) {
 		throw new TerminalProtocolError("snapshot.snapshotSeq 必须是正整数");
 	}
 	assertTerminalSize(v, "snapshot");
@@ -814,12 +1049,24 @@ export interface TerminalControlState {
 
 export function parseTerminalControlState(v: unknown): TerminalControlState {
 	assertRecord(v, "control");
-	assertKeys(v, new Set(["sessionId", "mode", "operatorName", "controlProtectedUntil", "canTakeover"]), "control");
+	assertKeys(
+		v,
+		new Set([
+			"sessionId",
+			"mode",
+			"operatorName",
+			"controlProtectedUntil",
+			"canTakeover",
+		]),
+		"control",
+	);
 	assertSessionId(v.sessionId);
 	if (v.mode !== "operator" && v.mode !== "viewer")
 		throw new TerminalProtocolError("control.mode 不受支持");
-	if (v.operatorName !== null) assertOptionalString(v.operatorName, "operatorName", 128);
-	if (v.controlProtectedUntil !== null) assertOptionalDate(v.controlProtectedUntil, "controlProtectedUntil");
+	if (v.operatorName !== null)
+		assertOptionalString(v.operatorName, "operatorName", 128);
+	if (v.controlProtectedUntil !== null)
+		assertOptionalDate(v.controlProtectedUntil, "controlProtectedUntil");
 	if (typeof v.canTakeover !== "boolean")
 		throw new TerminalProtocolError("control.canTakeover 必须是布尔");
 	return v as unknown as TerminalControlState;
@@ -832,24 +1079,29 @@ export interface TerminalSessionStateMessage {
 	reason?: string;
 }
 
-export function parseTerminalSessionStateMessage(v: unknown): TerminalSessionStateMessage {
+export function parseTerminalSessionStateMessage(
+	v: unknown,
+): TerminalSessionStateMessage {
 	assertRecord(v, "state-message");
 	assertKeys(v, new Set(["sessionId", "status", "reason"]), "state-message");
 	assertSessionId(v.sessionId);
-	if (!isTerminalSessionStatus(v.status)) throw new TerminalProtocolError("state-message.status 不受支持");
+	if (!isTerminalSessionStatus(v.status))
+		throw new TerminalProtocolError("state-message.status 不受支持");
 	if (v.reason !== undefined) assertString(v.reason, "reason", 200);
 	return v as unknown as TerminalSessionStateMessage;
 }
 
 /** 终端稳定错误消息。 */
 export interface TerminalErrorMessage {
+	sessionId: string;
 	code: TerminalErrorCode;
 	message: string;
 }
 
 export function parseTerminalError(v: unknown): TerminalErrorMessage {
 	assertRecord(v, "error");
-	assertKeys(v, new Set(["code", "message"]), "error");
+	assertKeys(v, new Set(["sessionId", "code", "message"]), "error");
+	assertString(v.sessionId, "sessionId", 128);
 	assertErrorCode(v.code, "error.code");
 	assertString(v.message, "message", 200);
 	return v as unknown as TerminalErrorMessage;

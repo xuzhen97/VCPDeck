@@ -1,13 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSdk } from "@/api/context";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/async-state";
 import type { TerminalSessionInfo, TerminalShellInfo } from "@vcpdeck/shared";
 import { TerminalLimits } from "@vcpdeck/shared";
-import { createTerminalSocket, createAppSocket, type TerminalSocketEvents } from "../terminal/terminal-socket.js";
-import { useTerminalSession, type TerminalSessionState } from "../terminal/use-terminal-session.js";
-import { TerminalView, type TerminalViewHandle, type XtermAdapter, type ResizeObserverLike } from "../terminal/terminal-view.js";
+import {
+	createTerminalSocket,
+	createAppSocket,
+	type TerminalSocketEvents,
+} from "../terminal/terminal-socket.js";
+import {
+	useTerminalSession,
+	type TerminalSessionState,
+} from "../terminal/use-terminal-session.js";
+import {
+	TerminalView,
+	type TerminalViewHandle,
+	type XtermAdapter,
+	type ResizeObserverLike,
+} from "../terminal/terminal-view.js";
 import { TerminalTabs } from "../terminal/terminal-tabs.js";
 import { TerminalControl } from "../terminal/terminal-control.js";
 import { TerminalAuditDialog } from "../terminal/terminal-audit-dialog.js";
@@ -16,14 +33,35 @@ const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 30;
 const ENDED = new Set(["exited", "interrupted", "expired", "closed", "error"]);
 
+const DISMISSED_PREFIX = "vcpdeck:term:dismissed:";
+
+/** 读取本机已清除的终态会话 id（localStorage，按 client 隔离）。 */
+function loadDismissed(clientId: string): Set<string> {
+	try {
+		const raw = window.localStorage.getItem(`${DISMISSED_PREFIX}${clientId}`);
+		return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+	} catch {
+		return new Set();
+	}
+}
+
+function saveDismissed(clientId: string, ids: Set<string>): void {
+	try {
+		window.localStorage.setItem(
+			`${DISMISSED_PREFIX}${clientId}`,
+			JSON.stringify([...ids]),
+		);
+	} catch {
+		/* 存储不可用（隐私模式等）时忽略：本次会话内仍有效 */
+	}
+}
+
 /** 单会话子标签：hook + xterm 视图 + 控制条。 */
 function SessionTab({
 	clientId,
 	session,
 	socket,
 	active,
-	onRequestClose,
-	onRequestAudit,
 	onSizeChange,
 	viewAdapterFactory,
 	viewResizeObserverFactory,
@@ -32,8 +70,6 @@ function SessionTab({
 	session: TerminalSessionInfo;
 	socket: TerminalSocketEvents;
 	active: boolean;
-	onRequestClose: () => void;
-	onRequestAudit: () => void;
 	onSizeChange: (cols: number, rows: number) => void;
 	viewAdapterFactory?: () => XtermAdapter;
 	viewResizeObserverFactory?: () => ResizeObserverLike;
@@ -44,9 +80,12 @@ function SessionTab({
 	const [viewReady, setViewReady] = useState(false);
 	const view = useMemo(
 		() => ({
-			write: (data: string) => {
-				if (viewRef.current) viewRef.current.write(data);
-				else pendingView.current += data;
+			write: (data: string, cb?: () => void) => {
+				if (viewRef.current) viewRef.current.write(data, cb);
+				else {
+					pendingView.current += data;
+					cb?.();
+				}
 			},
 			reset: () => {
 				pendingView.current = "";
@@ -55,7 +94,9 @@ function SessionTab({
 		}),
 		[],
 	);
-	const sessionHookRef = useRef<ReturnType<typeof useTerminalSession> | null>(null);
+	const sessionHookRef = useRef<ReturnType<typeof useTerminalSession> | null>(
+		null,
+	);
 	const sessionHook = useTerminalSession({
 		socket,
 		clientId,
@@ -82,13 +123,15 @@ function SessionTab({
 	}, [viewReady]);
 
 	return (
-		<div className="flex h-full min-h-0 flex-col" role="tabpanel" hidden={!active}>
+		<div
+			className="flex h-full min-h-0 flex-col"
+			role="tabpanel"
+			hidden={!active}
+		>
 			<TerminalControl
 				state={state}
 				shellLabel={session.shellLabel}
 				onTakeover={sessionHook.handleTakeover}
-				onClose={onRequestClose}
-				onAudit={onRequestAudit}
 			/>
 			<div className="min-h-0 flex-1 bg-black">
 				<TerminalView
@@ -122,13 +165,21 @@ export function TerminalPanel({
 }) {
 	const sdk = useSdk();
 	const [socket] = useState(() => createTerminalSocket(socketFactory()));
+	// 已清除的终态会话（localStorage 持久化，刷新/新建后不复活）
+	const dismissedRef = useRef<Set<string>>(loadDismissed(clientId));
 	const [sessions, setSessions] = useState<TerminalSessionInfo[] | null>(null);
 	const [shells, setShells] = useState<TerminalShellInfo[]>([]);
 	const [activeId, setActiveId] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [closeTarget, setCloseTarget] = useState<TerminalSessionInfo | null>(null);
-	const [auditTarget, setAuditTarget] = useState<TerminalSessionInfo | null>(null);
+	const [closeTarget, setCloseTarget] = useState<TerminalSessionInfo | null>(
+		null,
+	);
+	const [auditTarget, setAuditTarget] = useState<TerminalSessionInfo | null>(
+		null,
+	);
 	const [closing, setClosing] = useState(false);
+	// 终端放大到整页（fixed 覆盖视口）
+	const [expanded, setExpanded] = useState(false);
 	// 最近一次容器 fit 尺寸（创建会话时使用；无记录用安全默认）
 	const sizeRef = useRef({ cols: DEFAULT_COLS, rows: DEFAULT_ROWS });
 	const handleSizeChange = useCallback((cols: number, rows: number) => {
@@ -142,12 +193,16 @@ export function TerminalPanel({
 					sdk.terminals.list(clientId, { page: 1, pageSize: 50 }, signal),
 					sdk.terminals.shells(clientId, signal),
 				]);
-				setSessions(list.data);
+				const data = list.data.filter(
+					(s) => !dismissedRef.current.has(s.sessionId),
+				);
+				setSessions(data);
 				setShells(shellList);
 				setError(null);
 				setActiveId((current) => {
-					if (current && list.data.some((s) => s.sessionId === current)) return current;
-					const first = list.data.find((s) => !ENDED.has(s.status)) ?? list.data[0];
+					if (current && data.some((s) => s.sessionId === current))
+						return current;
+					const first = data.find((s) => !ENDED.has(s.status)) ?? data[0];
 					return first?.sessionId ?? null;
 				});
 			} catch (err) {
@@ -155,7 +210,7 @@ export function TerminalPanel({
 				setError(
 					typeof code === "string"
 						? code
-						: (err as { message?: string }).message ?? "无法加载终端列表",
+						: ((err as { message?: string }).message ?? "无法加载终端列表"),
 				);
 			}
 		},
@@ -191,6 +246,11 @@ export function TerminalPanel({
 		setClosing(true);
 		try {
 			await sdk.terminals.remove(clientId, closeTarget.sessionId);
+			// 关闭即销毁 tab：标记为已清除（reload 过滤 + 刷新不复活），不再显示 closed 状态等二次点击
+			const next = new Set(dismissedRef.current);
+			next.add(closeTarget.sessionId);
+			dismissedRef.current = next;
+			saveDismissed(clientId, next);
 			setCloseTarget(null);
 			await reload();
 		} catch {
@@ -199,6 +259,32 @@ export function TerminalPanel({
 			setClosing(false);
 		}
 	}, [sdk, clientId, closeTarget, reload]);
+
+	// 存活会话：弹确认框走 DELETE；终态会话：清除标签并持久化（远端已结束，DELETE 是幂等空操作，行保留供审计）
+	const dismissOrClose = useCallback(
+		(session: TerminalSessionInfo) => {
+			if (!ENDED.has(session.status)) {
+				setCloseTarget(session);
+				return;
+			}
+			if (sessions === null) return;
+			const nextDismissed = new Set(dismissedRef.current);
+			nextDismissed.add(session.sessionId);
+			dismissedRef.current = nextDismissed;
+			saveDismissed(clientId, nextDismissed);
+			const next = sessions.filter((s) => s.sessionId !== session.sessionId);
+			setSessions(next);
+			setActiveId((current) => {
+				if (current !== session.sessionId) return current;
+				return (
+					next.find((s) => !ENDED.has(s.status))?.sessionId ??
+					next[0]?.sessionId ??
+					null
+				);
+			});
+		},
+		[clientId, sessions],
+	);
 
 	if (error) {
 		return (
@@ -215,21 +301,33 @@ export function TerminalPanel({
 	}
 	if (!sessions) return <LoadingState label="正在加载终端…" />;
 
-	const active = sessions.find((s) => s.sessionId === activeId) ?? null;
 	const activeCount = sessions.filter((s) => !ENDED.has(s.status)).length;
 	const canCreate = activeCount < TerminalLimits.maxSessionsPerClient;
 
 	return (
-		<div data-testid="terminal-panel" className="flex h-full min-h-0 flex-col">
+		<div
+			data-testid="terminal-panel"
+			className={`flex h-full min-h-0 flex-col ${
+				expanded ? "fixed inset-0 z-50 bg-background" : ""
+			}`}
+		>
 			<TerminalTabs
 				sessions={sessions}
 				shells={shells}
 				activeId={activeId}
 				onSelect={setActiveId}
 				onNew={createSession}
+				expanded={expanded}
+				onToggleExpand={() => setExpanded((v) => !v)}
 				onCloseTab={(sessionId) => {
-					const target = sessions.find((s) => s.sessionId === sessionId) ?? null;
-					setCloseTarget(target);
+					const target =
+						sessions.find((s) => s.sessionId === sessionId) ?? null;
+					if (target) dismissOrClose(target);
+				}}
+				onAudit={(sessionId) => {
+					const target =
+						sessions.find((s) => s.sessionId === sessionId) ?? null;
+					if (target) setAuditTarget(target);
 				}}
 				canCreate={canCreate}
 			/>
@@ -244,23 +342,53 @@ export function TerminalPanel({
 						</div>
 					</div>
 				)}
-				{sessions.map((session) => (
-					<SessionTab
-						key={session.sessionId}
-						clientId={clientId}
-						session={session}
-						socket={socket}
-						active={session.sessionId === activeId}
-						onRequestClose={() => setCloseTarget(session)}
-						onRequestAudit={() => setAuditTarget(session)}
-						onSizeChange={handleSizeChange}
-						viewAdapterFactory={viewAdapterFactory}
-						viewResizeObserverFactory={viewResizeObserverFactory}
-					/>
-				))}
+				{sessions.map((session) =>
+					ENDED.has(session.status) ? (
+						// 终态会话：不占用 xterm 实例（设计 13.2），展示状态与审计/清除入口
+						<div
+							key={session.sessionId}
+							role="tabpanel"
+							hidden={session.sessionId !== activeId}
+							className="flex h-full min-h-0 flex-col"
+						>
+							<TerminalControl
+								state={{
+									phase: "ended",
+									mode: "viewer",
+									operatorName: null,
+									controlProtectedUntil: null,
+									canTakeover: false,
+									lastSeq: 0,
+									historyTruncated: false,
+									status: session.status,
+									error: null,
+								}}
+								shellLabel={session.shellLabel}
+								onTakeover={() => {}}
+							/>
+							<div className="flex min-h-0 flex-1 items-center justify-center bg-black text-sm text-muted-foreground">
+								会话已结束，无法恢复
+							</div>
+						</div>
+					) : (
+						<SessionTab
+							key={session.sessionId}
+							clientId={clientId}
+							session={session}
+							socket={socket}
+							active={session.sessionId === activeId}
+							onSizeChange={handleSizeChange}
+							viewAdapterFactory={viewAdapterFactory}
+							viewResizeObserverFactory={viewResizeObserverFactory}
+						/>
+					),
+				)}
 			</div>
 
-			<Dialog open={closeTarget !== null} onOpenChange={(open) => !open && setCloseTarget(null)}>
+			<Dialog
+				open={closeTarget !== null}
+				onOpenChange={(open) => !open && setCloseTarget(null)}
+			>
 				<DialogContent>
 					<DialogTitle>关闭终端？</DialogTitle>
 					<DialogDescription>
@@ -270,7 +398,11 @@ export function TerminalPanel({
 						<Button variant="outline" onClick={() => setCloseTarget(null)}>
 							取消
 						</Button>
-						<Button variant="destructive" disabled={closing} onClick={() => void confirmClose()}>
+						<Button
+							variant="destructive"
+							disabled={closing}
+							onClick={() => void confirmClose()}
+						>
 							确认关闭
 						</Button>
 					</div>

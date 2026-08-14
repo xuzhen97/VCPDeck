@@ -28,6 +28,9 @@ export const TERMINAL_SESSION_END_STATUSES: readonly TerminalSessionStatus[] = [
 	"error",
 ];
 
+/** 列表保留已中断会话的时间窗口（设计 13.2：最近的已中断会话）。 */
+const TERMINAL_SESSION_LIST_KEEP_MS = 24 * 60 * 60 * 1000;
+
 function terminalError(code: string, message: string): Error {
 	return Object.assign(new Error(message), { code });
 }
@@ -75,16 +78,6 @@ export interface TerminalServiceDeps {
 	audit: { record: (request: TerminalAuditRecordRequest) => Promise<void> };
 	now?: () => number;
 	hashToken?: (token: string) => string;
-}
-
-function isDepsObject(value: unknown): value is TerminalServiceDeps {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		"prisma" in value &&
-		"broker" in value &&
-		"audit" in value
-	);
 }
 
 /** 稳定终端错误。 */
@@ -205,8 +198,9 @@ export class TerminalService {
 				result,
 				reason,
 			});
-		} catch {
-			/* 审计失败不阻断业务 */
+		} catch (error) {
+			// 审计失败不阻断业务，但记录原因便于定位（不含输入输出等敏感内容）
+			console.error(`[terminal-audit] record ${event} failed:`, (error as { message?: string })?.message);
 		}
 	}
 
@@ -222,9 +216,17 @@ export class TerminalService {
 
 	// ── REST：Session ──
 
-	/** 会话列表（默认非终态优先，按 createdAt desc）。 */
+	/** 会话列表：非终态 + 最近 24h 内已中断的会话（设计 13.2：默认返回非终态会话和最近的已中断会话）。 */
 	async listSessions(clientId: string, page = 1, pageSize = 20): Promise<PaginatedResult<TerminalSessionInfo>> {
-		const where: Record<string, unknown> = { clientId };
+		// closed/exited/expired/error 是用户可见操作的结果，不堆积；interrupted（客户端重启）保留 24h 供查看
+		const recentInterruptedAt = new Date(this.now() - TERMINAL_SESSION_LIST_KEEP_MS);
+		const where: Record<string, unknown> = {
+			clientId,
+			OR: [
+				{ status: { notIn: [...TERMINAL_SESSION_END_STATUSES] } },
+				{ status: "interrupted", endedAt: { gte: recentInterruptedAt } },
+			],
+		};
 		const [list, total] = await Promise.all([
 			this.deps.prisma.terminalSession.findMany({
 				where,
@@ -267,7 +269,7 @@ export class TerminalService {
 				throw terminalError("TERMINAL_SESSION_LIMIT_REACHED", "Terminal session limit reached");
 			}
 			const sessionId = `ts_${randomUUID()}`;
-			const row = await this.deps.prisma.terminalSession.create({
+			await this.deps.prisma.terminalSession.create({
 				data: {
 					id: sessionId,
 					clientId,
@@ -280,6 +282,8 @@ export class TerminalService {
 					createdByName: actor.displayName,
 				},
 			});
+			// 先建 runtime：Client 可能立即输出（提示符等），浏览器 attach 前不能丢块
+			this.ensureRuntime(sessionId, clientId);
 			await this.recordAudit(sessionId, clientId, "created", actor);
 			const response = await this.deps.broker.request(
 				lease,
@@ -357,6 +361,19 @@ export class TerminalService {
 			throw terminalError("TERMINAL_SESSION_ENDED", "Session has ended");
 		}
 		const rt = this.ensureRuntime(args.sessionId, clientId);
+
+		// 同一 socket 重复 attach（StrictMode 双挂载/页面内重挂）：旧 attachment 已失效，直接取代。
+		// socket 仍在线，不触发重连保护，否则新 attach 会被保护期挡成 viewer 且无法写。
+		for (const [oldId, old] of [...rt.attachments]) {
+			if (old.socketId !== args.socketId) continue;
+			rt.attachments.delete(oldId);
+			if (rt.operatorAttachmentId === oldId) {
+				rt.operatorAttachmentId = null;
+				rt.protectedUntil = null;
+				rt.protectedTokenHash = null;
+				rt.protectedIdentityId = null;
+			}
+		}
 
 		// token 重绑：断开 operator 的保护记录匹配时恢复操作权
 		if (args.reconnectToken) {
@@ -452,11 +469,17 @@ export class TerminalService {
 				sessionId: rt.sessionId,
 			});
 			if (!response.ok) {
-				this.emitBrowser(attachment.socketId, "terminal:error", { code: response.error.code, message: response.error.message });
+				this.emitBrowser(attachment.socketId, "terminal:error", {
+					sessionId: rt.sessionId,
+					code: response.error.code,
+					message: response.error.message,
+				});
 				return;
 			}
 			if (response.action !== "session.attach") return;
 			attachment.snapshotSeq = response.snapshotSeq;
+			// 快照即权威基线：同步 rt.lastSeq，避免早期块缺失造成永久 gap（后续块被丢弃）
+			rt.lastSeq = Math.max(rt.lastSeq, response.snapshotSeq);
 			this.emitBrowser(attachment.socketId, "terminal:snapshot", {
 				sessionId: rt.sessionId,
 				snapshot: response.snapshot,
@@ -479,6 +502,7 @@ export class TerminalService {
 		} catch (error) {
 			const code = (error as { code?: unknown }).code;
 			this.emitBrowser(attachment.socketId, "terminal:error", {
+				sessionId: rt.sessionId,
 				code: typeof code === "string" ? code : "TERMINAL_CLIENT_OFFLINE",
 				message: "Terminal session is not available",
 			});
@@ -644,15 +668,19 @@ export class TerminalService {
 
 	// ── Client 事件 ──
 
-	async handleClientResponse(clientId: string, _socketId: string, response: TerminalClientResponse): Promise<void> {
+	async handleClientResponse(_clientId: string, _socketId: string, response: TerminalClientResponse): Promise<void> {
 		// 响应由 broker 关联；此处仅校验 clientId 归属（防御性）
 		if (!response.ok) return;
 	}
 
 	/** Client 输出：按序转发到 live attachment；syncing 期间进入 backlog。 */
 	async handleClientOutput(clientId: string, chunk: TerminalOutputChunk): Promise<void> {
-		const rt = this.runtime(chunk.sessionId);
-		if (!rt || rt.clientId !== clientId) return;
+		let rt = this.runtime(chunk.sessionId);
+		if (!rt) {
+			// 会话创建后/服务重启后对账前：输出不应丢弃（快照基线靠 rt.lastSeq 对齐）
+			rt = this.ensureRuntime(chunk.sessionId, clientId);
+		}
+		if (rt.clientId !== clientId) return;
 		if (chunk.seq <= rt.lastSeq) return; // 重复
 		if (chunk.seq > rt.lastSeq + 1) {
 			// gap：跳过（前端将发起 resync）
@@ -669,7 +697,6 @@ export class TerminalService {
 					attachment.backlogBytes = 0;
 					this.emitBrowser(attachment.socketId, "terminal:resync-required", { sessionId: rt.sessionId });
 					attachment.state = "live"; // 等待前端 resync
-					continue;
 				}
 			} else if (attachment.state === "live") {
 				// 慢消费者：ack 落后超过阈值 → 暂停增量并请求 resync（不影响其他 attachment）
@@ -688,7 +715,7 @@ export class TerminalService {
 		const row = await this.deps.prisma.terminalSession.findUnique({ where: { id: exit.sessionId } });
 		if (!row || row.clientId !== clientId) return;
 		if (TERMINAL_SESSION_END_STATUSES.includes(row.status as TerminalSessionStatus)) return;
-		const updated = await this.deps.prisma.terminalSession.update({
+		await this.deps.prisma.terminalSession.update({
 			where: { id: exit.sessionId },
 			data: { status: "exited", endedAt: new Date(this.now()), endReason: `exit:${exit.exitCode}` },
 		});
