@@ -55,6 +55,7 @@ const frpsInstance = (): FrpsInstanceInfo => ({
 });
 const clientInfo = (): ClientInfo => ({
 	clientId: "client-1",
+	name: "DESKTOP-DEV",
 	hostname: "DESKTOP-DEV",
 	os: "win32",
 	cpuModel: "cpu",

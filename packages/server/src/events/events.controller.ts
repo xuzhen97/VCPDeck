@@ -1,16 +1,21 @@
 import {
   BadRequestException,
   Controller,
+  HttpException,
   Inject,
   NotFoundException,
   Post,
   Get,
+  Patch,
   Body,
   Param,
   Query,
 } from "@nestjs/common";
 import { JobService } from "../job/job.service.js";
-import { ClientService } from "../client/client.service.js";
+import {
+  ClientService,
+  INVALID_CLIENT_NAME,
+} from "../client/client.service.js";
 import { ClientGateway } from "./client.gateway.js";
 import { StorageService } from "../storage/storage.service.js";
 import { Actor } from "../auth/actor.decorator.js";
@@ -257,6 +262,31 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
   @Get("clients")
   async listClients() {
     return this.clientService.listOnline();
+  }
+
+  /** 修改客户端别名（全局唯一，改名后机器重连不会覆盖） */
+  @Patch("clients/:clientId/name")
+  async renameClient(
+    @Param("clientId") clientId: string,
+    @Body("name") name: unknown,
+  ) {
+    if (typeof name !== "string" || name.trim() === "") {
+      throw new BadRequestException({
+        code: INVALID_CLIENT_NAME,
+        message: "name must be a non-empty string",
+      });
+    }
+    try {
+      return await this.clientService.rename(clientId, name);
+    } catch (error) {
+      const { code, statusCode, message } = error as {
+        code?: string;
+        statusCode?: number;
+        message?: string;
+      };
+      if (!code || !statusCode) throw error;
+      throw new HttpException({ code, message }, statusCode);
+    }
   }
 
   @Get("jobs")

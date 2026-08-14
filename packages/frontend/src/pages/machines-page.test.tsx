@@ -65,13 +65,14 @@ describe("MachinesPage", () => {
 		renderPage(async () => [
 			{
 				clientId: "client-1",
+				name: "workstation",
 				hostname: "workstation",
 				os: "win32",
 				cpuModel: "Intel i7",
 				totalMemMB: 16384,
 				disks: [],
 				clientVersion: "0.0.0",
-				capabilities: ["exec", "file.read", "frp", "agent.pi"],
+				capabilities: ["exec", "file.read", "frp", "agent.pi", "terminal.pty"],
 				capabilityDetails: {},
 				online: true,
 				cpuPercent: null,
@@ -91,8 +92,14 @@ describe("MachinesPage", () => {
 		for (const label of ["命令执行", "文件操作", "Pi 运行"])
 			expect(screen.getByText(label)).toBeVisible();
 		expect(screen.queryByText("agent.pi")).not.toBeInTheDocument();
+		expect(screen.getAllByText("终端").length).toBeGreaterThanOrEqual(1);
+		expect(screen.queryByText("terminal.pty")).not.toBeInTheDocument();
 		expect(screen.getAllByText("映射").length).toBeGreaterThanOrEqual(1);
 		expect(screen.queryByText("FRP 映射")).not.toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "概览" })).toHaveAttribute(
+			"href",
+			"/machines/client-1/overview",
+		);
 		expect(screen.getByRole("link", { name: "执行" })).toHaveAttribute(
 			"href",
 			"/machines/client-1/execute",
@@ -105,6 +112,18 @@ describe("MachinesPage", () => {
 			"href",
 			"/machines/client-1/frp",
 		);
+		expect(screen.getByRole("link", { name: "任务记录" })).toHaveAttribute(
+			"href",
+			"/machines/client-1/jobs",
+		);
+		expect(screen.getByRole("link", { name: "Pi" })).toHaveAttribute(
+			"href",
+			"/machines/client-1/pi",
+		);
+		expect(screen.getByRole("link", { name: "终端" })).toHaveAttribute(
+			"href",
+			"/machines/client-1/terminal",
+		);
 		expect(screen.queryByRole("link", { name: "FRP" })).not.toBeInTheDocument();
 	});
 
@@ -112,6 +131,7 @@ describe("MachinesPage", () => {
 		const machine = (clientId: string, hostname: string, os: string) =>
 			({
 				clientId,
+				name: hostname,
 				hostname,
 				os,
 				cpuModel: "CPU",

@@ -5,30 +5,35 @@ export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
 }
 
-/** 将原始 capability 列表映射为可读的中文标签，未映射的保留原文 */
+/** 机器详情 tab 定义：路由 key + 中文标签（机器列表卡片快速跳转与详情页导航共用） */
+export const MACHINE_TABS = [
+	["overview", "概览"],
+	["execute", "执行"],
+	["files", "文件"],
+	["frp", "映射"],
+	["jobs", "任务记录"],
+	["pi", "Pi"],
+	["terminal", "终端"],
+] as const;
+
+/** 能力 → 中文标签；未映射的能力原样透传，确保显示不遗漏 */
+const CAPABILITY_LABELS: Record<string, string> = {
+	exec: "命令执行",
+	"file.read": "文件操作",
+	"file.write": "文件操作",
+	frp: "映射",
+	"agent.pi": "Pi 运行",
+	"terminal.pty": "终端",
+};
+
 export function capabilitiesLabel(raw: string[]): string[] {
 	const labels: string[] = [];
 	const seen = new Set<string>();
-	if (raw.includes("exec")) {
-		labels.push("命令执行");
-		seen.add("exec");
-	}
-	if (raw.includes("file.read") || raw.includes("file.write")) {
-		labels.push("文件操作");
-		seen.add("file.read");
-		seen.add("file.write");
-	}
-	if (raw.includes("frp")) {
-		labels.push("映射");
-		seen.add("frp");
-	}
-	if (raw.includes("agent.pi")) {
-		labels.push("Pi 运行");
-		seen.add("agent.pi");
-	}
-	// 未映射的原始能力透传，确保显示不遗漏
 	for (const cap of raw) {
-		if (!seen.has(cap)) labels.push(cap);
+		const label = CAPABILITY_LABELS[cap] ?? cap;
+		if (seen.has(label)) continue;
+		seen.add(label);
+		labels.push(label);
 	}
 	return labels;
 }

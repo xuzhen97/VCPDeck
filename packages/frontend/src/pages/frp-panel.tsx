@@ -175,7 +175,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 	}
 
 	const clientNames = new Map(
-		clients.map((client) => [client.clientId, client.hostname]),
+		clients.map((client) => [client.clientId, client.name ?? client.hostname]),
 	);
 
 	if (resource.loading) return <LoadingState label="正在加载映射…" />;

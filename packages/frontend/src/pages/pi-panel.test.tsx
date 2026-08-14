@@ -35,6 +35,7 @@ class MockEventSource {
 function makeClient(): ClientInfo {
 	return {
 		clientId: "c1",
+		name: "host",
 		hostname: "host",
 		os: "win32",
 		cpuModel: "cpu",

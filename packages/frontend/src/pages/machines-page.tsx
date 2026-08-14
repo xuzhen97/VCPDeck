@@ -1,5 +1,14 @@
 import type { ClientInfo } from "@vcpdeck/shared";
-import { ArrowRight, FolderOpen, TerminalSquare } from "lucide-react";
+import {
+	BrainCircuit,
+	FolderOpen,
+	History,
+	LayoutDashboard,
+	Network,
+	SquareTerminal,
+	TerminalSquare,
+	type LucideIcon,
+} from "lucide-react";
 import { useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useSdk } from "@/api/context";
@@ -9,7 +18,18 @@ import { OperatingSystemIcon } from "@/components/operating-system-icon";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
-import { capabilitiesLabel } from "@/lib/utils";
+import { MACHINE_TABS, capabilitiesLabel } from "@/lib/utils";
+
+/** 详情页 tab → 卡片快捷跳转图标 */
+const tabIcons: Record<string, LucideIcon> = {
+	overview: LayoutDashboard,
+	execute: TerminalSquare,
+	files: FolderOpen,
+	frp: Network,
+	jobs: History,
+	pi: BrainCircuit,
+	terminal: SquareTerminal,
+};
 
 export function MachinesPage() {
 	const sdk = useSdk();
@@ -70,11 +90,11 @@ function MachineCard({ client }: { client: ClientInfo }) {
 								className="rounded-sm hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 								to={`${base}/overview`}
 							>
-								{client.hostname}
+								{client.name ?? client.hostname}
 							</Link>
 						</CardTitle>
 						<p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-							{client.clientId}
+							{client.hostname} · {client.clientId}
 						</p>
 					</div>
 					<StatusChip label="在线" tone="success" />
@@ -93,27 +113,19 @@ function MachineCard({ client }: { client: ClientInfo }) {
 					))}
 				</div>
 				<div className="mt-5 flex flex-wrap gap-3 border-t border-border/60 pt-4 text-sm">
-					<Link
-						className="inline-flex items-center gap-1 text-primary"
-						to={`${base}/execute`}
-					>
-						<TerminalSquare className="size-4" />
-						执行
-					</Link>
-					<Link
-						className="inline-flex items-center gap-1 text-primary"
-						to={`${base}/files`}
-					>
-						<FolderOpen className="size-4" />
-						文件
-					</Link>
-					<Link
-						className="inline-flex items-center gap-1 text-primary"
-						to={`${base}/frp`}
-					>
-						映射
-						<ArrowRight className="size-4" />
-					</Link>
+					{MACHINE_TABS.map(([key, label]) => {
+						const Icon = tabIcons[key];
+						return (
+							<Link
+								key={key}
+								className="inline-flex items-center gap-1 text-primary"
+								to={`${base}/${key}`}
+							>
+								{Icon && <Icon className="size-4" />}
+								{label}
+							</Link>
+						);
+					})}
 				</div>
 			</CardContent>
 		</Card>

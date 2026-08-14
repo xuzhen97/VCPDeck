@@ -267,6 +267,8 @@ export interface StatusReport {
 // ── Client info (REST response) ──
 export interface ClientInfo {
 	clientId: string;
+	/** 别名：默认取 hostname（重名自动加后缀），可由服务端修改；后续 CLI 寻址依据 */
+	name: string;
 	hostname: string;
 	os: string;
 	cpuModel: string;

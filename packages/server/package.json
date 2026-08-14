@@ -5,8 +5,8 @@
   "main": "./dist/main.js",
   "scripts": {
     "build": "prisma generate && tsc",
-    "start": "prisma generate && prisma db push && node dist/main.js",
-    "dev": "prisma generate && prisma db push && tsx watch src/main.ts",
+    "start": "prisma generate && prisma db push --accept-data-loss && node dist/main.js",
+    "dev": "prisma generate && prisma db push --accept-data-loss && tsx watch src/main.ts",
     "test": "vitest run"
   },
   "dependencies": {

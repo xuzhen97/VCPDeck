@@ -6,7 +6,9 @@ function makeController() {
 		createUploadSession: vi.fn(),
 		completeUploadSession: vi.fn(),
 	} as never;
-	const clientService = {} as never;
+	const clientService = {
+		rename: vi.fn(),
+	} as never;
 	const gateway = {
 		sendDispatch: vi.fn(),
 	} as never;
@@ -34,6 +36,7 @@ function makeController() {
 			refreshDirectPartUrls: ReturnType<typeof vi.fn>;
 			updateUploadProgress: ReturnType<typeof vi.fn>;
 		},
+		clientService: clientService as { rename: ReturnType<typeof vi.fn> },
 	};
 }
 
@@ -153,6 +156,43 @@ describe("EventsController upload sessions", () => {
 				"j1",
 				64,
 			);
+		});
+	});
+});
+
+describe("EventsController renameClient", () => {
+	it("把改名请求交给 ClientService", async () => {
+		const { controller, clientService } = makeController();
+		const expected = { clientId: "c1", name: "new-name" };
+		clientService.rename.mockResolvedValue(expected);
+
+		await expect(controller.renameClient("c1", "new-name")).resolves.toBe(
+			expected,
+		);
+		expect(clientService.rename).toHaveBeenCalledWith("c1", "new-name");
+	});
+
+	it("空名直接拒绝 400", async () => {
+		const { controller, clientService } = makeController();
+
+		await expect(controller.renameClient("c1", "  ")).rejects.toMatchObject({
+			status: 400,
+		});
+		expect(clientService.rename).not.toHaveBeenCalled();
+	});
+
+	it("服务层冲突错误映射为 409 HttpException", async () => {
+		const { controller, clientService } = makeController();
+		clientService.rename.mockRejectedValue(
+			Object.assign(new Error("already taken"), {
+				code: "CLIENT_NAME_TAKEN",
+				statusCode: 409,
+			}),
+		);
+
+		await expect(controller.renameClient("c1", "c2-name")).rejects.toMatchObject({
+			status: 409,
+			response: { code: "CLIENT_NAME_TAKEN" },
 		});
 	});
 });

@@ -1,8 +1,9 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
+import { VcpDeckApiError } from "@vcpdeck/sdk";
 import type { ClientInfo } from "@vcpdeck/shared";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
 import { AuthProvider } from "@/auth-context";
 import { MachineWorkspace } from "./machine-workspace";
@@ -16,9 +17,21 @@ const identity = {
 	createdAt: "2026-07-26T00:00:00.000Z",
 };
 
-function renderWorkspace(clients: ClientInfo[], tab = "overview") {
+function renderWorkspace(
+	clients: ClientInfo[],
+	tab = "overview",
+	rename?: (clientId: string, name: string) => Promise<ClientInfo>,
+) {
 	const sdk = {
-		clients: { list: async () => clients },
+		clients: {
+			list: async () => clients,
+			rename:
+				rename ??
+				(async (clientId: string, name: string) => ({
+					...clients.find((c) => c.clientId === clientId)!,
+					name,
+				})),
+		},
 		files: { roots: async () => [] },
 		auth: { me: async () => identity },
 	} as unknown as VcpDeckClient;
@@ -42,6 +55,7 @@ describe("MachineWorkspace overview", () => {
 	it("renders full machine info when server returns all fields", async () => {
 		const client: ClientInfo = {
 			clientId: "c1",
+			name: "workstation",
 			hostname: "workstation",
 			os: "win32 10.0.26200",
 			cpuModel: "Intel(R) Core(TM) i7-12700",
@@ -61,7 +75,9 @@ describe("MachineWorkspace overview", () => {
 		renderWorkspace([client]);
 
 		expect(await screen.findByText("workstation")).toBeVisible();
-		expect(screen.getByText("win32 10.0.26200 · c1")).toBeVisible();
+		expect(
+			screen.getByText("workstation · win32 10.0.26200 · c1"),
+		).toBeVisible();
 		expect(screen.getByText("Intel(R) Core(TM) i7-12700")).toBeVisible();
 		expect(screen.getByText("16 GB")).toBeVisible();
 		expect(screen.getByText("0.0.0")).toBeVisible();
@@ -101,6 +117,7 @@ describe("MachineWorkspace overview", () => {
 	it("merges machine details and navigation into a compact header", async () => {
 		const client: ClientInfo = {
 			clientId: "c1",
+			name: "workstation",
 			hostname: "workstation",
 			os: "win32",
 			cpuModel: "Intel",
@@ -154,6 +171,7 @@ describe("MachineWorkspace overview", () => {
 	it("shows — for missing heartbeat fields", async () => {
 		const client: ClientInfo = {
 			clientId: "c1",
+			name: "server",
 			hostname: "server",
 			os: "linux",
 			cpuModel: "AMD EPYC",
@@ -195,5 +213,73 @@ describe("MachineWorkspace overview", () => {
 		// 旧 Client 缺失的指标仍以可访问进度条和占位值展示；磁盘无数据时不渲染进度条
 		expect(screen.getAllByRole("progressbar")).toHaveLength(2);
 		expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
+	});
+});
+
+describe("MachineWorkspace 名称双击编辑", () => {
+	const client: ClientInfo = {
+		clientId: "c1",
+		name: "workstation",
+		hostname: "workstation",
+		os: "win32",
+		cpuModel: "Intel",
+		totalMemMB: 16384,
+		disks: [],
+		clientVersion: "1.0.0",
+		capabilities: [],
+		capabilityDetails: {},
+		online: true,
+		cpuPercent: null,
+		memPercent: null,
+		lastHeartbeatAt: null,
+	};
+
+	it("双击名称进入编辑态，回车保存新别名", async () => {
+		const rename = vi.fn().mockResolvedValue({ ...client, name: "我的NAS" });
+		renderWorkspace([client], "overview", rename);
+
+		fireEvent.doubleClick(await screen.findByText("workstation"));
+		const input = screen.getByRole("textbox", { name: "机器名称" });
+		expect(input).toHaveValue("workstation");
+
+		fireEvent.change(input, { target: { value: "我的NAS" } });
+		fireEvent.keyDown(input, { key: "Enter" });
+
+		expect(await screen.findByText("我的NAS")).toBeVisible();
+		expect(rename).toHaveBeenCalledWith("c1", "我的NAS");
+		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+	});
+
+	it("Escape 取消编辑且不调用改名", async () => {
+		const rename = vi.fn();
+		renderWorkspace([client], "overview", rename);
+
+		fireEvent.doubleClick(await screen.findByText("workstation"));
+		const input = screen.getByRole("textbox", { name: "机器名称" });
+		fireEvent.change(input, { target: { value: "改一半" } });
+		fireEvent.keyDown(input, { key: "Escape" });
+
+		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+		expect(screen.getByText("workstation")).toBeVisible();
+		expect(rename).not.toHaveBeenCalled();
+	});
+
+	it("改名撞重名时显示占用提示并保持编辑态", async () => {
+		const rename = vi
+			.fn()
+			.mockRejectedValue(
+				new VcpDeckApiError("already taken", 409, "CLIENT_NAME_TAKEN"),
+			);
+		renderWorkspace([client], "overview", rename);
+
+		fireEvent.doubleClick(await screen.findByText("workstation"));
+		const input = screen.getByRole("textbox", { name: "机器名称" });
+		fireEvent.change(input, { target: { value: "被占用名" } });
+		fireEvent.keyDown(input, { key: "Enter" });
+
+		expect(await screen.findByTestId("machine-name-error")).toHaveTextContent(
+			"该名称已被其他机器占用",
+		);
+		expect(screen.getByRole("textbox")).toBeInTheDocument();
 	});
 });

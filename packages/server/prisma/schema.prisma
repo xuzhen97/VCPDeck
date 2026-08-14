@@ -9,6 +9,7 @@ datasource db {
 
 model Client {
   id                String    @id
+  name              String?   @unique // 别名：默认取 hostname（重名自动加后缀），服务端可修改；迁移前旧记录为 null，注册时自愈补齐
   hostname          String
   os                String
   cpuModel          String

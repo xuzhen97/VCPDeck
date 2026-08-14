@@ -91,7 +91,7 @@ export function DashboardPage() {
 		);
 	const { clients, jobs, mappings, storage } = resource.data;
 	const clientMap = new Map(
-		clients.map((item) => [item.clientId, item.hostname]),
+		clients.map((item) => [item.clientId, item.name ?? item.hostname]),
 	);
 	const running = jobs.data.filter((job) =>
 		["pending", "running", "disconnected"].includes(job.status),

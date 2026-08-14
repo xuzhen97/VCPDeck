@@ -565,7 +565,7 @@ export class JobService {
         where,
         include: {
           client: {
-            select: { hostname: true },
+            select: { hostname: true, name: true },
           },
         },
         orderBy: { createdAt: "desc" },
@@ -589,7 +589,7 @@ export class JobService {
       where: { id: jobId },
       include: {
         client: {
-          select: { hostname: true },
+          select: { hostname: true, name: true },
         },
       },
     });
@@ -614,12 +614,12 @@ function toJobInfo(j: {
   createdByIdentityId: string | null;
   createdByName: string | null;
   createdVia: string | null;
-  client: { hostname: string } | null;
+  client: { hostname: string; name: string | null } | null;
 }): JobInfo {
   return {
     jobId: j.id,
     clientId: j.clientId,
-    clientName: j.client?.hostname ?? null,
+    clientName: j.client?.name ?? j.client?.hostname ?? null,
     type: j.type,
     status: j.status as JobStatus,
     payload: safeJsonParse(j.payload, {}),

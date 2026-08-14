@@ -1,4 +1,5 @@
 import type { ClientInfo, DiskInfo } from "@vcpdeck/shared";
+import { VcpDeckApiError } from "@vcpdeck/sdk";
 import {
 	Clock3,
 	Cpu,
@@ -8,31 +9,22 @@ import {
 	Package,
 	TriangleAlert,
 } from "lucide-react";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Navigate, useParams } from "react-router-dom";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
 import { OperatingSystemIcon } from "@/components/operating-system-icon";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/status-chip";
-import { capabilitiesLabel } from "@/lib/utils";
+import { MACHINE_TABS as tabs, capabilitiesLabel } from "@/lib/utils";
 import { ExecutePanel } from "@/pages/execute-panel";
 import { FilesPanel } from "@/pages/files-panel";
 import { FrpPanel } from "@/pages/frp-panel";
 import { JobsPage } from "@/pages/jobs-page";
 import { PiPanel } from "@/pages/pi-panel";
 import { TerminalPanel } from "@/pages/terminal-panel";
-
-const tabs = [
-	["overview", "概览"],
-	["execute", "执行"],
-	["files", "文件"],
-	["frp", "映射"],
-	["jobs", "任务记录"],
-	["pi", "Pi"],
-	["terminal", "终端"],
-] as const;
 
 export function MachineWorkspace() {
 	const sdk = useSdk();
@@ -74,7 +66,69 @@ export function MachineWorkspace() {
 }
 
 function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
+	const sdk = useSdk();
 	const base = `/machines/${encodeURIComponent(client.clientId)}`;
+	// 名称编辑：双击标题进入编辑态，Enter/失焦保存，Esc 取消
+	const [isEditing, setIsEditing] = useState(false);
+	const [draft, setDraft] = useState("");
+	const [displayName, setDisplayName] = useState(
+		() => client.name ?? client.hostname,
+	);
+	const [saveError, setSaveError] = useState<string | null>(null);
+	const [saving, setSaving] = useState(false);
+	// 防止 Enter 保存后 input 卸载触发的 blur 重复保存
+	const editingRef = useRef(false);
+
+	// 机器信息定时刷新（10s）或外部改名后同步展示名
+	useEffect(() => {
+		setDisplayName(client.name ?? client.hostname);
+	}, [client.name, client.hostname]);
+
+	function startEdit() {
+		setDraft(client.name ?? client.hostname);
+		setSaveError(null);
+		editingRef.current = true;
+		setIsEditing(true);
+	}
+
+	function cancelEdit() {
+		editingRef.current = false;
+		setIsEditing(false);
+		setSaveError(null);
+	}
+
+	async function saveName() {
+		if (!editingRef.current) return;
+		editingRef.current = false;
+		const trimmed = draft.trim();
+		if (!trimmed) {
+			editingRef.current = true;
+			setSaveError("名称不能为空");
+			return;
+		}
+		if (trimmed === (client.name ?? client.hostname)) {
+			setIsEditing(false);
+			setSaveError(null);
+			return;
+		}
+		setSaving(true);
+		setSaveError(null);
+		try {
+			const updated = await sdk.clients.rename(client.clientId, trimmed);
+			setDisplayName(updated.name);
+			setIsEditing(false);
+		} catch (error) {
+			editingRef.current = true;
+			setSaveError(
+				error instanceof VcpDeckApiError && error.status === 409
+					? "该名称已被其他机器占用"
+					: "保存失败，请重试",
+			);
+		} finally {
+			setSaving(false);
+		}
+	}
+
 	return (
 		<div
 			data-testid="machine-workspace"
@@ -91,13 +145,43 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 						</div>
 						<div className="min-w-0">
 							<div className="flex items-center gap-2">
-								<h1 className="truncate text-xl font-semibold tracking-tight">
-									{client.hostname}
-								</h1>
+								{isEditing ? (
+									<Input
+										data-testid="machine-name-input"
+										aria-label="机器名称"
+										autoFocus
+										value={draft}
+										disabled={saving}
+										onChange={(e) => setDraft(e.target.value)}
+										onFocus={(e) => e.target.select()}
+										onBlur={() => void saveName()}
+										onKeyDown={(e) => {
+											if (e.key === "Enter") void saveName();
+											else if (e.key === "Escape") cancelEdit();
+										}}
+										className="h-8 w-64 rounded-md text-xl font-semibold tracking-tight"
+									/>
+								) : (
+									<h1
+										onDoubleClick={startEdit}
+										title="双击编辑名称"
+										className="cursor-text truncate text-xl font-semibold tracking-tight"
+									>
+										{displayName}
+									</h1>
+								)}
 								<StatusChip label="在线" tone="success" />
 							</div>
+							{saveError && (
+								<p
+									data-testid="machine-name-error"
+									className="mt-1 text-xs text-destructive"
+								>
+									{saveError}
+								</p>
+							)}
 							<p className="truncate text-xs text-muted-foreground">
-								{client.os} · {client.clientId}
+								{client.hostname} · {client.os} · {client.clientId}
 							</p>
 						</div>
 					</div>
@@ -157,9 +241,15 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				{tab === "jobs" && <JobsPage clientId={client.clientId} />}
 				{tab === "pi" && <PiPanel client={client} />}
 				{tab === "terminal" && <TerminalPanel clientId={client.clientId} />}
-				{!["overview", "execute", "files", "frp", "jobs", "pi", "terminal"].includes(
-					tab,
-				) && (
+				{![
+					"overview",
+					"execute",
+					"files",
+					"frp",
+					"jobs",
+					"pi",
+					"terminal",
+				].includes(tab) && (
 					<Card>
 						<CardContent className="pt-6 text-sm text-muted-foreground">
 							{tabs.find(([key]) => key === tab)?.[1] ?? "未知页面"}
