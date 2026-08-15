@@ -146,12 +146,7 @@ describe("ReleaseController", () => {
 				requestId: "r1",
 			};
 
-			await controller.upload(
-				fakeReq(),
-				"1.2.1",
-				"a".repeat(64),
-				actor,
-			);
+			await controller.upload(fakeReq(), "1.2.1", "a".repeat(64), actor);
 
 			expect(service.create).toHaveBeenCalledWith(
 				expect.objectContaining({

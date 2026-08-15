@@ -144,14 +144,18 @@ describe("ReleaseService", () => {
 				state: "updating",
 				at: expect.any(String),
 			});
-			const written = (prisma.release.update.mock.calls[0]?.[0] as {
-				data: { clientStates: string };
-			}).data.clientStates;
+			const written = (
+				prisma.release.update.mock.calls[0]?.[0] as {
+					data: { clientStates: string };
+				}
+			).data.clientStates;
 			let parsed: Record<string, unknown>;
 			try {
 				parsed = JSON.parse(written) as Record<string, unknown>;
 			} catch (e) {
-				throw new Error(`clientStates 写入值非法 JSON: ${e instanceof Error ? e.message : String(e)}`);
+				throw new Error(
+					`clientStates 写入值非法 JSON: ${e instanceof Error ? e.message : String(e)}`,
+				);
 			}
 			expect(parsed.client_a).toMatchObject({ state: "pending" });
 			expect(parsed.client_b).toMatchObject({

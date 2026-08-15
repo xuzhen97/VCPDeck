@@ -79,9 +79,7 @@ function formatSize(bytes: number): string {
 	return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-function summarizeClients(
-	states: Record<string, ReleaseClientEntry>,
-): string {
+function summarizeClients(states: Record<string, ReleaseClientEntry>): string {
 	const entries = Object.entries(states);
 	if (entries.length === 0) return "尚未开始";
 	const counts = { done: 0, failed: 0, updating: 0, pending: 0 };
@@ -346,43 +344,43 @@ function ReleaseDetails({ release }: { release: ReleaseInfo }) {
 					<div className="mt-2 overflow-x-auto rounded-md border border-border/60">
 						<table className="w-full text-sm">
 							<thead>
-									<tr className="border-b border-border/60 text-left text-muted-foreground">
-										<th className="px-3 py-2 font-medium">客户端</th>
-										<th className="px-3 py-2 font-medium">状态</th>
-										<th className="px-3 py-2 font-medium">失败原因</th>
-										<th className="px-3 py-2 font-medium">时间</th>
+								<tr className="border-b border-border/60 text-left text-muted-foreground">
+									<th className="px-3 py-2 font-medium">客户端</th>
+									<th className="px-3 py-2 font-medium">状态</th>
+									<th className="px-3 py-2 font-medium">失败原因</th>
+									<th className="px-3 py-2 font-medium">时间</th>
+								</tr>
+							</thead>
+							<tbody className="divide-y divide-border/60">
+								{clients.map(([clientId, entry]) => (
+									<tr key={clientId}>
+										<td className="max-w-56 truncate px-3 py-2 font-mono text-xs">
+											{clientId}
+										</td>
+										<td className="px-3 py-2">
+											<StatusChip
+												label={clientStateLabel(entry.state)}
+												tone={clientStateTone(entry.state)}
+											/>
+										</td>
+										<td className="max-w-64 px-3 py-2">
+											{entry.reason ? (
+												<p
+													className="truncate text-xs text-red-400"
+													title={entry.reason}
+												>
+													{entry.reason}
+												</p>
+											) : (
+												<span className="text-xs text-muted-foreground">—</span>
+											)}
+										</td>
+										<td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
+											{formatTime(entry.at)}
+										</td>
 									</tr>
-								</thead>
-								<tbody className="divide-y divide-border/60">
-									{clients.map(([clientId, entry]) => (
-										<tr key={clientId}>
-											<td className="max-w-56 truncate px-3 py-2 font-mono text-xs">
-												{clientId}
-											</td>
-											<td className="px-3 py-2">
-												<StatusChip
-													label={clientStateLabel(entry.state)}
-													tone={clientStateTone(entry.state)}
-												/>
-											</td>
-											<td className="max-w-64 px-3 py-2">
-												{entry.reason ? (
-													<p
-														className="truncate text-xs text-red-400"
-														title={entry.reason}
-													>
-														{entry.reason}
-													</p>
-												) : (
-													<span className="text-xs text-muted-foreground">—</span>
-												)}
-											</td>
-											<td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
-												{formatTime(entry.at)}
-											</td>
-										</tr>
-									))}
-								</tbody>
+								))}
+							</tbody>
 						</table>
 					</div>
 				)}
