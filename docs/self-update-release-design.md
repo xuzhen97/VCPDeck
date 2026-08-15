@@ -182,7 +182,7 @@ model Release {
 
 | 端点 | 说明 |
 | ------ | ------ |
-| `POST /api/releases` | multipart 上传 zip → 校验 sha256/version 不重复 → 存 `data/releases/<version>.zip` → 写 Release 表 → 触发编排 |
+| `POST /api/releases/upload` | raw stream 上传 zip（query: version、sha256；body 为 zip 字节）→ 校验 sha256/version 不重复 → 存 `data/releases/<version>.zip` → 写 Release 表 → 触发编排（弃 multipart，避免引入 multer 依赖） |
 | `GET /api/releases` | release 列表（分页，遵循 AGENTS.md 分页规范） |
 | `GET /api/releases/:version/file` | 下载更新包（客户端 launcher 使用） |
 | `GET /api/status` | `{ serverVersion, releaseStatus }`，供 launcher 健康探活与前端展示 |
@@ -279,13 +279,13 @@ uploaded → updating_server → updating_clients → done
 
 ### 阶段 A：协议与版本注入
 
-- [ ] A1 `packages/shared/src/update.ts`：更新事件名（并入 `Events`）、payload 类型、`UpdateManifest` 类型
-- [ ] A2 版本号构建注入：替换 `shared` 与 client 注册中硬编码的 `"0.0.0"`（打包脚本注入）
+- [x] A1 `packages/shared/src/update.ts`：更新事件名（并入 `Events`）、payload 类型、`UpdateManifest` 类型 — 2026-06-15
+- [x] A2 版本号构建注入：替换 `shared` 与 client 注册中硬编码的 `"0.0.0"`（打包脚本注入） — 2026-06-15
 
 ### 阶段 B：服务端
 
-- [ ] B1 Prisma `Release` 模型 + `release.service`（上传记录、状态流转、sha256 校验、clientStates 维护）——（TDD）
-- [ ] B2 REST API：`POST /api/releases` 上传、`GET /api/releases` 列表、`GET /api/releases/:version/file` 下载——（TDD）
+- [x] B1 Prisma `Release` 模型 + `release.service`（上传记录、状态流转、sha256 校验、clientStates 维护）——（TDD） — 2026-06-15
+- [x] B2 REST API：`POST /api/releases/upload` 上传、`GET /api/releases` 列表、`GET /api/releases/:version/file` 下载——（TDD） — 2026-06-15
 - [ ] B3 更新编排 orchestrator：状态机（uploaded → updating_server → updating_clients → done/failed）、逐台下发、超时与失败不阻塞——（TDD）
 - [ ] B4 服务端优雅停机：停 dispatch → 等 RUNNING job 收敛（超时可配）→ 广播 `server:shutdown` → 退出——（TDD）
 - [ ] B5 `GET /api/status`：暴露 `serverVersion` 与 release 状态（launcher 探活 + 前端展示）

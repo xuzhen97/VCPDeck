@@ -1,0 +1,220 @@
+/**
+ * Release 领域服务：上传记录、状态流转、客户端状态维护、sha256 校验。
+ * 详见 docs/self-update-release-design.md §7。
+ */
+import { Injectable, Inject } from "@nestjs/common";
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import {
+	ReleaseStatus,
+	type PaginatedResult,
+	type ReleaseClientState,
+	type ReleaseInfo,
+} from "@vcpdeck/shared";
+import { PrismaService } from "../prisma/prisma.service.js";
+
+/** release 领域错误：code 稳定，message 安全（不含文件内容/密钥） */
+export class ReleaseError extends Error {
+	constructor(
+		readonly code: string,
+		message: string,
+	) {
+		super(message);
+		this.name = "ReleaseError";
+	}
+}
+
+/** 状态机允许的流转（详见设计文档 §7.3） */
+const ALLOWED_TRANSITIONS: Record<ReleaseStatus, readonly ReleaseStatus[]> = {
+	[ReleaseStatus.UPLOADED]: [ReleaseStatus.UPDATING_SERVER, ReleaseStatus.FAILED],
+	[ReleaseStatus.UPDATING_SERVER]: [
+		ReleaseStatus.UPDATING_CLIENTS,
+		ReleaseStatus.FAILED,
+	],
+	[ReleaseStatus.UPDATING_CLIENTS]: [ReleaseStatus.DONE, ReleaseStatus.FAILED],
+	[ReleaseStatus.DONE]: [],
+	[ReleaseStatus.FAILED]: [],
+};
+
+export interface CreateReleaseInput {
+	version: string;
+	sha256: string;
+	fileName: string;
+	size: number;
+}
+
+/** DB 行 → API 形态（clientStates 解析为对象，日期转 ISO 字符串） */
+export function toReleaseInfo(row: {
+	version: string;
+	sha256: string;
+	size: number;
+	status: string;
+	errorMessage: string | null;
+	clientStates: string;
+	createdAt: Date;
+	updatedAt: Date;
+}): ReleaseInfo {
+	let clientStates: Record<string, ReleaseClientState> = {};
+	try {
+		clientStates = JSON.parse(row.clientStates) as Record<
+			string,
+			ReleaseClientState
+		>;
+	} catch {
+		clientStates = {};
+	}
+	return {
+		version: row.version,
+		sha256: row.sha256,
+		size: row.size,
+		status: row.status as ReleaseStatus,
+		errorMessage: row.errorMessage,
+		createdAt: row.createdAt.toISOString(),
+		updatedAt: row.updatedAt.toISOString(),
+		clientStates,
+	};
+}
+
+@Injectable()
+export class ReleaseService {
+	constructor(
+		@Inject(PrismaService) private readonly prisma: PrismaService,
+	) {}
+
+	/** 上传后登记 release（版本重复抛 RELEASE_DUPLICATE_VERSION） */
+	async create(input: CreateReleaseInput): Promise<ReleaseInfo> {
+		const existing = await this.prisma.release.findUnique({
+			where: { version: input.version },
+		});
+		if (existing) {
+			throw new ReleaseError(
+				"RELEASE_DUPLICATE_VERSION",
+				`版本 ${input.version} 已存在`,
+			);
+		}
+		const row = await this.prisma.release.create({
+			data: {
+				id: randomUUID(),
+				version: input.version,
+				sha256: input.sha256,
+				fileName: input.fileName,
+				size: input.size,
+				status: "uploaded",
+				clientStates: "{}",
+			},
+		});
+		return toReleaseInfo(row);
+	}
+
+	/** 分页列表（遵循 AGENTS.md 分页规范） */
+	async list(page = 1, pageSize = 20): Promise<PaginatedResult<ReleaseInfo>> {
+		const [rows, total] = await Promise.all([
+			this.prisma.release.findMany({
+				orderBy: { createdAt: "desc" },
+				skip: (page - 1) * pageSize,
+				take: pageSize,
+			}),
+			this.prisma.release.count(),
+		]);
+		return {
+			data: rows.map(toReleaseInfo),
+			total,
+			page,
+			pageSize,
+			totalPages: Math.ceil(total / pageSize),
+		};
+	}
+
+	async findByVersion(version: string): Promise<ReleaseInfo | null> {
+		const row = await this.prisma.release.findUnique({ where: { version } });
+		return row ? toReleaseInfo(row) : null;
+	}
+
+	/**
+	 * 状态流转（原子）：先校验当前状态允许流转，再按 version+status 条件更新，
+	 * 条件更新条数为 0 视为并发修改/非法流转。
+	 */
+	async transitionStatus(
+		version: string,
+		to: ReleaseStatus,
+		errorMessage?: string,
+	): Promise<void> {
+		const current = await this.prisma.release.findUnique({
+			where: { version },
+		});
+		if (!current) {
+			throw new ReleaseError("RELEASE_NOT_FOUND", `release ${version} 不存在`);
+		}
+		const allowed = ALLOWED_TRANSITIONS[current.status as ReleaseStatus] ?? [];
+		if (!allowed.includes(to)) {
+			throw new ReleaseError(
+				"RELEASE_INVALID_TRANSITION",
+				`不允许从 ${current.status} 流转到 ${to}`,
+			);
+		}
+		const result = await this.prisma.release.updateMany({
+			where: { version, status: current.status },
+			data: { status: to, errorMessage: errorMessage ?? null },
+		});
+		if (result.count === 0) {
+			throw new ReleaseError(
+				"RELEASE_INVALID_TRANSITION",
+				`状态已被并发修改，无法流转到 ${to}`,
+			);
+		}
+	}
+
+	/** 记录单个客户端在 release 中的更新状态，返回合并后的完整状态表 */
+	async markClientState(
+		version: string,
+		clientId: string,
+		state: ReleaseClientState,
+	): Promise<Record<string, ReleaseClientState>> {
+		const row = await this.prisma.release.findUnique({ where: { version } });
+		if (!row) {
+			throw new ReleaseError("RELEASE_NOT_FOUND", `release ${version} 不存在`);
+		}
+		let states: Record<string, ReleaseClientState> = {};
+		try {
+			states = JSON.parse(row.clientStates) as Record<
+				string,
+				ReleaseClientState
+			>;
+		} catch {
+			states = {};
+		}
+		states[clientId] = state;
+		await this.prisma.release.update({
+			where: { version },
+			data: { clientStates: JSON.stringify(states) },
+		});
+		return states;
+	}
+
+	/** 置为 failed（附安全错误摘要） */
+	async markFailed(version: string, errorMessage: string): Promise<void> {
+		await this.transitionStatus(version, ReleaseStatus.FAILED, errorMessage);
+	}
+
+	/** 当前活动目标版本：最近一条 updating_clients/done 的 release（客户端比对用） */
+	async getLatestActiveTarget(): Promise<ReleaseInfo | null> {
+		const row = await this.prisma.release.findFirst({
+			where: {
+				status: { in: [ReleaseStatus.UPDATING_CLIENTS, ReleaseStatus.DONE] },
+			},
+			orderBy: { createdAt: "desc" },
+		});
+		return row ? toReleaseInfo(row) : null;
+	}
+
+	/** 流式计算文件 sha256 并与期望值比对（文件不存在/读失败返回 false） */
+	async verifyZipSha256(filePath: string, expected: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			const hash = createHash("sha256");
+			const stream = createReadStream(filePath);
+			stream.on("error", () => resolve(false));
+			stream.on("data", (chunk) => hash.update(chunk));
+			stream.on("end", () => resolve(hash.digest("hex") === expected));
+		});
+	}
+}
