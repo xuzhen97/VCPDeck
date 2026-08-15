@@ -29,6 +29,8 @@ export interface DaemonConfig {
 
 const MAX_CRASH_RETRIES = 5;
 const STABLE_WINDOW_MS = 30_000;
+/** client 探活稳定窗口：启动后至少存活此时长才判健康（秒退进程判失败） */
+const CLIENT_PROBE_STABLE_MS = 3000;
 
 /** 读取版本目录下的 manifest.json；缺失/损坏返回 null */
 export function readManifest(versionDir: string): UpdateManifest | null {
@@ -79,6 +81,7 @@ export class Daemon {
 	private readonly log: (msg: string) => void;
 	private readonly versions: VersionStore;
 	private child: ChildProcess | null = null;
+	private childStartedAt = 0;
 	private updating = false;
 	private stopping = false;
 	private crashCount = 0;
@@ -183,6 +186,7 @@ export class Daemon {
 			} as NodeJS.ProcessEnv,
 		});
 		this.child = child;
+		this.childStartedAt = Date.now();
 		child.on("exit", (code) => {
 			if (this.child !== child) return;
 			this.child = null;
@@ -239,7 +243,7 @@ export class Daemon {
 		});
 	}
 
-	/** 健康探活：server 走 HTTP + 版本匹配；client 看进程存活 */
+	/** 健康探活：server 走 HTTP + 版本匹配；client 需存活超过稳定窗口（秒退进程判失败） */
 	private async probe(version: string): Promise<boolean> {
 		if (this.artifact === "server") {
 			try {
@@ -253,7 +257,11 @@ export class Daemon {
 				return false;
 			}
 		}
-		return this.child !== null && this.child.exitCode === null;
+		return (
+			this.child !== null &&
+			this.child.exitCode === null &&
+			Date.now() - this.childStartedAt > CLIENT_PROBE_STABLE_MS
+		);
 	}
 
 	private buildUpdater(): Updater {
