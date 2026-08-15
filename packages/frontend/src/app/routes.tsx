@@ -9,6 +9,7 @@ import { JobsPage } from "@/pages/jobs-page";
 import { LoginPage } from "@/pages/login-page";
 import { MachinesPage } from "@/pages/machines-page";
 import { MachineWorkspace } from "@/pages/machine-workspace";
+import { ReleasesPage } from "@/pages/releases-page";
 import { SettingsPage } from "@/pages/settings-page";
 import { StoragePage } from "@/pages/storage-page";
 
@@ -38,6 +39,7 @@ export function AppRoutes() {
 				<Route path="/jobs" element={<JobsPage />} />
 				<Route path="/jobs/:jobId" element={<JobDetailPage />} />
 				<Route path="/frp" element={<FrpPage />} />
+				<Route path="/releases" element={<ReleasesPage />} />
 				<Route path="/storage" element={<StoragePage />} />
 				<Route path="/settings/*" element={<SettingsPage />} />
 				<Route path="*" element={<Navigate to="/dashboard" replace />} />

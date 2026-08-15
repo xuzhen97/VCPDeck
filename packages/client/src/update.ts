@@ -60,7 +60,11 @@ async function handleUpdateRequest(
 	const log = deps.log ?? ((msg: string) => console.log(`[update] ${msg}`));
 
 	if (!req.releaseVersion || !req.url || !req.sha256) {
-		emitFailed(deps, req.releaseVersion ?? "unknown", "update:request 缺少字段");
+		emitFailed(
+			deps,
+			req.releaseVersion ?? "unknown",
+			"update:request 缺少字段",
+		);
 		return;
 	}
 

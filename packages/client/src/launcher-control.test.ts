@@ -46,7 +46,9 @@ describe("ClientLauncher", () => {
 			"http://127.0.0.1:43124/prepare",
 			expect.objectContaining({
 				method: "POST",
-				headers: expect.objectContaining({ "x-launcher-token": "client-token" }),
+				headers: expect.objectContaining({
+					"x-launcher-token": "client-token",
+				}),
 				body: expect.stringContaining('"version":"1.2.1"'),
 			}),
 		);

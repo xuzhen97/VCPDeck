@@ -20,7 +20,12 @@ export interface ClientLauncherOptions {
 	fetchImpl?: typeof fetch;
 }
 
-const DEFAULT_CONTROL_FILE = join(homedir(), ".vcpdeck", "launcher", "control.json");
+const DEFAULT_CONTROL_FILE = join(
+	homedir(),
+	".vcpdeck",
+	"launcher",
+	"control.json",
+);
 
 export class ClientLauncher {
 	private readonly controlFile: string;

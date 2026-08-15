@@ -210,7 +210,9 @@ export class Daemon {
 		const delay = Math.min(1000 * 2 ** (this.crashCount - 1), 30_000);
 		setTimeout(() => {
 			if (!this.updating && !this.stopping && !this.child) {
-				void this.startCurrent().catch((e: Error) => this.log(`拉起失败: ${e.message}`));
+				void this.startCurrent().catch((e: Error) =>
+					this.log(`拉起失败: ${e.message}`),
+				);
 			}
 		}, delay);
 	}

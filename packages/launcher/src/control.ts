@@ -5,7 +5,11 @@
  * - POST /apply：停掉本进程并切换版本（响应可能无法送达，属正常）
  * preStart 钩子（如 prisma db push）在切换前由编排侧调用 runPreStart。
  */
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+	createServer,
+	type IncomingMessage,
+	type ServerResponse,
+} from "node:http";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";

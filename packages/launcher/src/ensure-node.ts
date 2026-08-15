@@ -36,7 +36,10 @@ export interface NodeRuntimeOptions {
 const DEFAULT_DOWNLOAD_BASE = "https://nodejs.org/dist";
 
 /** ">=24" 约束只比较主版本；非法返回 false */
-export function satisfiesConstraint(version: string, constraint: string): boolean {
+export function satisfiesConstraint(
+	version: string,
+	constraint: string,
+): boolean {
 	const major = Number.parseInt(version.replace(/^v/, ""), 10);
 	if (Number.isNaN(major)) return false;
 	const m = /^>=(\d+)$/.exec(constraint.trim());
@@ -61,7 +64,10 @@ async function detectSystemNode(): Promise<string | null> {
 }
 
 /** 缓存目录中满足约束的最高版本目录名（如 node-24.5.0） */
-function findCachedRuntime(cacheDir: string, constraint: string): string | null {
+function findCachedRuntime(
+	cacheDir: string,
+	constraint: string,
+): string | null {
 	if (!existsSync(cacheDir)) return null;
 	let best: { version: string; dir: string } | null = null;
 	for (const name of readdirSync(cacheDir)) {
@@ -85,7 +91,11 @@ function compareVersions(a: string, b: string): number {
 	return 0;
 }
 
-function nodeBinPath(cacheDir: string, dirName: string, platform: string): string {
+function nodeBinPath(
+	cacheDir: string,
+	dirName: string,
+	platform: string,
+): string {
 	return platform === "win32"
 		? join(cacheDir, dirName, "node.exe")
 		: join(cacheDir, dirName, "bin", "node");

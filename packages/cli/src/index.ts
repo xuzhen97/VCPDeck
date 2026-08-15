@@ -54,7 +54,9 @@ function sha256File(path: string): Promise<string> {
 async function uploadRelease(args: UploadArgs): Promise<void> {
 	const match = VERSION_RE.exec(args.zipPath.split(/[\\/]/).pop() ?? "");
 	if (!match) {
-		throw new Error(`文件名应形如 vcpdeck-<x.y.z>.zip / .tar.gz: ${args.zipPath}`);
+		throw new Error(
+			`文件名应形如 vcpdeck-<x.y.z>.zip / .tar.gz: ${args.zipPath}`,
+		);
 	}
 	const version = match[1];
 
@@ -70,7 +72,9 @@ async function uploadRelease(args: UploadArgs): Promise<void> {
 		body: JSON.stringify({ username: args.username, password: args.password }),
 	});
 	if (!loginRes.ok) {
-		throw new Error(`登录失败: HTTP ${loginRes.status} ${await loginRes.text()}`);
+		throw new Error(
+			`登录失败: HTTP ${loginRes.status} ${await loginRes.text()}`,
+		);
 	}
 	const cookie = loginRes.headers.get("set-cookie")?.split(";")[0];
 	if (!cookie) throw new Error("登录响应缺少会话 cookie");
@@ -91,13 +95,15 @@ async function uploadRelease(args: UploadArgs): Promise<void> {
 			},
 			body: createReadStream(args.zipPath) as unknown as BodyInit,
 			// 流式 body 需声明 duplex（旧版 @types/node 无此字段）
-			...( { duplex: "half" } as Record<string, string>),
+			...({ duplex: "half" } as Record<string, string>),
 		},
 	);
 	if (!res.ok) {
 		throw new Error(`上传失败: HTTP ${res.status} ${await res.text()}`);
 	}
-	const body = (await res.json()) as { release?: { version: string; status: string } };
+	const body = (await res.json()) as {
+		release?: { version: string; status: string };
+	};
 	console.log(
 		`[vcpdeck] 上传成功: ${body.release?.version ?? version}（服务端已自动开始更新）`,
 	);
@@ -114,7 +120,9 @@ export function run(argv: string[]): void {
 	}
 	console.log("vcpdeck");
 	console.log("可用命令:");
-	console.log("  vcpdeck release upload <zip> --server=<url> [--username=x --password=y]");
+	console.log(
+		"  vcpdeck release upload <zip> --server=<url> [--username=x --password=y]",
+	);
 }
 
 run(process.argv.slice(2));

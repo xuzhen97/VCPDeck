@@ -59,15 +59,14 @@ function run(cmd: string, label: string): void {
 	try {
 		execSync(cmd, { cwd: ROOT, stdio: "inherit" });
 	} catch (e) {
-		throw new Error(`${label} 失败: ${e instanceof Error ? e.message : String(e)}`);
+		throw new Error(
+			`${label} 失败: ${e instanceof Error ? e.message : String(e)}`,
+		);
 	}
 }
 
 /** 组装单个构件的生产部署目录（dist + 额外文件 + pnpm 生产依赖） */
-function stagePackage(
-	pkgName: "server" | "client",
-	stagingDir: string,
-): void {
+function stagePackage(pkgName: "server" | "client", stagingDir: string): void {
 	const pkgDir = join(ROOT, "packages", pkgName);
 	const target = join(stagingDir, pkgName);
 
@@ -90,9 +89,7 @@ function stagePackage(
 		const dir = join(target, "dist", "frp", p);
 		const found = names.some((name) => existsSync(join(dir, name)));
 		if (!found) {
-			throw new Error(
-				`${pkgName} 缺少 frp 二进制: ${p}/${names.join("|")}`,
-			);
+			throw new Error(`${pkgName} 缺少 frp 二进制: ${p}/${names.join("|")}`);
 		}
 	}
 	// linux 目录只保留 .gz 包装（裸 ELF 会被杀毒删除，且会由 zip 追加步骤注入）
@@ -146,7 +143,14 @@ function stagePackage(
 		if (process.platform === "win32") {
 			execFileSync(
 				"cmd.exe",
-				["/c", "pnpm", "install", "--prod", "--ignore-scripts", "--prefer-offline"],
+				[
+					"/c",
+					"pnpm",
+					"install",
+					"--prod",
+					"--ignore-scripts",
+					"--prefer-offline",
+				],
 				{ cwd: target, stdio: "inherit" },
 			);
 		} else {
@@ -163,7 +167,11 @@ function stagePackage(
 	}
 }
 
-function createArchive(stagingDir: string, version: string, output: string): string {
+function createArchive(
+	stagingDir: string,
+	version: string,
+	output: string,
+): string {
 	const archiveName =
 		process.platform === "win32"
 			? `vcpdeck-${version}.zip`
@@ -200,7 +208,10 @@ function createArchive(stagingDir: string, version: string, output: string): str
  * 裸 ELF 在磁盘只存在秒级窗口（开发机杀毒来不及），且 zip 内条目与 bsdtar 前缀无关。
  * 仅 Windows zip 需要（Linux 用 tar.gz 时 .gz 直接随包，解压后裸文件保留可执行位）。
  */
-function appendFrpBinariesFromGz(archivePath: string, stagingDir: string): void {
+function appendFrpBinariesFromGz(
+	archivePath: string,
+	stagingDir: string,
+): void {
 	if (process.platform !== "win32") return;
 	const entries: Array<{ gz: string; entry: string }> = [
 		{
@@ -255,10 +266,7 @@ function main(): void {
 
 	try {
 		// 1. 注入版本并全量构建
-		run(
-			`node scripts/inject-version.cjs ${args.version}`,
-			"注入版本号",
-		);
+		run(`node scripts/inject-version.cjs ${args.version}`, "注入版本号");
 		run("pnpm --filter @vcpdeck/shared build", "shared 构建");
 		run("pnpm --filter @vcpdeck/server build", "server 构建");
 		run("pnpm --filter @vcpdeck/client build", "client 构建");

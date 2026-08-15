@@ -21,9 +21,19 @@ import {
 import type { PiWorkerRequestMessage } from "./pi/worker-protocol.js";
 import { probePiCapability } from "./pi/capability.js";
 import { probeTerminalCapability } from "./terminal/capability.js";
-import { discoverShells, type ShellDiscoveryEnv } from "./terminal/shell-discovery.js";
-import { createTerminalManager, type PtyAdapter, type PtySpawnOptions } from "./terminal/terminal-manager.js";
-import { attachTerminalBridge, wireManagerToSocket } from "./terminal/protocol-bridge.js";
+import {
+	discoverShells,
+	type ShellDiscoveryEnv,
+} from "./terminal/shell-discovery.js";
+import {
+	createTerminalManager,
+	type PtyAdapter,
+	type PtySpawnOptions,
+} from "./terminal/terminal-manager.js";
+import {
+	attachTerminalBridge,
+	wireManagerToSocket,
+} from "./terminal/protocol-bridge.js";
 import { killProcessTree } from "./terminal/process-tree.js";
 import { attachUpdateHandler } from "./update.js";
 import { ClientLauncher } from "./launcher-control.js";
@@ -122,26 +132,37 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 	function scheduleControlledReconnect(generation: number): void {
 		socket.disconnect();
 		setTimeout(() => {
-			if (generation === connectionGeneration && !socket.connected) socket.connect();
+			if (generation === connectionGeneration && !socket.connected)
+				socket.connect();
 		}, 100);
 	}
 
-	function reportState(generation: number, retry = 0, closureConfirmed = false): void {
+	function reportState(
+		generation: number,
+		retry = 0,
+		closureConfirmed = false,
+	): void {
 		if (generation !== connectionGeneration || !socket.connected) return;
-		socket.emit(Events.PI_STATE, deps.supervisor.getStateReport(), async (raw?: Partial<PiStateAck>) => {
-			if (generation !== connectionGeneration) return;
-			const ack: PiStateAck = {
-				acceptedRunIds: raw?.acceptedRunIds ?? [],
-				closedRunIds: raw?.closedRunIds ?? [],
-				reportAgain: raw?.reportAgain ?? false,
-			};
-			const { allClosed } = await deps.supervisor.applyStateAck(ack);
-			if (generation !== connectionGeneration) return;
-			if (!ack.reportAgain) return;
-			if (allClosed && !closureConfirmed) reportState(generation, retry, true);
-			else if (!allClosed && retry < 2) setTimeout(() => reportState(generation, retry + 1), 100);
-			else scheduleControlledReconnect(generation);
-		});
+		socket.emit(
+			Events.PI_STATE,
+			deps.supervisor.getStateReport(),
+			async (raw?: Partial<PiStateAck>) => {
+				if (generation !== connectionGeneration) return;
+				const ack: PiStateAck = {
+					acceptedRunIds: raw?.acceptedRunIds ?? [],
+					closedRunIds: raw?.closedRunIds ?? [],
+					reportAgain: raw?.reportAgain ?? false,
+				};
+				const { allClosed } = await deps.supervisor.applyStateAck(ack);
+				if (generation !== connectionGeneration) return;
+				if (!ack.reportAgain) return;
+				if (allClosed && !closureConfirmed)
+					reportState(generation, retry, true);
+				else if (!allClosed && retry < 2)
+					setTimeout(() => reportState(generation, retry + 1), 100);
+				else scheduleControlledReconnect(generation);
+			},
+		);
 	}
 
 	// 兼容旧 Server：现有 "ack" event，始终绑定当前连接代次
@@ -163,13 +184,19 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 			// probe 最多等待 3 秒：超时降级为无 Pi 能力，不阻塞注册
 			const piStatus = await Promise.race([
 				deps.getPiStatus(),
-				new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 3000)),
+				new Promise<undefined>((resolve) =>
+					setTimeout(() => resolve(undefined), 3000),
+				),
 			]).catch(() => undefined);
 			const terminalStatus = await deps
 				.getTerminalStatus()
 				.catch(() => undefined);
 			if (generation === connectionGeneration)
-				socket.emit(Events.REGISTER, deps.getRegister(piStatus, terminalStatus), onRegistered);
+				socket.emit(
+					Events.REGISTER,
+					deps.getRegister(piStatus, terminalStatus),
+					onRegistered,
+				);
 		},
 	};
 }
@@ -299,13 +326,17 @@ function createShellDiscoveryEnv(): ShellDiscoveryEnv {
 		resolveExecutable: async (name) => {
 			const { access } = await import("node:fs/promises");
 			const exts = isWin
-				? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
+				? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+						.split(";")
+						.filter(Boolean)
 				: [""];
 			const seps = isWin ? ["\\", "/"] : ["/"];
 			for (const dir of dirs) {
 				for (const sep of seps) {
 					for (const ext of exts) {
-						const candidate = dir.endsWith(sep) ? `${dir}${name}${ext}` : `${dir}${sep}${name}${ext}`;
+						const candidate = dir.endsWith(sep)
+							? `${dir}${name}${ext}`
+							: `${dir}${sep}${name}${ext}`;
 						try {
 							await access(candidate);
 							return candidate;
@@ -319,7 +350,10 @@ function createShellDiscoveryEnv(): ShellDiscoveryEnv {
 			if (isWin) {
 				try {
 					const { spawnSync } = await import("node:child_process");
-					const result = spawnSync("where.exe", [name], { windowsHide: true, encoding: "utf8" });
+					const result = spawnSync("where.exe", [name], {
+						windowsHide: true,
+						encoding: "utf8",
+					});
 					if (result.status === 0 && result.stdout) {
 						const first = result.stdout.split(/\r?\n/)[0]?.trim();
 						if (first) return first;
@@ -361,7 +395,10 @@ function createPtySpawner(): (opts: PtySpawnOptions) => PtyAdapter {
 		let pty: ReturnType<typeof ptyModule.spawn>;
 		if (process.platform === "win32") {
 			try {
-				pty = ptyModule.spawn(opts.file, opts.args, { ...baseOptions, useConptyDll: true });
+				pty = ptyModule.spawn(opts.file, opts.args, {
+					...baseOptions,
+					useConptyDll: true,
+				});
 			} catch {
 				// 无 conpty.dll 的构建：回退默认 ConPTY 路径
 				pty = ptyModule.spawn(opts.file, opts.args, baseOptions);

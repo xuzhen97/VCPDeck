@@ -106,7 +106,11 @@ async function main() {
 			JSON.stringify({ current: "1.0.0" }),
 		);
 	} else {
-		fs.symlinkSync(path.join(appsDir, "1.0.0"), path.join(appsDir, "current"), "dir");
+		fs.symlinkSync(
+			path.join(appsDir, "1.0.0"),
+			path.join(appsDir, "current"),
+			"dir",
+		);
 	}
 
 	// 更新包：1.1.0（正常）与 1.2.0（启动即崩溃）
@@ -144,7 +148,9 @@ async function main() {
 		},
 	);
 	launcher.stdout.on("data", (d) => process.stdout.write(`[launcher] ${d}`));
-	launcher.stderr.on("data", (d) => process.stderr.write(`[launcher-err] ${d}`));
+	launcher.stderr.on("data", (d) =>
+		process.stderr.write(`[launcher-err] ${d}`),
+	);
 
 	const currentVersion = () => {
 		const stateFile = path.join(appsDir, "state.json");
@@ -175,7 +181,11 @@ async function main() {
 			15_000,
 			"control.json 就绪",
 		);
-		await waitFor(() => markCount(markDir, "1.0.0") >= 1, 20_000, "v1.0.0 进程启动");
+		await waitFor(
+			() => markCount(markDir, "1.0.0") >= 1,
+			20_000,
+			"v1.0.0 进程启动",
+		);
 		console.log("✓ 场景 1：v1.0.0 已被守护启动");
 		control = JSON.parse(
 			fs.readFileSync(path.join(appDir, "control.json"), "utf-8"),
@@ -187,13 +197,26 @@ async function main() {
 			url: "http://127.0.0.1:3999/good.zip",
 			sha256: goodSha,
 		});
-		assert(prep1.status === 200, `prepare 失败: ${prep1.status} ${await prep1.text()}`);
+		assert(
+			prep1.status === 200,
+			`prepare 失败: ${prep1.status} ${await prep1.text()}`,
+		);
 		console.log("✓ prepare 1.1.0 完成");
 
 		const apply1 = await postControl("/apply", control.token);
-		assert(apply1.status === 200, `apply 失败: ${apply1.status} ${await apply1.text()}`);
-		await waitFor(() => markCount(markDir, "1.1.0") >= 1, 30_000, "v1.1.0 启动");
-		assert(currentVersion() === "1.1.0", `current 应为 1.1.0，实际 ${currentVersion()}`);
+		assert(
+			apply1.status === 200,
+			`apply 失败: ${apply1.status} ${await apply1.text()}`,
+		);
+		await waitFor(
+			() => markCount(markDir, "1.1.0") >= 1,
+			30_000,
+			"v1.1.0 启动",
+		);
+		assert(
+			currentVersion() === "1.1.0",
+			`current 应为 1.1.0，实际 ${currentVersion()}`,
+		);
 		console.log("✓ 正常更新完成：current = 1.1.0");
 
 		// ── 坏更新 1.2.0（启动即崩）→ 自动回退 ──
@@ -206,7 +229,10 @@ async function main() {
 		console.log("✓ prepare 1.2.0（坏版本）完成");
 
 		const apply2 = await postControl("/apply", control.token);
-		assert(apply2.status === 500, `坏版本 apply 应返回 500，实际 ${apply2.status}`);
+		assert(
+			apply2.status === 500,
+			`坏版本 apply 应返回 500，实际 ${apply2.status}`,
+		);
 		assert(
 			(await apply2.text()).includes("已回退"),
 			"apply 响应应包含「已回退」",
@@ -216,7 +242,10 @@ async function main() {
 			30_000,
 			"回退后 1.1.0 重启",
 		);
-		assert(currentVersion() === "1.1.0", `回退后 current 应为 1.1.0，实际 ${currentVersion()}`);
+		assert(
+			currentVersion() === "1.1.0",
+			`回退后 current 应为 1.1.0，实际 ${currentVersion()}`,
+		);
 		console.log("✓ 坏版本自动回退：current = 1.1.0，旧版本已重启");
 
 		console.log("== launcher 冒烟全部通过（正常更新 + 失败回退） ==");
@@ -227,7 +256,9 @@ async function main() {
 			if (!name.startsWith("pid-") && !name.startsWith("started-")) continue;
 			if (!name.startsWith("pid-")) continue;
 			try {
-				process.kill(Number(fs.readFileSync(path.join(markDir, name), "utf-8")));
+				process.kill(
+					Number(fs.readFileSync(path.join(markDir, name), "utf-8")),
+				);
 			} catch {
 				// 进程可能已退出
 			}

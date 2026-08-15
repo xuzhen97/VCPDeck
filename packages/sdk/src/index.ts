@@ -6,5 +6,6 @@ export * from "./files.js";
 export * from "./frp.js";
 export * from "./jobs.js";
 export * from "./pi.js";
+export * from "./releases.js";
 export * from "./storage.js";
 export * from "./terminal.js";

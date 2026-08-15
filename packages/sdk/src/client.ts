@@ -5,6 +5,7 @@ import { createFilesApi } from "./files.js";
 import { createFrpApi } from "./frp.js";
 import { createJobsApi } from "./jobs.js";
 import { createPiApi } from "./pi.js";
+import { createReleasesApi } from "./releases.js";
 import { createStorageApi } from "./storage.js";
 import { createTerminalsApi } from "./terminal.js";
 
@@ -43,6 +44,7 @@ export class VcpDeckClient {
 	readonly aliyundrive;
 	readonly frp;
 	readonly pi;
+	readonly releases;
 	readonly terminals;
 	readonly health = {
 		get: (signal?: AbortSignal) =>
@@ -61,6 +63,7 @@ export class VcpDeckClient {
 		this.aliyundrive = createAliyunDriveApi(this);
 		this.frp = createFrpApi(this);
 		this.pi = createPiApi(this);
+		this.releases = createReleasesApi(this);
 		this.terminals = createTerminalsApi(this);
 	}
 

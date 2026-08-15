@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { VERSION } from "@vcpdeck/shared";
 import { getRegisterInfo } from "./register.js";
-import type { PiCapabilityStatus, TerminalCapabilityStatus } from "@vcpdeck/shared";
+import type {
+	PiCapabilityStatus,
+	TerminalCapabilityStatus,
+} from "@vcpdeck/shared";
 
 describe("getRegisterInfo", () => {
 	it("注册版本取构建注入的 VERSION（供服务端版本比对与补更）", () => {
 		const info = getRegisterInfo();
 		expect(info.clientVersion).toBe(VERSION);
-	});	it("可用状态包含 agent.pi 及安全 details", () => {
+	});
+	it("可用状态包含 agent.pi 及安全 details", () => {
 		const status: PiCapabilityStatus = {
 			available: true,
 			sdkVersion: "0.84.0",
@@ -57,7 +61,9 @@ describe("getRegisterInfo", () => {
 		};
 		const info = getRegisterInfo(undefined, terminalStatus);
 		expect(info.capabilities).not.toContain("terminal.pty");
-		expect(info.capabilityDetails?.terminal).toMatchObject({ available: false });
+		expect(info.capabilityDetails?.terminal).toMatchObject({
+			available: false,
+		});
 	});
 
 	it("无终端探测时不声明能力", () => {

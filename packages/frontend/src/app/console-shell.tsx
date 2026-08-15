@@ -10,6 +10,7 @@ import {
 	LogOut,
 	MonitorCog,
 	Moon,
+	Rocket,
 	Settings,
 	Sun,
 } from "lucide-react";
@@ -30,6 +31,7 @@ const navigation = [
 	{ to: "/machines", label: "机器", icon: MonitorCog },
 	{ to: "/jobs", label: "任务", icon: ListTodo },
 	{ to: "/frp", label: "映射", icon: Cable },
+	{ to: "/releases", label: "发版", icon: Rocket },
 	{ to: "/storage", label: "存储", icon: Database },
 	{ to: "/settings/profile", label: "设置", icon: Settings },
 ];
