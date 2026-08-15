@@ -301,9 +301,9 @@ uploaded → updating_server → updating_clients → done
 
 ### 阶段 D：客户端
 
-- [ ] D1 客户端优雅停机：收到 `update:request` → 拒新 job → 等运行中 job 完成并上报 → 回 `update:ready` → 调 launcher → 退出——（TDD）
-- [ ] D2 版本上报与补更：注册带真实版本；服务端比对触发离线补更——（TDD）
-- [ ] D3 客户端调用本机 launcher 控制通道（与 B6 同协议）——（TDD）
+- [x] D1 客户端优雅停机：收到 `update:request` → 拒新 job → 等运行中 job 完成并上报 → 回 `update:ready` → 调 launcher → 退出——（TDD） — 2026-06-15
+- [x] D2 版本上报与补更：注册带真实版本；服务端比对触发离线补更——（TDD） — 2026-06-15
+- [x] D3 客户端调用本机 launcher 控制通道（与 B6 同协议）——（TDD） — 2026-06-15
 
 ### 阶段 E：打包与发版
 

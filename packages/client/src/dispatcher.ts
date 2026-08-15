@@ -1,8 +1,9 @@
 import type { Socket } from "socket.io-client";
-import type { JobDispatch } from "@vcpdeck/shared";
+import { Events, type JobDispatch } from "@vcpdeck/shared";
 import { executeExec } from "./executor.js";
 import { handleFileOp } from "./file-handler.js";
 import { handleTransfer } from "./transfer-handler.js";
+import { isDraining } from "./update.js";
 import {
 	handleFrpCreate,
 	handleFrpDelete,
@@ -10,6 +11,18 @@ import {
 } from "./frpc-daemon.js";
 
 export function dispatch(job: JobDispatch, socket: Socket) {
+	// 优雅停机守卫：更新期间拒绝新任务（服务端不再派活，双重保险）
+	if (isDraining()) {
+		socket.emit(Events.JOB_DONE, {
+			jobId: job.jobId,
+			type: job.type,
+			error: {
+				code: "CLIENT_UPDATING",
+				message: "客户端正在更新，拒绝新任务",
+			},
+		});
+		return;
+	}
 	switch (job.type) {
 		case "exec": {
 			const execJob = job as {

@@ -25,13 +25,15 @@ import { discoverShells, type ShellDiscoveryEnv } from "./terminal/shell-discove
 import { createTerminalManager, type PtyAdapter, type PtySpawnOptions } from "./terminal/terminal-manager.js";
 import { attachTerminalBridge, wireManagerToSocket } from "./terminal/protocol-bridge.js";
 import { killProcessTree } from "./terminal/process-tree.js";
+import { attachUpdateHandler } from "./update.js";
+import { ClientLauncher } from "./launcher-control.js";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { fork } from "node:child_process";
 import { join } from "node:path";
 
-const SERVER_URL =
-	(process.env.VCPDECK_SERVER || "http://localhost:3001") + "/client";
+const SERVER_BASE = process.env.VCPDECK_SERVER || "http://localhost:3001";
+const SERVER_URL = SERVER_BASE + "/client";
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
 
 function main() {
@@ -178,6 +180,13 @@ export function connect(): Socket {
 		reconnection: true,
 		reconnectionDelay: 1_000,
 		reconnectionDelayMax: 10_000,
+	});
+
+	// 自更新：优雅停机 + 调本机 launcher（设计文档 §8）
+	attachUpdateHandler({
+		socket,
+		launcher: new ClientLauncher(),
+		serverBase: SERVER_BASE,
 	});
 
 	const supervisor = createPiSupervisor({
