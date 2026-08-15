@@ -8,6 +8,7 @@ import { createReadStream } from "node:fs";
 import {
 	ReleaseStatus,
 	type PaginatedResult,
+	type ReleaseClientEntry,
 	type ReleaseClientState,
 	type ReleaseInfo,
 } from "@vcpdeck/shared";
@@ -41,6 +42,33 @@ export interface CreateReleaseInput {
 	sha256: string;
 	fileName: string;
 	size: number;
+	/** 上传者（由 AuthGuard 注入） */
+	createdByName?: string;
+	createdVia?: string;
+}
+
+/** 单条客户端状态：兼容旧格式（裸枚举字符串）与新格式（{ state, reason?, at }） */
+function normalizeEntry(
+	value: unknown,
+	fallbackAt: string,
+): ReleaseClientEntry | null {
+	if (typeof value === "string") {
+		// 旧格式：裸状态枚举值（历史数据兼容）
+		return { state: value as ReleaseClientState, at: fallbackAt };
+	}
+	if (typeof value === "object" && value !== null) {
+		const entry = value as Partial<ReleaseClientEntry>;
+		if (typeof entry.state === "string") {
+			return {
+				state: entry.state,
+				...(typeof entry.reason === "string" && entry.reason
+					? { reason: entry.reason }
+					: {}),
+				at: typeof entry.at === "string" ? entry.at : fallbackAt,
+			};
+		}
+	}
+	return null;
 }
 
 /** DB 行 → API 形态（clientStates 解析为对象，日期转 ISO 字符串） */
@@ -50,16 +78,20 @@ export function toReleaseInfo(row: {
 	size: number;
 	status: string;
 	errorMessage: string | null;
+	createdByName: string | null;
+	createdVia: string | null;
 	clientStates: string;
 	createdAt: Date;
 	updatedAt: Date;
 }): ReleaseInfo {
-	let clientStates: Record<string, ReleaseClientState> = {};
+	const fallbackAt = row.updatedAt.toISOString();
+	let clientStates: Record<string, ReleaseClientEntry> = {};
 	try {
-		clientStates = JSON.parse(row.clientStates) as Record<
-			string,
-			ReleaseClientState
-		>;
+		const parsed = JSON.parse(row.clientStates) as Record<string, unknown>;
+		for (const [clientId, value] of Object.entries(parsed)) {
+			const entry = normalizeEntry(value, fallbackAt);
+			if (entry) clientStates[clientId] = entry;
+		}
 	} catch {
 		clientStates = {};
 	}
@@ -69,6 +101,8 @@ export function toReleaseInfo(row: {
 		size: row.size,
 		status: row.status as ReleaseStatus,
 		errorMessage: row.errorMessage,
+		createdByName: row.createdByName,
+		createdVia: row.createdVia,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 		clientStates,
@@ -101,6 +135,8 @@ export class ReleaseService {
 				size: input.size,
 				status: "uploaded",
 				clientStates: "{}",
+				createdByName: input.createdByName ?? null,
+				createdVia: input.createdVia ?? null,
 			},
 		});
 		return toReleaseInfo(row);
@@ -164,26 +200,36 @@ export class ReleaseService {
 		}
 	}
 
-	/** 记录单个客户端在 release 中的更新状态，返回合并后的完整状态表 */
+	/**
+	 * 记录单个客户端在 release 中的更新状态（含失败原因与时间戳，审计用）。
+	 * 返回合并后的完整状态表。
+	 */
 	async markClientState(
 		version: string,
 		clientId: string,
 		state: ReleaseClientState,
-	): Promise<Record<string, ReleaseClientState>> {
+		reason?: string,
+	): Promise<Record<string, ReleaseClientEntry>> {
 		const row = await this.prisma.release.findUnique({ where: { version } });
 		if (!row) {
 			throw new ReleaseError("RELEASE_NOT_FOUND", `release ${version} 不存在`);
 		}
-		let states: Record<string, ReleaseClientState> = {};
+		const fallbackAt = row.updatedAt.toISOString();
+		let states: Record<string, ReleaseClientEntry> = {};
 		try {
-			states = JSON.parse(row.clientStates) as Record<
-				string,
-				ReleaseClientState
-			>;
+			const parsed = JSON.parse(row.clientStates) as Record<string, unknown>;
+			for (const [id, value] of Object.entries(parsed)) {
+				const entry = normalizeEntry(value, fallbackAt);
+				if (entry) states[id] = entry;
+			}
 		} catch {
 			states = {};
 		}
-		states[clientId] = state;
+		states[clientId] = {
+			state,
+			...(reason ? { reason } : {}),
+			at: new Date().toISOString(),
+		};
 		await this.prisma.release.update({
 			where: { version },
 			data: { clientStates: JSON.stringify(states) },

@@ -65,7 +65,7 @@ describe("ReleaseController", () => {
 		const fakeReq = (): IncomingMessage =>
 			Readable.from([zipBytes]) as unknown as IncomingMessage;
 
-		it("校验通过后落盘并创建 release", async () => {
+		it("校验通过后落盘并创建 release（无 actor 时操作者为空）", async () => {
 			service.verifyZipSha256.mockResolvedValue(true);
 			service.create.mockResolvedValue({ version: "1.2.1" });
 
@@ -84,6 +84,8 @@ describe("ReleaseController", () => {
 				sha256: "a".repeat(64),
 				fileName: "vcpdeck-1.2.1.zip",
 				size: zipBytes.length,
+				createdByName: undefined,
+				createdVia: undefined,
 			});
 			expect(result.release).toEqual({ version: "1.2.1" });
 			// 已移动到最终存储路径
@@ -129,6 +131,34 @@ describe("ReleaseController", () => {
 			expect(err.getResponse()).toMatchObject({
 				code: "RELEASE_DUPLICATE_VERSION",
 			});
+		});
+
+		it("actor 注入时记录操作者", async () => {
+			service.verifyZipSha256.mockResolvedValue(true);
+			service.create.mockResolvedValue({ version: "1.2.1" });
+			const actor = {
+				identityId: "i1",
+				displayName: "Admin",
+				isAdmin: true,
+				credentialId: null,
+				sessionId: "s1",
+				source: "web" as const,
+				requestId: "r1",
+			};
+
+			await controller.upload(
+				fakeReq(),
+				"1.2.1",
+				"a".repeat(64),
+				actor,
+			);
+
+			expect(service.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					createdByName: "Admin",
+					createdVia: "web",
+				}),
+			);
 		});
 	});
 

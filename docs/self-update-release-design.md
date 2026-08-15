@@ -163,14 +163,16 @@ idle → downloading → verifying → extracting → switching → starting →
 
 ```prisma
 model Release {
-  id        String   @id
-  version   String   @unique
-  sha256    String
-  fileName  String
-  size      Int
-  status    String   @default("uploaded")  // uploaded | updating_server | updating_clients | done | failed
-  clientStates String @default("{}")       // clientId -> pending | updating | done | failed（JSON）
+  id           String   @id
+  version      String   @unique
+  sha256       String
+  fileName     String
+  size         Int
+  status       String   @default("uploaded")  // uploaded | updating_server | updating_clients | done | failed
+  clientStates String   @default("{}")       // clientId -> { state, reason?, at }（JSON，审计：状态/失败原因/时间）
   errorMessage String?
+  createdByName String? // 上传者（由 AuthGuard 注入）
+  createdVia   String?  // 上传来源（web/cli）
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

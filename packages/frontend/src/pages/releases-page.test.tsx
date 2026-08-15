@@ -17,11 +17,20 @@ function release(overrides: Partial<ReleaseInfo> = {}): ReleaseInfo {
 		size: 1024,
 		status: ReleaseStatus.DONE,
 		errorMessage: null,
+		createdByName: "Admin",
+		createdVia: "web",
 		createdAt: "2026-08-15T04:00:00.000Z",
 		updatedAt: "2026-08-15T04:05:00.000Z",
 		clientStates: {
-			client_a: ReleaseClientState.DONE,
-			client_b: ReleaseClientState.FAILED,
+			client_a: {
+				state: ReleaseClientState.DONE,
+				at: "2026-08-15T04:04:00.000Z",
+			},
+			client_b: {
+				state: ReleaseClientState.FAILED,
+				reason: "校验失败",
+				at: "2026-08-15T04:05:00.000Z",
+			},
 		},
 		...overrides,
 	};
@@ -78,7 +87,11 @@ describe("ReleasesPage", () => {
 		expect(screen.getByText("完成")).toBeVisible();
 		expect(screen.getByText("失败")).toBeVisible();
 		// 客户端状态汇总
-		expect(screen.getByText("成功 1 · 失败 1 · 进行中 0 · 待更新 0")).toBeVisible();
+		expect(
+			screen.getByText("成功 1 · 失败 1 · 进行中 0 · 待更新 0"),
+		).toBeVisible();
+		// 操作者（列表操作者列 + 失败 release 的空态）
+		expect(screen.getAllByText("Admin").length).toBeGreaterThan(0);
 		expect(screen.getByText("尚未开始")).toBeVisible();
 	});
 

@@ -191,6 +191,7 @@ describe("ReleaseOrchestrator", () => {
 				"1.2.1",
 				"c1",
 				"done",
+				undefined,
 			);
 			// c3 已是最新，不参与更新
 			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalledWith(
@@ -270,11 +271,13 @@ describe("ReleaseOrchestrator", () => {
 				"1.2.1",
 				"c1",
 				"failed",
+				"等待重连注册超时",
 			);
 			expect(deps.releases.markClientState).toHaveBeenCalledWith(
 				"1.2.1",
 				"c2",
 				"done",
+				undefined,
 			);
 			expect(deps.releases.transitionStatus).toHaveBeenCalledWith(
 				"1.2.1",
@@ -303,6 +306,7 @@ describe("ReleaseOrchestrator", () => {
 				"1.2.1",
 				"c1",
 				"failed",
+				"校验失败",
 			);
 			expect(deps.releases.transitionStatus).toHaveBeenCalledWith(
 				"1.2.1",
@@ -315,7 +319,13 @@ describe("ReleaseOrchestrator", () => {
 		it("旧版本客户端注册时触发补更（failed 的客户端不再重试）", async () => {
 			const target = releaseInfo({
 				status: ReleaseStatus.DONE,
-				clientStates: { c2: ReleaseClientState.FAILED },
+				clientStates: {
+					c2: {
+						state: ReleaseClientState.FAILED,
+						reason: "回退",
+						at: "2026-08-15T04:00:00.000Z",
+					},
+				},
 			});
 			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
 			deps.releases.findByVersion.mockResolvedValue(target);
@@ -334,6 +344,7 @@ describe("ReleaseOrchestrator", () => {
 					"1.2.1",
 					"c1",
 					"done",
+					undefined,
 				);
 			});
 

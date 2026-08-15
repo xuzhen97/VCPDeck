@@ -30,6 +30,8 @@ function dbRow(overrides: Record<string, unknown> = {}) {
 		status: "uploaded",
 		clientStates: "{}",
 		errorMessage: null,
+		createdByName: null,
+		createdVia: null,
 		createdAt: new Date("2026-06-15T00:00:00Z"),
 		updatedAt: new Date("2026-06-15T00:00:00Z"),
 		...overrides,
@@ -47,7 +49,7 @@ describe("ReleaseService", () => {
 	});
 
 	describe("create", () => {
-		it("新版本创建成功，status 为 uploaded", async () => {
+		it("新版本创建成功，status 为 uploaded（含操作者）", async () => {
 			prisma.release.findUnique.mockResolvedValue(null);
 			prisma.release.create.mockResolvedValue(dbRow());
 
@@ -56,6 +58,8 @@ describe("ReleaseService", () => {
 				sha256: "abc",
 				fileName: "vcpdeck-1.2.1.zip",
 				size: 1024,
+				createdByName: "Admin",
+				createdVia: "web",
 			});
 
 			expect(info.status).toBe(ReleaseStatus.UPLOADED);
@@ -65,6 +69,8 @@ describe("ReleaseService", () => {
 					version: "1.2.1",
 					sha256: "abc",
 					status: "uploaded",
+					createdByName: "Admin",
+					createdVia: "web",
 				}),
 			});
 		});
@@ -121,13 +127,11 @@ describe("ReleaseService", () => {
 	});
 
 	describe("markClientState", () => {
-		it("合并写入，保留其他客户端已有状态", async () => {
+		it("合并写入条目（state+at），兼容旧格式并保留其他客户端", async () => {
 			prisma.release.findUnique.mockResolvedValue(
 				dbRow({ clientStates: '{"client_a":"pending"}' }),
 			);
-			prisma.release.update.mockResolvedValue(
-				dbRow({ clientStates: '{"client_a":"pending","client_b":"updating"}' }),
-			);
+			prisma.release.update.mockResolvedValue(dbRow());
 
 			const states = await service.markClientState(
 				"1.2.1",
@@ -135,10 +139,42 @@ describe("ReleaseService", () => {
 				ReleaseClientState.UPDATING,
 			);
 
-			expect(states).toEqual({ client_a: "pending", client_b: "updating" });
-			expect(prisma.release.update).toHaveBeenCalledWith({
-				where: { version: "1.2.1" },
-				data: { clientStates: '{"client_a":"pending","client_b":"updating"}' },
+			expect(states.client_a).toMatchObject({ state: "pending" });
+			expect(states.client_b).toMatchObject({
+				state: "updating",
+				at: expect.any(String),
+			});
+			const written = (prisma.release.update.mock.calls[0]?.[0] as {
+				data: { clientStates: string };
+			}).data.clientStates;
+			let parsed: Record<string, unknown>;
+			try {
+				parsed = JSON.parse(written) as Record<string, unknown>;
+			} catch (e) {
+				throw new Error(`clientStates 写入值非法 JSON: ${e instanceof Error ? e.message : String(e)}`);
+			}
+			expect(parsed.client_a).toMatchObject({ state: "pending" });
+			expect(parsed.client_b).toMatchObject({
+				state: "updating",
+				at: expect.any(String),
+			});
+		});
+
+		it("failed 状态带失败原因与时间落库", async () => {
+			prisma.release.findUnique.mockResolvedValue(dbRow());
+			prisma.release.update.mockResolvedValue(dbRow());
+
+			const states = await service.markClientState(
+				"1.2.1",
+				"c1",
+				ReleaseClientState.FAILED,
+				"校验失败",
+			);
+
+			expect(states.c1).toMatchObject({
+				state: "failed",
+				reason: "校验失败",
+				at: expect.any(String),
 			});
 		});
 	});

@@ -57,7 +57,7 @@ const DEFAULT_CLIENT_TIMEOUT_MS = 10 * 60 * 1000;
 /** 客户端更新等待器（注册回执/超时/失败事件三选一解决；timer 由闭包持有） */
 interface ClientWaiter {
 	targetVersion: string;
-	resolve: (outcome: "done" | "failed") => void;
+	resolve: (outcome: "done" | "failed", reason?: string) => void;
 }
 
 @Injectable()
@@ -143,9 +143,11 @@ export class ReleaseOrchestrator {
 	onClientRegistered(clientId: string, clientVersion: string): void {
 		const waiter = this.pendingClients.get(clientId);
 		if (waiter) {
-			waiter.resolve(
-				clientVersion === waiter.targetVersion ? "done" : "failed",
-			);
+			if (clientVersion === waiter.targetVersion) {
+				waiter.resolve("done");
+			} else {
+				waiter.resolve("failed", "注册版本不符（launcher 已回退）");
+			}
 		}
 		void this.triggerCatchUp(clientId, clientVersion);
 	}
@@ -154,8 +156,9 @@ export class ReleaseOrchestrator {
 	onUpdateFailed(clientId: string, _version: string, reason: string): void {
 		const waiter = this.pendingClients.get(clientId);
 		if (waiter) {
-			console.warn(`[release] 客户端 ${clientId} 更新失败: ${reason}`);
-			waiter.resolve("failed");
+			const safeReason = reason.slice(0, 200) || "未知原因";
+			console.warn(`[release] 客户端 ${clientId} 更新失败: ${safeReason}`);
+			waiter.resolve("failed", safeReason);
 		}
 	}
 
@@ -171,7 +174,8 @@ export class ReleaseOrchestrator {
 	): Promise<void> {
 		const target = (await this.releases.getLatestActiveTarget()) ?? null;
 		if (!target || clientVersion === target.version) return;
-		if (target.clientStates[clientId] === ReleaseClientState.FAILED) return;
+		if (target.clientStates[clientId]?.state === ReleaseClientState.FAILED)
+			return;
 		if (this.activePhase) return; // 进行中的循环会自行覆盖在线客户端
 		await this.runClientPhase(target.version);
 	}
@@ -213,9 +217,10 @@ export class ReleaseOrchestrator {
 			await this.releases.markClientState(
 				version,
 				client.clientId,
-				outcome === "done"
+				outcome.outcome === "done"
 					? ReleaseClientState.DONE
 					: ReleaseClientState.FAILED,
+				outcome.reason,
 			);
 		}
 		await this.releases.transitionStatus(version, ReleaseStatus.DONE);
@@ -224,18 +229,21 @@ export class ReleaseOrchestrator {
 	private waitClientOutcome(
 		clientId: string,
 		targetVersion: string,
-	): Promise<"done" | "failed"> {
+	): Promise<{ outcome: "done" | "failed"; reason?: string }> {
 		return new Promise((resolve) => {
 			const timer = setTimeout(() => {
 				this.pendingClients.delete(clientId);
-				resolve("failed");
+				resolve({
+					outcome: "failed",
+					reason: "等待重连注册超时",
+				});
 			}, this.clientTimeoutMs);
 			this.pendingClients.set(clientId, {
 				targetVersion,
-				resolve: (outcome) => {
+				resolve: (outcome, reason) => {
 					clearTimeout(timer);
 					this.pendingClients.delete(clientId);
-					resolve(outcome);
+					resolve({ outcome, ...(reason ? { reason } : {}) });
 				},
 			});
 		});

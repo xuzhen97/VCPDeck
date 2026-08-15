@@ -70,6 +70,15 @@ export enum ReleaseClientState {
 	FAILED = "failed",
 }
 
+/** 单客户端更新条目（含失败原因与时间戳，审计用） */
+export interface ReleaseClientEntry {
+	state: ReleaseClientState;
+	/** 失败原因摘要（仅 failed 时非空，安全脱敏） */
+	reason?: string;
+	/** 最后状态变更时间（ISO 字符串） */
+	at: string;
+}
+
 /** release 列表项（REST 返回） */
 export interface ReleaseInfo {
 	version: string;
@@ -77,8 +86,11 @@ export interface ReleaseInfo {
 	size: number;
 	status: ReleaseStatus;
 	errorMessage?: string | null;
+	/** 发版操作者（上传者身份；由 AuthGuard 注入） */
+	createdByName?: string | null;
+	createdVia?: string | null;
 	createdAt: string;
 	updatedAt: string;
-	/** clientId -> 更新状态（JSON 字符串在 DB，API 层解析为对象） */
-	clientStates: Record<string, ReleaseClientState>;
+	/** clientId -> 更新条目（JSON 字符串在 DB，API 层解析为对象） */
+	clientStates: Record<string, ReleaseClientEntry>;
 }

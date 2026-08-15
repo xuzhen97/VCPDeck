@@ -27,6 +27,8 @@ import type { Response } from "express";
 import { ReleaseError, ReleaseService } from "./release.service.js";
 import { ReleaseOrchestrator } from "./release.orchestrator.js";
 import { Public } from "../auth/public.decorator.js";
+import { Actor } from "../auth/actor.decorator.js";
+import type { ActorContext } from "@vcpdeck/shared";
 
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
@@ -117,12 +119,14 @@ export class ReleaseController {
 	/**
 	 * 上传更新包：POST /api/releases/upload?version=x.y.z&sha256=<64hex>
 	 * body 为 zip 原始字节（content-type: application/zip）。
+	 * 操作者由 AuthGuard 注入（createdByName/createdVia），审计用。
 	 */
 	@Post("upload")
 	async upload(
 		@Req() req: IncomingMessage,
 		@Query("version") version?: string,
 		@Query("sha256") sha256?: string,
+		@Actor() actor?: ActorContext,
 	) {
 		if (!version || !VERSION_RE.test(version)) {
 			throw new BadRequestException("版本号格式应为 x.y.z");
@@ -152,6 +156,8 @@ export class ReleaseController {
 				sha256,
 				fileName: `vcpdeck-${version}.zip`,
 				size: (await stat(finalPath)).size,
+				createdByName: actor?.displayName,
+				createdVia: actor?.source,
 			});
 			// 上传即触发自更新（不阻塞上传响应；失败由编排器落库标记）
 			void this.orchestrator

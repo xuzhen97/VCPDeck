@@ -1,4 +1,9 @@
-import type { ReleaseClientState, ReleaseInfo, ReleaseStatus } from "@vcpdeck/shared";
+import type {
+	ReleaseClientEntry,
+	ReleaseClientState,
+	ReleaseInfo,
+	ReleaseStatus,
+} from "@vcpdeck/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
@@ -26,7 +31,9 @@ function releaseStatusLabel(status: ReleaseStatus): string {
 	}
 }
 
-function releaseStatusTone(status: ReleaseStatus): "success" | "warning" | "danger" | "neutral" {
+function releaseStatusTone(
+	status: ReleaseStatus,
+): "success" | "warning" | "danger" | "neutral" {
 	if (status === "done") return "success";
 	if (status === "failed") return "danger";
 	if (status === "uploaded") return "neutral";
@@ -48,7 +55,9 @@ function clientStateLabel(state: ReleaseClientState): string {
 	}
 }
 
-function clientStateTone(state: ReleaseClientState): "success" | "warning" | "danger" | "neutral" {
+function clientStateTone(
+	state: ReleaseClientState,
+): "success" | "warning" | "danger" | "neutral" {
 	if (state === "done") return "success";
 	if (state === "failed") return "danger";
 	if (state === "updating") return "warning";
@@ -64,16 +73,19 @@ function formatTime(value: string | null | undefined): string {
 
 function formatSize(bytes: number): string {
 	if (!Number.isFinite(bytes)) return "—";
-	if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+	if (bytes >= 1024 * 1024 * 1024)
+		return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 	if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 	return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-function summarizeClients(states: Record<string, ReleaseClientState>): string {
+function summarizeClients(
+	states: Record<string, ReleaseClientEntry>,
+): string {
 	const entries = Object.entries(states);
 	if (entries.length === 0) return "尚未开始";
 	const counts = { done: 0, failed: 0, updating: 0, pending: 0 };
-	for (const [, state] of entries) counts[state] += 1;
+	for (const [, entry] of entries) counts[entry.state] += 1;
 	return `成功 ${counts.done} · 失败 ${counts.failed} · 进行中 ${counts.updating} · 待更新 ${counts.pending}`;
 }
 
@@ -159,9 +171,18 @@ export function ReleasesPage() {
 					</CardHeader>
 					<CardContent>
 						<p className="text-sm">
-							完成 <span className="font-semibold text-emerald-400">{summary.done}</span> · 失败{" "}
-							<span className="font-semibold text-red-400">{summary.failed}</span> · 进行中{" "}
-							<span className="font-semibold text-amber-400">{summary.active}</span>
+							完成{" "}
+							<span className="font-semibold text-emerald-400">
+								{summary.done}
+							</span>{" "}
+							· 失败{" "}
+							<span className="font-semibold text-red-400">
+								{summary.failed}
+							</span>{" "}
+							· 进行中{" "}
+							<span className="font-semibold text-amber-400">
+								{summary.active}
+							</span>
 						</p>
 					</CardContent>
 				</Card>
@@ -183,6 +204,7 @@ export function ReleasesPage() {
 										<th className="px-4 py-3 font-medium">版本</th>
 										<th className="px-4 py-3 font-medium">状态</th>
 										<th className="px-4 py-3 font-medium">大小</th>
+										<th className="px-4 py-3 font-medium">操作者</th>
 										<th className="px-4 py-3 font-medium">客户端</th>
 										<th className="px-4 py-3 font-medium">发起时间</th>
 										<th className="px-4 py-3 font-medium">最后更新</th>
@@ -210,6 +232,9 @@ export function ReleasesPage() {
 											</td>
 											<td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
 												{formatSize(release.size)}
+											</td>
+											<td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+												{release.createdByName ?? "—"}
 											</td>
 											<td className="px-4 py-3 text-muted-foreground">
 												{summarizeClients(release.clientStates)}
@@ -281,11 +306,22 @@ function ReleaseDetails({ release }: { release: ReleaseInfo }) {
 			<div className="grid gap-3 text-sm sm:grid-cols-2">
 				<div>
 					<p className="font-medium">发起时间</p>
-					<p className="mt-1 text-muted-foreground">{formatTime(release.createdAt)}</p>
+					<p className="mt-1 text-muted-foreground">
+						{formatTime(release.createdAt)}
+					</p>
 				</div>
 				<div>
 					<p className="font-medium">最后更新</p>
-					<p className="mt-1 text-muted-foreground">{formatTime(release.updatedAt)}</p>
+					<p className="mt-1 text-muted-foreground">
+						{formatTime(release.updatedAt)}
+					</p>
+				</div>
+				<div>
+					<p className="font-medium">操作者</p>
+					<p className="mt-1 text-muted-foreground">
+						{release.createdByName ?? "—"}
+						{release.createdVia ? `（${release.createdVia}）` : ""}
+					</p>
 				</div>
 			</div>
 			<div>
@@ -310,26 +346,43 @@ function ReleaseDetails({ release }: { release: ReleaseInfo }) {
 					<div className="mt-2 overflow-x-auto rounded-md border border-border/60">
 						<table className="w-full text-sm">
 							<thead>
-								<tr className="border-b border-border/60 text-left text-muted-foreground">
-									<th className="px-3 py-2 font-medium">客户端</th>
-									<th className="px-3 py-2 font-medium">状态</th>
-								</tr>
-							</thead>
-							<tbody className="divide-y divide-border/60">
-								{clients.map(([clientId, state]) => (
-									<tr key={clientId}>
-										<td className="max-w-56 truncate px-3 py-2 font-mono text-xs">
-											{clientId}
-										</td>
-										<td className="px-3 py-2">
-											<StatusChip
-												label={clientStateLabel(state)}
-												tone={clientStateTone(state)}
-											/>
-										</td>
+									<tr className="border-b border-border/60 text-left text-muted-foreground">
+										<th className="px-3 py-2 font-medium">客户端</th>
+										<th className="px-3 py-2 font-medium">状态</th>
+										<th className="px-3 py-2 font-medium">失败原因</th>
+										<th className="px-3 py-2 font-medium">时间</th>
 									</tr>
-								))}
-							</tbody>
+								</thead>
+								<tbody className="divide-y divide-border/60">
+									{clients.map(([clientId, entry]) => (
+										<tr key={clientId}>
+											<td className="max-w-56 truncate px-3 py-2 font-mono text-xs">
+												{clientId}
+											</td>
+											<td className="px-3 py-2">
+												<StatusChip
+													label={clientStateLabel(entry.state)}
+													tone={clientStateTone(entry.state)}
+												/>
+											</td>
+											<td className="max-w-64 px-3 py-2">
+												{entry.reason ? (
+													<p
+														className="truncate text-xs text-red-400"
+														title={entry.reason}
+													>
+														{entry.reason}
+													</p>
+												) : (
+													<span className="text-xs text-muted-foreground">—</span>
+												)}
+											</td>
+											<td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
+												{formatTime(entry.at)}
+											</td>
+										</tr>
+									))}
+								</tbody>
 						</table>
 					</div>
 				)}
