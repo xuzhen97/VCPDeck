@@ -293,11 +293,11 @@ uploaded → updating_server → updating_clients → done
 
 ### 阶段 C：launcher 包
 
-- [ ] C1 `packages/launcher` 包骨架 + `ensure-node`（检测/下载/缓存，参考 `ensure-frpc.cjs` 模式，下载源可配镜像）——（TDD）
-- [ ] C2 版本目录管理与原子切换（`apps/<version>/` + current 指针，Windows 兼容策略）——（TDD）
-- [ ] C3 更新执行器（下载 → sha256 校验 → 解压 → 切换 → 启动 → 健康检查 → 失败回退）——（TDD）
-- [ ] C4 进程守护（启动、崩溃退避拉起、更新期间拉起抑制）——不适合 TDD（真实进程行为，冒烟/E2E 覆盖）
-- [ ] C5 本地控制通道服务端（127.0.0.1 + token、`/update` 处理、preStart 钩子 `prisma db push`）——（TDD）
+- [x] C1 `packages/launcher` 包骨架 + `ensure-node`（检测/下载/缓存，参考 `ensure-frpc.cjs` 模式，下载源可配镜像）——（TDD） — 2026-06-15
+- [x] C2 版本目录管理与原子切换（`apps/<version>/` + current 指针，Windows 兼容策略）——（TDD） — 2026-06-15
+- [x] C3 更新执行器（下载 → sha256 校验 → 解压 → 切换 → 启动 → 健康检查 → 失败回退）——（TDD） — 2026-06-15
+- [x] C4 进程守护（启动、崩溃退避拉起、更新期间拉起抑制）——不适合 TDD（真实进程行为，冒烟/E2E 覆盖） — 2026-06-15
+- [x] C5 本地控制通道服务端（127.0.0.1 + token、`/prepare`/`/apply` 处理、preStart 钩子 `prisma db push`）——（TDD） — 2026-06-15
 
 ### 阶段 D：客户端
 
