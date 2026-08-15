@@ -8,6 +8,7 @@ import type {
 	PiCapabilityStatus,
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
+import { VERSION } from "@vcpdeck/shared";
 import { isFrpAvailable } from "./frpc-daemon.js";
 
 const CLIENT_ID_DIR = path.join(os.homedir(), ".vcpdeck");
@@ -51,7 +52,7 @@ export function getRegisterInfo(
 		os: `${os.platform()} ${os.release()}`,
 		cpuModel: cpus[0]?.model || "unknown",
 		totalMemMB: Math.round(os.totalmem() / 1024 / 1024),
-		clientVersion: "0.0.0",
+		clientVersion: VERSION,
 		capabilities: caps,
 		capabilityDetails,
 	};

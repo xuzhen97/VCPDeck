@@ -1,4 +1,7 @@
-export const VERSION = "0.0.0";
+export { VERSION } from "./version.js";
+
+// ── 自更新协议 ──
+export * from "./update.js";
 
 // ── 远程 Pi 协议 ──
 export * from "./pi.js";
@@ -87,6 +90,10 @@ export const Events = {
 	TERMINAL_SESSION_STATE: "terminal:session-state",
 	TERMINAL_RESYNC_REQUIRED: "terminal:resync-required",
 	TERMINAL_ERROR: "terminal:error",
+	UPDATE_REQUEST: "update:request",
+	UPDATE_READY: "update:ready",
+	UPDATE_FAILED: "update:failed",
+	SERVER_SHUTDOWN: "server:shutdown",
 } as const;
 
 // ── Job type ──
