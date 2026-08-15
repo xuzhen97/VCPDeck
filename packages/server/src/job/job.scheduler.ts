@@ -1,6 +1,7 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import type { DispatchPayload } from "@vcpdeck/shared";
+import { ServerDrain } from "./server-drain.js";
 
 function safeJsonParse<T>(raw: string, fallback: T): T {
   try {
@@ -16,9 +17,12 @@ const MAX_CONCURRENT_JOBS = 3;
 export class JobScheduler {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    // 优雅停机闸门：JobModule 提供；测试可不传
+    @Optional() @Inject(ServerDrain) private readonly drain?: ServerDrain,
   ) {}
 
   async tryDispatch(clientId: string): Promise<DispatchPayload | null> {
+    if (this.drain?.isDraining()) return null;
     const runningCount = await this.prisma.job.count({
       where: {
         clientId,

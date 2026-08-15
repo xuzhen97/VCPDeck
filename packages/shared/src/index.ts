@@ -138,7 +138,10 @@ export interface MachineRegister {
 	clientVersion: string;
 	capabilities: string[];
 	/** 可选：Client Pi 能力探测结果摘要（旧 Client 缺省） */
-	capabilityDetails?: { pi?: PiCapabilityStatus; terminal?: TerminalCapabilityStatus };
+	capabilityDetails?: {
+		pi?: PiCapabilityStatus;
+		terminal?: TerminalCapabilityStatus;
+	};
 }
 
 /** 单盘容量与占用率（容量与使用率来自同一次 statfs） */
@@ -283,7 +286,10 @@ export interface ClientInfo {
 	clientVersion: string;
 	capabilities: string[];
 	/** 解析后的能力摘要（pi/terminal；无探测/损坏时为 {}） */
-	capabilityDetails: { pi?: PiCapabilityStatus; terminal?: TerminalCapabilityStatus };
+	capabilityDetails: {
+		pi?: PiCapabilityStatus;
+		terminal?: TerminalCapabilityStatus;
+	};
 	online: boolean;
 	cpuPercent: number | null;
 	memPercent: number | null;

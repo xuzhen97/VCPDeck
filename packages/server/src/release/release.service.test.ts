@@ -86,7 +86,9 @@ describe("ReleaseService", () => {
 
 	describe("transitionStatus", () => {
 		it("合法流转 uploaded → updating_server 成功", async () => {
-			prisma.release.findUnique.mockResolvedValue(dbRow({ status: "uploaded" }));
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({ status: "uploaded" }),
+			);
 			prisma.release.updateMany.mockResolvedValue({ count: 1 });
 
 			await expect(
@@ -158,6 +160,27 @@ describe("ReleaseService", () => {
 		});
 	});
 
+	describe("getActiveRelease", () => {
+		it("返回 updating_server/updating_clients 状态的 release", async () => {
+			prisma.release.findFirst.mockResolvedValue(
+				dbRow({ status: "updating_server" }),
+			);
+
+			const active = await service.getActiveRelease();
+
+			expect(active?.status).toBe(ReleaseStatus.UPDATING_SERVER);
+			expect(prisma.release.findFirst).toHaveBeenCalledWith({
+				where: { status: { in: ["updating_server", "updating_clients"] } },
+				orderBy: { createdAt: "desc" },
+			});
+		});
+
+		it("无活动 release 时返回 null", async () => {
+			prisma.release.findFirst.mockResolvedValue(null);
+			await expect(service.getActiveRelease()).resolves.toBeNull();
+		});
+	});
+
 	describe("getLatestActiveTarget", () => {
 		it("返回最近一条 updating_clients/done 状态的 release", async () => {
 			prisma.release.findFirst.mockResolvedValue(
@@ -196,9 +219,7 @@ describe("ReleaseService", () => {
 			await writeFile(file, content);
 			const expected = createHash("sha256").update(content).digest("hex");
 
-			await expect(service.verifyZipSha256(file, expected)).resolves.toBe(
-				true,
-			);
+			await expect(service.verifyZipSha256(file, expected)).resolves.toBe(true);
 		});
 
 		it("哈希不匹配返回 false", async () => {

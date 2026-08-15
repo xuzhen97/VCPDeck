@@ -25,6 +25,8 @@ import { pipeline } from "node:stream/promises";
 import type { IncomingMessage } from "node:http";
 import type { Response } from "express";
 import { ReleaseError, ReleaseService } from "./release.service.js";
+import { ReleaseOrchestrator } from "./release.orchestrator.js";
+import { Public } from "../auth/public.decorator.js";
 
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
@@ -72,6 +74,8 @@ async function moveFile(src: string, dest: string): Promise<void> {
 export class ReleaseController {
 	constructor(
 		@Inject(ReleaseService) private readonly service: ReleaseService,
+		@Inject(ReleaseOrchestrator)
+		private readonly orchestrator: ReleaseOrchestrator,
 	) {}
 
 	@Get()
@@ -85,6 +89,8 @@ export class ReleaseController {
 		);
 	}
 
+	/** 更新包下载：客户端 launcher 使用，公开（完整性由 sha256 校验兑底） */
+	@Public()
 	@Get(":version/file")
 	async download(@Param("version") version: string, @Res() res: Response) {
 		const info = await this.service.findByVersion(version);
@@ -147,6 +153,12 @@ export class ReleaseController {
 				fileName: `vcpdeck-${version}.zip`,
 				size: (await stat(finalPath)).size,
 			});
+			// 上传即触发自更新（不阻塞上传响应；失败由编排器落库标记）
+			void this.orchestrator
+				.startRelease(version)
+				.catch((e: unknown) => {
+					console.error(`[release] 触发更新失败: ${version}`, e);
+				});
 			return { release };
 		} catch (e) {
 			if (e instanceof ReleaseError) throw toHttp(e);

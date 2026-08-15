@@ -182,12 +182,12 @@ model Release {
 
 | 端点 | 说明 |
 | ------ | ------ |
-| `POST /api/releases/upload` | raw stream 上传 zip（query: version、sha256；body 为 zip 字节）→ 校验 sha256/version 不重复 → 存 `data/releases/<version>.zip` → 写 Release 表 → 触发编排（弃 multipart，避免引入 multer 依赖） |
-| `GET /api/releases` | release 列表（分页，遵循 AGENTS.md 分页规范） |
-| `GET /api/releases/:version/file` | 下载更新包（客户端 launcher 使用） |
-| `GET /api/status` | `{ serverVersion, releaseStatus }`，供 launcher 健康探活与前端展示 |
+| `POST /api/releases/upload` | raw stream 上传 zip（query: version、sha256；body 为 zip 字节）→ 校验 sha256/version 不重复 → 存 `data/releases/<version>.zip` → 写 Release 表 → 触发编排（弃 multipart，避免引入 multer 依赖）。受全局 AuthGuard 保护 |
+| `GET /api/releases` | release 列表（分页，遵循 AGENTS.md 分页规范）。受全局 AuthGuard 保护 |
+| `GET /api/releases/:version/file` | 下载更新包（客户端 launcher 使用）。`@Public()` 公开，完整性由 sha256 校验兑底 |
+| `GET /api/status` | `{ serverVersion, activeRelease }`，供 launcher 健康探活与前端展示。`@Public()` 公开 |
 
-与现有 REST 一致：无鉴权（内部使用），后续由 CLI 薄封装为 `vcpdeck release` 命令。
+鉴权：上传/列表沿用全局 AuthGuard（内部使用，需管理员会话）；下载与状态端点公开（客户端 launcher 无会话），风险由 sha256 完整性校验兑底。CLI 以后薄封装为 `vcpdeck release` 命令。
 
 ### 7.3 更新编排（全自动状态机）
 
@@ -286,10 +286,10 @@ uploaded → updating_server → updating_clients → done
 
 - [x] B1 Prisma `Release` 模型 + `release.service`（上传记录、状态流转、sha256 校验、clientStates 维护）——（TDD） — 2026-06-15
 - [x] B2 REST API：`POST /api/releases/upload` 上传、`GET /api/releases` 列表、`GET /api/releases/:version/file` 下载——（TDD） — 2026-06-15
-- [ ] B3 更新编排 orchestrator：状态机（uploaded → updating_server → updating_clients → done/failed）、逐台下发、超时与失败不阻塞——（TDD）
-- [ ] B4 服务端优雅停机：停 dispatch → 等 RUNNING job 收敛（超时可配）→ 广播 `server:shutdown` → 退出——（TDD）
-- [ ] B5 `GET /api/status`：暴露 `serverVersion` 与 release 状态（launcher 探活 + 前端展示）
-- [ ] B6 服务端 ↔ launcher 本地控制通道调用（读 control.json、请求 /update、重试）——（TDD）
+- [x] B3 更新编排 orchestrator：状态机（uploaded → updating_server → updating_clients → done/failed）、逐台下发、超时与失败不阻塞——（TDD） — 2026-06-15
+- [x] B4 服务端优雅停机：停 dispatch → 等 RUNNING job 收敛（超时可配）→ 广播 `server:shutdown` → 退出——（TDD） — 2026-06-15
+- [x] B5 `GET /api/status`：暴露 `serverVersion` 与 release 状态（launcher 探活 + 前端展示） — 2026-06-15
+- [x] B6 服务端 ↔ launcher 本地控制通道调用（读 control.json、请求 /update、重试）——（TDD） — 2026-06-15
 
 ### 阶段 C：launcher 包
 

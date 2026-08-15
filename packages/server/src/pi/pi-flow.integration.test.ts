@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PiEvent, PiRequest, PiResponse, PiStateReport } from "@vcpdeck/shared";
+import type {
+	PiEvent,
+	PiRequest,
+	PiResponse,
+	PiStateReport,
+} from "@vcpdeck/shared";
 import type { Socket } from "socket.io";
 import { ClientGateway } from "../events/client.gateway.js";
 import { PiController } from "./pi.controller.js";
@@ -48,7 +53,8 @@ function makePrismaMemory() {
 	const job = {
 		create: vi.fn(async (args: { data: Record<string, unknown> }) => {
 			calls.push(args);
-			if (jobs.some((candidate) => candidate.id === args.data.id)) throw { code: "P2002" };
+			if (jobs.some((candidate) => candidate.id === args.data.id))
+				throw { code: "P2002" };
 			const created = {
 				payload: "{}",
 				progress: null,
@@ -62,30 +68,49 @@ function makePrismaMemory() {
 			jobs.push(created);
 			return created;
 		}),
-		findUnique: vi.fn(async (args: { where: { id: string } }) =>
-			jobs.find((candidate) => candidate.id === args.where.id) ?? null),
+		findUnique: vi.fn(
+			async (args: { where: { id: string } }) =>
+				jobs.find((candidate) => candidate.id === args.where.id) ?? null,
+		),
 		findMany: vi.fn(async (args?: { where?: Record<string, unknown> }) =>
-			jobs.filter((candidate) => Object.entries(args?.where ?? {}).every(
-				([key, value]) => matches(candidate[key], value),
-			))),
-		update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
-			calls.push(args);
-			const candidate = jobs.find((item) => item.id === args.where.id);
-			if (!candidate) throw new Error("not found");
-			Object.assign(candidate, args.data);
-			return candidate;
-		}),
-		updateMany: vi.fn(async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
-			calls.push(args);
-			let count = 0;
-			for (const candidate of jobs) {
-				if (Object.entries(args.where).every(([key, value]) => matches(candidate[key], value))) {
-					Object.assign(candidate, args.data);
-					count += 1;
+			jobs.filter((candidate) =>
+				Object.entries(args?.where ?? {}).every(([key, value]) =>
+					matches(candidate[key], value),
+				),
+			),
+		),
+		update: vi.fn(
+			async (args: {
+				where: { id: string };
+				data: Record<string, unknown>;
+			}) => {
+				calls.push(args);
+				const candidate = jobs.find((item) => item.id === args.where.id);
+				if (!candidate) throw new Error("not found");
+				Object.assign(candidate, args.data);
+				return candidate;
+			},
+		),
+		updateMany: vi.fn(
+			async (args: {
+				where: Record<string, unknown>;
+				data: Record<string, unknown>;
+			}) => {
+				calls.push(args);
+				let count = 0;
+				for (const candidate of jobs) {
+					if (
+						Object.entries(args.where).every(([key, value]) =>
+							matches(candidate[key], value),
+						)
+					) {
+						Object.assign(candidate, args.data);
+						count += 1;
+					}
 				}
-			}
-			return { count };
-		}),
+				return { count };
+			},
+		),
 	};
 	return { job, jobs, calls };
 }
@@ -134,11 +159,15 @@ function makeLoopback() {
 	const clientService = {
 		register: vi.fn(async () => {}),
 		markOfflineBySocketId: vi.fn(async () => {}),
-		listOnline: vi.fn(async () => [{
-			clientId: "c1",
-			capabilities: ["agent.pi"],
-			capabilityDetails: { pi: { available: true, sessionJobProtocolVersion: 1 } },
-		}]),
+		listOnline: vi.fn(async () => [
+			{
+				clientId: "c1",
+				capabilities: ["agent.pi"],
+				capabilityDetails: {
+					pi: { available: true, sessionJobProtocolVersion: 1 },
+				},
+			},
+		]),
 	};
 	const jobService = {
 		markDisconnected: vi.fn(async () => {}),
@@ -153,11 +182,18 @@ function makeLoopback() {
 		handleClientResponse: vi.fn(async () => {}),
 		handleClientOutput: vi.fn(async () => {}),
 		handleClientExit: vi.fn(async () => {}),
-		handleClientState: vi.fn(async () => ({ acceptedSessionIds: [], closeSessionIds: [] })),
+		handleClientState: vi.fn(async () => ({
+			acceptedSessionIds: [],
+			closeSessionIds: [],
+		})),
 		handleClientDisconnect: vi.fn(async () => {}),
 		handleClientRegistered: vi.fn(async () => {}),
 	};
-	const terminalBroker = { bindEmitter: vi.fn(), disconnect: vi.fn(), resolve: vi.fn() };
+	const terminalBroker = {
+		bindEmitter: vi.fn(),
+		disconnect: vi.fn(),
+		resolve: vi.fn(),
+	};
 	const gateway = new ClientGateway(
 		clientService as never,
 		jobService as never,
@@ -168,11 +204,18 @@ function makeLoopback() {
 		runs,
 		terminalService as never,
 		terminalBroker as never,
+		{
+			onClientRegistered: vi.fn(),
+			onUpdateReady: vi.fn(),
+			onUpdateFailed: vi.fn(),
+		} as never,
+		{ bindEmitters: vi.fn() } as never,
 	);
 	gateway.server = {
 		emit: vi.fn(),
 		to: vi.fn((socketId: string) => ({
-			emit: (_event: string, request: PiRequest) => requestHandlers.get(socketId)?.(request),
+			emit: (_event: string, request: PiRequest) =>
+				requestHandlers.get(socketId)?.(request),
 		})),
 	} as never;
 	gateway.afterInit();
@@ -197,14 +240,25 @@ function makeLoopback() {
 	const respond = async (socket: Socket, response: PiResponse) => {
 		await gateway.handlePiResponse(socket, response);
 	};
-	const autoRespond = (socket: Socket, state: Record<string, unknown> = idleState()) => {
+	const autoRespond = (
+		socket: Socket,
+		state: Record<string, unknown> = idleState(),
+	) => {
 		requestHandlers.set(socket.id, (request) => {
-			const data = request.action === "project.resolve"
-				? { projectKey: PROJECT_KEY }
-				: request.action === "agent.state"
-					? state
-					: { accepted: true };
-			queueMicrotask(() => void respond(socket, { requestId: request.requestId, ok: true, data }));
+			const data =
+				request.action === "project.resolve"
+					? { projectKey: PROJECT_KEY }
+					: request.action === "agent.state"
+						? state
+						: { accepted: true };
+			queueMicrotask(
+				() =>
+					void respond(socket, {
+						requestId: request.requestId,
+						ok: true,
+						data,
+					}),
+			);
 		});
 	};
 	const register = async (socket: Socket) => {
@@ -214,7 +268,8 @@ function makeLoopback() {
 		const result = await gateway.handlePiState(socket, stateReport);
 		return result as unknown;
 	};
-	const current = (jobId: string) => prisma.jobs.find((job) => job.id === jobId)!;
+	const current = (jobId: string) =>
+		prisma.jobs.find((job) => job.id === jobId)!;
 
 	return {
 		prisma,
@@ -264,19 +319,33 @@ describe("Pi Gateway loopback 集成", () => {
 		const socket = loop.addSocket("socket-1");
 		loop.autoRespond(socket);
 		await loop.register(socket);
-		await expect(loop.controller.sessions("c1", "D:\\", "repo")).rejects.toMatchObject({
+		await expect(
+			loop.controller.sessions("c1", "D:\\", "repo"),
+		).rejects.toMatchObject({
 			response: { code: "PI_STATE_PENDING" },
 		});
 		expect(await loop.reconcile(socket)).toEqual({
-			acceptedRunIds: [], closedRunIds: [], reportAgain: false,
+			acceptedRunIds: [],
+			closedRunIds: [],
+			reportAgain: false,
 		});
 
-		await loop.runs.ensureSession(actor, { clientId: "c1", sessionId: "session-1" });
+		await loop.runs.ensureSession(actor, {
+			clientId: "c1",
+			sessionId: "session-1",
+		});
 		const run = await loop.runs.startRun(actor, {
-			clientId: "c1", sessionId: "session-1", projectKey: PROJECT_KEY,
+			clientId: "c1",
+			sessionId: "session-1",
+			projectKey: PROJECT_KEY,
 		});
 		await loop.runs.accept(run.jobId, run.runId);
-		const base = { clientId: "c1", sessionId: "session-1", jobId: "session-1", runId: run.runId };
+		const base = {
+			clientId: "c1",
+			sessionId: "session-1",
+			jobId: "session-1",
+			runId: run.runId,
+		};
 		await loop.gateway.handlePiEvent(socket, {
 			...base,
 			event: {
@@ -303,7 +372,10 @@ describe("Pi Gateway loopback 集成", () => {
 		} as PiEvent);
 		await vi.advanceTimersByTimeAsync(30_000);
 		await flush();
-		expect(loop.current("session-1")).toMatchObject({ status: "idle", payload: "{}" });
+		expect(loop.current("session-1")).toMatchObject({
+			status: "idle",
+			payload: "{}",
+		});
 	});
 
 	it("run-1/run-2 settlement 交错与 complete race 保持当前 run/done", async () => {
@@ -313,62 +385,110 @@ describe("Pi Gateway loopback 集成", () => {
 		loop.autoRespond(socket);
 		await loop.register(socket);
 		await loop.reconcile(socket);
-		await loop.runs.ensureSession(actor, { clientId: "c1", sessionId: "session-1" });
+		await loop.runs.ensureSession(actor, {
+			clientId: "c1",
+			sessionId: "session-1",
+		});
 
 		const run1 = await loop.runs.startRun(actor, {
-			clientId: "c1", sessionId: "session-1", projectKey: PROJECT_KEY,
+			clientId: "c1",
+			sessionId: "session-1",
+			projectKey: PROJECT_KEY,
 		});
 		await loop.runs.accept(run1.jobId, run1.runId);
 		await loop.gateway.handlePiEvent(socket, {
-			clientId: "c1", sessionId: "session-1", jobId: "session-1", runId: run1.runId,
+			clientId: "c1",
+			sessionId: "session-1",
+			jobId: "session-1",
+			runId: run1.runId,
 			event: { type: "agent_settled", sessionId: "session-1" },
 		} as PiEvent);
 		await loop.runs.finishRun(run1.jobId, run1.runId);
 		const run2 = await loop.runs.startRun(actor, {
-			clientId: "c1", sessionId: "session-1", projectKey: PROJECT_KEY,
+			clientId: "c1",
+			sessionId: "session-1",
+			projectKey: PROJECT_KEY,
 		});
 		await loop.runs.accept(run2.jobId, run2.runId);
 		await vi.advanceTimersByTimeAsync(30_000);
 		expect(loop.current("session-1")).toMatchObject({
-			status: "running", payload: JSON.stringify({ runId: run2.runId }),
+			status: "running",
+			payload: JSON.stringify({ runId: run2.runId }),
 		});
 
 		await loop.gateway.handlePiEvent(socket, {
-			clientId: "c1", sessionId: "session-1", jobId: "session-1", runId: run2.runId,
+			clientId: "c1",
+			sessionId: "session-1",
+			jobId: "session-1",
+			runId: run2.runId,
 			event: { type: "agent_settled", sessionId: "session-1" },
 		} as PiEvent);
 		await loop.runs.completeSession("session-1", run2.runId);
 		await vi.advanceTimersByTimeAsync(30_000);
-		expect(loop.current("session-1")).toMatchObject({ status: "done", payload: "{}" });
+		expect(loop.current("session-1")).toMatchObject({
+			status: "done",
+			payload: "{}",
+		});
 	});
 
 	it("projectKey 冲突要求二次 PI_STATE；prompt_error sentinel 不持久化", async () => {
 		const loop = makeLoopback();
 		const socket = loop.addSocket("socket-1");
-		await loop.runs.ensureSession(actor, { clientId: "c1", sessionId: "session-1" });
-		await loop.runs.ensureSession(actor, { clientId: "c1", sessionId: "session-2" });
+		await loop.runs.ensureSession(actor, {
+			clientId: "c1",
+			sessionId: "session-1",
+		});
+		await loop.runs.ensureSession(actor, {
+			clientId: "c1",
+			sessionId: "session-2",
+		});
 		const run1 = await loop.runs.startRun(actor, {
-			clientId: "c1", sessionId: "session-1", projectKey: "1".repeat(64),
+			clientId: "c1",
+			sessionId: "session-1",
+			projectKey: "1".repeat(64),
 		});
 		const run2 = await loop.runs.startRun(actor, {
-			clientId: "c1", sessionId: "session-2", projectKey: "2".repeat(64),
+			clientId: "c1",
+			sessionId: "session-2",
+			projectKey: "2".repeat(64),
 		});
 		await loop.runs.accept(run1.jobId, run1.runId);
 		await loop.runs.accept(run2.jobId, run2.runId);
 		await loop.register(socket);
-		expect(await loop.reconcile(socket, report([
-			{ jobId: "session-1", sessionId: "session-1", runId: run1.runId, status: "running", projectKey: PROJECT_KEY },
-			{ jobId: "session-2", sessionId: "session-2", runId: run2.runId, status: "running", projectKey: PROJECT_KEY },
-		]))).toEqual({
+		expect(
+			await loop.reconcile(
+				socket,
+				report([
+					{
+						jobId: "session-1",
+						sessionId: "session-1",
+						runId: run1.runId,
+						status: "running",
+						projectKey: PROJECT_KEY,
+					},
+					{
+						jobId: "session-2",
+						sessionId: "session-2",
+						runId: run2.runId,
+						status: "running",
+						projectKey: PROJECT_KEY,
+					},
+				]),
+			),
+		).toEqual({
 			acceptedRunIds: [],
 			closedRunIds: [run1.runId, run2.runId],
 			reportAgain: true,
 		});
-		await expect(loop.controller.sessions("c1", "D:\\", "repo")).rejects.toMatchObject({
+		await expect(
+			loop.controller.sessions("c1", "D:\\", "repo"),
+		).rejects.toMatchObject({
 			response: { code: "PI_STATE_PENDING" },
 		});
 		expect(await loop.reconcile(socket)).toEqual({
-			acceptedRunIds: [], closedRunIds: [], reportAgain: false,
+			acceptedRunIds: [],
+			closedRunIds: [],
+			reportAgain: false,
 		});
 
 		loop.autoRespond(socket);
@@ -420,7 +540,10 @@ describe("Pi Gateway loopback 集成", () => {
 		] as const;
 		for (const event of events) {
 			await loop.gateway.handlePiEvent(socket, {
-				clientId: "c1", sessionId: "session-3", jobId: run3.jobId, runId: run3.runId,
+				clientId: "c1",
+				sessionId: "session-3",
+				jobId: run3.jobId,
+				runId: run3.runId,
 				event,
 			} as PiEvent);
 		}
@@ -437,36 +560,63 @@ describe("Pi Gateway loopback 集成", () => {
 	});
 
 	it.each([
-		["active", { ...idleState(), status: "running", streaming: true }, "running"],
+		[
+			"active",
+			{ ...idleState(), status: "running", streaming: true },
+			"running",
+		],
 		["not-started", idleState(), "idle"],
-	] as const)("prompt timeout 但 Worker %s 时按权威 state 收敛", async (_name, state, expectedStatus) => {
-		vi.useFakeTimers();
-		const loop = makeLoopback();
-		const socket = loop.addSocket("socket-1");
-		await loop.register(socket);
-		await loop.reconcile(socket);
-		loop.requestHandlers.set(socket.id, (request) => {
-			if (request.action === "project.resolve") {
-				queueMicrotask(() => void loop.respond(socket, {
-					requestId: request.requestId, ok: true, data: { projectKey: PROJECT_KEY },
-				}));
-			} else if (request.action === "agent.state") {
-				queueMicrotask(() => void loop.respond(socket, {
-					requestId: request.requestId, ok: true, data: state,
-				}));
-			}
-		});
+	] as const)(
+		"prompt timeout 但 Worker %s 时按权威 state 收敛",
+		async (_name, state, expectedStatus) => {
+			vi.useFakeTimers();
+			const loop = makeLoopback();
+			const socket = loop.addSocket("socket-1");
+			await loop.register(socket);
+			await loop.reconcile(socket);
+			loop.requestHandlers.set(socket.id, (request) => {
+				if (request.action === "project.resolve") {
+					queueMicrotask(
+						() =>
+							void loop.respond(socket, {
+								requestId: request.requestId,
+								ok: true,
+								data: { projectKey: PROJECT_KEY },
+							}),
+					);
+				} else if (request.action === "agent.state") {
+					queueMicrotask(
+						() =>
+							void loop.respond(socket, {
+								requestId: request.requestId,
+								ok: true,
+								data: state,
+							}),
+					);
+				}
+			});
 
-		const prompt = loop.controller.prompt("c1", "session-timeout", {
-			rootDir: "D:\\", relativePath: "repo", type: "prompt",
-			submissionId: "submission-timeout", prompt: PROMPT_SENTINEL,
-		}, actor);
-		const outcome = expect(prompt).rejects.toMatchObject({ response: { code: "PI_REQUEST_TIMEOUT" } });
-		await flush();
-		await vi.advanceTimersByTimeAsync(15_000);
-		await outcome;
-		expect(loop.current("session-timeout").status).toBe(expectedStatus);
-	});
+			const prompt = loop.controller.prompt(
+				"c1",
+				"session-timeout",
+				{
+					rootDir: "D:\\",
+					relativePath: "repo",
+					type: "prompt",
+					submissionId: "submission-timeout",
+					prompt: PROMPT_SENTINEL,
+				},
+				actor,
+			);
+			const outcome = expect(prompt).rejects.toMatchObject({
+				response: { code: "PI_REQUEST_TIMEOUT" },
+			});
+			await flush();
+			await vi.advanceTimersByTimeAsync(15_000);
+			await outcome;
+			expect(loop.current("session-timeout").status).toBe(expectedStatus);
+		},
+	);
 
 	it("REST lease 跨 await 阻塞 REGISTER，且新旧 socket 响应/断线隔离", async () => {
 		const loop = makeLoopback();
@@ -494,8 +644,9 @@ describe("Pi Gateway loopback 集成", () => {
 		const nextRegister = loop.register(newSocket);
 		await flush();
 		expect(newSocket.data.clientId).toBe("c1");
-		expect((newSocket.emit as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith(
-			"ack", expect.anything(),
+		expect(newSocket.emit as ReturnType<typeof vi.fn>).not.toHaveBeenCalledWith(
+			"ack",
+			expect.anything(),
 		);
 
 		const resolveRequest = emitted[0]!;
@@ -525,7 +676,9 @@ describe("Pi Gateway loopback 集成", () => {
 			ok: true,
 			data: { accepted: true },
 		});
-		await expect(prompt).resolves.toMatchObject({ sessionId: "session-legacy" });
+		await expect(prompt).resolves.toMatchObject({
+			sessionId: "session-legacy",
+		});
 		await nextRegister;
 		expect(newSocket.emit).toHaveBeenCalledWith("ack", { event: "register" });
 		await loop.reconcile(newSocket);

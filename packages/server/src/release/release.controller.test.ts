@@ -20,6 +20,10 @@ function mockRes() {
 	return { sendFile: vi.fn() };
 }
 
+function mockOrchestrator() {
+	return { startRelease: vi.fn() };
+}
+
 /** 捕获 Promise 拒绝并断言 HTTP 错误形态 */
 async function catchHttpError(p: Promise<unknown>): Promise<{
 	getStatus: () => number;
@@ -35,17 +39,20 @@ async function catchHttpError(p: Promise<unknown>): Promise<{
 
 describe("ReleaseController", () => {
 	let service: ReturnType<typeof mockService>;
+	let orchestrator: ReturnType<typeof mockOrchestrator>;
 	let controller: ReleaseController;
 	let dir: string;
 	let releasesDir: string;
 
 	beforeEach(async () => {
 		service = mockService();
+		orchestrator = mockOrchestrator();
+		orchestrator.startRelease.mockResolvedValue(undefined);
 		dir = await mkdtemp(join(tmpdir(), "release-ctrl-"));
 		releasesDir = join(dir, "releases");
 		process.env.VCPDECK_RELEASES_DIR = releasesDir;
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		controller = new ReleaseController(service as any);
+		controller = new ReleaseController(service as any, orchestrator as any);
 	});
 
 	afterEach(async () => {
@@ -81,6 +88,8 @@ describe("ReleaseController", () => {
 			expect(result.release).toEqual({ version: "1.2.1" });
 			// 已移动到最终存储路径
 			await expect(access(releaseZipPath("1.2.1"))).resolves.toBeUndefined();
+			// 上传即触发编排
+			expect(orchestrator.startRelease).toHaveBeenCalledWith("1.2.1");
 		});
 
 		it("sha256 不匹配返回 400 RELEASE_SHA256_MISMATCH", async () => {

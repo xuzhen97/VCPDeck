@@ -10,6 +10,7 @@ import { FrpModule } from "../frp/frp.module.js";
 import { StorageModule } from "../storage/storage.module.js";
 import { PiModule } from "../pi/pi.module.js";
 import { TerminalModule } from "../terminal/terminal.module.js";
+import { ReleaseModule } from "../release/release.module.js";
 
 @Module({
 	imports: [
@@ -19,6 +20,7 @@ import { TerminalModule } from "../terminal/terminal.module.js";
 		PrismaModule,
 		StorageModule,
 		forwardRef(() => FrpModule),
+		forwardRef(() => ReleaseModule),
 		PiModule,
 		TerminalModule,
 	],

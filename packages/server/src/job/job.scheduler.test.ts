@@ -31,7 +31,8 @@ describe("JobScheduler", () => {
 		const dispatch = await scheduler.tryDispatch("c1");
 		expect(dispatch?.type).toBe("exec");
 		expect(
-			(prisma as { job: { findFirst: ReturnType<typeof vi.fn> } }).job.findFirst,
+			(prisma as { job: { findFirst: ReturnType<typeof vi.fn> } }).job
+				.findFirst,
 		).toHaveBeenCalledWith(
 			expect.objectContaining({
 				where: {
@@ -57,7 +58,8 @@ describe("JobScheduler", () => {
 		const dispatch = await scheduler.tryDispatch("c1");
 		expect(dispatch).toBeNull();
 		expect(
-			(prisma as { job: { findFirst: ReturnType<typeof vi.fn> } }).job.findFirst,
+			(prisma as { job: { findFirst: ReturnType<typeof vi.fn> } }).job
+				.findFirst,
 		).toHaveBeenCalledWith(
 			expect.objectContaining({
 				where: {
@@ -105,8 +107,27 @@ describe("JobScheduler", () => {
 		const dispatch = await scheduler.tryDispatch("c1");
 		expect(dispatch).toBeNull();
 		expect(
-			(prisma as { job: { findFirst: ReturnType<typeof vi.fn> } }).job.findFirst,
+			(prisma as { job: { findFirst: ReturnType<typeof vi.fn> } }).job
+				.findFirst,
 		).not.toHaveBeenCalled();
+	});
+
+	it("优雅停机闸门开启时不派发", async () => {
+		const prisma = prismaMock() as unknown as {
+			job: {
+				count: ReturnType<typeof vi.fn>;
+				findFirst: ReturnType<typeof vi.fn>;
+				update: ReturnType<typeof vi.fn>;
+			};
+		};
+		const drainMock = { isDraining: vi.fn().mockReturnValue(true) };
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const scheduler = new JobScheduler(prisma as never, drainMock as any);
+
+		const dispatch = await scheduler.tryDispatch("c1");
+
+		expect(dispatch).toBeNull();
+		expect(prisma.job.findFirst).not.toHaveBeenCalled();
 	});
 });
 

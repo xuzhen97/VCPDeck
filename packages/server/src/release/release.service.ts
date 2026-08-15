@@ -207,6 +207,19 @@ export class ReleaseService {
 		return row ? toReleaseInfo(row) : null;
 	}
 
+	/** 进行中的 release：updating_server / updating_clients（编排器忙检查与启动恢复用） */
+	async getActiveRelease(): Promise<ReleaseInfo | null> {
+		const row = await this.prisma.release.findFirst({
+			where: {
+				status: {
+					in: [ReleaseStatus.UPDATING_SERVER, ReleaseStatus.UPDATING_CLIENTS],
+				},
+			},
+			orderBy: { createdAt: "desc" },
+		});
+		return row ? toReleaseInfo(row) : null;
+	}
+
 	/** 流式计算文件 sha256 并与期望值比对（文件不存在/读失败返回 false） */
 	async verifyZipSha256(filePath: string, expected: string): Promise<boolean> {
 		return new Promise((resolve) => {

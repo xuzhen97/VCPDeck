@@ -4,7 +4,6 @@ import { Events, TerminalLimits } from "@vcpdeck/shared";
 import { ClientGateway } from "../events/client.gateway.js";
 import { TerminalService } from "./terminal.service.js";
 import { TerminalRequestBroker } from "./terminal-request-broker.js";
-import { TerminalAuditService } from "./terminal-audit.service.js";
 import { makeMemoryPrisma, makeFakeClient } from "./integration-helpers.js";
 
 const ACTOR: ActorContext = {
@@ -21,7 +20,6 @@ const ACTOR: ActorContext = {
 function makeHarness() {
 	const memory = makeMemoryPrisma();
 	const broker = new TerminalRequestBroker();
-	const audit = new TerminalAuditService(memory.prisma as never);
 	const service = TerminalService.withDeps({
 		prisma: memory.prisma as never,
 		broker,
@@ -79,6 +77,12 @@ function makeHarness() {
 		} as never,
 		service as never,
 		broker as never,
+		{
+			onClientRegistered: vi.fn(),
+			onUpdateReady: vi.fn(),
+			onUpdateFailed: vi.fn(),
+		} as never,
+		{ bindEmitters: vi.fn() } as never,
 	);
 	gateway.afterInit();
 	// 覆盖 terminal broker emitter → fake client（模拟 /client socket 发送）

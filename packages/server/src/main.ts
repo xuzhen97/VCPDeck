@@ -5,6 +5,7 @@ import { AppModule } from "./app.module.js";
 import cookieParser from "cookie-parser";
 import { PrismaService } from "./prisma/prisma.service.js";
 import { FrpsInstancesService } from "./frp/frp-instances.service.js";
+import { ReleaseOrchestrator } from "./release/release.orchestrator.js";
 import { randomUUID } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 
@@ -63,6 +64,14 @@ async function bootstrap() {
 
 	await app.listen(3001);
 	console.log("VCPDeck server listening on http://localhost:3001");
+
+	// 自更新编排恢复：launcher 回退判定 / 客户端阶段续跑（设计文档 §7.3）
+	void app
+		.get(ReleaseOrchestrator)
+		.resumeAfterStartup()
+		.catch((e: unknown) => {
+			console.error("[release] 恢复编排失败", e);
+		});
 }
 
 bootstrap();

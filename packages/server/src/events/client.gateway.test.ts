@@ -44,19 +44,35 @@ function makeGateway() {
 	};
 	const piRuns = {
 		markReconcilePending: vi.fn(async () => {}),
-		reconcileGeneration: vi.fn(async (): Promise<PiStateAck> => ({
-			acceptedRunIds: [], closedRunIds: [], reportAgain: false,
-		})),
-		withReconciledSocket: vi.fn(async (_clientId: string, _socketId: string, operation: () => Promise<void>) => operation()),
+		reconcileGeneration: vi.fn(
+			async (): Promise<PiStateAck> => ({
+				acceptedRunIds: [],
+				closedRunIds: [],
+				reportAgain: false,
+			}),
+		),
+		withReconciledSocket: vi.fn(
+			async (
+				_clientId: string,
+				_socketId: string,
+				operation: () => Promise<void>,
+			) => operation(),
+		),
 		disconnectGeneration: vi.fn(async () => true),
 	};
 	const terminalService = {
 		handleClientResponse: vi.fn(async () => {}),
 		handleClientOutput: vi.fn(async () => {}),
 		handleClientExit: vi.fn(async () => {}),
-		handleClientState: vi.fn(async (): Promise<{ acceptedSessionIds: string[]; closeSessionIds: string[] }> => ({
-			acceptedSessionIds: [], closeSessionIds: [],
-		})),
+		handleClientState: vi.fn(
+			async (): Promise<{
+				acceptedSessionIds: string[];
+				closeSessionIds: string[];
+			}> => ({
+				acceptedSessionIds: [],
+				closeSessionIds: [],
+			}),
+		),
 		handleClientDisconnect: vi.fn(async () => {}),
 		handleClientRegistered: vi.fn(async () => {}),
 	};
@@ -64,6 +80,14 @@ function makeGateway() {
 		bindEmitter: vi.fn(),
 		disconnect: vi.fn(),
 		resolve: vi.fn(),
+	};
+	const orchestrator = {
+		onClientRegistered: vi.fn(),
+		onUpdateReady: vi.fn(),
+		onUpdateFailed: vi.fn(),
+	};
+	const updateChannel = {
+		bindEmitters: vi.fn(),
 	};
 	const gateway = new ClientGateway(
 		clientService as never,
@@ -75,13 +99,27 @@ function makeGateway() {
 		piRuns as never,
 		terminalService as never,
 		terminalBroker as never,
+		orchestrator as never,
+		updateChannel as never,
 	);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
 	gateway.server = { emit: vi.fn(), to } as never;
 	return {
-		gateway, clientService, jobService, fileService, frpService,
-		piRequests, piEvents, piRuns, terminalService, terminalBroker, emit, to,
+		gateway,
+		clientService,
+		jobService,
+		fileService,
+		frpService,
+		piRequests,
+		piEvents,
+		piRuns,
+		terminalService,
+		terminalBroker,
+		orchestrator,
+		updateChannel,
+		emit,
+		to,
 	};
 }
 
@@ -102,17 +140,27 @@ describe("ClientGateway Pi generation routing", () => {
 		const binder = piRequests.bindEmitter.mock.calls[0]?.[0];
 		binder("socket-2", { requestId: "r1", action: "sessions.list" });
 		expect(to).toHaveBeenCalledWith("socket-2");
-		expect(emit).toHaveBeenCalledWith("pi:request", expect.objectContaining({ requestId: "r1" }));
+		expect(emit).toHaveBeenCalledWith(
+			"pi:request",
+			expect.objectContaining({ requestId: "r1" }),
+		);
 	});
 
 	it("REGISTER 在 ack 前绑定身份并进入 pending generation", async () => {
 		const { gateway, piRuns } = makeGateway();
 		const socket = makeSocket();
 		const order: string[] = [];
-		piRuns.markReconcilePending.mockImplementation(async () => { order.push("pending"); });
+		piRuns.markReconcilePending.mockImplementation(async () => {
+			order.push("pending");
+		});
 		await gateway.handleRegister(socket, {
-			clientId: "c1", hostname: "host", os: "win32", cpuModel: "cpu",
-			totalMemMB: 1024, clientVersion: "1", capabilities: ["agent.pi"],
+			clientId: "c1",
+			hostname: "host",
+			os: "win32",
+			cpuModel: "cpu",
+			totalMemMB: 1024,
+			clientVersion: "1",
+			capabilities: ["agent.pi"],
 			capabilityDetails: {},
 		});
 		expect(socket.data.clientId).toBe("c1");
@@ -131,7 +179,11 @@ describe("ClientGateway Pi generation routing", () => {
 		};
 		piRuns.reconcileGeneration.mockResolvedValue(expected);
 		const result = await gateway.handlePiState(socket, report);
-		expect(piRuns.reconcileGeneration).toHaveBeenCalledWith("c1", "socket-1", report);
+		expect(piRuns.reconcileGeneration).toHaveBeenCalledWith(
+			"c1",
+			"socket-1",
+			report,
+		);
 		expect(result).toEqual(expected);
 		expect(piEvents).not.toHaveProperty("handleState");
 	});
@@ -162,7 +214,9 @@ describe("ClientGateway Pi generation routing", () => {
 		const socket = makeSocket();
 		socket.data.clientId = "c1";
 		const order: string[] = [];
-		piRequests.disconnect.mockImplementation(() => { order.push("request-disconnected"); });
+		piRequests.disconnect.mockImplementation(() => {
+			order.push("request-disconnected");
+		});
 		piRuns.disconnectGeneration.mockImplementation(async () => {
 			order.push("generation-disconnected");
 			return true;
@@ -176,20 +230,32 @@ describe("ClientGateway Pi generation routing", () => {
 
 describe("ClientGateway terminal routing", () => {
 	it("afterInit 绑定 terminal emitter 精确投递 socketId", () => {
-		const { gateway, terminalBroker, to, emit } = makeGateway();
+		const { gateway, terminalBroker, emit } = makeGateway();
 		gateway.afterInit();
 		// 第二个 bindEmitter 调用属于 terminal broker
 		const binder = terminalBroker.bindEmitter.mock.calls[0]?.[0];
 		if (!binder) throw new Error("no binder");
 		binder("socket-2", { requestId: "r1", action: "shells.list" });
-		expect(emit).toHaveBeenCalledWith("terminal:request", expect.objectContaining({ requestId: "r1" }));
+		expect(emit).toHaveBeenCalledWith(
+			"terminal:request",
+			expect.objectContaining({ requestId: "r1" }),
+		);
 	});
 
 	it("未 REGISTER 的 socket 上报 terminal 消息被忽略", async () => {
 		const { gateway, terminalService } = makeGateway();
 		const socket = makeSocket();
-		await gateway.handleTerminalResponse(socket, { requestId: "r1", ok: true, action: "session.detach", sessionId: "s1" });
-		await gateway.handleTerminalOutput(socket, { sessionId: "s1", seq: 1, data: "x" });
+		await gateway.handleTerminalResponse(socket, {
+			requestId: "r1",
+			ok: true,
+			action: "session.detach",
+			sessionId: "s1",
+		});
+		await gateway.handleTerminalOutput(socket, {
+			sessionId: "s1",
+			seq: 1,
+			data: "x",
+		});
 		await gateway.handleTerminalExit(socket, { sessionId: "s1", exitCode: 0 });
 		expect(terminalService.handleClientResponse).not.toHaveBeenCalled();
 		expect(terminalService.handleClientOutput).not.toHaveBeenCalled();
@@ -200,15 +266,29 @@ describe("ClientGateway terminal routing", () => {
 		const { gateway, terminalService } = makeGateway();
 		const socket = makeSocket("socket-9");
 		socket.data.clientId = "c1";
-		await gateway.handleTerminalResponse(socket, { requestId: "r1", ok: true, action: "session.detach", sessionId: "s1" });
-		expect(terminalService.handleClientResponse).toHaveBeenCalledWith("c1", "socket-9", expect.objectContaining({ requestId: "r1" }));
+		await gateway.handleTerminalResponse(socket, {
+			requestId: "r1",
+			ok: true,
+			action: "session.detach",
+			sessionId: "s1",
+		});
+		expect(terminalService.handleClientResponse).toHaveBeenCalledWith(
+			"c1",
+			"socket-9",
+			expect.objectContaining({ requestId: "r1" }),
+		);
 	});
 
 	it("非法 TERMINAL_RESPONSE 被忽略", async () => {
 		const { gateway, terminalService } = makeGateway();
 		const socket = makeSocket();
 		socket.data.clientId = "c1";
-		await gateway.handleTerminalResponse(socket, { requestId: "r1", ok: true, action: "session.hack", sessionId: "s1" } as never);
+		await gateway.handleTerminalResponse(socket, {
+			requestId: "r1",
+			ok: true,
+			action: "session.hack",
+			sessionId: "s1",
+		} as never);
 		expect(terminalService.handleClientResponse).not.toHaveBeenCalled();
 	});
 
@@ -216,8 +296,16 @@ describe("ClientGateway terminal routing", () => {
 		const { gateway, terminalService } = makeGateway();
 		const socket = makeSocket();
 		socket.data.clientId = "c1";
-		await gateway.handleTerminalOutput(socket, { sessionId: "s1", seq: 3, data: "ok" });
-		expect(terminalService.handleClientOutput).toHaveBeenCalledWith("c1", { sessionId: "s1", seq: 3, data: "ok" });
+		await gateway.handleTerminalOutput(socket, {
+			sessionId: "s1",
+			seq: 3,
+			data: "ok",
+		});
+		expect(terminalService.handleClientOutput).toHaveBeenCalledWith("c1", {
+			sessionId: "s1",
+			seq: 3,
+			data: "ok",
+		});
 	});
 
 	it("TERMINAL_EXIT 解析后交给 service", async () => {
@@ -225,7 +313,10 @@ describe("ClientGateway terminal routing", () => {
 		const socket = makeSocket();
 		socket.data.clientId = "c1";
 		await gateway.handleTerminalExit(socket, { sessionId: "s1", exitCode: 0 });
-		expect(terminalService.handleClientExit).toHaveBeenCalledWith("c1", { sessionId: "s1", exitCode: 0 });
+		expect(terminalService.handleClientExit).toHaveBeenCalledWith("c1", {
+			sessionId: "s1",
+			exitCode: 0,
+		});
 	});
 
 	it("TERMINAL_STATE 解析后交给 service 并原样 ack", async () => {
@@ -238,15 +329,26 @@ describe("ClientGateway terminal routing", () => {
 			closeSessionIds: ["s2"],
 		});
 		const result = await gateway.handleTerminalState(socket, report);
-		expect(terminalService.handleClientState).toHaveBeenCalledWith("c1", "socket-1", report);
-		expect(result).toEqual({ acceptedSessionIds: ["s1"], closeSessionIds: ["s2"] });
+		expect(terminalService.handleClientState).toHaveBeenCalledWith(
+			"c1",
+			"socket-1",
+			report,
+		);
+		expect(result).toEqual({
+			acceptedSessionIds: ["s1"],
+			closeSessionIds: ["s2"],
+		});
 	});
 
 	it("非法 TERMINAL_STATE 不 ack", async () => {
 		const { gateway, terminalService } = makeGateway();
 		const socket = makeSocket();
 		socket.data.clientId = "c1";
-		const result = await gateway.handleTerminalState(socket, { clientId: 42, generationId: "g", sessions: [] } as never);
+		const result = await gateway.handleTerminalState(socket, {
+			clientId: 42,
+			generationId: "g",
+			sessions: [],
+		} as never);
 		expect(terminalService.handleClientState).not.toHaveBeenCalled();
 		expect(result).toEqual({ acceptedSessionIds: [], closeSessionIds: [] });
 	});
@@ -256,7 +358,10 @@ describe("ClientGateway terminal routing", () => {
 		const socket = makeSocket();
 		socket.data.clientId = "c1";
 		await gateway.handleDisconnect(socket);
-		expect(terminalService.handleClientDisconnect).toHaveBeenCalledWith("c1", "socket-1");
+		expect(terminalService.handleClientDisconnect).toHaveBeenCalledWith(
+			"c1",
+			"socket-1",
+		);
 		expect(terminalService.handleClientOutput).not.toHaveBeenCalled();
 	});
 
@@ -264,10 +369,18 @@ describe("ClientGateway terminal routing", () => {
 		const { gateway, terminalService } = makeGateway();
 		const socket = makeSocket();
 		await gateway.handleRegister(socket, {
-			clientId: "c1", hostname: "host", os: "win32", cpuModel: "cpu",
-			totalMemMB: 1024, clientVersion: "1", capabilities: [],
+			clientId: "c1",
+			hostname: "host",
+			os: "win32",
+			cpuModel: "cpu",
+			totalMemMB: 1024,
+			clientVersion: "1",
+			capabilities: [],
 		});
-		expect(terminalService.handleClientRegistered).toHaveBeenCalledWith("c1", "socket-1");
+		expect(terminalService.handleClientRegistered).toHaveBeenCalledWith(
+			"c1",
+			"socket-1",
+		);
 	});
 });
 

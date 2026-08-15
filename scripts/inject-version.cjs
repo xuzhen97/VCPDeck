@@ -11,7 +11,9 @@ const path = require("node:path");
 
 const version = process.argv[2];
 if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
-	console.error("[inject-version] 用法: node scripts/inject-version.cjs <x.y.z>");
+	console.error(
+		"[inject-version] 用法: node scripts/inject-version.cjs <x.y.z>",
+	);
 	process.exit(1);
 }
 

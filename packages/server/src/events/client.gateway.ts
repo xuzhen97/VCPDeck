@@ -1,4 +1,4 @@
-import { Inject } from "@nestjs/common";
+import { Inject, forwardRef } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -16,6 +16,8 @@ import { PiEventBroker } from "../pi/pi-event-broker.js";
 import { PiRunService } from "../pi/pi-run.service.js";
 import { TerminalService } from "../terminal/terminal.service.js";
 import { TerminalRequestBroker } from "../terminal/terminal-request-broker.js";
+import { ReleaseOrchestrator } from "../release/release.orchestrator.js";
+import { GatewayUpdateChannel } from "../release/update-channel.js";
 import {
   Events,
   JobStatus,
@@ -27,7 +29,6 @@ import {
   parseTerminalOutputChunk,
   parseTerminalStateReport,
   type JobProgress,
-  type PiStateAck,
 } from "@vcpdeck/shared";
 import type {
   MachineRegister,
@@ -46,8 +47,9 @@ import type {
   TerminalClientResponse,
   TerminalOutputChunk,
   TerminalExitReport,
-  TerminalStateAck,
   TerminalStateReport,
+  UpdateReady,
+  UpdateFailed,
 } from "@vcpdeck/shared";
 
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
@@ -65,8 +67,14 @@ export class ClientGateway {
     @Inject(PiRequestBroker) private readonly piRequests: PiRequestBroker,
     @Inject(PiEventBroker) private readonly piEvents: PiEventBroker,
     @Inject(PiRunService) private readonly piRuns: PiRunService,
-    @Inject(TerminalService) private readonly terminalService: TerminalService,
+  	@Inject(TerminalService) private readonly terminalService: TerminalService,
     @Inject(TerminalRequestBroker) private readonly terminalBroker: TerminalRequestBroker,
+    // 更新编排（forwardRef 解开 ReleaseModule ↔ EventsModule 循环）
+  	@Inject(forwardRef(() => ReleaseOrchestrator))
+    private readonly orchestrator: ReleaseOrchestrator,
+    // 更新事件发送通道（bindEmitters 模式，避免 provider 循环）
+    @Inject(forwardRef(() => GatewayUpdateChannel))
+    private readonly updateChannel: GatewayUpdateChannel,
   ) {}
 
   // ── Pi request 发送通道（避免与 PiModule 循环依赖） ──
@@ -76,6 +84,14 @@ export class ClientGateway {
     });
     this.terminalBroker.bindEmitter((socketId, request) => {
       this.server.to(socketId).emit(Events.TERMINAL_REQUEST, request);
+    });
+    this.updateChannel.bindEmitters({
+      sendUpdateRequest: (clientId, request) => {
+        this.server.to(clientId).emit(Events.UPDATE_REQUEST, request);
+      },
+      broadcastShutdown: (notice) => {
+        this.server.emit(Events.SERVER_SHUTDOWN, notice);
+      },
     });
   }
 
@@ -116,11 +132,23 @@ export class ClientGateway {
     client.data.clientId = data.clientId;
     client.join(data.clientId);
     await this.piRuns.markReconcilePending(data.clientId, client.id);
-    await this.terminalService.handleClientRegistered(data.clientId, client.id);
-    client.emit("ack", { event: Events.REGISTER });
-    console.log(`[ws] registered: ${data.clientId} (${data.hostname})`);
-    return { ok: true };
-  }
+		await this.terminalService.handleClientRegistered(data.clientId, client.id);
+		this.orchestrator.onClientRegistered(data.clientId, data.clientVersion);
+		client.emit("ack", { event: Events.REGISTER });
+		console.log(`[ws] registered: ${data.clientId} (${data.hostname})`);
+		return { ok: true };
+	}
+
+	// ── 自更新事件 ──
+	@SubscribeMessage(Events.UPDATE_READY)
+	handleUpdateReady(@MessageBody() data: UpdateReady) {
+		this.orchestrator.onUpdateReady(data.clientId, data.releaseVersion);
+	}
+
+	@SubscribeMessage(Events.UPDATE_FAILED)
+	handleUpdateFailed(@MessageBody() data: UpdateFailed) {
+		this.orchestrator.onUpdateFailed(data.clientId, data.releaseVersion, data.reason);
+	}
 
   // ── Pi 事件（复用现有 PSK 连接） ──
 
