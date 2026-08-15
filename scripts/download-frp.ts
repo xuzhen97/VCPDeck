@@ -14,10 +14,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createWriteStream } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { gzipSync } from "node:zlib";
 
 const FRP_VERSION = process.env.FRP_VERSION || "0.61.0";
-const GITHUB_API = "https://api.github.com/repos/fatedier/frp/releases";
 
 type PlatformEntry = {
 	assetSuffix: string;
@@ -88,32 +88,69 @@ async function downloadPlatform(platform: string): Promise<void> {
 	fs.mkdirSync(serverDestDir, { recursive: true });
 	fs.mkdirSync(TMP_DIR, { recursive: true });
 
-	// 1. 获取 release 下载 URL
-	console.log(`[${platform}] 获取 release 信息...`);
-	const releaseUrl = `${GITHUB_API}/tags/v${FRP_VERSION}`;
-	const releaseRes = await fetch(releaseUrl);
-	if (!releaseRes.ok) {
-		throw new Error(`GitHub API ${releaseRes.status}`);
+	// 幂等：frpc 与 frps 均已存在则跳过（离线环境/网络受限时复用已有产物）
+	const frpcExists = fs.existsSync(path.join(clientDestDir, entry.frpcName));
+	const frpsExists = fs.existsSync(path.join(serverDestDir, entry.frpsName));
+	if (frpcExists && frpsExists) {
+		console.log(`[${platform}] frpc/frps 已存在，跳过下载`);
+		return;
 	}
-	const release = (await releaseRes.json()) as {
-		assets: Array<{ name: string; browser_download_url: string }>;
-	};
-	const asset = release.assets.find((a) => a.name === entry.assetSuffix);
-	if (!asset) throw new Error(`找不到 asset: ${entry.assetSuffix}`);
 
-	// 2. 下载
+	// 1-2. 下载归档（已缓存则复用；直连 URL 由 ASSET_MAP 确定，镜像回退同 ensure-frpc）
 	const archivePath = path.join(TMP_DIR, entry.assetSuffix);
-	await downloadFile(asset.browser_download_url, archivePath);
-
-	// 3. 解压
-	console.log(`[${platform}] 解压...`);
-	if (entry.assetSuffix.endsWith(".zip")) {
-		execSync(
-			`powershell -Command "Expand-Archive -Path '${archivePath}' -DestinationPath '${TMP_DIR}' -Force"`,
-			{ stdio: "inherit" },
-		);
+	if (!fs.existsSync(archivePath) || fs.statSync(archivePath).size === 0) {
+		const suffix = `fatedier/frp/releases/download/v${FRP_VERSION}/${entry.assetSuffix}`;
+		const bases = [
+			...(process.env.FRP_DOWNLOAD_BASE
+				? [process.env.FRP_DOWNLOAD_BASE.replace(/\/$/, "")]
+				: []),
+			"https://ghfast.top/https://github.com",
+			"https://ghproxy.net/https://github.com",
+			"https://gh-proxy.com/https://github.com",
+			"https://github.com",
+		];
+		let lastErr: unknown;
+		for (const base of bases) {
+			try {
+				await downloadFile(`${base}/${suffix}`, archivePath);
+				lastErr = null;
+				break;
+			} catch (e) {
+				lastErr = e;
+				console.log(`[${platform}] ${base} 不可用，尝试下一个源`);
+			}
+		}
+		if (lastErr) {
+			throw new Error(
+				`所有下载源均失败: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+			);
+		}
 	} else {
-		execSync(`tar -xzf "${archivePath}" -C "${TMP_DIR}"`, { stdio: "inherit" });
+		console.log(`[${platform}] 复用已缓存归档: ${archivePath}`);
+	}
+
+	// 3. 解压（argv 数组无 shell 拼接；路径转正斜杠防 GNU tar 转义/远程主机误判）
+	console.log(`[${platform}] 解压...`);
+	const fwd = (p: string) => p.replace(/\\/g, "/");
+	try {
+		if (entry.assetSuffix.endsWith(".zip")) {
+			// Windows 用系统 bsdtar（与打包端一致，避免 PowerShell 命令串）
+			execFileSync(
+				"C:\\Windows\\System32\\tar.exe",
+				["-xf", fwd(archivePath), "-C", fwd(TMP_DIR)],
+				{ stdio: "inherit" },
+			);
+		} else {
+			execFileSync(
+				"tar",
+				["--force-local", "-xzf", fwd(archivePath), "-C", fwd(TMP_DIR)],
+				{ stdio: "inherit" },
+			);
+		}
+	} catch (e) {
+		throw new Error(
+			`解压失败 ${entry.assetSuffix}: ${e instanceof Error ? e.message : String(e)}`,
+		);
 	}
 
 	// 4. 提取 frpc 二进制 → client/dist/frp/
@@ -129,6 +166,15 @@ async function downloadPlatform(platform: string): Promise<void> {
 	fs.copyFileSync(frpsSrc, frpsDest);
 	if (!isWin) fs.chmodSync(frpsDest, 0o755);
 	console.log(`[${platform}] frps → ${frpsDest}`);
+
+	// 6. 无扩展名产物（linux 平台）额外存 .gz 包装副本：部分 Windows 开发机杀毒会删除
+	//    裸 ELF 字节序列（连 .bin 也会），gzip 包装免疫；pack-release 在打包后用其
+	//    解压内容直接追加进 zip（裸文件在磁盘只存在秒级窗口）
+	if (!entry.frpcName.endsWith(".exe")) {
+		fs.writeFileSync(`${frpcDest}.gz`, gzipSync(fs.readFileSync(frpcSrc)));
+		fs.writeFileSync(`${frpsDest}.gz`, gzipSync(fs.readFileSync(frpsSrc)));
+		console.log(`[${platform}] frpc/frps .gz 包装副本已就绪`);
+	}
 }
 
 function normalizePlatform(p: string): string {

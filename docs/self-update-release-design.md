@@ -307,8 +307,8 @@ uploaded → updating_server → updating_clients → done
 
 ### 阶段 E：打包与发版
 
-- [ ] E1 `scripts/pack-release.ts`：全平台构建 → 拍平 node_modules（pnpm deploy/复制）→ 多平台 frp → 注入版本 → 生成 manifest + zip + sha256——不适合 TDD（构建脚本，冒烟测试：产物可解压、可启动）
-- [ ] E2 CLI 发版命令：`@vcpdeck/cli release upload`（薄封装 `POST /api/releases`，打印上传/更新进度）——不适合 TDD（薄封装，冒烟测试）
+- [x] E1 `scripts/pack-release.ts`：全平台构建 → 拍平 node_modules（pnpm deploy/复制）→ 多平台 frp → 注入版本 → 生成 manifest + zip + sha256——不适合 TDD（构建脚本，冒烟测试：产物可解压、可启动） — 2026-06-15
+- [x] E2 CLI 发版命令：`@vcpdeck/cli release upload`（薄封装 `POST /api/releases/upload`，打印上传/更新进度）——不适合 TDD（薄封装，冒烟测试） — 2026-06-15
 
 ### 阶段 F：端到端验证
 

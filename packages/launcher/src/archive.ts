@@ -18,7 +18,11 @@ export async function extractArchive(
 				{ stdio: "inherit" },
 			);
 		} else {
-			execSync(`tar -xzf "${archivePath}" -C "${destDir}"`, {
+			// GNU tar 在 Windows 下把反斜杠当转义符：路径统一转正斜杠 + --force-local
+			// （--force-local 防盘符冒号被误判为远程主机）
+			const archiveForTar = archivePath.replace(/\\/g, "/");
+			const dirForTar = destDir.replace(/\\/g, "/");
+			execSync(`tar --force-local -xzf "${archiveForTar}" -C "${dirForTar}"`, {
 				stdio: "inherit",
 			});
 		}

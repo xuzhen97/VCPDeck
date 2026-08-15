@@ -34,18 +34,22 @@ type SocketLike = {
 	emit: (event: string, data: unknown) => void;
 };
 
-/** 默认 frpc 路径（相对于 Client dist 目录） */
+/** 默认 frpc 路径候选（按序尝试，支持 .bin 副本：防 Windows 开发机杀毒删除无扩展名 ELF） */
 function defaultFrpcPath(): string | null {
 	const platform = os.platform();
 	const arch = os.arch();
-	const map: Record<string, string> = {
-		"win32-x64": "frp/win-x64/frpc.exe",
-		"linux-x64": "frp/linux-x64/frpc",
-		"linux-arm64": "frp/linux-arm64/frpc",
+	const map: Record<string, string[]> = {
+		"win32-x64": ["frp/win-x64/frpc.exe"],
+		"linux-x64": ["frp/linux-x64/frpc", "frp/linux-x64/frpc.bin"],
+		"linux-arm64": ["frp/linux-arm64/frpc", "frp/linux-arm64/frpc.bin"],
 	};
-	const rel = map[`${platform}-${arch}`];
-	if (!rel) return null;
-	return path.join(__dirname, rel);
+	const rels = map[`${platform}-${arch}`];
+	if (!rels) return null;
+	for (const rel of rels) {
+		const candidate = path.join(__dirname, rel);
+		if (fs.existsSync(candidate)) return candidate;
+	}
+	return null;
 }
 
 function resolveFrpcPath(): string | null {
