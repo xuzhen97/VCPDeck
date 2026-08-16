@@ -209,7 +209,7 @@ export function connect(): Socket {
 		reconnectionDelayMax: 10_000,
 	});
 
-	// 自更新：优雅停机 + 调本机 launcher（设计文档 §8）
+	// 自更新：有界 drain + 本机 Launcher 两阶段更新
 	attachUpdateHandler({
 		socket,
 		launcher: new ClientLauncher(),
@@ -340,8 +340,8 @@ function createShellDiscoveryEnv(): ShellDiscoveryEnv {
 						try {
 							await access(candidate);
 							return candidate;
-						} catch {
-							/* 继续查找 */
+						} catch (error) {
+							void error;
 						}
 					}
 				}
@@ -359,7 +359,7 @@ function createShellDiscoveryEnv(): ShellDiscoveryEnv {
 						if (first) return first;
 					}
 				} catch {
-					/* 忽略 */
+					return null;
 				}
 			}
 			return null;

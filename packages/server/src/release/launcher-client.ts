@@ -1,5 +1,6 @@
 /**
- * 本机 launcher 控制通道 HTTP 客户端（设计文档 §6.3）。
+ * 本机 Launcher 控制通道 HTTP 客户端。
+ * 详见 docs/design/release-and-update.md。
  *
  * launcher 启动时监听 127.0.0.1 随机端口并写入 control.json：
  *   { port, token, pid }

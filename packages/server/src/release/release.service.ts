@@ -1,6 +1,6 @@
 /**
  * Release 领域服务：上传记录、状态流转、客户端状态维护、sha256 校验。
- * 详见 docs/self-update-release-design.md §7。
+ * 详见 docs/design/release-and-update.md。
  */
 import { Injectable, Inject } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
@@ -25,7 +25,7 @@ export class ReleaseError extends Error {
 	}
 }
 
-/** 状态机允许的流转（详见设计文档 §7.3） */
+/** Release 状态机允许的流转。 */
 const ALLOWED_TRANSITIONS: Record<ReleaseStatus, readonly ReleaseStatus[]> = {
 	[ReleaseStatus.UPLOADED]: [ReleaseStatus.UPDATING_SERVER, ReleaseStatus.FAILED],
 	[ReleaseStatus.UPDATING_SERVER]: [

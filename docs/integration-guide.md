@@ -9,7 +9,7 @@
 ## 1. 当前能力矩阵
 
 | 功能域 | Server | Client | Frontend | CLI | Skill | 对接结论 |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | 健康检查 | 已实现 | 不涉及 | SDK 已接入 | 骨架 | 骨架 | 可直接使用 |
 | Cookie 登录/退出 | 已实现 | 不涉及 | 已实现 | 不适用 | 不适用 | 可直接使用 |
 | Bearer Token | 已实现 | 不涉及 | Token 管理已实现 | 未实现 | 未实现 | CLI/Skill 可直接复用 SDK |
@@ -107,12 +107,16 @@ Token 仅在创建时返回一次。CLI 应保存在受限配置文件或系统�
 
 #### 公开接口
 
-只有以下接口无需认证：
+当前以下接口无需 Cookie/Bearer：
 
 - `GET /api/health`
+- `GET /api/status`
 - `POST /api/auth/login`
+- `GET /api/releases/:version/file`
 - 已签名的 `PUT /api/storage/upload/:key`
 - 已签名的 `GET /api/storage/download/:key`
+
+公开不等于无约束：Release 依赖 SHA-256，Storage 依赖签名/过期时间，部署仍需网络 ACL、请求限制和日志脱敏。
 
 其余 REST API 默认都需要 Cookie 或 Bearer Token。
 
@@ -181,7 +185,7 @@ NestJS 成功创建资源通常返回 `201`，普通查询和更新通常返回 
 ### 3.1 状态
 
 | 状态 | 含义 | 是否终态 |
-|---|---|---|
+| --- | --- | --- |
 | `pending` | 已创建，等待调度槽 | 否 |
 | `running` | 已下发给 Client | 否 |
 | `waiting_input` | 为未来交互任务预留 | 否 |
@@ -412,7 +416,7 @@ Frontend 应显示 Token label 并确认；CLI 要求显式 `--force`；Skill �
 ### 5.8 身份管理（admin）
 
 | 方法 | 路径 | 请求 | 响应 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `GET` | `/api/identities` | 无 | `IdentityInfo[]` |
 | `POST` | `/api/identities` | `{username,password,displayName}` | 新建的 `IdentityInfo` |
 | `POST` | `/api/identities/:id/disable` | 无 | `{ok:true}` |
@@ -425,6 +429,8 @@ Frontend 应显示 Token label 并确认；CLI 要求显式 `--force`；Skill �
 - `packages/server/src/auth/auth.controller.ts`
 - `packages/server/src/auth/auth.service.ts`
 - `packages/server/src/identity/identity.controller.ts`
+
+完整 Session、Credential、Actor、admin 和撤销边界见 [`docs/design/identity-and-authentication.md`](./design/identity-and-authentication.md)。
 
 ---
 
@@ -460,7 +466,7 @@ Frontend 应显示 Token label 并确认；CLI 要求显式 `--force`；Skill �
 调用端应先根据 capability 控制功能入口：
 
 | 操作 | capability |
-|---|---|
+| --- | --- |
 | 命令/脚本 | `exec` |
 | list/stat/readText/export | `file.read` |
 | writeText/mkdir/delete/move/import | `file.write` |
@@ -493,7 +499,7 @@ Frontend 应显示 Token label 并确认；CLI 要求显式 `--force`；Skill �
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `clientId` | string | 是 | 在线 Client ID |
 | `type` | string | 是 | Job 类型；不要发送未知类型 |
 | `payload` | object | 是 | 类型对应参数 |
@@ -786,7 +792,7 @@ Client 先写临时文件再 rename。父目录必须已存在。该操作会替
 ### 7.8 文件错误码
 
 | code | 含义 | 建议 |
-|---|---|---|
+| --- | --- | --- |
 | `PATH_NOT_FOUND` | 路径不存在 | 允许用户刷新或改路径后重试 |
 | `PATH_NOT_ALLOWED` | path 逃逸给定 root | 不自动重试 |
 | `PATH_CONFLICT` | 非空目录或目标已存在 | 修改显式参数后再操作 |
@@ -1091,8 +1097,9 @@ OAuth 会话只保存在 Server 内存中，Server 重启后必须重新 start�
 
 - Client 在线且 capabilities 含 `frp`；
 - Client 可找到匹配平台的 frpc；
-- Server 已配置 `FRP_PUBLIC_HOST`、`FRPS_BIND_PORT`、`FRPS_TOKEN`；
-- 端口范围默认为 `20000..21000`。
+- Server 已在 SQLite 配置并 probe 一个 FrpsInstance；数据库为空的首次启动才从 `FRP_PUBLIC_HOST`、`FRPS_BIND_PORT`、`FRPS_TOKEN` 等环境变量迁移；
+- 端口范围默认 `20000..21000`；
+- 同一 Client 当前只有一个 frpc runtime，所有活动映射必须使用同一个 FrpsInstance。
 
 ### 10.1 创建映射
 
@@ -1105,12 +1112,13 @@ OAuth 会话只保存在 Server 内存中，Server 重启后必须重新 start�
   "proxyType": "tcp",
   "localIp": "127.0.0.1",
   "localPort": 3000,
-  "remotePort": 20080
+  "remotePort": 20080,
+  "frpsInstanceId": "frps_12345678"
 }
 ```
 
 | 字段 | 必填 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `clientId` | 是 | 在线且支持 FRP 的 Client |
 | `name` | 是 | frpc proxy 名称 |
 | `proxyType` | 是 | `tcp`、`http`、`https` |
@@ -1118,6 +1126,7 @@ OAuth 会话只保存在 Server 内存中，Server 重启后必须重新 start�
 | `localPort` | 是 | 本地服务端口 |
 | `remotePort` | 否 | 首选公网端口，省略则自动分配 |
 | `customDomain` | 否 | HTTP/HTTPS 自定义域名 |
+| `frpsInstanceId` | 否 | 省略时使用逻辑默认实例；同一 Client 当前不要跨实例 |
 
 响应立即返回，不等待 frpc 启动：
 
@@ -1147,7 +1156,7 @@ GET /api/frp/mappings/:id
   → error：失败
 ```
 
-建议沿用 1s、2s、5s 间隔，并设置调用端等待上限。`inactive` 也可能表示 Client 后续断线。
+建议沿用 1s、2s、5s 间隔，并设置调用端等待上限。`inactive` 也可能表示 Client 后续断线；`active` 当前只表示 frpc spawn 未同步失败，不证明 FRPS 注册、本地服务或公网可达。
 
 ### 10.2 列表和详情
 
@@ -1157,7 +1166,7 @@ GET /api/frp/mappings?clientId=<clientId>
 GET /api/frp/mappings/:id
 ```
 
-列表返回 `FrpMappingInfo[]`；详情返回单个映射。当前不存在时详情使用 `400`，不是 `404`。
+列表返回 `PaginatedResult<FrpMappingInfo>`，支持 `page/pageSize` 且 pageSize 最大 100；详情返回单个映射。当前不存在时详情使用 `400`，不是 `404`。
 
 ### 10.3 删除映射
 
@@ -1175,7 +1184,7 @@ GET /api/frp/mappings/:id
 
 - Frontend/CLI/Skill 必须把结果描述为“已提交删除并移除 Server 映射记录”；
 - 不应宣称远端 frpc 已确认清理；
-- 关键映射删除后应人工检查目标端口或 Client frpc 状态。
+- 关键映射删除后应人工检查目标端口、FRPS Dashboard 或 Client frpc 状态。Client 重启也不会按 SQLite 自动恢复映射。完整当前边界见 [`docs/design/frp.md`](./design/frp.md)。
 
 实现：
 
@@ -1308,7 +1317,7 @@ bearerToken
 ### 13.1 意图映射
 
 | 用户意图 | CLI/API 行为 |
-|---|---|
+| --- | --- |
 | 查看可用机器 | `client list` |
 | 在某机器执行命令 | 选 Client → capability 检查 → `exec` → 轮询 |
 | 读取/写入远程文件 | 选 Client/root → 对应 file Job |
@@ -1346,7 +1355,7 @@ bearerToken
 ## 14. 错误处理速查
 
 | 场景 | 调用端行为 |
-|---|---|
+| --- | --- |
 | `401 AUTH_REQUIRED` | Frontend 跳登录；CLI/Skill 提示配置或更新 Token |
 | `403 FORBIDDEN` | 提示需要 admin，不重试 |
 | `400 Client ... offline` | 刷新 Client 列表，保留用户输入 |
@@ -1379,20 +1388,20 @@ bearerToken
 9. **Client REST 只列在线机器**：没有离线历史、详情、指标或分页；
 10. **Job 列表固定最近 100 条**：没有分页、筛选、删除和输出检索；
 11. **错误响应不统一**：部分接口没有稳定 code；
-12. **审计不完整**：通用 Job 记录 actor，但 FRP 内部 Job 直接创建，缺少创建者字段；
+12. **审计不完整**：通用 Job 记录 actor，但 FRP 内部 Job 直接创建，缺少创建者字段；FRPS 凭据还会明文进入实例响应、Job payload 和 Client TOML；
 13. **未知 Job 类型未被 Server 拒绝**：调用端必须使用本文确认的类型，Server 后续应加 allowlist 校验；
 14. **无业务授权与数据隔离**：普通身份可调用全部远程操作接口，Job 可跨身份查询；
 15. **认证业务错误映射不正确**：登录和个人资料更新的预期 401/409 可能返回 500；
 16. **Client PSK 有固定开发默认值**：生产或共享网络环境必须显式配置唯一 PSK。
 
-后续扩展优先级建议：先修安全和数据正确性（路径、凭证脱敏、import、FRP delete），再补统一错误模型和分页，最后根据实际需求增加 `/app` 实时事件与输出 spool。
+后续扩展优先级建议：先修安全和数据正确性（路径、凭证脱敏、import、FRP 单 Client 多实例/恢复/delete），再补统一错误模型和分页，最后根据实际需求增加 `/app` 实时事件与输出 spool。
 
 ---
 
 ## 16. 实现索引
 
 | 领域 | 代码位置 |
-|---|---|
+| --- | --- |
 | 共享类型、状态、错误码 | `packages/shared/src/index.ts` |
 | REST 健康、Client、Job | `packages/server/src/events/events.controller.ts` |
 | Client Socket.IO 生命周期 | `packages/server/src/events/client.gateway.ts` |
@@ -1417,25 +1426,23 @@ bearerToken
 
 ## 11. 交互式终端（Terminal Tab）
 
-机器工作区「终端」Tab 提供真实交互式 PTY（Windows ConPTY / Linux PTY），
-支持多会话、刷新恢复、单写多读与最小审计。详细设计与验收见
-`docs/interactive-terminal-tab-design.md` 与 `docs/verification/interactive-terminal-windows.md`。
+机器工作区「终端」Tab 提供基于 node-pty 的真实交互式 PTY，支持多会话、重新 attach、单写多读与最小审计。当前组件、状态和已知恢复偏移见 [`docs/design/remote-terminal.md`](./design/remote-terminal.md)，协议和排障分别见 [`docs/protocols.md`](./protocols.md) 与 [`docs/operations.md`](./operations.md)。平台支持范围必须以当前兼容矩阵和持续真实验收为准，不能由一次性实施清单推断。
 
 ### 使用方式
 
 1. 进入 `/machines/:clientId/terminal`，点击「新建」选择 Client 实际可用的 Shell
    （Windows：pwsh/powershell/cmd；Linux：$SHELL/bash/zsh/sh，首个可用项为默认）。
-2. 终端支持方向键、Tab 补全、命令历史、Ctrl+C、中文输入输出与复制粘贴；
-   窗口尺寸自动同步（ResizeObserver + Fit）。
-3. 刷新页面或切换标签后重新打开，会恢复同一 PTY 进程（快照 + 增量回放）。
+2. 终端按真实 PTY 语义传递方向键、Tab、Ctrl+C、文本和 resize；中文、全屏 TUI、复制粘贴及平台 Shell 行为需在目标 OS/浏览器组合中实测。
+3. 刷新页面或切换标签后重新打开时会尝试重新 attach 同一 PTY，并通过 snapshot + 增量恢复画面；当前 snapshot/output seq 和上游 gap 仍有已知可靠性偏移。
 4. 同一终端可被多个浏览器查看；只有最先打开者（operator）可输入，
    其他页面只读。操作者断开后有 30 秒重连保护，保护期后只读页面可「接管」。
-5. 所有浏览器离开后会话保留 30 分钟，到期自动结束；也可随时手动关闭。
+5. 最后一个 attachment 离开后，Client 会启动 30 分钟内存保留计时；从未 attach 和本地 expired 向 Server 收敛仍有已知缺口，也可随时手动关闭。
 6. 「记录」按钮查看最小审计（仅生命周期事件，不保存输入输出）。
 
 ### 限制与安全
 
 - 终端继承远程 Client OS 用户权限，**不是沙箱**，勿输入敏感凭据。
 - 每台机器最多 5 个活动终端。
-- Client/机器重启后旧会话标记为「已中断」，不会伪恢复。
+- Client/机器重启后旧会话应标记为「已中断」，不会伪恢复；当前 Server 按状态报告集合对账，generationId 尚未实际参与分支判断。
+- SQLite status 不是 PTY 实时权威，排障应结合 Client 状态和 attach/snapshot。
 - REST API：`/api/clients/:clientId/terminals*`（SDK `sdk.terminals`）。

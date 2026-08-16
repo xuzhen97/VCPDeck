@@ -1,5 +1,5 @@
 /**
- * 更新执行器（设计文档 §6.5 状态机）。
+ * Launcher 两阶段更新执行器（详见 docs/design/release-and-update.md）。
  * - prepare：下载 → sha256 校验 → 解压到 apps/<version>/（服务进程仍在运行）
  * - apply：停旧进程 → 切换 current → 启动 → 探活 → 失败自动回退旧版本
  */

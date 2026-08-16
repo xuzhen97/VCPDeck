@@ -3,7 +3,7 @@
  *
  * 与 PiRequestBroker 同模式：不直接依赖 ClientGateway（避免 ReleaseModule ↔
  * EventsModule provider 循环），由 ClientGateway.afterInit 将发送函数绑定进来。
- * 设计文档 §7.3②：客户端更新指令经 room（clientId）下发。
+ * Client 更新指令经 room（clientId）下发；详见 docs/design/release-and-update.md。
  */
 import { Inject, Injectable } from "@nestjs/common";
 import type { ServerShutdownNotice, UpdateRequest } from "@vcpdeck/shared";

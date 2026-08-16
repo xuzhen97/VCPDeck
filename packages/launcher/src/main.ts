@@ -1,6 +1,6 @@
 /**
  * launcher 入口：加载配置并启动守护进程。
- * 部署后冻结，不自更新（设计文档 §6）。
+ * 部署后冻结，不参与业务构件自动更新。详见 docs/design/release-and-update.md。
  */
 import { Daemon, loadConfigFromEnv } from "./daemon.js";
 

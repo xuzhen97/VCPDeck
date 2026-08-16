@@ -1,6 +1,6 @@
 /**
  * 状态端点：GET /api/status 返回服务端版本与当前活动 release。
- * 供 launcher 健康探活与前端展示（设计文档 §7.2）。
+ * 供 Launcher 健康探活与前端展示；详见 docs/design/release-and-update.md。
  */
 import { Controller, Get, Inject } from "@nestjs/common";
 import { VERSION } from "@vcpdeck/shared";

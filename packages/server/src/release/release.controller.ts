@@ -1,7 +1,7 @@
 /**
  * Release REST API：更新包上传、列表、下载。
  * 上传采用 raw stream（POST body 为 zip 字节，version/sha256 走 query），
- * 避免引入 multipart/multer 依赖。详见 docs/self-update-release-design.md §7.2。
+ * 避免引入 multipart/multer 依赖。详见 docs/design/release-and-update.md。
  */
 import {
 	BadRequestException,

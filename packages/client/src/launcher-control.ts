@@ -1,6 +1,7 @@
 /**
  * 本机 launcher 控制通道客户端（客户端侧，与服务端 release/launcher-client.ts 同协议）。
- * 设计文档 §6.3：launcher 监听 127.0.0.1 + token，写 control.json。
+ * Launcher 监听 127.0.0.1 + token，并写入 control.json。
+ * 详见 docs/design/release-and-update.md。
  * - prepare：launcher 下载/校验/解压新版本（客户端进程仍在运行）
  * - apply：launcher 停掉本进程并切换版本（响应无法送达属正常，视为成功）
  */

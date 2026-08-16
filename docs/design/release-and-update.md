@@ -1,0 +1,380 @@
+# Release 与自更新子系统设计
+
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-15｜适用版本：当前 `main`
+
+本文描述当前已经落地的 Release、Server/Client 更新和 Launcher 进程守护模型。长期决策理由见 [ADR-0003](../adr/0003-separate-launcher-for-updates.md)；构件生成、首次部署和回滚操作见 [`deployment.md`](../deployment.md)；兼容要求见 [`compatibility.md`](../compatibility.md)；故障处置见 [`operations.md`](../operations.md)。
+
+当前核心实现已经落地，Launcher 局部 smoke 已覆盖 prepare/apply、探活和失败回退，但完整的 Server → Launcher → 多 Client 跨平台发布演练仍是发布门禁，不能把“已有代码”视为“已完成生产验收”。
+
+## 1. 目标与非目标
+
+### 1.1 目标
+
+- Server 统一接收、保存和编排 Server/Client Release；
+- 业务进程不原地替换自身，由独立 Launcher 执行下载、切换、探活和回退；
+- Server 更新成功后，再逐台更新在线 Client；
+- 离线或晚到 Client 在后续注册时对齐最近目标版本；
+- 更新前停止接受新 Job，并在有界时间内等待活跃 Job；
+- 更新包在上传和下载后都进行 SHA-256 完整性校验；
+- Linux 与 Windows 使用各自可行的 current 指针方式。
+
+### 1.2 当前非目标
+
+- Launcher 自动更新；
+- 灰度、分组、暂停/恢复和维护窗口；
+- 多 Server 协调和共享连接路由；
+- Frontend 静态资源的自动部署；
+- 数据库 schema 自动回滚；
+- 发布者数字签名；
+- 自动安装 systemd、Windows Service 或 Launcher；
+- 对任意历史 Server/Client 版本提供兼容承诺。
+
+## 2. 组件与职责
+
+| 组件 | 当前职责 |
+| --- | --- |
+| `scripts/pack-release.ts` | 注入版本、构建 Shared/Server/Client、组装依赖和 FRP、生成 manifest、压缩并计算 archive SHA-256 |
+| CLI `release upload` | 登录、从文件名取得版本、计算 SHA-256、上传原始字节流 |
+| `ReleaseController` | Release 列表、构件下载、上传校验和自动触发编排 |
+| `ReleaseService` | Release 持久化、状态转换、Client 更新明细和 SHA-256 复核 |
+| `ReleaseOrchestrator` | Server 更新、启动后恢复、在线 Client 逐台更新和后续补更 |
+| `ServerDrain` / `JobScheduler` | 更新时关闭新 Job 派发闸门并等待活跃 Job 收敛 |
+| Client update handler | Launcher prepare、拒绝新 Job、等待 executor 跟踪的活动 Job、ready/failed 上报和 apply |
+| Launcher control server | 绑定 loopback，提供带随机 Token 的 `/prepare`、`/apply` |
+| Launcher `Updater` | 下载、SHA-256 校验、解压、current 切换、探活和失败回退 |
+| Launcher `Daemon` | 启动/停止业务进程、崩溃退避、Node 运行时、preStart 和探活策略 |
+| `VersionStore` | Linux symlink 或 Windows state 文件形式的 current 指针 |
+
+Launcher 是稳定的外部生命周期管理器。Server 负责全局控制面，Client 只负责本机更新配合；任何一方都不能在没有 Launcher 的情况下可靠完成自替换和失败回退。
+
+## 3. 数据与状态权威
+
+| 信息 | 权威位置 | 说明 |
+| --- | --- | --- |
+| Release 元数据和阶段 | SQLite `Release` | Server 重启后恢复编排的依据 |
+| 单 Client 更新结果 | `Release.clientStates` JSON | `clientId → {state,reason?,at}` |
+| Release archive | `VCPDECK_RELEASES_DIR`，默认 `./data/releases` | 必须位于应用版本目录之外 |
+| 当前应用版本 | Launcher `apps/current` 或 `apps/state.json` | Linux 使用 symlink；Windows 使用 state 文件 |
+| 已准备目标版本 | Launcher 进程内 `pendingVersion` | Launcher 重启后不保留 |
+| 运行中的业务进程 | Launcher `Daemon` | Server 数据库不能证明进程仍健康 |
+| Server/Client 构建版本 | `@vcpdeck/shared` 的 `VERSION` | 发布时注入；开发构建为 `0.0.0` |
+| archive SHA-256 | 上传请求、`Release.sha256`、`UpdateRequest.sha256` | 当前 manifest 内的 `sha256` 留空，不是权威值 |
+
+业务数据、数据库、Storage 和 Release archive 必须存放在 Launcher `apps/<version>/` 之外。current 切换只改变应用构件，不迁移或恢复持久数据。
+
+## 4. 构件与 manifest
+
+打包脚本组装一个同时包含 Server 和 Client 的 archive：
+
+```text
+manifest.json
+server/
+  dist/
+  generated/
+  prisma/schema.prisma
+  node_modules/
+client/
+  dist/
+  node_modules/
+```
+
+当前 manifest 的有效结构为：
+
+```json
+{
+  "version": "1.2.0",
+  "nodeVersion": ">=24",
+  "launcherMinVersion": "0.0.0",
+  "sha256": "",
+  "artifacts": {
+    "server": {
+      "dir": "server",
+      "entry": "dist/main.js",
+      "preStart": "prisma db push"
+    },
+    "client": {
+      "dir": "client",
+      "entry": "dist/index.js"
+    }
+  }
+}
+```
+
+必须注意：
+
+- archive 的 SHA-256 在压缩完成后计算，无法可靠地自包含在同一个 archive 内；
+- 当前 `manifest.sha256` 留空，实际校验值由上传参数进入 `Release.sha256`，再通过更新请求交给 Launcher；
+- `launcherMinVersion` 当前固定为 `0.0.0`，Launcher 尚未执行最低版本校验；
+- `preStart` 是受信任构件携带的 shell 命令，当前仅 Server 使用；
+- Frontend 不在该 archive 中，必须独立构建、部署并与 Server 版本协调。
+
+### 4.1 当前 archive 格式缺口
+
+打包脚本在 Windows 生成 `.zip`，在 Linux/macOS 生成 `.tar.gz`；但 Server 将上传构件统一保存为 `vcpdeck-<version>.zip`，Launcher 也下载到 `.zip` 临时路径，并按扩展名选择解压工具。
+
+因此当前可靠路径是经过验证的 Windows zip 路径；不能声称 `.tar.gz` 已完成全链路支持。发布流程必须在修复格式传递或统一 archive 格式后，分别执行 Windows/Linux 真实演练。
+
+## 5. Release 状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> uploaded: 上传并登记
+    uploaded --> updating_server: 编排开始
+    updating_server --> updating_clients: 新 Server 版本匹配并恢复
+    updating_clients --> done: 在线 Client 阶段结束
+    uploaded --> failed: 启动编排失败
+    updating_server --> failed: prepare/drain/apply/版本恢复失败
+    updating_clients --> failed: 编排器阶段失败
+    done --> [*]
+    failed --> [*]
+```
+
+状态转换由 `ReleaseService.transitionStatus()` 使用当前状态条件更新，防止同一 Release 被并发推进。`done` 和 `failed` 是终态。
+
+Client 明细状态为：
+
+```text
+pending → updating → done | failed
+```
+
+当前语义：
+
+- Server 更新成功后才进入 Client 阶段；
+- 在线 Client 串行更新，每台等待重连、明确失败或超时；
+- 单台 Client 失败不会阻止后续 Client，Release 最终仍可为 `done`；
+- 失败明细保留在 `clientStates`；
+- Client 更新判断使用“版本是否等于目标版本”，不是 SemVer 小于比较；版本更高但不相等的 Client 也可能被拉回目标版本；
+- `failed` Client 当前不会自动无限重试；
+- 离线 Client 不阻塞 Release 进入 `done`，后续注册时再按最近的 `updating_clients/done` 目标补更。
+
+## 6. Server 更新流程
+
+```mermaid
+sequenceDiagram
+    participant O as Operator/CLI
+    participant S as Old Server
+    participant DB as SQLite
+    participant L as Server Launcher
+    participant N as New Server
+
+    O->>S: POST release archive + version + sha256
+    S->>S: 流式计算并复核 SHA-256
+    S->>DB: 创建 uploaded Release
+    S-->>O: 返回 Release
+    S->>DB: uploaded → updating_server
+    S->>L: POST /prepare
+    L->>L: 下载、校验、解压
+    S->>S: 关闭新 Job 派发并等待活跃 Job
+    S->>S: 广播 server:shutdown
+    S->>L: POST /apply
+    L->>L: preStart → 停旧进程 → 切换 current
+    L->>N: 启动新 Server
+    L->>N: GET /api/status，版本必须匹配
+    alt 探活成功
+        N->>DB: 恢复 updating_server
+        N->>DB: → updating_clients
+    else 探活失败
+        L->>L: 切回上一 current 并启动旧版本
+        S->>DB: 恢复后将 Release 标为 failed
+    end
+```
+
+关键不变量：
+
+1. `/prepare` 在业务进程仍运行时完成下载、SHA-256 校验和解压；
+2. prepare 成功后才进入 drain，避免在长下载期间提前停止派发；
+3. `ServerDrain` 只等待 `running/waiting_input` Job，不等待 Terminal 或 Pi 真实进程完全退出；
+4. 新 Server 启动后，从 SQLite 中的活动 Release 恢复，而不是依赖旧进程内存；
+5. `/api/status.serverVersion` 必须与目标版本完全相同，才进入 Client 阶段；
+6. Launcher 回退应用版本，不回退数据库和其他持久数据。
+
+当前 `preStart` 在停止旧 Server 之前执行。默认 `prisma db push` 可能与旧 Server 同时访问数据库，且其 schema 变化不会在应用回退时自动逆转；生产发布不能把该默认钩子当作安全迁移策略。
+
+## 7. Client 更新流程
+
+```mermaid
+sequenceDiagram
+    participant S as Server
+    participant C as Client
+    participant L as Client Launcher
+
+    S->>C: update:request(version,url,sha256,timeout)
+    C->>C: draining=true，拒绝新 Job
+    C->>L: POST /prepare
+    L->>L: 下载、校验、解压
+    C->>C: 等待 executor 跟踪的 running Job（有超时）
+    C->>S: update:ready
+    C->>L: POST /apply
+    L->>L: 停 Client、切换、启动、稳定窗口探活
+    alt 启动稳定
+        C->>S: 重连并注册目标版本
+        S->>S: clientStates[clientId]=done
+    else 失败回退或超时
+        C->>S: update:failed 或重连版本不符
+        S->>S: clientStates[clientId]=failed
+    end
+```
+
+Client 收到有效更新请求后先设置本地 drain，再调用 prepare，因此下载和解压期间 dispatcher 已拒绝新 Job。等待达到上限后，Client 仍会继续 ready/apply，所以它是“有界尽力等待”，不是所有任务完成的强保证。
+
+当前 drain 查询复用 `executor.ts` 的活动 Job 集合，主要覆盖该 executor 跟踪的命令进程；它不构成对 File transfer、Terminal PTY 或 Pi Worker 的统一运行态屏障。因此即使查询为空，也不能推断 Client 上所有远程活动都已安全收敛。
+
+Client 更新会停止整个 Client 进程：
+
+- 未完成的普通子进程可能被终止；
+- PTY 不能由 Server 恢复，重连后应收敛为 `interrupted`；
+- Pi Worker/run 可能中断，必须按 Session/Run 身份重新对账；
+- Server 中存在元数据不代表 Client 运行态仍可恢复。
+
+Client Launcher 的健康判定是新 Client 进程连续存活约 3 秒，不验证其已成功注册 Server 或完成能力探测。Server 以目标版本重连注册作为该 Client 更新的最终成功信号。
+
+## 8. Launcher 模型
+
+### 8.1 目录和 current
+
+```text
+<VCPDECK_APP_DIR>/
+├── control.json
+├── node/
+└── apps/
+    ├── current -> <version>       # 非 Windows
+    ├── state.json                 # Windows: {"current":"<version>"}
+    ├── <current-version>/
+    └── <previous-version>/
+```
+
+Launcher 首次启动前必须已经存在可启动的 current 版本。仓库当前没有完整安装器，不会自动准备初始版本和系统服务。
+
+Launcher 也没有自动旧版本保留/清理策略。失败回退只有在上一版本目录仍存在且可启动时才有效；运维清理不得删除 current 或预期回退版本。
+
+### 8.2 本地控制通道
+
+Launcher 启动时：
+
+1. 在 `127.0.0.1` 随机端口监听；
+2. 生成随机 Token；
+3. 写入 `{port,token,pid}` 到 `control.json`；
+4. 将端口和 Token 通过环境变量传给被守护进程。
+
+业务进程调用：
+
+| 请求 | 语义 |
+| --- | --- |
+| `POST /prepare` | 下载、SHA-256 校验并解压指定版本，记录内存 `pendingVersion` |
+| `POST /apply` | 对 pending 版本执行 preStart、停止、切换、启动、探活和回退 |
+
+两者都要求 `x-launcher-token`。`control.json` 是本机高敏感能力文件，应只允许 Launcher 和同一运行账户读取。Launcher 重启后 `pendingVersion` 丢失，必须重新 prepare。
+
+### 8.3 Node 运行时
+
+启动版本时 Launcher 按 manifest `nodeVersion`：
+
+1. 优先使用满足约束的系统 Node；
+2. 否则选择缓存中满足约束的最高版本；
+3. 否则从 Node 发行索引选择并下载满足约束的最高版本。
+
+当前约束解析只支持类似 `>=24` 的主版本下限，不是完整 SemVer range 实现。下载的 Node archive 当前没有独立发布者签名校验。
+
+### 8.4 守护与回退
+
+- 业务进程异常退出后按指数退避重启，连续超过上限则等待人工处理或新版本；
+- Server 通过公开 `/api/status` 探活并校验版本；
+- Client 通过短稳定窗口判断是否秒退；
+- 新版本探活失败时切回 previous current 并重新启动；
+- 如果没有 previous current，只能报告失败；
+- 回退不还原数据库、Storage、Release 状态或外部副作用。
+
+## 9. 完整性、安全和信任边界
+
+当前构件安全模型是“可信操作者 + SHA-256 完整性”，不是完整的软件供应链签名：
+
+- Release 上传受全局身份认证保护，但当前没有额外 admin-only 检查；
+- 构件下载和 `/api/status` 是公开端点；
+- Server 上传时重新计算 SHA-256；
+- Launcher 下载后再次计算 SHA-256；
+- SHA-256 能检测内容不一致，不能证明发布者身份；
+- Launcher 控制通道依赖 loopback 和随机 Token；
+- 更新 URL 只接受带主机名的 HTTP/HTTPS；
+- archive、manifest 和 `preStart` 都属于高信任输入，只有可信发布者可以上传；
+- 当前没有独立 archive 条目路径穿越预检，不能接收不可信构件；
+- Token、Cookie、签名 URL、完整 archive 内容和 preStart 输出不得进入普通日志。
+
+增加 Ed25519 等发布者签名、固定信任公钥和密钥轮换前，不能把自动更新描述为对不可信发布链路具有来源认证。
+
+## 10. 数据库与回滚
+
+Launcher 的回退单位是应用版本目录，不是整个系统状态。涉及数据库变化时必须遵守：
+
+- 发布前备份 SQLite、Storage 和 Release archive；
+- 不能把开发用 `prisma db push --accept-data-loss` 当作生产迁移方案；
+- schema 变化采用 expand → migrate → contract，使旧 Server 在回退窗口内仍能读取；
+- preStart 成功但新 Server 探活失败时，数据库变化仍然存在；
+- 若旧 Server 已不能读取新 schema，必须恢复与旧应用匹配的数据备份，而不是只切 current；
+- 回滚后核对 Job、Release、File 和外部 Provider 状态，避免把窗口内副作用重复执行。
+
+## 11. 故障与恢复边界
+
+| 故障 | 当前结果 | 恢复方式 |
+| --- | --- | --- |
+| Launcher/control.json 不存在或 Token 无效 | prepare/apply 失败，Release 进入 failed 或 Client 上报 failed | 恢复 Launcher 与文件权限后重新发布/补更 |
+| 下载或 SHA-256 校验失败 | 不切换 current | 核对 archive、Release.sha256、网络和磁盘 |
+| 解压失败 | 目标版本可能留下不完整目录 | 删除不完整版本目录后重新 prepare |
+| 目标版本目录已存在 | `prepare` 直接跳过下载和校验 | 人工确认目录完整可信；异常时先删除再 prepare |
+| preStart 失败 | 不进入 current 切换，旧进程通常仍运行 | 修复迁移/权限；核对是否已有部分 DB 副作用 |
+| Server drain 超时 | Release 标为 failed，但 drain 闸门当前不会自动解除 | 检查活跃 Job；当前通常需重启 Server 恢复派发 |
+| 新 Server 探活失败 | Launcher 尝试回退 previous current | 确认旧 Server 与当前 DB 兼容 |
+| Client drain 超时 | 继续 apply，未完成运行态可能被终止 | 重连后对账 Job/Terminal/Pi，不伪造成功 |
+| Client 重连版本不符 | Client 标记 failed | 检查 Launcher 日志和 previous 回退原因 |
+| Client 离线 | 不阻塞 Release done | 后续注册时补更 |
+| 上传时已有活动 Release | 新上传记录可能停留 `uploaded` | 等活动 Release 完成后人工核对并重新触发/重新发布 |
+| 重复版本上传 | 当前文件移动发生在 DB 重复检查前，存在覆盖既有 archive 的风险 | 不复用版本号；核对 archive SHA 和 Release 记录 |
+| 非 Windows archive | 扩展名和解压器可能不匹配 | 当前不要声称支持；先修复格式协议并做真实演练 |
+| 应用回退但 DB 已升级 | 旧应用可能无法启动或错误读写 | 恢复兼容备份或部署兼容版本 |
+
+故障恢复必须以 SQLite Release 状态、Launcher current、实际进程版本和 archive SHA 四者共同核对，不能只看单一日志或 HTTP 成功响应。
+
+## 12. 测试与发布门禁
+
+最低覆盖：
+
+- Shared update 类型和事件；
+- Release 状态合法/非法转换和并发条件更新；
+- 上传 SHA 不匹配、重复版本、构件缺失和认证；
+- Launcher `/prepare`、`/apply`、Token、解压和 URL 校验；
+- Linux symlink 与 Windows state 指针切换；
+- system/cache/download Node 选择；
+- Server drain、恢复编排和版本不符回退；
+- Client drain、超时、拒绝新 Job、ready/failed 和重连；
+- 多 Client 串行、单机失败继续和离线补更；
+- archive 路径穿越、异常 manifest 和危险 preStart；
+- 数据库升级后应用回退；
+- Windows/Linux 真实构件从上传到 Server/Client 更新的全链路演练。
+
+详细命令和发布验收见 [`testing.md`](../testing.md)。当前 `scripts/smoke-launcher.cjs` 只证明 Launcher 局部流程，不替代真实 Server/Client 和数据库升级演练。
+
+## 13. 扩展规则与已知缺口
+
+以下变化会改变长期边界，应先评估 ADR、兼容和迁移：
+
+- Launcher 自更新或控制协议破坏性变化；
+- 多 Server、高可用 Release 编排；
+- 灰度、分组或人工审批；
+- 将 Frontend 纳入统一 Release；
+- 更换 archive 格式或 manifest 版本；
+- 发布者数字签名和信任根；
+- 自动数据库迁移/回滚；
+- 允许 N-1 Client 长期兼容。
+
+当前优先缺口：
+
+1. 统一并验证跨平台 archive 格式；
+2. 实现 `launcherMinVersion` 强制校验；
+3. 建立 Launcher 初始安装和系统服务流程；
+4. 增加构件发布者数字签名；
+5. 修复 Server drain 失败后的闸门恢复；
+6. 防止重复版本覆盖 archive，并处理活动 Release 期间的新上传；
+7. 对 archive 条目和 manifest 做严格运行时验证；
+8. 完成 Server 重启窗口 Job 对账和跨平台全链路 Release E2E；
+9. 建立可回退的生产数据库迁移流程。
+
+未实现事项统一进入 [`roadmap.md`](../roadmap.md) 或 Issue；本文只在其影响当前安全使用方式时保留已知缺口。

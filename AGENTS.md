@@ -2,20 +2,33 @@
 
 ## 项目概述
 
-VCPDeck 是一个个人 AI 协作驾驶台，当前阶段实现了**远程机器管理与命令执行**的核心闭环：
+VCPDeck 是一个个人 AI 协作驾驶台，当前阶段已形成远程机器管理、命令与文件操作、交互式终端、远程 Pi、FRP 和自更新的核心闭环：
 
-- Server（NestJS 网关）— WebSocket + REST API，管理客户端连接、任务调度、状态追踪
-- Client（Node.js 代理）— 部署在目标机器上，注册、心跳、执行命令、上报结果
-- Frontend（React + Vite）— 驾驶台界面（骨架阶段）
-- CLI — 命令行工具（骨架阶段）
+- Server（NestJS 网关）— REST、Socket.IO、SSE、任务调度和 Prisma 持久化
+- Client（Node.js 代理）— 部署在目标机器，执行命令、文件、PTY、Pi 和 frpc
+- Frontend（React + Vite）— 身份认证、机器、Job、文件、终端、Pi、FRP 和发布界面
+- SDK — Browser/Node.js 共用的类型安全 REST 客户端
+- CLI — 当前提供发布包上传命令和 Pi Skill 单文件入口
+- Launcher — 守护并更新 Server/Client，负责探活和失败回退
 
-事实来源：`README.md`（定位与愿景）、`docs/`（设计文档）、代码本身。
+事实来源：当前代码、`packages/shared/src/`、Prisma schema 和配置读取逻辑决定实际行为；有效 Accepted ADR 解释长期决策；Current 文档解释当前边界。文档治理见 `docs/documentation-governance.md`。
+
+## 文档维护
+
+- 开发前阅读 `docs/index.md`、相关 Current 文档和 Accepted ADR。
+- 判断当前行为时以代码、Shared、Prisma 和配置读取逻辑核验，不把规划或归档材料当作现状。
+- 代码、ADR 与 Current 文档冲突时必须停止猜测并报告，由维护者确认修复实现还是用新 ADR 替代旧决策。
+- 运行行为变化时，在同一变更中更新对应 Current 文档；重大长期取舍先写 ADR。
+- 未实现方向只进入 `docs/roadmap.md` 或 Issue，不能写成 README/Current 的当前能力。
+- 用户或运维可感知变化更新 `CHANGELOG.md`。
+- 一次性过程材料在有效知识收敛后删除；只有确有历史价值的失效材料才进入 `docs/archive/`。
+- 完整分类、状态、生命周期、归档和检查规则见 `docs/documentation-governance.md`。
 
 ## 构建与运行命令
 
 - `pnpm install` — 安装依赖
 - `pnpm build` — 全量构建（所有包）
-- `pnpm dev` — 并行启动所有包的 dev 模式
+- `pnpm dev` — 启动 Shared watch、Server 和 Frontend
 - `pnpm lint` — 全量 lint
 - 单包构建：`pnpm --filter @vcpdeck/server build`
 
@@ -30,23 +43,25 @@ VCPDeck 是一个个人 AI 协作驾驶台，当前阶段实现了**远程机器
 
 ## 架构边界
 
-```
+```text
 packages/
-  shared/     — 协议类型、事件名、枚举、接口（@vcpdeck/shared）
-  server/     — NestJS 网关：WebSocket 事件、REST API、Prisma 持久化
-  client/     — Node.js 执行代理：注册、心跳、命令执行、取消
+  shared/     — 协议类型、事件名、枚举和运行时解析器（@vcpdeck/shared）
+  sdk/        — 类型安全 REST API 客户端
+  server/     — NestJS 控制面：REST、Socket.IO、SSE、Prisma 持久化
+  client/     — 目标机器执行代理：Job、文件、FRP、PTY、Pi
   frontend/   — React + Vite 驾驶台界面
-  cli/        — 命令行入口
+  cli/        — 命令行入口和 Pi Skill 构件
+  launcher/   — Server/Client 进程守护、更新和回退
 ```
 
-- `shared` 无内部依赖；其余包只依赖 `shared`
-- Server 模块：`prisma/`（数据库）、`client/`（机器管理）、`job/`（任务调度）、`events/`（WebSocket + REST）
+- `shared` 无内部依赖；`sdk` 依赖 `shared`；其余运行包通过 Shared 契约和网络协议协作，不跨包引用彼此源码
+- Server 模块覆盖身份、机器、Job、文件/Storage、FRP、Terminal、Pi、Release 和 Prisma
 - 新目录或新包必须服务当前阶段验收
 
 ## 关键术语（与 `@vcpdeck/shared` 一致）
 
 | 术语 | 含义 |
-|------|------|
+| ------ | ------ |
 | Client / 客户端 | 一台注册到网关的远程机器 |
 | Job | 下发到客户端执行的命令单元，状态见 `JobStatus` 枚举 |
 | Event | WebSocket 消息，事件名见 `Events` 常量 |
@@ -109,7 +124,7 @@ list: (options?, signal?) => {
 ## 安全
 
 - Job command、stdout/stderr、环境变量和路径都可能含敏感信息；日志默认脱敏
-- WebSocket 连接通过 PSK 认证；REST API 当前无鉴权（内部使用）
+- `/client` Socket.IO 使用 PSK；REST 默认使用 Cookie/Bearer 认证，只有显式 `@Public()` 端点公开
 - Client 不执行未验证的协议输入
 - 示例和测试不执行真实破坏性命令
 
@@ -138,7 +153,7 @@ This project is indexed by GitNexus as **VCPDeck** (2638 symbols, 5178 relations
 ## Resources
 
 | Resource | Use for |
-|----------|---------|
+| ---------- | --------- |
 | `gitnexus://repo/VCPDeck/context` | Codebase overview, check index freshness |
 | `gitnexus://repo/VCPDeck/clusters` | All functional areas |
 | `gitnexus://repo/VCPDeck/processes` | All execution flows |
@@ -147,7 +162,7 @@ This project is indexed by GitNexus as **VCPDeck** (2638 symbols, 5178 relations
 ## CLI
 
 | Task | Read this skill file |
-|------|---------------------|
+| ------ | --------------------- |
 | Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
 | Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
 | Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |

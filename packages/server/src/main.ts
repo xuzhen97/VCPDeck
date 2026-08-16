@@ -65,7 +65,7 @@ async function bootstrap() {
 	await app.listen(3001);
 	console.log("VCPDeck server listening on http://localhost:3001");
 
-	// 自更新编排恢复：launcher 回退判定 / 客户端阶段续跑（设计文档 §7.3）
+	// 自更新编排恢复：Launcher 回退判定 / Client 阶段续跑
 	void app
 		.get(ReleaseOrchestrator)
 		.resumeAfterStartup()

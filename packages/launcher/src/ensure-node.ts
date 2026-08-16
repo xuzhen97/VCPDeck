@@ -1,5 +1,5 @@
 /**
- * Node 运行时保障（设计文档 §6.2「确保 Node」）：
+ * Node 运行时保障（详见 docs/design/release-and-update.md）：
  * 1) 系统 node 满足约束 → 直接用
  * 2) 否则检查缓存目录（launcher/node/node-<version>/）→ 命中即用
  * 3) 否则从 index.json 解析满足约束的最高版本 → 下载解压入缓存

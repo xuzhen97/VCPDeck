@@ -1,5 +1,6 @@
 /**
- * 客户端优雅停机与自更新处理（设计文档 §8）。
+ * 客户端有界 drain 与 Launcher 两阶段更新处理。
+ * 详见 docs/design/release-and-update.md。
  * 收到 update:request 后：
  *   1) 调本机 launcher /prepare（下载/校验/解压）
  *   2) 拒新 job（draining 标志，dispatcher 守卫）

@@ -1,5 +1,5 @@
 /**
- * 守护进程编排（设计文档 §6.2，C4 进程守护，非 TDD——真实进程行为走 E2E 验证）：
+ * 守护进程编排（详见 docs/design/release-and-update.md）：
  * - ensure-node 保障运行时 → 启动 current 版本 → 崩溃退避拉起（更新期间抑制）
  * - 控制通道 /prepare、/apply → Updater 两阶段更新 + preStart 钩子 + 探活回退
  */

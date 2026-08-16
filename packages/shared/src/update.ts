@@ -1,14 +1,14 @@
 // ── 自更新协议（server ↔ client 经 WebSocket，launcher 经本地控制通道） ──
-// 详见 docs/self-update-release-design.md
+// 详见 docs/design/release-and-update.md
 
-/** 更新包 manifest（打包时生成，随 zip 携带） */
+/** 更新包 manifest（打包时生成，随 archive 携带） */
 export interface UpdateManifest {
 	version: string;
 	/** 所需 Node 版本约束（如 ">=24"），launcher ensure-node 使用 */
 	nodeVersion: string;
-	/** launcher 最低兼容版本（launcher 冻结，仅做校验） */
+	/** launcher 最低兼容版本（当前字段预留，尚未执行校验） */
 	launcherMinVersion: string;
-	/** zip 整体 sha256（打包生成，上传时服务端复核，下载后再校验） */
+	/** archive 整体 sha256（当前 manifest 内留空，权威值存于 Release 并随更新请求下发） */
 	sha256: string;
 	artifacts: {
 		server?: {

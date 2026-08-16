@@ -1,5 +1,6 @@
 /**
- * 更新编排器：全自动状态机（详见 docs/self-update-release-design.md §7.3）。
+ * 更新编排器：Server 先更新，启动恢复后再逐台更新 Client。
+ * 详见 docs/design/release-and-update.md。
  *
  * - startRelease：上传后触发服务端自更新（prepare → drain → 广播 → apply）
  * - resumeAfterStartup：服务启动时从 DB 恢复（launcher 回退判定 / 客户端阶段续跑）

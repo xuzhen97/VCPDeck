@@ -1,125 +1,63 @@
 # VCPDeck
 
-你的个人 AI 协作驾驶台 —— 与 [VCPToolBox](https://github.com/lioensky/VCPToolBox) 深度集成，按你的工作流程调度编排一切。
+你的个人 AI 协作驾驶台。当前阶段已形成远程机器管理、命令与文件操作、交互式终端、远程 Pi、FRP 和自更新的核心闭环。
 
 ## 项目定位
 
-VCPDeck 是一个面向你的独立驾驶台。它是你每天跟 AI 助手协同工作的地方，不是 VCPToolBox 的后台管理面板。
+VCPDeck 是面向个人工作流的独立控制面，不是 VCPToolBox 的后台管理面板。
 
-- **VCPToolBox** = Agent 平台（管理 Agent 身份、知识库、插件生态）
-- **VCPDeck** = 你的驾驶台（TODO 追踪、机器调度、流程编排、与 Agent 对话）
+- **VCPDeck 当前负责**：可信操作者、远程机器、Job、文件、终端、Pi Session、FRP 和发布更新；
+- **VCPToolBox 负责**：Agent 身份、知识库、RAG 和插件生态；
+- **长期愿景**：在现有远程执行基础上增加 TODO、工作流、聊天和 VCPToolBox 双向集成。
 
-两者双向集成：VCPToolBox 可以把 VCPDeck 当插件调用它的调度能力，VCPDeck 也可以直接调用 VCPToolBox 的 Agent 来对话和推理。
+愿景中的 TODO、规则引擎、聊天和 VCPToolBox 桥接尚未实现，不应视为当前系统能力。规划见 [`docs/roadmap.md`](docs/roadmap.md)。
 
-## 背景
+## 当前能力
 
-VCPToolBox 是一个强大的 AI Agent 中间件，能在上面创建 Agent、配置插件、管理知识库。但它是面向 Agent 管理的，不是面向你的日常工作流程的。
+- Client 注册、心跳、能力探测、别名和断线重连；
+- Typed Job、命令/脚本执行、取消和状态对账；
+- 远程文件浏览、读写、导入/导出及本地/阿里云 Storage；
+- 交互式远程终端，包括 PTY、快照、重连和控制权；
+- 人机交互式远程 Pi Session，包括 REST 控制、SSE 事件和运行状态机；
+- FRPS 实例与 FRP 映射管理；
+- Cookie/Bearer 身份认证、操作审计和 React 驾驶台；
+- Release、Launcher、Server/Client 更新与失败回退基础实现。
 
-VCPDeck 的角色是：**把你的工作流程组织起来**。你手头有多台机器、各种项目、一堆 TODO，Agent 可以帮你分担 —— 但它需要知道你的上下文：什么项目在哪台机器、排查问题的固定套路、你现在关注什么任务。
+## 当前架构
 
-同时，VCPDeck 的调度能力不止服务于 VCPToolBox。当你在使用 coding agent（如 Pi）编码时，也可以直接调用驾驶台的能力 —— 发布到目标机器、查看线上日志、重启服务 —— 不用切换上下文。一个驾驶台，多种 Agent 共用。
+VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server；每台目标机器上的 Client 通过 PSK 主动建立 Socket.IO 出站连接，实际执行命令、文件、PTY、Pi 和 frpc。Server 使用 SQLite 保存控制面状态，Launcher 独立守护并更新 Server/Client。
 
-这就是 VCPDeck 做的事。
+完整架构图、通信边界和关键链路见 [`docs/architecture.md`](docs/architecture.md)。
 
-## 核心理念
+## 当前边界
 
-```text
-VCPToolBox  = Agent 引擎（对话、推理、知识记忆、插件能力）
-VCPDeck      = 你的驾驶台（TODO、机器调度、流程编排、聊天协作）
-```
+- 系统面向少量可信操作者，普通身份同样具有远程操作能力；
+- TODO、工作流、聊天、规则和 VCPToolBox 双向桥接仍是规划；
+- Server 当前是单控制面节点，使用 SQLite，不提供高可用多实例；
+- Release/Launcher 已有基础实现，但全链路真实环境演练仍需继续固化；
+- Agent 创建、知识向量检索和插件生态不属于 VCPDeck。
 
-- **你有自己的聊天界面** — 在工作台里直接跟 VCP 的 Agent 对话，不需要切到 VCPToolBox
-- **双向集成** — VCP 作为插件调用 VCPDeck 的调度能力；VCPDeck 调用 VCP 的 Agent 进行对话和推理
-- **按你的习惯定义流程** — 把重复的工作套路沉淀为可复用的流程模板
-- **经验记忆复用 VCP** — 你教给 Agent 的项目路径、机器信息等，交给 VCPToolBox 的 RAG 记忆系统存储
+## 项目文档
 
-## 核心流程
-
-### TODO 驱动的协作模式
-
-1. **创建 TODO** — 你在工作台创建任务，打上标签（如 `project:vcptoolbox`、`type:bug`）
-2. **环境关联** — 系统根据标签和规则，自动关联对应的机器、项目路径、历史操作记录
-3. **Agent 主动执行** — VCP 的 Agent 拿到上下文，通过网关去目标机器执行操作（跑命令、查日志、改文件等）
-4. **结果回写** — 执行结果回写到 TODO，你来审核，决定下一步怎么做
-5. **经验积累** — 你在这个过程中教给 Agent 的信息，交给 VCPToolBox 的记忆系统，下次自动召回
-
-### 一个典型场景
-
-> 有人反馈了一个 bug
-> → 你在 VCPDeck 驾驶台创建 TODO，打上项目标签
-> → 跟 Agent 聊：这个 bug 是什么现象、可能跟哪个模块有关
-> → Agent 知道这个项目在哪台机器、什么路径
-> → 你忙别的时候，Agent 自动去排查：拉日志、跑测试、git log 分析
-> → 初步结论写回 TODO
-> → 你回来审核，跟 Agent 继续讨论，决定修复方向
-
-## 系统架构
-
-```text
-         ┌─────────────┐    ┌──────────────┐
-         │  Coding Agent │    │ VCPToolBox   │
-         │  (如 Pi)      │    │  Agent 平台   │
-         └──────┬───────┘    └──────┬───────┘
-                │                   │
-                │   调用驾驶台能力    │  双向集成
-                │   (发布/查日志等)   │  (Plugin ⇄ API)
-                │                   │
-                └─────────┬─────────┘
-                          │
-┌─────────────────────────┴────────────────────────┐
-│                  VCPDeck 驾驶台                     │
-│                                                    │
-│  ┌──────────┐ ┌──────────┐ ┌──────────────────┐  │
-│  │ TODO 面板 │ │ 机器管理  │ │  与 Agent 聊天    │  │
-│  └──────────┘ └──────────┘ └──────────────────┘  │
-│                                                    │
-│  ┌────────────────────────────────────────────┐   │
-│  │         流程引擎 · 规则配置 · 标签系统        │   │
-│  └────────────────────────────────────────────┘   │
-├────────────────────────────────────────────────────┤
-│                                                    │
-│  ┌─────────────┐              ┌────────────────┐  │
-│  │   网关服务    │              │  VCP 桥接层     │  │
-│  │ · 客户端管理  │◄── 双向 ──►│ · VCP Plugin   │  │
-│  │ · 任务下发    │              │ · 调用 Agent   │  │
-│  │ · FRP 隧道   │              │ · 复用 RAG     │  │
-│  └──────┬───────┘              └────────────────┘  │
-├─────────┼──────────────────────────────────────────┤
-│         │         客户端层 (每台机器)                │
-│  ┌──────┴───────────────────────────────────────┐  │
-│  │  Node.js 执行环境                              │  │
-│  │  · 命令执行  · 文件读写  · 脚本运行              │  │
-│  │  · FRP 映射  · 心跳上报  · (未来) Pi Agent     │  │
-│  └──────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────┘
-```
-
-## 功能边界
-
-**VCPDeck 做：**
-
-- **驾驶台界面** — 你日常跟 Agent 协作的主入口（未来延伸到手机）
-- **TODO 管理** — 任务创建、标签分类、状态追踪、结果审核
-- **聊天协作** — 在工作台内直接与 VCPToolBox 的 Agent 对话
-- **机器管理** — 多台机器的客户端注册、心跳监控、远程操作
-- **远程执行** — 下发命令、运行 Node.js 脚本
-- **远程文件管理** — 浏览目录、读写文本、流式传输文件（export/import）、路径安全隔离 → [实现文档](docs/file-transfer-implementation.md)
-- **FRP 端口映射** — 让内网或无外网的机器可达
-- **远程 Pi Tab** — 结构化多轮编码代理界面：项目级 Session、工具调用监督、分支导航、图片提示 → [实现文档](docs/remote-pi-tab.md)
-- **自定义流程** — 把你自己的工作套路沉淀为可复用的流程
-- **规则配置** — 标签规则、环境关联、自动化触发条件
-
-**VCPDeck 不做：**
-
-- Agent 管理与创建 → VCPToolBox 的 Admin Panel 负责
-- 知识向量检索 → VCPToolBox 的 RAG 记忆系统负责
-- 插件生态管理 → VCPToolBox 的 Plugin 系统负责
-
-## 技术栈
-
-技术选型详情见 [`docs/tech-stack.md`](docs/tech-stack.md)。
+- [文档中心](docs/index.md) — 长期维护文档的统一入口
+- [系统架构](docs/architecture.md) — 当前组件、通信、数据归属与关键链路
+- [技术栈](docs/tech-stack.md) — 技术选型、版本与约束
+- [领域模型](docs/domain-model.md) — 核心实体、状态机与不变量
+- [协议说明](docs/protocols.md) — REST、Socket.IO、SSE 与兼容规则
+- [兼容策略](docs/compatibility.md) — 组件版本、升级顺序与破坏性变更规则
+- [部署指南](docs/deployment.md) / [运维手册](docs/operations.md) / [安全模型](docs/security.md)
+- [测试策略](docs/testing.md) / [架构决策](docs/adr/README.md) / [路线图](docs/roadmap.md)
+- [参与开发](CONTRIBUTING.md) / [更新日志](CHANGELOG.md)
 
 ## 本地开发与测试
+
+### 环境要求
+
+- Node.js 24+
+- pnpm
+- Git
+
+远程 Pi 依赖目标机器已经配置可用的 Pi 模型凭据；交互式终端依赖 `node-pty` 能在当前平台正常安装。完整运行条件见 [`docs/deployment.md`](docs/deployment.md)。
 
 ### 初始化依赖
 
@@ -140,7 +78,7 @@ pnpm download:frp
 
 ### 启动项目
 
-先复制 Server 配置并设置首次启动所需的管理员密码：
+先复制 Server 配置：
 
 ```bash
 # macOS / Linux
@@ -150,17 +88,40 @@ cp packages/server/.env.example packages/server/.env
 Copy-Item packages/server/.env.example packages/server/.env
 ```
 
-默认配置会使用 `http://localhost:3001`、`admin` 用户和 `test123` 密码。常用启动方式：
+首次启动必须设置 `VCPDECK_ADMIN_PASSWORD`。示例中的 `admin / test123` 只用于本机开发，使用前应改成自己的密码；数据库已有管理员后，修改该变量不会重置现有密码。
+
+当前示例文件仍使用尚未被代码读取的旧变量 `VCPDECK_CLIENT_PSK`。Server 和 Client 实际都读取 `VCPDECK_PSK`，因此请在 `packages/server/.env` 中增加或改为：
+
+```dotenv
+VCPDECK_ADMIN_USERNAME=admin
+VCPDECK_ADMIN_PASSWORD=<local-development-password>
+VCPDECK_PSK=<same-high-entropy-psk-on-server-and-client>
+```
+
+运行远程 Client 时，必须通过进程环境向 Client 提供相同的 `VCPDECK_PSK`；Client 不会读取 `packages/server/.env`。默认开发 PSK 仅可用于本机验证。
+
+常用启动方式：
 
 ```bash
 # 只启动 Server 和 Frontend
 pnpm dev
 
-# 启动 Server、Frontend 和 Client（远程机器测试推荐）
+# 启动 Server、Frontend 和本机 Client
 pnpm dev:all
 ```
 
-访问前端：<http://localhost:5173>。
+使用自定义 PSK 启动 `dev:all` 的示例：
+
+```bash
+# macOS / Linux
+VCPDECK_PSK='<same-psk>' pnpm dev:all
+
+# Windows PowerShell
+$env:VCPDECK_PSK='<same-psk>'
+pnpm dev:all
+```
+
+访问前端：<http://localhost:5173>。Server API 默认监听 <http://localhost:3001>。
 
 ### 启动本地 FRPS 测试实例
 
@@ -226,7 +187,7 @@ node scripts/test-frp-instances.cjs
 
 #### 各包单元测试
 
-运行 Server、Client、Frontend 和 SDK 中声明的 Vitest 测试：
+运行 Shared、Server、Client、SDK、Frontend 和 Launcher 中声明的 Vitest 测试：
 
 ```bash
 pnpm -r test
@@ -235,21 +196,23 @@ pnpm -r test
 也可以按包运行：
 
 ```bash
+pnpm --filter @vcpdeck/shared test
 pnpm --filter @vcpdeck/server test
 pnpm --filter @vcpdeck/client test
-pnpm --filter @vcpdeck/frontend test
 pnpm --filter @vcpdeck/sdk test
+pnpm --filter @vcpdeck/frontend test
+pnpm --filter @vcpdeck/launcher test
 ```
 
 #### 项目端到端集成测试
 
-根目录的 `pnpm test` 会自动启动临时 Server 和 mock Client，覆盖认证、任务、文件传输等核心链路；测试结束后会清理进程。它会占用 `3001` 端口，并重建本地测试数据库：
+根目录的 `pnpm test` 会自动启动临时 Server 和 mock/真实 Client，覆盖认证、任务、文件传输等核心链路；测试结束后会清理进程和隔离的临时数据库：
 
 ```bash
 pnpm test
 ```
 
-不要在有未备份数据的开发数据库上运行该命令。
+该脚本会占用 `3001` 端口，并在开始时强制停止占用该端口的现有进程。不要在开发 Server 正在运行时执行。测试数据库位于系统临时目录，不会重建 `packages/server/prisma/dev.db`。
 
 #### FRP 全链路集成测试
 
@@ -262,16 +225,15 @@ pnpm test:frp
 
 该测试需要先执行 `pnpm download:frp`。如果输出 `SKIP`，表示 FRP 二进制缺失，此次没有真正执行 FRP 测试，不应视为全链路测试通过。
 
-#### 构建检查
+#### Lint 与构建检查
 
 ```bash
+pnpm lint
 pnpm build
 ```
 
-`pnpm build` 会构建所有 workspace 包；Client 构建时如果缺少 `frpc`，会尝试自动下载当前平台版本。
+`pnpm build` 会构建所有 workspace 包；Client 构建时如果缺少 `frpc`，会尝试自动下载当前平台版本。更完整的测试矩阵、Launcher 冒烟和发布验收要求见 [`docs/testing.md`](docs/testing.md)。
 
-## 后续扩展方向
+## 路线图
 
-- **移动端** — 延伸到手机，随时随地查看 TODO、跟 Agent 对话、审核结果
-- **客户端 Pi Agent 代理** — 每台机器上的客户端内置 Agent 能力，网关下发子任务，客户端自主执行并返回
-- **主动监控巡检** — Agent 自主巡视机器状态，异常自动创建 TODO 并通知你
+TODO、工作流、VCPToolBox 桥接、Client 自主 Agent、主动巡检和移动端等方向统一维护在 [`docs/roadmap.md`](docs/roadmap.md)，不在 README 中重复声明为当前能力或交付承诺。

@@ -1,5 +1,6 @@
 /**
- * 本地控制通道服务端（设计文档 §6.3）。
+ * Launcher 本地控制通道服务端。
+ * 详见 docs/design/release-and-update.md。
  * 监听 127.0.0.1 随机端口 + 随机 token，写 control.json 供被守护进程调用：
  * - POST /prepare：下载/校验/解压新版本（服务进程仍在运行）
  * - POST /apply：停掉本进程并切换版本（响应可能无法送达，属正常）

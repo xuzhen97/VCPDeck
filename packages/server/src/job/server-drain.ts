@@ -1,6 +1,6 @@
 /**
  * 服务端优雅停机闸门：停止新派发并等待运行中 job 收敛。
- * 详见 docs/self-update-release-design.md §7.4。
+ * 详见 docs/design/release-and-update.md。
  */
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";

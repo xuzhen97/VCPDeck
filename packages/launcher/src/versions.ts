@@ -1,5 +1,5 @@
 /**
- * 版本目录管理与原子切换（设计文档 §6.4）。
+ * 版本目录管理与原子切换（详见 docs/design/release-and-update.md）。
  * - Linux：apps/current 为符号链接，切换用「临时链接 + rename」原子完成
  * - Windows：不用 symlink（权限问题），apps/state.json 指针文件，写入用 tmp+rename
  * fs 操作可注入（测试在非 Linux 机器上模拟 symlink 语义）。

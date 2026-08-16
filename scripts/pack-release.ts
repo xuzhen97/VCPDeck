@@ -1,5 +1,5 @@
 /**
- * 发版打包（设计文档 §5/§11）：
+ * Release 构件打包（详见 docs/design/release-and-update.md）：
  *   pnpm release --version 1.2.1 [--output dist-release/] [--node-constraint ">=24"]
  *
  * 步骤：
