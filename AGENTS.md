@@ -1,132 +1,88 @@
 # AGENTS.md
 
-## 项目概述
+## 1. 核心规则
 
-VCPDeck 是一个个人 AI 协作驾驶台，当前阶段已形成远程机器管理、命令与文件操作、交互式终端、远程 Pi、FRP 和自更新的核心闭环：
+- VCPDeck 是个人 AI 协作驾驶台；当前能力包括远程机器、Job、文件、Terminal、Pi、FRP、Storage 和 Release/更新。
+- **当前运行事实**以代码、`packages/shared/src/`、Prisma schema 和配置读取逻辑为准；**长期决策意图**以有效 Accepted ADR 为准；Current 文档负责解释当前边界。
+- 开发前先读 [`docs/index.md`](./docs/index.md)、相关 Current 专题和 Accepted ADR。
+- 代码、ADR 与 Current 文档冲突时停止猜测并报告，由维护者确认长期方向。
+- 只描述和实现已经确认的当前需求；未实现方向只进入 [`docs/roadmap.md`](./docs/roadmap.md) 或 Issue，不能写成现有能力。
+- 优先最小、直接、可验证的修改；先复用现有模块和 Node.js 标准库，不提前增加抽象层、配置层、factory、interface 或空目录。
 
-- Server（NestJS 网关）— REST、Socket.IO、SSE、任务调度和 Prisma 持久化
-- Client（Node.js 代理）— 部署在目标机器，执行命令、文件、PTY、Pi 和 frpc
-- Frontend（React + Vite）— 身份认证、机器、Job、文件、终端、Pi、FRP 和发布界面
-- SDK — Browser/Node.js 共用的类型安全 REST 客户端
-- CLI — 当前提供发布包上传命令和 Pi Skill 单文件入口
-- Launcher — 守护并更新 Server/Client，负责探活和失败回退
+## 2. 工作流程
 
-事实来源：当前代码、`packages/shared/src/`、Prisma schema 和配置读取逻辑决定实际行为；有效 Accepted ADR 解释长期决策；Current 文档解释当前边界。文档治理见 `docs/documentation-governance.md`。
+1. 查明事实来源和相关调用链；修改代码符号前执行下方 GitNexus impact 分析。
+2. 修改跨运行时协议时，同步检查 Shared、Server、Client、SDK、Frontend、兼容性和测试。
+3. 运行行为变化时，同一变更更新对应 Current 文档；重大长期取舍先写 ADR。
+4. 用户或运维可感知的变化更新 `CHANGELOG.md`。
+5. 完成前运行相关 LSP、测试、构建、`git diff --check`；提交前执行 GitNexus `detect_changes()`。
+6. 不把无关的既有问题混入当前修改；发现后记录并报告。
 
-## 文档维护
+## 3. 临时材料
 
-- 开发前阅读 `docs/index.md`、相关 Current 文档和 Accepted ADR。
-- 判断当前行为时以代码、Shared、Prisma 和配置读取逻辑核验，不把规划或归档材料当作现状。
-- 代码、ADR 与 Current 文档冲突时必须停止猜测并报告，由维护者确认修复实现还是用新 ADR 替代旧决策。
-- 运行行为变化时，在同一变更中更新对应 Current 文档；重大长期取舍先写 ADR。
-- 未实现方向只进入 `docs/roadmap.md` 或 Issue，不能写成 README/Current 的当前能力。
-- 用户或运维可感知变化更新 `CHANGELOG.md`。
-- 一次性过程材料在有效知识收敛后删除；只有确有历史价值的失效材料才进入 `docs/archive/`。
-- 完整分类、状态、生命周期、归档和检查规则见 `docs/documentation-governance.md`。
+- Agent 生成的任务计划、分析过程、实施清单和验证草稿统一放在根目录 `.tmp/`。
+- `.tmp/` 已被 Git 忽略，不属于项目事实来源，也不得被正式文档引用。
+- 不在 `docs/` 中创建一次性计划、TDD 清单或临时验证草稿。
+- 任务完成后删除对应临时材料；长期价值只提炼到代码、Accepted ADR、Current 文档、Roadmap 或 Issue。
+- 只有具备独立历史价值的正式材料才进入 `docs/archive/`。完整规则见 [`docs/documentation-governance.md`](./docs/documentation-governance.md)。
 
-## 构建与运行命令
-
-- `pnpm install` — 安装依赖
-- `pnpm build` — 全量构建（所有包）
-- `pnpm dev` — 启动 Shared watch、Server 和 Frontend
-- `pnpm lint` — 全量 lint
-- 单包构建：`pnpm --filter @vcpdeck/server build`
-
-## 代码风格
-
-- 业务文档、设计文档使用简体中文；代码标识符、包名、协议字段、数据库字段、枚举值使用英文
-- 注释使用简体中文；公共 surface（导出类型、函数、类）写简体中文 JSDoc
-- TypeScript：ESM + strict，NodeNext 相对导入保留 `.js` 后缀
-- 先复用现有模块和 Node 标准库，不提前加 interface、factory、配置层或空目录
-- 错误对象保持稳定 `code`、合适 `statusCode`、安全 message；不泄露 stack、密钥或文件内容
-- `git commit` 使用简体中文
-
-## 架构边界
+## 4. 架构边界
 
 ```text
 packages/
-  shared/     — 协议类型、事件名、枚举和运行时解析器（@vcpdeck/shared）
-  sdk/        — 类型安全 REST API 客户端
-  server/     — NestJS 控制面：REST、Socket.IO、SSE、Prisma 持久化
-  client/     — 目标机器执行代理：Job、文件、FRP、PTY、Pi
-  frontend/   — React + Vite 驾驶台界面
-  cli/        — 命令行入口和 Pi Skill 构件
-  launcher/   — Server/Client 进程守护、更新和回退
+  shared/    跨运行时协议、事件、枚举、DTO 和 parser；无内部依赖
+  sdk/       类型安全 REST 客户端；只依赖 shared
+  server/    NestJS 中心控制面、Socket.IO/SSE、Prisma
+  client/    目标机器代理：Job、Files、FRP、PTY、Pi
+  frontend/  React + Vite 驾驶台
+  cli/       命令入口和 Pi Skill 构件
+  launcher/  Server/Client 守护、更新和回退
 ```
 
-- `shared` 无内部依赖；`sdk` 依赖 `shared`；其余运行包通过 Shared 契约和网络协议协作，不跨包引用彼此源码
-- Server 模块覆盖身份、机器、Job、文件/Storage、FRP、Terminal、Pi、Release 和 Prisma
-- 新目录或新包必须服务当前阶段验收
+- Frontend、SDK 和 CLI 不直接控制目标机器；所有业务操作先进入 Server。
+- Server 与 Client/Frontend 通过 Shared 契约和网络协议协作，不跨包引用彼此源码。
+- `/client` Socket.IO 用于 Server ↔ Client；`/app` Socket.IO 当前用于 Browser Terminal；SSE 用于 Pi 事件投影。
+- 需要持久化、调度、取消、恢复或审计的远程操作使用 Typed Job；Terminal 使用专门 Session，不是普通 Job。
+- PTY、Pi Worker/Session 和 frpc 等实时资源在 Client；Server 保存控制面状态和最小审计。
+- 新目录、包或运行组件必须服务当前阶段验收；新增运行组件或数据权威变化必须先写 ADR。
 
-## 关键术语（与 `@vcpdeck/shared` 一致）
+## 5. 协议与数据约束
 
-| 术语 | 含义 |
-| ------ | ------ |
-| Client / 客户端 | 一台注册到网关的远程机器 |
-| Job | 下发到客户端执行的命令单元，状态见 `JobStatus` 枚举 |
-| Event | WebSocket 消息，事件名见 `Events` 常量 |
-| PSK | Pre-Shared Key，客户端与网关的连接凭证 |
-| Dispatch | 网关将 pending job 发送到对应客户端执行 |
+- 跨信任边界输入必须运行时校验；未知 type、action、event、状态和字段不得宽松猜测。
+- `@vcpdeck/shared` 是协议字段、事件、枚举、错误码、capability 和 parser 的统一维护位置。
+- TypeScript 使用 ESM + strict；NodeNext 相对导入保留 `.js` 后缀。
+- 列表接口统一返回 `PaginatedResult<T>`：`data/total/page/pageSize/totalPages`。
+- Service 并发查询列表与总数；Controller 将 `pageSize` 限制在 1–100；SDK 使用 `URLSearchParams`。参考 `packages/server/src/frp/` 和 `packages/sdk/src/frp.ts`。
+- 错误保持稳定 `code`、合适 `statusCode` 和安全 message；不得泄露 stack、密钥、签名 URL、文件内容或原始外部响应。
 
-## 分页规范
+## 6. 安全边界
 
-列表接口统一用 `PaginatedResult<T>`（`packages/shared/src/index.ts`），字段：`data`、`total`、`page`、`pageSize`、`totalPages`。
+- 当前是少量可信操作者单信任域；任意有效业务 Identity 都是远程操作员，admin 只额外管理身份。
+- `/client` 使用 PSK；REST 使用 Cookie/Bearer，只有显式 `@Public()` 端点公开。
+- 命令、脚本、stdout/stderr、环境变量、路径、Job payload/result、终端/Pi 正文和文件内容都可能敏感；日志与错误默认脱敏。
+- Client 不执行未通过协议与 capability 校验的输入。
+- 远程命令、Terminal、Pi 和 Files 继承 Client OS 账户权限，不是沙箱。
+- 示例和测试不得执行真实破坏性命令或使用真实凭据。
 
-各层写法：
+## 7. 代码与文档风格
 
-```ts
-// Service — Promise.all 并发取数据和总数
-async listXxx(
-  clientId?: string,
-  page: number = 1,
-  pageSize: number = 20,
-): Promise<PaginatedResult<XxxInfo>> {
-  const where = clientId ? { clientId } : {};
-  const [list, total] = await Promise.all([
-    this.prisma.xxx.findMany({
-      where, orderBy: { createdAt: "desc" },
-      skip: (page - 1) * pageSize, take: pageSize,
-    }),
-    this.prisma.xxx.count({ where }),
-  ]);
-  return { data: list.map(toApi), total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
-}
+- 业务和设计文档使用简体中文；代码标识符、协议字段、数据库字段、包名和枚举值使用英文。
+- 注释使用简体中文；导出类型、函数和类提供简体中文 JSDoc。
+- `git commit` 使用简体中文。
+- 不复制大段 DTO 或实现到文档；Current 文档解释语义、权威、状态、安全、故障与已知偏移。
 
-// Controller — @Query 手动解析字符串，不引入 ValidationPipe
-@Get("xxx")
-async list(
-  @Query("clientId") clientId?: string,
-  @Query("page") page?: string,
-  @Query("pageSize") pageSize?: string,
-) {
-  return this.service.listXxx(
-    clientId,
-    page ? Math.max(1, parseInt(page, 10)) : undefined,
-    pageSize ? Math.min(100, Math.max(1, parseInt(pageSize, 10))) : undefined,
-  );
-}
+## 8. 常用命令
 
-// SDK — URLSearchParams 拼接 query string
-list: (options?, signal?) => {
-  const params = new URLSearchParams();
-  if (options?.clientId) params.set("clientId", options.clientId);
-  if (options?.page) params.set("page", String(options.page));
-  if (options?.pageSize) params.set("pageSize", String(options.pageSize));
-  const qs = params.toString();
-  return client.request<PaginatedResult<XxxInfo>>(
-    "GET", `/api/xxx${qs ? `?${qs}` : ""}`, undefined, signal,
-  );
-},
+```bash
+pnpm install
+pnpm dev
+pnpm build
+pnpm test
+pnpm -r test
+pnpm --filter @vcpdeck/server build
 ```
 
-参考实现：`packages/server/src/frp/frp.service.ts` `listMappings()`、`packages/server/src/frp/frp.controller.ts`、`packages/sdk/src/frp.ts`。
-
-## 安全
-
-- Job command、stdout/stderr、环境变量和路径都可能含敏感信息；日志默认脱敏
-- `/client` Socket.IO 使用 PSK；REST 默认使用 Cookie/Bearer 认证，只有显式 `@Public()` 端点公开
-- Client 不执行未验证的协议输入
-- 示例和测试不执行真实破坏性命令
+`pnpm lint` 当前依赖仓库提供可用的 ESLint executable；若命令因工具缺失未运行，必须明确报告，不能声称 lint 通过。
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
