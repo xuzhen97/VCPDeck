@@ -17,17 +17,17 @@ describe("GatewayUpdateChannel", () => {
 		channel = new GatewayUpdateChannel(clients as any);
 	});
 
-	it("listOnlineClients 映射为 { clientId, clientVersion }", async () => {
+	it("listOnlineClients 映射为 { clientId, clientVersion, os }", async () => {
 		clients.listOnline.mockResolvedValue([
-			{ clientId: "c1", clientVersion: "1.1.0" },
-			{ clientId: "c2", clientVersion: "1.2.1" },
+			{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			{ clientId: "c2", clientVersion: "1.2.1", os: "linux 6.8 x64" },
 		]);
 
 		const list = await channel.listOnlineClients();
 
 		expect(list).toEqual([
-			{ clientId: "c1", clientVersion: "1.1.0" },
-			{ clientId: "c2", clientVersion: "1.2.1" },
+			{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			{ clientId: "c2", clientVersion: "1.2.1", os: "linux 6.8 x64" },
 		]);
 	});
 

@@ -14,6 +14,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Drawer } from "@/components/ui/drawer";
 
+function releaseSizeSummary(release: ReleaseInfo): string {
+	const entries = Object.entries(release.archives);
+	if (entries.length === 0) return "—";
+	const total = entries.reduce((sum, [, a]) => sum + (a?.size ?? 0), 0);
+	if (entries.length === 1) return formatSize(total);
+	return entries
+		.map(([platform, a]) => `${platform} ${formatSize(a?.size ?? 0)}`)
+		.join(" · ");
+}
+
 function releaseStatusLabel(status: ReleaseStatus): string {
 	switch (status) {
 		case "uploaded":
@@ -229,7 +239,7 @@ export function ReleasesPage() {
 												/>
 											</td>
 											<td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-												{formatSize(release.size)}
+												{releaseSizeSummary(release)}
 											</td>
 											<td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
 												{release.createdByName ?? "—"}
@@ -298,7 +308,7 @@ function ReleaseDetails({ release }: { release: ReleaseInfo }) {
 					tone={releaseStatusTone(release.status)}
 				/>
 				<span className="text-sm text-muted-foreground">
-					大小 {formatSize(release.size)}
+					{releaseSizeSummary(release)}
 				</span>
 			</div>
 			<div className="grid gap-3 text-sm sm:grid-cols-2">
@@ -323,10 +333,24 @@ function ReleaseDetails({ release }: { release: ReleaseInfo }) {
 				</div>
 			</div>
 			<div>
-				<p className="text-sm font-medium">sha256</p>
-				<p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-					{release.sha256}
-				</p>
+				<p className="text-sm font-medium">构件</p>
+				{Object.keys(release.archives).length === 0 ? (
+					<p className="mt-1 text-muted-foreground">—</p>
+				) : (
+					<div className="mt-1 space-y-2">
+						{Object.entries(release.archives).map(([platform, archive]) => (
+							<div key={platform}>
+								<p className="font-mono text-xs font-medium">{platform}</p>
+								<p className="break-all font-mono text-xs text-muted-foreground">
+									{formatSize(archive?.size ?? 0)} · {archive?.fileName}
+								</p>
+								<p className="break-all font-mono text-xs text-muted-foreground">
+									sha256 {archive?.sha256}
+								</p>
+							</div>
+						))}
+					</div>
+				)}
 			</div>
 			{release.errorMessage && (
 				<div>

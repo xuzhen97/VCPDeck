@@ -79,11 +79,32 @@ export interface ReleaseClientEntry {
 	at: string;
 }
 
+/** 发布包支持的目标平台（打包脚本产出对应的分发 zip） */
+export type ReleasePlatform = "win-x64" | "linux-x64";
+
+/** 单个平台的发布构件信息（校验值与体积） */
+export interface ReleaseArchiveInfo {
+	sha256: string;
+	size: number;
+	fileName: string;
+}
+
+/** 由客户端注册的 os 字符串（如 "win32 10.0.26200"）映射到发布平台，未知平台返回 null */
+export function platformFromOs(
+	os: string | undefined | null,
+): ReleasePlatform | null {
+	if (!os) return null;
+	const lower = os.toLowerCase();
+	if (lower.startsWith("win32") || lower === "win") return "win-x64";
+	if (lower.startsWith("linux")) return "linux-x64";
+	return null;
+}
+
 /** release 列表项（REST 返回） */
 export interface ReleaseInfo {
 	version: string;
-	sha256: string;
-	size: number;
+	/** 平台 -> 构件信息（上传两个平台后完整；缺失平台的目标机无法更新） */
+	archives: Partial<Record<ReleasePlatform, ReleaseArchiveInfo>>;
 	status: ReleaseStatus;
 	errorMessage?: string | null;
 	/** 发版操作者（上传者身份；由 AuthGuard 注入） */

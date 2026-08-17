@@ -11,6 +11,7 @@ import {
 	ReleaseClientState,
 	ReleaseStatus,
 	VERSION,
+	platformFromOs,
 	type ServerShutdownNotice,
 	type UpdateRequest,
 } from "@vcpdeck/shared";
@@ -21,9 +22,9 @@ import { ServerDrain } from "../job/server-drain.js";
 
 /** 向客户端发送更新事件与查询在线客户端（由网关适配器实现） */
 export interface ClientUpdateChannel {
-	/** 在线客户端及其版本 */
+	/** 在线客户端及其版本与注册 os（用于选择对应平台的更新包） */
 	listOnlineClients(): Promise<
-		Array<{ clientId: string; clientVersion: string }>
+		Array<{ clientId: string; clientVersion: string; os: string }>
 	>;
 	sendUpdateRequest(clientId: string, req: UpdateRequest): void;
 	broadcastShutdown(notice: ServerShutdownNotice): void;
@@ -84,7 +85,7 @@ export class ReleaseOrchestrator {
 
 	/**
 	 * 上传后触发：uploaded → updating_server。
-	 * applyUpdate 正常返回（launcher 未接管）视为失败。
+	 * 服务端按本机平台选择构件；applyUpdate 正常返回（launcher 未接管）视为失败。
 	 */
 	async startRelease(version: string): Promise<void> {
 		const release = await this.releases.findByVersion(version);
@@ -98,12 +99,20 @@ export class ReleaseOrchestrator {
 				`已有进行中的 release ${active.version}`,
 			);
 		}
+		const serverPlatform = platformFromOs(process.platform);
+		if (!serverPlatform || !release.archives[serverPlatform]) {
+			await this.releases.markFailed(
+				version,
+				`缺少 ${serverPlatform ?? "未知平台"} 构件，无法更新服务端`,
+			);
+			return;
+		}
 		await this.releases.transitionStatus(version, ReleaseStatus.UPDATING_SERVER);
 		try {
 			await this.launcher.prepareUpdate({
 				version,
-				url: `/api/releases/${version}/file`,
-				sha256: release.sha256,
+				url: `/api/releases/${version}/file?platform=${serverPlatform}`,
+				sha256: release.archives[serverPlatform].sha256,
 			});
 			await this.drain.drain();
 			this.channel.broadcastShutdown({ expectedVersion: version });
@@ -196,13 +205,23 @@ export class ReleaseOrchestrator {
 		return this.activePhase;
 	}
 
-	/** 全量依次更新：逐个等待「重连注册新版本 / 超时 / 失败」 */
+	/** 全量依次更新：逐个等待「重连注册新版本 / 超时 / 失败」；按客户端 os 选择平台包 */
 	private async runClientLoop(version: string): Promise<void> {
 		const release = await this.releases.findByVersion(version);
 		if (!release) return;
 		const online = await this.channel.listOnlineClients();
 		const outdated = online.filter((c) => c.clientVersion !== version);
 		for (const client of outdated) {
+			const platform = platformFromOs(client.os);
+			if (!platform || !release.archives[platform]) {
+				await this.releases.markClientState(
+					version,
+					client.clientId,
+					ReleaseClientState.FAILED,
+					`平台不受支持或构件缺失: ${client.os || "unknown"}`,
+				);
+				continue;
+			}
 			await this.releases.markClientState(
 				version,
 				client.clientId,
@@ -210,8 +229,8 @@ export class ReleaseOrchestrator {
 			);
 			this.channel.sendUpdateRequest(client.clientId, {
 				releaseVersion: version,
-				url: `/api/releases/${version}/file`,
-				sha256: release.sha256,
+				url: `/api/releases/${version}/file?platform=${platform}`,
+				sha256: release.archives[platform].sha256,
 				timeoutMs: this.clientTimeoutMs,
 			});
 			const outcome = await this.waitClientOutcome(client.clientId, version);

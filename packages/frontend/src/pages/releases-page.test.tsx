@@ -13,8 +13,18 @@ import { ReleasesPage } from "./releases-page.js";
 function release(overrides: Partial<ReleaseInfo> = {}): ReleaseInfo {
 	return {
 		version: "1.2.1",
-		sha256: "a".repeat(64),
-		size: 1024,
+		archives: {
+			"win-x64": {
+				sha256: "a".repeat(64),
+				size: 1024,
+				fileName: "vcpdeck-1.2.1-win-x64.zip",
+			},
+			"linux-x64": {
+				sha256: "b".repeat(64),
+				size: 2048,
+				fileName: "vcpdeck-1.2.1-linux-x64.zip",
+			},
+		},
 		status: ReleaseStatus.DONE,
 		errorMessage: null,
 		createdByName: "Admin",

@@ -24,9 +24,13 @@ function dbRow(overrides: Record<string, unknown> = {}) {
 	return {
 		id: "rel_1",
 		version: "1.2.1",
-		sha256: "abc",
-		fileName: "vcpdeck-1.2.1.zip",
-		size: 1024,
+		archives: JSON.stringify({
+			"win-x64": {
+				sha256: "abc",
+				size: 1024,
+				fileName: "vcpdeck-1.2.1-win-x64.zip",
+			},
+		}),
 		status: "uploaded",
 		clientStates: "{}",
 		errorMessage: null,
@@ -49,25 +53,30 @@ describe("ReleaseService", () => {
 	});
 
 	describe("create", () => {
-		it("新版本创建成功，status 为 uploaded（含操作者）", async () => {
+		it("新版本创建成功，status 为 uploaded（含操作者与平台构件）", async () => {
 			prisma.release.findUnique.mockResolvedValue(null);
 			prisma.release.create.mockResolvedValue(dbRow());
 
 			const info = await service.create({
 				version: "1.2.1",
-				sha256: "abc",
-				fileName: "vcpdeck-1.2.1.zip",
-				size: 1024,
+				archives: {
+					"win-x64": {
+						sha256: "abc",
+						fileName: "vcpdeck-1.2.1-win-x64.zip",
+						size: 1024,
+					},
+				},
 				createdByName: "Admin",
 				createdVia: "web",
 			});
 
 			expect(info.status).toBe(ReleaseStatus.UPLOADED);
 			expect(info.clientStates).toEqual({});
+			expect(info.archives["win-x64"]).toMatchObject({ sha256: "abc" });
 			expect(prisma.release.create).toHaveBeenCalledWith({
 				data: expect.objectContaining({
 					version: "1.2.1",
-					sha256: "abc",
+					archives: expect.stringContaining('"win-x64"'),
 					status: "uploaded",
 					createdByName: "Admin",
 					createdVia: "web",
@@ -81,12 +90,77 @@ describe("ReleaseService", () => {
 			await expect(
 				service.create({
 					version: "1.2.1",
-					sha256: "abc",
-					fileName: "vcpdeck-1.2.1.zip",
-					size: 1024,
+					archives: {},
 				}),
 			).rejects.toMatchObject({ code: "RELEASE_DUPLICATE_VERSION" });
 			expect(prisma.release.create).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("addArchive", () => {
+		it("补充新平台构件并返回合并结果", async () => {
+			prisma.release.findUnique.mockResolvedValue(dbRow());
+			prisma.release.update.mockResolvedValue(
+				dbRow({
+					archives: JSON.stringify({
+						"win-x64": { sha256: "abc", size: 1024, fileName: "w.zip" },
+						"linux-x64": { sha256: "def", size: 2048, fileName: "l.zip" },
+					}),
+				}),
+			);
+
+			const info = await service.addArchive("1.2.1", "linux-x64", {
+				sha256: "def",
+				size: 2048,
+				fileName: "l.zip",
+			});
+
+			expect(info.archives["linux-x64"]).toMatchObject({ sha256: "def" });
+			expect(prisma.release.update).toHaveBeenCalledWith({
+				where: { version: "1.2.1" },
+				data: { archives: expect.stringContaining('"linux-x64"') },
+			});
+		});
+
+		it("同平台构件已存在抛出 RELEASE_ARCHIVE_EXISTS", async () => {
+			prisma.release.findUnique.mockResolvedValue(dbRow());
+
+			await expect(
+				service.addArchive("1.2.1", "win-x64", {
+					sha256: "abc",
+					size: 1024,
+					fileName: "w.zip",
+				}),
+			).rejects.toMatchObject({ code: "RELEASE_ARCHIVE_EXISTS" });
+		});
+
+		it("release 不存在抛出 RELEASE_NOT_FOUND", async () => {
+			prisma.release.findUnique.mockResolvedValue(null);
+
+			await expect(
+				service.addArchive("9.9.9", "win-x64", {
+					sha256: "abc",
+					size: 1,
+					fileName: "w.zip",
+				}),
+			).rejects.toMatchObject({ code: "RELEASE_NOT_FOUND" });
+		});
+	});
+
+	describe("hasAllArchives", () => {
+		it("两个平台构件齐备返回 true", () => {
+			const info = {
+				version: "1.2.1",
+				archives: {
+					"win-x64": { sha256: "a", size: 1, fileName: "w.zip" },
+					"linux-x64": { sha256: "b", size: 2, fileName: "l.zip" },
+				},
+			};
+			expect(service.hasAllArchives(info as never)).toBe(true);
+		});
+
+		it("缺平台返回 false", () => {
+			expect(service.hasAllArchives({ archives: {} } as never)).toBe(false);
 		});
 	});
 

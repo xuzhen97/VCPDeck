@@ -1,13 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ReleaseClientState, ReleaseStatus } from "@vcpdeck/shared";
+import {
+	ReleaseClientState,
+	ReleaseStatus,
+	platformFromOs,
+} from "@vcpdeck/shared";
 import type { ReleaseInfo } from "@vcpdeck/shared";
 import { ReleaseOrchestrator } from "./release.orchestrator.js";
+
+/** 测试机自身平台（断言下载 URL 用，避免依赖测试运行环境） */
+const currentPlatform = platformFromOs(process.platform) ?? "win-x64";
 
 function releaseInfo(overrides: Partial<ReleaseInfo> = {}): ReleaseInfo {
 	return {
 		version: "1.2.1",
-		sha256: "a".repeat(64),
-		size: 1024,
+		archives: {
+			"win-x64": {
+				sha256: "a".repeat(64),
+				size: 1024,
+				fileName: "vcpdeck-1.2.1-win-x64.zip",
+			},
+			"linux-x64": {
+				sha256: "b".repeat(64),
+				size: 2048,
+				fileName: "vcpdeck-1.2.1-linux-x64.zip",
+			},
+		},
 		status: ReleaseStatus.UPLOADED,
 		errorMessage: null,
 		createdAt: "2026-06-15T00:00:00.000Z",
@@ -108,8 +125,8 @@ describe("ReleaseOrchestrator", () => {
 			);
 			expect(deps.launcher.prepareUpdate).toHaveBeenCalledWith({
 				version: "1.2.1",
-				url: "/api/releases/1.2.1/file",
-				sha256: "a".repeat(64),
+				url: `/api/releases/1.2.1/file?platform=${currentPlatform}`,
+				sha256: releaseInfo().archives[currentPlatform]!.sha256,
 			});
 			expect(deps.drain.drain).toHaveBeenCalled();
 			expect(deps.channel.broadcastShutdown).toHaveBeenCalledWith({
@@ -120,6 +137,24 @@ describe("ReleaseOrchestrator", () => {
 				"1.2.1",
 				expect.stringContaining("applyUpdate"),
 			);
+		});
+
+		it("缺少本机平台构件时直接标记 failed，不进入更新阶段", async () => {
+			deps.releases.findByVersion.mockResolvedValue(
+				releaseInfo({
+					archives: { "linux-x64": releaseInfo().archives["linux-x64"] },
+				}),
+			);
+			deps.releases.getActiveRelease.mockResolvedValue(null);
+
+			await orchestrator.startRelease("1.2.1");
+
+			expect(deps.releases.markFailed).toHaveBeenCalledWith(
+				"1.2.1",
+				expect.stringContaining("构件"),
+			);
+			expect(deps.releases.transitionStatus).not.toHaveBeenCalled();
+			expect(deps.launcher.prepareUpdate).not.toHaveBeenCalled();
 		});
 
 		it("已有活动 release 时抛 RELEASE_ORCHESTRATOR_BUSY，不动 launcher", async () => {
@@ -157,9 +192,9 @@ describe("ReleaseOrchestrator", () => {
 			);
 			mockLoopRelease(deps, ReleaseStatus.UPDATING_SERVER);
 			deps.channel.listOnlineClients.mockResolvedValue([
-				{ clientId: "c1", clientVersion: "1.1.0" },
-				{ clientId: "c2", clientVersion: "1.1.0" },
-				{ clientId: "c3", clientVersion: "1.2.1" },
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+				{ clientId: "c2", clientVersion: "1.1.0", os: "linux 6.8 x64" },
+				{ clientId: "c3", clientVersion: "1.2.1", os: "win32 10.0.26200" },
 			]);
 			deps.releases.markClientState.mockResolvedValue({});
 
@@ -184,7 +219,16 @@ describe("ReleaseOrchestrator", () => {
 				"c1",
 				expect.objectContaining({
 					releaseVersion: "1.2.1",
-					url: "/api/releases/1.2.1/file",
+					url: "/api/releases/1.2.1/file?platform=win-x64",
+					sha256: releaseInfo().archives["win-x64"]!.sha256,
+				}),
+			);
+			expect(deps.channel.sendUpdateRequest).toHaveBeenNthCalledWith(
+				2,
+				"c2",
+				expect.objectContaining({
+					url: "/api/releases/1.2.1/file?platform=linux-x64",
+					sha256: releaseInfo().archives["linux-x64"]!.sha256,
 				}),
 			);
 			expect(deps.releases.markClientState).toHaveBeenCalledWith(
@@ -250,8 +294,8 @@ describe("ReleaseOrchestrator", () => {
 			);
 			mockLoopRelease(deps, ReleaseStatus.UPDATING_CLIENTS);
 			deps.channel.listOnlineClients.mockResolvedValue([
-				{ clientId: "c1", clientVersion: "1.1.0" },
-				{ clientId: "c2", clientVersion: "1.1.0" },
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+				{ clientId: "c2", clientVersion: "1.1.0", os: "win32 10.0.26200" },
 			]);
 			deps.releases.markClientState.mockResolvedValue({});
 
@@ -291,7 +335,7 @@ describe("ReleaseOrchestrator", () => {
 			);
 			mockLoopRelease(deps, ReleaseStatus.UPDATING_CLIENTS);
 			deps.channel.listOnlineClients.mockResolvedValue([
-				{ clientId: "c1", clientVersion: "1.1.0" },
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
 			]);
 			deps.releases.markClientState.mockResolvedValue({});
 
@@ -308,6 +352,30 @@ describe("ReleaseOrchestrator", () => {
 				"failed",
 				"校验失败",
 			);
+			expect(deps.releases.transitionStatus).toHaveBeenCalledWith(
+				"1.2.1",
+				ReleaseStatus.DONE,
+			);
+		});
+		it("不支持平台的客户端标记 failed 且不发送更新请求", async () => {
+			deps.releases.getActiveRelease.mockResolvedValue(
+				releaseInfo({ status: ReleaseStatus.UPDATING_CLIENTS }),
+			);
+			mockLoopRelease(deps, ReleaseStatus.UPDATING_CLIENTS);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.1.0", os: "darwin 24.0" },
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			await orchestrator.resumeAfterStartup();
+
+			expect(deps.releases.markClientState).toHaveBeenCalledWith(
+				"1.2.1",
+				"c1",
+				"failed",
+				expect.stringContaining("平台不受支持"),
+			);
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
 			expect(deps.releases.transitionStatus).toHaveBeenCalledWith(
 				"1.2.1",
 				ReleaseStatus.DONE,
@@ -330,7 +398,7 @@ describe("ReleaseOrchestrator", () => {
 			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
 			deps.releases.findByVersion.mockResolvedValue(target);
 			deps.channel.listOnlineClients.mockResolvedValue([
-				{ clientId: "c1", clientVersion: "1.1.0" },
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
 			]);
 			deps.releases.markClientState.mockResolvedValue({});
 

@@ -56,9 +56,7 @@ model Job {
 model Release {
   id           String   @id
   version      String   @unique
-  sha256       String
-  fileName     String
-  size         Int
+  archives     String   @default("{}") // 平台 -> { sha256, size, fileName }（JSON）
   status       String   @default("uploaded") // uploaded | updating_server | updating_clients | done | failed
   clientStates String   @default("{}")        // clientId -> { state, reason?, at }（JSON，审计用）
   errorMessage String?

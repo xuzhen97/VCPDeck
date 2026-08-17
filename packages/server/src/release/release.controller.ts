@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { copyFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { IncomingMessage } from "node:http";
 import type { Response } from "express";
@@ -28,19 +28,26 @@ import { ReleaseError, ReleaseService } from "./release.service.js";
 import { ReleaseOrchestrator } from "./release.orchestrator.js";
 import { Public } from "../auth/public.decorator.js";
 import { Actor } from "../auth/actor.decorator.js";
-import type { ActorContext } from "@vcpdeck/shared";
+import type { ActorContext, ReleasePlatform } from "@vcpdeck/shared";
 
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
+
+function isPlatform(v: string | undefined): v is ReleasePlatform {
+	return v === "win-x64" || v === "linux-x64";
+}
 
 /** release 存储目录（默认相对 server 运行目录，可经环境变量覆盖） */
 export function releasesDir(): string {
 	return process.env.VCPDECK_RELEASES_DIR || "./data/releases";
 }
 
-/** release zip 最终存储路径 */
-export function releaseZipPath(version: string): string {
-	return join(releasesDir(), `vcpdeck-${version}.zip`);
+/** release zip 最终存储路径（按平台分开；绝对路径，res.sendFile 要求） */
+export function releaseZipPath(version: string, platform: ReleasePlatform): string {
+	return resolve(
+		process.env.VCPDECK_RELEASES_DIR || "./data/releases",
+		`vcpdeck-${version}-${platform}.zip`,
+	);
 }
 
 /** 上传临时目录（校验通过后移动到最终路径） */
@@ -91,10 +98,17 @@ export class ReleaseController {
 		);
 	}
 
-	/** 更新包下载：客户端 launcher 使用，公开（完整性由 sha256 校验兑底） */
+	/** 更新包下载：客户端 launcher 使用，公开（完整性由 sha256 校验兑底）；按平台选包 */
 	@Public()
 	@Get(":version/file")
-	async download(@Param("version") version: string, @Res() res: Response) {
+	async download(
+		@Param("version") version: string,
+		@Res() res: Response,
+		@Query("platform") platform?: string,
+	) {
+		if (!isPlatform(platform)) {
+			throw new BadRequestException("platform 应为 win-x64 或 linux-x64");
+		}
 		const info = await this.service.findByVersion(version);
 		if (!info) {
 			throw new NotFoundException({
@@ -102,8 +116,14 @@ export class ReleaseController {
 				message: `release ${version} 不存在`,
 			});
 		}
+		if (!info.archives[platform]) {
+			throw new NotFoundException({
+				code: "RELEASE_ARCHIVE_MISSING",
+				message: `release ${version} 缺少 ${platform} 构件`,
+			});
+		}
 		res.sendFile(
-			releaseZipPath(version),
+			releaseZipPath(version, platform),
 			{ headers: { "content-type": "application/zip" } },
 			(err?: Error | null) => {
 				if (err && !res.headersSent) {
@@ -117,19 +137,23 @@ export class ReleaseController {
 	}
 
 	/**
-	 * 上传更新包：POST /api/releases/upload?version=x.y.z&sha256=<64hex>
-	 * body 为 zip 原始字节（content-type: application/zip）。
-	 * 操作者由 AuthGuard 注入（createdByName/createdVia），审计用。
+	 * 上传更新包：POST /api/releases/upload?version=x.y.z&platform=win-x64|linux-x64&sha256=<64hex>
+	 * body 为 zip 原始字节（content-type: application/zip）。两个平台各上传一次；
+	 * 两个平台构件齐备后才自动触发更新。操作者由 AuthGuard 注入，审计用。
 	 */
 	@Post("upload")
 	async upload(
 		@Req() req: IncomingMessage,
 		@Query("version") version?: string,
+		@Query("platform") platform?: string,
 		@Query("sha256") sha256?: string,
 		@Actor() actor?: ActorContext,
 	) {
 		if (!version || !VERSION_RE.test(version)) {
 			throw new BadRequestException("版本号格式应为 x.y.z");
+		}
+		if (!isPlatform(platform)) {
+			throw new BadRequestException("platform 应为 win-x64 或 linux-x64");
 		}
 		if (!sha256 || !SHA256_RE.test(sha256)) {
 			throw new BadRequestException("sha256 应为 64 位十六进制");
@@ -147,24 +171,32 @@ export class ReleaseController {
 					"文件 sha256 与声明不符",
 				);
 			}
-			const finalPath = releaseZipPath(version);
+			const finalPath = releaseZipPath(version, platform);
 			await mkdir(releasesDir(), { recursive: true });
 			await moveFile(tempPath, finalPath);
 			moved = true;
-			const release = await this.service.create({
-				version,
+			const archive = {
 				sha256,
-				fileName: `vcpdeck-${version}.zip`,
+				fileName: `vcpdeck-${version}-${platform}.zip`,
 				size: (await stat(finalPath)).size,
-				createdByName: actor?.displayName,
-				createdVia: actor?.source,
-			});
-			// 上传即触发自更新（不阻塞上传响应；失败由编排器落库标记）
-			void this.orchestrator
-				.startRelease(version)
-				.catch((e: unknown) => {
-					console.error(`[release] 触发更新失败: ${version}`, e);
-				});
+			};
+			const existing = await this.service.findByVersion(version);
+			const release = existing
+				? await this.service.addArchive(version, platform, archive)
+				: await this.service.create({
+						version,
+						archives: { [platform]: archive },
+						createdByName: actor?.displayName,
+						createdVia: actor?.source,
+					});
+			// 两个平台构件齐备才触发自更新（不阻塞上传响应；失败由编排器落库标记）
+			if (this.service.hasAllArchives(release)) {
+				void this.orchestrator
+					.startRelease(version)
+					.catch((e: unknown) => {
+						console.error(`[release] 触发更新失败: ${version}`, e);
+					});
+			}
 			return { release };
 		} catch (e) {
 			if (e instanceof ReleaseError) throw toHttp(e);

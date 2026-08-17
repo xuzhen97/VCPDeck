@@ -29,12 +29,13 @@ export class GatewayUpdateChannel implements ClientUpdateChannel {
 	}
 
 	async listOnlineClients(): Promise<
-		Array<{ clientId: string; clientVersion: string }>
+		Array<{ clientId: string; clientVersion: string; os: string }>
 	> {
 		const online = await this.clients.listOnline();
 		return online.map((c) => ({
 			clientId: c.clientId,
 			clientVersion: c.clientVersion,
+			os: c.os,
 		}));
 	}
 

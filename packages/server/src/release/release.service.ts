@@ -11,6 +11,8 @@ import {
 	type ReleaseClientEntry,
 	type ReleaseClientState,
 	type ReleaseInfo,
+	type ReleasePlatform,
+	type ReleaseArchiveInfo,
 } from "@vcpdeck/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 
@@ -39,9 +41,8 @@ const ALLOWED_TRANSITIONS: Record<ReleaseStatus, readonly ReleaseStatus[]> = {
 
 export interface CreateReleaseInput {
 	version: string;
-	sha256: string;
-	fileName: string;
-	size: number;
+	/** 平台 -> 构件信息（首次上传至少含一个平台，另一个平台经 addArchive 补充） */
+	archives: Record<string, ReleaseArchiveInfo>;
 	/** 上传者（由 AuthGuard 注入） */
 	createdByName?: string;
 	createdVia?: string;
@@ -71,11 +72,10 @@ function normalizeEntry(
 	return null;
 }
 
-/** DB 行 → API 形态（clientStates 解析为对象，日期转 ISO 字符串） */
+/** DB 行 → API 形态（archives/clientStates 解析为对象，日期转 ISO 字符串） */
 export function toReleaseInfo(row: {
 	version: string;
-	sha256: string;
-	size: number;
+	archives: string;
 	status: string;
 	errorMessage: string | null;
 	createdByName: string | null;
@@ -95,10 +95,30 @@ export function toReleaseInfo(row: {
 	} catch {
 		clientStates = {};
 	}
+	let archives: Partial<Record<ReleasePlatform, ReleaseArchiveInfo>> = {};
+	try {
+		const parsed = JSON.parse(row.archives) as Record<string, unknown>;
+		for (const [platform, value] of Object.entries(parsed)) {
+			if (platform !== "win-x64" && platform !== "linux-x64") continue;
+			const entry = value as Partial<ReleaseArchiveInfo>;
+			if (
+				typeof entry.sha256 === "string" &&
+				typeof entry.fileName === "string" &&
+				typeof entry.size === "number"
+			) {
+				archives[platform] = {
+					sha256: entry.sha256,
+					size: entry.size,
+					fileName: entry.fileName,
+				};
+			}
+		}
+	} catch {
+		archives = {};
+	}
 	return {
 		version: row.version,
-		sha256: row.sha256,
-		size: row.size,
+		archives,
 		status: row.status as ReleaseStatus,
 		errorMessage: row.errorMessage,
 		createdByName: row.createdByName,
@@ -130,9 +150,7 @@ export class ReleaseService {
 			data: {
 				id: randomUUID(),
 				version: input.version,
-				sha256: input.sha256,
-				fileName: input.fileName,
-				size: input.size,
+				archives: JSON.stringify(input.archives),
 				status: "uploaded",
 				clientStates: "{}",
 				createdByName: input.createdByName ?? null,
@@ -140,6 +158,41 @@ export class ReleaseService {
 			},
 		});
 		return toReleaseInfo(row);
+	}
+
+	/**
+	 * 补充单个平台的构件（第二次上传）。已存在同平台构件或 release 不存在时抛错。
+	 * 返回更新后的 release。
+	 */
+	async addArchive(
+		version: string,
+		platform: ReleasePlatform,
+		archive: ReleaseArchiveInfo,
+	): Promise<ReleaseInfo> {
+		const row = await this.prisma.release.findUnique({ where: { version } });
+		if (!row) {
+			throw new ReleaseError("RELEASE_NOT_FOUND", `release ${version} 不存在`);
+		}
+		const info = toReleaseInfo(row);
+		if (info.archives[platform]) {
+			throw new ReleaseError(
+				"RELEASE_ARCHIVE_EXISTS",
+				`release ${version} 已存在 ${platform} 构件`,
+			);
+		}
+		const archives = { ...info.archives, [platform]: archive };
+		const updated = await this.prisma.release.update({
+			where: { version },
+			data: { archives: JSON.stringify(archives) },
+		});
+		return toReleaseInfo(updated);
+	}
+
+	/** release 是否已包含全部支持平台的构件（补齐后才允许触发更新） */
+	hasAllArchives(release: ReleaseInfo): boolean {
+		return (
+			Boolean(release.archives["win-x64"]) && Boolean(release.archives["linux-x64"])
+		);
 	}
 
 	/** 分页列表（遵循 AGENTS.md 分页规范） */

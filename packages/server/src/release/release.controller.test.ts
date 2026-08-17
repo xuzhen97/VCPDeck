@@ -10,6 +10,8 @@ import { ReleaseError } from "./release.service.js";
 function mockService() {
 	return {
 		create: vi.fn(),
+		addArchive: vi.fn(),
+		hasAllArchives: vi.fn(),
 		list: vi.fn(),
 		findByVersion: vi.fn(),
 		verifyZipSha256: vi.fn(),
@@ -67,11 +69,14 @@ describe("ReleaseController", () => {
 
 		it("校验通过后落盘并创建 release（无 actor 时操作者为空）", async () => {
 			service.verifyZipSha256.mockResolvedValue(true);
+			service.findByVersion.mockResolvedValue(null);
+			service.hasAllArchives.mockReturnValue(false);
 			service.create.mockResolvedValue({ version: "1.2.1" });
 
 			const result = await controller.upload(
 				fakeReq(),
 				"1.2.1",
+				"win-x64",
 				"a".repeat(64),
 			);
 
@@ -81,16 +86,53 @@ describe("ReleaseController", () => {
 			);
 			expect(service.create).toHaveBeenCalledWith({
 				version: "1.2.1",
-				sha256: "a".repeat(64),
-				fileName: "vcpdeck-1.2.1.zip",
-				size: zipBytes.length,
+				archives: {
+					"win-x64": {
+						sha256: "a".repeat(64),
+						fileName: "vcpdeck-1.2.1-win-x64.zip",
+						size: zipBytes.length,
+					},
+				},
 				createdByName: undefined,
 				createdVia: undefined,
 			});
 			expect(result.release).toEqual({ version: "1.2.1" });
-			// 已移动到最终存储路径
-			await expect(access(releaseZipPath("1.2.1"))).resolves.toBeUndefined();
-			// 上传即触发编排
+			// 已移动到最终存储路径（按平台命名）
+			await expect(
+				access(releaseZipPath("1.2.1", "win-x64")),
+			).resolves.toBeUndefined();
+			// 单平台构件未齐，不触发编排
+			expect(orchestrator.startRelease).not.toHaveBeenCalled();
+		});
+
+		it("第二个平台上传后补充构件并触发编排", async () => {
+			service.verifyZipSha256.mockResolvedValue(true);
+			service.findByVersion.mockResolvedValue({
+				version: "1.2.1",
+				archives: {
+					"win-x64": {
+						sha256: "a".repeat(64),
+						size: 1,
+						fileName: "vcpdeck-1.2.1-win-x64.zip",
+					},
+				},
+			});
+			service.addArchive.mockResolvedValue({ version: "1.2.1" });
+			service.hasAllArchives.mockReturnValue(true);
+
+			const result = await controller.upload(
+				fakeReq(),
+				"1.2.1",
+				"linux-x64",
+				"b".repeat(64),
+			);
+
+			expect(service.addArchive).toHaveBeenCalledWith("1.2.1", "linux-x64", {
+				sha256: "b".repeat(64),
+				fileName: "vcpdeck-1.2.1-linux-x64.zip",
+				size: zipBytes.length,
+			});
+			expect(result.release).toEqual({ version: "1.2.1" });
 			expect(orchestrator.startRelease).toHaveBeenCalledWith("1.2.1");
 		});
 
@@ -98,7 +140,7 @@ describe("ReleaseController", () => {
 			service.verifyZipSha256.mockResolvedValue(false);
 
 			const err = await catchHttpError(
-				controller.upload(fakeReq(), "1.2.1", "a".repeat(64)),
+				controller.upload(fakeReq(), "1.2.1", "win-x64", "a".repeat(64)),
 			);
 
 			expect(err.getStatus()).toBe(400);
@@ -110,7 +152,21 @@ describe("ReleaseController", () => {
 
 		it("版本号格式非法返回 400", async () => {
 			const err = await catchHttpError(
-				controller.upload(fakeReq(), "not-a-version", "a".repeat(64)),
+				controller.upload(
+					fakeReq(),
+					"not-a-version",
+					"win-x64",
+					"a".repeat(64),
+				),
+			);
+
+			expect(err.getStatus()).toBe(400);
+			expect(service.create).not.toHaveBeenCalled();
+		});
+
+		it("平台参数非法返回 400", async () => {
+			const err = await catchHttpError(
+				controller.upload(fakeReq(), "1.2.1", "darwin-x64", "a".repeat(64)),
 			);
 
 			expect(err.getStatus()).toBe(400);
@@ -119,12 +175,13 @@ describe("ReleaseController", () => {
 
 		it("版本重复返回 409 RELEASE_DUPLICATE_VERSION", async () => {
 			service.verifyZipSha256.mockResolvedValue(true);
+			service.findByVersion.mockResolvedValue(null);
 			service.create.mockRejectedValue(
 				new ReleaseError("RELEASE_DUPLICATE_VERSION", "版本已存在"),
 			);
 
 			const err = await catchHttpError(
-				controller.upload(fakeReq(), "1.2.1", "a".repeat(64)),
+				controller.upload(fakeReq(), "1.2.1", "win-x64", "a".repeat(64)),
 			);
 
 			expect(err.getStatus()).toBe(409);
@@ -135,6 +192,8 @@ describe("ReleaseController", () => {
 
 		it("actor 注入时记录操作者", async () => {
 			service.verifyZipSha256.mockResolvedValue(true);
+			service.findByVersion.mockResolvedValue(null);
+			service.hasAllArchives.mockReturnValue(false);
 			service.create.mockResolvedValue({ version: "1.2.1" });
 			const actor = {
 				identityId: "i1",
@@ -146,7 +205,13 @@ describe("ReleaseController", () => {
 				requestId: "r1",
 			};
 
-			await controller.upload(fakeReq(), "1.2.1", "a".repeat(64), actor);
+			await controller.upload(
+				fakeReq(),
+				"1.2.1",
+				"win-x64",
+				"a".repeat(64),
+				actor,
+			);
 
 			expect(service.create).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -176,24 +241,54 @@ describe("ReleaseController", () => {
 	});
 
 	describe("download", () => {
+		const winArchive = {
+			sha256: "a".repeat(64),
+			size: 1,
+			fileName: "vcpdeck-1.2.1-win-x64.zip",
+		};
+
 		it("release 不存在返回 404", async () => {
 			service.findByVersion.mockResolvedValue(null);
 
 			const err = await catchHttpError(
-				controller.download("9.9.9", mockRes() as never),
+				controller.download("9.9.9", mockRes() as never, "win-x64"),
 			);
 
 			expect(err.getStatus()).toBe(404);
 		});
 
-		it("存在时 sendFile 到最终存储路径", async () => {
-			service.findByVersion.mockResolvedValue({ version: "1.2.1" });
+		it("platform 非法返回 400", async () => {
+			const err = await catchHttpError(
+				controller.download("1.2.1", mockRes() as never, "darwin-x64"),
+			);
+
+			expect(err.getStatus()).toBe(400);
+		});
+
+		it("缺少对应平台构件返回 404", async () => {
+			service.findByVersion.mockResolvedValue({
+				version: "1.2.1",
+				archives: { "win-x64": winArchive },
+			});
+
+			const err = await catchHttpError(
+				controller.download("1.2.1", mockRes() as never, "linux-x64"),
+			);
+
+			expect(err.getStatus()).toBe(404);
+		});
+
+		it("存在时 sendFile 到对应平台存储路径", async () => {
+			service.findByVersion.mockResolvedValue({
+				version: "1.2.1",
+				archives: { "win-x64": winArchive },
+			});
 			const res = mockRes();
 
-			await controller.download("1.2.1", res as never);
+			await controller.download("1.2.1", res as never, "win-x64");
 
 			expect(res.sendFile).toHaveBeenCalledWith(
-				releaseZipPath("1.2.1"),
+				releaseZipPath("1.2.1", "win-x64"),
 				expect.objectContaining({
 					headers: expect.objectContaining({
 						"content-type": "application/zip",
