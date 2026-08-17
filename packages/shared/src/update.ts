@@ -8,6 +8,11 @@ export interface UpdateManifest {
 	nodeVersion: string;
 	/** launcher 最低兼容版本（当前字段预留，尚未执行校验） */
 	launcherMinVersion: string;
+	/** 随发布包提供的稳定 Launcher 入口；首次安装时复制到 app-dir 外部路径 */
+	launcher?: {
+		dir: string;
+		entry: string;
+	};
 	/** archive 整体 sha256（当前 manifest 内留空，权威值存于 Release 并随更新请求下发） */
 	sha256: string;
 	artifacts: {

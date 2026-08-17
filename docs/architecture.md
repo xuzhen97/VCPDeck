@@ -372,7 +372,7 @@ flowchart TB
     ServerProcess -.-> ExternalStorage[可选外部存储]
 ```
 
-Frontend 是独立构建的 SPA，当前 Server 不承担其静态资源构建职责。开发环境通常由 Vite 提供 Frontend，由 NestJS Server 监听 API 端口；生产环境可以将静态资源和 API 部署在不同主机，并通过允许的 Origin 和反向代理进行连接。
+Frontend 构建产物随发布包分发并由 Server 同源托管（`server/public/`，SPA 回退到 `index.html`，见 [ADR-0013](./adr/0013-frontend-bundled-with-server.md)），开发环境仍由 Vite 提供、NestJS Server 监听 API 端口；生产环境也可将静态资源和 API 部署在不同主机（不随包时），通过允许的 Origin 和反向代理进行连接。
 
 Client 和 Server 都可以由 Launcher 守护。SQLite 与本地 Storage 应放在 Server 的持久化目录中，不应随版本目录切换而丢失。
 

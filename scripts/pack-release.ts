@@ -3,11 +3,11 @@
  *   pnpm release --version=1.2.1 [--output=dist-release/] [--node-constraint=">=24"]
  *
  * 步骤：
- *   1. 注入版本号 → 全量构建（shared/server/client）→ 多平台 frp 下载
+ *   1. 注入版本号 → 全量构建（shared/server/client/launcher/frontend）→ 多平台 frp 下载
  *   2. esbuild 将业务代码 + 纯 JS 依赖打成少量单文件（原生模块、Prisma 运行时、
  *      Pi SDK 等外部保留，staging 只安装这部分依赖）
- *   3. staging 组装：server/ 与 client/（bundle + generated + schema + 精简依赖）
- *   4. 产出 win-x64 / linux-x64 两份 zip（archiver，构建机平台无关），供分发与自动
+ *   3. staging 组装：launcher/、server/ 与 client/（Launcher 单文件 + 业务构件与精简依赖）
+ *   4. 产出 win-x64 / linux-x64 两份 zip（均含 Launcher、Server、Client；archiver，构建机平台无关），供分发与自动
  *      更新上传（Server 按目标机平台选择对应包）；linux frp 裸 ELF 从 .gz 内存解压
  *      直接注入 zip（规避开发机杀毒删除裸 ELF）；计算 sha256
  *   5. 恢复版本号为 0.0.0
@@ -31,7 +31,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { ZipArchive } from "archiver";
-import { bundleServer, bundleClient } from "./bundle-apps.js";
+import { bundleLauncher, bundleServer, bundleClient } from "./bundle-apps.js";
 
 const ROOT = resolve(__dirname, "..");
 const PLATFORMS = "win-x64,linux-x64";
@@ -48,15 +48,13 @@ function parseArgs(argv: string[]): Args {
 		throw new Error("用法: pnpm release --version=<x.y.z> [--output=<dir>]");
 	}
 	const output =
-		argv.find((a) => a.startsWith("--output="))?.split("=")[1] ??
-		"dist-release";
+		argv.find((a) => a.startsWith("--output="))?.split("=")[1] ?? "dist-release";
 	// 输出目录白名单：仅允许路径安全字符，防命令注入
 	if (!/^[A-Za-z0-9._/\\-]+$/.test(output)) {
 		throw new Error(`--output 含非法字符: ${output}`);
 	}
 	const nodeConstraint =
-		argv.find((a) => a.startsWith("--node-constraint="))?.split("=")[1] ??
-		">=24";
+		argv.find((a) => a.startsWith("--node-constraint="))?.split("=")[1] ?? ">=24";
 	if (!/^>=\d+$/.test(nodeConstraint)) {
 		throw new Error(`--node-constraint 格式应为 >=数字: ${nodeConstraint}`);
 	}
@@ -204,11 +202,14 @@ async function stagePackage(
 	const target = join(stagingDir, pkgName);
 	mkdirSync(join(target, "dist"), { recursive: true });
 
-	// 1. frp 多平台二进制（缺失直接失败；linux 平台以 .gz 包装副本为准：
-	//    开发机杀毒会删除裸 ELF，裸文件由打包步骤从 .gz 内存解压注入 zip）
-	cpSync(join(pkgDir, "dist", "frp"), join(target, "dist", "frp"), {
-		recursive: true,
-	});
+	// 1. frp 多平台二进制（只复制平台目录，避免把 tsc 中间产物/测试文件带进发布包；
+	//    缺失直接失败；linux 平台以 .gz 包装副本为准：开发机杀毒会删除裸 ELF，
+	//    裸文件由打包步骤从 .gz 内存解压注入 zip）
+	for (const p of ["win-x64", "linux-x64"]) {
+		cpSync(join(pkgDir, "dist", "frp", p), join(target, "dist", "frp", p), {
+			recursive: true,
+		});
+	}
 	const checks: Array<[string, string[]]> =
 		pkgName === "server"
 			? [
@@ -252,7 +253,7 @@ async function stagePackage(
 		]);
 	}
 
-	// 3. server 额外文件（Prisma 运行时与 preStart 共用）
+	// 3. server 额外文件（Prisma 运行时与 preStart 共用；Frontend 静态资源同源托管）
 	if (pkgName === "server") {
 		cpSync(join(pkgDir, "generated"), join(target, "generated"), {
 			recursive: true,
@@ -262,10 +263,16 @@ async function stagePackage(
 			join(target, "schema.prisma"),
 		);
 		// Prisma 7 CLI 强制要求 config 文件（preStart db push 与运行时共用 DATABASE_URL）
-		cpSync(
-			join(pkgDir, "prisma.config.cjs"),
-			join(target, "prisma.config.cjs"),
-		);
+		cpSync(join(pkgDir, "prisma.config.cjs"), join(target, "prisma.config.cjs"));
+		// Frontend 构建产物 → <server>/public，由 ServeStatic 同源托管（见 ADR-0013）
+		// （frontend 已在 main() 中先于 staging 构建，此处校验防遗漏）
+		const frontendDist = join(ROOT, "packages", "frontend", "dist");
+		if (!existsSync(join(frontendDist, "index.html"))) {
+			throw new Error(
+				"packages/frontend/dist 缺少 index.html，请先构建 frontend（pnpm --filter @vcpdeck/frontend build）",
+			);
+		}
+		cpSync(frontendDist, join(target, "public"), { recursive: true });
 	}
 
 	// 4. 外部依赖精简安装：supportedArchitectures（pnpm 11 从 pnpm-workspace.yaml 读取）
@@ -301,14 +308,7 @@ async function stagePackage(
 		if (process.platform === "win32") {
 			execFileSync(
 				"cmd.exe",
-				[
-					"/c",
-					"pnpm",
-					"install",
-					"--prod",
-					"--ignore-scripts",
-					"--prefer-offline",
-				],
+				["/c", "pnpm", "install", "--prod", "--ignore-scripts", "--prefer-offline"],
 				{ cwd: target, stdio: "inherit" },
 			);
 		} else {
@@ -339,6 +339,7 @@ const VARIANT_EXCLUDES: Record<ArchiveVariant, string[]> = {
 		"server/dist/frp/linux-x64",
 		"client/dist/frp/linux-x64",
 		"server/node_modules/@libsql/linux-x64-gnu",
+		"server/node_modules/@libsql/linux-x64-musl",
 		"client/node_modules/@lydell/node-pty-linux-x64",
 	],
 	"linux-x64": [
@@ -386,25 +387,11 @@ function createArchive(
 			? []
 			: [
 					{
-						gz: join(
-							stagingDir,
-							"client",
-							"dist",
-							"frp",
-							"linux-x64",
-							"frpc.gz",
-						),
+						gz: join(stagingDir, "client", "dist", "frp", "linux-x64", "frpc.gz"),
 						entry: "client/dist/frp/linux-x64/frpc",
 					},
 					{
-						gz: join(
-							stagingDir,
-							"server",
-							"dist",
-							"frp",
-							"linux-x64",
-							"frps.gz",
-						),
+						gz: join(stagingDir, "server", "dist", "frp", "linux-x64", "frps.gz"),
 						entry: "server/dist/frp/linux-x64/frps",
 					},
 				];
@@ -445,12 +432,17 @@ async function main(): Promise<void> {
 		run(["pnpm", "--filter", "@vcpdeck/shared", "build"], "shared 构建");
 		run(["pnpm", "--filter", "@vcpdeck/server", "build"], "server 构建");
 		run(["pnpm", "--filter", "@vcpdeck/client", "build"], "client 构建");
+		run(["pnpm", "--filter", "@vcpdeck/launcher", "build"], "Launcher 构建");
+		run(["pnpm", "--filter", "@vcpdeck/frontend", "build"], "frontend 构建");
 		run(
 			["npx", "tsx", "scripts/download-frp.ts", `--platform=${PLATFORMS}`],
 			"多平台 frp 下载",
 		);
 
 		// 2. staging 组装
+		mkdirSync(join(stagingDir, "launcher", "dist"), { recursive: true });
+		console.log("[pack-release] Launcher esbuild 打包");
+		await bundleLauncher(join(stagingDir, "launcher", "dist", "main.js"));
 		await stagePackage("server", stagingDir);
 		await stagePackage("client", stagingDir);
 		writeFileSync(
@@ -461,6 +453,7 @@ async function main(): Promise<void> {
 					nodeVersion: args.nodeConstraint,
 					launcherMinVersion: "0.0.0",
 					sha256: "",
+					launcher: { dir: "launcher", entry: "dist/main.js" },
 					artifacts: {
 						server: {
 							dir: "server",
@@ -475,11 +468,19 @@ async function main(): Promise<void> {
 				2,
 			),
 		);
+		// 安装/卸载脚本与 zip 平级提供（工具不寄生在 zip 内，避免解压拿脚本又依赖 zip 的重复解压）
+		cpSync(
+			join(ROOT, "scripts", "install.cjs"),
+			join(ROOT, args.output, "install.cjs"),
+		);
+		cpSync(
+			join(ROOT, "scripts", "uninstall.cjs"),
+			join(ROOT, args.output, "uninstall.cjs"),
+		);
 
 		// 3. 压缩（win-x64 / linux-x64 两份）+ linux frp 内存注入 + sha256
 		const variants: ArchiveVariant[] = ["win-x64", "linux-x64"];
-		const results: Array<{ name: string; sha256: string; platform: string }> =
-			[];
+		const results: Array<{ name: string; sha256: string; platform: string }> = [];
 		for (const variant of variants) {
 			const archivePath = await createArchive(
 				stagingDir,
@@ -502,6 +503,9 @@ async function main(): Promise<void> {
 		}
 		console.log(
 			"[pack-release] 或使用 CLI：vcpdeck release upload <win-x64.zip> <linux-x64.zip> --server=<url>",
+		);
+		console.log(
+			`[pack-release] 安装/卸载脚本与 zip 平级: ${join(ROOT, args.output, "install.cjs / uninstall.cjs")}`,
 		);
 	} finally {
 		// 4. 恢复版本号

@@ -25,15 +25,17 @@ pnpm release --version=0.1.1
 | `vcpdeck-0.1.1-win-x64.zip` | Windows 控制面主机与目标机 |
 | `vcpdeck-0.1.1-linux-x64.zip` | Linux 控制面主机与目标机 |
 
-每个包同时含 `server/` 与 `client/` 两套构件。构建脚本会打印各包 sha256 与上传命令。
+每个包同时含 `launcher/`、`server/` 与 `client/` 三套构件；Launcher 首次安装到 `<app-dir>/dist/main.js`，已有 Launcher 默认保留；server 构件另含 `public/`（Frontend 构建产物，由 Server 同源托管，见 §9）。安装/卸载脚本 `install.cjs` / `uninstall.cjs` 与 zip **平级**提供于 `dist-release/` 目录（见 3.1/3.2 节）。构建脚本会打印各包 sha256 与上传命令。
 
 ## 3. 部署布局（Launcher apps 结构）
 
 Launcher 以 `apps/<version>/` 保存版本目录，用 current 指针（Linux symlink / Windows state 文件）选择当前版本：
 
 ```text
-<VCPDECK_APP_DIR>/            # 默认 ~/.vcpdeck/launcher
+<VCPDECK_APP_DIR>/            # Server 默认 ~/.vcpdeck/launcher；Client 默认 ~/.vcpdeck/launcher-client
+# 同机运行时使用两个独立目录：Server=~/.vcpdeck/launcher，Client=~/.vcpdeck/launcher-client
 ├── control.json              # Launcher 启动后自动生成（控制通道端口与 Token）
+├── dist/main.js              # 稳定 Launcher（首次安装由发布 zip 提供）
 ├── node/                     # Launcher 管理的 Node 运行时缓存
 └── apps/
     ├── current -> 0.1.1      # Linux：symlink
@@ -46,35 +48,56 @@ Launcher 以 `apps/<version>/` 保存版本目录，用 current 指针（Linux s
 
 **持久数据（数据库、Release 目录、Storage）必须放在版本目录之外**，否则 Launcher 切换版本会丢数据。
 
-### 3.1 快速安装脚本（`scripts/install.cjs`）——推荐
+### 3.1 快速安装脚本（`install.cjs`）——推荐
 
-把发布 zip 安装为版本目录并设置 current 指针、初始化数据库，一条命令完成。支持本地文件或 http(s) URL 下载：
+把发布 zip 安装为版本目录并设置 current 指针、初始化数据库，一条命令完成。支持本地文件或 http(s) URL 下载。
+
+> 安装/卸载脚本与发布 zip **平级提供**于 `dist-release/` 目录（纯 Node 标准库、无仓库依赖）：拿到发布产物即同时拥有脚本与包，无需先解压 zip 拿脚本，也不会对同一个包解压两遍。
 
 ```bash
-# 控制面主机：安装 Server 构件并初始化数据库
+# 发布机（dist-release 目录内，脚本与 zip 同目录）：安装 Server 并引导参数
+node install.cjs --artifact=server --zip=vcpdeck-0.1.1-win-x64.zip
+
+# 仓库开发环境：脚本在 scripts/ 下，zip 在 dist-release/ 下
 node scripts/install.cjs --artifact=server \
   --zip=dist-release/vcpdeck-0.1.1-win-x64.zip \
-  --app-dir=~/.vcpdeck/launcher \
-  --db-url=file:/var/lib/vcpdeck/server.db
-
-# 目标机：安装 Client 构件（无需 db）
-node scripts/install.cjs --artifact=client \
-  --zip=dist-release/vcpdeck-0.1.1-linux-x64.zip \
   --app-dir=~/.vcpdeck/launcher
 
+# 同机安装 Client：默认使用独立的 ~/.vcpdeck/launcher-client，不会与 Server 的 Launcher 冲突
+node install.cjs --artifact=client --zip=vcpdeck-0.1.1-win-x64.zip --server-url=http://127.0.0.1:3001 --psk=<与 Server 相同的密钥>
+
+# 远程 Linux 目标机：使用对应的 Linux 包
+# node install.cjs --artifact=client --zip=vcpdeck-0.1.1-linux-x64.zip --server-url=http://<server-ip>:3001 --psk=<与 Server 相同的密钥>
+
+# 非交互（CI/脚本）显式传参；缺省项自动随机生成
+node install.cjs --artifact=server \
+  --zip=vcpdeck-0.1.1-win-x64.zip \
+  --psk=<密钥> --admin-password=<密码> \
+  --db-url=file:/var/lib/vcpdeck/server.db
+
 # 直接从 URL 安装，并指定 sha256 校验（可选）
-node scripts/install.cjs --artifact=server \
+node install.cjs --artifact=server \
   --zip=https://<server>/api/releases/0.1.1/file?platform=win-x64 \
-  --sha256=<64hex> --db-url=file:/var/lib/vcpdeck/server.db
+  --sha256=<64hex>
 ```
 
-安装脚本完成：解压 → 校验构件完整 → 复制 `manifest.json` + 对应构件（server/ 或 client/）到 `apps/<version>/` → 设置 current 指针 →（server 且给了 `--db-url` 或环境变量 `DATABASE_URL` 时）执行 `prisma db push` → 打印下一步启动命令。
+> 只有 zip、没有脚本的场景（如仅从 Server `/api/releases` 下载 zip）：走第 4 节手动步骤（系统 unzip/tar 解压 + 写 current 指针 + 手铺环境变量）。
 
-选项：`--version=<x.y.z>`（覆盖文件名推断，用于重命名为其他版本）、`--skip-db`、`--force`（覆盖已存在版本目录）。不指定 `--db-url` 时 server 会跳过建库并提示手动初始化。
+**启动参数就绪**：安装过程引导生成关键环境变量并写入 `<app-dir>/launcher.env`（PSK 与管理员密码缺省用 `crypto` 强随机生成，非 Windows 权限 600；敏感值仅打印一次请妥善保管）。server 构件额外写入 `DATABASE_URL` 与 `VCPDECK_RELEASES_DIR`（默认 `<app-dir>/releases`，**版本目录外绝对路径**——Launcher 按版本目录启动 server，相对路径会在自更新切换版本后漂移丢失）。安装完成后脚本会直接打印完整 Launcher 启动命令：
 
-> 脚本只安装应用构件；Launcher 本身与系统服务仍需按第 4 节和 `deployment.md` 准备。
+```bash
+node --env-file="<app-dir>/launcher.env" "<app-dir>/dist/main.js"
+```
 
-### 3.2 快速卸载脚本（`scripts/uninstall.cjs`）
+安装脚本完成：解压 → 校验 Launcher 与业务构件完整 → 首次将 Launcher 安装到 `<app-dir>/dist/main.js`（已有 Launcher 保留）→ 复制 `manifest.json` + 对应构件（server/ 或 client/）到 `apps/<version>/` → 设置 current 指针 → 引导启动参数并写 `launcher.env` →（server，用引导确定的 `DATABASE_URL` 时）执行 `prisma db push` → 打印完整启动命令。
+
+选项：`--version=<x.y.z>`（覆盖文件名推断，用于重命名为其他版本）、`--psk` / `--admin-password` / `--server-url` / `--client-id` / `--releases-dir`（显式参数，非 TTY 必需时使用）、`--no-env`（跳过 env 生成，保持纯安装）、`--skip-db`、`--force`（覆盖已存在版本目录）。目标机 client 未提供 `--server-url` 时会提示手动补写 `launcher.env` 的 `VCPDECK_SERVER`。
+
+> Launcher 随发布 zip 提供，但安装后位于 `<app-dir>/dist/main.js`，不随业务版本切换覆盖；系统服务安装仍需由运维配置。
+
+### 3.2 快速卸载脚本（`uninstall.cjs`）
+
+`uninstall.cjs` 与发布 zip 平级提供于 `dist-release/` 目录（仓库内为 `scripts/uninstall.cjs`）。它只操作 `<app-dir>/apps/...`，与 zip 内容无关：
 
 ```bash
 node scripts/uninstall.cjs --version=0.1.1 --app-dir=~/.vcpdeck/launcher --yes
@@ -89,30 +112,20 @@ node scripts/uninstall.cjs --version=0.1.1 --app-dir=~/.vcpdeck/launcher --dry-r
 > 用第 3.1 节的快速脚本即可完成安装（解压 + current 指针 + 建库）；下面给出不做脚本时的完整手动步骤，并说明启动所需环境变量。
 
 ```bash
-# 1. 解压（Windows 系统 bsdtar 或 PowerShell Expand-Archive；Linux 用 unzip）
+# 不使用安装脚本时，先解压到临时目录，再按 manifest 安装 Launcher 和业务构件。
+# Windows 可用 Expand-Archive，Linux 可用 unzip；生产建议直接使用第 3.1 节安装脚本。
 APP_DIR=~/.vcpdeck/launcher
+mkdir -p "$APP_DIR"
+unzip -o dist-release/vcpdeck-0.1.1-linux-x64.zip -d "$APP_DIR/.staging"
+mkdir -p "$APP_DIR/dist"
+cp "$APP_DIR/.staging/launcher/dist/main.js" "$APP_DIR/dist/main.js"
 mkdir -p "$APP_DIR/apps/0.1.1"
-tar -xf dist-release/vcpdeck-0.1.1-win-x64.zip -C "$APP_DIR/apps/0.1.1"
+cp "$APP_DIR/.staging/manifest.json" "$APP_DIR/apps/0.1.1/manifest.json"
+cp -R "$APP_DIR/.staging/server" "$APP_DIR/apps/0.1.1/server"
+ln -sfn 0.1.1 "$APP_DIR/apps/current"
 
-# 2. current 指针（Linux 用 symlink，Windows 写 state.json）
-#    Linux: ln -s 0.1.1 "$APP_DIR/apps/current"
-echo '{"current":"0.1.1"}' > "$APP_DIR/apps/state.json"
-
-# 3. 初始化数据库（Launcher 首次启动不执行 preStart，preStart 只在自动更新时运行）
-cd "$APP_DIR/apps/0.1.1/server"
-DATABASE_URL="file:/var/lib/vcpdeck/server.db" \
-  node node_modules/prisma/build/index.js db push
-
-# 4. 用 Launcher 启动（守护、崩溃重启、自动更新与回退）
-cd ~/vcpdeck  # Launcher 所在目录
-VCPDECK_APP_DIR="$APP_DIR" \
-VCPDECK_ARTIFACT="server" \
-VCPDECK_PSK="<强随机密钥，与 Client 一致>" \
-VCPDECK_ADMIN_PASSWORD="<首次启动设置管理员密码>" \
-VCPDECK_COOKIE_SECURE="false" \          # 生产 HTTPS 时必须 true
-DATABASE_URL="file:/var/lib/vcpdeck/server.db" \
-VCPDECK_RELEASES_DIR="/var/lib/vcpdeck/releases" \
-node packages/launcher/dist/main.js
+# 初始化数据库并准备 launcher.env 后，直接使用安装脚本打印的 Launcher 命令：
+node --env-file="$APP_DIR/launcher.env" "$APP_DIR/dist/main.js"
 ```
 
 验证：
@@ -126,20 +139,18 @@ curl http://127.0.0.1:3001/api/status
 
 ## 5. 目标机（Client）部署与启动
 
-每台目标机执行（解压对应平台包，保留 `client/` 构件）：
+每台目标机执行（推荐直接使用第 3.1 节安装脚本；Client 默认使用 `~/.vcpdeck/launcher-client`，Launcher 会自动安装到 `<app-dir>/dist/main.js`）：
 
 ```bash
-APP_DIR=~/.vcpdeck/launcher
-mkdir -p "$APP_DIR/apps/0.1.1"
-tar -xf dist-release/vcpdeck-0.1.1-linux-x64.zip -C "$APP_DIR/apps/0.1.1"
-# Linux: ln -s 0.1.1 "$APP_DIR/apps/current"；Windows: state.json 同 Server
+node install.cjs --artifact=client --zip=vcpdeck-0.1.1-linux-x64.zip \
+  --server-url=http://<server-ip>:3001 --psk=<与 Server 相同的密钥>
+```
 
-VCPDECK_APP_DIR="$APP_DIR" \
-VCPDECK_ARTIFACT="client" \
-VCPDECK_SERVER="http://<server-ip>:3001" \
-VCPDECK_PSK="<与 Server 相同的密钥>" \
-VCPDECK_CLIENT_ID="可选固定机器名" \
-node packages/launcher/dist/main.js
+安装完成后使用脚本打印的完整命令：
+
+```bash
+node --env-file="$HOME/.vcpdeck/launcher-client/launcher.env" \
+  "$HOME/.vcpdeck/launcher-client/dist/main.js"
 ```
 
 出现 `[vcpdeck] connected as <id>` 即连接成功。Client 以运行账户权限执行命令/文件/终端/Pi，应使用权限受控的专用账户。
@@ -198,5 +209,5 @@ Server 校验 sha256 → 两个平台构件齐备后自动编排：**Server 先�
 - `VCPDECK_PSK` 与管理员密码必须随机生成并妥善保管，示例值仅用于本地演练；
 - 生产必须 HTTPS + `VCPDECK_COOKIE_SECURE=true`；
 - Server 固定监听 `3001`（当前无端口覆盖变量）；
-- Frontend 不在发布包内，需单独构建部署并与 Server 同版本（见 `deployment.md` §7）；
+- Frontend 已随发布包打进 server 构件（`server/public/`），由 Server 同源托管（SPA 回退到 `index.html`），访问 `http://<host>:3001/` 即驾驶台；跨源部署仍可按 `deployment.md` §7 单独托管并设置 `VCPDECK_FRONTEND_ORIGIN`；
 - 信任模型、凭据与敏感数据处理见 [`security.md`](./security.md)。

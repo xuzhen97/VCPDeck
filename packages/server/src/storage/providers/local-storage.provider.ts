@@ -14,13 +14,26 @@ import type {
 const SIGN_UPLOAD_PREFIX = "upload";
 const SIGN_DOWNLOAD_PREFIX = "download";
 
+/**
+ * 解析 local 存储根目录：绝对 baseDir 原样返回；相对 baseDir 锚定到
+ * VCPDECK_APP_DIR（版本目录外，Launcher 场景下自更新切换版本不漂移）
+ * 或 cwd（无 app-dir 的裸 node 快速验证，维持原行为）。
+ */
+export function resolveStorageBaseDir(
+	raw: string | undefined,
+	appDir = process.env.VCPDECK_APP_DIR,
+): string {
+	const base = raw || "./data/storage";
+	return resolve(appDir || process.cwd(), base);
+}
+
 @Injectable()
 export class LocalStorageProvider implements StorageProvider {
 	private readonly baseDir: string;
 	private readonly signSecret: string;
 
 	constructor(config: Record<string, unknown> = {}) {
-		this.baseDir = resolve((config.baseDir as string) || "./data/storage");
+		this.baseDir = resolveStorageBaseDir(config.baseDir as string | undefined);
 		this.signSecret = (config.signSecret as string) || randomUUID();
 	}
 
@@ -85,11 +98,7 @@ export class LocalStorageProvider implements StorageProvider {
 		return `expires=${expiresAt}&sig=${sig}`;
 	}
 
-	verifyDownloadSignature(
-		key: string,
-		expiresAt: number,
-		sig: string,
-	): boolean {
+	verifyDownloadSignature(key: string, expiresAt: number, sig: string): boolean {
 		// expires=0 为永久链接标记，不做时间校验
 		if (expiresAt > 0 && Date.now() > expiresAt) return false;
 		const expected = this.sign(`${SIGN_DOWNLOAD_PREFIX}:${key}:${expiresAt}`);

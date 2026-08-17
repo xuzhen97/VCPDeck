@@ -44,7 +44,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client 和 Shared 在正式发
 4. 新 Server 从 Release 状态恢复；
 5. 在线 Client 逐台更新；
 6. 离线 Client 后续注册时补更；
-7. Frontend 静态资源与目标 Server 版本同步发布并刷新缓存。
+7. Frontend 随 server 构件同版本分发（`server/public/` 同源托管，[ADR-0013](./adr/0013-frontend-bundled-with-server.md)）；跨源单独托管时需与目标 Server 版本同步发布并刷新缓存。
 
 不要先手工部署新 Client 再保留旧 Server。
 
@@ -100,13 +100,13 @@ FRP 当前 Server 多实例模型与 Client 单 frpc runtime 不一致。无论�
 
 ## 7. Launcher 兼容缺口
 
-manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身版本比较和拒绝逻辑，打包脚本写入 `0.0.0`。在该缺口修复前：
+manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身版本比较和拒绝逻辑，打包脚本写入 `0.0.0`。Launcher 随发布 zip 提供，首次安装后位于 `<app-dir>/dist/main.js`；已有 Launcher 默认保留，不随业务版本自动覆盖。在最低版本校验缺口修复前：
 
 - Launcher 协议或目录结构不得做隐式破坏性变更；
-- 如必须升级 Launcher，应先人工部署新 Launcher，再发布依赖它的业务构件；
+- 如必须升级 Launcher，应先使用明确的 Launcher 升级流程替换 `<app-dir>/dist/main.js`，再发布依赖它的业务构件；
 - 发布说明必须写明最低 Launcher 要求和人工步骤；
 - 不得声称系统已自动强制最低 Launcher 版本；
-- 打包脚本在非 Windows 生成 `.tar.gz`，但 Server/Launcher 当前按 `.zip` 路径保存和解压，非 Windows archive 在修复格式传递并完成真实演练前不属于支持路径。
+- 发布脚本当前统一生成 `.zip`；Server/Launcher 按 `.zip` 保存和解压，Linux 目标机需要 `unzip`。
 
 ## 8. 发布兼容门禁
 

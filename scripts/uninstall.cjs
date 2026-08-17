@@ -2,8 +2,10 @@
  * VCPDeck 快速卸载脚本：从 Launcher 应用目录移除指定版本并维护 current 指针。
  *
  * 用法：
- *   node scripts/uninstall.cjs --version=x.y.z [--app-dir=<dir>] [--yes] [--dry-run]
- *   node scripts/uninstall.cjs --current  [--app-dir=<dir>] [--yes] [--dry-run]
+ *   node uninstall.cjs --version=x.y.z [--app-dir=<dir>] [--yes] [--dry-run]
+ *   node uninstall.cjs --current  [--app-dir=<dir>] [--yes] [--dry-run]
+ *
+ * 本脚本同时随发布包分发（zip 根目录）：解压 zip 后即可直接运行，无需仓库源码。
  *
  * 行为：
  *   - 删除 apps/<version> 版本目录（仅应用构件；数据库/Release/Storage 等
@@ -202,10 +204,10 @@ async function main() {
 if (require.main === module) {
 	if (process.argv.length <= 2) {
 		console.log(
-			"用法: node scripts/uninstall.cjs --version=x.y.z [--app-dir=<dir>] [--yes] [--dry-run]",
+			"用法: node uninstall.cjs --version=x.y.z [--app-dir=<dir>] [--yes] [--dry-run]",
 		);
 		console.log(
-			"      node scripts/uninstall.cjs --current [--app-dir=<dir>] [--yes] [--dry-run]",
+			"      node uninstall.cjs --current [--app-dir=<dir>] [--yes] [--dry-run]",
 		);
 		process.exit(1);
 	}

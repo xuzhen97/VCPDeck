@@ -23,17 +23,17 @@
 - Launcher 自动更新；
 - 灰度、分组、暂停/恢复和维护窗口；
 - 多 Server 协调和共享连接路由；
-- Frontend 静态资源的自动部署；
+- Frontend 静态资源的独立自动部署（当前随 Server 构件分发）；
 - 数据库 schema 自动回滚；
 - 发布者数字签名；
-- 自动安装 systemd、Windows Service 或 Launcher；
+- 自动安装 systemd 或 Windows Service；Launcher 首次安装由发布脚本完成；
 - 对任意历史 Server/Client 版本提供兼容承诺。
 
 ## 2. 组件与职责
 
 | 组件 | 当前职责 |
 | --- | --- |
-| `scripts/pack-release.ts` | 注入版本、构建 Shared/Server/Client、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012） |
+| `scripts/pack-release.ts` | 注入版本、构建 Shared/Server/Client/Frontend/Launcher、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
 | CLI `release upload` | 登录、从文件名取得版本、计算 SHA-256、上传原始字节流 |
 | `ReleaseController` | Release 列表、构件下载、上传校验和自动触发编排 |
 | `ReleaseService` | Release 持久化、状态转换、Client 更新明细和 SHA-256 复核 |
@@ -45,7 +45,7 @@
 | Launcher `Daemon` | 启动/停止业务进程、崩溃退避、Node 运行时、preStart 和探活策略 |
 | `VersionStore` | Linux symlink 或 Windows state 文件形式的 current 指针 |
 
-Launcher 是稳定的外部生命周期管理器。Server 负责全局控制面，Client 只负责本机更新配合；任何一方都不能在没有 Launcher 的情况下可靠完成自替换和失败回退。
+Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由安装脚本首次部署到 `<app-dir>/dist/main.js`，但不随业务版本自动覆盖。Server 负责全局控制面，Client 只负责本机更新配合；任何一方都不能在没有 Launcher 的情况下可靠完成自替换和失败回退。
 
 ## 3. 数据与状态权威
 
@@ -64,10 +64,12 @@ Launcher 是稳定的外部生命周期管理器。Server 负责全局控制面�
 
 ## 4. 构件与 manifest
 
-打包脚本组装一个同时包含 Server 和 Client 的 archive（决策见 ADR-0012）：
+打包脚本组装一个同时包含 Launcher、Server 和 Client 的 archive（决策见 ADR-0012）：
 
 ```text
 manifest.json
+launcher/
+  dist/main.js               # Launcher esbuild 单文件
 server/
   dist/main.js            # esbuild 单文件（业务代码 + 纯 JS 依赖内联）
   dist/frp/               # win-x64 + linux-x64 frps（linux 为裸 ELF + .gz 副本）
@@ -93,6 +95,10 @@ client/
   "nodeVersion": ">=24",
   "launcherMinVersion": "0.0.0",
   "sha256": "",
+  "launcher": {
+    "dir": "launcher",
+    "entry": "dist/main.js"
+  },
   "artifacts": {
     "server": {
       "dir": "server",
@@ -113,7 +119,8 @@ client/
 - 当前 `manifest.sha256` 留空，实际校验值由上传参数进入 `Release.sha256`，再通过更新请求交给 Launcher；
 - `launcherMinVersion` 当前固定为 `0.0.0`，Launcher 尚未执行最低版本校验；
 - `preStart` 是受信任构件携带的 shell 命令，当前仅 Server 使用；以显式 node_modules 相对路径调用 prisma CLI（Launcher 不保证 PATH 含 `.bin`），Windows/Linux 行为一致；
-- Frontend 不在该 archive 中，必须独立构建、部署并与 Server 版本协调。
+- Launcher 首次安装从 `launcher/` 复制到 `<app-dir>/dist/main.js`，已有 Launcher 默认保留，不随业务版本自动覆盖；
+- Frontend 已随 Server 构件放入 `server/public/`，由 Server 同源托管；
 
 ### 4.1 跨平台 archive 与打包机要求
 
@@ -252,7 +259,7 @@ Client Launcher 的健康判定是新 Client 进程连续存活约 3 秒，不�
     └── <previous-version>/
 ```
 
-Launcher 首次启动前必须已经存在可启动的 current 版本。仓库当前没有完整安装器，不会自动准备初始版本和系统服务。
+Launcher 首次启动前必须已经存在可启动的 current 版本。发布安装脚本会从 zip 准备 Launcher 和初始业务版本，但不会自动安装 systemd 或 Windows Service。
 
 Launcher 也没有自动旧版本保留/清理策略。失败回退只有在上一版本目录仍存在且可启动时才有效；运维清理不得删除 current 或预期回退版本。
 
@@ -368,7 +375,7 @@ Launcher 的回退单位是应用版本目录，不是整个系统状态。涉�
 - Launcher 自更新或控制协议破坏性变化；
 - 多 Server、高可用 Release 编排；
 - 灰度、分组或人工审批；
-- 将 Frontend 纳入统一 Release；
+- 将其他独立 Frontend 构件纳入统一 Release（当前 Frontend 已随 Server 构件分发）；
 - 更换 archive 格式或 manifest 版本；
 - 发布者数字签名和信任根；
 - 自动数据库迁移/回滚；
@@ -376,9 +383,9 @@ Launcher 的回退单位是应用版本目录，不是整个系统状态。涉�
 
 当前优先缺口：
 
-1. 统一并验证跨平台 archive 格式；
+1. 完成跨平台 archive 与 Launcher 随包分发的真实演练；
 2. 实现 `launcherMinVersion` 强制校验；
-3. 建立 Launcher 初始安装和系统服务流程；
+3. 建立 systemd/Windows Service 安装流程；
 4. 增加构件发布者数字签名；
 5. 修复 Server drain 失败后的闸门恢复；
 6. 防止重复版本覆盖 archive，并处理活动 Release 期间的新上传；

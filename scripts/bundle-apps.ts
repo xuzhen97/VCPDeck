@@ -68,3 +68,12 @@ export async function bundleClient(targets: BundleTarget[]): Promise<void> {
 		});
 	}
 }
+
+/** Launcher：独立打为单文件，安装到 app-dir/dist 后不随业务版本切换。 */
+export async function bundleLauncher(outfile: string): Promise<void> {
+	await build({
+		...baseOptions("packages/launcher/tsconfig.json", []),
+		entryPoints: [resolve(ROOT, "packages/launcher/src/main.ts")],
+		outfile,
+	});
+}

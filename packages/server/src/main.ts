@@ -1,6 +1,7 @@
 import "dotenv/config";
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module.js";
 import cookieParser from "cookie-parser";
 import { PrismaService } from "./prisma/prisma.service.js";
@@ -8,6 +9,11 @@ import { FrpsInstancesService } from "./frp/frp-instances.service.js";
 import { ReleaseOrchestrator } from "./release/release.orchestrator.js";
 import { randomUUID } from "node:crypto";
 import * as bcrypt from "bcryptjs";
+import { FrontendOriginIoAdapter } from "./static/frontend-origin.adapter.js";
+import {
+	createFrontendFallback,
+	resolveFrontendDir,
+} from "./static/frontend-static.js";
 
 const FRONTEND_ORIGIN =
 	process.env.VCPDECK_FRONTEND_ORIGIN || "http://localhost:5173";
@@ -38,10 +44,26 @@ async function bootstrapAdmin(prisma: PrismaService) {
 }
 
 async function bootstrap() {
-	const app = await NestFactory.create(AppModule);
+	const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+	// socket.io 同源 CORS（SPA 单包交付：页面与 API 同源 :3001 时 /app 也放行）；
+	// 必须传入 app.getHttpServer()，否则 socket.io 会自建独立端口监听
+	app.useWebSocketAdapter(new FrontendOriginIoAdapter(app.getHttpServer()));
 
 	app.use(cookieParser());
 	app.enableCors({ origin: FRONTEND_ORIGIN, credentials: true });
+
+	// Frontend 静态资源同源托管（开发环境由 Vite 提供，找不到产物时仅 API）
+	const frontendDir = resolveFrontendDir();
+	if (frontendDir) {
+		app.useStaticAssets(frontendDir);
+		app.use(createFrontendFallback(frontendDir));
+		console.log(`[frontend] 同源托管静态资源: ${frontendDir}`);
+	} else {
+		console.warn(
+			"[frontend] 未找到 Frontend 构建产物，Server 仅提供 API（开发环境请用 Vite :5173）",
+		);
+	}
 
 	await bootstrapAdmin(app.get(PrismaService));
 

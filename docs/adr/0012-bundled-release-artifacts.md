@@ -68,6 +68,7 @@
 
 ### 5. staging 安装配置
 
+- Launcher 入口由 esbuild 打为 `launcher/dist/main.js`，随两个平台 zip 分发；安装脚本首次安装到 `<app-dir>/dist/main.js`，已有 Launcher 默认保留，避免覆盖正在运行的稳定生命周期组件；
 - staging 目录（OS 临时目录内）用 `pnpm install --prod --ignore-scripts --prefer-offline`；
 - `pnpm-workspace.yaml` 写入 `nodeLinker: hoisted` 与 `supportedArchitectures: {os: [win32, linux], cpu: [x64]}`：
   - hoisted 保证 node_modules 是真实目录（无软链），zip 解压后模块可解析；
@@ -84,7 +85,7 @@
 - 不把 Pi SDK、Prisma CLI 栈打进 bundle（动态加载与体积风险大于收益）；
 - 不裁剪 prisma CLI 的 studio 等传递依赖（脆弱，收益有限，留作后续优化）；
 - 不引入发布者数字签名（仍是 ADR-0003/当前文档已声明的非目标）；
-- 不改变 manifest 结构、Launcher 解压与 Node 运行时选择逻辑。
+- 不改变 manifest 结构、Launcher 解压与 Node 运行时选择逻辑；Launcher 作为首次安装构件随包提供，但不随业务版本自动覆盖。
 
 ## 后果
 
