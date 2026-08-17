@@ -21,6 +21,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [`deployment.md`](./deployment.md) | 配置、目录、部署拓扑、首次部署和升级 |
+| [`quickstart.md`](./quickstart.md) | 从零到 Server/Client 通讯的快速开始演练（构建、部署、运行、验证） |
 | [`operations.md`](./operations.md) | 启停、健康检查、备份恢复、巡检和故障处置 |
 | [`security.md`](./security.md) | 信任边界、凭据、敏感数据、威胁与响应 |
 | [`testing.md`](./testing.md) | 测试层次、命令、环境和发布门禁 |

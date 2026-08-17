@@ -4,6 +4,8 @@
 
 本文描述当前可验证的部署边界。项目尚未提供容器镜像、systemd/Windows Service 安装器或完整生产安装脚本；生产常驻应由 Launcher 或外部服务管理器负责。
 
+> 首次部署的端到端演练（构建 → 解压 → 配置 → 启动 → 验证通讯）见 [`quickstart.md`](./quickstart.md)。
+
 ## 1. 部署拓扑
 
 最小部署包含：
@@ -22,8 +24,9 @@ Client 主动连接 Server，因此目标机器无需向 Server 开放入站控�
 - Node.js 24+（发布 manifest 默认 `>=24`）；
 - Server 需要可写的数据库、Storage 和 Release 目录；
 - Client 的远程 Pi 依赖本机 Pi 配置、模型认证和受支持 Shell；
-- 交互式终端依赖 `node-pty` 原生模块；
-- FRP 能力需要匹配平台的 frpc/frps 构件。
+- 交互式终端依赖 `@lydell/node-pty` 预编译后端（随包携带 win-x64/linux-x64 预编译，Linux 仅 glibc；Alpine/musl 目标机终端能力不可用）；
+- FRP 能力需要匹配平台的 frpc/frps 构件（win-x64 与 linux-x64 均随包）；
+- 目标机不再需要编译工具链或网络下载依赖引擎（详见 ADR-0012）。
 
 ## 3. 构建
 
@@ -42,7 +45,14 @@ pnpm dev
 pnpm dev:all
 ```
 
-生产构件应使用 `scripts/pack-release.ts` 生成并经发布验收，不建议将工作区源码目录直接当作长期版本目录。
+生产构件统一为 zip，每次发版产出两份按平台分开的包（详见 [ADR-0012](./adr/0012-bundled-release-artifacts.md)）：
+
+```bash
+pnpm release --version=x.y.z
+```
+
+- `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`：对应平台构件，既供手动分发（解压到目标机 Launcher `apps/<version>/`），也供自动更新上传（两个平台各上传一次）；
+- 业务代码为 esbuild 单文件，仅原生/引擎/SDK 依赖保留为 node_modules。Linux 目标机自动更新依赖系统 `unzip` 命令（手动分发无此要求）。发布前应完成发布验收冒烟（Server 启动与 `/api/status`、Client 注册与能力上报、终端与 Pi 探测），不建议将工作区源码目录直接当作长期版本目录。
 
 ## 4. 配置
 
@@ -85,7 +95,7 @@ Client 使用运行账户的权限执行命令、文件、PTY 和 Pi。应为其
 | `VCPDECK_ARTIFACT` | 必填 | `server` 或 `client` |
 | `VCPDECK_PROBE_URL` | `http://127.0.0.1:3001/api/status` | Server 探活地址 |
 
-Launcher 首次启动要求 `apps/current` 已指向可用初始版本。仓库当前没有完整安装器，初始版本目录和 current 指针需要由发布流程或运维脚本准备。
+Launcher 首次启动要求 `apps/current` 已指向可用初始版本。应用构件提供快速安装/卸载脚本（`scripts/install.cjs` / `scripts/uninstall.cjs`，见 [`quickstart.md`](./quickstart.md) §3.1–3.2）；Launcher 本身与系统服务安装器仍由运维准备。
 
 ### 4.4 FRPS 迁移配置
 

@@ -112,7 +112,7 @@ React + Vite SPA，使用 React Router 进行客户端路由。数据访问以 `
 无命令框架的 Node.js CLI。当前已实现的命令是：
 
 ```text
-vcpdeck release upload <zip|tar.gz> --server=<url> [--username=x --password=y]
+vcpdeck release upload <vcpdeck-x.y.z-win-x64.zip> <vcpdeck-x.y.z-linux-x64.zip> --server=<url> [--username=x --password=y]
 ```
 
 该命令负责登录、计算 SHA-256 并流式上传发布包。构建时先由 TypeScript 编译，再由 esbuild 打包为 `skills/vcpdeck/vcpdeck.cjs`。机器管理、Job 操作等尚未形成 CLI 命令，不在本文中声明为现有能力。

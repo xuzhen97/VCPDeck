@@ -33,7 +33,7 @@
 
 | 组件 | 当前职责 |
 | --- | --- |
-| `scripts/pack-release.ts` | 注入版本、构建 Shared/Server/Client、组装依赖和 FRP、生成 manifest、压缩并计算 archive SHA-256 |
+| `scripts/pack-release.ts` | 注入版本、构建 Shared/Server/Client、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012） |
 | CLI `release upload` | 登录、从文件名取得版本、计算 SHA-256、上传原始字节流 |
 | `ReleaseController` | Release 列表、构件下载、上传校验和自动触发编排 |
 | `ReleaseService` | Release 持久化、状态转换、Client 更新明细和 SHA-256 复核 |
@@ -64,19 +64,26 @@ Launcher 是稳定的外部生命周期管理器。Server 负责全局控制面�
 
 ## 4. 构件与 manifest
 
-打包脚本组装一个同时包含 Server 和 Client 的 archive：
+打包脚本组装一个同时包含 Server 和 Client 的 archive（决策见 ADR-0012）：
 
 ```text
 manifest.json
 server/
-  dist/
-  generated/
-  prisma/schema.prisma
-  node_modules/
+  dist/main.js            # esbuild 单文件（业务代码 + 纯 JS 依赖内联）
+  dist/frp/               # win-x64 + linux-x64 frps（linux 为裸 ELF + .gz 副本）
+  generated/              # Prisma generated client
+  schema.prisma           # Prisma schema（preStart 与运行时共用）
+  prisma.config.cjs       # Prisma 7 CLI 强制要求
+  node_modules/           # 仅外部保留：prisma CLI 栈 + libsql 双平台绑定
 client/
-  dist/
-  node_modules/
+  dist/index.js           # esbuild 单文件（主进程）
+  dist/pi/worker.js       # fork worker 独立 bundle
+  dist/probe-worker.js    # 能力探测 worker 独立 bundle
+  dist/frp/               # win-x64 + linux-x64 frpc（linux 为裸 ELF + .gz 副本）
+  node_modules/           # 仅外部保留：Pi SDK + @lydell/node-pty 双平台预编译
 ```
+
+外部保留清单与理由、esbuild 选项、staging 安装配置见 ADR-0012。
 
 当前 manifest 的有效结构为：
 
@@ -90,7 +97,7 @@ client/
     "server": {
       "dir": "server",
       "entry": "dist/main.js",
-      "preStart": "prisma db push"
+      "preStart": "node node_modules/prisma/build/index.js db push"
     },
     "client": {
       "dir": "client",
@@ -105,20 +112,22 @@ client/
 - archive 的 SHA-256 在压缩完成后计算，无法可靠地自包含在同一个 archive 内；
 - 当前 `manifest.sha256` 留空，实际校验值由上传参数进入 `Release.sha256`，再通过更新请求交给 Launcher；
 - `launcherMinVersion` 当前固定为 `0.0.0`，Launcher 尚未执行最低版本校验；
-- `preStart` 是受信任构件携带的 shell 命令，当前仅 Server 使用；
+- `preStart` 是受信任构件携带的 shell 命令，当前仅 Server 使用；以显式 node_modules 相对路径调用 prisma CLI（Launcher 不保证 PATH 含 `.bin`），Windows/Linux 行为一致；
 - Frontend 不在该 archive 中，必须独立构建、部署并与 Server 版本协调。
 
-### 4.1 当前 archive 格式缺口
+### 4.1 跨平台 archive 与打包机要求
 
-打包脚本在 Windows 生成 `.zip`，在 Linux/macOS 生成 `.tar.gz`；但 Server 将上传构件统一保存为 `vcpdeck-<version>.zip`，Launcher 也下载到 `.zip` 临时路径，并按扩展名选择解压工具。
+打包统一产出 `.zip`（纯 JS 的 archiver 生成，构建机平台无关），Server 保存与 Launcher 解压都按 `.zip` 处理，先前的 tar.gz 全链路缺口已消除。
 
-因此当前可靠路径是经过验证的 Windows zip 路径；不能声称 `.tar.gz` 已完成全链路支持。发布流程必须在修复格式传递或统一 archive 格式后，分别执行 Windows/Linux 真实演练。
+每次发版产出两份按平台分开的 zip（win-x64 / linux-x64），构建机不再决定目标平台；Server 更新流程按目标机平台选择对应包（上传两次、下载带 `platform` 参数），详见 ADR-0012。注意 Linux 目标机的终端后端来自 @lydell/node-pty 的 glibc 预编译包，不覆盖 musl（Alpine）环境。
+
+linux frp 裸 ELF 在打包时从 `.gz` 包装内存解压注入 zip（开发机杀毒会删除磁盘上的裸 ELF）；`.gz` 副本仍随包保留。
 
 ## 5. Release 状态机
 
 ```mermaid
 stateDiagram-v2
-    [*] --> uploaded: 上传并登记
+    [*] --> uploaded: 上传并登记（按平台，两平台齐备才可进入更新）
     uploaded --> updating_server: 编排开始
     updating_server --> updating_clients: 新 Server 版本匹配并恢复
     updating_clients --> done: 在线 Client 阶段结束
@@ -157,11 +166,11 @@ sequenceDiagram
     participant L as Server Launcher
     participant N as New Server
 
-    O->>S: POST release archive + version + sha256
+    O->>S: POST release archive + version + platform + sha256（win-x64）
     S->>S: 流式计算并复核 SHA-256
-    S->>DB: 创建 uploaded Release
-    S-->>O: 返回 Release
-    S->>DB: uploaded → updating_server
+    S->>DB: 创建 uploaded Release（含 win-x64 构件）
+    O->>S: POST release archive + version + platform + sha256（linux-x64）
+    S->>DB: 补充 linux-x64 构件 → 两平台齐备，触发编排
     S->>L: POST /prepare
     L->>L: 下载、校验、解压
     S->>S: 关闭新 Job 派发并等待活跃 Job
@@ -198,7 +207,7 @@ sequenceDiagram
     participant C as Client
     participant L as Client Launcher
 
-    S->>C: update:request(version,url,sha256,timeout)
+    S->>C: update:request(version,url?platform=<目标机平台>,sha256,timeout)
     C->>C: draining=true，拒绝新 Job
     C->>L: POST /prepare
     L->>L: 下载、校验、解压

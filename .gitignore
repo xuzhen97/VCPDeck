@@ -15,6 +15,7 @@ packages/server/prisma/.env
 CLAUDE.md
 # Build artifacts
 .tmp/
+dist-release/
 # Storage files
 packages/server/data/
 .superpowers/

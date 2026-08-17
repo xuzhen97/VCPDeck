@@ -123,9 +123,9 @@ SDK 将失败归一化为 `VcpDeckApiError(status, code?, details?)`。新增接
 
 | 端点 | 认证 | 当前语义 |
 | --- | --- | --- |
-| `POST /api/releases/upload?version=&sha256=` | Cookie/Bearer | 原始 archive 字节流；校验版本格式和声明 SHA-256，登记后异步触发更新 |
+| `POST /api/releases/upload?version=&platform=&sha256=` | Cookie/Bearer | 原始 archive 字节流；校验版本格式、平台（win-x64/linux-x64）和声明 SHA-256；两个平台构件齐备后异步触发更新 |
 | `GET /api/releases?page=&pageSize=` | Cookie/Bearer | 分页查询 Release 和 Client 更新明细 |
-| `GET /api/releases/:version/file` | Public | Launcher 下载 archive；完整性以 `Release.sha256` 为准 |
+| `GET /api/releases/:version/file?platform=` | Public | Launcher 下载对应平台 archive；完整性以该平台构件 sha256 为准 |
 | `GET /api/status` | Public | 返回 `serverVersion` 和当前活动 Release，供 Launcher 探活 |
 
 上传响应只证明构件已保存并登记，不证明 Server/Client 更新成功。调用方必须继续查询 Release 状态。版本号当前要求严格 `x.y.z`；相同版本不得复用，且活动 Release 期间不要并发上传新版本。详细状态和失败边界见 [`design/release-and-update.md`](./design/release-and-update.md)。
