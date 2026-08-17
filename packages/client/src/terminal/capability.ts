@@ -38,7 +38,7 @@ export function createTerminalCapabilityEnv(): TerminalCapabilityEnv {
 	return {
 		platform: process.platform,
 		loadPty: async () => {
-			const mod = await import("node-pty");
+			const mod = await import("@lydell/node-pty");
 			return { spawn: mod.spawn };
 		},
 	};

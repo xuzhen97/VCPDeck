@@ -141,11 +141,12 @@ async function downloadPlatform(platform: string): Promise<void> {
 				{ stdio: "inherit" },
 			);
 		} else {
-			execFileSync(
-				"tar",
-				["--force-local", "-xzf", fwd(archivePath), "-C", fwd(TMP_DIR)],
-				{ stdio: "inherit" },
-			);
+			// Windows 用系统 bsdtar：不支持 GNU 的 --force-local，但原生处理 D:/ 路径；
+			// 非 Windows 用 GNU tar，POSIX 绝对路径无冒号，同样无需 --force-local
+			const tarBin = isWin ? "C:\\Windows\\System32\\tar.exe" : "tar";
+			execFileSync(tarBin, ["-xzf", fwd(archivePath), "-C", fwd(TMP_DIR)], {
+				stdio: "inherit",
+			});
 		}
 	} catch (e) {
 		throw new Error(

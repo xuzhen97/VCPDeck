@@ -380,10 +380,11 @@ function createShellDiscoveryEnv(): ShellDiscoveryEnv {
  * Windows 下优先 useConptyDll（kill 时跳过 conpty_console_list_agent，避免
  * 父进程持有 console 时 AttachConsole 失败）；构建缺少 conpty.dll 时回退默认路径。 */
 function createPtySpawner(): (opts: PtySpawnOptions) => PtyAdapter {
-	let ptyModule: typeof import("node-pty") | null = null;
+	let ptyModule: typeof import("@lydell/node-pty") | null = null;
 	return (opts) => {
 		if (!ptyModule) {
-			ptyModule = require("node-pty") as typeof import("node-pty");
+			ptyModule =
+				require("@lydell/node-pty") as typeof import("@lydell/node-pty");
 		}
 		const baseOptions = {
 			name: opts.name,

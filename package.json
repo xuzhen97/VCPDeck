@@ -7,11 +7,16 @@
     "dev": "pnpm --filter @vcpdeck/shared --filter @vcpdeck/sdk build && pnpm --parallel --filter @vcpdeck/shared --filter @vcpdeck/frontend --filter @vcpdeck/server dev",
     "dev:all": "pnpm --filter @vcpdeck/shared --filter @vcpdeck/sdk build && pnpm --parallel --filter @vcpdeck/shared --filter @vcpdeck/frontend --filter @vcpdeck/server --filter @vcpdeck/client dev",
     "lint": "pnpm -r lint",
+    "release": "npx tsx scripts/pack-release.ts",
     "download:frp": "npx tsx scripts/download-frp.ts",
     "test:frp": "node scripts/test-frp.cjs"
   },
   "devDependencies": {
+    "@types/archiver": "^8.0.0",
     "@types/node": "^26.1.1",
+    "archiver": "^8.0.0",
+    "esbuild": "^0.24.2",
+    "tsx": "^4.23.1",
     "typescript": "^7.0.2"
   }
 }
