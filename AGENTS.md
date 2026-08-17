@@ -87,7 +87,7 @@ pnpm --filter @vcpdeck/server build
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **VCPDeck** (2638 symbols, 5178 relationships, 141 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **VCPDeck** (8487 symbols, 21543 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -109,7 +109,7 @@ This project is indexed by GitNexus as **VCPDeck** (2638 symbols, 5178 relations
 ## Resources
 
 | Resource | Use for |
-| ---------- | --------- |
+|----------|---------|
 | `gitnexus://repo/VCPDeck/context` | Codebase overview, check index freshness |
 | `gitnexus://repo/VCPDeck/clusters` | All functional areas |
 | `gitnexus://repo/VCPDeck/processes` | All execution flows |
@@ -118,7 +118,7 @@ This project is indexed by GitNexus as **VCPDeck** (2638 symbols, 5178 relations
 ## CLI
 
 | Task | Read this skill file |
-| ------ | --------------------- |
+|------|---------------------|
 | Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
 | Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
 | Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
