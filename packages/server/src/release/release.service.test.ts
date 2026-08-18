@@ -351,4 +351,57 @@ describe("ReleaseService", () => {
 			).resolves.toBe(false);
 		});
 	});
+
+	describe("toReleaseInfo 存储信息透传（ADR-0016）", () => {
+		it("完整 storage 字段透传到 archives", async () => {
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({
+					archives: JSON.stringify({
+						"win-x64": {
+							sha256: "abc",
+							size: 1024,
+							fileName: "vcpdeck-1.2.1-win-x64.zip",
+							storage: { provider: "alibaba", key: "file-1", mode: "direct" },
+						},
+					}),
+				}),
+			);
+
+			const info = await service.findByVersion("1.2.1");
+			expect(info?.archives["win-x64"]?.storage).toEqual({
+				provider: "alibaba",
+				key: "file-1",
+				mode: "direct",
+			});
+		});
+
+		it("storage 字段不完整时忽略（不落到 archives）", async () => {
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({
+					archives: JSON.stringify({
+						"win-x64": {
+							sha256: "abc",
+							size: 1024,
+							fileName: "vcpdeck-1.2.1-win-x64.zip",
+							storage: { provider: "alibaba", key: "file-1", mode: "proxy" },
+						},
+					}),
+				}),
+			);
+
+			const info = await service.findByVersion("1.2.1");
+			expect(info?.archives["win-x64"]?.storage).toBeUndefined();
+			expect(info?.archives["win-x64"]).toMatchObject({ sha256: "abc" });
+		});
+
+		it("无 storage 字段的旧记录不受影响", async () => {
+			prisma.release.findUnique.mockResolvedValue(dbRow());
+
+			const info = await service.findByVersion("1.2.1");
+			expect(info?.archives["win-x64"]?.storage).toBeUndefined();
+			expect(info?.archives["win-x64"]?.fileName).toBe(
+				"vcpdeck-1.2.1-win-x64.zip",
+			);
+		});
+	});
 });

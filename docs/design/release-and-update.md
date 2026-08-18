@@ -53,7 +53,7 @@ Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由
 | --- | --- | --- |
 | Release 元数据和阶段 | SQLite `Release` | Server 重启后恢复编排的依据 |
 | 单 Client 更新结果 | `Release.clientStates` JSON | `clientId → {state,reason?,at}` |
-| Release archive | `VCPDECK_RELEASES_DIR`，默认 `./data/releases` | 必须位于应用版本目录之外 |
+| Release archive | Local 后端：`VCPDECK_RELEASES_DIR`，默认 `./data/releases`；外部存储后端：Provider 对象（key 记录于 `Release.archives[platform].storage`） | 必须位于应用版本目录之外；外部后端下载经统一入口 302 直链（ADR-0016） |
 | 当前应用版本 | Launcher `apps/current` 或 `apps/state.json` | Linux 使用 symlink；Windows 使用 state 文件 |
 | 已准备目标版本 | Launcher 进程内 `pendingVersion` | Launcher 重启后不保留 |
 | 运行中的业务进程 | Launcher `Daemon` | Server 数据库不能证明进程仍健康 |
@@ -205,6 +205,8 @@ sequenceDiagram
 6. Launcher 回退应用版本，不回退数据库和其他持久数据。
 
 Server/Client 在 `/apply` 返回后不再把「本进程未被接管」立即落库/上报失败：连接被 Launcher 掐断与进程存活无法可靠区分，终局以新进程重启后的版本对账与 Client 重连注册为准；明确的 Launcher HTTP 错误仍会标记失败。
+
+下载入口统一为 `GET /api/releases/:version/file?platform=`（ADR-0016）：Local 后端直接 `sendFile`；外部存储后端由 Server 持凭证换取临时直链并 **302** 到直链（目标机 `fetch` 自动跟随，字节流直连存储不占 Server 带宽）；直链短时缓存、过期重新换取，短 TTL 不暴露给目标机与协议。
 
 当前 `preStart` 在停止旧 Server 之前执行。默认 `prisma db push` 可能与旧 Server 同时访问数据库，且其 schema 变化不会在应用回退时自动逆转；生产发布不能把该默认钩子当作安全迁移策略。
 

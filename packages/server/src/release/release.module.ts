@@ -7,9 +7,10 @@ import { LauncherHttpClient } from "./launcher-client.js";
 import { StatusController } from "./status.controller.js";
 import { JobModule } from "../job/job.module.js";
 import { ClientModule } from "../client/client.module.js";
+import { StorageModule } from "../storage/storage.module.js";
 
 @Module({
-	imports: [JobModule, ClientModule],
+	imports: [JobModule, ClientModule, StorageModule],
 	controllers: [ReleaseController, StatusController],
 	providers: [
 		ReleaseService,

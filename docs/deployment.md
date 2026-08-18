@@ -69,7 +69,7 @@ pnpm release --version=x.y.z
 | `VCPDECK_SESSION_TTL_SECONDS` | `604800` | 浏览器会话 TTL |
 | `VCPDECK_COOKIE_SECURE` | 未设时为 `true` | HTTP 开发环境需显式 `false`；生产必须 HTTPS + true |
 | `DATABASE_URL` | `file:./prisma/dev.db` | SQLite URL；相对路径依赖 Server 工作目录 |
-| `VCPDECK_RELEASES_DIR` | `./data/releases`（install 引导默认 `<app-dir>/releases`） | 发布构件目录；必须为**版本目录外绝对路径**，否则自更新切换版本后目录漂移、构件丢失 |
+| `VCPDECK_RELEASES_DIR` | `./data/releases`（install 引导默认 `<app-dir>/releases`） | **Local 后端**的发布构件目录；必须为**版本目录外绝对路径**，否则自更新切换版本后目录漂移、构件丢失。配置外部存储后端（OSS/网盘）后，发布包转存 Provider，此目录不再承载新构件 |
 | `VCPDECK_PSK` | `vcpdeck-dev-psk` | `/client` PSK，生产必须随机替换 |
 | `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | `/client` Gateway CORS Origin |
 

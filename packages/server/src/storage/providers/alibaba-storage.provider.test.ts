@@ -210,4 +210,39 @@ describe("AlibabaStorageProvider 直传会话", () => {
 			expiresAt: 1760000000000,
 		});
 	});
+
+	it("getDirectDownloadUrl（ADR-0016）委托外部下载 URL", async () => {
+		const provider = new AlibabaStorageProvider({
+			...baseConfig,
+			driveId: "drive-1",
+		} as never);
+		vi.stubGlobal(
+			"fetch",
+			openapiOk({
+				url: "https://download.example/y",
+				expire_time: 1760000000000,
+			}),
+		);
+		await expect(provider.getDirectDownloadUrl("file-1")).resolves.toEqual({
+			url: "https://download.example/y",
+			expiresAt: 1760000000000,
+		});
+	});
+
+	it("expire_time 为 ISO 字符串时解析为毫秒时间戳", async () => {
+		const provider = new AlibabaStorageProvider({
+			...baseConfig,
+			driveId: "drive-1",
+		} as never);
+		vi.stubGlobal(
+			"fetch",
+			openapiOk({
+				url: "https://download.example/z",
+				expire_time: "2026-08-18T12:00:00.000Z",
+			}),
+		);
+		const result = await provider.getExternalDownloadUrl("file-1");
+		expect(result.url).toBe("https://download.example/z");
+		expect(result.expiresAt).toBe(Date.parse("2026-08-18T12:00:00.000Z"));
+	});
 });

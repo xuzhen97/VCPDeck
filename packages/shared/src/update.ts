@@ -92,6 +92,19 @@ export interface ReleaseArchiveInfo {
 	sha256: string;
 	size: number;
 	fileName: string;
+	/** 外部存储直连信息（ADR-0016；Local 后端无此字段） */
+	storage?: ReleaseArchiveStorage;
+}
+
+/** 发布构件存储信息（ADR-0016：外部存储直连分发）
+ *  Local 后端无此字段；目标机经统一入口 302 直连存储下载。 */
+export interface ReleaseArchiveStorage {
+	/** 存储后端 kind（local / alibaba 等） */
+	provider: string;
+	/** 后端内对象 key（阿里云盘为 fileId） */
+	key: string;
+	/** 分发模式：direct = 目标机经统一入口 302 直连存储 */
+	mode: "direct";
 }
 
 /** 由客户端注册的 os 字符串（如 "win32 10.0.26200"）映射到发布平台，未知平台返回 null */

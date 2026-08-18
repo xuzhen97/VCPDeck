@@ -17,7 +17,7 @@ import {
 	Res,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -26,9 +26,15 @@ import type { IncomingMessage } from "node:http";
 import type { Response } from "express";
 import { ReleaseError, ReleaseService } from "./release.service.js";
 import { ReleaseOrchestrator } from "./release.orchestrator.js";
+import { DirectUrlCache } from "./direct-url-cache.js";
+import { StorageService } from "../storage/storage.service.js";
 import { Public } from "../auth/public.decorator.js";
 import { Actor } from "../auth/actor.decorator.js";
-import type { ActorContext, ReleasePlatform } from "@vcpdeck/shared";
+import type {
+	ActorContext,
+	ReleaseArchiveStorage,
+	ReleasePlatform,
+} from "@vcpdeck/shared";
 
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
@@ -81,10 +87,14 @@ async function moveFile(src: string, dest: string): Promise<void> {
 
 @Controller("api/releases")
 export class ReleaseController {
+	/** 外部存储直链短时缓存（ADR-0016：用的时候现取，短 TTL 不暴露给目标机） */
+	private readonly directUrls = new DirectUrlCache();
+
 	constructor(
 		@Inject(ReleaseService) private readonly service: ReleaseService,
 		@Inject(ReleaseOrchestrator)
 		private readonly orchestrator: ReleaseOrchestrator,
+		@Inject(StorageService) private readonly storage: StorageService,
 	) {}
 
 	@Get()
@@ -121,6 +131,27 @@ export class ReleaseController {
 				code: "RELEASE_ARCHIVE_MISSING",
 				message: `release ${version} 缺少 ${platform} 构件`,
 			});
+		}
+		// ADR-0016：外部存储后端 302 到临时直链，目标机直连下载不占 Server 带宽
+		const archive = info.archives[platform];
+		if (archive?.storage?.mode === "direct" && archive.storage.key) {
+			const directUrl = await this.resolveDirectUrl(
+				version,
+				platform,
+				archive.storage.key,
+			);
+			if (directUrl) {
+				res.redirect(302, directUrl);
+				return;
+			}
+			// 降级：本地有构件时回到中转；否则明确失败
+			if (!existsSync(releaseZipPath(version, platform))) {
+				res.status(502).json({
+					code: "RELEASE_DIRECT_URL_UNAVAILABLE",
+					message: "直链换取失败且无本地构件可用",
+				});
+				return;
+			}
 		}
 		res.sendFile(
 			releaseZipPath(version, platform),
@@ -171,15 +202,32 @@ export class ReleaseController {
 					"文件 sha256 与声明不符",
 				);
 			}
+		const fileName = `vcpdeck-${version}-${platform}.zip`;
+		const size = (await stat(tempPath)).size;
+		let storage: ReleaseArchiveStorage | undefined;
+		if (this.storage.supportsDirectDownload()) {
+			// ADR-0016：外部存储后端——转存 provider，目标机下载经统一入口 302 直连
+			const entry = await this.storage.uploadStream(
+				createReadStream(tempPath),
+				{ clientId: "release", filename: fileName, size },
+			);
+			storage = {
+				provider: entry.storageKind,
+				key: entry.key,
+				mode: "direct",
+			};
+		} else {
 			const finalPath = releaseZipPath(version, platform);
 			await mkdir(releasesDir(), { recursive: true });
 			await moveFile(tempPath, finalPath);
 			moved = true;
-			const archive = {
-				sha256,
-				fileName: `vcpdeck-${version}-${platform}.zip`,
-				size: (await stat(finalPath)).size,
-			};
+		}
+		const archive = {
+			sha256,
+			fileName,
+			size,
+			...(storage ? { storage } : {}),
+		};
 			const existing = await this.service.findByVersion(version);
 			const release = existing
 				? await this.service.addArchive(version, platform, archive)
@@ -206,5 +254,34 @@ export class ReleaseController {
 				await rm(tempPath, { force: true }).catch(() => undefined);
 			}
 		}
+	}
+
+	/**
+	 * 换取直链下载 URL（ADR-0016）：短时缓存，过期/失败时重新换取；
+	 * 不支持的 provider 或换取失败返回 null，由调用方降级。
+	 */
+	private async resolveDirectUrl(
+		version: string,
+		platform: ReleasePlatform,
+		key: string,
+	): Promise<string | null> {
+		const cacheKey = `${version}:${platform}:${key}`;
+		const cached = this.directUrls.get(cacheKey);
+		if (cached) return cached;
+		try {
+			const direct = await this.storage.getDirectDownloadUrl(key);
+			if (direct?.url) {
+				// 过期时间未知/非法时不缓存，避免短 TTL 直链被长期复用
+				if (Number.isFinite(direct.expiresAt) && direct.expiresAt > 0) {
+					this.directUrls.set(cacheKey, direct.url, direct.expiresAt);
+				}
+				return direct.url;
+			}
+		} catch (e) {
+			console.warn(
+				`[release] 直链换取失败: ${e instanceof Error ? e.message : String(e)}`,
+			);
+		}
+		return null;
 	}
 }

@@ -495,4 +495,54 @@ describe("StorageService", () => {
 			);
 		});
 	});
+
+	describe("直连下载能力（ADR-0016）", () => {
+		it("无 getDirectDownloadUrl 方法的 provider 不支持直连", async () => {
+			const localProvider = { signDownloadUrl: vi.fn(), signUploadUrl: vi.fn() };
+			vi.spyOn(service, "getProvider").mockReturnValue(localProvider as never);
+
+			expect(service.supportsDirectDownload()).toBe(false);
+			await expect(service.getDirectDownloadUrl("k")).resolves.toBeNull();
+		});
+
+		it("带 getDirectDownloadUrl 的 provider 支持直连并委托换取", async () => {
+			const direct = vi.fn().mockResolvedValue({
+				url: "https://storage/x",
+				expiresAt: Date.now() + 900_000,
+			});
+			vi.spyOn(service, "getProvider").mockReturnValue({
+				getDirectDownloadUrl: direct,
+			} as never);
+
+			expect(service.supportsDirectDownload()).toBe(true);
+			await expect(service.getDirectDownloadUrl("k")).resolves.toEqual({
+				url: "https://storage/x",
+				expiresAt: expect.any(Number),
+			});
+			expect(direct).toHaveBeenCalledWith("k");
+		});
+
+		it("provider 返回空 URL 时按不支持处理", async () => {
+			vi.spyOn(service, "getProvider").mockReturnValue({
+				getDirectDownloadUrl: vi.fn().mockResolvedValue({ url: "", expiresAt: 0 }),
+			} as never);
+
+			await expect(service.getDirectDownloadUrl("k")).resolves.toBeNull();
+		});
+
+		it("uploadStream 委托 provider.upload", async () => {
+			const upload = vi.fn().mockResolvedValue({
+				key: "file-1",
+				storageKind: "alibaba",
+			});
+			vi.spyOn(service, "getProvider").mockReturnValue({ upload } as never);
+
+			const stream = Readable.from(["zip-bytes"]);
+			const meta = { clientId: "release", filename: "a.zip", size: 9 };
+			await service.uploadStream(stream, meta);
+
+			expect(upload).toHaveBeenCalledWith(stream, meta);
+		});
+	});
 });
+

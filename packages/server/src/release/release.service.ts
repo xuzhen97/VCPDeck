@@ -13,6 +13,7 @@ import {
 	type ReleaseInfo,
 	type ReleasePlatform,
 	type ReleaseArchiveInfo,
+	type ReleaseArchiveStorage,
 } from "@vcpdeck/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 
@@ -106,11 +107,28 @@ export function toReleaseInfo(row: {
 				typeof entry.fileName === "string" &&
 				typeof entry.size === "number"
 			) {
-				archives[platform] = {
+				const archive: ReleaseArchiveInfo = {
 					sha256: entry.sha256,
 					size: entry.size,
 					fileName: entry.fileName,
 				};
+				// ADR-0016：外部存储直连信息透传（不完整则忽略）
+				const storage = entry.storage as Partial<
+					ReleaseArchiveStorage
+				> | undefined;
+				if (
+					storage &&
+					typeof storage.provider === "string" &&
+					typeof storage.key === "string" &&
+					storage.mode === "direct"
+				) {
+					archive.storage = {
+						provider: storage.provider,
+						key: storage.key,
+						mode: "direct",
+					};
+				}
+				archives[platform] = archive;
 			}
 		}
 	} catch {

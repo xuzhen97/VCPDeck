@@ -53,6 +53,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client 和 Shared 在正式发
 ### 5.1 通常兼容
 
 - REST 响应新增可选字段；
+- Release `archives[platform]` 新增可选 `storage` 字段（ADR-0016：外部存储直连信息；缺失即 Local，新旧记录互读）；
 - Client 新增 capability；
 - Socket payload 新增接收方明确忽略的可选字段；
 - 新增独立 API、Job 类型或事件且旧端不会收到；

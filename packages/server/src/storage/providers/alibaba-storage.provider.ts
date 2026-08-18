@@ -272,10 +272,17 @@ export class AlibabaStorageProvider implements StorageProvider {
 		const result = await client.getDownloadUrl({ driveId: rt.driveId, fileId });
 		const url = String(result.url ?? "");
 		if (!url) throw new Error("阿里云盘未返回下载 URL");
-		return {
-			url,
-			expiresAt: Number(result.expire_time ?? result.expiresAt ?? 0),
-		};
+		const raw = result.expire_time ?? result.expiresAt ?? 0;
+		const expiresAt =
+			typeof raw === "string" ? Date.parse(raw) : Number(raw);
+		return { url, expiresAt };
+	}
+
+	/** StorageProvider 直连下载 URL（ADR-0016：目标机直连网盘下载） */
+	async getDirectDownloadUrl(
+		key: string,
+	): Promise<{ url: string; expiresAt: number } | null> {
+		return this.getExternalDownloadUrl(key);
 	}
 
 	// ── StorageProvider 实现 ──

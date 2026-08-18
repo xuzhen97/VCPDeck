@@ -110,6 +110,29 @@ export class StorageService implements OnModuleInit {
 		return p as AlibabaStorageProvider;
 	}
 
+	/** 是否支持目标机直连下载（ADR-0016：字节不经过 Server） */
+	supportsDirectDownload(): boolean {
+		const p = this.getProvider();
+		return typeof p.getDirectDownloadUrl === "function";
+	}
+
+	/** 换取直连下载 URL（临时有效）；不支持直连返回 null */
+	async getDirectDownloadUrl(
+		key: string,
+	): Promise<{ url: string; expiresAt: number } | null> {
+		const p = this.getProvider();
+		if (typeof p.getDirectDownloadUrl !== "function") return null;
+		const result = await p.getDirectDownloadUrl(key);
+		return result && typeof result.url === "string" && result.url
+			? result
+			: null;
+	}
+
+	/** 服务端直传存储（ADR-0016：发布构件转存外部后端） */
+	async uploadStream(stream: Readable, meta: FileMeta): Promise<FileEntry> {
+		return this.getProvider().upload(stream, meta);
+	}
+
 	/** 签发上传令牌，返回 FileRef */
 	async createUploadToken(
 		meta: FileMeta,

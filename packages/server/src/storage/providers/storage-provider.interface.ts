@@ -46,4 +46,7 @@ export interface StorageProvider {
 
 	/** 验证上传签名 */
 	verifyUploadSignature(key: string, expiresAt: number, sig: string): boolean;
+
+	/** 换取目标机直连下载 URL（临时有效，字节不经过 Server）；不支持返回 null（ADR-0016） */
+	getDirectDownloadUrl?(key: string): Promise<{ url: string; expiresAt: number } | null>;
 }
