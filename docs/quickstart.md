@@ -135,7 +135,21 @@ curl http://127.0.0.1:3001/api/status
 # → {"serverVersion":"0.1.1","activeRelease":null}
 ```
 
-> 不带 Launcher 也可直接 `node dist/main.js` 运行，但没有守护、自更新与失败回退；不建议作为生产常驻方式。长期运行可用 PM2 等外部进程管理器托管 Launcher（只托管 Launcher，不托管业务进程），示例与约束见 [`deployment.md`](./deployment.md) §4.5。
+> 不带 Launcher 也可直接 `node dist/main.js` 运行，但没有守护、自更新与失败回退；不建议作为生产常驻方式。
+
+#### PM2 托管 Launcher（可选）
+
+生产长期运行可用 PM2 守护 **Launcher**（不是业务进程）：
+
+```bash
+pm2 start node --name vcpdeck-server-launcher -- \
+  --env-file="$APP_DIR/launcher.env" "$APP_DIR/dist/main.js"
+pm2 save
+```
+
+目标机 Client 同理（使用各自的 `launcher.env` 与 `dist/main.js`，`--name` 改为 `vcpdeck-client-launcher`）。
+
+说明：自更新时 Launcher 会自行停止/切换业务进程，因此**只把 Launcher 交给 PM2**；完整 ecosystem 配置、开机自启、更新期间禁止重启 Launcher 等注意事项见 [`deployment.md`](./deployment.md) §4.5。
 
 ## 5. 目标机（Client）部署与启动
 
