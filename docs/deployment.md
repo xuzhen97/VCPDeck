@@ -114,6 +114,60 @@ Launcher 首次启动要求 `apps/current` 已指向可用初始版本。发布 
 
 FRPS Token 和 Dashboard 密码当前明文存入 SQLite、通过实例 REST 返回，并写入 Job payload 和 Client `frpc-combined.toml`。相关数据库、备份、Client 工作目录和页面访问都必须限制。Server 虽可保存多个实例，但同一 Client 当前只有一个 frpc runtime；不要为同一 Client 创建跨多个 FrpsInstance 的活动映射。完整边界见 [`design/frp.md`](./design/frp.md)。
 
+### 4.5 使用 PM2 托管 Launcher（可选）
+
+项目不提供 systemd/Windows Service 安装器。除手工 `node` 运行外，可用 PM2 等外部进程管理器守护 **Launcher** 进程；业务进程（Server/Client）仍由 Launcher 拉起、切换与回退，不要把业务进程交给 PM2。
+
+基本约束：
+
+- **只托管 Launcher**。若把 `apps/<version>/server/dist/main.js` 或 `client/dist/index.js` 交给 PM2，自更新时 Launcher 会主动停止业务进程再启动新版本，PM2 会将其误判为崩溃并强行拉起，破坏版本切换与失败回退；
+- 使用 **fork 模式、单一实例**：Server 是单控制面节点（固定 3001 端口 + SQLite），不支持多实例/cluster；
+- 与安装时相同的运行账户和 `--app-dir`，保证 `launcher.env` / `control.json` / `apps/` 的读写权限一致。
+
+`ecosystem.config.cjs` 示例（路径替换为实际绝对路径）：
+
+```js
+module.exports = {
+  apps: [
+    {
+      name: "vcpdeck-server-launcher",
+      script: "C:/vcpdeck/launcher/dist/main.js",
+      interpreter: "node",
+      node_args: "--env-file=C:/vcpdeck/launcher/launcher.env",
+      cwd: "C:/vcpdeck/launcher",
+      autorestart: true,
+      restart_delay: 2000,
+      kill_timeout: 15000,
+    },
+    {
+      name: "vcpdeck-client-launcher",
+      script: "C:/vcpdeck/launcher-client/dist/main.js",
+      interpreter: "node",
+      node_args: "--env-file=C:/vcpdeck/launcher-client/launcher.env",
+      cwd: "C:/vcpdeck/launcher-client",
+      autorestart: true,
+      restart_delay: 2000,
+      kill_timeout: 15000,
+    },
+  ],
+};
+```
+
+```bash
+pm2 start ecosystem.config.cjs
+pm2 save            # 保存进程列表，重启机器后按保存列表拉起
+pm2 logs vcpdeck-server-launcher --lines 100
+```
+
+开机自启：Linux 运行 `pm2 startup` 并按提示执行输出的命令；Windows 需先 `pm2 install pm2-windows-startup` 再执行其安装命令。两者均为 PM2 自身机制，不属于项目交付物。
+
+注意事项：
+
+- PM2 收集的 stdout/stderr 同样受 [`operations.md`](./operations.md) §4 的敏感信息规则约束；
+- 更新进行中**不要**重启 Launcher：进行中的 prepare/`pendingVersion` 存在 Launcher 内存，重启即丢失，`/apply` 会报“尚未 prepare”，Release 失败后需发布新版本重试；日常非更新窗口重启无影响，Launcher 会按 current 重新拉起业务进程并重写 `control.json`（新随机端口/Token 对业务进程透明）；
+- `kill_timeout` 只作用于 Launcher 本身；业务进程的停止由 Launcher 自己的 SIGTERM→10s→SIGKILL 流程负责；
+- Windows 下 PM2 的服务化与自动重启行为与 Linux 有差异，该方案尚未纳入项目验收矩阵，作为可选运维方式使用。
+
 ## 5. 持久化目录
 
 至少持久化：

@@ -16,6 +16,7 @@ VCPDeck 尚未发布稳定版本。本文件记录用户或运维人员可感知
 
 ### Changed
 
+- `deployment.md` 新增 §4.5：用 PM2 托管 Launcher 的可选运维示例与约束（只托管 Launcher、fork 单实例、更新期间不重启、Windows 差异说明）；quickstart 与 operations 同步引用。
 - Frontend 构建产物打进 server 构件（`server/public/`），由 Server express.static 同源托管 + SPA 路由回退，访问 `http://<host>:3001/` 即驾驶台，无需单独静态托管/反向代理；socket.io 增加同源 CORS 放行（自定义 IoAdapter），跨源部署仍可显式配置 `VCPDECK_FRONTEND_ORIGIN`。见 `docs/adr/0013-frontend-bundled-with-server.md`。
 - 发布 zip 不再内嵌安装/卸载脚本，`install.cjs` / `uninstall.cjs` 改为与 zip 平级提供于 `dist-release/` 目录（纯 Node 标准库，无仓库依赖）：消除“先解压 zip 拿脚本、脚本又依赖 zip 再解压一遍”的重复解压；发布 zip 现在同时包含 `launcher/`、`server/`、`client/`，首次安装自动将 Launcher 放入 `<app-dir>/dist/main.js`，已有 Launcher 默认保留。
 - 发布构件改为 esbuild 单文件打包 + 最小外部依赖：业务代码与纯 JS 依赖内联，仅保留原生/引擎/SDK 依赖（Prisma 栈、libsql 双平台绑定、Pi SDK、node-pty 预编译）；单平台发布 zip 从约 513MB 降至约 120–130MB。

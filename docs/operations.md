@@ -24,7 +24,7 @@ pnpm --filter @vcpdeck/server start
 pnpm --filter @vcpdeck/client start
 ```
 
-长期环境优先由 Launcher 启动 Server/Client；停止 Launcher 前应确认没有进行中的 Release、Job、Terminal 或 Pi run。
+长期环境优先由 Launcher 启动 Server/Client；也可用 PM2 等外部进程管理器守护 Launcher 本身（只托管 Launcher，不托管业务进程，见 [`deployment.md`](./deployment.md) §4.5）；停止 Launcher 前应确认没有进行中的 Release、Job、Terminal 或 Pi run。
 
 ## 3. 健康与就绪检查
 

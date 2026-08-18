@@ -135,7 +135,7 @@ curl http://127.0.0.1:3001/api/status
 # → {"serverVersion":"0.1.1","activeRelease":null}
 ```
 
-> 不带 Launcher 也可直接 `node dist/main.js` 运行，但没有守护、自更新与失败回退；不建议作为生产常驻方式。
+> 不带 Launcher 也可直接 `node dist/main.js` 运行，但没有守护、自更新与失败回退；不建议作为生产常驻方式。长期运行可用 PM2 等外部进程管理器托管 Launcher（只托管 Launcher，不托管业务进程），示例与约束见 [`deployment.md`](./deployment.md) §4.5。
 
 ## 5. 目标机（Client）部署与启动
 
