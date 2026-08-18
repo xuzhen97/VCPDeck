@@ -113,7 +113,7 @@ describe("ReleaseOrchestrator", () => {
 	});
 
 	describe("startRelease", () => {
-		it("按序执行：prepare → drain → 广播 → apply；apply 正常返回视为失败", async () => {
+		it("按序执行：prepare → drain → 广播 → apply；apply 返回不再重复落库失败", async () => {
 			deps.releases.findByVersion.mockResolvedValue(releaseInfo());
 			deps.releases.getActiveRelease.mockResolvedValue(null);
 
@@ -133,10 +133,7 @@ describe("ReleaseOrchestrator", () => {
 				expectedVersion: "1.2.1",
 			});
 			expect(deps.launcher.applyUpdate).toHaveBeenCalled();
-			expect(deps.releases.markFailed).toHaveBeenCalledWith(
-				"1.2.1",
-				expect.stringContaining("applyUpdate"),
-			);
+			expect(deps.releases.markFailed).not.toHaveBeenCalled();
 		});
 
 		it("缺少本机平台构件时直接标记 failed，不进入更新阶段", async () => {
@@ -357,6 +354,34 @@ describe("ReleaseOrchestrator", () => {
 				ReleaseStatus.DONE,
 			);
 		});
+		it("Server 重启期间旧版本重连会重发一次更新请求", async () => {
+			deps.releases.getActiveRelease.mockResolvedValue(
+				releaseInfo({ status: ReleaseStatus.UPDATING_CLIENTS }),
+			);
+			mockLoopRelease(deps, ReleaseStatus.UPDATING_CLIENTS);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const phase = orchestrator.resumeAfterStartup();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+
+			orchestrator.onClientRegistered("c1", "1.1.0");
+			expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(2);
+			orchestrator.onClientRegistered("c1", "1.2.1");
+			await phase;
+
+			expect(deps.releases.markClientState).toHaveBeenCalledWith(
+				"1.2.1",
+				"c1",
+				ReleaseClientState.DONE,
+				undefined,
+			);
+		});
+
 		it("不支持平台的客户端标记 failed 且不发送更新请求", async () => {
 			deps.releases.getActiveRelease.mockResolvedValue(
 				releaseInfo({ status: ReleaseStatus.UPDATING_CLIENTS }),

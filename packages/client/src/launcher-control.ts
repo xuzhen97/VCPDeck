@@ -22,9 +22,7 @@ export interface ClientLauncherOptions {
 }
 
 const DEFAULT_CONTROL_FILE = join(
-	homedir(),
-	".vcpdeck",
-	"launcher",
+	process.env.VCPDECK_APP_DIR ?? join(homedir(), ".vcpdeck", "launcher"),
 	"control.json",
 );
 
@@ -86,8 +84,14 @@ export class ClientLauncher {
 		try {
 			await this.post(ctl, "/apply", {});
 		} catch (e) {
-			if (e instanceof TypeError) return;
-			throw e;
+			// launcher 停止本进程时 HTTP 连接会被直接切断；网络层异常的具体
+			// 类型随 Node/undici 版本变化。只有明确的 HTTP 错误仍需失败。
+			if (
+				e instanceof Error &&
+				e.message.startsWith("launcher /apply 失败: HTTP ")
+			)
+				throw e;
+			return;
 		}
 	}
 }

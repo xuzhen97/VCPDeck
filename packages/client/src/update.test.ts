@@ -56,7 +56,7 @@ describe("客户端优雅停机（update.ts）", () => {
 		launcher = makeLauncher();
 		runningJobs = [];
 		launcher.prepareUpdate.mockResolvedValue(undefined);
-		launcher.applyUpdate.mockRejectedValue(new TypeError("fetch failed"));
+		launcher.applyUpdate.mockResolvedValue(undefined);
 		attachUpdateHandler({
 			socket: socket as never,
 			launcher: launcher as never,
@@ -141,17 +141,16 @@ describe("客户端优雅停机（update.ts）", () => {
 		expect(launcher.applyUpdate).toHaveBeenCalledTimes(1);
 	});
 
-	it("apply 正常返回（launcher 未接管）→ UPDATE_FAILED", async () => {
+	it("apply 返回后不再上报失败（终局以重连注册版本为准）", async () => {
 		launcher.applyUpdate.mockResolvedValue(undefined);
 
 		fireUpdateRequest(socket);
 		await vi.waitFor(() => {
-			expect(lastEmit(socket, Events.UPDATE_FAILED)).toBeTruthy();
+			expect(isDraining()).toBe(false);
 		});
 
-		expect(lastEmit(socket, Events.UPDATE_FAILED)).toMatchObject({
-			reason: expect.stringContaining("applyUpdate"),
-		});
+		expect(launcher.applyUpdate).toHaveBeenCalledTimes(1);
+		expect(lastEmit(socket, Events.UPDATE_FAILED)).toBeUndefined();
 	});
 
 	it("draining 期间 dispatch 拒绝新任务（CLIENT_UPDATING）", async () => {

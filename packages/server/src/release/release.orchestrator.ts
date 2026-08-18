@@ -59,6 +59,8 @@ const DEFAULT_CLIENT_TIMEOUT_MS = 10 * 60 * 1000;
 /** 客户端更新等待器（注册回执/超时/失败事件三选一解决；timer 由闭包持有） */
 interface ClientWaiter {
 	targetVersion: string;
+	request: UpdateRequest;
+	retryCount: number;
 	resolve: (outcome: "done" | "failed", reason?: string) => void;
 }
 
@@ -117,10 +119,8 @@ export class ReleaseOrchestrator {
 			await this.drain.drain();
 			this.channel.broadcastShutdown({ expectedVersion: version });
 			await this.launcher.applyUpdate();
-			await this.releases.markFailed(
-				version,
-				"launcher applyUpdate 返回但服务进程未被接管",
-			);
+			// apply 后本进程应被 launcher 停止；连接被掐断与「进程仍存活」无法
+			// 可靠区分，不在此落库失败——终局以新进程重启后的版本对账为准。
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
 			await this.releases.markFailed(version, `服务端更新失败: ${message}`);
@@ -155,9 +155,15 @@ export class ReleaseOrchestrator {
 		if (waiter) {
 			if (clientVersion === waiter.targetVersion) {
 				waiter.resolve("done");
+			} else if (waiter.retryCount < 1) {
+				// Server 重启期间，旧 Client 可能先以旧版本重连；重发一次，避免
+				// 更新请求落在已断开的旧 Socket 上就被误判为回退。
+				waiter.retryCount++;
+				this.channel.sendUpdateRequest(clientId, waiter.request);
 			} else {
 				waiter.resolve("failed", "注册版本不符（launcher 已回退）");
 			}
+			return;
 		}
 		void this.triggerCatchUp(clientId, clientVersion);
 	}
@@ -227,13 +233,28 @@ export class ReleaseOrchestrator {
 				client.clientId,
 				ReleaseClientState.UPDATING,
 			);
-			this.channel.sendUpdateRequest(client.clientId, {
+			const request: UpdateRequest = {
 				releaseVersion: version,
 				url: `/api/releases/${version}/file?platform=${platform}`,
 				sha256: release.archives[platform].sha256,
 				timeoutMs: this.clientTimeoutMs,
-			});
-			const outcome = await this.waitClientOutcome(client.clientId, version);
+			};
+			const outcomePromise = this.waitClientOutcome(
+				client.clientId,
+				version,
+				request,
+			);
+			try {
+				// 先登记 waiter，再发事件，避免重连竞态丢失更新请求。
+				this.channel.sendUpdateRequest(client.clientId, request);
+			} catch (e) {
+				this.onUpdateFailed(
+					client.clientId,
+					version,
+					e instanceof Error ? e.message : String(e),
+				);
+			}
+			const outcome = await outcomePromise;
 			await this.releases.markClientState(
 				version,
 				client.clientId,
@@ -249,6 +270,7 @@ export class ReleaseOrchestrator {
 	private waitClientOutcome(
 		clientId: string,
 		targetVersion: string,
+		request: UpdateRequest,
 	): Promise<{ outcome: "done" | "failed"; reason?: string }> {
 		return new Promise((resolve) => {
 			const timer = setTimeout(() => {
@@ -260,6 +282,8 @@ export class ReleaseOrchestrator {
 			}, this.clientTimeoutMs);
 			this.pendingClients.set(clientId, {
 				targetVersion,
+				request,
+				retryCount: 0,
 				resolve: (outcome, reason) => {
 					clearTimeout(timer);
 					this.pendingClients.delete(clientId);

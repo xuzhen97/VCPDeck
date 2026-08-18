@@ -61,11 +61,7 @@ async function handleUpdateRequest(
 	const log = deps.log ?? ((msg: string) => console.log(`[update] ${msg}`));
 
 	if (!req.releaseVersion || !req.url || !req.sha256) {
-		emitFailed(
-			deps,
-			req.releaseVersion ?? "unknown",
-			"update:request 缺少字段",
-		);
+		emitFailed(deps, req.releaseVersion ?? "unknown", "update:request 缺少字段");
 		return;
 	}
 
@@ -94,15 +90,10 @@ async function handleUpdateRequest(
 			releaseVersion,
 		} satisfies UpdateReady);
 		await deps.launcher.applyUpdate();
-
-		// apply 正常返回说明 launcher 未接管（本进程未退出）
-		emitFailed(deps, releaseVersion, "launcher applyUpdate 返回但进程未退出");
+		// apply 后本进程应被 launcher 停止；连接被掐断与「进程仍存活」无法
+		// 可靠区分，不在此上报失败——终局以重连注册版本为准。
 	} catch (e) {
-		emitFailed(
-			deps,
-			releaseVersion,
-			e instanceof Error ? e.message : String(e),
-		);
+		emitFailed(deps, releaseVersion, e instanceof Error ? e.message : String(e));
 	} finally {
 		draining = false;
 	}

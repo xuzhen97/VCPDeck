@@ -197,17 +197,113 @@ location / {
 10. 如使用 FRP，创建并 probe FRPS 实例后再建映射；
 11. 配置备份、日志采集和定期恢复演练。
 
-## 9. 升级与回滚
+## 9. 升级与回滚（利用自更新机制）
 
-自动发布详见 [`compatibility.md`](./compatibility.md) 和 [`design/release-and-update.md`](./design/release-and-update.md)。关键限制：
+自更新机制与实现边界见 [`design/release-and-update.md`](./design/release-and-update.md)，兼容规则见 [`compatibility.md`](./compatibility.md)。本节是日常发版的操作流程。
+
+### 9.1 发布前准备
+
+1. 按 [`operations.md`](./operations.md) §6 备份 SQLite、Storage 与 Release 目录；数据库 schema 变化不能由回退自动逆转，备份必须与当前应用版本对应；
+2. 确认 `VCPDECK_RELEASES_DIR` 为版本目录外**绝对路径**（`install.cjs` 引导默认如此）；Local Storage 相对 `baseDir` 已锚定到 `VCPDECK_APP_DIR`，若曾在旧版本目录内写过 storage 文件，先按 [ADR-0014](./adr/0014-storage-basedir-anchor.md) 搬迁；
+3. 确认目标 Linux 机器已安装 `unzip`（自动更新解压依赖）；
+4. 确认版本号从未用过：同一版本重复上传会被拒绝（`RELEASE_DUPLICATE_VERSION`），且失败后不能“重试同一版本”，只能发布新版本号；
+5. 若发布说明要求新的 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 升级各主机 Launcher。
+
+### 9.2 构建并上传
+
+```bash
+pnpm release --version=x.y.z
+```
+
+产出 `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`，并打印各自的 sha256。上传任选其一：
+
+**方式一：CLI（登录后依次上传两个平台，第二个平台齐备即自动开始更新）**
+
+```bash
+node packages/cli/dist/index.js release upload \
+  dist-release/vcpdeck-x.y.z-win-x64.zip \
+  dist-release/vcpdeck-x.y.z-linux-x64.zip \
+  --server=https://<server>:3001 --username=admin --password=<密码>
+```
+
+**方式二：curl（先用登录会话，再按打包输出打印的 sha256 逐个上传）**
+
+```bash
+curl -s -c - -X POST https://<server>:3001/api/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"<密码>"}' | grep vcpdeck_session
+curl -X POST 'https://<server>:3001/api/releases/upload?version=x.y.z&platform=win-x64&sha256=<win sha256>' \
+  -b 'vcpdeck_session=<cookie>' -H 'content-type: application/zip' \
+  --data-binary @dist-release/vcpdeck-x.y.z-win-x64.zip
+curl -X POST 'https://<server>:3001/api/releases/upload?version=x.y.z&platform=linux-x64&sha256=<linux sha256>' \
+  -b 'vcpdeck_session=<cookie>' -H 'content-type: application/zip' \
+  --data-binary @dist-release/vcpdeck-x.y.z-linux-x64.zip
+```
+
+两个平台构件齐备后编排自动开始，无需其他触发。
+
+### 9.3 自动编排过程
+
+1. `uploaded → updating_server`：Server 通知本机 Launcher prepare（后台下载、SHA-256 校验、解压）；
+2. Server 关闭新 Job 派发并等待活跃 Job 收敛，向 Client 广播即将重启；
+3. Launcher 执行 preStart（`prisma db push`）→ 停止旧 Server → 切换 current → 启动新 Server → 探活版本一致；探活失败自动切回上一版本；
+4. 新 Server 从 SQLite 恢复编排 → `updating_clients`：按每台在线 Client 注册的 OS 选择对应平台包，逐台下发更新；
+5. Client Launcher 完成同样流程后以新版本重连注册；单台失败不影响后续机器，明细进入 `clientStates`；
+6. 全部在线 Client 处理完 → `done`。离线 Client 不阻塞完成，后续注册时自动补更（该 Release 中已标记 failed 的 Client 除外）。
+
+Windows 大包下载+解压可能耗时数分钟，`/api/status` 短时间仍显示旧版本属正常，不要误判失败。
+
+### 9.4 监控进度
+
+```bash
+# 公开端点：服务端版本与当前活动 Release
+curl https://<server>:3001/api/status
+# → {"serverVersion":"x.y.z","activeRelease":...}
+
+# 需认证：Release 状态机、失败原因、逐台 Client 明细
+curl -b 'vcpdeck_session=<cookie>' https://<server>:3001/api/releases
+# status: uploaded → updating_server → updating_clients → done/failed
+# clientStates[clientId]: pending/updating/done/failed + reason + at
+
+# 需认证：各机器当前版本与在线状态
+curl -b 'vcpdeck_session=<cookie>' https://<server>:3001/api/clients
+```
+
+### 9.5 完成核对
+
+- `/api/status.serverVersion` 等于目标版本，`activeRelease` 已清空；
+- Release `status=done`，`clientStates` 中全部为 `done`（有 failed 则单独处置）；
+- `/api/clients` 中所有在线机器的 `clientVersion` 等于目标版本；
+- 下发一个最小 exec Job 验证 Server→Client 链路仍正常。
+
+### 9.6 失败处置与重试
+
+- Release `failed`：查 `errorMessage` 定位阶段（prepare 下载/校验、drain 超时、launcher 回退等），修复后**发布新版本号**重新触发，不支持对同一版本重试；
+- 单台 Client `failed`（`clientStates` 里有 reason）：修复该机器后，发布新版本会重新覆盖它；`done` 的 Release 不会自动重试已 failed 的 Client；
+- Server drain 超时后派发闸门不会自动解除：核对活跃 Job，通常重启 Server 恢复派发；
+- 新 Server 探活失败时 Launcher 已自动回退上一版本，Release 会被恢复编排标记为 failed（“版本不符”）。
+
+### 9.7 手动回滚
+
+Launcher 的自动回退只覆盖“新版本探活失败”。需要人工回滚时：
+
+1. 停止 Server Launcher（确认没有进行中的 Release/Job/Terminal/Pi）；
+2. 备份当前数据库与日志；
+3. 将 current 指回上一版本：Windows 写 `apps/state.json` 的 `current`，Linux 重建 `apps/current` 软链；或直接用上一版本发布包重新执行 `install.cjs --artifact=server --force`；
+4. 若 schema 已变化且旧 Server 无法读取，恢复与旧版本匹配的数据库备份（Launcher 回退不回退数据库）；
+5. 启动后核对 `/api/status`、登录、Client 列表与 Job。
+
+### 9.8 Launcher 升级（仅需要时）
+
+Launcher 随发布包分发但**不随业务版本自动更新**（[ADR-0015](./adr/0015-launcher-distributed-with-release.md)）。仅当发布说明要求新 Launcher 时，在各主机停止当前 Launcher 后，用新包内的 `launcher/dist/main.js` 替换 `<app-dir>/dist/main.js` 并重启；同机 Server/Client 分别替换各自 app-dir。
+
+关键限制：
 
 - Server 先于 Client；
 - Launcher 负责应用版本回退，但不会自动回退数据库；
 - 发布前必须备份；
 - Frontend 随 Server 构件同版本分发，无需单独部署对齐；自定义跨源托管时需与 Server 同版本部署；
 - 当前 `launcherMinVersion` 尚未强制，依赖新 Launcher 的版本必须先人工升级 Launcher。
-
-> 自更新前必须确认 `VCPDECK_RELEASES_DIR` 为版本目录外绝对路径（`install.cjs` 引导已默认如此）；Local Storage 的相对 baseDir 已锚定到 `VCPDECK_APP_DIR`（见 [ADR-0014](./adr/0014-storage-basedir-anchor.md)），**本次升级前**若已在旧版本目录内写过 storage 文件，需先按 ADR-0014 指引手工搬迁到锚定位置，否则存量文件读取不到。
 
 ## 10. 当前非目标
 

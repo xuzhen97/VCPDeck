@@ -26,6 +26,11 @@ VCPDeck 尚未发布稳定版本。本文件记录用户或运维人员可感知
 
 ### Fixed
 
+- 修复自更新链路的控制通道路径：Server/Client 的 Launcher 控制客户端改为优先读取 `VCPDECK_APP_DIR/control.json`（无该变量时保留旧默认 `~/.vcpdeck/launcher/control.json`），自定义 `--app-dir` 安装时 Server 自更新不再连接错误的控制通道。
+- 修复 Server/Client 自更新被误判失败：Launcher `/prepare` 改为立即受理并后台下载（`/apply` 前等待完成），避免请求方 fetch 默认 300s 等待响应头超时在下载完成前切断连接；同时 Server/Client 在 `/apply` 返回后不再把「进程未被接管」立即落库/上报失败（连接被掐断与进程存活无法区分），终局以新进程重启后的版本对账与 Client 重连注册为准。
+- 修复 Launcher 更新包下载超时过短：由 5 分钟提高到 15 分钟，覆盖大包下载与 Windows 慢盘场景。
+- 修复 Server 重启窗口内 Client 以旧版本重连被误判为回退：更新编排器在等待期间收到旧版本注册时重发一次更新请求，避免更新请求落在已断开的旧 Socket 上。
+- 修复 `scripts/download-frp.ts` 在 Windows 上因安全软件删除解压出的裸 ELF 导致发布打包失败：Linux tar.gz 改为直接从归档读取 frpc/frps 二进制到内存再落盘，不再依赖解压出的裸文件。
 - 修复 Local Storage 相对 `baseDir` 随自更新版本目录漂移的问题：相对路径改为锚定到 `VCPDECK_APP_DIR`（版本目录外），与 `VCPDECK_RELEASES_DIR` 引导修复闭环；存量相对配置需按 ADR-0014 一次性搬迁旧文件。
 - 修复 `scripts/download-frp.ts` 在 Windows 解压 `.tar.gz` 时使用 GNU tar 专属 `--force-local` 导致系统 bsdtar 报 “Option --force-local is not supported” 而发布打包失败的问题；现 Windows 统一使用系统 bsdtar 解压。
 - 修复发布 zip 内容卫生：server 构件 frp 复制改为只取平台目录，不再把 tsc 中间产物与测试文件（如 `server/dist/frp/*.test.js`）打进发布包；win-x64 包同步排除 `@libsql/linux-x64-musl`，平台绑定裁剪与 linux-x64 对称。

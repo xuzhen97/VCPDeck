@@ -94,6 +94,12 @@ describe("ClientLauncher", () => {
 		await expect(launcher.applyUpdate()).resolves.toBeUndefined();
 	});
 
+	it("applyUpdate：普通 fetch failed 错误也视为 launcher 已接管", async () => {
+		fetchImpl.mockRejectedValue({ message: "fetch failed" });
+
+		await expect(launcher.applyUpdate()).resolves.toBeUndefined();
+	});
+
 	it("applyUpdate：非 2xx 抛错", async () => {
 		fetchImpl.mockResolvedValue(errResponse(500, "切换失败"));
 

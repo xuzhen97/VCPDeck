@@ -86,6 +86,8 @@ export class Daemon {
 	private stopping = false;
 	private crashCount = 0;
 	private pendingVersion: string | null = null;
+	/** 后台 prepare 任务（受理后下载/校验/解压）；apply 前必须等待完成 */
+	private prepareTask: Promise<void> | null = null;
 	private nodePath: string | null = null;
 	private updater!: Updater;
 
@@ -113,11 +115,17 @@ export class Daemon {
 		const control = await createControlServer({
 			controlFile: join(this.appDir, "control.json"),
 			handlers: {
-				prepare: async (input) => {
-					await this.updater.prepare(input);
-					this.pendingVersion = input.version;
+				prepare: (input) => {
+					// 立即受理：下载/校验/解压可能耗时数分钟，先行返回 200，
+					// 避免请求方 fetch 默认超时在下载完成前切断连接。
+					this.prepareTask = this.updater.prepare(input).then(() => {
+						this.pendingVersion = input.version;
+					});
+					this.prepareTask.catch(() => undefined);
+					return Promise.resolve();
 				},
 				apply: async () => {
+					if (this.prepareTask) await this.prepareTask;
 					const version = this.pendingVersion;
 					if (!version) throw new Error("尚未 prepare");
 					await this.applyUpdate(version);
@@ -276,7 +284,7 @@ export class Daemon {
 				);
 				this.log(`下载更新包: ${fullUrl}`);
 				const res = await fetch(fullUrl, {
-					signal: AbortSignal.timeout(300_000),
+					signal: AbortSignal.timeout(900_000),
 				});
 				if (!res.ok) throw new Error(`下载失败: HTTP ${res.status}`);
 				await pipeline(res.body as never, createWriteStream(destPath));

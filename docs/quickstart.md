@@ -192,6 +192,8 @@ node packages/cli/dist/index.js release upload \
 
 Server 校验 sha256 → 两个平台构件齐备后自动编排：**Server 先自更新**（Launcher prepare → drain → 重启 → 探活版本一致）→ **再逐台更新在线 Client**（按各机器注册 os 选对应平台包）→ 失败自动回退上一版本。发布前必须备份数据库与 Storage。
 
+完整的发布前准备、curl 上传方式、进度监控、完成核对、失败重试与手动回滚操作见 [`deployment.md`](./deployment.md) §9。
+
 ## 8. 常见问题速查
 
 | 现象 | 原因与处置 |

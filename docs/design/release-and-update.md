@@ -197,12 +197,14 @@ sequenceDiagram
 
 关键不变量：
 
-1. `/prepare` 在业务进程仍运行时完成下载、SHA-256 校验和解压；
+1. `/prepare` 立即受理并在业务进程仍运行时后台完成下载、SHA-256 校验和解压（响应不等待下载完成，避免请求方 HTTP 默认超时在下载完成前切断连接）；
 2. prepare 成功后才进入 drain，避免在长下载期间提前停止派发；
 3. `ServerDrain` 只等待 `running/waiting_input` Job，不等待 Terminal 或 Pi 真实进程完全退出；
 4. 新 Server 启动后，从 SQLite 中的活动 Release 恢复，而不是依赖旧进程内存；
 5. `/api/status.serverVersion` 必须与目标版本完全相同，才进入 Client 阶段；
 6. Launcher 回退应用版本，不回退数据库和其他持久数据。
+
+Server/Client 在 `/apply` 返回后不再把「本进程未被接管」立即落库/上报失败：连接被 Launcher 掐断与进程存活无法可靠区分，终局以新进程重启后的版本对账与 Client 重连注册为准；明确的 Launcher HTTP 错误仍会标记失败。
 
 当前 `preStart` 在停止旧 Server 之前执行。默认 `prisma db push` 可能与旧 Server 同时访问数据库，且其 schema 变化不会在应用回退时自动逆转；生产发布不能把该默认钩子当作安全迁移策略。
 
@@ -276,8 +278,8 @@ Launcher 启动时：
 
 | 请求 | 语义 |
 | --- | --- |
-| `POST /prepare` | 下载、SHA-256 校验并解压指定版本，记录内存 `pendingVersion` |
-| `POST /apply` | 对 pending 版本执行 preStart、停止、切换、启动、探活和回退 |
+| `POST /prepare` | 立即受理并后台下载、SHA-256 校验、解压指定版本，完成后记录内存 `pendingVersion`；响应不等待下载完成，避免请求方 fetch 默认 300s 等待响应头超时 |
+| `POST /apply` | 先等待进行中的 prepare 完成，再对 pending 版本执行 preStart、停止、切换、启动、探活和回退 |
 
 两者都要求 `x-launcher-token`。`control.json` 是本机高敏感能力文件，应只允许 Launcher 和同一运行账户读取。Launcher 重启后 `pendingVersion` 丢失，必须重新 prepare。
 

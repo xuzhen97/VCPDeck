@@ -75,6 +75,16 @@ async function downloadFile(url: string, dest: string): Promise<void> {
 	await pipeline(res.body as any, file);
 }
 
+/** 从 tar.gz 直接读取单个二进制，避免 Windows 安全软件删除解压出的裸 ELF。 */
+function readTarEntry(archivePath: string, entryPath: string): Buffer {
+	const tarBin = isWin ? "C:\\Windows\\System32\\tar.exe" : "tar";
+	return execFileSync(
+		tarBin,
+		["-xOf", archivePath.replace(/\\\\/g, "/"), entryPath],
+		{ maxBuffer: 64 * 1024 * 1024 },
+	);
+}
+
 async function downloadPlatform(platform: string): Promise<void> {
 	const entry = ASSET_MAP[platform];
 	if (!entry) {
@@ -129,9 +139,12 @@ async function downloadPlatform(platform: string): Promise<void> {
 		console.log(`[${platform}] 复用已缓存归档: ${archivePath}`);
 	}
 
-	// 3. 解压（argv 数组无 shell 拼接；路径转正斜杠防 GNU tar 转义/远程主机误判）
+	// 3-5. 提取 frpc/frps。Linux tar.gz 直接从归档读取，避免 Windows 安全软件
+	// 删除解压出的裸 ELF；zip 仍使用系统 tar 解压。
 	console.log(`[${platform}] 解压...`);
 	const fwd = (p: string) => p.replace(/\\/g, "/");
+	let frpcBytes: Buffer;
+	let frpsBytes: Buffer;
 	try {
 		if (entry.assetSuffix.endsWith(".zip")) {
 			// Windows 用系统 bsdtar（与打包端一致，避免 PowerShell 命令串）
@@ -140,31 +153,30 @@ async function downloadPlatform(platform: string): Promise<void> {
 				["-xf", fwd(archivePath), "-C", fwd(TMP_DIR)],
 				{ stdio: "inherit" },
 			);
+			frpcBytes = fs.readFileSync(
+				path.join(TMP_DIR, entry.extractDir, entry.frpcName),
+			);
+			frpsBytes = fs.readFileSync(
+				path.join(TMP_DIR, entry.extractDir, entry.frpsName),
+			);
 		} else {
-			// Windows 用系统 bsdtar：不支持 GNU 的 --force-local，但原生处理 D:/ 路径；
-			// 非 Windows 用 GNU tar，POSIX 绝对路径无冒号，同样无需 --force-local
-			const tarBin = isWin ? "C:\\Windows\\System32\\tar.exe" : "tar";
-			execFileSync(tarBin, ["-xzf", fwd(archivePath), "-C", fwd(TMP_DIR)], {
-				stdio: "inherit",
-			});
+			const prefix = `${entry.extractDir}/`;
+			frpcBytes = readTarEntry(archivePath, `${prefix}${entry.frpcName}`);
+			frpsBytes = readTarEntry(archivePath, `${prefix}${entry.frpsName}`);
 		}
 	} catch (e) {
 		throw new Error(
-			`解压失败 ${entry.assetSuffix}: ${e instanceof Error ? e.message : String(e)}`,
+			`提取失败 ${entry.assetSuffix}: ${e instanceof Error ? e.message : String(e)}`,
 		);
 	}
 
-	// 4. 提取 frpc 二进制 → client/dist/frp/
-	const frpcSrc = path.join(TMP_DIR, entry.extractDir, entry.frpcName);
 	const frpcDest = path.join(clientDestDir, entry.frpcName);
-	fs.copyFileSync(frpcSrc, frpcDest);
+	fs.writeFileSync(frpcDest, frpcBytes);
 	if (!isWin) fs.chmodSync(frpcDest, 0o755);
 	console.log(`[${platform}] frpc → ${frpcDest}`);
 
-	// 5. 提取 frps 二进制 → server/dist/frp/
-	const frpsSrc = path.join(TMP_DIR, entry.extractDir, entry.frpsName);
 	const frpsDest = path.join(serverDestDir, entry.frpsName);
-	fs.copyFileSync(frpsSrc, frpsDest);
+	fs.writeFileSync(frpsDest, frpsBytes);
 	if (!isWin) fs.chmodSync(frpsDest, 0o755);
 	console.log(`[${platform}] frps → ${frpsDest}`);
 
@@ -172,8 +184,8 @@ async function downloadPlatform(platform: string): Promise<void> {
 	//    裸 ELF 字节序列（连 .bin 也会），gzip 包装免疫；pack-release 在打包后用其
 	//    解压内容直接追加进 zip（裸文件在磁盘只存在秒级窗口）
 	if (!entry.frpcName.endsWith(".exe")) {
-		fs.writeFileSync(`${frpcDest}.gz`, gzipSync(fs.readFileSync(frpcSrc)));
-		fs.writeFileSync(`${frpsDest}.gz`, gzipSync(fs.readFileSync(frpsSrc)));
+		fs.writeFileSync(`${frpcDest}.gz`, gzipSync(frpcBytes));
+		fs.writeFileSync(`${frpsDest}.gz`, gzipSync(frpsBytes));
 		console.log(`[${platform}] frpc/frps .gz 包装副本已就绪`);
 	}
 }
