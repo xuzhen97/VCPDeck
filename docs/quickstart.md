@@ -4,6 +4,8 @@
 
 本文是从零到"Server 与 Client 双向通讯"的最小可验证路径，所有命令均经过 Windows（Git Bash）端到端演练。完整边界、配置表和升级细节见 [`deployment.md`](./deployment.md)；构件打包决策见 [`ADR-0012`](./adr/0012-bundled-release-artifacts.md)；更新协议见 [`design/release-and-update.md`](./design/release-and-update.md)。
 
+> 命令平台约定：本文命令默认在 **Linux Bash / Windows Git Bash** 下执行；Windows PowerShell 变体在对应小节标注（`curl.exe`、换行符 `` ` `` 等）。
+
 ## 1. 前置条件
 
 - 构建机：Node.js 24+、pnpm 11+、可访问 GitHub（frp 下载）；
@@ -113,7 +115,7 @@ node scripts/uninstall.cjs --version=0.1.1 --app-dir=~/.vcpdeck/launcher --dry-r
 
 ```bash
 # 不使用安装脚本时，先解压到临时目录，再按 manifest 安装 Launcher 和业务构件。
-# Windows 可用 Expand-Archive，Linux 可用 unzip；生产建议直接使用第 3.1 节安装脚本。
+# 以下为 Linux（Bash）手动步骤；Windows 建议直接使用第 3.1 节安装脚本（手动步骤见下方 PowerShell 变体）。
 APP_DIR=~/.vcpdeck/launcher
 mkdir -p "$APP_DIR"
 unzip -o dist-release/vcpdeck-0.1.1-linux-x64.zip -d "$APP_DIR/.staging"
@@ -126,6 +128,18 @@ ln -sfn 0.1.1 "$APP_DIR/apps/current"
 
 # 初始化数据库并准备 launcher.env 后，直接使用安装脚本打印的 Launcher 命令：
 node --env-file="$APP_DIR/launcher.env" "$APP_DIR/dist/main.js"
+```
+
+Windows（PowerShell）手动步骤变体（current 指针为 `state.json`，不是 symlink）：
+
+```powershell
+$APP_DIR = "$HOME\.vcpdeck\launcher"
+Expand-Archive -Path dist-release\vcpdeck-0.1.1-win-x64.zip -DestinationPath "$APP_DIR\.staging" -Force
+New-Item -ItemType Directory -Force -Path "$APP_DIR\dist", "$APP_DIR\apps\0.1.1" | Out-Null
+Copy-Item "$APP_DIR\.staging\launcher\dist\main.js" "$APP_DIR\dist\main.js"
+Copy-Item "$APP_DIR\.staging\manifest.json" "$APP_DIR\apps\0.1.1\manifest.json"
+Copy-Item -Recurse "$APP_DIR\.staging\server" "$APP_DIR\apps\0.1.1\server"
+'{ "current": "0.1.1" }' | Set-Content -Encoding ascii "$APP_DIR\apps\state.json"
 ```
 
 验证：
@@ -144,6 +158,13 @@ curl http://127.0.0.1:3001/api/status
 ```bash
 pm2 start node --name vcpdeck-server-launcher -- \
   --env-file="$APP_DIR/launcher.env" "$APP_DIR/dist/main.js"
+pm2 save
+```
+
+Windows（PowerShell）同一命令（换行符为反引号 `` ` ``，或写成一行）：
+
+```powershell
+pm2 start node --name vcpdeck-server-launcher -- "--env-file=$APP_DIR\launcher.env" "$APP_DIR\dist\main.js"
 pm2 save
 ```
 
@@ -171,6 +192,8 @@ node --env-file="$HOME/.vcpdeck/launcher-client/launcher.env" \
 
 ## 6. 验证通讯
 
+> 以下为 Bash / Git Bash 语法；Windows PowerShell 请使用 `curl.exe`，并改用 cookie 文件携带会话（见下方变体）。
+
 ```bash
 # 登录拿会话 cookie
 COOKIE=$(curl -s -c - -X POST http://127.0.0.1:3001/api/auth/login \
@@ -193,6 +216,18 @@ curl -s -b "vcpdeck_session=$COOKIE" http://127.0.0.1:3001/api/jobs/$JOB_ID
 ```
 
 实测输出示例：`status: done`，`stdout: "hello ... <hostname>"`——即 Server 下发、Client 在目标机实际执行并回传结果，全链路打通。
+
+Windows（PowerShell）验证变体（`curl.exe` + cookie 文件）：
+
+```powershell
+# 登录并把会话 cookie 保存到 cookies.txt
+curl.exe -s -c cookies.txt -X POST http://127.0.0.1:3001/api/auth/login `
+  -H "content-type: application/json" `
+  -d '{"username":"admin","password":"<管理员密码>"}'
+
+# Client 在线、版本与能力
+curl.exe -s -b cookies.txt http://127.0.0.1:3001/api/clients
+```
 
 ## 7. 日常发版（自动更新）
 

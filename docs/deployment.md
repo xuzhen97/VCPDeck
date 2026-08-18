@@ -124,7 +124,7 @@ FRPS Token 和 Dashboard 密码当前明文存入 SQLite、通过实例 REST 返
 - 使用 **fork 模式、单一实例**：Server 是单控制面节点（固定 3001 端口 + SQLite），不支持多实例/cluster；
 - 与安装时相同的运行账户和 `--app-dir`，保证 `launcher.env` / `control.json` / `apps/` 的读写权限一致。
 
-`ecosystem.config.cjs` 示例（路径替换为实际绝对路径）：
+`ecosystem.config.cjs` 示例（路径替换为实际绝对路径；Windows 用 `C:/...`，Linux 用 `/opt/vcpdeck/...`）：
 
 ```js
 module.exports = {
@@ -158,6 +158,8 @@ pm2 start ecosystem.config.cjs
 pm2 save            # 保存进程列表，重启机器后按保存列表拉起
 pm2 logs vcpdeck-server-launcher --lines 100
 ```
+
+Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt/vcpdeck/launcher` 即可；`pm2 startup` 会生成 systemd 自启脚本。
 
 开机自启：Linux 运行 `pm2 startup` 并按提示执行输出的命令；Windows 需先 `pm2 install pm2-windows-startup` 再执行其安装命令。两者均为 PM2 自身机制，不属于项目交付物。
 
@@ -281,6 +283,8 @@ node packages/cli/dist/index.js release upload \
 ```
 
 **方式二：curl（先用登录会话，再按打包输出打印的 sha256 逐个上传）**
+
+> 示例为 Bash / Git Bash 语法；Windows PowerShell 请使用 `curl.exe`，登录时用 `-c cookies.txt` 保存会话、后续请求用 `-b cookies.txt` 携带。
 
 ```bash
 curl -s -c - -X POST https://<server>:3001/api/auth/login \
