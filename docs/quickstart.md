@@ -63,7 +63,7 @@ node install.cjs --artifact=server --zip=vcpdeck-0.1.1-win-x64.zip
 # 仓库开发环境：脚本在 scripts/ 下，zip 在 dist-release/ 下
 node scripts/install.cjs --artifact=server \
   --zip=dist-release/vcpdeck-0.1.1-win-x64.zip \
-  --app-dir=~/.vcpdeck/launcher
+  --app-dir="$HOME/.vcpdeck/launcher"
 
 # 同机安装 Client：默认使用独立的 ~/.vcpdeck/launcher-client，不会与 Server 的 Launcher 冲突
 node install.cjs --artifact=client --zip=vcpdeck-0.1.1-win-x64.zip --server-url=http://127.0.0.1:3001 --psk=<与 Server 相同的密钥>
@@ -102,9 +102,9 @@ node --env-file="<app-dir>/launcher.env" "<app-dir>/dist/main.js"
 `uninstall.cjs` 与发布 zip 平级提供于 `dist-release/` 目录（仓库内为 `scripts/uninstall.cjs`）。它只操作 `<app-dir>/apps/...`，与 zip 内容无关：
 
 ```bash
-node scripts/uninstall.cjs --version=0.1.1 --app-dir=~/.vcpdeck/launcher --yes
-node scripts/uninstall.cjs --current --app-dir=~/.vcpdeck/launcher --yes  # 卸载当前生效版本
-node scripts/uninstall.cjs --version=0.1.1 --app-dir=~/.vcpdeck/launcher --dry-run  # 预览
+node scripts/uninstall.cjs --version=0.1.1 --app-dir="$HOME/.vcpdeck/launcher" --yes
+node scripts/uninstall.cjs --current --app-dir="$HOME/.vcpdeck/launcher" --yes  # 卸载当前生效版本
+node scripts/uninstall.cjs --version=0.1.1 --app-dir="$HOME/.vcpdeck/launcher" --dry-run  # 预览
 ```
 
 卸载语义：删除 `apps/<version>/`（仅应用构件，版本目录外的持久数据不受影响）；若 current 指向被卸载版本，自动重定向到剩余最高版本，无剩余版本时清空指针（Windows `state.json` 写 `{"current":null}`，Linux 删除 symlink）。`--yes` 跳过交互确认；非交互终端自动执行。版本目录被运行中进程占用时（如 Windows 上 Server 正在跑）会报错并提示，需先停止进程再卸载。
