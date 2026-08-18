@@ -98,9 +98,15 @@ async function downloadPlatform(platform: string): Promise<void> {
 	fs.mkdirSync(serverDestDir, { recursive: true });
 	fs.mkdirSync(TMP_DIR, { recursive: true });
 
-	// 幂等：frpc 与 frps 均已存在则跳过（离线环境/网络受限时复用已有产物）
-	const frpcExists = fs.existsSync(path.join(clientDestDir, entry.frpcName));
-	const frpsExists = fs.existsSync(path.join(serverDestDir, entry.frpsName));
+	// 幂等：frpc 与 frps 均已存在则跳过（离线环境/网络受限时复用已有产物）。
+	// Linux 平台落盘的是 .gz 包装副本（构建机不保留裸 ELF，见下方说明），按 .gz 判断。
+	const diskExt = entry.frpcName.endsWith(".exe") ? "" : ".gz";
+	const frpcExists = fs.existsSync(
+		path.join(clientDestDir, `${entry.frpcName}${diskExt}`),
+	);
+	const frpsExists = fs.existsSync(
+		path.join(serverDestDir, `${entry.frpsName}${diskExt}`),
+	);
 	if (frpcExists && frpsExists) {
 		console.log(`[${platform}] frpc/frps 已存在，跳过下载`);
 		return;
@@ -170,22 +176,25 @@ async function downloadPlatform(platform: string): Promise<void> {
 		);
 	}
 
-	const frpcDest = path.join(clientDestDir, entry.frpcName);
-	fs.writeFileSync(frpcDest, frpcBytes);
-	if (!isWin) fs.chmodSync(frpcDest, 0o755);
-	console.log(`[${platform}] frpc → ${frpcDest}`);
+	// 5. 落盘：Windows 写裸 .exe；Linux 只写 .gz 包装副本，不在构建机落裸 ELF。
+	//    裸 ELF 会被开发机安全软件误报（HackTool/Linux.Frp）并自动删除/弹窗；打包时
+	//    pack-release 从 .gz 内存解压注入 zip，Linux 目标机解压 zip 后即为可执行文件，
+	//    符合“构建机不保留二进制、目标机解压即用”的 Linux 管理方式。
+	if (entry.frpcName.endsWith(".exe")) {
+		const frpcDest = path.join(clientDestDir, entry.frpcName);
+		fs.writeFileSync(frpcDest, frpcBytes);
+		if (!isWin) fs.chmodSync(frpcDest, 0o755);
+		console.log(`[${platform}] frpc → ${frpcDest}`);
 
-	const frpsDest = path.join(serverDestDir, entry.frpsName);
-	fs.writeFileSync(frpsDest, frpsBytes);
-	if (!isWin) fs.chmodSync(frpsDest, 0o755);
-	console.log(`[${platform}] frps → ${frpsDest}`);
-
-	// 6. 无扩展名产物（linux 平台）额外存 .gz 包装副本：部分 Windows 开发机杀毒会删除
-	//    裸 ELF 字节序列（连 .bin 也会），gzip 包装免疫；pack-release 在打包后用其
-	//    解压内容直接追加进 zip（裸文件在磁盘只存在秒级窗口）
-	if (!entry.frpcName.endsWith(".exe")) {
-		fs.writeFileSync(`${frpcDest}.gz`, gzipSync(frpcBytes));
-		fs.writeFileSync(`${frpsDest}.gz`, gzipSync(frpsBytes));
+		const frpsDest = path.join(serverDestDir, entry.frpsName);
+		fs.writeFileSync(frpsDest, frpsBytes);
+		if (!isWin) fs.chmodSync(frpsDest, 0o755);
+		console.log(`[${platform}] frps → ${frpsDest}`);
+	} else {
+		const frpcGz = path.join(clientDestDir, `${entry.frpcName}.gz`);
+		fs.writeFileSync(frpcGz, gzipSync(frpcBytes));
+		const frpsGz = path.join(serverDestDir, `${entry.frpsName}.gz`);
+		fs.writeFileSync(frpsGz, gzipSync(frpsBytes));
 		console.log(`[${platform}] frpc/frps .gz 包装副本已就绪`);
 	}
 }
