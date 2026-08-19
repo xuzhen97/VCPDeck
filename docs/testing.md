@@ -71,6 +71,7 @@ node scripts/smoke-launcher.cjs
 | Terminal | 协议 parser、operator/viewer/token、snapshot/output 同序列、上游 gap/resync、UTF-8 上限、持续输入速率、generation、SQLite 状态、首次/重复 attach-detach TTL、expired 上报、真实 PTY 和进程树 |
 | Pi | capability/协议 parser、Owner/Observer、runId/CAS、cwd/projectKey、Session 树、交互/非阻塞 Extension 投影与 Trust、图片、SSE、重连/重启、隐私和真实模型 smoke |
 | Storage Provider | 签名篡改/过期、上传下载、Provider 故障、孤儿清理 |
+| Storage 阿里云盘真环境验收 | `scripts/setup-alibaba-storage.cjs`（OAuth PKCE 人工引导）+ `scripts/test-release-alibaba.cjs`（ADR-0016 端到端） | 需已创建阿里云盘应用并在浏览器完成一次授权；验证构件转存、302 直链、Server/Client 自更新 |
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |
 | Auth/Security | 密码/Cookie/Bearer、禁用/启用、撤销/过期、修改密码、既有 Socket、最后 admin、parser/限速、Actor、防泄漏 |
 | Release/Launcher | SHA、archive 路径安全、Windows/Linux 格式、drain、Server 恢复、Client 补更、数据库兼容和回退 |
@@ -132,6 +133,9 @@ Release 不得只凭构建成功发布。至少确认：
 - 命令与结果摘要（脱敏）；
 - 失败、跳过项和已知限制；
 - 验收人。
+
+- `scripts/setup-alibaba-storage.cjs`：阿里云盘 Storage 后端的人工 OAuth PKCE 授权引导。交互输入 clientId、浏览器完成授权、输入 code 粘回，验证授权后把 Server Storage 后端切换为 `alibaba`。是 `scripts/test-release-alibaba.cjs` 的前置。
+- `scripts/test-release-alibaba.cjs`：ADR-0016 发布构件经阿里云盘直连分发的真环境集成测试。自启动 Server Launcher + Client Launcher，打包 0.1.18 → install.cjs 装 0.1.17 → CLI 上传两个平台（确认转存 alibaba + 记录 `storage.mode=direct`）→ 验证 download 302 直链 → 等待 Server/Client 自更新到 0.1.18 → 验证 `VCPDECK_RELEASES_DIR` 不含 zip → 自动清理。
 
 验证文档是时间点证据，不是永久“已支持”声明。支持范围以 `compatibility.md` 和当前 CI 矩阵为准。
 
