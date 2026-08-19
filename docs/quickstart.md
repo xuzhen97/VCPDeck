@@ -259,6 +259,6 @@ Server 校验 sha256 → 两个平台构件齐备后自动编排：**Server 先�
 
 - `VCPDECK_PSK` 与管理员密码必须随机生成并妥善保管，示例值仅用于本地演练；
 - 生产必须 HTTPS + `VCPDECK_COOKIE_SECURE=true`；
-- Server 固定监听 `3001`（当前无端口覆盖变量）；
+- Server 默认监听 `3001`，可用 `VCPDECK_PORT` 覆盖；改端口时 Client `VCPDECK_SERVER` 与 Server Launcher `VCPDECK_PROBE_URL` 需同步指向新端口；
 - Frontend 已随发布包打进 server 构件（`server/public/`），由 Server 同源托管（SPA 回退到 `index.html`），访问 `http://<host>:3001/` 即驾驶台；跨源部署仍可按 `deployment.md` §7 单独托管并设置 `VCPDECK_FRONTEND_ORIGIN`；
 - 信任模型、凭据与敏感数据处理见 [`security.md`](./security.md)。

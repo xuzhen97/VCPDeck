@@ -18,6 +18,18 @@ import {
 const FRONTEND_ORIGIN =
 	process.env.VCPDECK_FRONTEND_ORIGIN || "http://localhost:5173";
 
+/** 监听端口：默认 3001，可用 VCPDECK_PORT 覆盖（1–65535 整数） */
+function resolvePort(): number {
+	const raw = process.env.VCPDECK_PORT;
+	if (!raw) return 3001;
+	const port = Number(raw);
+	if (!Number.isInteger(port) || port < 1 || port > 65535) {
+		console.error(`[bootstrap] VCPDECK_PORT 非法: ${raw}（需要 1–65535 整数）`);
+		process.exit(1);
+	}
+	return port;
+}
+
 async function bootstrapAdmin(prisma: PrismaService) {
 	const count = await prisma.identity.count({ where: { isAdmin: true } });
 	if (count > 0) return;
@@ -84,8 +96,9 @@ async function bootstrap() {
 		console.log("[bootstrap] default storage backend: local");
 	}
 
-	await app.listen(3001);
-	console.log("VCPDeck server listening on http://localhost:3001");
+	const port = resolvePort();
+	await app.listen(port);
+	console.log(`VCPDeck server listening on http://localhost:${port}`);
 
 	// 自更新编排恢复：Launcher 回退判定 / Client 阶段续跑
 	void app

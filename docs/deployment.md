@@ -72,10 +72,11 @@ pnpm release --version=x.y.z
 | `VCPDECK_RELEASES_DIR` | `./data/releases`（install 引导默认 `<app-dir>/releases`） | **Local 后端**的发布构件目录；必须为**版本目录外绝对路径**，否则自更新切换版本后目录漂移、构件丢失。配置外部存储后端（OSS/网盘）后，发布包转存 Provider，此目录不再承载新构件 |
 | `VCPDECK_PSK` | `vcpdeck-dev-psk` | `/client` PSK，生产必须随机替换 |
 | `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | `/client` Gateway CORS Origin |
+| `VCPDECK_PORT` | `3001` | Server 监听端口（1–65535 整数）；改端口时必须同步配置 Client `VCPDECK_SERVER` 与 Server Launcher `VCPDECK_PROBE_URL` |
 
 **已知配置不一致：** 根目录和 `packages/server/.env.example` 目前写的是 `VCPDECK_CLIENT_PSK`，但 Server 与 Client 实际代码都读取 `VCPDECK_PSK`；`VCPDECK_CLIENT_PSK_FILE` 当前也未实现。部署必须设置 `VCPDECK_PSK`，不要依赖示例中的旧变量。
 
-Server 固定监听 `3001`，当前没有环境变量覆盖端口。
+Server 默认监听 `3001`，可用 `VCPDECK_PORT` 覆盖。改端口时三处必须同步（默认均为 3001）：Client 的 `VCPDECK_SERVER`、CLI 的 `VCPDECK_SERVER`/`--server`、Server Launcher 的 `VCPDECK_PROBE_URL`；浏览器驾驶台随之访问 `http://<host>:<port>/`。
 
 ### 4.2 Client
 
