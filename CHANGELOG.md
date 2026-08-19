@@ -8,7 +8,7 @@ VCPDeck 尚未发布稳定版本。本文件记录用户或运维人员可感知
 
 ### Added
 
-- 阿里云盘真环境集成测试：`scripts/setup-alibaba-storage.cjs`（人工 OAuth PKCE 引导，把 Server Storage 后端切到 `alibaba`）+ `scripts/test-release-alibaba.cjs`（ADR-0016 端到端自更新验收：装 0.1.17 → 上传 0.1.18 转存 alibaba → 验证 302 直链 → Server/Client 各自更新到 0.1.18 → 自动清理）。
+- 阿里云盘一键真环境集成测试：唯一入口为 `node scripts/test-release-alibaba.cjs`。脚本会自建同一临时 DB、打包基线/目标版本、用 `install.cjs` 安装并启动隔离的 Server/Client Launcher、在该 DB 内完成 OAuth 配置、上传构件并验证 `storage.mode=direct`/302 外部直链、等待 Server/Client 自更新，最后删除本测试云端对象并清理本测试进程/目录；仅缺少 clientId、浏览器 OAuth code 或 3001 端口冲突时需要人工介入。
 - 发布构件接入 Storage Provider 直连分发（ADR-0016）：配置支持直连的外部存储（阿里云盘等）后，上传的 zip 转存 Provider 并在 `Release.archives[platform]` 记录 `storage{provider,key,mode}`；下载统一入口 `GET /api/releases/:version/file` 对 direct 构件响应 **302 到临时直链**（短时缓存、过期重取、换取失败降级本地），目标机 `fetch` 跟随重定向直连存储，**不占 Server 带宽**；Local 后端与无 storage 字段的旧记录行为不变。
 - `scripts/install.cjs` 新增启动参数引导：TTY 交互（回车用强随机默认值）或 `--psk` / `--admin-password` / `--server-url` / `--client-id` / `--releases-dir` 显式传入，安装完成后写入 `<app-dir>/launcher.env`（Non-Windows 权限 600），启动变为一行 `node --env-file=<app-dir>/launcher.env <app-dir>/dist/main.js`；server 引导的 `DATABASE_URL` 同时驱动建库，`VCPDECK_RELEASES_DIR` 默认 `<app-dir>/releases`（版本目录外，避免自更新切换版本后漂移）；未显式传 `--app-dir` 时 Server 默认 `~/.vcpdeck/launcher`、Client 默认 `~/.vcpdeck/launcher-client`，避免同机安装冲突。`--no-env` 可跳过生成。
 - 新增应用构件快速安装/卸载脚本 `scripts/install.cjs` / `scripts/uninstall.cjs`：一条命令完成发布包解压安装到 Launcher 版本目录、current 指针设置、Server 数据库初始化（`--db-url`）、多版本卸载与 current 重定向/清空；随附 node:test 单元测试；`docs/quickstart.md` 补充对应章节。

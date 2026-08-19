@@ -1,253 +1,314 @@
 #!/usr/bin/env node
 /**
- * VCPDeck 发布构件经阿里云盘直连自更新集成测试（ADR-0016 真环境验收）
+ * VCPDeck 发布构件经阿里云盘直连自更新的一键集成测试（ADR-0016）。
  *
- * 用法：
+ * 直接运行：
  *   node scripts/test-release-alibaba.cjs
  *
- * 前置：
- *   1. 已运行 scripts/setup-alibaba-storage.cjs 完成 OAuth 授权 + storage=alibaba
- *   2. 全量构建（pnpm build）
- *   3. Server 不在外部运行（脚本自己启停）
+ * 脚本自动完成：依赖检查、基线打包、Server/Client 安装与启动、临时 DB、
+ * 阿里云盘配置、目标版本打包、构件上传、302 直链验证、Server/Client
+ * 自更新、云端测试对象删除、Launcher 停止和临时目录清理。
  *
- * 流程：
- *   1. 构建新版本 0.1.18（pnpm release）
- *   2. install.cjs 安装 server 0.1.17 作为基线
- *   3. 启动 server Launcher
- *   4. install.cjs 安装 client 0.1.17 作为基线
- *   5. 启动 client Launcher（守护真 client 进程）
- *   6. 确认 Server/Client 都连上
- *   7. CLI 上传两个平台 0.1.18 → 自动转存 alibaba + 记录 storage
- *   8. 轮询 /api/releases 直到 done
- *   9. 验证：serverVersion=0.1.18、client.clientVersion=0.1.18
- *  10. 验证：VCPDECK_RELEASES_DIR 下没有 0.1.18 zip（ADR-0016 标志）
- *  11. 清理（uninstall）
+ * 仅在必要时暂停：
+ *   1. 未设置 ALIBABA_CLIENT_ID 时输入 clientId；
+ *   2. 浏览器 OAuth 授权后粘贴 code 或完整回调 URL；
+ *   3. 3001 端口被其他进程占用时，请用户自行停止该进程（脚本绝不误杀）。
  *
- * 关键 ADR-0016 验收点：
- *   - Release.archives[plat].storage 字段为 { provider: 'alibaba', key, mode: 'direct' }
- *   - 目标机通过 GET /api/releases/:version/file 收到 302 直链
- *   - 字节流不经过 Server 监听端口
+ * 可选环境变量：
+ *   ALIBABA_CLIENT_ID / ALIBABA_CLIENT_SECRET / ALIBABA_OPENAPI_BASE
+ *   VCPDECK_E2E_BASE_VERSION（默认 0.1.17）
+ *   VCPDECK_E2E_TARGET_VERSION（默认 0.1.18）
  */
 
-const { spawn, execFileSync } = require("node:child_process");
-const { existsSync, readFileSync, rmSync, mkdirSync, statSync } = require("node:fs");
+const assert = require("node:assert/strict");
+const { execFileSync, spawn } = require("node:child_process");
+const { createHash, randomBytes } = require("node:crypto");
+const {
+	appendFileSync,
+	createReadStream,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+} = require("node:fs");
+const { once } = require("node:events");
+const net = require("node:net");
+const { platform: nodePlatform, tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
-const { tmpdir, homedir, hostname, platform: nodePlatform } = require("node:os");
+const readline = require("node:readline");
 
 const ROOT = resolve(__dirname, "..");
-const BASE = process.env.VCPDECK_BASE || "http://localhost:3001";
-const ADMIN_USERNAME = process.env.VCPDECK_ADMIN_USERNAME || "admin";
-const ADMIN_PASSWORD =
-	process.env.VCPDECK_ADMIN_PASSWORD || "test123";
-const NEW_VERSION = "0.1.18";
-const BASE_VERSION = "0.1.17";
-const TEST_CLIENT_ID =
-	process.env.VCPDECK_TEST_CLIENT_ID ||
-	`alibaba-e2e-${nodePlatform()}-${Date.now()}`;
+const BASE = "http://127.0.0.1:3001";
+const ADMIN_USERNAME = "admin";
+const ADMIN_PASSWORD = randomBytes(24).toString("hex");
+const PSK = randomBytes(32).toString("hex");
+const BASE_VERSION = readVersion("VCPDECK_E2E_BASE_VERSION", "0.1.17");
+const TARGET_VERSION = readVersion("VCPDECK_E2E_TARGET_VERSION", "0.1.18");
+const TEST_CLIENT_ID = `alibaba-e2e-${nodePlatform()}-${Date.now()}`;
+const OPENAPI_BASE =
+	process.env.ALIBABA_OPENAPI_BASE || "https://openapi.alipan.com";
+const OUTPUT_REL = `.tmp/alibaba-release-e2e-${process.pid}/dist-release`;
+const OUTPUT_DIR = join(ROOT, OUTPUT_REL);
 
 let cookie = "";
-const results = [];
 let serverLauncher = null;
 let clientLauncher = null;
+let serverAppDir = null;
+let clientAppDir = null;
+let cleanupPromise = null;
+const uploadedKeys = new Set();
+const results = [];
+
+function readVersion(name, fallback) {
+	const value = process.env[name] || fallback;
+	if (!/^\d+\.\d+\.\d+$/.test(value)) {
+		throw new Error(`${name} 应为 x.y.z，实际 ${value}`);
+	}
+	return value;
+}
 
 function pass(name, detail) {
 	results.push({ status: "PASS", name, detail: detail || "" });
 	console.log(`  \x1b[32m✓\x1b[0m ${name}${detail ? `: ${detail}` : ""}`);
 }
+
+function warn(name, detail) {
+	results.push({ status: "WARN", name, detail: detail || "" });
+	console.log(`  \x1b[33m⚠\x1b[0m ${name}${detail ? `: ${detail}` : ""}`);
+}
+
 function fail(name, detail) {
 	results.push({ status: "FAIL", name, detail: detail || "" });
 	console.log(`  \x1b[31m✗\x1b[0m ${name}: ${detail}`);
 }
+
 function step(label) {
 	console.log(`\n── ${label} ──`);
 }
 
-async function sleep(ms) {
-	return new Promise((r) => setTimeout(r, ms));
+function sleep(ms) {
+	return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+function ask(question, timeoutMs = 0) {
+	if (!process.stdin.isTTY) {
+		throw new Error(`当前不是交互终端，无法等待输入：${question.trim()}`);
+	}
+	return new Promise((resolveAnswer, rejectAnswer) => {
+		const rl = readline.createInterface({
+			input: process.stdin,
+			output: process.stdout,
+		});
+		let timer = null;
+		if (timeoutMs > 0) {
+			timer = setTimeout(() => {
+				rl.close();
+				rejectAnswer(new Error("等待人工输入超时"));
+			}, timeoutMs);
+		}
+		rl.question(question, (answer) => {
+			if (timer) clearTimeout(timer);
+			rl.close();
+			resolveAnswer(answer.trim());
+		});
+	});
+}
+
+function parseAuthorizationCode(input) {
+	const trimmed = String(input || "").trim();
+	const match = trimmed.match(/[?&]code=([^&]+)/);
+	return match ? decodeURIComponent(match[1]) : trimmed;
+}
+
+function isExternalHttpsRedirect(location) {
+	try {
+		const target = new URL(location);
+		return target.protocol === "https:" && target.origin !== new URL(BASE).origin;
+	} catch {
+		return false;
+	}
+}
+
+function runSelfCheck() {
+	assert.notEqual(BASE_VERSION, TARGET_VERSION, "基线与目标版本不能相同");
+	assert.equal(parseAuthorizationCode("abc"), "abc");
+	assert.equal(
+		parseAuthorizationCode("https://example.test/callback?code=a%2Bb&state=s"),
+		"a+b",
+	);
+	assert.equal(isExternalHttpsRedirect("https://download.example/file"), true);
+	assert.equal(
+		isExternalHttpsRedirect(`${BASE}/api/releases/1.0.0/file`),
+		false,
+	);
+	console.log("test-release-alibaba.cjs self-check: OK");
 }
 
 async function api(method, path, opts = {}) {
 	const headers = { ...(opts.headers || {}) };
-	if (opts.json) headers["Content-Type"] = "application/json";
-	if (!opts.noCookie && cookie) headers["Cookie"] = cookie;
-	const res = await fetch(`${BASE}${path}`, {
+	if (opts.json !== undefined) headers["content-type"] = "application/json";
+	if (!opts.noCookie && cookie) headers.cookie = cookie;
+	const init = {
 		method,
 		headers,
-		body: opts.json ? JSON.stringify(opts.json) : undefined,
-		redirect: "manual",
-	});
-	const setCookie = res.headers.get("set-cookie");
-	if (setCookie) {
-		const m = setCookie.match(/vcpdeck_session=([^;]+)/);
-		if (m) cookie = `vcpdeck_session=${m[1]}`;
+		redirect: opts.redirect || "manual",
+	};
+	if (opts.json !== undefined) init.body = JSON.stringify(opts.json);
+	if (opts.body !== undefined) {
+		init.body = opts.body;
+		init.duplex = "half";
 	}
-	return res;
+	const response = await fetch(`${BASE}${path}`, init);
+	const setCookie = response.headers.get("set-cookie");
+	if (setCookie) {
+		const match = setCookie.match(/vcpdeck_session=([^;]+)/);
+		if (match) cookie = `vcpdeck_session=${match[1]}`;
+	}
+	return response;
 }
+
 async function apiJson(method, path, opts = {}) {
-	const res = await api(method, path, opts);
-	const text = await res.text();
+	const response = await api(method, path, opts);
+	const text = await response.text();
 	let body = null;
 	try {
 		body = text ? JSON.parse(text) : null;
 	} catch {
 		body = text;
 	}
-	return { status: res.status, body };
+	return { status: response.status, body, headers: response.headers };
 }
 
-/** 等待 Server /api/status 返回 listening */
-async function waitForServer(timeoutMs = 60_000) {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		try {
-			const r = await fetch(`${BASE}/api/health`);
-			if (r.ok) {
-				const j = await r.json();
-				if (j && j.ok) return;
-			}
-		} catch {
-			// 端口还没开
-		}
-		await sleep(1000);
+async function login() {
+	cookie = "";
+	const response = await apiJson("POST", "/api/auth/login", {
+		json: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
+		noCookie: true,
+	});
+	if (
+		(response.status !== 200 && response.status !== 201) ||
+		!response.body?.identity?.isAdmin
+	) {
+		throw new Error(`管理员登录失败: HTTP ${response.status}`);
 	}
-	throw new Error("Server 在超时时间内未就绪");
 }
 
-/** 等待 Server Launcher 完成 prepare 后，/api/status.serverVersion 等于目标 */
-async function waitForServerVersion(version, timeoutMs = 600_000) {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		try {
-			const r = await apiJson("GET", "/api/status");
-			if (r.status === 200 && r.body && r.body.serverVersion === version) {
-				return r.body;
-			}
-		} catch {
-			// 忽略瞬时
-		}
-		await sleep(2000);
-	}
-	throw new Error(`Server 未在 ${timeoutMs / 1000}s 内切到 ${version}`);
-}
-
-/** 轮询 Release 状态直到终态 */
-async function waitForReleaseDone(timeoutMs = 600_000) {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		const r = await apiJson("GET", "/api/releases");
-		if (r.status === 200 && r.body && Array.isArray(r.body.data)) {
-			const target = r.body.data.find((x) => x.version === NEW_VERSION);
-			if (target) {
-				if (target.status === "done") return target;
-				if (target.status === "failed") {
-					throw new Error(
-						`Release failed: ${target.errorMessage || "(无原因)"}`,
-					);
-				}
-			}
-		}
-		await sleep(2000);
-	}
-	throw new Error(`Release 未在 ${timeoutMs / 1000}s 内进入 done`);
-}
-
-/** 等待指定 client 上线、版本对齐 */
-async function waitForClient(clientId, version, timeoutMs = 600_000) {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		const r = await apiJson("GET", "/api/clients");
-		if (r.status === 200 && Array.isArray(r.body)) {
-			const c = r.body.find((x) => x.clientId === clientId);
-			if (
-				c &&
-				c.online === true &&
-				(!version || c.clientVersion === version)
-			) {
-				return c;
-			}
-		}
-		await sleep(2000);
-	}
-	throw new Error(`Client ${clientId} 在 ${timeoutMs / 1000}s 内未满足要求`);
-}
-
-/** 执行 install.cjs；返回 Promise<{ code, stdout, stderr }> */
-function runInstall(args) {
-	return new Promise((resolveP) => {
-		const p = spawn(
-			process.execPath,
-			[join(ROOT, "scripts", "install.cjs"), ...args],
-			{
-				stdio: ["ignore", "pipe", "pipe"],
-				env: { ...process.env },
-			},
-		);
-		let stdout = "";
-		let stderr = "";
-		p.stdout.on("data", (c) => {
-			stdout += c.toString();
-		});
-		p.stderr.on("data", (c) => {
-			stderr += c.toString();
-		});
-		p.on("close", (code) => resolveP({ code, stdout, stderr }));
+function isPortOpen(port) {
+	return new Promise((resolveOpen) => {
+		const socket = net.createConnection({ host: "127.0.0.1", port });
+		const finish = (open) => {
+			socket.destroy();
+			resolveOpen(open);
+		};
+		socket.setTimeout(1000, () => finish(false));
+		socket.once("connect", () => finish(true));
+		socket.once("error", () => finish(false));
 	});
 }
 
-/** 启动 Launcher（使用真 launcher 包，环境变量指定 app-dir + artifact） */
-function startLauncher({ appDir, artifact, env, logTag }) {
-	mkdirSync(appDir, { recursive: true });
+async function ensurePortFree() {
+	if (!(await isPortOpen(3001))) return;
+	step("需要你介入：3001 端口被占用");
+	console.log("  请停止当前 dev/生产 Server；脚本不会杀死非本次测试创建的进程。");
+	await ask("  停止后按 Enter 继续（10 分钟超时）: ", 10 * 60_000);
+	if (await isPortOpen(3001)) {
+		throw new Error("3001 端口仍被占用");
+	}
+}
+
+function runPnpm(args, label) {
+	console.log(`  [exec] ${label}`);
+	if (nodePlatform() === "win32") {
+		execFileSync(
+			process.env.ComSpec || "C:/Windows/System32/cmd.exe",
+			["/d", "/s", "/c", "pnpm", ...args],
+			{ cwd: ROOT, stdio: "inherit", env: { ...process.env } },
+		);
+		return;
+	}
+	execFileSync("pnpm", args, {
+		cwd: ROOT,
+		stdio: "inherit",
+		env: { ...process.env },
+	});
+}
+
+function packageVersion(version) {
+	runPnpm(
+		["release", `--version=${version}`, `--output=${OUTPUT_REL}`],
+		`打包 ${version}`,
+	);
+	for (const platform of ["win-x64", "linux-x64"]) {
+		const path = archivePath(version, platform);
+		if (!existsSync(path)) throw new Error(`打包后缺少 ${path}`);
+	}
+}
+
+function archivePath(version, platform) {
+	return join(OUTPUT_DIR, `vcpdeck-${version}-${platform}.zip`);
+}
+
+function installArtifact(artifact, zipPath, appDir, extraArgs) {
+	execFileSync(
+		process.execPath,
+		[
+			join(ROOT, "scripts", "install.cjs"),
+			`--artifact=${artifact}`,
+			`--zip=${zipPath}`,
+			`--app-dir=${appDir}`,
+			`--psk=${PSK}`,
+			"--force",
+			...extraArgs,
+		],
+		{ cwd: ROOT, stdio: "inherit", env: { ...process.env } },
+	);
+}
+
+function startLauncher(appDir, tag, extraEnv = {}) {
+	const launcherPath = join(appDir, "dist", "main.js");
+	const envPath = join(appDir, "launcher.env");
+	if (!existsSync(launcherPath) || !existsSync(envPath)) {
+		throw new Error(`${tag} 安装不完整：缺 Launcher 或 launcher.env`);
+	}
 	const child = spawn(
 		process.execPath,
-		[join(ROOT, "packages", "launcher", "dist", "main.js")],
+		[`--env-file=${envPath}`, launcherPath],
 		{
 			cwd: appDir,
 			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, ...env },
+			env: { ...process.env, ...extraEnv },
 		},
 	);
-	const prefix = `[launcher:${logTag}]`;
-	child.stdout.on("data", (c) => {
-		const t = c.toString();
-		process.stdout.write(`${prefix} ${t}`);
+	child.stdout.on("data", (chunk) => {
+		process.stdout.write(`[launcher:${tag}] ${chunk}`);
 	});
-	child.stderr.on("data", (c) => {
-		process.stderr.write(`${prefix}-err ${c.toString()}`);
+	child.stderr.on("data", (chunk) => {
+		process.stderr.write(`[launcher:${tag}:err] ${chunk}`);
 	});
 	return child;
 }
 
-/** 杀进程树：SIGTERM → 等 5s → SIGKILL；Windows 走 taskkill */
-function killTree(child) {
-	if (!child || child.killed || child.exitCode !== null) return;
-	try {
-		if (nodePlatform() === "win32") {
-			try {
-				execFileSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], {
-					stdio: "ignore",
-					timeout: 5_000,
-				});
-				return;
-			} catch {
-				// taskkill 可能因权限失败，回退到 child.kill
-			}
-		}
+async function stopLauncher(child, tag) {
+	if (!child || child.exitCode !== null) return;
+	if (nodePlatform() === "win32") {
 		try {
-			child.kill("SIGTERM");
+			execFileSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], {
+				stdio: "ignore",
+				timeout: 15_000,
+			});
+			return;
 		} catch {
-			// 进程可能已退出
+			// 回退到普通信号
 		}
-		setTimeout(() => {
-			try {
-				if (!child.killed && child.exitCode === null) {
-					child.kill("SIGKILL");
-				}
-			} catch {
-				// 进程已退出
-			}
-		}, 5_000);
+	}
+	try {
+		child.kill("SIGTERM");
+		await Promise.race([once(child, "exit"), sleep(15_000)]);
 	} catch {
-		// 兜底
+		// 进程可能已退出
+	}
+	if (child.exitCode === null) {
+		warn(`${tag} 未在 15 秒内退出`, "发送 SIGKILL");
 		try {
 			child.kill("SIGKILL");
 		} catch {
@@ -256,460 +317,473 @@ function killTree(child) {
 	}
 }
 
-async function main() {
-	console.log("\n╔══════════════════════════════════════════╗");
-	console.log("║  VCPDeck 阿里云盘自更新集成测试        ║");
-	console.log("║  （ADR-0016 真环境验收）               ║");
-	console.log("╚══════════════════════════════════════════╝\n");
-	console.log(`📡 Server: ${BASE}`);
-	console.log(`🎯 目标: Server ${BASE_VERSION} → ${NEW_VERSION}, Client ${BASE_VERSION} → ${NEW_VERSION}`);
-
-	const serverAppDir = join(tmpdir(), `vcpdeck-aliyun-e2e-server-${process.pid}`);
-	const clientAppDir = join(tmpdir(), `vcpdeck-aliyun-e2e-client-${process.pid}`);
-	const serverReleasesDir = join(serverAppDir, "releases");
-	const serverDbPath = join(serverAppDir, "server.db");
-	const zipBase = join(ROOT, "dist-release", `vcpdeck-${NEW_VERSION}`);
-
-	try {
-		step("0. 检查前置条件（storage=alibaba / 全量构建）");
-		{
-			const cfg = await apiJson("GET", "/api/storage/config");
-			if (cfg.status === 200 && cfg.body && cfg.body.kind === "alibaba") {
-				pass("Storage 后端为 alibaba");
-			} else {
-				fail(
-					"Storage 后端不是 alibaba",
-					"请先跑 scripts/setup-alibaba-storage.cjs",
-				);
-				return;
-			}
-			for (const p of [
-				"packages/cli/dist/index.js",
-				"packages/launcher/dist/main.js",
-				"packages/server/dist/main.js",
-				"packages/client/dist/index.js",
-			]) {
-				if (!existsSync(join(ROOT, p))) {
-					fail("缺构件", `请先 pnpm build（缺 ${p}）`);
-					return;
-				}
-			}
-			pass("CLI / Launcher / Server / Client 构件齐全");
-		}
-
-		step(`1. 构建新版本 ${NEW_VERSION}`);
-		{
-			const bothZipExist = ["win-x64", "linux-x64"].every((p) =>
-				existsSync(`${zipBase}-${p}.zip`),
-			);
-			if (bothZipExist) {
-				pass(
-					"两份 zip 已存在",
-					`dist-release/vcpdeck-${NEW_VERSION}-{win,linux}-x64.zip`,
-				);
-			} else {
-				console.log("  正在打包（首次需要数分钟）...");
-				try {
-					execFileSync(
-						"pnpm",
-						["release", `--version=${NEW_VERSION}`],
-						{
-							cwd: ROOT,
-							stdio: "inherit",
-							env: { ...process.env },
-						},
-					);
-				} catch (e) {
-					fail("打包失败", e.message);
-					return;
-				}
-				pass("打包完成", `${zipBase}-{win,linux}-x64.zip`);
-			}
-		}
-
-		step("2. 安装 Server 基线版本");
-		{
-			// 选定本机平台 zip
-			const isWin = nodePlatform() === "win32";
-			const zipName = isWin
-				? `vcpdeck-${BASE_VERSION}-win-x64.zip`
-				: `vcpdeck-${BASE_VERSION}-linux-x64.zip`;
-			// 同样需要这个 zip；如果没有，重新跑 release 用 BASE_VERSION
-			const zipPath = join(ROOT, "dist-release", zipName);
-			if (!existsSync(zipPath)) {
-				console.log(`  缺少基线 zip，重新打包 ${BASE_VERSION}...`);
-				try {
-					execFileSync(
-						"pnpm",
-						["release", `--version=${BASE_VERSION}`],
-						{
-							cwd: ROOT,
-							stdio: "inherit",
-							env: { ...process.env },
-						},
-					);
-				} catch (e) {
-					fail("基线打包失败", e.message);
-					return;
-				}
-			}
-			mkdirSync(serverAppDir, { recursive: true });
-			const envArgs = [
-				`--artifact=server`,
-				`--zip=${zipPath}`,
-				`--app-dir=${serverAppDir}`,
-				`--db-url=file:${serverDbPath.replace(/\\/g, "/")}`,
-				`--releases-dir=${serverReleasesDir}`,
-				`--psk=${ADMIN_PASSWORD}`,
-				`--admin-password=${ADMIN_PASSWORD}`,
-				`--no-env`,
-				"--force",
-			];
-			// 写 launcher.env 给 launcher 用
-			mkdirSync(serverAppDir, { recursive: true });
-			const envContent = [
-				"# auto-generated by test-release-alibaba.cjs",
-				`VCPDECK_APP_DIR=${serverAppDir}`,
-				"VCPDECK_ARTIFACT=server",
-				`VCPDECK_PSK=${ADMIN_PASSWORD}`,
-				`VCPDECK_ADMIN_PASSWORD=${ADMIN_PASSWORD}`,
-				"VCPDECK_COOKIE_SECURE=false",
-				`DATABASE_URL=file:${serverDbPath.replace(/\\/g, "/")}`,
-				`VCPDECK_RELEASES_DIR=${serverReleasesDir}`,
-				"VCPDECK_PROBE_URL=http://127.0.0.1:3001/api/status",
-				"",
-			].join("\n");
-			// install.cjs --no-env 不写 env 文件；手动写一份给 launcher
-			require("node:fs").writeFileSync(
-				join(serverAppDir, "launcher.env"),
-				envContent,
-			);
-			const r = await runInstall(envArgs);
-			if (r.code !== 0) {
-				fail("install server 失败", r.stderr || r.stdout.slice(-500));
-				return;
-			}
-			pass(`Server ${BASE_VERSION} 已安装`, serverAppDir);
-		}
-
-		step("3. 启动 Server Launcher");
-			serverLauncher = startLauncher({
-				appDir: serverAppDir,
-				artifact: "server",
-				env: {
-					VCPDECK_APP_DIR: serverAppDir,
-					VCPDECK_ARTIFACT: "server",
-					VCPDECK_PSK: ADMIN_PASSWORD,
-					VCPDECK_ADMIN_PASSWORD: ADMIN_PASSWORD,
-					VCPDECK_COOKIE_SECURE: "false",
-					DATABASE_URL: `file:${serverDbPath.replace(/\\/g, "/")}`,
-					VCPDECK_RELEASES_DIR: serverReleasesDir,
-					VCPDECK_PROBE_URL: `${BASE}/api/status`,
-				},
-				logTag: "server",
-			});
-			try {
-				await waitForServer();
-				pass("Server Launcher 拉起 Server + 健康检查通过");
-			} catch (e) {
-				fail("Server 启动失败", e.message);
-				return;
-			}
-
-		step("4. 管理员登录 + 验证 storage=alibaba");
-		{
-			const r = await apiJson("POST", "/api/auth/login", {
-				json: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
-				noCookie: true,
-			});
-			if (
-				(r.status === 200 || r.status === 201) &&
-				r.body &&
-				r.body.identity &&
-				r.body.identity.isAdmin
-			) {
-				pass("管理员登录成功");
-			} else {
-				fail("管理员登录失败", `status=${r.status}`);
-				return;
-			}
-			const cfg = await apiJson("GET", "/api/storage/config");
-			if (cfg.status === 200 && cfg.body && cfg.body.kind === "alibaba") {
-				pass("Storage 仍为 alibaba（重启后热加载）");
-			} else {
-				fail("重启后 storage 不是 alibaba", JSON.stringify(cfg.body));
-				return;
-			}
-		}
-
-		step(`5. 安装 Client 基线版本 ${BASE_VERSION}`);
-		{
-			const isWin = nodePlatform() === "win32";
-			const zipName = isWin
-				? `vcpdeck-${BASE_VERSION}-win-x64.zip`
-				: `vcpdeck-${BASE_VERSION}-linux-x64.zip`;
-			const zipPath = join(ROOT, "dist-release", zipName);
-			mkdirSync(clientAppDir, { recursive: true });
-			require("node:fs").writeFileSync(
-				join(clientAppDir, "launcher.env"),
-				[
-					`VCPDECK_APP_DIR=${clientAppDir}`,
-					"VCPDECK_ARTIFACT=client",
-					`VCPDECK_SERVER=${BASE}`,
-					`VCPDECK_PSK=${ADMIN_PASSWORD}`,
-					`VCPDECK_CLIENT_ID=${TEST_CLIENT_ID}`,
-					"",
-				].join("\n"),
-			);
-			const r = await runInstall([
-				"--artifact=client",
-				`--zip=${zipPath}`,
-				`--app-dir=${clientAppDir}`,
-				`--server-url=${BASE}`,
-				`--psk=${ADMIN_PASSWORD}`,
-				`--client-id=${TEST_CLIENT_ID}`,
-				`--no-env`,
-				"--force",
-			]);
-			if (r.code !== 0) {
-				fail("install client 失败", r.stderr || r.stdout.slice(-500));
-				return;
-			}
-			pass(`Client ${BASE_VERSION} 已安装`, clientAppDir);
-		}
-
-		step("6. 启动 Client Launcher");
-			clientLauncher = startLauncher({
-				appDir: clientAppDir,
-				artifact: "client",
-				env: {
-					VCPDECK_APP_DIR: clientAppDir,
-					VCPDECK_ARTIFACT: "client",
-					VCPDECK_SERVER: BASE,
-					VCPDECK_PSK: ADMIN_PASSWORD,
-					VCPDECK_CLIENT_ID: TEST_CLIENT_ID,
-				},
-				logTag: "client",
-			});
-			try {
-				const c = await waitForClient(TEST_CLIENT_ID, BASE_VERSION);
-				pass(
-					`Client 已连接`,
-					`version=${c.clientVersion} os=${c.os || "?"}`,
-				);
-			} catch (e) {
-				fail("Client 未在预期时间内连接", e.message);
-				return;
-			}
-
-		step(`7. CLI 上传 ${NEW_VERSION} 两个平台（自动转存 alibaba）`);
-			try {
-				execFileSync(
-					process.execPath,
-					[
-						join(ROOT, "packages", "cli", "dist", "index.js"),
-						"release",
-						"upload",
-						`${zipBase}-win-x64.zip`,
-						`${zipBase}-linux-x64.zip`,
-						`--server=${BASE}`,
-						`--username=${ADMIN_USERNAME}`,
-						`--password=${ADMIN_PASSWORD}`,
-					],
-					{
-						cwd: ROOT,
-						stdio: "inherit",
-						env: {
-							...process.env,
-							VCPDECK_ADMIN_USERNAME: ADMIN_USERNAME,
-							VCPDECK_ADMIN_PASSWORD: ADMIN_PASSWORD,
-						},
-					},
-				);
-			} catch (e) {
-				fail("CLI 上传失败", e.message);
-				return;
-			}
-			pass("两个平台 zip 已上传（自动转存 alibaba）");
-
-		step("8. 验证 Release 元数据记录 storage 字段（ADR-0016 关键标志）");
-		{
-			const r = await apiJson("GET", "/api/releases");
-			const target =
-				r.body && Array.isArray(r.body.data)
-					? r.body.data.find((x) => x.version === NEW_VERSION)
-					: null;
-			if (!target) {
-				fail("未找到刚上传的 Release");
-				return;
-			}
-			console.log("  archives:");
-			for (const [plat, info] of Object.entries(target.archives)) {
-				console.log(
-					`    ${plat}: sha256=${String(info.sha256).slice(0, 12)}... size=${info.size}`,
-				);
-				if (info.storage) {
-					console.log(
-						`      storage=${JSON.stringify(info.storage)}`,
-					);
-				}
-			}
-			const allDirect = ["win-x64", "linux-x64"].every(
-				(p) =>
-					target.archives[p] &&
-					target.archives[p].storage &&
-					target.archives[p].storage.mode === "direct",
-			);
-			if (allDirect) {
-				pass("两个平台 archive 都记录了 storage.mode=direct");
-			} else {
-				fail(
-					"archive 未记录 storage 字段",
-					"ADR-0016 关键标志未命中",
-				);
-				return;
-			}
-			// 不应落本地
-			const localPath = join(
-				serverReleasesDir,
-				`vcpdeck-${NEW_VERSION}-win-x64.zip`,
-			);
-			if (existsSync(localPath)) {
-				fail(
-					"VCPDECK_RELEASES_DIR 下仍有 zip",
-					"ADR-0016：应仅在 alibaba",
-				);
-				return;
-			} else {
-				pass(
-					"VCPDECK_RELEASES_DIR 下无 zip",
-					"ADR-0016：构件仅在 alibaba，Server 不再承载字节",
-				);
-			}
-		}
-
-		step("9. 验证下载端点返回 302 直链（ADR-0016 关键标志）");
-		{
-			const r = await fetch(
-				`${BASE}/api/releases/${NEW_VERSION}/file?platform=win-x64`,
-				{ redirect: "manual" },
-			);
-			if (r.status === 302) {
-				const loc = r.headers.get("location") || "";
-				const startsAliyun =
-					loc.startsWith("https://") &&
-					(loc.includes("alipan") ||
-						loc.includes("aliyundrive") ||
-						loc.includes("alibaba"));
-				if (startsAliyun) {
-					pass(
-						"download 302 到 aliyun 直链",
-						loc.slice(0, 60) + "...",
-					);
-				} else {
-					fail(
-						"302 但 Location 不是 aliyun 直链",
-						`status=${r.status} location=${loc.slice(0, 80)}`,
-					);
-					return;
-				}
-			} else {
-				fail(
-					"download 未返回 302",
-					`status=${r.status}（ADR-0016 期望 302 直链）`,
-				);
-				return;
-			}
-		}
-
-		step(`10. 等待 Server 自更新到 ${NEW_VERSION}`);
-			try {
-				const s = await waitForServerVersion(NEW_VERSION);
-				pass(
-					`Server 已更新到 ${NEW_VERSION}`,
-					`serverVersion=${s.serverVersion}`,
-				);
-			} catch (e) {
-				fail("Server 自更新未完成", e.message);
-				return;
-			}
-
-		step(`11. 等待 Client 自更新到 ${NEW_VERSION}`);
-			try {
-				// 重新登录（Server 重启后 session 可能失效）
-				cookie = "";
-				await apiJson("POST", "/api/auth/login", {
-					json: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
-					noCookie: true,
-				});
-				const c = await waitForClient(TEST_CLIENT_ID, NEW_VERSION);
-				pass(
-					`Client 已更新到 ${NEW_VERSION}`,
-					`clientVersion=${c.clientVersion}`,
-				);
-			} catch (e) {
-				fail("Client 自更新未完成", e.message);
-				return;
-			}
-
-		step("12. 等待 Release 进入 done");
-			try {
-				const target = await waitForReleaseDone();
-				const failedClients = Object.entries(target.clientStates || {})
-					.filter(([, v]) => v.state === "failed")
-					.map(([k]) => k);
-				if (failedClients.length === 0) {
-					pass(
-						"Release done，无 client 失败",
-						`clients=${Object.keys(target.clientStates || {}).length}`,
-					);
-				} else {
-					fail("Release done 但有 client 失败", failedClients.join(", "));
-				}
-			} catch (e) {
-				fail("Release 未进入 done", e.message);
-				return;
-			}
-
-		printReport();
-	} finally {
-		step("清理：杀掉 Launcher 与测试目录");
-		if (serverLauncher) killTree(serverLauncher);
-		if (clientLauncher) killTree(clientLauncher);
+async function waitForServer(timeoutMs = 90_000) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
 		try {
-			rmSync(serverAppDir, { recursive: true, force: true });
-		} catch (e) {
-			console.error("清理 serverAppDir 失败: " + e.message);
+			// pi-lens-ignore: typescript.react.security.react-insecure-request.react-insecure-request
+			const response = await fetch(`${BASE}/api/health`);
+			if (response.ok && (await response.json())?.ok) return;
+		} catch {
+			// Server 启动/重启窗口
 		}
+		await sleep(1000);
+	}
+	throw new Error("Server 在超时时间内未就绪");
+}
+
+async function waitForServerVersion(version, timeoutMs = 15 * 60_000) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
 		try {
-			rmSync(clientAppDir, { recursive: true, force: true });
-		} catch (e) {
-			console.error("清理 clientAppDir 失败: " + e.message);
+			// pi-lens-ignore: typescript.react.security.react-insecure-request.react-insecure-request
+			const response = await fetch(`${BASE}/api/status`);
+			if (response.ok && (await response.json())?.serverVersion === version) return;
+		} catch {
+			// Server 自更新重启窗口
+		}
+		await sleep(2000);
+	}
+	throw new Error(`Server 未在 ${timeoutMs / 1000}s 内切换到 ${version}`);
+}
+
+async function waitForClient(version, timeoutMs = 15 * 60_000) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			const response = await apiJson("GET", "/api/clients");
+			if (response.status === 401) {
+				await login();
+				continue;
+			}
+			const client = Array.isArray(response.body)
+				? response.body.find((item) => item.clientId === TEST_CLIENT_ID)
+				: null;
+			if (client?.online && client.clientVersion === version) return client;
+		} catch {
+			// Server/Client 重启窗口
+		}
+		await sleep(2000);
+	}
+	throw new Error(`Client ${TEST_CLIENT_ID} 未在超时内切换到 ${version}`);
+}
+
+async function waitForReleaseDone(timeoutMs = 15 * 60_000) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			const response = await apiJson("GET", "/api/releases");
+			if (response.status === 401) {
+				await login();
+				continue;
+			}
+			const release = Array.isArray(response.body?.data)
+				? response.body.data.find((item) => item.version === TARGET_VERSION)
+				: null;
+			if (release?.status === "done") return release;
+			if (release?.status === "failed") {
+				throw new Error(`Release failed: ${release.errorMessage || "无原因"}`);
+			}
+		} catch (error) {
+			if (error instanceof Error && error.message.startsWith("Release failed:")) {
+				throw error;
+			}
+		}
+		await sleep(2000);
+	}
+	throw new Error(`Release 未在 ${timeoutMs / 1000}s 内进入 done`);
+}
+
+function sha256File(path) {
+	return new Promise((resolveHash, rejectHash) => {
+		const hash = createHash("sha256");
+		createReadStream(path)
+			.on("error", rejectHash)
+			.on("data", (chunk) => hash.update(chunk))
+			.on("end", () => resolveHash(hash.digest("hex")));
+	});
+}
+
+function rememberUploadedKeys(release) {
+	for (const archive of Object.values(release?.archives || {})) {
+		if (archive?.storage?.provider === "alibaba" && archive.storage.key) {
+			uploadedKeys.add(archive.storage.key);
 		}
 	}
+}
+
+async function uploadArchive(platform) {
+	const path = archivePath(TARGET_VERSION, platform);
+	const sha256 = await sha256File(path);
+	const response = await api(
+		"POST",
+		`/api/releases/upload?version=${TARGET_VERSION}&platform=${platform}&sha256=${sha256}`,
+		{
+			headers: { "content-type": "application/zip" },
+			body: createReadStream(path),
+		},
+	);
+	const text = await response.text();
+	if (!response.ok) {
+		throw new Error(`上传 ${platform} 失败: HTTP ${response.status} ${text}`);
+	}
+	if (!text) return null;
+	try {
+		const release = JSON.parse(text).release ?? null;
+		rememberUploadedKeys(release);
+		return release;
+	} catch {
+		throw new Error(`上传 ${platform} 响应不是合法 JSON`);
+	}
+}
+
+async function findTargetRelease() {
+	const response = await apiJson("GET", "/api/releases");
+	if (response.status !== 200 || !Array.isArray(response.body?.data)) {
+		throw new Error(`Release 列表失败: HTTP ${response.status}`);
+	}
+	const release = response.body.data.find(
+		(item) => item.version === TARGET_VERSION,
+	);
+	if (!release) throw new Error(`未找到 Release ${TARGET_VERSION}`);
+	return release;
+}
+
+function openBrowser(url) {
+	try {
+		let command;
+		if (nodePlatform() === "win32") {
+			command = ["rundll32.exe", ["url.dll,FileProtocolHandler", url]];
+		} else if (nodePlatform() === "darwin") {
+			command = ["open", [url]];
+		} else {
+			command = ["xdg-open", [url]];
+		}
+		const child = spawn(command[0], command[1], {
+			stdio: "ignore",
+			detached: true,
+		});
+		child.on("error", () => undefined);
+		child.unref();
+	} catch {
+		// 仍会打印 URL，用户可手工打开
+	}
+}
+
+async function configureAlibaba() {
+	step("需要你介入：阿里云盘 OAuth 授权");
+	let clientId = process.env.ALIBABA_CLIENT_ID || "";
+	if (!clientId) {
+		console.log("  请在阿里云盘开发者中心创建应用，redirect_uri 设置为 oob。");
+		clientId = await ask("  粘贴 clientId: ");
+	}
+	if (!clientId) throw new Error("clientId 不能为空");
+
+	const config = {
+		clientId,
+		openapiBase: OPENAPI_BASE,
+		transferFolder: process.env.ALIBABA_TRANSFER_FOLDER || "VCPDeckTransfers",
+	};
+	if (process.env.ALIBABA_CLIENT_SECRET) {
+		config.clientSecret = process.env.ALIBABA_CLIENT_SECRET;
+	}
+	const saved = await apiJson("PUT", "/api/aliyundrive/config", {
+		json: config,
+	});
+	if (saved.status !== 200 && saved.status !== 201) {
+		throw new Error(`保存阿里云盘配置失败: HTTP ${saved.status}`);
+	}
+
+	const started = await apiJson("POST", "/api/aliyundrive/oauth/start");
+	if ((started.status !== 200 && started.status !== 201) || !started.body?.state) {
+		throw new Error(`启动 OAuth 失败: HTTP ${started.status}`);
+	}
+	const authorizationUrl = started.body.authorizationUrl;
+	console.log("\n  浏览器将自动打开授权页；若未打开，请复制下面的 URL：\n");
+	console.log(`  ${authorizationUrl}\n`);
+	openBrowser(authorizationUrl);
+	const input = await ask(
+		"  授权后粘贴 code 或完整回调 URL（10 分钟超时）: ",
+		10 * 60_000,
+	);
+	const code = parseAuthorizationCode(input);
+	if (!code) throw new Error("OAuth code 不能为空");
+
+	const completed = await apiJson("POST", "/api/aliyundrive/oauth/complete", {
+		json: { state: started.body.state, code },
+	});
+	if (completed.status !== 200 && completed.status !== 201) {
+		throw new Error(`OAuth 完成失败: HTTP ${completed.status}`);
+	}
+
+	const verified = await apiJson("POST", "/api/aliyundrive/verify");
+	if (!verified.body?.valid || !verified.body?.driveId) {
+		throw new Error(`阿里云盘授权验证失败: ${verified.body?.reason || "unknown"}`);
+	}
+	const switched = await apiJson("PUT", "/api/storage/config", {
+		json: { kind: "alibaba" },
+	});
+	if (switched.body?.kind !== "alibaba") {
+		throw new Error("Storage 后端未切换到 alibaba");
+	}
+	pass("阿里云盘授权并切换成功", `driveId=${verified.body.driveId}`);
+}
+
+async function verifyFirstArchive() {
+	const release = await findTargetRelease();
+	const archive = release.archives?.["win-x64"];
+	if (
+		archive?.storage?.provider !== "alibaba" ||
+		archive.storage.mode !== "direct" ||
+		!archive.storage.key
+	) {
+		throw new Error("win-x64 archive 未记录 alibaba direct storage");
+	}
+	uploadedKeys.add(archive.storage.key);
+	const response = await fetch(
+		`${BASE}/api/releases/${TARGET_VERSION}/file?platform=win-x64`,
+		{ redirect: "manual" },
+	);
+	const location = response.headers.get("location") || "";
+	if (response.status !== 302 || !isExternalHttpsRedirect(location)) {
+		throw new Error(
+			`下载入口应 302 到外部 HTTPS 直链，实际 HTTP ${response.status}`,
+		);
+	}
+	let hostname = "external-storage";
+	try {
+		hostname = new URL(location).hostname;
+	} catch {
+		// isExternalHttpsRedirect 已做过 URL 校验，仅保留防御式兜底
+	}
+	pass("首个平台构件转存与 302 直链验证通过", hostname);
+}
+
+async function verifyAllArchivesDirect() {
+	const release = await findTargetRelease();
+	for (const platform of ["win-x64", "linux-x64"]) {
+		const storage = release.archives?.[platform]?.storage;
+		if (
+			storage?.provider !== "alibaba" ||
+			storage.mode !== "direct" ||
+			!storage.key
+		) {
+			throw new Error(`${platform} archive 未记录 alibaba direct storage`);
+		}
+		uploadedKeys.add(storage.key);
+	}
+	pass("两个平台 archive 均为 alibaba direct");
+}
+
+async function collectUploadedKeys() {
+	try {
+		const release = await findTargetRelease();
+		rememberUploadedKeys(release);
+	} catch {
+		// 上传中途失败时列表可能不可用
+	}
+}
+
+async function deleteUploadedObjects() {
+	if (uploadedKeys.size === 0) return;
+	try {
+		await waitForServer(30_000);
+		await login();
+		for (const key of uploadedKeys) {
+			const response = await api("DELETE", `/api/storage/${encodeURIComponent(key)}`);
+			if (!response.ok) {
+				warn("阿里云盘测试对象删除失败", `HTTP ${response.status}`);
+			}
+		}
+		pass("阿里云盘测试对象已删除", `${uploadedKeys.size} 个`);
+	} catch (error) {
+		warn(
+			"无法自动删除阿里云盘测试对象",
+			error instanceof Error ? error.message : String(error),
+		);
+	}
+}
+
+async function runTest() {
+	if (BASE_VERSION === TARGET_VERSION) {
+		throw new Error("基线版本与目标版本不能相同");
+	}
+	console.log("\n╔══════════════════════════════════════════╗");
+	console.log("║  VCPDeck 阿里云盘一键自更新集成测试    ║");
+	console.log("╚══════════════════════════════════════════╝\n");
+	console.log(`  基线 ${BASE_VERSION} → 目标 ${TARGET_VERSION}`);
+	console.log("  只会停止本脚本创建的进程；不会杀死已有 Server。\n");
+
+	await ensurePortFree();
+	if (!existsSync(join(ROOT, "node_modules", ".pnpm"))) {
+		runPnpm(["install"], "安装 workspace 依赖");
+	}
+
+	serverAppDir = mkdtempSync(join(tmpdir(), "vcpdeck-alibaba-server-"));
+	clientAppDir = mkdtempSync(join(tmpdir(), "vcpdeck-alibaba-client-"));
+	mkdirSync(OUTPUT_DIR, { recursive: true });
+
+	step(`1. 打包基线版本 ${BASE_VERSION}`);
+	packageVersion(BASE_VERSION);
+	pass("基线构件打包完成");
+
+	step("2. 安装并启动临时 Server");
+	const serverDb = join(serverAppDir, "server.db").replace(/\\/g, "/");
+	const releasesDir = join(serverAppDir, "releases");
+	installArtifact(
+		"server",
+		archivePath(
+			BASE_VERSION,
+			nodePlatform() === "win32" ? "win-x64" : "linux-x64",
+		),
+		serverAppDir,
+		[
+			`--admin-password=${ADMIN_PASSWORD}`,
+			`--db-url=file:${serverDb}`,
+			`--releases-dir=${releasesDir}`,
+		],
+	);
+	appendFileSync(join(serverAppDir, "launcher.env"), "VCPDECK_COOKIE_SECURE=false\n");
+	serverLauncher = startLauncher(serverAppDir, "server");
+	await waitForServer();
+	await login();
+	pass("临时 Server 已启动", serverAppDir);
+
+	step("3. 配置同一临时 DB 的阿里云盘授权");
+	await configureAlibaba();
+
+	step("4. 安装并启动临时 Client");
+	installArtifact(
+		"client",
+		archivePath(
+			BASE_VERSION,
+			nodePlatform() === "win32" ? "win-x64" : "linux-x64",
+		),
+		clientAppDir,
+		[
+			`--server-url=${BASE}`,
+			`--client-id=${TEST_CLIENT_ID}`,
+		],
+	);
+	clientLauncher = startLauncher(clientAppDir, "client");
+	await waitForClient(BASE_VERSION);
+	pass("临时 Client 已连接", `version=${BASE_VERSION}`);
+
+	step(`5. 打包目标版本 ${TARGET_VERSION}`);
+	packageVersion(TARGET_VERSION);
+	pass("目标构件打包完成");
+
+	step("6. 上传首个平台并验证阿里云盘直连（尚不触发更新）");
+	await uploadArchive("win-x64");
+	await verifyFirstArchive();
+
+	step("7. 上传第二个平台，自动触发 Server → Client 更新");
+	await uploadArchive("linux-x64");
+	await verifyAllArchivesDirect();
+	pass("两个平台构件已转存阿里云盘");
+
+	for (const platform of ["win-x64", "linux-x64"]) {
+		const localArchive = join(
+			releasesDir,
+			`vcpdeck-${TARGET_VERSION}-${platform}.zip`,
+		);
+		if (existsSync(localArchive)) {
+			throw new Error(
+				`VCPDECK_RELEASES_DIR 出现 ${platform} 目标 zip，未走外部直连存储`,
+			);
+		}
+	}
+	pass("Local Release 目录未保存两个目标 zip");
+
+	step("8. 等待 Server 自更新");
+	await waitForServerVersion(TARGET_VERSION);
+	pass("Server 自更新完成", TARGET_VERSION);
+
+	step("9. 等待 Client 自更新");
+	await login();
+	await waitForClient(TARGET_VERSION);
+	pass("Client 自更新完成", TARGET_VERSION);
+
+	step("10. 验证 Release 终态");
+	const release = await waitForReleaseDone();
+	const failedClients = Object.entries(release.clientStates || {})
+		.filter(([, value]) => value.state === "failed")
+		.map(([clientId]) => clientId);
+	if (failedClients.length > 0) {
+		throw new Error(`存在失败 Client: ${failedClients.join(", ")}`);
+	}
+	pass("Release done 且无失败 Client");
 }
 
 function printReport() {
 	console.log("\n=== 集成测试报告 ===\n");
-	const passed = results.filter((r) => r.status === "PASS").length;
-	const failed = results.filter((r) => r.status === "FAIL").length;
-	for (const r of results) {
-		const icon = r.status === "PASS" ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
-		console.log(`  ${icon} ${r.name}${r.detail ? ` — ${r.detail}` : ""}`);
+	const passed = results.filter((item) => item.status === "PASS").length;
+	const failed = results.filter((item) => item.status === "FAIL").length;
+	const warned = results.filter((item) => item.status === "WARN").length;
+	for (const item of results) {
+		let icon = "\x1b[31m✗\x1b[0m";
+		if (item.status === "PASS") icon = "\x1b[32m✓\x1b[0m";
+		else if (item.status === "WARN") icon = "\x1b[33m⚠\x1b[0m";
+		console.log(`  ${icon} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`);
 	}
 	console.log(
-		`\n  ${passed}/${results.length} passed, ${failed} failed\n`,
+		`\n  ${passed}/${results.length} passed, ${failed} failed, ${warned} warnings\n`,
 	);
 	if (failed === 0) {
-		console.log(
-			"✅ ADR-0016 阿里云盘直连分发自更新链路验证通过",
-		);
+		console.log("✅ ADR-0016 阿里云盘直连分发自更新链路验证通过");
 	}
-	process.exit(failed > 0 ? 1 : 0);
 }
 
-main().catch((e) => {
-	console.error("\n\u001b[31mFatal:\u001b[0m " + e.message);
-	console.error(e.stack);
-	process.exit(1);
-});
+async function cleanup() {
+	if (cleanupPromise) return cleanupPromise;
+	cleanupPromise = (async () => {
+		await collectUploadedKeys();
+		await deleteUploadedObjects();
+		step("清理本次测试创建的进程和临时目录");
+		await stopLauncher(clientLauncher, "Client Launcher");
+		await stopLauncher(serverLauncher, "Server Launcher");
+		for (const dir of [
+			clientAppDir,
+			serverAppDir,
+			join(ROOT, ".tmp", `alibaba-release-e2e-${process.pid}`),
+		]) {
+			if (!dir) continue;
+			try {
+				rmSync(dir, { recursive: true, force: true });
+			} catch (error) {
+				warn("临时目录清理失败", `${dir}: ${error.message}`);
+			}
+		}
+	})();
+	return cleanupPromise;
+}
+
+async function main() {
+	try {
+		await runTest();
+	} catch (error) {
+		fail("集成测试失败", error instanceof Error ? error.message : String(error));
+	} finally {
+		await cleanup();
+	}
+	printReport();
+	process.exitCode = results.some((item) => item.status === "FAIL") ? 1 : 0;
+}
+
+function handleSignal(signal) {
+	warn(`收到 ${signal}`, "停止本次测试并清理");
+	void cleanup().finally(() => {
+		process.exit(signal === "SIGINT" ? 130 : 143);
+	});
+}
+
+process.once("SIGINT", () => handleSignal("SIGINT"));
+process.once("SIGTERM", () => handleSignal("SIGTERM"));
+
+if (process.argv.includes("--self-check")) {
+	runSelfCheck();
+} else if (process.argv.includes("--help")) {
+	console.log("用法: node scripts/test-release-alibaba.cjs [--self-check]");
+} else {
+	void main();
+}
