@@ -75,3 +75,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0011](./0011-server-side-opaque-authentication-and-actor-context.md) | Accepted | 使用服务端 opaque Session/Credential 与可信 ActorContext |
 | [0015](./0015-launcher-distributed-with-release.md) | Accepted | Launcher 随发布包分发，安装到 app-dir 外部稳定路径，不随业务版本覆盖 |
 | [0016](./0016-release-archive-storage-provider.md) | Accepted | 发布构件经 Storage Provider 分发：统一 Server 下载入口，Local 直发、外部后端 302 临时直链，上传转存 Provider |
+| [0017](./0017-cli-multi-environment-configuration.md) | Accepted | CLI 使用用户级环境注册表，项目配置只选择环境；严格优先级与 fail-closed 解析 |

@@ -175,7 +175,7 @@ pm2 save
 
 目标机 Client 同理（使用各自的 `launcher.env` 与 `dist/main.js`，`--name` 改为 `vcpdeck-client-launcher`）。
 
-说明：自更新时 Launcher 会自行停止/切换业务进程，因此**只把 Launcher 交给 PM2**；完整 ecosystem 配置、开机自启、更新期间禁止重启 Launcher 等注意事项见 [`deployment.md`](./deployment.md) §4.5。
+说明：自更新时 Launcher 会自行停止/切换业务进程，因此**只把 Launcher 交给 PM2**；完整 ecosystem 配置、开机自启、更新期间禁止重启 Launcher 等注意事项见 [`deployment.md`](./deployment.md) §4.6。
 
 ## 5. 目标机（Client）部署与启动
 
@@ -236,12 +236,24 @@ curl.exe -s -b cookies.txt http://127.0.0.1:3001/api/clients
 
 ## 7. 日常发版（自动更新）
 
+首次在本机注册环境；密码值只放在 `VCPDECK_DEV_PASSWORD` 环境变量：
+
+```bash
+node packages/cli/dist/index.js env add dev \
+  --server=http://<server>:3001 \
+  --auth=password --username=admin \
+  --password-env=VCPDECK_DEV_PASSWORD
+node packages/cli/dist/index.js env use dev --local
+node packages/cli/dist/index.js env current
+```
+
+之后项目目录内直接使用默认环境发布，也可临时添加 `--env=dev`：
+
 ```bash
 pnpm release --version=1.0.0
 node packages/cli/dist/index.js release upload \
   dist-release/vcpdeck-1.0.0-win-x64.zip \
-  dist-release/vcpdeck-1.0.0-linux-x64.zip \
-  --server=http://<server>:3001 --username=admin --password=<密码>
+  dist-release/vcpdeck-1.0.0-linux-x64.zip
 ```
 
 Server 校验 sha256 → 两个平台构件齐备后自动编排：**Server 先自更新**（Launcher prepare → drain → 重启 → 探活版本一致）→ **再逐台更新在线 Client**（按各机器注册 os 选对应平台包）→ 失败自动回退上一版本。发布前必须备份数据库与 Storage。

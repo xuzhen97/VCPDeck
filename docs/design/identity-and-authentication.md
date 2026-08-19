@@ -105,7 +105,7 @@ interface ActorContext {
 
 ActorContext 是单次 HTTP 请求或 Socket 连接的身份事实。业务模块不能相信 body/query/Socket payload 中自报的 identityId、actor、createdBy 或 operator。
 
-`source="cli"` 当前实际表示 Bearer Credential 入口，不证明调用方一定是仓库 CLI。仓库 CLI 当前主要实现 Release upload，并通过用户名密码登录取得 Cookie；不能把 Shared 的 source 名称理解为完整 CLI 已落地。
+`source="cli"` 当前实际表示 Bearer Credential 入口，不证明调用方一定是仓库 CLI。仓库 CLI 当前业务能力主要是 Release upload：password 环境登录取得 Cookie 时审计来源仍是 web，Bearer 环境才记为 cli；不能把 Shared 的 source 名称理解为完整 CLI 能力或可靠的二进制身份。CLI 环境配置见 [`cli.md`](./cli.md)。
 
 ## 4. Browser 登录与 Cookie
 
@@ -248,7 +248,7 @@ Actor 审计当前是局部实现：
 ## 11. 安全与隐私
 
 - 密码、Cookie、Bearer token、tokenHash 和登录 body 不得进入普通日志；
-- Token 不通过 URL、命令参数、Issue 或聊天传递；仓库 CLI 当前允许 `--password`，会暴露到 Shell history/进程列表，属于已知缺口；
+- Token 不通过 URL、命令参数、Issue 或聊天传递；CLI 命名环境只保存 passwordEnv/tokenEnv 引用；直连兼容参数 `--password` 仍可能暴露到 Shell history/进程列表，不推荐使用；
 - 反向代理不得记录 Authorization、Cookie、Set-Cookie 或登录请求正文；
 - `VCPDECK_FRONTEND_ORIGIN` 应配置为精确可信 Origin；
 - 当前没有独立 Origin/CSRF Guard、CSRF Token 或登录 rate limit，不能只凭 SameSite=Strict 声称完整防护；

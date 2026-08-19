@@ -15,6 +15,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client 和 Shared 在正式发
 | Server ↔ Client Terminal | `terminal.pty` capabilityDetails + Shared 严格运行时解析 | 无独立数字版本；缺能力时拒绝，seq/generation/state 变化需整套同版本发布 |
 | Server ↔ Frontend | REST/Socket.IO/SSE | Frontend 应与 Server 同一发布版本部署 |
 | SDK ↔ Server | REST DTO 和错误 | SDK 当前为私有 workspace 包，无跨版本承诺 |
+| CLI 配置 | 用户级/项目级 JSON `version=1`（ADR-0017） | 未知版本和字段明确拒绝；项目只选择用户级环境；`--server` 直连保持兼容 |
 | Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry | `launcherMinVersion` 字段存在，但当前 Launcher 未执行校验 |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
 | Node.js | release manifest 默认 `>=24` | Launcher 可选择系统或缓存 Node；开发环境也应使用 Node 24+ |

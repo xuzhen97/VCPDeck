@@ -502,7 +502,7 @@ async function main(): Promise<void> {
 			);
 		}
 		console.log(
-			"[pack-release] 或使用 CLI：vcpdeck release upload <win-x64.zip> <linux-x64.zip> --server=<url>",
+			"[pack-release] 或使用 CLI：vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>]（首次先执行 vcpdeck env add/use）",
 		);
 		console.log(
 			`[pack-release] 安装/卸载脚本与 zip 平级: ${join(ROOT, args.output, "install.cjs / uninstall.cjs")}`,

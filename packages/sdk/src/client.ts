@@ -9,13 +9,31 @@ import { createReleasesApi } from "./releases.js";
 import { createStorageApi } from "./storage.js";
 import { createTerminalsApi } from "./terminal.js";
 
-export type AuthMode = { type: "cookie" } | { type: "bearer"; token: string };
+/** SDK 认证模式；显式 cookie 仅用于不会自动维护 Cookie 的 Node.js 调用方。 */
+export type AuthMode =
+	| { type: "cookie"; cookie?: string }
+	| { type: "bearer"; token: string };
 
 /** VCPDeck 客户端配置。 */
 export interface VcpDeckClientOptions {
 	baseUrl: string;
 	auth: AuthMode;
 	fetch?: typeof globalThis.fetch;
+}
+
+/** 原始请求选项，用于 archive 等非 JSON 请求体。 */
+export interface VcpDeckRawRequestOptions {
+	body?: BodyInit;
+	headers?: Record<string, string>;
+	signal?: AbortSignal;
+	/** Node.js 流式请求体必须声明为 half。 */
+	duplex?: "half";
+}
+
+/** 带底层响应元数据的 SDK 返回值。 */
+export interface VcpDeckResponse<T> {
+	data: T;
+	response: Response;
 }
 
 /** VCPDeck REST API 归一化错误。 */
@@ -67,30 +85,47 @@ export class VcpDeckClient {
 		this.terminals = createTerminalsApi(this);
 	}
 
-	/** 发起 REST 请求并归一化失败响应。 */
+	/** 发起 JSON REST 请求并归一化失败响应。 */
 	async request<T>(
 		method: string,
 		path: string,
 		body?: unknown,
 		signal?: AbortSignal,
 	): Promise<T> {
+		const result = await this.requestRaw<T>(method, path, {
+			body: body === undefined ? undefined : JSON.stringify(body),
+			headers:
+				body === undefined ? undefined : { "Content-Type": "application/json" },
+			signal,
+		});
+		return result.data;
+	}
+
+	/** 发起原始 body 请求，同时返回响应头供 Node.js 会话等协议使用。 */
+	async requestRaw<T>(
+		method: string,
+		path: string,
+		options: VcpDeckRawRequestOptions = {},
+	): Promise<VcpDeckResponse<T>> {
+		const headers: Record<string, string> = { ...options.headers };
+		if (this.options.auth.type === "bearer") {
+			headers.Authorization = `Bearer ${this.options.auth.token}`;
+		} else if (this.options.auth.cookie) {
+			headers.Cookie = this.options.auth.cookie;
+		}
+
 		let response: Response;
 		try {
 			response = await this.fetcher(`${this.baseUrl}${path}`, {
 				method,
-				signal,
-				credentials:
-					this.options.auth.type === "cookie" ? "include" : undefined,
-				headers: {
-					...(body === undefined ? {} : { "Content-Type": "application/json" }),
-					...(this.options.auth.type === "bearer"
-						? { Authorization: `Bearer ${this.options.auth.token}` }
-						: {}),
-				},
-				body: body === undefined ? undefined : JSON.stringify(body),
-			});
+				signal: options.signal,
+				credentials: this.options.auth.type === "cookie" ? "include" : undefined,
+				headers,
+				body: options.body,
+				...(options.duplex ? { duplex: options.duplex } : {}),
+			} as RequestInit);
 		} catch (error) {
-			if (signal?.aborted) throw error;
+			if (options.signal?.aborted) throw error;
 			throw new VcpDeckApiError("Network request failed", 0);
 		}
 
@@ -105,7 +140,7 @@ export class VcpDeckClient {
 					: response.statusText || `HTTP ${response.status}`;
 			throw new VcpDeckApiError(message, response.status, code, parsed);
 		}
-		return parsed as T;
+		return { data: parsed as T, response };
 	}
 }
 

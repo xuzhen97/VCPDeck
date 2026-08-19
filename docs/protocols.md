@@ -22,7 +22,7 @@
 ### 2.1 认证
 
 - 浏览器：用户名/密码登录后取得 `vcpdeck_session` HttpOnly opaque Cookie；
-- SDK/自动化：`Authorization: Bearer vcp_<opaque-token>`；仓库 CLI 当前主要通过用户名密码登录取得 Cookie，不等于完整 Bearer CLI 已落地；
+- SDK/自动化：`Authorization: Bearer vcp_<opaque-token>`；仓库 CLI 的命名环境支持 Bearer，password 环境则登录取得 Cookie；两者都只访问 Server，环境选择本身不是认证或授权；
 - AuthSession/Credential 明文只在调用方，SQLite 保存 SHA-256 摘要；
 - 全局 AuthGuard 默认拒绝，Controller 标注 `@Public()` 才公开；
 - REST 优先 Cookie、再尝试 Bearer；多数无效/过期/撤销/禁用失败当前统一为 `AUTH_REQUIRED`；

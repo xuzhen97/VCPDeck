@@ -24,7 +24,7 @@ pnpm --filter @vcpdeck/server start
 pnpm --filter @vcpdeck/client start
 ```
 
-长期环境优先由 Launcher 启动 Server/Client；也可用 PM2 等外部进程管理器守护 Launcher 本身（只托管 Launcher，不托管业务进程，见 [`deployment.md`](./deployment.md) §4.5）；停止 Launcher 前应确认没有进行中的 Release、Job、Terminal 或 Pi run。
+长期环境优先由 Launcher 启动 Server/Client；也可用 PM2 等外部进程管理器守护 Launcher 本身（只托管 Launcher，不托管业务进程，见 [`deployment.md`](./deployment.md) §4.6）；停止 Launcher 前应确认没有进行中的 Release、Job、Terminal 或 Pi run。
 
 ## 3. 健康与就绪检查
 
@@ -132,6 +132,15 @@ pnpm --filter @vcpdeck/client start
 - 检查 `DATABASE_URL` 相对于当前工作目录的解析；
 - 检查数据库目录写权限和 Prisma generate；
 - 检查 3001 端口占用。
+
+### CLI 环境错误或目标环境不符
+
+- 先运行 `vcpdeck env current`，核对环境名、Server 和来源；该命令不验证 Server 可达或凭据有效；
+- 检查选择优先级：`--env`、`VCPDECK_ENVIRONMENT`、最近项目 `.vcpdeck.json`、全局默认；
+- 项目配置损坏或引用已删除环境时 CLI 会 fail closed，不会回退；修正项目文件或重新注册同名环境；
+- 凭据变量缺失时只补设对应环境变量，不把 Token/密码写入用户级或项目配置；
+- `env remove` 不遍历项目选择器，删除前应自行确认哪些项目引用该名称；
+- 高风险操作前若环境/Server 与预期不符，立即停止，不使用 `--server` 绕过后继续执行。
 
 ### Client 无法连接
 

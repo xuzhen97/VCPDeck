@@ -38,6 +38,33 @@ describe("VcpDeckClient", () => {
 		);
 	});
 
+	it("uses an explicit Node.js cookie", async () => {
+		const fetcher = vi.fn(async () => Response.json({ ok: true }));
+		const client = new VcpDeckClient({
+			baseUrl: "https://deck.example",
+			auth: { type: "cookie", cookie: "vcpdeck_session=session_token" },
+			fetch: fetcher,
+		});
+
+		await client.requestRaw("POST", "/api/releases/upload", {
+			body: "zip-bytes",
+			headers: { "Content-Type": "application/zip" },
+			duplex: "half",
+		});
+
+		expect(fetcher).toHaveBeenCalledWith(
+			"https://deck.example/api/releases/upload",
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Cookie: "vcpdeck_session=session_token",
+					"Content-Type": "application/zip",
+				}),
+				body: "zip-bytes",
+				duplex: "half",
+			}),
+		);
+	});
+
 	it("uses bearer authorization", async () => {
 		const fetcher = vi.fn(async () => Response.json({ ok: true }));
 		const client = new VcpDeckClient({

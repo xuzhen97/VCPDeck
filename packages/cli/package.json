@@ -2,15 +2,19 @@
   "name": "@vcpdeck/cli",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc && node scripts/bundle.cjs"
+    "build": "tsc && node scripts/bundle.cjs",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@vcpdeck/sdk": "workspace:*",
     "@vcpdeck/shared": "workspace:*"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "vitest": "^3.2.0"
   }
 }

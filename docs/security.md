@@ -47,14 +47,23 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 - 最后 admin 当前可被禁用，Bootstrap 又会把 disabled admin 计为已存在，存在管理面锁死风险；
 - admin-only 范围当前只有身份管理；认证详情见 [`design/identity-and-authentication.md`](./design/identity-and-authentication.md)。
 
-### 4.2 Client
+### 4.2 CLI 环境与凭据
+
+- 用户级 `~/.vcpdeck/cli/config.json` 只保存 Server、用户名和凭据环境变量名，不保存密码、Bearer Token、Cookie 或 PSK；非 Windows 权限收紧为 `0600`；
+- 项目 `.vcpdeck.json` 只能选择用户级环境，不能覆盖 Server 或认证，防止不可信仓库诱导 CLI 把本机秘密发送到攻击者 Server；
+- 项目选择器仍可指向本机已注册的生产环境，因此 CLI/Skill 的写入、执行、发布等副作用操作必须展示最终环境、Server 和来源；确认门不是 Server 授权边界；
+- 项目或用户配置损坏、字段未知、版本不支持、环境不存在时 fail closed，不静默回退到其他环境；
+- 密码/Token 环境变量值只进入 CLI 进程内存；`env current/list/show` 只显示变量名。环境变量并非系统凭据保险箱，同账户进程仍可能读取；
+- `--password` 只作为直连兼容参数，可能进入 Shell history/进程列表，推荐命名环境 + 凭据环境变量；完整规则见 [`design/cli.md`](./design/cli.md) 和 ADR-0017。
+
+### 4.3 Client
 
 - `/client` 使用单个共享 PSK；
 - 当前没有每 Client 独立证书、PSK 标识、轮换重叠窗口或 mTLS；
 - PSK 泄露意味着攻击者可能伪装 Client，因此必须使用高熵随机值、限制配置权限并定期轮换；
 - Server/Client 实际读取 `VCPDECK_PSK`；示例中的 `VCPDECK_CLIENT_PSK` 当前无效。
 
-### 4.3 授权缺口
+### 4.4 授权缺口
 
 当前任意有效业务身份可访问所有 Client/Job/Storage/FRP/Pi/Terminal。Frontend 隐藏按钮和“确认操作”不是授权边界。若增加非完全可信用户，必须先设计资源级授权和审计，不能只增加 UI 角色。
 

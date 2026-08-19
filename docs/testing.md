@@ -14,6 +14,7 @@
 | Server 单元测试 | Vitest，模块旁测试 | Service 状态机、Controller 映射、Prisma mock |
 | Client 单元测试 | Vitest | dispatcher、executor、文件路径、PTY/Pi supervisor |
 | SDK 单元测试 | Vitest | URL、认证头、分页、错误归一化 |
+| CLI 单元/本地集成测试 | Vitest，`packages/cli/src/*.test.ts` | 多环境严格配置、选择优先级、项目查找、凭据引用、命令与 Release SDK 接线 |
 | Frontend 组件测试 | Vitest + Testing Library + jsdom | 路由、状态、交互、敏感信息不渲染 |
 | 包内集成测试 | `*.integration.test.ts` | Server Gateway/Broker、Client Pi Worker、Terminal |
 | 项目 E2E | `scripts/test.cjs` | 真实 Server + mock/真实 Client + REST/WS |
@@ -38,6 +39,7 @@ pnpm --filter @vcpdeck/shared test
 pnpm --filter @vcpdeck/server test
 pnpm --filter @vcpdeck/client test
 pnpm --filter @vcpdeck/sdk test
+pnpm --filter @vcpdeck/cli test
 pnpm --filter @vcpdeck/frontend test
 pnpm --filter @vcpdeck/launcher test
 ```
@@ -75,6 +77,7 @@ node scripts/smoke-launcher.cjs
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |
 | Auth/Security | 密码/Cookie/Bearer、禁用/启用、撤销/过期、修改密码、既有 Socket、最后 admin、parser/限速、Actor、防泄漏 |
 | Release/Launcher | SHA、archive 路径安全、Windows/Linux 格式、drain、Server 恢复、Client 补更、数据库兼容和回退 |
+| CLI 多环境 | strict parser、明文秘密/未知字段拒绝、flag/env/project/global 优先级、Git 根、项目 fail closed、password/Bearer 缺失、直连冲突、原子写入/权限、真实本地 HTTP Release 上传 |
 | Frontend | loading/error/empty、刷新重连、无敏感原文渲染 |
 
 ## 5. 测试数据与安全

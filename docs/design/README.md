@@ -15,6 +15,7 @@
 | 远程终端 | [`remote-terminal.md`](./remote-terminal.md) | 当前 PTY、Session、attach、控制权、snapshot、重连和失败边界 |
 | 远程 Pi | [`remote-pi.md`](./remote-pi.md) | 当前 Worker、Session/Run、REST/SSE、Extension、隐私、重连与兼容边界 |
 | Release/更新 | [`release-and-update.md`](./release-and-update.md) | 当前 Release 编排、Launcher、更新、回退和故障边界 |
+| CLI | [`cli.md`](./cli.md) | 当前 CLI 多环境配置、选择优先级、命令、安全和扩展边界 |
 | 远程执行 | [`remote-execution.md`](./remote-execution.md) | 当前 command/script、输出、取消、安全边界与 runtime registry 迁移 |
 
 ## 新专题模板

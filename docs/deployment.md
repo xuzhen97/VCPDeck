@@ -76,9 +76,25 @@ pnpm release --version=x.y.z
 
 **已知配置不一致：** 根目录和 `packages/server/.env.example` 目前写的是 `VCPDECK_CLIENT_PSK`，但 Server 与 Client 实际代码都读取 `VCPDECK_PSK`；`VCPDECK_CLIENT_PSK_FILE` 当前也未实现。部署必须设置 `VCPDECK_PSK`，不要依赖示例中的旧变量。
 
-Server 默认监听 `3001`，可用 `VCPDECK_PORT` 覆盖。改端口时三处必须同步（默认均为 3001）：Client 的 `VCPDECK_SERVER`、CLI 的 `VCPDECK_SERVER`/`--server`、Server Launcher 的 `VCPDECK_PROBE_URL`；浏览器驾驶台随之访问 `http://<host>:<port>/`。
+Server 默认监听 `3001`，可用 `VCPDECK_PORT` 覆盖。改端口时三处必须同步（默认均为 3001）：Client 的 `VCPDECK_SERVER`、CLI 环境注册的 Server origin（或兼容 `--server`）、Server Launcher 的 `VCPDECK_PROBE_URL`；浏览器驾驶台随之访问 `http://<host>:<port>/`。
 
-### 4.2 Client
+### 4.2 CLI 多环境配置
+
+CLI 用户级环境注册表位于 `~/.vcpdeck/cli/config.json`，项目默认环境选择器为从当前目录向上查找的最近 `.vcpdeck.json`。项目文件只能保存环境名，不能保存 Server 或凭据；完整命令、优先级和故障边界见 [`design/cli.md`](./design/cli.md) 与 ADR-0017。
+
+```bash
+node packages/cli/dist/index.js env add dev \
+  --server=http://127.0.0.1:3001 \
+  --auth=password --username=admin \
+  --password-env=VCPDECK_DEV_PASSWORD
+node packages/cli/dist/index.js env use dev --global
+node packages/cli/dist/index.js env use dev --local   # 写入最近项目/Git 根 .vcpdeck.json
+node packages/cli/dist/index.js env current
+```
+
+Password/Bearer 的真实值只放在相应环境变量。用户级配置应限制读取并纳入本机配置备份，不得提交 Git；项目 `.vcpdeck.json` 不含秘密，可按项目需要提交。
+
+### 4.3 Client
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
@@ -91,7 +107,7 @@ Server 默认监听 `3001`，可用 `VCPDECK_PORT` 覆盖。改端口时三处�
 
 Client 使用运行账户的权限执行命令、文件、PTY 和 Pi。应为其创建权限受控的专用账户，不能仅依赖 UI 确认。
 
-### 4.3 Launcher
+### 4.4 Launcher
 
 | 变量 | 默认/要求 | 说明 |
 | --- | --- | --- |
@@ -101,7 +117,7 @@ Client 使用运行账户的权限执行命令、文件、PTY 和 Pi。应为其
 
 Launcher 首次启动要求 `apps/current` 已指向可用初始版本。发布 zip 同时包含 `launcher/`、`server/`、`client/`；快速安装/卸载脚本（`install.cjs` / `uninstall.cjs`）与 zip 平级于 `dist-release/` 目录，仓库内为 `scripts/`，见 [`quickstart.md`](./quickstart.md) §3.1–3.2。安装后 Launcher 位于 `<app-dir>/dist/main.js`；安装脚本默认使用 Server `~/.vcpdeck/launcher`、Client `~/.vcpdeck/launcher-client`，显式 `--app-dir` 时可覆盖；系统服务安装器仍由运维准备。
 
-### 4.4 FRPS 迁移配置
+### 4.5 FRPS 迁移配置
 
 当数据库中不存在 FRPS 实例时，Server 可从下列变量迁移默认实例：
 
@@ -115,7 +131,7 @@ Launcher 首次启动要求 `apps/current` 已指向可用初始版本。发布 
 
 FRPS Token 和 Dashboard 密码当前明文存入 SQLite、通过实例 REST 返回，并写入 Job payload 和 Client `frpc-combined.toml`。相关数据库、备份、Client 工作目录和页面访问都必须限制。Server 虽可保存多个实例，但同一 Client 当前只有一个 frpc runtime；不要为同一 Client 创建跨多个 FrpsInstance 的活动映射。完整边界见 [`design/frp.md`](./design/frp.md)。
 
-### 4.5 使用 PM2 托管 Launcher（可选）
+### 4.6 使用 PM2 托管 Launcher（可选）
 
 项目不提供 systemd/Windows Service 安装器。除手工 `node` 运行外，可用 PM2 等外部进程管理器守护 **Launcher** 进程；业务进程（Server/Client）仍由 Launcher 拉起、切换与回退，不要把业务进程交给 PM2。
 
@@ -274,14 +290,23 @@ pnpm release --version=x.y.z
 
 产出 `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`，并打印各自的 sha256。上传任选其一：
 
-**方式一：CLI（登录后依次上传两个平台，第二个平台齐备即自动开始更新）**
+**方式一：CLI（推荐命名环境；第二个平台齐备即自动开始更新）**
 
 ```bash
+# 首次配置，凭据值在本机环境变量 VCPDECK_PROD_TOKEN 中
+node packages/cli/dist/index.js env add prod \
+  --server=https://<server>:3001 \
+  --auth=bearer --token-env=VCPDECK_PROD_TOKEN
+node packages/cli/dist/index.js env use prod --global
+
+# 后续可使用全局/项目默认，或显式 --env=prod
 node packages/cli/dist/index.js release upload \
   dist-release/vcpdeck-x.y.z-win-x64.zip \
   dist-release/vcpdeck-x.y.z-linux-x64.zip \
-  --server=https://<server>:3001 --username=admin --password=<密码>
+  --env=prod
 ```
+
+已有自动化仍可使用 `--server=<url> --username=<name>` 直连，并由 `VCPDECK_ADMIN_PASSWORD` 提供密码；不推荐把 `--password` 写入命令行。
 
 **方式二：curl（先用登录会话，再按打包输出打印的 sha256 逐个上传）**
 

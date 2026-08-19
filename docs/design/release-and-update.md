@@ -34,7 +34,7 @@
 | 组件 | 当前职责 |
 | --- | --- |
 | `scripts/pack-release.ts` | 注入版本、构建 Shared/Server/Client/Frontend/Launcher、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
-| CLI `release upload` | 登录、从文件名取得版本、计算 SHA-256、上传原始字节流 |
+| CLI `release upload` | 解析命名/项目环境（ADR-0017）、参数与文件名，读取本地 archive、计算 SHA-256 和输出安全进度；password 登录/Bearer、原始字节流上传及 API 错误归一化复用 `@vcpdeck/sdk` |
 | `ReleaseController` | Release 列表、构件下载、上传校验和自动触发编排 |
 | `ReleaseService` | Release 持久化、状态转换、Client 更新明细和 SHA-256 复核 |
 | `ReleaseOrchestrator` | Server 更新、启动后恢复、在线 Client 逐台更新和后续补更 |
@@ -173,7 +173,7 @@ sequenceDiagram
     participant L as Server Launcher
     participant N as New Server
 
-    O->>S: POST release archive + version + platform + sha256（win-x64）
+    O->>S: CLI 经 SDK POST release archive + version + platform + sha256（win-x64）
     S->>S: 流式计算并复核 SHA-256
     S->>DB: 创建 uploaded Release（含 win-x64 构件）
     O->>S: POST release archive + version + platform + sha256（linux-x64）

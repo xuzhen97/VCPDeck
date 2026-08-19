@@ -21,7 +21,8 @@ VCPDeck 是面向个人工作流的独立控制面，不是 VCPToolBox 的后台
 - 人机交互式远程 Pi Session，包括 REST 控制、SSE 事件和运行状态机；
 - FRPS 实例与 FRP 映射管理；
 - Cookie/Bearer 身份认证、操作审计和 React 驾驶台；
-- Release、Launcher、Server/Client 更新与失败回退基础实现。
+- Release、Launcher、Server/Client 更新与失败回退基础实现；
+- CLI 多环境注册与项目默认环境选择，以及双平台 Release 上传。
 
 ## 当前架构
 
@@ -46,7 +47,7 @@ VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server�
 - [协议说明](docs/protocols.md) — REST、Socket.IO、SSE 与兼容规则
 - [兼容策略](docs/compatibility.md) — 组件版本、升级顺序与破坏性变更规则
 - [部署指南](docs/deployment.md) / [运维手册](docs/operations.md) / [安全模型](docs/security.md)
-- [测试策略](docs/testing.md) / [架构决策](docs/adr/README.md) / [路线图](docs/roadmap.md)
+- [测试策略](docs/testing.md) / [CLI 与多环境配置](docs/design/cli.md) / [架构决策](docs/adr/README.md) / [路线图](docs/roadmap.md)
 - [参与开发](CONTRIBUTING.md) / [更新日志](CHANGELOG.md)
 
 ## 本地开发与测试

@@ -1,7 +1,7 @@
 # VCPDeck 前端、CLI 与 Skill 对接指南
 
-> 更新时间：2026-07-26  
-> 适用范围：当前 `main` 分支  
+> 更新时间：2026-08-18
+> 适用范围：当前 `main` 分支
 > 事实来源：当前代码实现优先于历史设计文档
 
 本文用于指导 VCPDeck Frontend、CLI 和 Skill 对接当前已经实现的 Server/Client 能力。文中会明确区分可直接使用的能力、存在限制的能力和尚未实现的能力。
@@ -10,8 +10,8 @@
 
 | 功能域 | Server | Client | Frontend | CLI | Skill | 对接结论 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 健康检查 | 已实现 | 不涉及 | SDK 已接入 | 骨架 | 骨架 | 可直接使用 |
-| Cookie 登录/退出 | 已实现 | 不涉及 | 已实现 | 不适用 | 不适用 | 可直接使用 |
+| 健康检查 | 已实现 | 不涉及 | SDK 已接入 | 未实现命令 | 发布前由 Skill 要求人工核验 | SDK 可直接使用，CLI 尚无入口 |
+| Cookie 登录/退出 | 已实现 | 不涉及 | 已实现 | Release 上传内部使用 | 通过 CLI 间接使用 | CLI 复用 SDK 的 Node Cookie 会话，不持久化 Cookie |
 | Bearer Token | 已实现 | 不涉及 | Token 管理已实现 | 未实现 | 未实现 | CLI/Skill 可直接复用 SDK |
 | 身份管理 | 已实现 | 不涉及 | 已实现 | 未实现 | 未实现 | 可直接使用，需 admin |
 | 在线 Client 列表 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | 仅返回在线 Client |
@@ -26,9 +26,10 @@
 | 阿里云盘 OAuth | 已实现 | 不涉及 | 已实现 | 未实现 | 未实现 | 只展示安全状态，授权 URL 校验 origin |
 | FRP 映射 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | 创建/查询可用；删除仍有已知缺陷 |
 | Job WebSocket 实时输出 | 部分实现 | 已实现 | 未实现 | 未实现 | 未实现 | 暂不作为对接方案 |
+| Release 上传与自更新 | 已实现 | 已实现更新配合 | 已实现审计页 | 已实现双平台上传 | CLI 总 Skill 中已实现该功能章节 | 上传后 Server 先自更新，再逐台更新在线 Client |
 | `agent.run` | 仅有类型占位 | 未实现 | 未实现 | 未实现 | 未实现 | 不得调用 |
 
-当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘和账号设置。`packages/cli/src/index.ts` 与 `skills/vcpdeck/SKILL.md` 仍是骨架。
+当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘、发布审计和账号设置。VCPDeck Skill 是 CLI 的统一能力入口；其中当前已落地的功能章节只有 Release 双平台上传与自更新，机器管理、Job 等命令仍未实现，后续随 CLI 对齐 Server 能力逐项补充。
 
 > **安全提示：** 当前任意已认证身份都等价于远程机器操作员，可执行 shell、操作文件并修改 Storage/FRP；Job 也不按身份隔离。只向可信操作者发放账号和 Token。
 
@@ -1198,7 +1199,7 @@ GET /api/frp/mappings/:id
 
 ### 11.1 复用 `@vcpdeck/sdk`
 
-`packages/sdk` 提供框架无关的 REST 客户端，统一 Cookie/Bearer 认证、错误归一化、业务 API 和 Job 轮询。Frontend 通过 `SdkProvider` 复用同一实例，不另写 fetch 或轮询逻辑；CLI/Skill 后续也应直接复用该包。
+`packages/sdk` 提供框架无关的 REST 客户端，统一 Cookie/Bearer 认证、错误归一化、业务 API 和 Job 轮询。Frontend 通过 `SdkProvider` 复用同一实例；CLI 已复用 SDK 的 Node Cookie 登录、Release 原始字节流上传和错误归一化。Skill 作为 CLI 的统一能力说明与工作流层，只编排已经落地的 CLI 命令，不重复实现 HTTP。
 
 ```ts
 import { VcpDeckClient } from "@vcpdeck/sdk";
@@ -1249,9 +1250,9 @@ const terminal = await sdk.jobs.wait(job.jobId);
 
 ## 12. CLI 对接建议
 
-当前 CLI 仅打印 `vcpdeck`，可直接围绕 REST API 实现，不需要额外协议层。
+当前 CLI 已实现多环境 `env add/list/show/current/use/remove` 与 `release upload`。环境配置遵循 ADR-0017：用户级注册表定义 Server/认证引用，项目 `.vcpdeck.json` 只选择环境；Release 校验两个同版本且平台互补的 archive，在本地计算 SHA-256，通过 SDK 的 password Cookie 或 Bearer 认证流式上传。第二个平台成功后 Server 自动启动自更新编排；CLI 上传成功不等于 Release 已完成。其他业务领域仍不具备 CLI 命令。
 
-### 12.1 建议命令映射
+### 12.1 后续候选命令映射
 
 ```text
 vcpdeck health
@@ -1273,14 +1274,18 @@ vcpdeck frp list|get|create|delete
 
 ### 12.2 配置与输出
 
-最低配置：
+当前推荐先注册命名环境：
 
 ```text
-serverUrl
-bearerToken
+vcpdeck env add dev --server=http://localhost:3001 --auth=password --username=admin --password-env=VCPDECK_DEV_PASSWORD
+vcpdeck env add prod --server=https://deck.example --auth=bearer --token-env=VCPDECK_PROD_TOKEN
+vcpdeck env use dev --global|--local
+vcpdeck env current
 ```
 
-要求：
+解析优先级为 `--env` → `VCPDECK_ENVIRONMENT` → 最近项目 `.vcpdeck.json` → 全局默认。项目配置损坏或环境不存在时 fail closed；完整当前语义见 [`design/cli.md`](./design/cli.md)。`--server` + 用户名/密码仍作为 Release 直连兼容模式，密码优先从 `VCPDECK_ADMIN_PASSWORD` 读取，不推荐 `--password`。
+
+后续业务命令要求：
 
 - 支持 `--json`，输出稳定 JSON，便于 Skill 调用；
 - 默认人类输出只展示安全摘要；
@@ -1299,7 +1304,8 @@ bearerToken
 
 ### 12.4 CLI Definition of Done
 
-- [ ] Server URL 与 Token 可安全配置；
+- [x] Server URL 与 password/Bearer 凭据引用可按多个环境安全配置；
+- [x] 项目可只选择默认环境，解析优先级与 fail-closed 行为有测试；
 - [ ] `health` 与 `auth me` 可诊断连接；
 - [ ] 支持 client/job/exec 的人类输出和 `--json`；
 - [ ] Job 轮询正确处理终态、断线和本地超时；
@@ -1310,11 +1316,11 @@ bearerToken
 
 ---
 
-## 13. Skill 完善建议
+## 13. Skill 工作流与后续完善
 
-当前 `skills/vcpdeck/SKILL.md` 只有 setup 骨架。建议 Skill 默认调用 CLI 的 `--json` 模式，而不是在 Skill 中重复实现 HTTP、Token 读取和轮询。
+`skills/vcpdeck/SKILL.md` 是 VCPDeck CLI 的统一能力入口，而不是单独的自更新 Skill。它维护能力目录、通用操作规则和按功能分组的工作流；当前已经实现 Release 打包、最终确认、双平台上传和状态核验章节，直接调用 CLI，不重复实现 HTTP、Cookie 或上传协议。CLI 尚无 `--json` 和 Release 状态轮询，因此该功能当前要求在 Frontend 发版页完成最终核验；机器/Job 等意图映射仍是后续候选，待相应 CLI 命令落地后再增量写入同一个 Skill。
 
-### 13.1 意图映射
+### 13.1 后续意图映射
 
 | 用户意图 | CLI/API 行为 |
 | --- | --- |
@@ -1327,7 +1333,9 @@ bearerToken
 | 删除文件/映射/Token | 停在确认门，确认后再调用 |
 | 配置阿里云盘 | config → oauth start → 等用户 code → complete → status |
 
-### 13.2 Skill 行为约束
+### 13.2 后续机器/Job Skill 行为约束
+
+以下约束仅适用于将来落地机器/Job CLI 后的扩展，不代表当前 Skill 已具备这些能力：
 
 1. 操作前列出匹配的在线 Client；名称不唯一时询问，不猜 clientId；
 2. 检查 capability，不支持时解释原因；
@@ -1419,8 +1427,8 @@ bearerToken
 | frpc 管理 | `packages/client/src/frpc-daemon.ts` |
 | 框架无关 SDK | `packages/sdk/src/` |
 | Frontend API 与页面 | `packages/frontend/src/api/`, `packages/frontend/src/pages/` |
-| CLI 骨架 | `packages/cli/src/index.ts` |
-| Skill 骨架 | `skills/vcpdeck/SKILL.md` |
+| Release 上传 CLI | `packages/cli/src/index.ts` |
+| VCPDeck CLI 总 Skill（当前含 Release/自更新功能） | `skills/vcpdeck/SKILL.md` |
 | 通用集成测试 | `scripts/test.cjs` |
 | FRP 集成测试 | `scripts/test-frp.cjs` |
 

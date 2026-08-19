@@ -41,7 +41,7 @@ vcpdeck/
 └── docs/             # 架构、协议、实现与验证文档
 ```
 
-依赖方向以共享协议为中心：`shared` 不依赖其他内部包；`sdk` 依赖 `shared`；Frontend 同时消费 `sdk` 和 `shared`；Server、Client、CLI、Launcher 直接消费 `shared`。各运行时包之间不直接引用源码，通过 REST、Socket.IO、SSE 和发布构件交互。
+依赖方向以共享协议为中心：`shared` 不依赖其他内部包；`sdk` 只依赖 `shared`；Frontend 和 CLI 消费 `sdk` 与 `shared`；Server、Client、Launcher 直接消费 `shared`。内部包通过 package export 复用，不跨包引用源码；运行时之间通过 REST、Socket.IO、SSE 和发布构件交互。
 
 ## 各包职责
 
@@ -109,13 +109,14 @@ React + Vite SPA，使用 React Router 进行客户端路由。数据访问以 `
 
 ### `packages/cli`
 
-无命令框架的 Node.js CLI。当前已实现的命令是：
+无命令框架的 Node.js CLI。当前已实现：
 
 ```text
-vcpdeck release upload <vcpdeck-x.y.z-win-x64.zip> <vcpdeck-x.y.z-linux-x64.zip> --server=<url> [--username=x --password=y]
+vcpdeck env add|list|show|current|use|remove
+vcpdeck release upload <vcpdeck-x.y.z-win-x64.zip> <vcpdeck-x.y.z-linux-x64.zip> [--env=<name>]
 ```
 
-该命令负责登录、计算 SHA-256 并流式上传发布包。构建时先由 TypeScript 编译，再由 esbuild 打包为 `skills/vcpdeck/vcpdeck.cjs`。机器管理、Job 操作等尚未形成 CLI 命令，不在本文中声明为现有能力。
+CLI 使用 `~/.vcpdeck/cli/config.json` 注册多个环境，项目 `.vcpdeck.json` 只选择默认环境；解析顺序为显式 `--env`、`VCPDECK_ENVIRONMENT`、最近项目配置、全局默认，错误配置 fail closed（ADR-0017）。`release upload` 负责参数/文件校验、SHA-256 与人类可读输出；登录会话、Bearer、Release 原始流上传和 API 错误归一化复用 `@vcpdeck/sdk`。现有 `--server` 直连模式保持兼容。构建时 TypeScript 编译，再由 esbuild 打包为 `skills/vcpdeck/vcpdeck.cjs`。机器管理、Job 操作等尚未形成 CLI 命令。
 
 ### `packages/launcher`
 
@@ -131,7 +132,7 @@ Launcher 管理的是发布构件生命周期，不参与 Job 调度或业务协
 
 ### `skills/vcpdeck`
 
-Pi Agent Skill 的描述目录。`SKILL.md` 提供发现元数据与使用入口，`vcpdeck.cjs` 由 CLI 构建生成。Skill 是 CLI 的薄入口，不是另一套 SDK 或服务端实现；其可用能力以当前 CLI 命令为准。
+Pi Agent Skill 的描述目录。`SKILL.md` 是 VCPDeck CLI 的统一能力入口，维护当前命令目录、通用安全规则和各功能操作流程；Release/自更新是目前首先落地的功能章节。`vcpdeck.cjs` 由 CLI 构建生成。Skill 不是另一套 SDK 或服务端实现，其可用能力始终以当前 CLI 命令为准；未来 CLI 逐步对齐 Server 能力时，在同一 Skill 中增量补充对应章节。
 
 ## 通信与安全边界
 

@@ -34,7 +34,7 @@
 | --- | --- |
 | [`adr/README.md`](./adr/README.md) | 架构决策记录及新增规则 |
 | [`roadmap.md`](./roadmap.md) | 已完成、近期候选和长期方向，不代表交付承诺 |
-| [`design/README.md`](./design/README.md) | 当前专题设计文档索引及权威性说明 |
+| [`design/README.md`](./design/README.md) | 当前专题设计文档索引及权威性说明（含 [`design/cli.md`](./design/cli.md) 多环境 CLI） |
 | [`archive/README.md`](./archive/README.md) | 历史计划、过期设计和验证记录的归档规则 |
 
 ## 文档状态约定
