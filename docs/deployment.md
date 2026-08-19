@@ -59,7 +59,7 @@ pnpm release --version=x.y.z
 
 ### 4.1 Server
 
-> 使用 `install.cjs`（与发布 zip 平级提供于 `dist-release/`）安装时，脚本会从 zip 自动安装 Launcher 到 `<app-dir>/dist/main.js`，引导生成 `VCPDECK_PSK`、`VCPDECK_ADMIN_PASSWORD`、`DATABASE_URL`、`VCPDECK_RELEASES_DIR` 并写入 `<app-dir>/launcher.env`（敏感值 Non-Windows 权限 600）；启动命令由脚本打印为 `node --env-file="<app-dir>/launcher.env" "<app-dir>/dist/main.js"`；下表为手铺环境变量时的完整清单。
+> 使用 `install.cjs`（与发布 zip 平级提供于 `dist-release/`）安装时，脚本会从 zip 自动安装 Launcher 到 `<app-dir>/dist/main.js`，引导生成 `VCPDECK_PSK`、`VCPDECK_ADMIN_PASSWORD`、`DATABASE_URL`、`VCPDECK_RELEASES_DIR`（可选 `VCPDECK_PORT`，见下方 `--port`）并写入 `<app-dir>/launcher.env`（敏感值 Non-Windows 权限 600）；启动命令由脚本打印为 `node --env-file="<app-dir>/launcher.env" "<app-dir>/dist/main.js"`；下表为手铺环境变量时的完整清单。`install.cjs` 支持 `--port=<1-65535>` 覆盖 Server 监听端口（写入 `VCPDECK_PORT`）；改端口时需同步 client `--server-url` 与 Server Launcher `VCPDECK_PROBE_URL`，见 quickstart §3.1。
 
 | 变量 | 当前默认/要求 | 说明 |
 | --- | --- | --- |
@@ -122,7 +122,7 @@ FRPS Token 和 Dashboard 密码当前明文存入 SQLite、通过实例 REST 返
 基本约束：
 
 - **只托管 Launcher**。若把 `apps/<version>/server/dist/main.js` 或 `client/dist/index.js` 交给 PM2，自更新时 Launcher 会主动停止业务进程再启动新版本，PM2 会将其误判为崩溃并强行拉起，破坏版本切换与失败回退；
-- 使用 **fork 模式、单一实例**：Server 是单控制面节点（固定 3001 端口 + SQLite），不支持多实例/cluster；
+- 使用 **fork 模式、单一实例**：Server 是单控制面节点（默认 3001 端口，可用 `VCPDECK_PORT`/`--port` 覆盖，仍不支持多实例/cluster）；
 - 与安装时相同的运行账户和 `--app-dir`，保证 `launcher.env` / `control.json` / `apps/` 的读写权限一致。
 
 `ecosystem.config.cjs` 示例（路径替换为实际绝对路径；Windows 用 `C:/...`，Linux 用 `/opt/vcpdeck/...`）：

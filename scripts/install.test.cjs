@@ -95,6 +95,32 @@ test("parseArgs 校验版本与 sha256 格式", () => {
 	);
 });
 
+test("parseArgs 解析并校验 --port", () => {
+	const args = install.parseArgs([
+		"--artifact=server",
+		"--zip=a.zip",
+		"--port=8080",
+	]);
+	assert.equal(args.port, 8080);
+	assert.throws(
+		() => install.parseArgs(["--artifact=server", "--zip=a.zip", "--port=0"]),
+		/--port/,
+	);
+	assert.throws(
+		() => install.parseArgs(["--artifact=server", "--zip=a.zip", "--port=70000"]),
+		/--port/,
+	);
+	assert.throws(
+		() => install.parseArgs(["--artifact=server", "--zip=a.zip", "--port=abc"]),
+		/--port/,
+	);
+	// client 也能解析，但只对 server 写入 env
+	assert.equal(
+		install.parseArgs(["--artifact=client", "--zip=a.zip", "--port=8080"]).port,
+		8080,
+	);
+});
+
 test("inferVersionFromZip 从文件名取版本", () => {
 	assert.equal(
 		install.inferVersionFromZip("vcpdeck-0.1.1-win-x64.zip"),
@@ -261,6 +287,19 @@ test("buildEnvFile server 含 PSK/密码/DB/Releases，client 含 PSK/Server", (
 	assert.match(server, /DATABASE_URL=file:C:\/app\/server\.db/);
 	assert.match(server, /VCPDECK_RELEASES_DIR=C:\/app\/releases/);
 	assert.doesNotMatch(server, /VCPDECK_SERVER=/);
+
+	// 显式 port 时写入 VCPDECK_PORT；未提供时不写（保持默认 3001）
+	assert.doesNotMatch(server, /VCPDECK_PORT=/);
+	const withPort = install.buildEnvFile({
+		artifact: "server",
+		appDir: "C:/app",
+		psk: "k1",
+		adminPassword: "p1",
+		dbUrl: "file:C:/app/server.db",
+		releasesDir: "C:/app/releases",
+		port: 8080,
+	});
+	assert.match(withPort, /VCPDECK_PORT=8080/);
 
 	const client = install.buildEnvFile({
 		artifact: "client",

@@ -20,6 +20,7 @@
  *   --client-id=<value>        client：可选固定机器名（VCPDECK_CLIENT_ID）
  *   --releases-dir=<dir>       server：覆盖默认 VCPDECK_RELEASES_DIR（<app-dir>/releases，
  *                              绝对路径版本目录外，避免自更新后随版本目录漂移）
+ *   --port=<1-65535>          server：覆盖默认监听端口 3001（写入 VCPDECK_PORT）
  *   --no-env                   跳过启动环境文件（launcher.env）生成，保持纯安装
  *   --skip-db                  跳过数据库初始化
  *   --force                    目标版本目录已存在时覆盖
@@ -128,6 +129,14 @@ function parseArgs(argv) {
 			case "--releases-dir":
 				args.releasesDir = value;
 				break;
+			case "--port": {
+				const port = Number(value);
+				if (!Number.isInteger(port) || port < 1 || port > 65535) {
+					fail(`--port 非法: ${value}（需要 1-65535 整数）`);
+				}
+				args.port = port;
+				break;
+			}
 			case "--no-env":
 				args.noEnv = true;
 				break;
@@ -371,6 +380,7 @@ function buildEnvFile({
 	serverUrl,
 	clientId,
 	releasesDir,
+	port,
 }) {
 	const lines = [
 		"# 由 scripts/install.cjs 生成（敏感值请妥善保管）",
@@ -378,6 +388,7 @@ function buildEnvFile({
 		`VCPDECK_ARTIFACT=${artifact}`,
 	];
 	if (psk) lines.push(`VCPDECK_PSK=${psk}`);
+	if (port) lines.push(`VCPDECK_PORT=${port}`);
 	if (artifact === "server") {
 		if (adminPassword) lines.push(`VCPDECK_ADMIN_PASSWORD=${adminPassword}`);
 		if (dbUrl) lines.push(`DATABASE_URL=${dbUrl}`);
@@ -411,6 +422,7 @@ async function collectEnvArgs(args, io = { input: stdin, output: stdout }) {
 					adminPassword: args.adminPassword ?? generateSecret(),
 					dbUrl: args.dbUrl ?? `file:${join(args.appDir, "server.db")}`,
 					releasesDir: args.releasesDir ?? join(args.appDir, "releases"),
+					port: args.port,
 				}
 			: {
 					psk: args.psk ?? generateSecret(),
@@ -441,6 +453,7 @@ async function collectEnvArgs(args, io = { input: stdin, output: stdout }) {
 				adminPassword,
 				dbUrl,
 				releasesDir: args.releasesDir ?? join(args.appDir, "releases"),
+				port: args.port,
 			};
 		}
 		const psk =
@@ -593,7 +606,7 @@ async function main() {
 if (require.main === module) {
 	if (process.argv.length <= 2) {
 		console.log(
-			"用法: node install.cjs --artifact=server|client --zip=<路径或URL> [--version=x.y.z] [--app-dir=<dir>] [--sha256=<hex>] [--db-url=<url>] [--skip-db] [--force]",
+			"用法: node install.cjs --artifact=server|client --zip=<路径或URL> [--version=x.y.z] [--app-dir=<dir>] [--sha256=<hex>] [--db-url=<url>] [--psk=..] [--admin-password=..] [--server-url=..] [--client-id=..] [--releases-dir=..] [--port=1-65535] [--skip-db] [--force]",
 		);
 		process.exit(1);
 	}

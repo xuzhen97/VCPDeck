@@ -77,6 +77,11 @@ node install.cjs --artifact=server \
   --psk=<密钥> --admin-password=<密码> \
   --db-url=file:/var/lib/vcpdeck/server.db
 
+# 更换 Server 监听端口（默认 3001；写入 VCPDECK_PORT，改端口时同步 --server-url 与探活）
+node install.cjs --artifact=server \
+  --zip=vcpdeck-0.1.1-win-x64.zip \
+  --port=8080
+
 # 直接从 URL 安装，并指定 sha256 校验（可选）
 node install.cjs --artifact=server \
   --zip=https://<server>/api/releases/0.1.1/file?platform=win-x64 \
@@ -93,7 +98,7 @@ node --env-file="<app-dir>/launcher.env" "<app-dir>/dist/main.js"
 
 安装脚本完成：解压 → 校验 Launcher 与业务构件完整 → 首次将 Launcher 安装到 `<app-dir>/dist/main.js`（已有 Launcher 保留）→ 复制 `manifest.json` + 对应构件（server/ 或 client/）到 `apps/<version>/` → 设置 current 指针 → 引导启动参数并写 `launcher.env` →（server，用引导确定的 `DATABASE_URL` 时）执行 `prisma db push` → 打印完整启动命令。
 
-选项：`--version=<x.y.z>`（覆盖文件名推断，用于重命名为其他版本）、`--psk` / `--admin-password` / `--server-url` / `--client-id` / `--releases-dir`（显式参数，非 TTY 必需时使用）、`--no-env`（跳过 env 生成，保持纯安装）、`--skip-db`、`--force`（覆盖已存在版本目录）。目标机 client 未提供 `--server-url` 时会提示手动补写 `launcher.env` 的 `VCPDECK_SERVER`。
+选项：`--version=<x.y.z>`（覆盖文件名推断，用于重命名为其他版本）、`--psk` / `--admin-password` / `--server-url` / `--client-id` / `--releases-dir` / `--port=<1-65535>`（显式参数，非 TTY 必需时使用；`--port` 仅 server 构件生效，写入 `VCPDECK_PORT` 覆盖默认 3001，需同步 client 的 `--server-url` 与 Server Launcher 的 `VCPDECK_PROBE_URL`）、`--no-env`（跳过 env 生成，保持纯安装）、`--skip-db`、`--force`（覆盖已存在版本目录）。目标机 client 未提供 `--server-url` 时会提示手动补写 `launcher.env` 的 `VCPDECK_SERVER`。
 
 > Launcher 随发布 zip 提供，但安装后位于 `<app-dir>/dist/main.js`，不随业务版本切换覆盖；系统服务安装仍需由运维配置。
 

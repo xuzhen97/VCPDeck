@@ -44,6 +44,24 @@ export type {
 	PiToolCallContent,
 	PiModelInfo,
 } from "./pi.js";
+// update.ts 类型显式 re-export（同上：部分工具链不解析 export * 通配转发）
+export type {
+	ReleaseArchiveInfo,
+	ReleaseArchiveStorage,
+	ReleaseClientEntry,
+	ReleaseInfo,
+	ReleasePlatform,
+	ServerShutdownNotice,
+	UpdateFailed,
+	UpdateManifest,
+	UpdateReady,
+	UpdateRequest,
+} from "./update.js";
+export {
+	ReleaseClientState,
+	ReleaseStatus,
+	platformFromOs,
+} from "./update.js";
 export {
 	PI_ERROR_CODES,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
