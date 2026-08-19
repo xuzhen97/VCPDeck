@@ -170,9 +170,7 @@ describe("AlibabaStorageProvider 直传会话", () => {
 			}),
 		);
 		const parts = await provider.refreshPartUrls("file-1", "upload-1", [2]);
-		expect(parts).toEqual([
-			{ partNumber: 2, url: "https://oss.example/p2-new" },
-		]);
+		expect(parts).toEqual([{ partNumber: 2, url: "https://oss.example/p2-new" }]);
 	});
 
 	it("completeDirectUpload 调 complete 接口", async () => {

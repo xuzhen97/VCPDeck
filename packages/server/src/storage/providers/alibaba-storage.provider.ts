@@ -206,9 +206,9 @@ export class AlibabaStorageProvider implements StorageProvider {
 			throw new Error("阿里云盘创建上传任务未返回 file_id/upload_id");
 		}
 
-		const list = (created.part_info_list ??
-			created.partInfoList ??
-			[]) as Array<Record<string, unknown>>;
+		const list = (created.part_info_list ?? created.partInfoList ?? []) as Array<
+			Record<string, unknown>
+		>;
 		const parts = list
 			.map((p) => ({
 				partNumber: Number(p.part_number ?? p.partNumber ?? 0),
@@ -273,8 +273,7 @@ export class AlibabaStorageProvider implements StorageProvider {
 		const url = String(result.url ?? "");
 		if (!url) throw new Error("阿里云盘未返回下载 URL");
 		const raw = result.expire_time ?? result.expiresAt ?? 0;
-		const expiresAt =
-			typeof raw === "string" ? Date.parse(raw) : Number(raw);
+		const expiresAt = typeof raw === "string" ? Date.parse(raw) : Number(raw);
 		return { url, expiresAt };
 	}
 
@@ -357,9 +356,7 @@ export class AlibabaStorageProvider implements StorageProvider {
 				const urlPart = urlParts.find(
 					(p) => Number(p.part_number ?? p.partNumber ?? 0) === partNumber,
 				);
-				const uploadUrl = String(
-					urlPart?.upload_url ?? urlPart?.uploadUrl ?? "",
-				);
+				const uploadUrl = String(urlPart?.upload_url ?? urlPart?.uploadUrl ?? "");
 				if (!uploadUrl) {
 					throw new Error(`阿里云盘未返回分片 ${partNumber} 的上传 URL`);
 				}
@@ -389,10 +386,7 @@ export class AlibabaStorageProvider implements StorageProvider {
 							break;
 						}
 						// 401/403 刷新 URL
-						if (
-							(putResp.status === 401 || putResp.status === 403) &&
-							attempt < 3
-						) {
+						if ((putResp.status === 401 || putResp.status === 403) && attempt < 3) {
 							const refreshed = await client.getUploadUrl({
 								driveId: rt.driveId,
 								fileId,
@@ -403,8 +397,7 @@ export class AlibabaStorageProvider implements StorageProvider {
 								refreshed.partInfoList ??
 								[]) as Array<Record<string, unknown>>;
 							const refreshedPart = refreshedParts.find(
-								(p) =>
-									Number(p.part_number ?? p.partNumber ?? 0) === partNumber,
+								(p) => Number(p.part_number ?? p.partNumber ?? 0) === partNumber,
 							);
 							const newUrl = String(
 								refreshedPart?.upload_url ?? refreshedPart?.uploadUrl ?? "",
@@ -515,11 +508,7 @@ export class AlibabaStorageProvider implements StorageProvider {
 		return `expires=${expiresAt}&sig=${sig}`;
 	}
 
-	verifyDownloadSignature(
-		key: string,
-		expiresAt: number,
-		sig: string,
-	): boolean {
+	verifyDownloadSignature(key: string, expiresAt: number, sig: string): boolean {
 		// expires=0 为永久链接标记，不做时间校验
 		if (expiresAt > 0 && Date.now() > expiresAt) return false;
 		const expected = this.sign(`${SIGN_DOWNLOAD_PREFIX}:${key}:${expiresAt}`);

@@ -209,7 +209,9 @@ function isPortOpen(port) {
 async function ensurePortFree() {
 	if (!(await isPortOpen(3001))) return;
 	step("需要你介入：3001 端口被占用");
-	console.log("  请停止当前 dev/生产 Server；脚本不会杀死非本次测试创建的进程。");
+	console.log(
+		"  请停止当前 dev/生产 Server；脚本不会杀死非本次测试创建的进程。",
+	);
 	await ask("  停止后按 Enter 继续（10 分钟超时）: ", 10 * 60_000);
 	if (await isPortOpen(3001)) {
 		throw new Error("3001 端口仍被占用");
@@ -338,7 +340,8 @@ async function waitForServerVersion(version, timeoutMs = 15 * 60_000) {
 		try {
 			// pi-lens-ignore: typescript.react.security.react-insecure-request.react-insecure-request
 			const response = await fetch(`${BASE}/api/status`);
-			if (response.ok && (await response.json())?.serverVersion === version) return;
+			if (response.ok && (await response.json())?.serverVersion === version)
+				return;
 		} catch {
 			// Server 自更新重启窗口
 		}
@@ -495,7 +498,10 @@ async function configureAlibaba() {
 	}
 
 	const started = await apiJson("POST", "/api/aliyundrive/oauth/start");
-	if ((started.status !== 200 && started.status !== 201) || !started.body?.state) {
+	if (
+		(started.status !== 200 && started.status !== 201) ||
+		!started.body?.state
+	) {
 		throw new Error(`启动 OAuth 失败: HTTP ${started.status}`);
 	}
 	const authorizationUrl = started.body.authorizationUrl;
@@ -518,7 +524,9 @@ async function configureAlibaba() {
 
 	const verified = await apiJson("POST", "/api/aliyundrive/verify");
 	if (!verified.body?.valid || !verified.body?.driveId) {
-		throw new Error(`阿里云盘授权验证失败: ${verified.body?.reason || "unknown"}`);
+		throw new Error(
+			`阿里云盘授权验证失败: ${verified.body?.reason || "unknown"}`,
+		);
 	}
 	const switched = await apiJson("PUT", "/api/storage/config", {
 		json: { kind: "alibaba" },
@@ -590,7 +598,10 @@ async function deleteUploadedObjects() {
 		await waitForServer(30_000);
 		await login();
 		for (const key of uploadedKeys) {
-			const response = await api("DELETE", `/api/storage/${encodeURIComponent(key)}`);
+			const response = await api(
+				"DELETE",
+				`/api/storage/${encodeURIComponent(key)}`,
+			);
 			if (!response.ok) {
 				warn("阿里云盘测试对象删除失败", `HTTP ${response.status}`);
 			}
@@ -643,7 +654,10 @@ async function runTest() {
 			`--releases-dir=${releasesDir}`,
 		],
 	);
-	appendFileSync(join(serverAppDir, "launcher.env"), "VCPDECK_COOKIE_SECURE=false\n");
+	appendFileSync(
+		join(serverAppDir, "launcher.env"),
+		"VCPDECK_COOKIE_SECURE=false\n",
+	);
 	serverLauncher = startLauncher(serverAppDir, "server");
 	await waitForServer();
 	await login();
@@ -660,10 +674,7 @@ async function runTest() {
 			nodePlatform() === "win32" ? "win-x64" : "linux-x64",
 		),
 		clientAppDir,
-		[
-			`--server-url=${BASE}`,
-			`--client-id=${TEST_CLIENT_ID}`,
-		],
+		[`--server-url=${BASE}`, `--client-id=${TEST_CLIENT_ID}`],
 	);
 	clientLauncher = startLauncher(clientAppDir, "client");
 	await waitForClient(BASE_VERSION);
@@ -724,7 +735,9 @@ function printReport() {
 		let icon = "\x1b[31m✗\x1b[0m";
 		if (item.status === "PASS") icon = "\x1b[32m✓\x1b[0m";
 		else if (item.status === "WARN") icon = "\x1b[33m⚠\x1b[0m";
-		console.log(`  ${icon} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`);
+		console.log(
+			`  ${icon} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`,
+		);
 	}
 	console.log(
 		`\n  ${passed}/${results.length} passed, ${failed} failed, ${warned} warnings\n`,

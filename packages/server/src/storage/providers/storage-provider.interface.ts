@@ -23,11 +23,7 @@ export interface StorageProvider {
 	upload(stream: Readable, meta: FileMeta): Promise<FileEntry>;
 
 	/** 上传到指定 key（预签名 URL 回调用） */
-	uploadToKey(
-		stream: Readable,
-		meta: FileMeta,
-		key: string,
-	): Promise<FileEntry>;
+	uploadToKey(stream: Readable, meta: FileMeta, key: string): Promise<FileEntry>;
 
 	/** 服务端主动下载 */
 	download(key: string): Promise<{ stream: Readable; meta: FileEntry }>;
@@ -48,5 +44,7 @@ export interface StorageProvider {
 	verifyUploadSignature(key: string, expiresAt: number, sig: string): boolean;
 
 	/** 换取目标机直连下载 URL（临时有效，字节不经过 Server）；不支持返回 null（ADR-0016） */
-	getDirectDownloadUrl?(key: string): Promise<{ url: string; expiresAt: number } | null>;
+	getDirectDownloadUrl?(
+		key: string,
+	): Promise<{ url: string; expiresAt: number } | null>;
 }

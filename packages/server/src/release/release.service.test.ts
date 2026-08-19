@@ -166,9 +166,7 @@ describe("ReleaseService", () => {
 
 	describe("transitionStatus", () => {
 		it("合法流转 uploaded → updating_server 成功", async () => {
-			prisma.release.findUnique.mockResolvedValue(
-				dbRow({ status: "uploaded" }),
-			);
+			prisma.release.findUnique.mockResolvedValue(dbRow({ status: "uploaded" }));
 			prisma.release.updateMany.mockResolvedValue({ count: 1 });
 
 			await expect(
@@ -340,9 +338,7 @@ describe("ReleaseService", () => {
 			const file = join(dir, "a.zip");
 			await writeFile(file, "hello release");
 
-			await expect(service.verifyZipSha256(file, "deadbeef")).resolves.toBe(
-				false,
-			);
+			await expect(service.verifyZipSha256(file, "deadbeef")).resolves.toBe(false);
 		});
 
 		it("文件不存在返回 false", async () => {

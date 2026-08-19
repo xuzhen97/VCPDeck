@@ -124,9 +124,7 @@ describe("StorageService", () => {
 			});
 
 			expect(
-				await service.resolveFilename(
-					"6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1",
-				),
+				await service.resolveFilename("6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1"),
 			).toBe("nginx-1.18.0.zip");
 			expect(prisma.file.findFirst).toHaveBeenCalledWith({
 				where: { key: "6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1" },
@@ -175,8 +173,7 @@ describe("StorageService", () => {
 					key: "aliyun-file-id",
 					status: "completed",
 					size: 5,
-					sha256:
-						"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+					sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
 				},
 			});
 		});
@@ -345,11 +342,7 @@ describe("StorageService", () => {
 			});
 			prisma.file.update.mockResolvedValue({});
 
-			const result = await service.createDirectUploadSession(
-				100,
-				"a.bin",
-				"f1",
-			);
+			const result = await service.createDirectUploadSession(100, "a.bin", "f1");
 
 			expect(result).toMatchObject({ fileId: "aliyun-file", uploadId: "up-1" });
 			expect(prisma.file.update).toHaveBeenCalledWith({
@@ -417,10 +410,7 @@ describe("StorageService", () => {
 
 			const result = await service.createExportSession("j1", 100);
 
-			expect(directProvider.createDirectUpload).toHaveBeenCalledWith(
-				100,
-				"a.zip",
-			);
+			expect(directProvider.createDirectUpload).toHaveBeenCalledWith(100, "a.zip");
 			expect(prisma.file.update).toHaveBeenCalledWith({
 				where: { id: "f1" },
 				data: expect.objectContaining({ size: 100, key: "aliyun-file" }),
@@ -456,12 +446,10 @@ describe("StorageService", () => {
 				expiresAt: 1760000000000,
 			});
 
-			await expect(service.createDownloadToken("aliyun-file")).resolves.toEqual(
-				{
-					url: "https://download.example/x",
-					expiresAt: 1760000000000,
-				},
-			);
+			await expect(service.createDownloadToken("aliyun-file")).resolves.toEqual({
+				url: "https://download.example/x",
+				expiresAt: 1760000000000,
+			});
 		});
 
 		it("local provider 上 createDownloadToken 保持签名 URL", async () => {
@@ -545,4 +533,3 @@ describe("StorageService", () => {
 		});
 	});
 });
-

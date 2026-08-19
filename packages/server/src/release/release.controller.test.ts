@@ -170,12 +170,7 @@ describe("ReleaseController", () => {
 
 		it("版本号格式非法返回 400", async () => {
 			const err = await catchHttpError(
-				controller.upload(
-					fakeReq(),
-					"not-a-version",
-					"win-x64",
-					"a".repeat(64),
-				),
+				controller.upload(fakeReq(), "not-a-version", "win-x64", "a".repeat(64)),
 			);
 
 			expect(err.getStatus()).toBe(400);
@@ -250,21 +245,13 @@ describe("ReleaseController", () => {
 				storageKind: "alibaba",
 			});
 
-			await controller.upload(
-				fakeReq(),
-				"1.2.1",
-				"win-x64",
-				"a".repeat(64),
-			);
+			await controller.upload(fakeReq(), "1.2.1", "win-x64", "a".repeat(64));
 
-			expect(storage.uploadStream).toHaveBeenCalledWith(
-				expect.any(Object),
-				{
-					clientId: "release",
-					filename: "vcpdeck-1.2.1-win-x64.zip",
-					size: zipBytes.length,
-				},
-			);
+			expect(storage.uploadStream).toHaveBeenCalledWith(expect.any(Object), {
+				clientId: "release",
+				filename: "vcpdeck-1.2.1-win-x64.zip",
+				size: zipBytes.length,
+			});
 			expect(service.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					archives: {
@@ -297,7 +284,7 @@ describe("ReleaseController", () => {
 		});
 	});
 
-		describe("download", () => {
+	describe("download", () => {
 		const winArchive = {
 			sha256: "a".repeat(64),
 			size: 1,
@@ -375,10 +362,7 @@ describe("ReleaseController", () => {
 			await controller.download("1.2.1", res as never, "win-x64");
 
 			expect(res.redirect).toHaveBeenCalledTimes(2);
-			expect(res.redirect).toHaveBeenCalledWith(
-				302,
-				"https://storage.example/x",
-			);
+			expect(res.redirect).toHaveBeenCalledWith(302, "https://storage.example/x");
 			// 短时缓存命中：只换取一次
 			expect(storage.getDirectDownloadUrl).toHaveBeenCalledTimes(1);
 			expect(res.sendFile).not.toHaveBeenCalled();
