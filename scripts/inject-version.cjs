@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 构建前注入版本号：改写 packages/shared/src/version.ts。
+ * 更新发布版本：同步 Shared 运行时版本与 SDK/Shared/CLI 包版本。
  * 由 pack-release（pnpm release）在构建前调用。
  *
  * 用法:
@@ -17,12 +17,28 @@ if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
 	process.exit(1);
 }
 
-const target = path.resolve(__dirname, "../packages/shared/src/version.ts");
-const content = `/**
+try {
+	const packageNames = ["shared", "sdk", "cli"];
+	for (const name of packageNames) {
+		const target = path.resolve(__dirname, `../packages/${name}/package.json`);
+		const manifest = JSON.parse(fs.readFileSync(target, "utf8"));
+		manifest.version = version;
+		if (name === "sdk") manifest.peerDependencies["@vcpdeck/shared"] = version;
+		fs.writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`);
+	}
+
+	const target = path.resolve(__dirname, "../packages/shared/src/version.ts");
+	const content = `/**
  * 全局版本号（server 与 client 共用）。
  * 由 scripts/inject-version.cjs 注入（发版构建时）。
  */
 export const VERSION = "${version}";
 `;
-fs.writeFileSync(target, content);
-console.log(`[inject-version] 已写入 ${version} → ${target}`);
+	fs.writeFileSync(target, content);
+	console.log(`[inject-version] 已同步发布版本 ${version}`);
+} catch (error) {
+	console.error(
+		`[inject-version] 更新失败: ${error instanceof Error ? error.message : String(error)}`,
+	);
+	process.exit(1);
+}

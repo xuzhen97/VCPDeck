@@ -50,12 +50,59 @@ VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server�
 - [测试策略](docs/testing.md) / [CLI 与多环境配置](docs/design/cli.md) / [架构决策](docs/adr/README.md) / [路线图](docs/roadmap.md)
 - [参与开发](CONTRIBUTING.md) / [更新日志](CHANGELOG.md)
 
+## 从 GitHub 安装
+
+### Pi Skill
+
+Node.js 24+ 环境中按稳定 Tag 用户级安装：
+
+```bash
+pi install git:github.com/xuzhen97/VCPDeck@v0.1.0
+```
+
+Pi 会克隆整个仓库并发现 `skills/vcpdeck/SKILL.md`；同目录 `vcpdeck.cjs` 已随 Tag 提交，无需在安装机编译。升级或回滚需显式切换 Tag，例如：
+
+```bash
+pi install git:github.com/xuzhen97/VCPDeck@v0.2.0
+```
+
+Skill 与 CLI 用户级只安装一份，但执行时保留当前项目 cwd，因此每个项目都可以用自己的 `.vcpdeck.json` 选择用户级已注册环境。
+
+### SDK 与 Shared
+
+Node.js 24+、pnpm 10.26+ 的项目可从同一 Tag 安装 SDK 和协议类型：
+
+```bash
+pnpm \
+  --allow-build="@vcpdeck/sdk" \
+  --allow-build="@vcpdeck/shared" \
+  add \
+  "github:xuzhen97/VCPDeck#v0.1.0&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.1.0&path:/packages/shared"
+```
+
+两个包必须使用同一 Tag。pnpm 会在 Git 获取阶段构建未提交的 `dist`，并把实际 commit 与构建许可记录到目标项目。SDK 不读取 CLI 环境配置；调用方显式提供 Server 和认证：
+
+```ts
+import { VcpDeckClient } from "@vcpdeck/sdk";
+import { JobStatus, type JobInfo } from "@vcpdeck/shared";
+
+const client = new VcpDeckClient({
+  baseUrl: process.env.VCPDECK_SERVER!,
+  auth: { type: "bearer", token: process.env.VCPDECK_TOKEN! },
+});
+
+const jobs = await client.jobs.list({ status: JobStatus.RUNNING });
+```
+
+目标项目可自行用 esbuild 等工具将脚本打成只依赖 Node.js 的 `.mjs`。
+
 ## 本地开发与测试
 
 ### 环境要求
 
 - Node.js 24+
-- pnpm
+- pnpm 10.26+
 - Git
 
 远程 Pi 依赖目标机器已经配置可用的 Pi 模型凭据；交互式终端依赖 `node-pty` 能在当前平台正常安装。完整运行条件见 [`docs/deployment.md`](docs/deployment.md)。

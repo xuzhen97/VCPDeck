@@ -1,7 +1,10 @@
 {
   "name": "@vcpdeck/shared",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
+  "files": [
+    "dist"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -9,10 +12,17 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc -p tsconfig.build.json",
     "dev": "tsc --watch",
     "test": "vitest run"
   },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10.26.0"
+  },
+  "packageManager": "pnpm@10.26.0",
   "devDependencies": {
+    "typescript": "^7.0.2",
     "vitest": "3.2.7"
   }
 }

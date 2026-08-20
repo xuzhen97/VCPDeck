@@ -73,11 +73,12 @@ node scripts/smoke-launcher.cjs
 | Terminal | 协议 parser、operator/viewer/token、snapshot/output 同序列、上游 gap/resync、UTF-8 上限、持续输入速率、generation、SQLite 状态、首次/重复 attach-detach TTL、expired 上报、真实 PTY 和进程树 |
 | Pi | capability/协议 parser、Owner/Observer、runId/CAS、cwd/projectKey、Session 树、交互/非阻塞 Extension 投影与 Trust、图片、SSE、重连/重启、隐私和真实模型 smoke |
 | Storage Provider | 签名篡改/过期、上传下载、Provider 故障、孤儿清理 |
-| Storage 阿里云盘真环境验收 | `node scripts/test-release-alibaba.cjs`（ADR-0016 一键端到端） | 脚本自建同一临时 DB、Server/Client Launcher 并完成打包/安装/更新/清理；仅首次输入 clientId、浏览器 OAuth code 或 3001 端口冲突时需人工介入 |
+| Storage 阿里云盘真环境验收 | `node scripts/test-release-alibaba.cjs`（ADR-0016 一键端到端）：脚本自建同一临时 DB、Server/Client Launcher 并完成打包/安装/更新/清理；仅首次输入 clientId、浏览器 OAuth code 或 3001 端口冲突时需人工介入 |
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |
 | Auth/Security | 密码/Cookie/Bearer、禁用/启用、撤销/过期、修改密码、既有 Socket、最后 admin、parser/限速、Actor、防泄漏 |
 | Release/Launcher | SHA、archive 路径安全、Windows/Linux 格式、drain、Server 恢复、Client 补更、数据库兼容和回退 |
 | CLI 多环境 | strict parser、明文秘密/未知字段拒绝、flag/env/project/global 优先级、Git 根、项目 fail closed、password/Bearer 缺失、直连冲突、原子写入/权限、真实本地 HTTP Release 上传 |
+| Git 分发 | 在仓库外用 Node.js 24+/pnpm 10.26+ 从同一 Tag 安装 SDK/Shared，验证构建许可、JS/TS 导入、类型声明和单文件打包；从不同 cwd 调用同一 Skill CLI 验证项目环境隔离 |
 | Frontend | loading/error/empty、刷新重连、无敏感原文渲染 |
 
 ## 5. 测试数据与安全
@@ -124,6 +125,7 @@ Release 不得只凭构建成功发布。至少确认：
 - Pi Session CRUD/fork/clone、prompt/steer/follow-up/compact/abort、Extension/Trust、图片、SSE、Worker/Client/Server reconnect；
 - FRPS probe、单实例映射、frpc 退出/重启、删除孤儿和凭据不泄漏；
 - Windows/Linux 构件从上传到 Server 更新、Client 逐台更新、离线补更和失败回退的完整链路；
+- 同一 Git Tag 的 Pi Skill 安装/升级与 SDK/Shared 仓库外安装；
 - 数据库和 Storage 恢复；
 - CHANGELOG/compatibility/deployment/operations 已更新。
 

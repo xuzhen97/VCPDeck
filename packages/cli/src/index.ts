@@ -3,6 +3,7 @@
  *
  * 当前能力：多环境配置、Release 双平台上传与 Server/Client 自更新触发。
  */
+import { VERSION } from "@vcpdeck/shared";
 import { runEnvCommand } from "./env-command.js";
 import { runReleaseCommand } from "./release-command.js";
 
@@ -21,6 +22,10 @@ export async function run(
 	const error = context.error ?? console.error;
 	const [command, subcommand, ...rest] = argv;
 	try {
+		if (command === "version" || command === "--version" || command === "-v") {
+			log(VERSION);
+			return 0;
+		}
 		if (command === "env") {
 			await runEnvCommand(subcommand, rest, { log });
 			return 0;
@@ -49,6 +54,7 @@ export async function run(
 export function helpText(): string {
 	return [
 		"vcpdeck",
+		"  vcpdeck --version",
 		"",
 		"环境配置:",
 		"  vcpdeck env list",

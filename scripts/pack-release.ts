@@ -3,14 +3,15 @@
  *   pnpm release --version=1.2.1 [--output=dist-release/] [--node-constraint=">=24"]
  *
  * 步骤：
- *   1. 注入版本号 → 全量构建（shared/server/client/launcher/frontend）→ 多平台 frp 下载
+ *   1. 同步 SDK/Shared/CLI 版本与 Shared 运行时版本 → 全量构建
+ *      （shared/sdk/cli/server/client/launcher/frontend）→ 多平台 frp 下载
  *   2. esbuild 将业务代码 + 纯 JS 依赖打成少量单文件（原生模块、Prisma 运行时、
  *      Pi SDK 等外部保留，staging 只安装这部分依赖）
  *   3. staging 组装：launcher/、server/ 与 client/（Launcher 单文件 + 业务构件与精简依赖）
  *   4. 产出 win-x64 / linux-x64 两份 zip（均含 Launcher、Server、Client；archiver，构建机平台无关），供分发与自动
  *      更新上传（Server 按目标机平台选择对应包）；linux frp 裸 ELF 从 .gz 内存解压
  *      直接注入 zip（规避开发机杀毒删除裸 ELF）；计算 sha256
- *   5. 恢复版本号为 0.0.0
+ *   5. 保留版本文件与 skills/vcpdeck/vcpdeck.cjs，供提交后创建同版本 Git Tag
  *
  * 注意：manifest.sha256 由服务端上传时计算并写入 Release 表（zip 内含 manifest，
  * 无法自指），此处留空；客户端校验以服务端下发的 sha256 为准。
@@ -421,15 +422,36 @@ function createArchive(
 
 async function main(): Promise<void> {
 	const args = parseArgs(process.argv.slice(2));
+	const preparedFiles = [
+		"packages/shared/package.json",
+		"packages/sdk/package.json",
+		"packages/cli/package.json",
+		"packages/shared/src/version.ts",
+		"pnpm-lock.yaml",
+		"skills/vcpdeck/vcpdeck.cjs",
+	].map((path) => join(ROOT, path));
+	const originals = new Map<string, Buffer | undefined>(
+		preparedFiles.map((path) => [
+			path,
+			existsSync(path) ? readFileSync(path) : undefined,
+		]),
+	);
 	// staging 必须放在 workspace 之外（OS 临时目录），否则 pnpm 视其为 workspace 成员
 	const stagingDir = join(tmpdir(), "vcpdeck-release-staging");
 	rmSync(stagingDir, { recursive: true, force: true });
 	mkdirSync(stagingDir, { recursive: true });
 
 	try {
-		// 1. 注入版本并全量构建（tsc 构建同时充当类型检查门禁）
-		run(["node", "scripts/inject-version.cjs", args.version], "注入版本号");
+		// 1. 同步发布版本并全量构建（tsc 构建同时充当类型检查门禁）
+		run(["node", "scripts/inject-version.cjs", args.version], "同步发布版本");
+		run(
+			["pnpm", "install", "--frozen-lockfile", "--lockfile-only"],
+			"验证 lockfile",
+		);
 		run(["pnpm", "--filter", "@vcpdeck/shared", "build"], "shared 构建");
+		run(["pnpm", "--filter", "@vcpdeck/sdk", "build"], "SDK 构建");
+		run(["pnpm", "--filter", "@vcpdeck/cli", "build"], "CLI/Skill 构建");
+		run(["node", "skills/vcpdeck/vcpdeck.cjs", "--help"], "CLI/Skill 冒烟");
 		run(["pnpm", "--filter", "@vcpdeck/server", "build"], "server 构建");
 		run(["pnpm", "--filter", "@vcpdeck/client", "build"], "client 构建");
 		run(["pnpm", "--filter", "@vcpdeck/launcher", "build"], "Launcher 构建");
@@ -507,9 +529,13 @@ async function main(): Promise<void> {
 		console.log(
 			`[pack-release] 安装/卸载脚本与 zip 平级: ${join(ROOT, args.output, "install.cjs / uninstall.cjs")}`,
 		);
+	} catch (error) {
+		for (const [path, content] of originals) {
+			if (content === undefined) rmSync(path, { force: true });
+			else writeFileSync(path, content);
+		}
+		throw error;
 	} finally {
-		// 4. 恢复版本号
-		run(["node", "scripts/inject-version.cjs", "0.0.0"], "恢复版本号");
 		rmSync(stagingDir, { recursive: true, force: true });
 	}
 }

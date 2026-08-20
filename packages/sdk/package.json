@@ -1,8 +1,11 @@
 {
   "name": "@vcpdeck/sdk",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -10,12 +13,20 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc -p ../shared/tsconfig.build.json && tsc -p tsconfig.build.json",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@vcpdeck/shared": "workspace:*"
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10.26.0"
+  },
+  "packageManager": "pnpm@10.26.0",
+  "peerDependencies": {
+    "@vcpdeck/shared": "0.1.0"
   },
   "devDependencies": {
+    "@vcpdeck/shared": "link:../shared",
+    "typescript": "^7.0.2",
     "vitest": "^3.2.0"
   }
 }

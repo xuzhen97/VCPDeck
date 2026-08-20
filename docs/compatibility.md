@@ -1,10 +1,10 @@
 # VCPDeck 兼容性与升级策略
 
-> 状态：Current｜维护责任：发布维护者｜最后核验：2026-08-15｜当前开发版本：`0.0.0`
+> 状态：Current｜维护责任：发布维护者｜最后核验：2026-08-20｜适用版本：当前 `main`
 
 ## 1. 当前结论
 
-VCPDeck 尚未发布稳定兼容承诺。Server、Client 和 Shared 在正式发布构件中使用同一个 `x.y.z` 版本，推荐始终整套升级。开发构建统一显示 `0.0.0`，不能据此判断协议兼容。
+VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI 与 Skill 在正式发布中使用同一个 `x.y.z` 版本，推荐始终整套升级。`pnpm release --version=x.y.z` 会保留该版本到 Shared 源码、三个 package manifest 和 Skill CLI 构件，提交后再创建同版本 Git Tag；普通开发构建可能仍显示最近准备的发布版本，不能据此判断工作区提交是否已经正式发布。
 
 ## 2. 兼容维度
 
@@ -14,7 +14,8 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client 和 Shared 在正式发
 | Server ↔ Client Pi | `PI_SESSION_JOB_PROTOCOL_VERSION=1`；capabilityDetails 含 SDK/Node/shell 安全摘要 | 必须精确匹配，不匹配明确拒绝 Pi |
 | Server ↔ Client Terminal | `terminal.pty` capabilityDetails + Shared 严格运行时解析 | 无独立数字版本；缺能力时拒绝，seq/generation/state 变化需整套同版本发布 |
 | Server ↔ Frontend | REST/Socket.IO/SSE | Frontend 应与 Server 同一发布版本部署 |
-| SDK ↔ Server | REST DTO 和错误 | SDK 当前为私有 workspace 包，无跨版本承诺 |
+| SDK ↔ Server | REST DTO 和错误 | SDK/Shared 可从同一 Git Tag 子目录安装；只支持与 Server 同版本的标准组合 |
+| CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | Pi 用户级 Git package 安装；升级必须显式切换 Tag |
 | CLI 配置 | 用户级/项目级 JSON `version=1`（ADR-0017） | 未知版本和字段明确拒绝；项目只选择用户级环境；`--server` 直连保持兼容 |
 | Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry | `launcherMinVersion` 字段存在，但当前 Launcher 未执行校验 |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
@@ -30,7 +31,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client 和 Shared 在正式发
 | 同一 `x.y.z` | 同一 `x.y.z` | 同一 `x.y.z` | 支持的标准组合 |
 | 新 Server | 上一版本 Client | 同版本 Frontend | 仅更新窗口临时存在；依赖 capability，必须完成补更 |
 | 旧 Server | 新 Client | 任意 | 不支持主动部署；Server 更新顺序必须在 Client 之前 |
-| 任意发布版本 | 开发版 `0.0.0` | 任意 | 不支持 |
+| 任意发布版本 | 未打 Tag 的工作区构建 | 任意 | 不支持 |
 | Pi 协议版本不同 | 任意 | 任意 | Pi 功能明确不可用，其他 capability 可继续评估 |
 
 “支持”表示进入发布验收矩阵，不表示所有历史版本永久兼容。
@@ -114,7 +115,8 @@ manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身�
 
 每次 Release 至少验证：
 
-- Shared、Server、Client、Frontend、SDK 全量构建；
+- Shared、Server、Client、Frontend、SDK、CLI 全量构建，Skill `vcpdeck.cjs --help` 冒烟；
+- 在仓库外用 pnpm 10.26+ 从同一 Git Tag 安装 SDK/Shared，验证 JavaScript 导入、TypeScript 类型和目标项目单文件打包；
 - Server 与同版本真实 Client 的注册、Job、文件 parser/root/导入导出/取消和重连；
 - Pi 协议版本、锁定 SDK 版本、Session 打开/迁移和 Worker 重连；Terminal capability、真实 PTY、snapshot/seq、控制权和重连；
 - 数据库从上一支持版本升级；

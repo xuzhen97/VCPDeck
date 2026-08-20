@@ -27,9 +27,11 @@ const {
 	appendFileSync,
 	createReadStream,
 	existsSync,
+	readFileSync,
 	mkdirSync,
 	mkdtempSync,
 	rmSync,
+	writeFileSync,
 } = require("node:fs");
 const { once } = require("node:events");
 const net = require("node:net");
@@ -236,13 +238,34 @@ function runPnpm(args, label) {
 }
 
 function packageVersion(version) {
-	runPnpm(
-		["release", `--version=${version}`, `--output=${OUTPUT_REL}`],
-		`打包 ${version}`,
+	const versionFiles = [
+		join(ROOT, "packages", "shared", "package.json"),
+		join(ROOT, "packages", "sdk", "package.json"),
+		join(ROOT, "packages", "cli", "package.json"),
+		join(ROOT, "packages", "shared", "src", "version.ts"),
+		join(ROOT, "pnpm-lock.yaml"),
+		join(ROOT, "skills", "vcpdeck", "vcpdeck.cjs"),
+	];
+	const originals = new Map(
+		versionFiles.map((path) => [
+			path,
+			existsSync(path) ? readFileSync(path, "utf8") : undefined,
+		]),
 	);
-	for (const platform of ["win-x64", "linux-x64"]) {
-		const path = archivePath(version, platform);
-		if (!existsSync(path)) throw new Error(`打包后缺少 ${path}`);
+	try {
+		runPnpm(
+			["release", `--version=${version}`, `--output=${OUTPUT_REL}`],
+			`打包 ${version}`,
+		);
+		for (const platform of ["win-x64", "linux-x64"]) {
+			const path = archivePath(version, platform);
+			if (!existsSync(path)) throw new Error(`打包后缺少 ${path}`);
+		}
+	} finally {
+		for (const [path, content] of originals) {
+			if (content === undefined) rmSync(path, { force: true });
+			else writeFileSync(path, content);
+		}
 	}
 }
 

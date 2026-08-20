@@ -33,7 +33,7 @@
 
 | 组件 | 当前职责 |
 | --- | --- |
-| `scripts/pack-release.ts` | 注入版本、构建 Shared/Server/Client/Frontend/Launcher、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
+| `scripts/pack-release.ts` | 同步 Shared/SDK/CLI 与运行时版本、构建 Shared/SDK/CLI/Server/Client/Frontend/Launcher、生成并验证 `skills/vcpdeck/vcpdeck.cjs`、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
 | CLI `release upload` | 解析命名/项目环境（ADR-0017）、参数与文件名，读取本地 archive、计算 SHA-256 和输出安全进度；password 登录/Bearer、原始字节流上传及 API 错误归一化复用 `@vcpdeck/sdk` |
 | `ReleaseController` | Release 列表、构件下载、上传校验和自动触发编排 |
 | `ReleaseService` | Release 持久化、状态转换、Client 更新明细和 SHA-256 复核 |
@@ -57,7 +57,7 @@ Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由
 | 当前应用版本 | Launcher `apps/current` 或 `apps/state.json` | Linux 使用 symlink；Windows 使用 state 文件 |
 | 已准备目标版本 | Launcher 进程内 `pendingVersion` | Launcher 重启后不保留 |
 | 运行中的业务进程 | Launcher `Daemon` | Server 数据库不能证明进程仍健康 |
-| Server/Client 构建版本 | `@vcpdeck/shared` 的 `VERSION` | 发布时注入；开发构建为 `0.0.0` |
+| Server/Client 构建版本 | `@vcpdeck/shared` 的 `VERSION` | `pnpm release --version=x.y.z` 同步并保留，提交与同版本 Git Tag 后成为正式发布 |
 | archive SHA-256 | 上传请求、`Release.sha256`、`UpdateRequest.sha256` | 当前 manifest 内的 `sha256` 留空，不是权威值 |
 
 业务数据、数据库、Storage 和 Release archive 必须存放在 Launcher `apps/<version>/` 之外。current 切换只改变应用构件，不迁移或恢复持久数据。

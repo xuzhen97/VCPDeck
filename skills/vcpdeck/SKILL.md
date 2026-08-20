@@ -1,7 +1,7 @@
 ---
 name: vcpdeck
 description: Use VCPDeck through its CLI to access cockpit capabilities exposed by the VCPDeck Server. Use when the user asks to operate VCPDeck from Pi, inspect available CLI capabilities, publish or update VCPDeck, or use machine, Job, file, Terminal, Pi, FRP, Storage, and other commands as they become available. Currently the implemented CLI capability is Release upload and Server/Client self-update initiation.
-compatibility: Requires Node.js 24+, the generated vcpdeck.cjs CLI beside this file, and network access to the VCPDeck Server. Individual capabilities may have additional requirements; Release packaging also requires the VCPDeck repository and pnpm.
+compatibility: Requires Node.js 24+, the bundled vcpdeck.cjs CLI beside this file, and network access to the VCPDeck Server. Individual capabilities may have additional requirements; Release packaging also requires the VCPDeck repository and pnpm 10.26+.
 ---
 
 # VCPDeck CLI
@@ -12,19 +12,19 @@ Skill 不实现 HTTP、认证、轮询或业务状态机。它调用同目录的
 
 ## 入口与能力发现
 
-在本 `SKILL.md` 所在目录运行：
+先从本 `SKILL.md` 解析同目录 `vcpdeck.cjs` 的绝对路径，记为 `<vcpdeck-cli>`。执行时必须保持 Pi 当前项目为工作目录，**不得 `cd` 到 Skill/安装仓库目录**，否则 CLI 无法读取当前项目的 `.vcpdeck.json`：
 
 ```bash
-node ./vcpdeck.cjs --help
+node "<vcpdeck-cli>" --help
 ```
 
-若 `vcpdeck.cjs` 不存在，在 VCPDeck 仓库根目录构建：
+正式 Git Tag 必须已经包含 `vcpdeck.cjs`；若源码开发分支缺失，可在 VCPDeck 仓库根目录构建：
 
 ```bash
 pnpm --filter @vcpdeck/cli build
 ```
 
-以当前 CLI `--help` 和源码为命令事实来源。Server 或 SDK 已经具备某项 API，不代表 CLI 已经提供对应命令；不得自行猜测命令名或把规划能力描述为已实现。
+以下命令中的 `<vcpdeck-cli>` 始终指绝对路径。以当前 CLI `--help` 和源码为命令事实来源。Server 或 SDK 已经具备某项 API，不代表 CLI 已经提供对应命令；不得自行猜测命令名或把规划能力描述为已实现。
 
 ## 当前能力
 
@@ -39,19 +39,19 @@ pnpm --filter @vcpdeck/cli build
 用户级环境定义保存在 `~/.vcpdeck/cli/config.json`；项目 `.vcpdeck.json` 只保存环境名。Skill 不直接读取或修改这些 JSON，统一调用 CLI：
 
 ```bash
-node ./vcpdeck.cjs env list
-node ./vcpdeck.cjs env current
+node "<vcpdeck-cli>" env list
+node "<vcpdeck-cli>" env current
 ```
 
 需要配置时使用：
 
 ```bash
-node ./vcpdeck.cjs env add dev \
+node "<vcpdeck-cli>" env add dev \
   --server=http://127.0.0.1:3001 \
   --auth=password --username=admin \
   --password-env=VCPDECK_DEV_PASSWORD
-node ./vcpdeck.cjs env use dev --global
-node ./vcpdeck.cjs env use dev --local
+node "<vcpdeck-cli>" env use dev --global
+node "<vcpdeck-cli>" env use dev --local
 ```
 
 Bearer 环境改用 `--auth=bearer --token-env=<VAR>`。不得把密码或 Token 值写进配置或命令。
@@ -94,7 +94,7 @@ Server 更新并探活 → 逐台更新在线 Client → 离线 Client 后续注
 #### 1. 发布前检查
 
 1. 阅读 `../../docs/design/release-and-update.md`、`../../docs/design/cli.md` 与 `../../docs/deployment.md` §9。
-2. 运行 `node ./vcpdeck.cjs env current`，向用户展示环境名、Server 和来源并确认；不要打印凭据值。
+2. 在当前项目 cwd 运行 `node "<vcpdeck-cli>" env current`，向用户展示环境名、Server 和来源并确认；不要打印凭据值。
 3. 确认已备份 SQLite、Storage 和 Release archive。
 4. 确认目标 Linux 主机具备 `unzip`，Server/Client Launcher 正常，且没有其他活动 Release。
 5. 确认凭据环境变量已由用户在本地设置，不打印其值。
@@ -122,7 +122,7 @@ dist-release/vcpdeck-x.y.z-linux-x64.zip
 用户确认 Server、版本和文件后，在本 Skill 目录运行：
 
 ```bash
-node ./vcpdeck.cjs release upload \
+node "<vcpdeck-cli>" release upload \
   <repo>/dist-release/vcpdeck-x.y.z-win-x64.zip \
   <repo>/dist-release/vcpdeck-x.y.z-linux-x64.zip
 ```

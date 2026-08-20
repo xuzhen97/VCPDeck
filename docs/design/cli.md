@@ -68,7 +68,7 @@ CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 S
 }
 ```
 
-项目文件可以提交 Git，但只能选择用户级已注册环境，不能定义 Server、认证或凭据变量。不同操作者需要在本机注册同名环境。
+项目文件是否提交 Git 由目标仓库自行决定；CLI 对已提交和未提交文件处理相同。它只能选择用户级已注册环境，不能定义 Server、认证或凭据变量。不同操作者需要在本机注册同名环境。
 
 ## 3. 环境选择与查找
 
@@ -146,11 +146,36 @@ Password 环境先通过 SDK 登录取得进程内 Cookie，再上传；Bearer �
 - `env current` 的成功只表示配置可解析，不表示 Server 可达或凭据有效；
 - 环境删除不会修复项目引用，被删除环境的项目后续明确失败。
 
-## 7. Skill 与后续扩展
+## 7. Skill 安装与当前项目 cwd
+
+正式版本通过 Pi 用户级 Git package 安装：
+
+```bash
+pi install git:github.com/xuzhen97/VCPDeck@v0.1.0
+```
+
+Pi 克隆整个仓库，从 `skills/vcpdeck/SKILL.md` 发现 Skill；同目录 `vcpdeck.cjs` 是随 Tag 提交的 CLI 单文件构件。所有项目共享这一份安装。升级到新 Tag 时再次执行 `pi install ...@vX.Y.Z`，固定 Tag 不会由 `pi update --extensions` 自动推进。
+
+Skill 调用 CLI 时从 `SKILL.md` 解析 `vcpdeck.cjs` 的绝对路径，但必须保留 Pi 当前项目为 cwd，不得切换到 Skill 安装目录。这样 `D:/a` 与 `D:/b` 可以分别命中各自最近的 `.vcpdeck.json`；用户级 `~/.vcpdeck/cli/config.json`、项目选择器和 Git package 安装互不覆盖。
 
 `skills/vcpdeck/SKILL.md` 通过 CLI `env current` 取得环境权威摘要，不直接读取 JSON。后续每个 CLI 业务命令都复用同一环境解析结果，并在 Skill 中新增对应功能章节。Server/SDK 已有 API 不等于 CLI 命令已落地。
 
-## 8. 测试与验收
+## 8. SDK/Shared Git 安装
+
+SDK 不读取 CLI 的 HOME/cwd 配置，只接受调用方提供的 `baseUrl` 与认证。Node.js 24+、pnpm 10.26+ 的目标项目可从同一个稳定 Tag 直接安装 SDK 与 Shared：
+
+```bash
+pnpm \
+  --allow-build="@vcpdeck/sdk" \
+  --allow-build="@vcpdeck/shared" \
+  add \
+  "github:xuzhen97/VCPDeck#v0.1.0&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.1.0&path:/packages/shared"
+```
+
+两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。
+
+## 9. 测试与验收
 
 当前单元/集成测试覆盖：
 
