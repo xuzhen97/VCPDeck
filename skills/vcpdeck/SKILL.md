@@ -30,7 +30,7 @@ pnpm --filter @vcpdeck/cli build
 
 | 功能域 | CLI 命令 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| 多环境配置 | `env add/list/show/current/use/remove` | 已实现 | 用户级注册环境，项目级只选择默认环境 |
+| 多环境配置 | `env add/list/show/current/check/use/remove` | 已实现 | 用户级注册环境，项目级只选择默认环境；`check` 验证 Token 对应身份 |
 | Release / 自更新 | `release upload` | 已实现 | 上传 Windows/Linux 两个平台构件；两个构件齐备后由 Server 自动编排 Server/Client 更新 |
 | 机器、Job、文件、Terminal、Pi、FRP、Storage 等 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明，不直接绕过 CLI 调用 |
 
@@ -43,20 +43,19 @@ node "<vcpdeck-cli>" env list
 node "<vcpdeck-cli>" env current
 ```
 
-需要配置时使用：
+推荐先在 Frontend `/settings/tokens` 为 CLI 创建独立 Token，立即保存到本机环境变量，再注册命名环境：
 
 ```bash
-node "<vcpdeck-cli>" env add dev \
-  --server=http://127.0.0.1:3001 \
-  --auth=password --username=admin \
-  --password-env=VCPDECK_DEV_PASSWORD
-node "<vcpdeck-cli>" env use dev --global
-node "<vcpdeck-cli>" env use dev --local
+node "<vcpdeck-cli>" env add prod \
+  --server=https://deck.example.com \
+  --token-env=VCPDECK_PROD_TOKEN
+node "<vcpdeck-cli>" env use prod --global
+node "<vcpdeck-cli>" env check
 ```
 
-Bearer 环境改用 `--auth=bearer --token-env=<VAR>`。不得把密码或 Token 值写进配置或命令。
+`env check` 通过 SDK 请求 `/api/auth/me`，安全显示该 Token 对应的真实身份；个人资料修改用户名不会改变 Token 身份。`--auth=bearer` 仍兼容但可省略。用户名/密码环境仅为旧配置和临时兼容入口，不作为新环境首选。不得把密码或 Token 值写进配置、命令或对话。
 
-环境选择顺序为：显式 `--env`、`VCPDECK_ENVIRONMENT`、最近项目配置、全局默认。执行任何业务操作前必须先运行 `env current`，展示并核对环境名、Server 和来源；有副作用操作还需取得用户确认。项目配置损坏、引用不存在环境或目标 Server 不符合预期时停止，不通过 `--server` 绕过。
+环境选择顺序为：显式 `--env`、`VCPDECK_ENVIRONMENT`、最近项目配置、全局默认。执行任何业务操作前必须先运行 `env current` 展示并核对环境名、Server 和来源，并运行 `env check` 验证 Server 可达、凭据有效及 Token 身份；有副作用操作还需取得用户确认。项目配置损坏、引用不存在环境或目标 Server 不符合预期时停止，不通过 `--server` 绕过。
 
 ## 通用操作规则
 
@@ -84,7 +83,7 @@ Server 更新并探活 → 逐台更新在线 Client → 离线 Client 后续注
 
 - 第二个平台构件上传成功后会立即触发更新，没有额外确认关卡。
 - 上传前必须复述 Server URL、目标版本和两个 archive 路径，并取得明确确认。
-- 优先读取用户已在本地设置的 `VCPDECK_ADMIN_USERNAME` / `VCPDECK_ADMIN_PASSWORD`；不要通过会显示值的命令检查，也不要让用户把密码贴到对话中。
+- 优先使用用户在 Frontend `/settings/tokens` 创建并保存在本机环境变量中的专用 Bearer Token；不得让用户把 Token 贴到对话中。用户名/密码只用于旧环境或直连兼容。
 - Release 上传是不可盲目重试的 POST。网络结果不明或只上传了一个平台时，先核对发版页面和 Release 记录。
 - 同一版本号不得复用。失败后修复问题并使用新版本号。
 - Launcher 回退只切回应用版本目录，不回退数据库、Storage 或外部副作用；发布前必须确认备份。
@@ -94,7 +93,7 @@ Server 更新并探活 → 逐台更新在线 Client → 离线 Client 后续注
 #### 1. 发布前检查
 
 1. 阅读 `../../docs/design/release-and-update.md`、`../../docs/design/cli.md` 与 `../../docs/deployment.md` §9。
-2. 在当前项目 cwd 运行 `node "<vcpdeck-cli>" env current`，向用户展示环境名、Server 和来源并确认；不要打印凭据值。
+2. 在当前项目 cwd 运行 `node "<vcpdeck-cli>" env current` 展示环境名、Server 和来源，再运行 `node "<vcpdeck-cli>" env check` 验证 Token 对应身份并请用户确认；不要打印凭据值。
 3. 确认已备份 SQLite、Storage 和 Release archive。
 4. 确认目标 Linux 主机具备 `unzip`，Server/Client Launcher 正常，且没有其他活动 Release。
 5. 确认凭据环境变量已由用户在本地设置，不打印其值。
@@ -119,7 +118,7 @@ dist-release/vcpdeck-x.y.z-linux-x64.zip
 
 #### 3. 最终确认与上传
 
-用户确认 Server、版本和文件后，在本 Skill 目录运行：
+用户确认 Server、版本和文件后，保持当前项目 cwd 运行：
 
 ```bash
 node "<vcpdeck-cli>" release upload \

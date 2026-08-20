@@ -4,6 +4,7 @@ import { stat } from "node:fs/promises";
 import { VcpDeckClient } from "@vcpdeck/sdk";
 import type { ReleaseInfo, ReleasePlatform } from "@vcpdeck/shared";
 import type { ConfigPaths } from "./config.js";
+import { createAuthenticatedClient } from "./authenticated-client.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
 import {
 	formatEnvironmentSummary,
@@ -127,31 +128,6 @@ async function uploadOne(
 		duplex: "half",
 	});
 	return release;
-}
-
-/** 根据环境认证方式创建 SDK 客户端。 */
-async function createAuthenticatedClient(
-	environment: ResolvedEnvironment,
-): Promise<VcpDeckClient> {
-	if (!environment.credentials) throw new Error("环境凭据未解析");
-	if (environment.credentials.type === "bearer") {
-		return new VcpDeckClient({
-			baseUrl: environment.server,
-			auth: { type: "bearer", token: environment.credentials.token },
-		});
-	}
-	const loginClient = new VcpDeckClient({
-		baseUrl: environment.server,
-		auth: { type: "cookie" },
-	});
-	const { cookie } = await loginClient.auth.loginSession({
-		username: environment.credentials.username,
-		password: environment.credentials.password,
-	});
-	return new VcpDeckClient({
-		baseUrl: environment.server,
-		auth: { type: "cookie", cookie },
-	});
 }
 
 function exclusiveAlias(

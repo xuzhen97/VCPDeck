@@ -31,6 +31,7 @@
 9. CLI 和 Skill 在有副作用操作前展示最终环境名、Server 和配置来源；只展示凭据变量名，不展示其值。CLI 的同步成功不替代 Server/Job/Release 等业务终态核验。
 10. 用户级配置使用临时文件 + rename 原子写入；非 Windows 下目录和文件权限分别收紧为 `0700`、`0600`。项目选择器允许提交 Git，但不得含秘密。
 11. 环境名、Server URL、认证类型、凭据变量名和未知字段都进行严格校验；Server 必须是无用户名密码、query、fragment 和业务路径的 HTTP/HTTPS origin。
+12. 新命名环境默认推荐 Frontend `/settings/tokens` 创建的 Bearer Credential；`env add --token-env=<VAR>` 可省略 `--auth=bearer`，仍落为既有 version 1 Bearer 结构。`env check` 通过 SDK `/api/auth/me` 验证凭据对应身份。Password 环境和显式 `--auth=bearer` 保持兼容，不迁移或重写用户配置。
 
 ## 候选方案
 

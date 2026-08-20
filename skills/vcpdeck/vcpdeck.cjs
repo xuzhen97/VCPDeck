@@ -37,7 +37,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.1.0";
+    exports2.VERSION = "0.1.1";
   }
 });
 
@@ -1376,633 +1376,6 @@ __export(index_exports, {
 module.exports = __toCommonJS(index_exports);
 var import_shared2 = __toESM(require_dist(), 1);
 
-// dist/config.js
-var import_node_fs = require("node:fs");
-var import_promises = require("node:fs/promises");
-var import_node_os = require("node:os");
-var import_node_path = require("node:path");
-var CLI_CONFIG_VERSION = 1;
-var PROJECT_CONFIG_FILE = ".vcpdeck.json";
-var ENVIRONMENT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-var ENVIRONMENT_VARIABLE_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-function defaultConfigPaths(cwd = process.cwd()) {
-  return {
-    globalConfigPath: (0, import_node_path.join)((0, import_node_os.homedir)(), ".vcpdeck", "cli", "config.json"),
-    cwd: (0, import_node_path.resolve)(cwd)
-  };
-}
-function normalizeServerUrl(value) {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error(`Server URL \u65E0\u6548: ${value}`);
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:" || !url.hostname) {
-    throw new Error("Server URL \u5FC5\u987B\u662F\u5E26\u4E3B\u673A\u540D\u7684 http/https \u5730\u5740");
-  }
-  if (url.username || url.password) {
-    throw new Error("Server URL \u4E0D\u5F97\u5185\u5D4C\u7528\u6237\u540D\u6216\u5BC6\u7801");
-  }
-  if (url.search || url.hash) {
-    throw new Error("Server URL \u4E0D\u5F97\u5305\u542B query \u6216 fragment");
-  }
-  if (url.pathname !== "/" && url.pathname !== "") {
-    throw new Error("Server URL \u5FC5\u987B\u662F origin\uFF0C\u4E0D\u5F97\u5305\u542B\u4E1A\u52A1\u8DEF\u5F84");
-  }
-  return url.origin;
-}
-function assertEnvironmentName(name) {
-  if (!ENVIRONMENT_NAME_RE.test(name) || name === "__proto__" || name === "constructor" || name === "prototype") {
-    throw new Error("\u73AF\u5883\u540D\u5FC5\u987B\u4EE5\u5B57\u6BCD\u6216\u6570\u5B57\u5F00\u5934\uFF0C\u53EA\u542B\u5B57\u6BCD\u3001\u6570\u5B57\u3001\u70B9\u3001\u4E0B\u5212\u7EBF\u3001\u8FDE\u5B57\u7B26\uFF08\u6700\u957F 64\uFF09\uFF0C\u4E14\u4E0D\u80FD\u4F7F\u7528\u4FDD\u7559\u540D\u79F0");
-  }
-}
-function assertEnvironmentVariableName(name) {
-  if (!ENVIRONMENT_VARIABLE_RE.test(name)) {
-    throw new Error(`\u73AF\u5883\u53D8\u91CF\u540D\u65E0\u6548: ${name}`);
-  }
-}
-function parseCliConfig(value) {
-  const root = requireRecord(value, "CLI \u914D\u7F6E");
-  assertOnlyKeys(root, ["version", "defaultEnvironment", "environments"], "CLI \u914D\u7F6E");
-  if (root.version !== CLI_CONFIG_VERSION) {
-    throw new Error(`CLI \u914D\u7F6E version \u5FC5\u987B\u4E3A ${CLI_CONFIG_VERSION}`);
-  }
-  if (root.defaultEnvironment !== void 0) {
-    if (typeof root.defaultEnvironment !== "string") {
-      throw new Error("defaultEnvironment \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
-    }
-    assertEnvironmentName(root.defaultEnvironment);
-  }
-  const environmentsValue = requireRecord(root.environments, "environments");
-  const environments = {};
-  for (const [name, rawEnvironment] of Object.entries(environmentsValue)) {
-    assertEnvironmentName(name);
-    environments[name] = parseEnvironment(rawEnvironment, name);
-  }
-  if (root.defaultEnvironment !== void 0 && !Object.hasOwn(environments, root.defaultEnvironment)) {
-    throw new Error(`\u9ED8\u8BA4\u73AF\u5883\u4E0D\u5B58\u5728: ${root.defaultEnvironment}`);
-  }
-  const config = { version: 1, environments };
-  if (root.defaultEnvironment) {
-    config.defaultEnvironment = root.defaultEnvironment;
-  }
-  return config;
-}
-function parseProjectConfig(value) {
-  const root = requireRecord(value, "\u9879\u76EE\u914D\u7F6E");
-  assertOnlyKeys(root, ["version", "environment"], "\u9879\u76EE\u914D\u7F6E");
-  if (root.version !== CLI_CONFIG_VERSION) {
-    throw new Error(`\u9879\u76EE\u914D\u7F6E version \u5FC5\u987B\u4E3A ${CLI_CONFIG_VERSION}`);
-  }
-  if (typeof root.environment !== "string") {
-    throw new Error("\u9879\u76EE\u914D\u7F6E environment \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
-  }
-  assertEnvironmentName(root.environment);
-  return { version: 1, environment: root.environment };
-}
-async function loadCliConfig(path, options = {}) {
-  const value = await readJson(path, options.required ?? false);
-  return value === void 0 ? { version: CLI_CONFIG_VERSION, environments: {} } : parseCliConfig(value);
-}
-async function loadProjectConfig(path) {
-  const value = await readJson(path, true);
-  return parseProjectConfig(value);
-}
-async function localProjectConfigTarget(cwd) {
-  const normalizedCwd = (0, import_node_path.resolve)(cwd);
-  const existing = await findProjectConfig(normalizedCwd);
-  if (existing)
-    return existing;
-  let directory = normalizedCwd;
-  for (; ; ) {
-    if (await exists((0, import_node_path.join)(directory, ".git"))) {
-      return (0, import_node_path.join)(directory, PROJECT_CONFIG_FILE);
-    }
-    const parent = (0, import_node_path.dirname)(directory);
-    if (parent === directory)
-      return (0, import_node_path.join)(normalizedCwd, PROJECT_CONFIG_FILE);
-    directory = parent;
-  }
-}
-async function saveCliConfig(path, config) {
-  const validated = parseCliConfig(config);
-  await writeJsonAtomic(path, validated, true);
-}
-async function saveProjectConfig(path, config) {
-  const validated = parseProjectConfig(config);
-  await writeJsonAtomic(path, validated, false);
-}
-async function findProjectConfig(cwd) {
-  let directory = (0, import_node_path.resolve)(cwd);
-  for (; ; ) {
-    const candidate = (0, import_node_path.join)(directory, PROJECT_CONFIG_FILE);
-    if (await exists(candidate))
-      return candidate;
-    if (await exists((0, import_node_path.join)(directory, ".git")))
-      return void 0;
-    const parent = (0, import_node_path.dirname)(directory);
-    if (parent === directory || directory === (0, import_node_path.parse)(directory).root)
-      return void 0;
-    directory = parent;
-  }
-}
-function parseEnvironment(value, name) {
-  const root = requireRecord(value, `\u73AF\u5883 ${name}`);
-  assertOnlyKeys(root, ["server", "auth"], `\u73AF\u5883 ${name}`);
-  if (typeof root.server !== "string") {
-    throw new Error(`\u73AF\u5883 ${name}.server \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
-  }
-  const server = normalizeServerUrl(root.server);
-  const auth = requireRecord(root.auth, `\u73AF\u5883 ${name}.auth`);
-  if (auth.type === "password") {
-    assertOnlyKeys(auth, ["type", "username", "passwordEnv"], `\u73AF\u5883 ${name}.auth`);
-    if (typeof auth.username !== "string" || !auth.username.trim()) {
-      throw new Error(`\u73AF\u5883 ${name}.auth.username \u4E0D\u80FD\u4E3A\u7A7A`);
-    }
-    if (typeof auth.passwordEnv !== "string") {
-      throw new Error(`\u73AF\u5883 ${name}.auth.passwordEnv \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
-    }
-    assertEnvironmentVariableName(auth.passwordEnv);
-    return {
-      server,
-      auth: {
-        type: "password",
-        username: auth.username,
-        passwordEnv: auth.passwordEnv
-      }
-    };
-  }
-  if (auth.type === "bearer") {
-    assertOnlyKeys(auth, ["type", "tokenEnv"], `\u73AF\u5883 ${name}.auth`);
-    if (typeof auth.tokenEnv !== "string") {
-      throw new Error(`\u73AF\u5883 ${name}.auth.tokenEnv \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
-    }
-    assertEnvironmentVariableName(auth.tokenEnv);
-    return { server, auth: { type: "bearer", tokenEnv: auth.tokenEnv } };
-  }
-  throw new Error(`\u73AF\u5883 ${name}.auth.type \u5FC5\u987B\u4E3A password \u6216 bearer`);
-}
-function requireRecord(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} \u5FC5\u987B\u662F\u5BF9\u8C61`);
-  }
-  return value;
-}
-function assertOnlyKeys(record, allowed, label) {
-  const unknown = Object.keys(record).filter((key) => !allowed.includes(key));
-  if (unknown.length)
-    throw new Error(`${label} \u542B\u672A\u77E5\u5B57\u6BB5: ${unknown.join(", ")}`);
-}
-async function readJson(path, required) {
-  let text;
-  try {
-    text = await (0, import_promises.readFile)(path, "utf8");
-  } catch (error) {
-    if (isErrno(error, "ENOENT") && !required)
-      return void 0;
-    if (isErrno(error, "ENOENT"))
-      throw new Error(`\u914D\u7F6E\u6587\u4EF6\u4E0D\u5B58\u5728: ${path}`);
-    throw error;
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`\u914D\u7F6E\u6587\u4EF6\u4E0D\u662F\u6709\u6548 JSON: ${path}`);
-  }
-}
-async function writeJsonAtomic(path, value, privateFile) {
-  const directory = (0, import_node_path.dirname)(path);
-  await (0, import_promises.mkdir)(directory, { recursive: true, mode: privateFile ? 448 : 493 });
-  if (privateFile && process.platform !== "win32")
-    await (0, import_promises.chmod)(directory, 448);
-  const tempPath = (0, import_node_path.join)(directory, `.${Date.now()}-${process.pid}.tmp`);
-  try {
-    await (0, import_promises.writeFile)(tempPath, `${JSON.stringify(value, null, 2)}
-`, {
-      encoding: "utf8",
-      mode: privateFile ? 384 : 420
-    });
-    if (privateFile && process.platform !== "win32")
-      await (0, import_promises.chmod)(tempPath, 384);
-    await (0, import_promises.rename)(tempPath, path);
-    if (privateFile && process.platform !== "win32")
-      await (0, import_promises.chmod)(path, 384);
-  } finally {
-    try {
-      await (0, import_promises.rm)(tempPath, { force: true });
-    } catch {
-    }
-  }
-}
-async function exists(path) {
-  try {
-    await (0, import_promises.access)(path, import_node_fs.constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function isErrno(error, code) {
-  return typeof error === "object" && error !== null && "code" in error && error.code === code;
-}
-
-// dist/arguments.js
-function parseCommandArgs(argv, schema = {}) {
-  const valueOptions = new Set(schema.value ?? []);
-  const booleanOptions = new Set(schema.boolean ?? []);
-  const options = {};
-  const positionals = [];
-  for (let index = 0; index < argv.length; index++) {
-    const arg = argv[index];
-    if (!arg.startsWith("--")) {
-      positionals.push(arg);
-      continue;
-    }
-    const parsed = parseLongOption(arg);
-    assertKnownOption(parsed.name, valueOptions, booleanOptions);
-    if (Object.hasOwn(options, parsed.name)) {
-      throw new Error(`\u9009\u9879\u4E0D\u80FD\u91CD\u590D: --${parsed.name}`);
-    }
-    if (booleanOptions.has(parsed.name)) {
-      if (parsed.inlineValue !== void 0) {
-        throw new Error(`\u5E03\u5C14\u9009\u9879\u4E0D\u63A5\u53D7\u503C: --${parsed.name}`);
-      }
-      options[parsed.name] = true;
-      continue;
-    }
-    const value = parsed.inlineValue ?? argv[++index];
-    options[parsed.name] = requireOptionValue(parsed.name, value);
-  }
-  return { positionals, options };
-}
-function parseLongOption(arg) {
-  const raw = arg.slice(2);
-  const separator = raw.indexOf("=");
-  return separator >= 0 ? { name: raw.slice(0, separator), inlineValue: raw.slice(separator + 1) } : { name: raw };
-}
-function assertKnownOption(name, valueOptions, booleanOptions) {
-  if (!name || !valueOptions.has(name) && !booleanOptions.has(name)) {
-    throw new Error(`\u672A\u77E5\u9009\u9879: --${name}`);
-  }
-}
-function requireOptionValue(name, value) {
-  if (value === void 0 || value.startsWith("--") || value.length === 0) {
-    throw new Error(`\u9009\u9879\u7F3A\u5C11\u503C: --${name}`);
-  }
-  return value;
-}
-function stringOption(options, name) {
-  const value = options[name];
-  return typeof value === "string" ? value : void 0;
-}
-
-// dist/environment.js
-async function resolveEnvironment(options = {}) {
-  const paths = options.paths ?? defaultConfigPaths();
-  const processEnv = options.processEnv ?? process.env;
-  if (options.server && options.environment) {
-    throw new Error("--server \u4E0E --env/--environment \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528");
-  }
-  if (options.server) {
-    return resolveDirectEnvironment(options, processEnv);
-  }
-  const globalConfig = await loadCliConfig(paths.globalConfigPath);
-  let source;
-  let name;
-  if (options.environment) {
-    name = options.environment;
-    source = { type: "flag", name };
-  } else if (processEnv.VCPDECK_ENVIRONMENT) {
-    name = processEnv.VCPDECK_ENVIRONMENT;
-    source = { type: "environment-variable", name };
-  } else {
-    const projectPath = await findProjectConfig(paths.cwd);
-    if (projectPath) {
-      const project = await loadProjectConfig(projectPath);
-      name = project.environment;
-      source = { type: "project", name, path: projectPath };
-    } else if (globalConfig.defaultEnvironment) {
-      name = globalConfig.defaultEnvironment;
-      source = {
-        type: "global-default",
-        name,
-        path: paths.globalConfigPath
-      };
-    } else {
-      throw new Error("\u672A\u9009\u62E9 VCPDeck \u73AF\u5883\uFF1A\u4F7F\u7528 --env\u3001VCPDECK_ENVIRONMENT\u3001\u9879\u76EE .vcpdeck.json \u6216\u5168\u5C40\u9ED8\u8BA4\u73AF\u5883");
-    }
-  }
-  assertEnvironmentName(name);
-  const environment = Object.hasOwn(globalConfig.environments, name) ? globalConfig.environments[name] : void 0;
-  if (!environment) {
-    throw new Error(`\u73AF\u5883\u4E0D\u5B58\u5728: ${name}\uFF08\u914D\u7F6E: ${paths.globalConfigPath}\uFF09`);
-  }
-  return resolveRegisteredEnvironment({
-    name,
-    environment,
-    source,
-    processEnv,
-    requireCredentials: options.requireCredentials ?? true
-  });
-}
-function environmentSourceLabel(source) {
-  switch (source.type) {
-    case "direct":
-      return "--server \u76F4\u8FDE";
-    case "flag":
-      return `--env=${source.name}`;
-    case "environment-variable":
-      return `VCPDECK_ENVIRONMENT=${source.name}`;
-    case "project":
-      return source.path;
-    case "global-default":
-      return `${source.path}\uFF08\u5168\u5C40\u9ED8\u8BA4\uFF09`;
-    default:
-      throw new Error("\u672A\u77E5\u73AF\u5883\u6765\u6E90");
-  }
-}
-function formatEnvironmentSummary(environment) {
-  const lines = [
-    `\u73AF\u5883: ${environment.name ?? "direct"}`,
-    `Server: ${environment.server}`,
-    `\u6765\u6E90: ${environmentSourceLabel(environment.source)}`
-  ];
-  if (environment.auth.type === "password") {
-    lines.push(`\u8BA4\u8BC1: password (${environment.auth.username}, ${environment.auth.credentialEnv})`);
-  } else {
-    lines.push(`\u8BA4\u8BC1: bearer (${environment.auth.credentialEnv})`);
-  }
-  return lines.join("\n");
-}
-function resolveDirectEnvironment(options, processEnv) {
-  const username = options.username ?? processEnv.VCPDECK_ADMIN_USERNAME;
-  const password = options.password ?? processEnv.VCPDECK_ADMIN_PASSWORD;
-  const requireCredentials = options.requireCredentials ?? true;
-  if (requireCredentials && (!username || !password)) {
-    throw new Error("\u76F4\u8FDE\u6A21\u5F0F\u9700\u8981 --username/--password \u6216 VCPDECK_ADMIN_USERNAME/VCPDECK_ADMIN_PASSWORD");
-  }
-  const environment = {
-    name: null,
-    server: normalizeServerUrl(options.server),
-    auth: {
-      type: "password",
-      username: username ?? "<\u672A\u8BBE\u7F6E>",
-      credentialEnv: "VCPDECK_ADMIN_PASSWORD"
-    },
-    source: { type: "direct" }
-  };
-  if (username && password) {
-    environment.credentials = { type: "password", username, password };
-  }
-  return environment;
-}
-function resolveRegisteredEnvironment(options) {
-  const { name, environment, source, processEnv, requireCredentials } = options;
-  if (environment.auth.type === "password") {
-    const password = processEnv[environment.auth.passwordEnv];
-    if (requireCredentials && !password) {
-      throw new Error(`\u73AF\u5883 ${name} \u7F3A\u5C11\u51ED\u636E\u53D8\u91CF: ${environment.auth.passwordEnv}`);
-    }
-    const resolved2 = {
-      name,
-      server: environment.server,
-      auth: {
-        type: "password",
-        username: environment.auth.username,
-        credentialEnv: environment.auth.passwordEnv
-      },
-      source
-    };
-    if (password) {
-      resolved2.credentials = {
-        type: "password",
-        username: environment.auth.username,
-        password
-      };
-    }
-    return resolved2;
-  }
-  const token = processEnv[environment.auth.tokenEnv];
-  if (requireCredentials && !token) {
-    throw new Error(`\u73AF\u5883 ${name} \u7F3A\u5C11\u51ED\u636E\u53D8\u91CF: ${environment.auth.tokenEnv}`);
-  }
-  const resolved = {
-    name,
-    server: environment.server,
-    auth: { type: "bearer", credentialEnv: environment.auth.tokenEnv },
-    source
-  };
-  if (token)
-    resolved.credentials = { type: "bearer", token };
-  return resolved;
-}
-
-// dist/env-command.js
-async function runEnvCommand(subcommand, argv, context = {}) {
-  const paths = context.paths ?? defaultConfigPaths();
-  const log = context.log ?? console.log;
-  switch (subcommand) {
-    case "list":
-      await listEnvironments(argv, paths, log);
-      return;
-    case "show":
-      await showEnvironment(argv, paths, log);
-      return;
-    case "current":
-      await showCurrent(argv, paths, context.processEnv ?? process.env, log);
-      return;
-    case "add":
-      await addEnvironment(argv, paths, log);
-      return;
-    case "remove":
-      await removeEnvironment(argv, paths, log);
-      return;
-    case "use":
-      await useEnvironment(argv, paths, log);
-      return;
-    default:
-      throw new Error(envUsage());
-  }
-}
-function envUsage() {
-  return [
-    "\u73AF\u5883\u547D\u4EE4:",
-    "  vcpdeck env list",
-    "  vcpdeck env show <name>",
-    "  vcpdeck env current [--env=<name>] [--server=<url>]",
-    "  vcpdeck env add <name> --server=<url> --auth=password --username=<name> --password-env=<VAR>",
-    "  vcpdeck env add <name> --server=<url> --auth=bearer --token-env=<VAR>",
-    "  vcpdeck env remove <name>",
-    "  vcpdeck env use <name> --global|--local"
-  ].join("\n");
-}
-async function listEnvironments(argv, paths, log) {
-  assertNoArgs(argv);
-  const config = await loadCliConfig(paths.globalConfigPath);
-  const names = Object.keys(config.environments).sort((left, right) => left.localeCompare(right, "en"));
-  if (!names.length) {
-    log("\u5C1A\u672A\u914D\u7F6E\u73AF\u5883");
-    return;
-  }
-  for (const name of names) {
-    const environment = config.environments[name];
-    const marker = config.defaultEnvironment === name ? "*" : " ";
-    log(`${marker} ${name}	${environment.server}	${authSummary(environment)}`);
-  }
-}
-async function showEnvironment(argv, paths, log) {
-  const { positionals } = parseCommandArgs(argv);
-  if (positionals.length !== 1)
-    throw new Error("\u7528\u6CD5: vcpdeck env show <name>");
-  const config = await loadCliConfig(paths.globalConfigPath);
-  const name = positionals[0];
-  const environment = ownEnvironment(config.environments, name);
-  if (!environment)
-    throw new Error(`\u73AF\u5883\u4E0D\u5B58\u5728: ${name}`);
-  log(`\u73AF\u5883: ${name}`);
-  log(`Server: ${environment.server}`);
-  log(`\u8BA4\u8BC1: ${authSummary(environment)}`);
-  log(`\u5168\u5C40\u9ED8\u8BA4: ${config.defaultEnvironment === name ? "\u662F" : "\u5426"}`);
-  log(`\u914D\u7F6E: ${paths.globalConfigPath}`);
-}
-async function showCurrent(argv, paths, processEnv, log) {
-  const { positionals, options } = parseCommandArgs(argv, {
-    value: ["env", "environment", "server", "username"]
-  });
-  if (positionals.length)
-    throw new Error("env current \u4E0D\u63A5\u53D7\u4F4D\u7F6E\u53C2\u6570");
-  const env = exclusiveAlias(options, "env", "environment");
-  const resolved = await resolveEnvironment({
-    environment: env,
-    server: stringOption(options, "server"),
-    username: stringOption(options, "username"),
-    requireCredentials: false,
-    paths,
-    processEnv
-  });
-  log(formatEnvironmentSummary(resolved));
-}
-async function addEnvironment(argv, paths, log) {
-  const { positionals, options } = parseCommandArgs(argv, {
-    value: ["server", "auth", "username", "password-env", "token-env"]
-  });
-  if (positionals.length !== 1) {
-    throw new Error("\u7528\u6CD5: vcpdeck env add <name> --server=... --auth=password|bearer ...");
-  }
-  const name = positionals[0];
-  assertEnvironmentName(name);
-  const server = requiredOption(options, "server");
-  const auth = requiredOption(options, "auth");
-  const environment = buildEnvironment(server, auth, options);
-  const config = await loadCliConfig(paths.globalConfigPath);
-  if (ownEnvironment(config.environments, name)) {
-    throw new Error(`\u73AF\u5883\u5DF2\u5B58\u5728: ${name}`);
-  }
-  config.environments[name] = environment;
-  await saveCliConfig(paths.globalConfigPath, config);
-  log(`\u5DF2\u6DFB\u52A0\u73AF\u5883 ${name}`);
-  log(`Server: ${environment.server}`);
-  log(`\u8BA4\u8BC1: ${authSummary(environment)}`);
-  log(`\u914D\u7F6E: ${paths.globalConfigPath}`);
-}
-async function removeEnvironment(argv, paths, log) {
-  const { positionals } = parseCommandArgs(argv);
-  if (positionals.length !== 1)
-    throw new Error("\u7528\u6CD5: vcpdeck env remove <name>");
-  const name = positionals[0];
-  const config = await loadCliConfig(paths.globalConfigPath);
-  if (!ownEnvironment(config.environments, name)) {
-    throw new Error(`\u73AF\u5883\u4E0D\u5B58\u5728: ${name}`);
-  }
-  const environments = Object.fromEntries(Object.entries(config.environments).filter(([key]) => key !== name));
-  await saveCliConfig(paths.globalConfigPath, {
-    version: 1,
-    environments,
-    ...config.defaultEnvironment && config.defaultEnvironment !== name ? { defaultEnvironment: config.defaultEnvironment } : {}
-  });
-  log(`\u5DF2\u5220\u9664\u73AF\u5883 ${name}`);
-}
-async function useEnvironment(argv, paths, log) {
-  const { positionals, options } = parseCommandArgs(argv, {
-    boolean: ["global", "local"]
-  });
-  if (positionals.length !== 1 || Boolean(options.global) === Boolean(options.local)) {
-    throw new Error("\u7528\u6CD5: vcpdeck env use <name> --global|--local");
-  }
-  const name = positionals[0];
-  const config = await loadCliConfig(paths.globalConfigPath);
-  if (!ownEnvironment(config.environments, name)) {
-    throw new Error(`\u73AF\u5883\u4E0D\u5B58\u5728: ${name}`);
-  }
-  if (options.global) {
-    config.defaultEnvironment = name;
-    await saveCliConfig(paths.globalConfigPath, config);
-    log(`\u5DF2\u5C06 ${name} \u8BBE\u4E3A\u5168\u5C40\u9ED8\u8BA4\u73AF\u5883`);
-    return;
-  }
-  const target = await localProjectConfigTarget(paths.cwd);
-  await saveProjectConfig(target, { version: 1, environment: name });
-  log(`\u5DF2\u5C06 ${name} \u8BBE\u4E3A\u9879\u76EE\u9ED8\u8BA4\u73AF\u5883`);
-  log(`\u914D\u7F6E: ${target}`);
-}
-function buildEnvironment(serverValue, authType, options) {
-  const server = normalizeServerUrl(serverValue);
-  if (authType === "password") {
-    if (options["token-env"] !== void 0) {
-      throw new Error("password \u8BA4\u8BC1\u4E0D\u63A5\u53D7 --token-env");
-    }
-    const username = requiredOption(options, "username");
-    const passwordEnv = requiredOption(options, "password-env");
-    assertEnvironmentVariableName(passwordEnv);
-    return {
-      server,
-      auth: { type: "password", username, passwordEnv }
-    };
-  }
-  if (authType === "bearer") {
-    if (options.username !== void 0 || options["password-env"] !== void 0) {
-      throw new Error("bearer \u8BA4\u8BC1\u4E0D\u63A5\u53D7 --username/--password-env");
-    }
-    const tokenEnv = requiredOption(options, "token-env");
-    assertEnvironmentVariableName(tokenEnv);
-    return {
-      server,
-      auth: { type: "bearer", tokenEnv }
-    };
-  }
-  throw new Error("--auth \u5FC5\u987B\u4E3A password \u6216 bearer");
-}
-function ownEnvironment(environments, name) {
-  return Object.hasOwn(environments, name) ? environments[name] : void 0;
-}
-function authSummary(environment) {
-  return environment.auth.type === "password" ? `password (${environment.auth.username}, ${environment.auth.passwordEnv})` : `bearer (${environment.auth.tokenEnv})`;
-}
-function requiredOption(options, name) {
-  const value = stringOption(options, name);
-  if (!value)
-    throw new Error(`\u7F3A\u5C11 --${name}`);
-  return value;
-}
-function exclusiveAlias(options, first, second) {
-  const firstValue = stringOption(options, first);
-  const secondValue = stringOption(options, second);
-  if (firstValue && secondValue) {
-    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
-  }
-  return firstValue ?? secondValue;
-}
-function assertNoArgs(argv) {
-  if (argv.length)
-    throw new Error("\u8BE5\u547D\u4EE4\u4E0D\u63A5\u53D7\u53C2\u6570");
-}
-
-// dist/release-command.js
-var import_node_crypto = require("node:crypto");
-var import_node_fs2 = require("node:fs");
-var import_promises2 = require("node:fs/promises");
-
 // ../sdk/dist/aliyundrive.js
 function createAliyunDriveApi(client) {
   return {
@@ -2469,7 +1842,679 @@ function isRecord(value) {
   return typeof value === "object" && value !== null;
 }
 
+// dist/authenticated-client.js
+async function createAuthenticatedClient(environment) {
+  if (!environment.credentials)
+    throw new Error("\u73AF\u5883\u51ED\u636E\u672A\u89E3\u6790");
+  if (environment.credentials.type === "bearer") {
+    return new VcpDeckClient({
+      baseUrl: environment.server,
+      auth: { type: "bearer", token: environment.credentials.token }
+    });
+  }
+  const loginClient = new VcpDeckClient({
+    baseUrl: environment.server,
+    auth: { type: "cookie" }
+  });
+  const { cookie } = await loginClient.auth.loginSession({
+    username: environment.credentials.username,
+    password: environment.credentials.password
+  });
+  return new VcpDeckClient({
+    baseUrl: environment.server,
+    auth: { type: "cookie", cookie }
+  });
+}
+
+// dist/config.js
+var import_node_fs = require("node:fs");
+var import_promises = require("node:fs/promises");
+var import_node_os = require("node:os");
+var import_node_path = require("node:path");
+var CLI_CONFIG_VERSION = 1;
+var PROJECT_CONFIG_FILE = ".vcpdeck.json";
+var ENVIRONMENT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+var ENVIRONMENT_VARIABLE_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+function defaultConfigPaths(cwd = process.cwd()) {
+  return {
+    globalConfigPath: (0, import_node_path.join)((0, import_node_os.homedir)(), ".vcpdeck", "cli", "config.json"),
+    cwd: (0, import_node_path.resolve)(cwd)
+  };
+}
+function normalizeServerUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`Server URL \u65E0\u6548: ${value}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:" || !url.hostname) {
+    throw new Error("Server URL \u5FC5\u987B\u662F\u5E26\u4E3B\u673A\u540D\u7684 http/https \u5730\u5740");
+  }
+  if (url.username || url.password) {
+    throw new Error("Server URL \u4E0D\u5F97\u5185\u5D4C\u7528\u6237\u540D\u6216\u5BC6\u7801");
+  }
+  if (url.search || url.hash) {
+    throw new Error("Server URL \u4E0D\u5F97\u5305\u542B query \u6216 fragment");
+  }
+  if (url.pathname !== "/" && url.pathname !== "") {
+    throw new Error("Server URL \u5FC5\u987B\u662F origin\uFF0C\u4E0D\u5F97\u5305\u542B\u4E1A\u52A1\u8DEF\u5F84");
+  }
+  return url.origin;
+}
+function assertEnvironmentName(name) {
+  if (!ENVIRONMENT_NAME_RE.test(name) || name === "__proto__" || name === "constructor" || name === "prototype") {
+    throw new Error("\u73AF\u5883\u540D\u5FC5\u987B\u4EE5\u5B57\u6BCD\u6216\u6570\u5B57\u5F00\u5934\uFF0C\u53EA\u542B\u5B57\u6BCD\u3001\u6570\u5B57\u3001\u70B9\u3001\u4E0B\u5212\u7EBF\u3001\u8FDE\u5B57\u7B26\uFF08\u6700\u957F 64\uFF09\uFF0C\u4E14\u4E0D\u80FD\u4F7F\u7528\u4FDD\u7559\u540D\u79F0");
+  }
+}
+function assertEnvironmentVariableName(name) {
+  if (!ENVIRONMENT_VARIABLE_RE.test(name)) {
+    throw new Error(`\u73AF\u5883\u53D8\u91CF\u540D\u65E0\u6548: ${name}`);
+  }
+}
+function parseCliConfig(value) {
+  const root = requireRecord(value, "CLI \u914D\u7F6E");
+  assertOnlyKeys(root, ["version", "defaultEnvironment", "environments"], "CLI \u914D\u7F6E");
+  if (root.version !== CLI_CONFIG_VERSION) {
+    throw new Error(`CLI \u914D\u7F6E version \u5FC5\u987B\u4E3A ${CLI_CONFIG_VERSION}`);
+  }
+  if (root.defaultEnvironment !== void 0) {
+    if (typeof root.defaultEnvironment !== "string") {
+      throw new Error("defaultEnvironment \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+    }
+    assertEnvironmentName(root.defaultEnvironment);
+  }
+  const environmentsValue = requireRecord(root.environments, "environments");
+  const environments = {};
+  for (const [name, rawEnvironment] of Object.entries(environmentsValue)) {
+    assertEnvironmentName(name);
+    environments[name] = parseEnvironment(rawEnvironment, name);
+  }
+  if (root.defaultEnvironment !== void 0 && !Object.hasOwn(environments, root.defaultEnvironment)) {
+    throw new Error(`\u9ED8\u8BA4\u73AF\u5883\u4E0D\u5B58\u5728: ${root.defaultEnvironment}`);
+  }
+  const config = { version: 1, environments };
+  if (root.defaultEnvironment) {
+    config.defaultEnvironment = root.defaultEnvironment;
+  }
+  return config;
+}
+function parseProjectConfig(value) {
+  const root = requireRecord(value, "\u9879\u76EE\u914D\u7F6E");
+  assertOnlyKeys(root, ["version", "environment"], "\u9879\u76EE\u914D\u7F6E");
+  if (root.version !== CLI_CONFIG_VERSION) {
+    throw new Error(`\u9879\u76EE\u914D\u7F6E version \u5FC5\u987B\u4E3A ${CLI_CONFIG_VERSION}`);
+  }
+  if (typeof root.environment !== "string") {
+    throw new Error("\u9879\u76EE\u914D\u7F6E environment \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+  }
+  assertEnvironmentName(root.environment);
+  return { version: 1, environment: root.environment };
+}
+async function loadCliConfig(path, options = {}) {
+  const value = await readJson(path, options.required ?? false);
+  return value === void 0 ? { version: CLI_CONFIG_VERSION, environments: {} } : parseCliConfig(value);
+}
+async function loadProjectConfig(path) {
+  const value = await readJson(path, true);
+  return parseProjectConfig(value);
+}
+async function localProjectConfigTarget(cwd) {
+  const normalizedCwd = (0, import_node_path.resolve)(cwd);
+  const existing = await findProjectConfig(normalizedCwd);
+  if (existing)
+    return existing;
+  let directory = normalizedCwd;
+  for (; ; ) {
+    if (await exists((0, import_node_path.join)(directory, ".git"))) {
+      return (0, import_node_path.join)(directory, PROJECT_CONFIG_FILE);
+    }
+    const parent = (0, import_node_path.dirname)(directory);
+    if (parent === directory)
+      return (0, import_node_path.join)(normalizedCwd, PROJECT_CONFIG_FILE);
+    directory = parent;
+  }
+}
+async function saveCliConfig(path, config) {
+  const validated = parseCliConfig(config);
+  await writeJsonAtomic(path, validated, true);
+}
+async function saveProjectConfig(path, config) {
+  const validated = parseProjectConfig(config);
+  await writeJsonAtomic(path, validated, false);
+}
+async function findProjectConfig(cwd) {
+  let directory = (0, import_node_path.resolve)(cwd);
+  for (; ; ) {
+    const candidate = (0, import_node_path.join)(directory, PROJECT_CONFIG_FILE);
+    if (await exists(candidate))
+      return candidate;
+    if (await exists((0, import_node_path.join)(directory, ".git")))
+      return void 0;
+    const parent = (0, import_node_path.dirname)(directory);
+    if (parent === directory || directory === (0, import_node_path.parse)(directory).root)
+      return void 0;
+    directory = parent;
+  }
+}
+function parseEnvironment(value, name) {
+  const root = requireRecord(value, `\u73AF\u5883 ${name}`);
+  assertOnlyKeys(root, ["server", "auth"], `\u73AF\u5883 ${name}`);
+  if (typeof root.server !== "string") {
+    throw new Error(`\u73AF\u5883 ${name}.server \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+  }
+  const server = normalizeServerUrl(root.server);
+  const auth = requireRecord(root.auth, `\u73AF\u5883 ${name}.auth`);
+  if (auth.type === "password") {
+    assertOnlyKeys(auth, ["type", "username", "passwordEnv"], `\u73AF\u5883 ${name}.auth`);
+    if (typeof auth.username !== "string" || !auth.username.trim()) {
+      throw new Error(`\u73AF\u5883 ${name}.auth.username \u4E0D\u80FD\u4E3A\u7A7A`);
+    }
+    if (typeof auth.passwordEnv !== "string") {
+      throw new Error(`\u73AF\u5883 ${name}.auth.passwordEnv \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+    }
+    assertEnvironmentVariableName(auth.passwordEnv);
+    return {
+      server,
+      auth: {
+        type: "password",
+        username: auth.username,
+        passwordEnv: auth.passwordEnv
+      }
+    };
+  }
+  if (auth.type === "bearer") {
+    assertOnlyKeys(auth, ["type", "tokenEnv"], `\u73AF\u5883 ${name}.auth`);
+    if (typeof auth.tokenEnv !== "string") {
+      throw new Error(`\u73AF\u5883 ${name}.auth.tokenEnv \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+    }
+    assertEnvironmentVariableName(auth.tokenEnv);
+    return { server, auth: { type: "bearer", tokenEnv: auth.tokenEnv } };
+  }
+  throw new Error(`\u73AF\u5883 ${name}.auth.type \u5FC5\u987B\u4E3A password \u6216 bearer`);
+}
+function requireRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+  }
+  return value;
+}
+function assertOnlyKeys(record, allowed, label) {
+  const unknown = Object.keys(record).filter((key) => !allowed.includes(key));
+  if (unknown.length)
+    throw new Error(`${label} \u542B\u672A\u77E5\u5B57\u6BB5: ${unknown.join(", ")}`);
+}
+async function readJson(path, required) {
+  let text;
+  try {
+    text = await (0, import_promises.readFile)(path, "utf8");
+  } catch (error) {
+    if (isErrno(error, "ENOENT") && !required)
+      return void 0;
+    if (isErrno(error, "ENOENT"))
+      throw new Error(`\u914D\u7F6E\u6587\u4EF6\u4E0D\u5B58\u5728: ${path}`);
+    throw error;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`\u914D\u7F6E\u6587\u4EF6\u4E0D\u662F\u6709\u6548 JSON: ${path}`);
+  }
+}
+async function writeJsonAtomic(path, value, privateFile) {
+  const directory = (0, import_node_path.dirname)(path);
+  await (0, import_promises.mkdir)(directory, { recursive: true, mode: privateFile ? 448 : 493 });
+  if (privateFile && process.platform !== "win32")
+    await (0, import_promises.chmod)(directory, 448);
+  const tempPath = (0, import_node_path.join)(directory, `.${Date.now()}-${process.pid}.tmp`);
+  try {
+    await (0, import_promises.writeFile)(tempPath, `${JSON.stringify(value, null, 2)}
+`, {
+      encoding: "utf8",
+      mode: privateFile ? 384 : 420
+    });
+    if (privateFile && process.platform !== "win32")
+      await (0, import_promises.chmod)(tempPath, 384);
+    await (0, import_promises.rename)(tempPath, path);
+    if (privateFile && process.platform !== "win32")
+      await (0, import_promises.chmod)(path, 384);
+  } finally {
+    try {
+      await (0, import_promises.rm)(tempPath, { force: true });
+    } catch {
+    }
+  }
+}
+async function exists(path) {
+  try {
+    await (0, import_promises.access)(path, import_node_fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function isErrno(error, code) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+// dist/arguments.js
+function parseCommandArgs(argv, schema = {}) {
+  const valueOptions = new Set(schema.value ?? []);
+  const booleanOptions = new Set(schema.boolean ?? []);
+  const options = {};
+  const positionals = [];
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    if (!arg.startsWith("--")) {
+      positionals.push(arg);
+      continue;
+    }
+    const parsed = parseLongOption(arg);
+    assertKnownOption(parsed.name, valueOptions, booleanOptions);
+    if (Object.hasOwn(options, parsed.name)) {
+      throw new Error(`\u9009\u9879\u4E0D\u80FD\u91CD\u590D: --${parsed.name}`);
+    }
+    if (booleanOptions.has(parsed.name)) {
+      if (parsed.inlineValue !== void 0) {
+        throw new Error(`\u5E03\u5C14\u9009\u9879\u4E0D\u63A5\u53D7\u503C: --${parsed.name}`);
+      }
+      options[parsed.name] = true;
+      continue;
+    }
+    const value = parsed.inlineValue ?? argv[++index];
+    options[parsed.name] = requireOptionValue(parsed.name, value);
+  }
+  return { positionals, options };
+}
+function parseLongOption(arg) {
+  const raw = arg.slice(2);
+  const separator = raw.indexOf("=");
+  return separator >= 0 ? { name: raw.slice(0, separator), inlineValue: raw.slice(separator + 1) } : { name: raw };
+}
+function assertKnownOption(name, valueOptions, booleanOptions) {
+  if (!name || !valueOptions.has(name) && !booleanOptions.has(name)) {
+    throw new Error(`\u672A\u77E5\u9009\u9879: --${name}`);
+  }
+}
+function requireOptionValue(name, value) {
+  if (value === void 0 || value.startsWith("--") || value.length === 0) {
+    throw new Error(`\u9009\u9879\u7F3A\u5C11\u503C: --${name}`);
+  }
+  return value;
+}
+function stringOption(options, name) {
+  const value = options[name];
+  return typeof value === "string" ? value : void 0;
+}
+
+// dist/environment.js
+async function resolveEnvironment(options = {}) {
+  const paths = options.paths ?? defaultConfigPaths();
+  const processEnv = options.processEnv ?? process.env;
+  if (options.server && options.environment) {
+    throw new Error("--server \u4E0E --env/--environment \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528");
+  }
+  if (options.server) {
+    return resolveDirectEnvironment(options, processEnv);
+  }
+  const globalConfig = await loadCliConfig(paths.globalConfigPath);
+  let source;
+  let name;
+  if (options.environment) {
+    name = options.environment;
+    source = { type: "flag", name };
+  } else if (processEnv.VCPDECK_ENVIRONMENT) {
+    name = processEnv.VCPDECK_ENVIRONMENT;
+    source = { type: "environment-variable", name };
+  } else {
+    const projectPath = await findProjectConfig(paths.cwd);
+    if (projectPath) {
+      const project = await loadProjectConfig(projectPath);
+      name = project.environment;
+      source = { type: "project", name, path: projectPath };
+    } else if (globalConfig.defaultEnvironment) {
+      name = globalConfig.defaultEnvironment;
+      source = {
+        type: "global-default",
+        name,
+        path: paths.globalConfigPath
+      };
+    } else {
+      throw new Error("\u672A\u9009\u62E9 VCPDeck \u73AF\u5883\uFF1A\u4F7F\u7528 --env\u3001VCPDECK_ENVIRONMENT\u3001\u9879\u76EE .vcpdeck.json \u6216\u5168\u5C40\u9ED8\u8BA4\u73AF\u5883");
+    }
+  }
+  assertEnvironmentName(name);
+  const environment = Object.hasOwn(globalConfig.environments, name) ? globalConfig.environments[name] : void 0;
+  if (!environment) {
+    throw new Error(`\u73AF\u5883\u4E0D\u5B58\u5728: ${name}\uFF08\u914D\u7F6E: ${paths.globalConfigPath}\uFF09`);
+  }
+  return resolveRegisteredEnvironment({
+    name,
+    environment,
+    source,
+    processEnv,
+    requireCredentials: options.requireCredentials ?? true
+  });
+}
+function environmentSourceLabel(source) {
+  switch (source.type) {
+    case "direct":
+      return "--server \u76F4\u8FDE";
+    case "flag":
+      return `--env=${source.name}`;
+    case "environment-variable":
+      return `VCPDECK_ENVIRONMENT=${source.name}`;
+    case "project":
+      return source.path;
+    case "global-default":
+      return `${source.path}\uFF08\u5168\u5C40\u9ED8\u8BA4\uFF09`;
+    default:
+      throw new Error("\u672A\u77E5\u73AF\u5883\u6765\u6E90");
+  }
+}
+function formatEnvironmentSummary(environment) {
+  const lines = [
+    `\u73AF\u5883: ${environment.name ?? "direct"}`,
+    `Server: ${environment.server}`,
+    `\u6765\u6E90: ${environmentSourceLabel(environment.source)}`
+  ];
+  if (environment.auth.type === "password") {
+    lines.push(`\u8BA4\u8BC1: password (${environment.auth.username}, ${environment.auth.credentialEnv})`);
+  } else {
+    lines.push(`\u8BA4\u8BC1: bearer (${environment.auth.credentialEnv})`);
+  }
+  return lines.join("\n");
+}
+function resolveDirectEnvironment(options, processEnv) {
+  const username = options.username ?? processEnv.VCPDECK_ADMIN_USERNAME;
+  const password = options.password ?? processEnv.VCPDECK_ADMIN_PASSWORD;
+  const requireCredentials = options.requireCredentials ?? true;
+  if (requireCredentials && (!username || !password)) {
+    throw new Error("\u76F4\u8FDE\u6A21\u5F0F\u9700\u8981 --username/--password \u6216 VCPDECK_ADMIN_USERNAME/VCPDECK_ADMIN_PASSWORD");
+  }
+  const environment = {
+    name: null,
+    server: normalizeServerUrl(options.server),
+    auth: {
+      type: "password",
+      username: username ?? "<\u672A\u8BBE\u7F6E>",
+      credentialEnv: "VCPDECK_ADMIN_PASSWORD"
+    },
+    source: { type: "direct" }
+  };
+  if (username && password) {
+    environment.credentials = { type: "password", username, password };
+  }
+  return environment;
+}
+function resolveRegisteredEnvironment(options) {
+  const { name, environment, source, processEnv, requireCredentials } = options;
+  if (environment.auth.type === "password") {
+    const password = processEnv[environment.auth.passwordEnv];
+    if (requireCredentials && !password) {
+      throw new Error(`\u73AF\u5883 ${name} \u7F3A\u5C11\u51ED\u636E\u53D8\u91CF: ${environment.auth.passwordEnv}`);
+    }
+    const resolved2 = {
+      name,
+      server: environment.server,
+      auth: {
+        type: "password",
+        username: environment.auth.username,
+        credentialEnv: environment.auth.passwordEnv
+      },
+      source
+    };
+    if (password) {
+      resolved2.credentials = {
+        type: "password",
+        username: environment.auth.username,
+        password
+      };
+    }
+    return resolved2;
+  }
+  const token = processEnv[environment.auth.tokenEnv];
+  if (requireCredentials && !token) {
+    throw new Error(`\u73AF\u5883 ${name} \u7F3A\u5C11\u51ED\u636E\u53D8\u91CF: ${environment.auth.tokenEnv}`);
+  }
+  const resolved = {
+    name,
+    server: environment.server,
+    auth: { type: "bearer", credentialEnv: environment.auth.tokenEnv },
+    source
+  };
+  if (token)
+    resolved.credentials = { type: "bearer", token };
+  return resolved;
+}
+
+// dist/env-command.js
+async function runEnvCommand(subcommand, argv, context = {}) {
+  const paths = context.paths ?? defaultConfigPaths();
+  const log = context.log ?? console.log;
+  switch (subcommand) {
+    case "list":
+      await listEnvironments(argv, paths, log);
+      return;
+    case "show":
+      await showEnvironment(argv, paths, log);
+      return;
+    case "current":
+      await showCurrent(argv, paths, context.processEnv ?? process.env, log);
+      return;
+    case "check":
+      await checkEnvironment(argv, paths, context.processEnv ?? process.env, log);
+      return;
+    case "add":
+      await addEnvironment(argv, paths, log);
+      return;
+    case "remove":
+      await removeEnvironment(argv, paths, log);
+      return;
+    case "use":
+      await useEnvironment(argv, paths, log);
+      return;
+    default:
+      throw new Error(envUsage());
+  }
+}
+function envUsage() {
+  return [
+    "\u73AF\u5883\u547D\u4EE4:",
+    "  vcpdeck env list",
+    "  vcpdeck env show <name>",
+    "  vcpdeck env current [--env=<name>] [--server=<url>]",
+    "  vcpdeck env check [--env=<name>]",
+    "  vcpdeck env add <name> --server=<url> --token-env=<VAR>",
+    "  \u517C\u5BB9\u5BC6\u7801: ... --auth=password --username=<name> --password-env=<VAR>",
+    "  vcpdeck env remove <name>",
+    "  vcpdeck env use <name> --global|--local"
+  ].join("\n");
+}
+async function listEnvironments(argv, paths, log) {
+  assertNoArgs(argv);
+  const config = await loadCliConfig(paths.globalConfigPath);
+  const names = Object.keys(config.environments).sort((left, right) => left.localeCompare(right, "en"));
+  if (!names.length) {
+    log("\u5C1A\u672A\u914D\u7F6E\u73AF\u5883");
+    return;
+  }
+  for (const name of names) {
+    const environment = config.environments[name];
+    const marker = config.defaultEnvironment === name ? "*" : " ";
+    log(`${marker} ${name}	${environment.server}	${authSummary(environment)}`);
+  }
+}
+async function showEnvironment(argv, paths, log) {
+  const { positionals } = parseCommandArgs(argv);
+  if (positionals.length !== 1)
+    throw new Error("\u7528\u6CD5: vcpdeck env show <name>");
+  const config = await loadCliConfig(paths.globalConfigPath);
+  const name = positionals[0];
+  const environment = ownEnvironment(config.environments, name);
+  if (!environment)
+    throw new Error(`\u73AF\u5883\u4E0D\u5B58\u5728: ${name}`);
+  log(`\u73AF\u5883: ${name}`);
+  log(`Server: ${environment.server}`);
+  log(`\u8BA4\u8BC1: ${authSummary(environment)}`);
+  log(`\u5168\u5C40\u9ED8\u8BA4: ${config.defaultEnvironment === name ? "\u662F" : "\u5426"}`);
+  log(`\u914D\u7F6E: ${paths.globalConfigPath}`);
+}
+async function showCurrent(argv, paths, processEnv, log) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "server", "username"]
+  });
+  if (positionals.length)
+    throw new Error("env current \u4E0D\u63A5\u53D7\u4F4D\u7F6E\u53C2\u6570");
+  const env = exclusiveAlias(options, "env", "environment");
+  const resolved = await resolveEnvironment({
+    environment: env,
+    server: stringOption(options, "server"),
+    username: stringOption(options, "username"),
+    requireCredentials: false,
+    paths,
+    processEnv
+  });
+  log(formatEnvironmentSummary(resolved));
+}
+async function checkEnvironment(argv, paths, processEnv, log) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment"]
+  });
+  if (positionals.length)
+    throw new Error("env check \u4E0D\u63A5\u53D7\u4F4D\u7F6E\u53C2\u6570");
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias(options, "env", "environment"),
+    paths,
+    processEnv
+  });
+  log(formatEnvironmentSummary(environment));
+  const client = await createAuthenticatedClient(environment);
+  const identity = await client.auth.me();
+  log(`\u8EAB\u4EFD: ${identity.username} (${identity.displayName})${identity.isAdmin ? " [admin]" : ""}`);
+}
+async function addEnvironment(argv, paths, log) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["server", "auth", "username", "password-env", "token-env"]
+  });
+  if (positionals.length !== 1) {
+    throw new Error("\u7528\u6CD5: vcpdeck env add <name> --server=... --auth=password|bearer ...");
+  }
+  const name = positionals[0];
+  assertEnvironmentName(name);
+  const server = requiredOption(options, "server");
+  const auth = stringOption(options, "auth") ?? (stringOption(options, "token-env") ? "bearer" : void 0);
+  if (!auth) {
+    throw new Error("\u7F3A\u5C11 --token-env\uFF08\u63A8\u8350\uFF09\u6216 --auth=password \u8BA4\u8BC1\u53C2\u6570");
+  }
+  const environment = buildEnvironment(server, auth, options);
+  const config = await loadCliConfig(paths.globalConfigPath);
+  if (ownEnvironment(config.environments, name)) {
+    throw new Error(`\u73AF\u5883\u5DF2\u5B58\u5728: ${name}`);
+  }
+  config.environments[name] = environment;
+  await saveCliConfig(paths.globalConfigPath, config);
+  log(`\u5DF2\u6DFB\u52A0\u73AF\u5883 ${name}`);
+  log(`Server: ${environment.server}`);
+  log(`\u8BA4\u8BC1: ${authSummary(environment)}`);
+  log(`\u914D\u7F6E: ${paths.globalConfigPath}`);
+}
+async function removeEnvironment(argv, paths, log) {
+  const { positionals } = parseCommandArgs(argv);
+  if (positionals.length !== 1)
+    throw new Error("\u7528\u6CD5: vcpdeck env remove <name>");
+  const name = positionals[0];
+  const config = await loadCliConfig(paths.globalConfigPath);
+  if (!ownEnvironment(config.environments, name)) {
+    throw new Error(`\u73AF\u5883\u4E0D\u5B58\u5728: ${name}`);
+  }
+  const environments = Object.fromEntries(Object.entries(config.environments).filter(([key]) => key !== name));
+  await saveCliConfig(paths.globalConfigPath, {
+    version: 1,
+    environments,
+    ...config.defaultEnvironment && config.defaultEnvironment !== name ? { defaultEnvironment: config.defaultEnvironment } : {}
+  });
+  log(`\u5DF2\u5220\u9664\u73AF\u5883 ${name}`);
+}
+async function useEnvironment(argv, paths, log) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    boolean: ["global", "local"]
+  });
+  if (positionals.length !== 1 || Boolean(options.global) === Boolean(options.local)) {
+    throw new Error("\u7528\u6CD5: vcpdeck env use <name> --global|--local");
+  }
+  const name = positionals[0];
+  const config = await loadCliConfig(paths.globalConfigPath);
+  if (!ownEnvironment(config.environments, name)) {
+    throw new Error(`\u73AF\u5883\u4E0D\u5B58\u5728: ${name}`);
+  }
+  if (options.global) {
+    config.defaultEnvironment = name;
+    await saveCliConfig(paths.globalConfigPath, config);
+    log(`\u5DF2\u5C06 ${name} \u8BBE\u4E3A\u5168\u5C40\u9ED8\u8BA4\u73AF\u5883`);
+    return;
+  }
+  const target = await localProjectConfigTarget(paths.cwd);
+  await saveProjectConfig(target, { version: 1, environment: name });
+  log(`\u5DF2\u5C06 ${name} \u8BBE\u4E3A\u9879\u76EE\u9ED8\u8BA4\u73AF\u5883`);
+  log(`\u914D\u7F6E: ${target}`);
+}
+function buildEnvironment(serverValue, authType, options) {
+  const server = normalizeServerUrl(serverValue);
+  if (authType === "password") {
+    if (options["token-env"] !== void 0) {
+      throw new Error("password \u8BA4\u8BC1\u4E0D\u63A5\u53D7 --token-env");
+    }
+    const username = requiredOption(options, "username");
+    const passwordEnv = requiredOption(options, "password-env");
+    assertEnvironmentVariableName(passwordEnv);
+    return {
+      server,
+      auth: { type: "password", username, passwordEnv }
+    };
+  }
+  if (authType === "bearer") {
+    if (options.username !== void 0 || options["password-env"] !== void 0) {
+      throw new Error("bearer \u8BA4\u8BC1\u4E0D\u63A5\u53D7 --username/--password-env");
+    }
+    const tokenEnv = requiredOption(options, "token-env");
+    assertEnvironmentVariableName(tokenEnv);
+    return {
+      server,
+      auth: { type: "bearer", tokenEnv }
+    };
+  }
+  throw new Error("--auth \u5FC5\u987B\u4E3A password \u6216 bearer");
+}
+function ownEnvironment(environments, name) {
+  return Object.hasOwn(environments, name) ? environments[name] : void 0;
+}
+function authSummary(environment) {
+  return environment.auth.type === "password" ? `password (${environment.auth.username}, ${environment.auth.passwordEnv})` : `bearer (${environment.auth.tokenEnv})`;
+}
+function requiredOption(options, name) {
+  const value = stringOption(options, name);
+  if (!value)
+    throw new Error(`\u7F3A\u5C11 --${name}`);
+  return value;
+}
+function exclusiveAlias(options, first, second) {
+  const firstValue = stringOption(options, first);
+  const secondValue = stringOption(options, second);
+  if (firstValue && secondValue) {
+    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
+  }
+  return firstValue ?? secondValue;
+}
+function assertNoArgs(argv) {
+  if (argv.length)
+    throw new Error("\u8BE5\u547D\u4EE4\u4E0D\u63A5\u53D7\u53C2\u6570");
+}
+
 // dist/release-command.js
+var import_node_crypto = require("node:crypto");
+var import_node_fs2 = require("node:fs");
+var import_promises2 = require("node:fs/promises");
 var VERSION_RE = /^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)\.zip$/;
 async function runReleaseCommand(subcommand, argv, context = {}) {
   if (subcommand !== "upload")
@@ -2549,28 +2594,6 @@ async function uploadOne(client, zipPath, log) {
   });
   return release;
 }
-async function createAuthenticatedClient(environment) {
-  if (!environment.credentials)
-    throw new Error("\u73AF\u5883\u51ED\u636E\u672A\u89E3\u6790");
-  if (environment.credentials.type === "bearer") {
-    return new VcpDeckClient({
-      baseUrl: environment.server,
-      auth: { type: "bearer", token: environment.credentials.token }
-    });
-  }
-  const loginClient = new VcpDeckClient({
-    baseUrl: environment.server,
-    auth: { type: "cookie" }
-  });
-  const { cookie } = await loginClient.auth.loginSession({
-    username: environment.credentials.username,
-    password: environment.credentials.password
-  });
-  return new VcpDeckClient({
-    baseUrl: environment.server,
-    auth: { type: "cookie", cookie }
-  });
-}
 function exclusiveAlias2(options, first, second) {
   const firstValue = stringOption(options, first);
   const secondValue = stringOption(options, second);
@@ -2619,8 +2642,9 @@ function helpText() {
     "  vcpdeck env list",
     "  vcpdeck env show <name>",
     "  vcpdeck env current [--env=<name>]",
-    "  vcpdeck env add <name> --server=<url> --auth=password --username=<name> --password-env=<VAR>",
-    "  vcpdeck env add <name> --server=<url> --auth=bearer --token-env=<VAR>",
+    "  vcpdeck env check [--env=<name>]",
+    "  vcpdeck env add <name> --server=<url> --token-env=<VAR>",
+    "  \u517C\u5BB9\u5BC6\u7801: ... --auth=password --username=<name> --password-env=<VAR>",
     "  vcpdeck env remove <name>",
     "  vcpdeck env use <name> --global|--local",
     "",

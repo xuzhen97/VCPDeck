@@ -1,3 +1,4 @@
+import { createAuthenticatedClient } from "./authenticated-client.js";
 import {
 	assertEnvironmentName,
 	assertEnvironmentVariableName,
@@ -39,6 +40,9 @@ export async function runEnvCommand(
 		case "current":
 			await showCurrent(argv, paths, context.processEnv ?? process.env, log);
 			return;
+		case "check":
+			await checkEnvironment(argv, paths, context.processEnv ?? process.env, log);
+			return;
 		case "add":
 			await addEnvironment(argv, paths, log);
 			return;
@@ -59,8 +63,9 @@ function envUsage(): string {
 		"  vcpdeck env list",
 		"  vcpdeck env show <name>",
 		"  vcpdeck env current [--env=<name>] [--server=<url>]",
-		"  vcpdeck env add <name> --server=<url> --auth=password --username=<name> --password-env=<VAR>",
-		"  vcpdeck env add <name> --server=<url> --auth=bearer --token-env=<VAR>",
+		"  vcpdeck env check [--env=<name>]",
+		"  vcpdeck env add <name> --server=<url> --token-env=<VAR>",
+		"  兼容密码: ... --auth=password --username=<name> --password-env=<VAR>",
 		"  vcpdeck env remove <name>",
 		"  vcpdeck env use <name> --global|--local",
 	].join("\n");
@@ -127,6 +132,27 @@ async function showCurrent(
 	log(formatEnvironmentSummary(resolved));
 }
 
+async function checkEnvironment(
+	argv: string[],
+	paths: ConfigPaths,
+	processEnv: NodeJS.ProcessEnv,
+	log: (message: string) => void,
+): Promise<void> {
+	const { positionals, options } = parseCommandArgs(argv, {
+		value: ["env", "environment"],
+	});
+	if (positionals.length) throw new Error("env check 不接受位置参数");
+	const environment = await resolveEnvironment({
+		environment: exclusiveAlias(options, "env", "environment"),
+		paths,
+		processEnv,
+	});
+	log(formatEnvironmentSummary(environment));
+	const client = await createAuthenticatedClient(environment);
+	const identity = await client.auth.me();
+	log(`身份: ${identity.username} (${identity.displayName})${identity.isAdmin ? " [admin]" : ""}`);
+}
+
 async function addEnvironment(
 	argv: string[],
 	paths: ConfigPaths,
@@ -143,7 +169,11 @@ async function addEnvironment(
 	const name = positionals[0];
 	assertEnvironmentName(name);
 	const server = requiredOption(options, "server");
-	const auth = requiredOption(options, "auth");
+	const auth = stringOption(options, "auth") ??
+		(stringOption(options, "token-env") ? "bearer" : undefined);
+	if (!auth) {
+		throw new Error("缺少 --token-env（推荐）或 --auth=password 认证参数");
+	}
 	const environment = buildEnvironment(server, auth, options);
 	const config = await loadCliConfig(paths.globalConfigPath);
 	if (ownEnvironment(config.environments, name)) {

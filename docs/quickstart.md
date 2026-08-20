@@ -156,7 +156,7 @@ curl http://127.0.0.1:3001/api/status
 
 > 不带 Launcher 也可直接 `node dist/main.js` 运行，但没有守护、自更新与失败回退；不建议作为生产常驻方式。
 
-#### PM2 托管 Launcher（可选）
+### PM2 托管 Launcher（可选）
 
 生产长期运行可用 PM2 守护 **Launcher**（不是业务进程）：
 
@@ -236,16 +236,18 @@ curl.exe -s -b cookies.txt http://127.0.0.1:3001/api/clients
 
 ## 7. 日常发版（自动更新）
 
-首次在本机注册环境；密码值只放在 `VCPDECK_DEV_PASSWORD` 环境变量：
+首次在 Frontend `/settings/tokens` 创建专用 CLI Token，并把 Token 值保存到本机 `VCPDECK_DEV_TOKEN` 环境变量（不要写入仓库或命令）后注册环境：
 
 ```bash
 node packages/cli/dist/index.js env add dev \
   --server=http://<server>:3001 \
-  --auth=password --username=admin \
-  --password-env=VCPDECK_DEV_PASSWORD
+  --token-env=VCPDECK_DEV_TOKEN
 node packages/cli/dist/index.js env use dev --local
 node packages/cli/dist/index.js env current
+node packages/cli/dist/index.js env check
 ```
+
+`env check` 验证 Server 可达、Token 有效及其对应身份；个人资料修改用户名不会使该 Token 失效。密码环境仅作为旧配置兼容。
 
 之后项目目录内直接使用默认环境发布，也可临时添加 `--env=dev`：
 

@@ -1250,7 +1250,7 @@ const terminal = await sdk.jobs.wait(job.jobId);
 
 ## 12. CLI 对接建议
 
-当前 CLI 已实现多环境 `env add/list/show/current/use/remove` 与 `release upload`。环境配置遵循 ADR-0017：用户级注册表定义 Server/认证引用，项目 `.vcpdeck.json` 只选择环境；Release 校验两个同版本且平台互补的 archive，在本地计算 SHA-256，通过 SDK 的 password Cookie 或 Bearer 认证流式上传。第二个平台成功后 Server 自动启动自更新编排；CLI 上传成功不等于 Release 已完成。其他业务领域仍不具备 CLI 命令。
+当前 CLI 已实现多环境 `env add/list/show/current/check/use/remove` 与 `release upload`。环境配置遵循 ADR-0017：用户级注册表定义 Server/认证引用，项目 `.vcpdeck.json` 只选择环境；新环境推荐 `/settings/tokens` 创建的 Bearer Token，`env check` 通过 SDK 显示其对应身份；Release 校验两个同版本且平台互补的 archive，在本地计算 SHA-256，通过 SDK 的 Bearer 或兼容 password Cookie 认证流式上传。第二个平台成功后 Server 自动启动自更新编排；CLI 上传成功不等于 Release 已完成。其他业务领域仍不具备 CLI 命令。
 
 ### 12.1 后续候选命令映射
 
@@ -1277,13 +1277,14 @@ vcpdeck frp list|get|create|delete
 当前推荐先注册命名环境：
 
 ```text
-vcpdeck env add dev --server=http://localhost:3001 --auth=password --username=admin --password-env=VCPDECK_DEV_PASSWORD
-vcpdeck env add prod --server=https://deck.example --auth=bearer --token-env=VCPDECK_PROD_TOKEN
+vcpdeck env add dev --server=http://localhost:3001 --token-env=VCPDECK_DEV_TOKEN
+vcpdeck env add prod --server=https://deck.example --token-env=VCPDECK_PROD_TOKEN
 vcpdeck env use dev --global|--local
 vcpdeck env current
+vcpdeck env check
 ```
 
-解析优先级为 `--env` → `VCPDECK_ENVIRONMENT` → 最近项目 `.vcpdeck.json` → 全局默认。项目配置损坏或环境不存在时 fail closed；完整当前语义见 [`design/cli.md`](./design/cli.md)。`--server` + 用户名/密码仍作为 Release 直连兼容模式，密码优先从 `VCPDECK_ADMIN_PASSWORD` 读取，不推荐 `--password`。
+Token 在 Frontend `/settings/tokens` 创建并与 Identity 关联；CLI 与 SDK 可共用同一 Bearer Token，个人资料修改用户名不会使其失效。`env check` 调用 `/api/auth/me` 显示 Token 对应身份。解析优先级为 `--env` → `VCPDECK_ENVIRONMENT` → 最近项目 `.vcpdeck.json` → 全局默认。项目配置损坏或环境不存在时 fail closed；完整当前语义见 [`design/cli.md`](./design/cli.md)。`--server` + 用户名/密码仍作为 Release 直连兼容模式，密码优先从 `VCPDECK_ADMIN_PASSWORD` 读取，不推荐 `--password`。
 
 后续业务命令要求：
 

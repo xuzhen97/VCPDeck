@@ -33,9 +33,8 @@ CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 S
     "dev": {
       "server": "http://127.0.0.1:3001",
       "auth": {
-        "type": "password",
-        "username": "admin",
-        "passwordEnv": "VCPDECK_DEV_PASSWORD"
+        "type": "bearer",
+        "tokenEnv": "VCPDECK_DEV_TOKEN"
       }
     },
     "prod": {
@@ -86,22 +85,28 @@ CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 S
 
 ## 4. 环境命令
 
+推荐在 Frontend `/settings/tokens` 为 CLI 创建独立 Token，保存到本机环境变量后注册环境：
+
 ```text
 vcpdeck env list
 vcpdeck env show <name>
 vcpdeck env current [--env=<name>]
-vcpdeck env add <name> --server=<url> --auth=password --username=<name> --password-env=<VAR>
-vcpdeck env add <name> --server=<url> --auth=bearer --token-env=<VAR>
+vcpdeck env check [--env=<name>]
+vcpdeck env add <name> --server=<url> --token-env=<VAR>
+vcpdeck env add <name> --server=<url> --auth=password --username=<name> --password-env=<VAR>  # 兼容
 vcpdeck env remove <name>
 vcpdeck env use <name> --global|--local
 ```
+
+提供 `--token-env` 时默认推断为 Bearer；显式 `--auth=bearer` 保持兼容。Token 是服务端 Credential，与 Identity 关联，CLI 与 SDK 可共用；个人资料修改用户名不会改变现有 Token 所代表的身份。Token 明文只在创建时显示一次，不进入 CLI 配置。
 
 行为：
 
 - `list`：列出环境安全摘要，`*` 标记全局默认；
 - `show`：显示单个环境的 Server、认证引用和默认状态；
-- `current`：按完整优先级输出最终环境、Server、来源和凭据变量名；
-- `add`：严格校验并新增环境，不覆盖同名环境；
+- `current`：按完整优先级输出最终环境、Server、来源和凭据变量名，不访问 Server；
+- `check`：按相同优先级解析凭据，通过 SDK 调用 `/api/auth/me`，显示 Token/兼容密码对应的真实用户名、显示名和 admin 状态；
+- `add`：严格校验并新增环境，不覆盖同名环境；`--token-env` 是新环境推荐入口；
 - `remove`：删除环境；若它是全局默认，同时清除默认；不遍历项目文件；
 - `use --global`：设置用户级默认；
 - `use --local`：写入项目选择器。
@@ -134,7 +139,7 @@ vcpdeck release upload ... \
 
 直连密码优先来自 `VCPDECK_ADMIN_PASSWORD`；`--password` 仍兼容但会暴露在 Shell history/进程参数中，不推荐。`--server` 不能与 `--env` 同时使用，命名环境模式也不能混入 `--username` / `--password`。
 
-Password 环境先通过 SDK 登录取得进程内 Cookie，再上传；Bearer 环境直接通过 SDK Authorization 上传。CLI 上传前显示最终环境安全摘要，并校验两个 archive 版本一致、平台互补；上传完成不表示自更新终态完成。
+Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认证；Password 环境先通过 SDK 登录取得进程内 Cookie，仅为已有配置兼容。CLI 上传前显示最终环境安全摘要，并校验两个 archive 版本一致、平台互补；上传完成不表示自更新终态完成。
 
 ## 6. 安全与故障边界
 
@@ -143,7 +148,7 @@ Password 环境先通过 SDK 登录取得进程内 Cookie，再上传；Bearer �
 - 项目仍可选择本机已注册生产环境，因此副作用命令必须展示最终 Server 并取得确认；
 - 输出不得包含密码、Token、Cookie、PSK、签名 URL 或原始敏感响应；
 - 非幂等 POST 网络结果不明时先查询 Server 权威状态，不盲目重试；
-- `env current` 的成功只表示配置可解析，不表示 Server 可达或凭据有效；
+- `env current` 的成功只表示配置可解析，不表示 Server 可达或凭据有效；`env check` 才验证 Server、凭据和实际身份；
 - 环境删除不会修复项目引用，被删除环境的项目后续明确失败。
 
 ## 7. Skill 安装与当前项目 cwd
@@ -151,7 +156,7 @@ Password 环境先通过 SDK 登录取得进程内 Cookie，再上传；Bearer �
 正式版本通过 Pi 用户级 Git package 安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.1.0
+pi install git:github.com/xuzhen97/VCPDeck@v0.1.1
 ```
 
 Pi 克隆整个仓库，从 `skills/vcpdeck/SKILL.md` 发现 Skill；同目录 `vcpdeck.cjs` 是随 Tag 提交的 CLI 单文件构件。所有项目共享这一份安装。升级到新 Tag 时再次执行 `pi install ...@vX.Y.Z`，固定 Tag 不会由 `pi update --extensions` 自动推进。
@@ -169,8 +174,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.1.0&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.1.0&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.1.1&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.1.1&path:/packages/shared"
 ```
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。
@@ -185,7 +190,8 @@ pnpm \
 - 项目损坏/未知环境 fail closed；
 - 缺失凭据和直连冲突；
 - 配置原子写入及 POSIX `0600`；
-- `env add/list/show/current/use/remove`；
+- `env add/list/show/current/check/use/remove`；
+- `env check` 使用 Bearer 调用真实本地 HTTP Server 并显示 Token 身份，且不输出 Token；
 - 命名 Bearer 环境通过真实本地 HTTP Server 上传两个平台构件。
 
 当前已知非能力：系统凭据存储、共享环境目录、`--json`、交互式密码输入、环境健康检查、Release 状态轮询，以及 Release 之外的业务 CLI 命令。

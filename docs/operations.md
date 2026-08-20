@@ -135,7 +135,7 @@ pnpm --filter @vcpdeck/client start
 
 ### CLI 环境错误或目标环境不符
 
-- 先运行 `vcpdeck env current`，核对环境名、Server 和来源；该命令不验证 Server 可达或凭据有效；
+- 先运行 `vcpdeck env current` 核对环境名、Server 和来源，再运行 `vcpdeck env check` 验证 Server、凭据和实际身份；
 - 检查选择优先级：`--env`、`VCPDECK_ENVIRONMENT`、最近项目 `.vcpdeck.json`、全局默认；
 - 项目配置损坏或引用已删除环境时 CLI 会 fail closed，不会回退；修正项目文件或重新注册同名环境；
 - 凭据变量缺失时只补设对应环境变量，不把 Token/密码写入用户级或项目配置；

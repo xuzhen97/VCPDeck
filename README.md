@@ -57,7 +57,7 @@ VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server�
 Node.js 24+ 环境中按稳定 Tag 用户级安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.1.0
+pi install git:github.com/xuzhen97/VCPDeck@v0.1.1
 ```
 
 Pi 会克隆整个仓库并发现 `skills/vcpdeck/SKILL.md`；同目录 `vcpdeck.cjs` 已随 Tag 提交，无需在安装机编译。升级或回滚需显式切换 Tag，例如：
@@ -68,6 +68,18 @@ pi install git:github.com/xuzhen97/VCPDeck@v0.2.0
 
 Skill 与 CLI 用户级只安装一份，但执行时保留当前项目 cwd，因此每个项目都可以用自己的 `.vcpdeck.json` 选择用户级已注册环境。
 
+CLI 推荐先在 Frontend `/settings/tokens` 创建专用 Token，再将 Token 保存在本机环境变量并注册命名环境：
+
+```bash
+node "<vcpdeck-cli>" env add prod \
+  --server=https://deck.example.com \
+  --token-env=VCPDECK_PROD_TOKEN
+node "<vcpdeck-cli>" env use prod --global
+node "<vcpdeck-cli>" env check
+```
+
+`env check` 会通过 SDK 显示 Token 对应的实际身份，但不会输出 Token。修改个人用户名不会使 Token 环境失效；用户名/密码模式仅保留兼容。
+
 ### SDK 与 Shared
 
 Node.js 24+、pnpm 10.26+ 的项目可从同一 Tag 安装 SDK 和协议类型：
@@ -77,8 +89,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.1.0&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.1.0&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.1.1&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.1.1&path:/packages/shared"
 ```
 
 两个包必须使用同一 Tag。pnpm 会在 Git 获取阶段构建未提交的 `dist`，并把实际 commit 与构建许可记录到目标项目。SDK 不读取 CLI 环境配置；调用方显式提供 Server 和认证：

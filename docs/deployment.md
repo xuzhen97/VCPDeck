@@ -82,17 +82,19 @@ Server 默认监听 `3001`，可用 `VCPDECK_PORT` 覆盖。改端口时三处�
 
 CLI 用户级环境注册表位于 `~/.vcpdeck/cli/config.json`，项目默认环境选择器为从当前目录向上查找的最近 `.vcpdeck.json`。项目文件只能保存环境名，不能保存 Server 或凭据；完整命令、优先级和故障边界见 [`design/cli.md`](./design/cli.md) 与 ADR-0017。
 
+先在 Frontend `/settings/tokens` 创建专用 CLI Token，将明文只保存到本机 `VCPDECK_DEV_TOKEN` 环境变量，再注册环境：
+
 ```bash
 node packages/cli/dist/index.js env add dev \
   --server=http://127.0.0.1:3001 \
-  --auth=password --username=admin \
-  --password-env=VCPDECK_DEV_PASSWORD
+  --token-env=VCPDECK_DEV_TOKEN
 node packages/cli/dist/index.js env use dev --global
 node packages/cli/dist/index.js env use dev --local   # 写入最近项目/Git 根 .vcpdeck.json
 node packages/cli/dist/index.js env current
+node packages/cli/dist/index.js env check
 ```
 
-Password/Bearer 的真实值只放在相应环境变量。用户级配置应限制读取并纳入本机配置备份，不得提交 Git；项目 `.vcpdeck.json` 不含秘密，可按项目需要提交。
+Token 是与 Identity 关联的服务端 Credential，CLI 与 SDK 可共用；修改个人用户名不会使 Token 失效。Token/兼容密码的真实值只放在相应环境变量。用户级配置应限制读取并纳入本机配置备份，不得提交 Git；项目 `.vcpdeck.json` 不含秘密，可按项目需要提交。
 
 ### 4.3 Client
 
@@ -290,13 +292,13 @@ pnpm release --version=x.y.z
 
 产出 `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`，并打印各自的 sha256。上传任选其一：
 
-**方式一：CLI（推荐命名环境；第二个平台齐备即自动开始更新）**
+#### 方式一：CLI（推荐命名环境；第二个平台齐备即自动开始更新）
 
 ```bash
 # 首次配置，凭据值在本机环境变量 VCPDECK_PROD_TOKEN 中
 node packages/cli/dist/index.js env add prod \
   --server=https://<server>:3001 \
-  --auth=bearer --token-env=VCPDECK_PROD_TOKEN
+  --token-env=VCPDECK_PROD_TOKEN
 node packages/cli/dist/index.js env use prod --global
 
 # 后续可使用全局/项目默认，或显式 --env=prod
@@ -308,7 +310,7 @@ node packages/cli/dist/index.js release upload \
 
 已有自动化仍可使用 `--server=<url> --username=<name>` 直连，并由 `VCPDECK_ADMIN_PASSWORD` 提供密码；不推荐把 `--password` 写入命令行。
 
-**方式二：curl（先用登录会话，再按打包输出打印的 sha256 逐个上传）**
+#### 方式二：curl（先用登录会话，再按打包输出打印的 sha256 逐个上传）
 
 > 示例为 Bash / Git Bash 语法；Windows PowerShell 请使用 `curl.exe`，登录时用 `-c cookies.txt` 保存会话、后续请求用 `-b cookies.txt` 携带。
 
