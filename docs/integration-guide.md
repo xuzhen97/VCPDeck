@@ -1250,7 +1250,7 @@ const terminal = await sdk.jobs.wait(job.jobId);
 
 ## 12. CLI 对接建议
 
-当前 CLI 已实现多环境 `env add/list/show/current/check/use/remove` 与 `release upload`。环境配置遵循 ADR-0017：用户级注册表定义 Server/认证引用，项目 `.vcpdeck.json` 只选择环境；新环境推荐 `/settings/tokens` 创建的 Bearer Token，`env check` 通过 SDK 显示其对应身份；Release 校验两个同版本且平台互补的 archive，在本地计算 SHA-256，通过 SDK 的 Bearer 或兼容 password Cookie 认证流式上传。第二个平台成功后 Server 自动启动自更新编排；CLI 上传成功不等于 Release 已完成。其他业务领域仍不具备 CLI 命令。
+当前 CLI 已实现多环境 `env add/list/show/current/check/use/remove` 与 `release upload/status/wait`。环境配置遵循 ADR-0017：用户级注册表定义 Server/认证引用，项目 `.vcpdeck.json` 只选择环境；新环境推荐 `/settings/tokens` 创建的 Bearer Token，`env check` 通过 SDK 显示其对应身份；Release 校验两个同版本且平台互补的 archive，在本地计算 SHA-256，通过 SDK 的 Bearer 或兼容 password Cookie 认证流式上传。`release wait`/`upload --wait` 仅重试安全 GET，并同时验收 Server 版本、Release 终态和 Client 明细。其他业务领域仍不具备 CLI 命令。
 
 ### 12.1 后续候选命令映射
 
@@ -1319,7 +1319,7 @@ Token 在 Frontend `/settings/tokens` 创建并与 Identity 关联；CLI 与 SDK
 
 ## 13. Skill 工作流与后续完善
 
-`skills/vcpdeck/SKILL.md` 是 VCPDeck CLI 的统一能力入口，而不是单独的自更新 Skill。它维护能力目录、通用操作规则和按功能分组的工作流；当前已经实现 Release 打包、最终确认、双平台上传和状态核验章节，直接调用 CLI，不重复实现 HTTP、Cookie 或上传协议。CLI 尚无 `--json` 和 Release 状态轮询，因此该功能当前要求在 Frontend 发版页完成最终核验；机器/Job 等意图映射仍是后续候选，待相应 CLI 命令落地后再增量写入同一个 Skill。
+`skills/vcpdeck/SKILL.md` 是 VCPDeck CLI 的统一能力入口，而不是单独的自更新 Skill。它维护能力目录、通用操作规则和按功能分组的工作流；当前已经实现 Release 打包、最终确认、双平台上传和 `status/wait` 终态核验，直接调用 CLI，不重复实现 HTTP、Cookie 或上传协议。CLI 尚无 `--json`；机器/Job 等意图映射仍是后续候选，待相应 CLI 命令落地后再增量写入同一个 Skill。
 
 ### 13.1 后续意图映射
 

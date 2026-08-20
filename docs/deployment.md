@@ -305,7 +305,7 @@ node packages/cli/dist/index.js env use prod --global
 node packages/cli/dist/index.js release upload \
   dist-release/vcpdeck-x.y.z-win-x64.zip \
   dist-release/vcpdeck-x.y.z-linux-x64.zip \
-  --env=prod
+  --env=prod --wait --timeout=1800
 ```
 
 已有自动化仍可使用 `--server=<url> --username=<name>` 直连，并由 `VCPDECK_ADMIN_PASSWORD` 提供密码；不推荐把 `--password` 写入命令行。
@@ -341,24 +341,19 @@ Windows 大包下载+解压可能耗时数分钟，`/api/status` 短时间仍显
 
 ### 9.4 监控进度
 
+推荐直接用 CLI 查询或等待，它会同时核对 Server 版本、Release 状态和逐台 Client 明细；Server 重启期间只重试安全 GET，不重复上传：
+
 ```bash
-# 公开端点：服务端版本与当前活动 Release
-curl https://<server>:3001/api/status
-# → {"serverVersion":"x.y.z","activeRelease":...}
-
-# 需认证：Release 状态机、失败原因、逐台 Client 明细
-curl -b 'vcpdeck_session=<cookie>' https://<server>:3001/api/releases
-# status: uploaded → updating_server → updating_clients → done/failed
-# clientStates[clientId]: pending/updating/done/failed + reason + at
-
-# 需认证：各机器当前版本与在线状态
-curl -b 'vcpdeck_session=<cookie>' https://<server>:3001/api/clients
+node packages/cli/dist/index.js release status x.y.z --env=prod
+node packages/cli/dist/index.js release wait x.y.z --env=prod --timeout=1800
 ```
+
+需人工排障时仍可在 Frontend“发版”页面查看完整明细，或使用已认证 REST 查询。`/api/status` 公开端点只显示 Server 版本与活动 Release，`activeRelease=null` 单独不能证明 Client 全部成功。
 
 ### 9.5 完成核对
 
-- `/api/status.serverVersion` 等于目标版本，`activeRelease` 已清空；
-- Release `status=done`，`clientStates` 中全部为 `done`（有 failed 则单独处置）；
+- `release wait` 以零退出码结束；
+- Server 版本等于目标版本；Release `status=done`，`clientStates` 中全部为 `done`（有 failed 时 CLI 非零退出）；
 - `/api/clients` 中所有在线机器的 `clientVersion` 等于目标版本；
 - 下发一个最小 exec Job 验证 Server→Client 链路仍正常。
 

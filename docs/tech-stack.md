@@ -112,11 +112,11 @@ React + Vite SPA，使用 React Router 进行客户端路由。数据访问以 `
 无命令框架的 Node.js CLI。当前已实现：
 
 ```text
-vcpdeck env add|list|show|current|use|remove
-vcpdeck release upload <vcpdeck-x.y.z-win-x64.zip> <vcpdeck-x.y.z-linux-x64.zip> [--env=<name>]
+vcpdeck env add|list|show|current|check|use|remove
+vcpdeck release upload|status|wait
 ```
 
-CLI 使用 `~/.vcpdeck/cli/config.json` 注册多个环境，项目 `.vcpdeck.json` 只选择默认环境；解析顺序为显式 `--env`、`VCPDECK_ENVIRONMENT`、最近项目配置、全局默认，错误配置 fail closed（ADR-0017）。`release upload` 负责参数/文件校验、SHA-256 与人类可读输出；登录会话、Bearer、Release 原始流上传和 API 错误归一化复用 `@vcpdeck/sdk`。现有 `--server` 直连模式保持兼容。构建时 TypeScript 编译，再由 esbuild 打包为随 Git Tag 提交的 `skills/vcpdeck/vcpdeck.cjs`；Skill 从绝对路径调用它但保留当前项目 cwd。机器管理、Job 操作等尚未形成 CLI 命令。
+CLI 使用 `~/.vcpdeck/cli/config.json` 注册多个环境，项目 `.vcpdeck.json` 只选择默认环境；解析顺序为显式 `--env`、`VCPDECK_ENVIRONMENT`、最近项目配置、全局默认，错误配置 fail closed（ADR-0017）。`release upload` 负责参数/文件校验、SHA-256 与人类可读输出；`release status/wait` 同时核对 Server、Release 与 Client 终态，只对安全 GET 做等待重试。登录会话、Bearer、Release 原始流上传和 API 错误归一化复用 `@vcpdeck/sdk`。现有 `--server` 直连模式保持兼容。构建时 TypeScript 编译，再由 esbuild 打包为随 Git Tag 提交的 `skills/vcpdeck/vcpdeck.cjs`；Skill 从绝对路径调用它但保留当前项目 cwd。机器管理、Job 操作等尚未形成 CLI 命令。
 
 ### `packages/launcher`
 

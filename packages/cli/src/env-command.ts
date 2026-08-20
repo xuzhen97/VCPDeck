@@ -150,7 +150,9 @@ async function checkEnvironment(
 	log(formatEnvironmentSummary(environment));
 	const client = await createAuthenticatedClient(environment);
 	const identity = await client.auth.me();
-	log(`身份: ${identity.username} (${identity.displayName})${identity.isAdmin ? " [admin]" : ""}`);
+	log(
+		`身份: ${identity.username} (${identity.displayName})${identity.isAdmin ? " [admin]" : ""}`,
+	);
 }
 
 async function addEnvironment(
@@ -169,7 +171,8 @@ async function addEnvironment(
 	const name = positionals[0];
 	assertEnvironmentName(name);
 	const server = requiredOption(options, "server");
-	const auth = stringOption(options, "auth") ??
+	const auth =
+		stringOption(options, "auth") ??
 		(stringOption(options, "token-env") ? "bearer" : undefined);
 	if (!auth) {
 		throw new Error("缺少 --token-env（推荐）或 --auth=password 认证参数");

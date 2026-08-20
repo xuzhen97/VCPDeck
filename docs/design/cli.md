@@ -9,7 +9,7 @@
 CLI 是操作员和 Pi Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访问 Server。当前已落地：
 
 - 多环境注册、查看、选择与项目默认环境；
-- `release upload` 双平台发布上传和自更新触发。
+- `release upload/status/wait` 双平台发布上传、权威状态查询和 Server/Client 终态等待。
 
 CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 Skill 中复制 HTTP。SDK 不读取 HOME、当前目录或 CLI 配置，只接受解析后的 `baseUrl` 和认证。
 
@@ -115,18 +115,20 @@ Server 必须是 HTTP/HTTPS origin，不允许内嵌用户名密码、query、fr
 
 ## 5. Release 命令
 
-推荐使用当前环境：
+推荐使用当前环境并等待完整终态：
 
 ```bash
 vcpdeck release upload \
   vcpdeck-x.y.z-win-x64.zip \
-  vcpdeck-x.y.z-linux-x64.zip
+  vcpdeck-x.y.z-linux-x64.zip \
+  --wait --timeout=1800
 ```
 
-临时覆盖：
+已有发布可独立查询或等待；临时环境覆盖继续使用 `--env=prod`：
 
 ```bash
-vcpdeck release upload ... --env=prod
+vcpdeck release status x.y.z --env=prod
+vcpdeck release wait x.y.z --env=prod --timeout=1800
 ```
 
 保留的直连兼容模式：
@@ -139,7 +141,7 @@ vcpdeck release upload ... \
 
 直连密码优先来自 `VCPDECK_ADMIN_PASSWORD`；`--password` 仍兼容但会暴露在 Shell history/进程参数中，不推荐。`--server` 不能与 `--env` 同时使用，命名环境模式也不能混入 `--username` / `--password`。
 
-Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认证；Password 环境先通过 SDK 登录取得进程内 Cookie，仅为已有配置兼容。CLI 上传前显示最终环境安全摘要，并校验两个 archive 版本一致、平台互补；上传完成不表示自更新终态完成。
+Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认证；Password 环境先通过 SDK 登录取得进程内 Cookie，仅为已有配置兼容。CLI 上传前显示最终环境安全摘要，并校验两个 archive 版本一致、平台互补。`status` 输出 Server、Release 和 Client 状态汇总；`wait`/`upload --wait` 仅重试安全 GET，容忍 Server 重启短暂断线，并要求 Server 版本匹配、Release `done`、所有已记录 Client 均 `done`；Release/Client 失败或超时均非零退出。离线 Client 不属于本次在线明细，后续注册补更。
 
 ## 6. 安全与故障边界
 
@@ -156,7 +158,7 @@ Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认
 正式版本通过 Pi 用户级 Git package 安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.1.1
+pi install git:github.com/xuzhen97/VCPDeck@v0.1.2
 ```
 
 Pi 克隆整个仓库，从 `skills/vcpdeck/SKILL.md` 发现 Skill；同目录 `vcpdeck.cjs` 是随 Tag 提交的 CLI 单文件构件。所有项目共享这一份安装。升级到新 Tag 时再次执行 `pi install ...@vX.Y.Z`，固定 Tag 不会由 `pi update --extensions` 自动推进。
@@ -174,8 +176,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.1.1&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.1.1&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.1.2&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.1.2&path:/packages/shared"
 ```
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。
@@ -192,6 +194,7 @@ pnpm \
 - 配置原子写入及 POSIX `0600`；
 - `env add/list/show/current/check/use/remove`；
 - `env check` 使用 Bearer 调用真实本地 HTTP Server 并显示 Token 身份，且不输出 Token；
-- 命名 Bearer 环境通过真实本地 HTTP Server 上传两个平台构件。
+- 命名 Bearer 环境通过真实本地 HTTP Server 上传两个平台构件；
+- `release status/wait` 覆盖 Server 重启暂时不可达、成功终态、Release failed、Client failed 和超时。
 
-当前已知非能力：系统凭据存储、共享环境目录、`--json`、交互式密码输入、环境健康检查、Release 状态轮询，以及 Release 之外的业务 CLI 命令。
+当前已知非能力：系统凭据存储、共享环境目录、`--json`、交互式密码输入，以及 Release 之外的业务 CLI 命令。

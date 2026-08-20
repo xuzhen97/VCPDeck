@@ -34,7 +34,7 @@
 | 组件 | 当前职责 |
 | --- | --- |
 | `scripts/pack-release.ts` | 同步 Shared/SDK/CLI 与运行时版本、构建 Shared/SDK/CLI/Server/Client/Frontend/Launcher、生成并验证 `skills/vcpdeck/vcpdeck.cjs`、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
-| CLI `release upload` | 解析命名/项目环境（ADR-0017）、参数与文件名，读取本地 archive、计算 SHA-256 和输出安全进度；password 登录/Bearer、原始字节流上传及 API 错误归一化复用 `@vcpdeck/sdk` |
+| CLI `release upload/status/wait` | 解析命名/项目环境（ADR-0017）、参数与文件名，读取本地 archive、计算 SHA-256 和输出安全进度；password 登录/Bearer、原始字节流上传及 API 错误归一化复用 `@vcpdeck/sdk`；`wait` 仅重试安全 GET，并同时验收 Server 版本、Release 与 Client 明细 |
 | `ReleaseController` | Release 列表、构件下载、上传校验和自动触发编排 |
 | `ReleaseService` | Release 持久化、状态转换、Client 更新明细和 SHA-256 复核 |
 | `ReleaseOrchestrator` | Server 更新、启动后恢复、在线 Client 逐台更新和后续补更 |

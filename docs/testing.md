@@ -77,7 +77,7 @@ node scripts/smoke-launcher.cjs
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |
 | Auth/Security | 密码/Cookie/Bearer、禁用/启用、撤销/过期、修改密码、既有 Socket、最后 admin、parser/限速、Actor、防泄漏 |
 | Release/Launcher | SHA、archive 路径安全、Windows/Linux 格式、drain、Server 恢复、Client 补更、数据库兼容和回退 |
-| CLI 多环境 | strict parser、明文秘密/未知字段拒绝、flag/env/project/global 优先级、Git 根、项目 fail closed、Token-first 注册、password/Bearer 缺失、`env check` 身份且不泄漏 Token、直连冲突、原子写入/权限、真实本地 HTTP Release 上传 |
+| CLI 多环境与 Release | strict parser、明文秘密/未知字段拒绝、flag/env/project/global 优先级、Git 根、项目 fail closed、Token-first 注册、password/Bearer 缺失、`env check` 身份且不泄漏 Token、直连冲突、原子写入/权限、真实本地 HTTP Release 上传，以及 `status/wait` 的重启断线、成功、Release/Client 失败和超时 |
 | Git 分发 | 在仓库外用 Node.js 24+/pnpm 10.26+ 从同一 Tag 安装 SDK/Shared，验证构建许可、JS/TS 导入、类型声明和单文件打包；从不同 cwd 调用同一 Skill CLI 验证项目环境隔离 |
 | Frontend | loading/error/empty、刷新重连、无敏感原文渲染 |
 

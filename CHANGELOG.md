@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-20
+
+### Added
+
+- CLI 新增 `release status <version>`、`release wait <version>` 和 `release upload ... --wait`，同时核对 Server 版本、Release 状态与逐台 Client 明细。
+
+### Fixed
+
+- 修复发布上传后只能依赖 `/api/status.activeRelease` 或浏览器人工核对、无法区分 Client 失败的问题；Release failed、Client failed、终态不一致和超时现在均返回非零退出。
+- 等待 Server 重启时只重试安全 GET，并使用显式 `AbortController` 清理请求超时，避免临时轮询脚本在 Windows 退出时触发 libuv 句柄断言。
+
 ## [0.1.1] - 2026-08-20
 
 ### Added

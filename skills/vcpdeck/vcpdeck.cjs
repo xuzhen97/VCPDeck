@@ -37,7 +37,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.1.1";
+    exports2.VERSION = "0.1.2";
   }
 });
 
@@ -48,21 +48,21 @@ var require_update = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ReleaseClientState = exports2.ReleaseStatus = void 0;
     exports2.platformFromOs = platformFromOs;
-    var ReleaseStatus;
-    (function(ReleaseStatus2) {
-      ReleaseStatus2["UPLOADED"] = "uploaded";
-      ReleaseStatus2["UPDATING_SERVER"] = "updating_server";
-      ReleaseStatus2["UPDATING_CLIENTS"] = "updating_clients";
-      ReleaseStatus2["DONE"] = "done";
-      ReleaseStatus2["FAILED"] = "failed";
-    })(ReleaseStatus || (exports2.ReleaseStatus = ReleaseStatus = {}));
-    var ReleaseClientState;
-    (function(ReleaseClientState2) {
-      ReleaseClientState2["PENDING"] = "pending";
-      ReleaseClientState2["UPDATING"] = "updating";
-      ReleaseClientState2["DONE"] = "done";
-      ReleaseClientState2["FAILED"] = "failed";
-    })(ReleaseClientState || (exports2.ReleaseClientState = ReleaseClientState = {}));
+    var ReleaseStatus2;
+    (function(ReleaseStatus3) {
+      ReleaseStatus3["UPLOADED"] = "uploaded";
+      ReleaseStatus3["UPDATING_SERVER"] = "updating_server";
+      ReleaseStatus3["UPDATING_CLIENTS"] = "updating_clients";
+      ReleaseStatus3["DONE"] = "done";
+      ReleaseStatus3["FAILED"] = "failed";
+    })(ReleaseStatus2 || (exports2.ReleaseStatus = ReleaseStatus2 = {}));
+    var ReleaseClientState2;
+    (function(ReleaseClientState3) {
+      ReleaseClientState3["PENDING"] = "pending";
+      ReleaseClientState3["UPDATING"] = "updating";
+      ReleaseClientState3["DONE"] = "done";
+      ReleaseClientState3["FAILED"] = "failed";
+    })(ReleaseClientState2 || (exports2.ReleaseClientState = ReleaseClientState2 = {}));
     function platformFromOs(os) {
       if (!os)
         return null;
@@ -1374,7 +1374,7 @@ __export(index_exports, {
   run: () => run
 });
 module.exports = __toCommonJS(index_exports);
-var import_shared2 = __toESM(require_dist(), 1);
+var import_shared3 = __toESM(require_dist(), 1);
 
 // ../sdk/dist/aliyundrive.js
 function createAliyunDriveApi(client) {
@@ -2515,38 +2515,95 @@ function assertNoArgs(argv) {
 var import_node_crypto = require("node:crypto");
 var import_node_fs2 = require("node:fs");
 var import_promises2 = require("node:fs/promises");
+var import_shared2 = __toESM(require_dist(), 1);
 var VERSION_RE = /^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)\.zip$/;
+var VERSION_INPUT_RE = /^\d+\.\d+\.\d+$/;
+var DEFAULT_WAIT_TIMEOUT_SECONDS = 1800;
+var DEFAULT_POLL_INTERVAL_MS = 5e3;
+var DEFAULT_REQUEST_TIMEOUT_MS = 15e3;
 async function runReleaseCommand(subcommand, argv, context = {}) {
-  if (subcommand !== "upload")
-    throw new Error(releaseUsage());
+  if (subcommand === "upload") {
+    await runUploadCommand(argv, context);
+    return;
+  }
+  if (subcommand === "status" || subcommand === "wait") {
+    await runInspectCommand(subcommand, argv, context);
+    return;
+  }
+  throw new Error(releaseUsage());
+}
+function releaseUsage() {
+  return [
+    "Release \u547D\u4EE4:",
+    "  vcpdeck release status <version> [--env=<name>]",
+    "  vcpdeck release wait <version> [--env=<name>] [--timeout=<seconds>]",
+    "  vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] [--wait] [--timeout=<seconds>]",
+    "  \u517C\u5BB9\u76F4\u8FDE: \u6DFB\u52A0 --server=<url> [--username=<name> --password=<value>]"
+  ].join("\n");
+}
+async function runUploadCommand(argv, context) {
   const { positionals, options } = parseCommandArgs(argv, {
-    value: ["env", "environment", "server", "username", "password"]
+    value: ["env", "environment", "server", "username", "password", "timeout"],
+    boolean: ["wait"]
   });
   if (positionals.length !== 2)
     throw new Error(releaseUsage());
   validateArchives(positionals);
-  const environmentName = exclusiveAlias2(options, "env", "environment");
+  if (!options.wait && options.timeout !== void 0) {
+    throw new Error("--timeout \u4EC5\u4E0E --wait \u4E00\u8D77\u4F7F\u7528");
+  }
+  const environment = await resolveCommandEnvironment(options, context);
+  const log = context.log ?? console.log;
+  const client = await uploadRelease(positionals, environment, log);
+  if (options.wait) {
+    await waitForRelease(client, platformOfFile(positionals[0]).version, parseTimeoutSeconds(options), log, context);
+  } else {
+    log("[vcpdeck] \u4E0A\u4F20\u6210\u529F\u4E0D\u4EE3\u8868\u66F4\u65B0\u5B8C\u6210\uFF1B\u4F7F\u7528 release wait <version> \u6216\u4E0A\u4F20\u65F6\u6DFB\u52A0 --wait \u9A8C\u6536\u7EC8\u6001");
+  }
+}
+async function runInspectCommand(subcommand, argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: [
+      "env",
+      "environment",
+      "server",
+      "username",
+      "password",
+      ...subcommand === "wait" ? ["timeout"] : []
+    ]
+  });
+  if (positionals.length !== 1 || !VERSION_INPUT_RE.test(positionals[0])) {
+    throw new Error(releaseUsage());
+  }
+  const environment = await resolveCommandEnvironment(options, context);
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  const client = await createAuthenticatedClient(environment);
+  if (subcommand === "wait") {
+    await waitForRelease(client, positionals[0], parseTimeoutSeconds(options), log, context);
+    return;
+  }
+  const snapshot = await readReleaseSnapshot(client, positionals[0], context.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  if (!snapshot.release)
+    throw new Error(`Release \u4E0D\u5B58\u5728: ${positionals[0]}`);
+  log(formatReleaseSummary(snapshot.release, snapshot.serverVersion));
+}
+async function resolveCommandEnvironment(options, context) {
+  const environment = exclusiveAlias2(options, "env", "environment");
   const server = stringOption(options, "server");
   const username = stringOption(options, "username");
   const password = stringOption(options, "password");
   if (!server && (username || password)) {
     throw new Error("--username/--password \u53EA\u7528\u4E8E --server \u76F4\u8FDE\u6A21\u5F0F");
   }
-  const environment = await resolveEnvironment({
-    environment: environmentName,
+  return resolveEnvironment({
+    environment,
     server,
     username,
     password,
     paths: context.paths,
     processEnv: context.processEnv
   });
-  await uploadRelease(positionals, environment, context.log ?? console.log);
-}
-function releaseUsage() {
-  return [
-    "\u7528\u6CD5: vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>]",
-    "\u517C\u5BB9\u76F4\u8FDE: ... --server=<url> [--username=<name> --password=<value>]"
-  ].join("\n");
 }
 async function uploadRelease(zipPaths, environment, log) {
   log(formatEnvironmentSummary(environment));
@@ -2555,7 +2612,130 @@ async function uploadRelease(zipPaths, environment, log) {
     await uploadOne(client, zipPath, log);
   }
   log("[vcpdeck] \u4E0A\u4F20\u5B8C\u6210\uFF08\u4E24\u4E2A\u5E73\u53F0\u6784\u4EF6\u9F50\u5907\u540E\u670D\u52A1\u7AEF\u81EA\u52A8\u5F00\u59CB\u66F4\u65B0\uFF09");
-  log("[vcpdeck] \u4E0A\u4F20\u6210\u529F\u4E0D\u4EE3\u8868\u66F4\u65B0\u5B8C\u6210\uFF0C\u8BF7\u5728\u53D1\u7248\u9875\u9762\u6838\u5BF9\u6700\u7EC8\u72B6\u6001\u4E0E Client \u660E\u7EC6");
+  return client;
+}
+async function waitForRelease(client, version, timeoutSeconds, log, context) {
+  const deadline = Date.now() + timeoutSeconds * 1e3;
+  const pollInterval = context.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const requestTimeout = context.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  let lastSummary;
+  let waitingForServer = false;
+  while (Date.now() < deadline) {
+    try {
+      const snapshot = await readReleaseSnapshot(client, version, requestTimeout);
+      waitingForServer = false;
+      if (!snapshot.release)
+        throw new Error(`Release \u4E0D\u5B58\u5728: ${version}`);
+      const summary = formatReleaseSummary(snapshot.release, snapshot.serverVersion);
+      if (summary !== lastSummary) {
+        log(summary);
+        lastSummary = summary;
+      }
+      assertReleaseNotFailed(snapshot.release);
+      if (snapshot.release.status === import_shared2.ReleaseStatus.DONE) {
+        assertReleaseCompleted(snapshot.release, snapshot.serverVersion);
+        log(`[vcpdeck] \u53D1\u7248 ${version} \u9A8C\u6536\u5B8C\u6210`);
+        return;
+      }
+    } catch (error) {
+      if (!isTransientReadError(error))
+        throw error;
+      if (!waitingForServer) {
+        log("[vcpdeck] Server \u6682\u65F6\u4E0D\u53EF\u8FBE\uFF0C\u7B49\u5F85\u91CD\u542F\u5B8C\u6210\u2026");
+        waitingForServer = true;
+      }
+    }
+    await sleep2(Math.min(pollInterval, Math.max(0, deadline - Date.now())));
+  }
+  throw new Error(`\u7B49\u5F85\u53D1\u7248 ${version} \u8D85\u65F6\uFF08${timeoutSeconds} \u79D2\uFF09`);
+}
+async function readReleaseSnapshot(client, version, requestTimeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const [release, status] = await Promise.all([
+      findRelease(client, version, controller.signal),
+      client.releases.status(controller.signal)
+    ]);
+    return { release, serverVersion: status.serverVersion };
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+async function findRelease(client, version, signal) {
+  for (let page = 1; ; page++) {
+    const result = await client.releases.list({ page, pageSize: 100 }, signal);
+    const found = result.data.find((release) => release.version === version);
+    if (found)
+      return found;
+    if (page >= result.totalPages)
+      return void 0;
+  }
+}
+function formatReleaseSummary(release, serverVersion) {
+  const counts = countClientStates(release);
+  return [
+    `\u7248\u672C: ${release.version}`,
+    `Server: ${serverVersion}`,
+    `Release: ${release.status}`,
+    `\u5BA2\u6237\u7AEF: \u6210\u529F ${counts.done} \xB7 \u5931\u8D25 ${counts.failed} \xB7 \u8FDB\u884C\u4E2D ${counts.updating} \xB7 \u5F85\u66F4\u65B0 ${counts.pending}`
+  ].join("\n");
+}
+function countClientStates(release) {
+  const counts = {
+    done: 0,
+    failed: 0,
+    updating: 0,
+    pending: 0
+  };
+  for (const entry of Object.values(release.clientStates)) {
+    if (entry.state === import_shared2.ReleaseClientState.DONE)
+      counts.done++;
+    else if (entry.state === import_shared2.ReleaseClientState.FAILED)
+      counts.failed++;
+    else if (entry.state === import_shared2.ReleaseClientState.UPDATING)
+      counts.updating++;
+    else
+      counts.pending++;
+  }
+  return counts;
+}
+function assertReleaseNotFailed(release) {
+  if (release.status === import_shared2.ReleaseStatus.FAILED) {
+    throw new Error(`\u53D1\u7248 ${release.version} \u5931\u8D25${release.errorMessage ? `: ${release.errorMessage}` : ""}`);
+  }
+}
+function assertReleaseCompleted(release, serverVersion) {
+  const counts = countClientStates(release);
+  if (serverVersion !== release.version) {
+    throw new Error(`\u53D1\u7248 ${release.version} \u5DF2\u7ED3\u675F\uFF0C\u4F46 Server \u7248\u672C\u4E3A ${serverVersion}`);
+  }
+  if (counts.failed > 0) {
+    throw new Error(`\u53D1\u7248 ${release.version} \u5DF2\u7ED3\u675F\uFF0C\u4F46\u6709 ${counts.failed} \u4E2A Client \u66F4\u65B0\u5931\u8D25`);
+  }
+  if (counts.updating > 0 || counts.pending > 0) {
+    throw new Error(`\u53D1\u7248 ${release.version} \u5DF2\u7ED3\u675F\uFF0C\u4F46\u4ECD\u6709\u672A\u5B8C\u6210\u7684 Client`);
+  }
+}
+function isTransientReadError(error) {
+  if (error instanceof VcpDeckApiError) {
+    return error.status === 0 || [502, 503, 504].includes(error.status);
+  }
+  return error instanceof Error && error.name === "AbortError";
+}
+function parseTimeoutSeconds(options) {
+  const raw = stringOption(options, "timeout");
+  if (!raw)
+    return DEFAULT_WAIT_TIMEOUT_SECONDS;
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 86400) {
+    throw new Error("--timeout \u5FC5\u987B\u662F 1\u201386400 \u79D2\u7684\u6574\u6570");
+  }
+  return seconds;
+}
+function sleep2(ms) {
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
 function validateArchives(zipPaths) {
   const archives = zipPaths.map(platformOfFile);
@@ -2610,7 +2790,7 @@ async function run(argv, context = {}) {
   const [command, subcommand, ...rest] = argv;
   try {
     if (command === "version" || command === "--version" || command === "-v") {
-      log(import_shared2.VERSION);
+      log(import_shared3.VERSION);
       return 0;
     }
     if (command === "env") {
@@ -2649,7 +2829,9 @@ function helpText() {
     "  vcpdeck env use <name> --global|--local",
     "",
     "Release:",
-    "  vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>]",
+    "  vcpdeck release status <version> [--env=<name>]",
+    "  vcpdeck release wait <version> [--env=<name>] [--timeout=<seconds>]",
+    "  vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] [--wait] [--timeout=<seconds>]",
     "  \u517C\u5BB9\u76F4\u8FDE: \u6DFB\u52A0 --server=<url> [--username=<name> --password=<value>]"
   ].join("\n");
 }

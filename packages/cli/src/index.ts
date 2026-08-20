@@ -1,7 +1,7 @@
 /**
  * VCPDeck CLI 入口。
  *
- * 当前能力：多环境配置、Release 双平台上传与 Server/Client 自更新触发。
+ * 当前能力：多环境配置、Release 双平台上传及 Server/Client 自更新终态验收。
  */
 import { VERSION } from "@vcpdeck/shared";
 import { runEnvCommand } from "./env-command.js";
@@ -67,7 +67,9 @@ export function helpText(): string {
 		"  vcpdeck env use <name> --global|--local",
 		"",
 		"Release:",
-		"  vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>]",
+		"  vcpdeck release status <version> [--env=<name>]",
+		"  vcpdeck release wait <version> [--env=<name>] [--timeout=<seconds>]",
+		"  vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] [--wait] [--timeout=<seconds>]",
 		"  兼容直连: 添加 --server=<url> [--username=<name> --password=<value>]",
 	].join("\n");
 }

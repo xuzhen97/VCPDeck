@@ -255,7 +255,8 @@ node packages/cli/dist/index.js env check
 pnpm release --version=1.0.0
 node packages/cli/dist/index.js release upload \
   dist-release/vcpdeck-1.0.0-win-x64.zip \
-  dist-release/vcpdeck-1.0.0-linux-x64.zip
+  dist-release/vcpdeck-1.0.0-linux-x64.zip \
+  --wait --timeout=1800
 ```
 
 Server 校验 sha256 → 两个平台构件齐备后自动编排：**Server 先自更新**（Launcher prepare → drain → 重启 → 探活版本一致）→ **再逐台更新在线 Client**（按各机器注册 os 选对应平台包）→ 失败自动回退上一版本。发布前必须备份数据库与 Storage。

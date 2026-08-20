@@ -31,7 +31,7 @@ pnpm --filter @vcpdeck/cli build
 | 功能域 | CLI 命令 | 状态 | 说明 |
 | --- | --- | --- | --- |
 | 多环境配置 | `env add/list/show/current/check/use/remove` | 已实现 | 用户级注册环境，项目级只选择默认环境；`check` 验证 Token 对应身份 |
-| Release / 自更新 | `release upload` | 已实现 | 上传 Windows/Linux 两个平台构件；两个构件齐备后由 Server 自动编排 Server/Client 更新 |
+| Release / 自更新 | `release upload/status/wait` | 已实现 | 上传双平台构件；查询或等待 Server/Client 权威终态，失败或超时返回非零退出 |
 | 机器、Job、文件、Terminal、Pi、FRP、Storage 等 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明，不直接绕过 CLI 调用 |
 
 ## 功能：环境选择
@@ -118,32 +118,29 @@ dist-release/vcpdeck-x.y.z-linux-x64.zip
 
 #### 3. 最终确认与上传
 
-用户确认 Server、版本和文件后，保持当前项目 cwd 运行：
+用户确认 Server、版本和文件后，保持当前项目 cwd 运行；默认添加 `--wait` 完成全链路验收：
 
 ```bash
 node "<vcpdeck-cli>" release upload \
   <repo>/dist-release/vcpdeck-x.y.z-win-x64.zip \
-  <repo>/dist-release/vcpdeck-x.y.z-linux-x64.zip
+  <repo>/dist-release/vcpdeck-x.y.z-linux-x64.zip \
+  --wait --timeout=1800
 ```
 
-命令默认使用刚确认的项目/全局环境，也可显式添加 `--env=<name>`。不要添加 `--password` 或临时改用 `--server` 绕过项目选择。CLI 从环境变量读取凭据、计算 SHA-256，并通过 SDK 流式上传。两个构件必须版本相同且平台各一个。
+命令默认使用刚确认的项目/全局环境，也可显式添加 `--env=<name>`。不要添加 `--password` 或临时改用 `--server` 绕过项目选择。CLI 从环境变量读取凭据、计算 SHA-256，并通过 SDK 流式上传。两个构件必须版本相同且平台各一个。非幂等上传请求不会自动重试；`--wait` 只重试安全的 GET 查询，并容忍 Server 重启期间短暂不可达。
 
 #### 4. 核对结果
 
-CLI 显示“上传完成”只证明两个上传请求成功，不证明更新完成。当前 CLI 尚无 Release 状态轮询命令，应在 Frontend“发版”页面核对：
+`--wait` 查询 Release 列表与 `/api/status`，成功门槛为：Server 等于目标版本、Release 到达 `done`、所有已记录 Client 均为 `done`。Release `failed`、任一 Client `failed`、仍有 pending/updating 或等待超时均返回非零退出。
 
-```text
-uploaded → updating_server → updating_clients → done | failed
+已有上传可单独查询或等待：
+
+```bash
+node "<vcpdeck-cli>" release status x.y.z
+node "<vcpdeck-cli>" release wait x.y.z --timeout=1800
 ```
 
-成功门槛：
-
-- Server 显示目标版本；
-- Release 到达 `done`；
-- 逐项检查 Client 明细，不能因 Release 为 `done` 就忽略 failed Client；
-- 离线 Client 不阻塞 `done`，其后续注册时才补更。
-
-若状态为 `failed`，只报告安全错误摘要和失败阶段。不要自行重复版本、删除数据库记录或覆盖 Launcher。
+离线 Client 不进入本次在线更新明细，也不阻塞 `done`；其后续注册时才补更。若状态为 `failed`，只报告安全错误摘要和失败阶段。不要自行重复版本、删除数据库记录或覆盖 Launcher。
 
 ### 本功能当前不提供
 
