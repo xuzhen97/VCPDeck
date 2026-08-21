@@ -142,6 +142,17 @@ pnpm --filter @vcpdeck/client start
 - `env remove` 不遍历项目选择器，删除前应自行确认哪些项目引用该名称；
 - 高风险操作前若环境/Server 与预期不符，立即停止，不使用 `--server` 绕过后继续执行。
 
+### Client 一键安装失败
+
+- `CLIENT_INSTALLER_DISABLED`：回 `/releases` 启用入口；不会影响已有 Client；
+- `CLIENT_INSTALLER_RELEASE_NOT_READY`：确认当前 Server 版本存在状态为 `done` 的同版本 Release；
+- `CLIENT_INSTALLER_ARCHIVE_MISSING`：补齐目标平台 Release archive；
+- 平台检查失败：核对 x64、受支持发行版、glibc/systemd，WSL/容器/ARM64/musl 不在范围；
+- Node/PM2 下载失败：检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源；
+- PM2 同名路径冲突：运行 `pm2 describe vcpdeck-client-launcher`，不要自动覆盖指向其他 app-dir 的进程；
+- Launcher online 但验收超时：运行 `pm2 logs vcpdeck-client-launcher --lines 100`，核对 `launcher.env`、Server 可达性、PSK 和 `/client` WebSocket；
+- 失败会保留 `~/.vcpdeck/client-install.json`、缓存、版本目录与 PM2 现场，修复后重跑同一固定命令。
+
 ### Client 无法连接
 
 - 核对 `VCPDECK_SERVER` 和网络/DNS/TLS；

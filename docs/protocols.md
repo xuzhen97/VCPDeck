@@ -34,6 +34,8 @@
 - `GET /api/health`
 - `GET /api/status`
 - `GET /api/releases/:version/file`
+- `GET /api/client-installer/scripts/:platform`、`assets/:name`、`preflight`、`POST /api/client-installer/bootstrap`（仅开关启用且当前 Release 就绪时返回安装信息）
+- `GET/PUT /api/client-installer/clients/:clientId/...`（Public 路由，但必须携带当前共享 `x-vcpdeck-psk`）
 - 带有效签名的 `PUT /api/storage/upload/:key`
 - 带有效签名的 `GET /api/storage/download/:key`
 
@@ -129,6 +131,18 @@ SDK 将失败归一化为 `VcpDeckApiError(status, code?, details?)`。新增接
 | `GET /api/status` | Public | 返回 `serverVersion` 和当前活动 Release，供 Launcher 探活 |
 
 上传响应只证明构件已保存并登记，不证明 Server/Client 更新成功。调用方必须继续查询 Release 状态。版本号当前要求严格 `x.y.z`；相同版本不得复用，且活动 Release 期间不要并发上传新版本。详细状态和失败边界见 [`design/release-and-update.md`](./design/release-and-update.md)。
+
+### 2.8 Client 一键安装 REST 协议
+
+| 端点 | 认证 | 语义 |
+| --- | --- | --- |
+| `GET/PUT /api/client-installer/config` | Cookie/Bearer | 任意有效业务身份读取/切换持久化安装开关；不返回 PSK |
+| `GET /scripts/:platform`、`GET /assets/:name` | Public | 返回不含凭据的平台引导与 Node 安装器资产 |
+| `GET /preflight?platform=` | Public + 安装开关 | 返回当前版本、资产 SHA、Node/npm 镜像等非秘密引导信息 |
+| `POST /bootstrap` | Public + 安装开关 | 仅当前 Server 同版本 `done` Release 有目标平台 archive 时，返回 archive、SHA 与共享 PSK；`Cache-Control: no-store, private` |
+| `GET /clients/:id/status`、`PUT /clients/:id/name` | `x-vcpdeck-psk` + 安装开关 | 安装器轮询最小上线摘要并设置显示名称 |
+
+关闭开关返回 `CLIENT_INSTALLER_DISABLED`，不影响已安装 Client。未知字段、平台和空名称严格拒绝；PSK 不得进入 URL query、日志或错误。
 
 ## 3. `/client` Socket.IO 协议
 

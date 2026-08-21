@@ -37,7 +37,51 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.1.2";
+    exports2.VERSION = "0.2.0";
+  }
+});
+
+// ../shared/dist/client-installer.js
+var require_client_installer = __commonJS({
+  "../shared/dist/client-installer.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.ClientInstallerErrorCode = void 0;
+    exports2.parseClientInstallerPlatform = parseClientInstallerPlatform;
+    exports2.parseClientInstallerConfigUpdate = parseClientInstallerConfigUpdate;
+    exports2.parseClientInstallerNameUpdate = parseClientInstallerNameUpdate;
+    exports2.ClientInstallerErrorCode = {
+      DISABLED: "CLIENT_INSTALLER_DISABLED",
+      RELEASE_NOT_READY: "CLIENT_INSTALLER_RELEASE_NOT_READY",
+      ARCHIVE_MISSING: "CLIENT_INSTALLER_ARCHIVE_MISSING",
+      PLATFORM_UNSUPPORTED: "CLIENT_INSTALLER_PLATFORM_UNSUPPORTED",
+      ASSET_MISSING: "CLIENT_INSTALLER_ASSET_MISSING",
+      PSK_INVALID: "CLIENT_INSTALLER_PSK_INVALID",
+      CLIENT_NOT_FOUND: "CLIENT_INSTALLER_CLIENT_NOT_FOUND"
+    };
+    function parseClientInstallerPlatform(value) {
+      if (value === "win-x64" || value === "linux-x64")
+        return value;
+      throw new Error("platform \u5FC5\u987B\u4E3A win-x64 \u6216 linux-x64");
+    }
+    function parseClientInstallerConfigUpdate(value) {
+      if (!isRecord2(value) || Object.keys(value).length !== 1 || typeof value.enabled !== "boolean") {
+        throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B boolean enabled");
+      }
+      return { enabled: value.enabled };
+    }
+    function parseClientInstallerNameUpdate(value) {
+      if (!isRecord2(value) || Object.keys(value).length !== 1 || typeof value.name !== "string") {
+        throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B string name");
+      }
+      const name = value.name.trim();
+      if (!name || name.length > 100)
+        throw new Error("name \u957F\u5EA6\u5FC5\u987B\u4E3A 1-100");
+      return { name };
+    }
+    function isRecord2(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
   }
 });
 
@@ -1230,10 +1274,23 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FrpJobType = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.platformFromOs = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.VERSION = void 0;
+    exports2.FrpJobType = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.platformFromOs = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
     var version_js_1 = require_version();
     Object.defineProperty(exports2, "VERSION", { enumerable: true, get: function() {
       return version_js_1.VERSION;
+    } });
+    var client_installer_js_1 = require_client_installer();
+    Object.defineProperty(exports2, "ClientInstallerErrorCode", { enumerable: true, get: function() {
+      return client_installer_js_1.ClientInstallerErrorCode;
+    } });
+    Object.defineProperty(exports2, "parseClientInstallerConfigUpdate", { enumerable: true, get: function() {
+      return client_installer_js_1.parseClientInstallerConfigUpdate;
+    } });
+    Object.defineProperty(exports2, "parseClientInstallerNameUpdate", { enumerable: true, get: function() {
+      return client_installer_js_1.parseClientInstallerNameUpdate;
+    } });
+    Object.defineProperty(exports2, "parseClientInstallerPlatform", { enumerable: true, get: function() {
+      return client_installer_js_1.parseClientInstallerPlatform;
     } });
     __exportStar(require_update(), exports2);
     __exportStar(require_pi(), exports2);
@@ -1431,6 +1488,23 @@ function createClientsApi(client) {
     list: (signal) => client.request("GET", "/api/clients", void 0, signal),
     /** 修改客户端别名（全局唯一；重名返回 409）。 */
     rename: (clientId, name, signal) => client.request("PATCH", `/api/clients/${encodeURIComponent(clientId)}/name`, { name }, signal)
+  };
+}
+
+// ../sdk/dist/client-installer.js
+function createClientInstallerApi(client) {
+  return {
+    getConfig: (signal) => client.request("GET", "/api/client-installer/config", void 0, signal),
+    updateConfig: (enabled, signal) => client.request("PUT", "/api/client-installer/config", { enabled }, signal),
+    preflight: (platform, signal) => {
+      const params = new URLSearchParams({ platform });
+      return client.request("GET", `/api/client-installer/preflight?${params.toString()}`, void 0, signal);
+    },
+    bootstrap: (platform, signal) => client.request("POST", "/api/client-installer/bootstrap", { platform }, signal),
+    getClientStatus: async (clientId, psk, signal) => {
+      const result = await client.requestRaw("GET", `/api/client-installer/clients/${encodeURIComponent(clientId)}/status`, { headers: { "x-vcpdeck-psk": psk }, signal });
+      return result.data;
+    }
   };
 }
 
@@ -1763,6 +1837,7 @@ var VcpDeckClient = class {
   auth;
   identities;
   clients;
+  clientInstaller;
   storage;
   aliyundrive;
   frp;
@@ -1781,6 +1856,7 @@ var VcpDeckClient = class {
     this.auth = createAuthApi(this);
     this.identities = createIdentitiesApi(this);
     this.clients = createClientsApi(this);
+    this.clientInstaller = createClientInstallerApi(this);
     this.storage = createStorageApi(this);
     this.aliyundrive = createAliyunDriveApi(this);
     this.frp = createFrpApi(this);

@@ -18,6 +18,7 @@ VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可
 - Storage 签名 URL；
 - 命令、脚本、环境变量、路径、终端正文、Pi prompt/响应和文件内容；
 - Release 构件及其下载路径；
+- Client 一键安装 bootstrap 响应和目标机 `launcher.env`；
 - SQLite 数据库和远程 Pi Session。
 
 这些内容不得进入普通日志、遥测、截图、Agent 回复、Issue 或未经加密的备份。
@@ -62,7 +63,9 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 - `/client` 使用单个共享 PSK；
 - 当前没有每 Client 独立证书、PSK 标识、轮换重叠窗口或 mTLS；
 - PSK 泄露意味着攻击者可能伪装 Client，因此必须使用高熵随机值、限制配置权限并定期轮换；
-- Server/Client 实际读取 `VCPDECK_PSK`；示例中的 `VCPDECK_CLIENT_PSK` 当前无效。
+- Server/Client 实际读取 `VCPDECK_PSK`；示例中的 `VCPDECK_CLIENT_PSK` 当前无效；
+- Client 一键安装开关默认关闭。启用后，任何能访问 Server 安装入口的机器都可从 bootstrap 取得共享 PSK；命令和公开脚本本身不含 PSK，bootstrap 禁止缓存和普通日志记录；
+- 禁用安装入口只拒绝后续安装请求，不轮换 PSK、不断开已有 Client，也无法撤销已经取得的 PSK。
 
 ### 4.4 授权缺口
 

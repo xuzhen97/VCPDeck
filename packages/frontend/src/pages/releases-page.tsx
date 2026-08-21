@@ -1,4 +1,5 @@
 import type {
+	ClientInstallerConfigInfo,
 	ReleaseClientEntry,
 	ReleaseClientState,
 	ReleaseInfo,
@@ -102,6 +103,8 @@ export function ReleasesPage() {
 	const sdk = useSdk();
 	const [page, setPage] = useState(1);
 	const [selected, setSelected] = useState<ReleaseInfo | null>(null);
+	const [installerSaving, setInstallerSaving] = useState(false);
+	const [installerError, setInstallerError] = useState("");
 	const load = useCallback(
 		(signal: AbortSignal) => sdk.releases.list({ page, pageSize: 20 }, signal),
 		[sdk, page],
@@ -110,18 +113,43 @@ export function ReleasesPage() {
 	const statusResource = useResource(
 		useCallback((signal: AbortSignal) => sdk.releases.status(signal), [sdk]),
 	);
+	const installerResource = useResource(
+		useCallback(
+			(signal: AbortSignal) => sdk.clientInstaller.getConfig(signal),
+			[sdk],
+		),
+	);
 
 	useEffect(() => {
 		const timer = setInterval(() => {
 			if (!document.hidden) {
 				resource.reload();
 				statusResource.reload();
+				installerResource.reload();
 			}
 		}, 10_000);
 		return () => clearInterval(timer);
-	}, [resource.reload, statusResource.reload]);
+	}, [resource.reload, statusResource.reload, installerResource.reload]);
 
 	const releases = useMemo(() => resource.data?.data ?? [], [resource.data]);
+	const installerOrigin = window.location.origin;
+	const linuxCommand = `curl -fsSL '${installerOrigin}/api/client-installer/scripts/linux-x64' | bash -s -- '${installerOrigin}'`;
+	const windowsCommand = `$script = irm '${installerOrigin}/api/client-installer/scripts/win-x64'; & ([scriptblock]::Create($script)) -ServerOrigin '${installerOrigin}'`;
+	const localOrigin = ["localhost", "127.0.0.1", "::1"].includes(
+		window.location.hostname,
+	);
+	const setInstallerEnabled = async (enabled: boolean) => {
+		setInstallerSaving(true);
+		setInstallerError("");
+		try {
+			await sdk.clientInstaller.updateConfig(enabled);
+			installerResource.reload();
+		} catch (error) {
+			setInstallerError(error instanceof Error ? error.message : "更新失败");
+		} finally {
+			setInstallerSaving(false);
+		}
+	};
 	const summary = useMemo(() => {
 		const counts = { done: 0, failed: 0, active: 0, total: releases.length };
 		for (const release of releases) {
@@ -180,21 +208,26 @@ export function ReleasesPage() {
 					<CardContent>
 						<p className="text-sm">
 							完成{" "}
-							<span className="font-semibold text-emerald-400">
-								{summary.done}
-							</span>{" "}
-							· 失败{" "}
-							<span className="font-semibold text-red-400">
-								{summary.failed}
-							</span>{" "}
+							<span className="font-semibold text-emerald-400">{summary.done}</span> ·
+							失败 <span className="font-semibold text-red-400">{summary.failed}</span>{" "}
 							· 进行中{" "}
-							<span className="font-semibold text-amber-400">
-								{summary.active}
-							</span>
+							<span className="font-semibold text-amber-400">{summary.active}</span>
 						</p>
 					</CardContent>
 				</Card>
 			</div>
+			<InstallerCard
+				config={installerResource.data}
+				loading={installerResource.loading}
+				error={
+					installerError || (installerResource.error ? "无法读取一键安装配置" : "")
+				}
+				saving={installerSaving}
+				localOrigin={localOrigin}
+				linuxCommand={linuxCommand}
+				windowsCommand={windowsCommand}
+				onToggle={setInstallerEnabled}
+			/>
 			<Card>
 				<CardHeader>
 					<CardTitle>发版记录</CardTitle>
@@ -298,6 +331,91 @@ export function ReleasesPage() {
 	);
 }
 
+function InstallerCard({
+	config,
+	loading,
+	error,
+	saving,
+	localOrigin,
+	linuxCommand,
+	windowsCommand,
+	onToggle,
+}: {
+	config: ClientInstallerConfigInfo | undefined;
+	loading: boolean;
+	error: string;
+	saving: boolean;
+	localOrigin: boolean;
+	linuxCommand: string;
+	windowsCommand: string;
+	onToggle: (enabled: boolean) => Promise<void>;
+}) {
+	const copy = async (value: string) => navigator.clipboard.writeText(value);
+	return (
+		<Card>
+			<CardHeader>
+				<div className="flex flex-wrap items-center justify-between gap-3">
+					<div>
+						<CardTitle>Client 一键安装</CardTitle>
+						<p className="mt-1 text-sm text-muted-foreground">
+							PM2 只守护 Launcher；Windows 登录后自启，Linux 随 systemd 启动。
+						</p>
+					</div>
+					<Button
+						variant={config?.enabled ? "destructive" : "default"}
+						disabled={loading || saving || !config}
+						onClick={() => void onToggle(!config?.enabled)}
+					>
+						{saving ? "保存中…" : config?.enabled ? "禁用一键安装" : "启用一键安装"}
+					</Button>
+				</div>
+			</CardHeader>
+			<CardContent className="space-y-4">
+				<p className="text-sm text-amber-300">
+					启用后，任何能够访问此 Server 的机器都可取得共享 Client PSK
+					并完成安装；禁用不会撤销已安装 Client。
+				</p>
+				{localOrigin && (
+					<p className="text-sm text-red-400">
+						当前页面使用 localhost，远程目标机通常无法访问生成的命令地址。
+					</p>
+				)}
+				{error && <p className="text-sm text-red-400">{error}</p>}
+				<div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+					<span>Server {config?.serverVersion ?? "—"}</span>
+					<span>· Release {config?.releaseReady ? "已就绪" : "未就绪"}</span>
+					<span>
+						· Windows {config?.platforms["win-x64"].available ? "可用" : "不可用"}
+					</span>
+					<span>
+						· Linux {config?.platforms["linux-x64"].available ? "可用" : "不可用"}
+					</span>
+				</div>
+				{[
+					["Windows PowerShell 5.1+", windowsCommand],
+					["Linux Bash", linuxCommand],
+				].map(([label, command]) => (
+					<div key={label} className="space-y-2">
+						<div className="flex items-center justify-between gap-2">
+							<p className="text-sm font-medium">{label}</p>
+							<Button size="sm" variant="outline" onClick={() => void copy(command)}>
+								复制命令
+							</Button>
+						</div>
+						<pre className="overflow-x-auto rounded-md bg-secondary/50 p-3 text-xs">
+							<code>{command}</code>
+						</pre>
+					</div>
+				))}
+				<p className="text-xs text-muted-foreground">
+					支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian
+					12+、Rocky/Alma 9+ x64 glibc/systemd；不支持 ARM64、Alpine、WSL 和容器。
+				</p>
+			</CardContent>
+		</Card>
+	);
+}
+
 function ReleaseDetails({ release }: { release: ReleaseInfo }) {
 	const clients = Object.entries(release.clientStates);
 	return (
@@ -389,10 +507,7 @@ function ReleaseDetails({ release }: { release: ReleaseInfo }) {
 										</td>
 										<td className="max-w-64 px-3 py-2">
 											{entry.reason ? (
-												<p
-													className="truncate text-xs text-red-400"
-													title={entry.reason}
-												>
+												<p className="truncate text-xs text-red-400" title={entry.reason}>
 													{entry.reason}
 												</p>
 											) : (

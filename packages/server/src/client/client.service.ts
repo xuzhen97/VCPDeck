@@ -36,6 +36,7 @@ interface ClientRow {
   cpuPercent: number | null;
   memPercent: number | null;
   lastHeartbeatAt: Date | null;
+  connectedAt?: Date | null;
 }
 
 @Injectable()
@@ -159,6 +160,39 @@ export class ClientService {
       orderBy: { connectedAt: "desc" },
     });
     return clients.map((c) => this.toClientInfo(c));
+  }
+
+  /** 返回一键安装器所需的最小 Client 验收摘要。 */
+  async getInstallerStatus(clientId: string) {
+    const client = await this.prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) {
+      return {
+        registered: false,
+        online: false,
+        clientVersion: null,
+        name: null,
+        hostname: null,
+        capabilitiesReported: false,
+        connectedAt: null,
+        lastHeartbeatAt: null,
+      };
+    }
+    let capabilities: unknown = [];
+    try {
+      capabilities = JSON.parse(client.capabilities);
+    } catch {
+      // 损坏数据按未完成能力上报处理。
+    }
+    return {
+      registered: true,
+      online: client.online,
+      clientVersion: client.clientVersion,
+      name: client.name ?? client.hostname,
+      hostname: client.hostname,
+      capabilitiesReported: Array.isArray(capabilities) && capabilities.length > 0,
+      connectedAt: client.connectedAt?.toISOString() ?? null,
+      lastHeartbeatAt: client.lastHeartbeatAt?.toISOString() ?? null,
+    };
   }
 
   private toClientInfo(c: ClientRow): ClientInfo {

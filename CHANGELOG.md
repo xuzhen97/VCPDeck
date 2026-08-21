@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-21
+
+### Added
+
+- `/releases` 新增默认关闭、持久化的 Client 一键安装入口，为 Windows x64 和 Linux x64/glibc/systemd 提供固定命令；自动准备 Node.js、Client、Launcher、PM2、自启并等待 Server 验收。
+- SDK 新增 `clientInstaller` API；发布构件的 Server 目录携带 PowerShell/Bash 引导和统一 Node.js 安装器。
+
+### Security
+
+- 一键安装命令与公开脚本不包含 PSK；启用入口后 bootstrap 会向任何可访问 Server 的机器返回现有共享 PSK，禁用只关闭后续安装，不撤销已有 Client 或已泄露凭据。
+
+### Migration
+
+- 新增默认 `enabled=false` 的 `ClientInstallerConfig` 单例配置。升级后需在 `/releases` 显式启用；已有 Client 和自更新不受影响。
+
 ## [0.1.2] - 2026-08-20
 
 ### Added

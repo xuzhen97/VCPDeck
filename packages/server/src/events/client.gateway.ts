@@ -51,8 +51,7 @@ import type {
   UpdateReady,
   UpdateFailed,
 } from "@vcpdeck/shared";
-
-const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
+import { clientPsk } from "../client/client-psk.js";
 
 @WebSocketGateway({ namespace: "/client", cors: { origin: process.env.VCPDECK_CORS_ORIGIN || "http://localhost:5173" } })
 export class ClientGateway {
@@ -98,7 +97,7 @@ export class ClientGateway {
   // ── Connection lifecycle ──
   handleConnection(client: Socket) {
     const psk = client.handshake.auth?.psk;
-    if (psk !== PSK) {
+    if (psk !== clientPsk()) {
       client.emit("error", "invalid PSK");
       client.disconnect();
       return;

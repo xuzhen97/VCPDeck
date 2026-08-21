@@ -36,6 +36,7 @@ TODO、工作流、聊天和 VCPToolBox 桥接目前没有落地数据模型，�
 | TerminalAuditEvent | `id` | SQLite | 终端生命周期最小审计 |
 | Pi Session | `jobId === sessionId` | Job + 远程 Pi JSONL | Server 保存生命周期元数据；正文由远程 Pi 管理 |
 | Release | `version` | SQLite + 发布文件目录 | 全局更新状态和各 Client 结果 |
+| ClientInstallerConfig | `default` | SQLite | Client 一键安装开关及最后变更者摘要；默认关闭 |
 | Launcher VersionStore | 版本号 | 主机文件系统 | 当前/历史构件和回退点 |
 
 ## 3. Identity、Credential 与 AuthSession
@@ -228,7 +229,9 @@ uploaded → updating_server → updating_clients → done
 - Server 先更新，恢复编排后再逐个更新 Client；
 - Launcher 管理本机 current 指针、健康探测和回退；
 - 离线 Client 在后续注册时补更；
-- Launcher 自身当前不参与自动更新。
+- Launcher 自身当前不参与自动更新；
+- Client 一键安装只选择 `version === Server VERSION`、`status=done` 且含目标平台 archive 的 Release；
+- 一键安装开关只控制安装入口，不撤销既有 Client 或轮换共享 PSK。
 
 ## 11. 模型变更规则
 

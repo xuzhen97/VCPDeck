@@ -1,6 +1,7 @@
 import { createAliyunDriveApi } from "./aliyundrive.js";
 import { createAuthApi, createIdentitiesApi } from "./auth.js";
 import { createClientsApi } from "./clients.js";
+import { createClientInstallerApi } from "./client-installer.js";
 import { createFilesApi } from "./files.js";
 import { createFrpApi } from "./frp.js";
 import { createJobsApi } from "./jobs.js";
@@ -58,6 +59,7 @@ export class VcpDeckClient {
 	readonly auth;
 	readonly identities;
 	readonly clients;
+	readonly clientInstaller;
 	readonly storage;
 	readonly aliyundrive;
 	readonly frp;
@@ -77,6 +79,7 @@ export class VcpDeckClient {
 		this.auth = createAuthApi(this);
 		this.identities = createIdentitiesApi(this);
 		this.clients = createClientsApi(this);
+		this.clientInstaller = createClientInstallerApi(this);
 		this.storage = createStorageApi(this);
 		this.aliyundrive = createAliyunDriveApi(this);
 		this.frp = createFrpApi(this);

@@ -1,5 +1,22 @@
 export { VERSION } from "./version.js";
 
+// ── Client 一键安装协议 ──
+export {
+	ClientInstallerErrorCode,
+	parseClientInstallerConfigUpdate,
+	parseClientInstallerNameUpdate,
+	parseClientInstallerPlatform,
+} from "./client-installer.js";
+export type {
+	ClientInstallerBootstrap,
+	ClientInstallerClientStatus,
+	ClientInstallerConfigInfo,
+	ClientInstallerErrorCode as ClientInstallerErrorCodeType,
+	ClientInstallerPlatform,
+	ClientInstallerPlatformStatus,
+	ClientInstallerPreflight,
+} from "./client-installer.js";
+
 // ── 自更新协议 ──
 export * from "./update.js";
 

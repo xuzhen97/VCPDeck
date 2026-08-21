@@ -5,6 +5,7 @@ import {
 	type ReleaseInfo,
 } from "@vcpdeck/shared";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
 import { AuthProvider } from "@/auth-context";
@@ -58,6 +59,32 @@ function makeClient(releases: ReleaseInfo[]) {
 				createdAt: "2026-08-15T00:00:00.000Z",
 			})),
 		},
+		clientInstaller: {
+			getConfig: vi.fn(async () => ({
+				enabled: false,
+				updatedAt: null,
+				updatedByName: null,
+				updatedVia: null,
+				serverVersion: "1.2.1",
+				releaseReady: true,
+				platforms: {
+					"win-x64": { available: true },
+					"linux-x64": { available: true },
+				},
+			})),
+			updateConfig: vi.fn(async (enabled: boolean) => ({
+				enabled,
+				updatedAt: "2026-08-20T00:00:00.000Z",
+				updatedByName: "User",
+				updatedVia: "web",
+				serverVersion: "1.2.1",
+				releaseReady: true,
+				platforms: {
+					"win-x64": { available: true },
+					"linux-x64": { available: true },
+				},
+			})),
+		},
 		releases: {
 			list: vi.fn(async () => ({
 				data: releases,
@@ -103,6 +130,28 @@ describe("ReleasesPage", () => {
 		// 操作者（列表操作者列 + 失败 release 的空态）
 		expect(screen.getAllByText("Admin").length).toBeGreaterThan(0);
 		expect(screen.getByText("尚未开始")).toBeVisible();
+	});
+
+	it("展示固定安装命令并允许任意登录用户启用", async () => {
+		const user = userEvent.setup();
+		const client = makeClient([release()]);
+		render(
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<ReleasesPage />
+				</AuthProvider>
+			</SdkProvider>,
+		);
+
+		expect(await screen.findByText("Client 一键安装")).toBeVisible();
+		expect(screen.getByText(/curl -fsSL/)).toHaveTextContent(
+			"/api/client-installer/scripts/linux-x64",
+		);
+		expect(screen.getByText(/scriptblock/)).toHaveTextContent(
+			"/api/client-installer/scripts/win-x64",
+		);
+		await user.click(screen.getByRole("button", { name: "启用一键安装" }));
+		expect(client.clientInstaller.updateConfig).toHaveBeenCalledWith(true);
 	});
 
 	it("无发版记录时给出空态提示", async () => {

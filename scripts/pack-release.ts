@@ -274,6 +274,17 @@ async function stagePackage(
 			);
 		}
 		cpSync(frontendDist, join(target, "public"), { recursive: true });
+		// Client 一键安装资产随 Server 构件分发；公开脚本不含 PSK，bootstrap 运行时再取。
+		const installerDir = join(target, "installer");
+		mkdirSync(installerDir, { recursive: true });
+		for (const name of [
+			"install-client-bootstrap.sh",
+			"install-client-bootstrap.ps1",
+			"install-client.cjs",
+			"install.cjs",
+		]) {
+			cpSync(join(ROOT, "scripts", name), join(installerDir, name));
+		}
 	}
 
 	// 4. 外部依赖精简安装：supportedArchitectures（pnpm 11 从 pnpm-workspace.yaml 读取）

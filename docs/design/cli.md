@@ -158,7 +158,7 @@ Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认
 正式版本通过 Pi 用户级 Git package 安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.1.2
+pi install git:github.com/xuzhen97/VCPDeck@v0.2.0
 ```
 
 Pi 克隆整个仓库，从 `skills/vcpdeck/SKILL.md` 发现 Skill；同目录 `vcpdeck.cjs` 是随 Tag 提交的 CLI 单文件构件。所有项目共享这一份安装。升级到新 Tag 时再次执行 `pi install ...@vX.Y.Z`，固定 Tag 不会由 `pi update --extensions` 自动推进。
@@ -176,8 +176,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.1.2&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.1.2&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.2.0&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.2.0&path:/packages/shared"
 ```
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。

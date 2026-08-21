@@ -117,7 +117,7 @@ Client 使用运行账户的权限执行命令、文件、PTY 和 Pi。应为其
 | `VCPDECK_ARTIFACT` | 必填 | `server` 或 `client` |
 | `VCPDECK_PROBE_URL` | `http://127.0.0.1:3001/api/status` | Server 探活地址 |
 
-Launcher 首次启动要求 `apps/current` 已指向可用初始版本。发布 zip 同时包含 `launcher/`、`server/`、`client/`；快速安装/卸载脚本（`install.cjs` / `uninstall.cjs`）与 zip 平级于 `dist-release/` 目录，仓库内为 `scripts/`，见 [`quickstart.md`](./quickstart.md) §3.1–3.2。安装后 Launcher 位于 `<app-dir>/dist/main.js`；安装脚本默认使用 Server `~/.vcpdeck/launcher`、Client `~/.vcpdeck/launcher-client`，显式 `--app-dir` 时可覆盖；系统服务安装器仍由运维准备。
+Launcher 首次启动要求 `apps/current` 已指向可用初始版本。发布 zip 同时包含 `launcher/`、`server/`、`client/`；快速安装/卸载脚本（`install.cjs` / `uninstall.cjs`）与 zip 平级于 `dist-release/` 目录，仓库内为 `scripts/`，见 [`quickstart.md`](./quickstart.md) §3.1–3.2。安装后 Launcher 位于 `<app-dir>/dist/main.js`；安装脚本默认使用 Server `~/.vcpdeck/launcher`、Client `~/.vcpdeck/launcher-client`，显式 `--app-dir` 时可覆盖。Client 还可从 `/releases` 启用一键安装，由平台引导脚本补齐 Node.js、PM2 和自启；Server 系统服务仍由运维准备。
 
 ### 4.5 FRPS 迁移配置
 
@@ -180,14 +180,24 @@ pm2 logs vcpdeck-server-launcher --lines 100
 
 Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt/vcpdeck/launcher` 即可；`pm2 startup` 会生成 systemd 自启脚本。
 
-开机自启：Linux 运行 `pm2 startup` 并按提示执行输出的命令；Windows 需先 `pm2 install pm2-windows-startup` 再执行其安装命令。两者均为 PM2 自身机制，不属于项目交付物。
+开机自启：手工部署时 Linux 运行 `pm2 startup` 并按提示执行输出的命令。Client 一键安装会自动为 Linux 注册 PM2 systemd startup；Windows 不依赖第三方 `pm2-windows-startup`，而是创建当前用户登录触发的计划任务执行 `pm2 resurrect`，因此无人登录时不保证 Client 在线。
 
 注意事项：
 
 - PM2 收集的 stdout/stderr 同样受 [`operations.md`](./operations.md) §4 的敏感信息规则约束；
 - 更新进行中**不要**重启 Launcher：进行中的 prepare/`pendingVersion` 存在 Launcher 内存，重启即丢失，`/apply` 会报“尚未 prepare”，Release 失败后需发布新版本重试；日常非更新窗口重启无影响，Launcher 会按 current 重新拉起业务进程并重写 `control.json`（新随机端口/Token 对业务进程透明）；
 - `kill_timeout` 只作用于 Launcher 本身；业务进程的停止由 Launcher 自己的 SIGTERM→10s→SIGKILL 流程负责；
-- Windows 下 PM2 的服务化与自动重启行为与 Linux 有差异，该方案尚未纳入项目验收矩阵，作为可选运维方式使用。
+- Windows 下 PM2 的服务化与自动重启行为与 Linux 有差异；Client 一键安装的明确语义是当前用户登录后恢复，不是 Windows Service。
+
+### 4.7 从 `/releases` 一键安装 Client
+
+任意已登录操作者可在发版页启用或禁用入口。入口默认关闭，状态保存在 SQLite；启用后页面按当前 Origin 显示固定 Windows PowerShell 和 Linux Bash 命令。命令每次动态选择与 Server 版本完全一致、状态为 `done` 且含对应平台 archive 的 Release。
+
+安装器会询问显示名称和安装目录（均有默认值），然后：检测平台、复用合格 Node.js 24+ x64或安装用户私有 Node、下载并校验 Release、保留 `~/.vcpdeck/client-id`、写入 `launcher.env`、复用/私装 PM2、只托管 `vcpdeck-client-launcher`、注册自启并等待 Server 确认在线/版本/能力。失败保留现场，重跑同一命令继续修复。若已有配置指向其他 Server则拒绝。
+
+支持范围：Windows 10/11 x64、Windows Server 2019+ x64；Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ x64 + glibc + systemd。不支持 ARM64、Alpine/musl、CentOS 7、WSL、容器及无 systemd Linux。Node 和 PM2 下载优先国内镜像，失败回退官方源。
+
+启用入口意味着任何能访问 Server 的机器都可取得共享 PSK；禁用只阻止新安装，不影响或撤销已有 Client。完整信任边界见 ADR-0018 和 [`security.md`](./security.md)。
 
 ## 5. 持久化目录
 

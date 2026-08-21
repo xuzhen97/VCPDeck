@@ -19,7 +19,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI �
 | CLI 配置 | 用户级/项目级 JSON `version=1`（ADR-0017） | `--token-env` 成为推荐入口但仍写入既有 Bearer 结构；0.1.0 password/Bearer 配置与 `--auth=bearer` 保持兼容；`--server` 直连保持兼容 |
 | Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry | `launcherMinVersion` 字段存在，但当前 Launcher 未执行校验 |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
-| Node.js | release manifest 默认 `>=24` | Launcher 可选择系统或缓存 Node；开发环境也应使用 Node 24+ |
+| Node.js | release manifest 默认 `>=24` | Launcher 可选择系统或缓存 Node；Client 一键安装优先复用合格 x64 Node，否则安装用户私有 Node；开发环境也应使用 Node 24+ |
 | FRP | 打包的 frpc/frps + Shared FRP DTO | 构件应成对验证；同一 Client 当前只可靠使用单一 FrpsInstance，实例/secret/runtime 语义变化需整套发布 |
 
 ## 3. 支持矩阵
@@ -35,6 +35,8 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI �
 | Pi 协议版本不同 | 任意 | 任意 | Pi 功能明确不可用，其他 capability 可继续评估 |
 
 “支持”表示进入发布验收矩阵，不表示所有历史版本永久兼容。
+
+Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 的 x64 + glibc + systemd 组合。ARM64、Alpine/musl、CentOS 7、WSL、容器和无 systemd Linux 会在下载大构件前明确拒绝；Node.js 自身支持某架构不代表 FRP、PTY 和 Release 原生依赖已支持。
 
 ## 4. 升级顺序
 

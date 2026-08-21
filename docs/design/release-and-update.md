@@ -26,7 +26,7 @@
 - Frontend 静态资源的独立自动部署（当前随 Server 构件分发）；
 - 数据库 schema 自动回滚；
 - 发布者数字签名；
-- 自动安装 systemd 或 Windows Service；Launcher 首次安装由发布脚本完成；
+- 自动安装 Windows Service；Client 一键安装当前强制使用 PM2（Windows 为当前用户登录计划任务，Linux 为 systemd startup）；Server 仍不自动服务化；
 - 对任意历史 Server/Client 版本提供兼容承诺。
 
 ## 2. 组件与职责
@@ -46,6 +46,8 @@
 | `VersionStore` | Linux symlink 或 Windows state 文件形式的 current 指针 |
 
 Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由安装脚本首次部署到 `<app-dir>/dist/main.js`，但不随业务版本自动覆盖。Server 负责全局控制面，Client 只负责本机更新配合；任何一方都不能在没有 Launcher 的情况下可靠完成自替换和失败回退。
+
+`/releases` 还提供默认关闭、持久化的 Client 一键安装入口（ADR-0018）。启用后，固定 Windows/Linux 命令会动态选择与运行中 Server 完全同版本且状态为 `done` 的 Release，准备用户私有 Node.js、安装 Client/Launcher，并由 PM2 只守护 Launcher。禁用只阻止新的安装请求，不影响已有 Client。
 
 ## 3. 数据与状态权威
 
@@ -263,7 +265,7 @@ Client Launcher 的健康判定是新 Client 进程连续存活约 3 秒，不�
     └── <previous-version>/
 ```
 
-Launcher 首次启动前必须已经存在可启动的 current 版本。发布安装脚本会从 zip 准备 Launcher 和初始业务版本，但不会自动安装 systemd 或 Windows Service。
+Launcher 首次启动前必须已经存在可启动的 current 版本。通用 `install.cjs` 会从 zip 准备 Launcher 和初始业务版本，但不自动安装 systemd 或 Windows Service；Client 一键安装器在其上增加 PM2 守护，Linux 配置 PM2 systemd startup，Windows 配置当前用户登录计划任务。
 
 Launcher 也没有自动旧版本保留/清理策略。失败回退只有在上一版本目录仍存在且可启动时才有效；运维清理不得删除 current 或预期回退版本。
 

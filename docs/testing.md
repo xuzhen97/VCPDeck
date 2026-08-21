@@ -77,6 +77,7 @@ node scripts/smoke-launcher.cjs
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |
 | Auth/Security | 密码/Cookie/Bearer、禁用/启用、撤销/过期、修改密码、既有 Socket、最后 admin、parser/限速、Actor、防泄漏 |
 | Release/Launcher | SHA、archive 路径安全、Windows/Linux 格式、drain、Server 恢复、Client 补更、数据库兼容和回退 |
+| Client 一键安装 | 默认关闭、Actor 开关、同版本 done Release、平台拒绝、Node/PM2 镜像回退、SHA、其他 Server 冲突、幂等修复、PM2 只托管 Launcher、Linux 重启、Windows 登录恢复和 Server 上线验收 |
 | CLI 多环境与 Release | strict parser、明文秘密/未知字段拒绝、flag/env/project/global 优先级、Git 根、项目 fail closed、Token-first 注册、password/Bearer 缺失、`env check` 身份且不泄漏 Token、直连冲突、原子写入/权限、真实本地 HTTP Release 上传，以及 `status/wait` 的重启断线、成功、Release/Client 失败和超时 |
 | Git 分发 | 在仓库外用 Node.js 24+/pnpm 10.26+ 从同一 Tag 安装 SDK/Shared，验证构建许可、JS/TS 导入、类型声明和单文件打包；从不同 cwd 调用同一 Skill CLI 验证项目环境隔离 |
 | Frontend | loading/error/empty、刷新重连、无敏感原文渲染 |
@@ -105,6 +106,7 @@ node scripts/smoke-launcher.cjs
 主分支/发布候选：
 
 - Windows 和 Linux 矩阵；
+- Client 一键安装在 Windows x64 与 Linux x64/glibc/systemd 的真实空机、既有 Node/PM2 和重启/登录恢复矩阵；
 - 真实 node-pty；
 - FRP E2E；
 - Pi Worker 集成、锁定 SDK 的 Session JSONL 打开/迁移与真实模型 smoke；
@@ -152,6 +154,7 @@ Release 不得只凭构建成功发布。至少确认：
 - 尚未建立持续、可重复的 Windows/Linux 真实 PTY 验收矩阵；
 - 远程文件 rootDir 认证、symlink/junction、不存在目标父链、import SHA-256、跨平台覆盖、running cancel、失败后下一 Job 派发和断线终局补报尚无满足长期安全要求的全链路验证；
 - 全链路 Release（Server + 多 Client + 故障回退）未自动化；
+- Client 一键安装代码与单元测试已落地，但 Windows/Linux 真实空机、PM2 自启及重启/登录恢复仍需发布候选环境验收；
 - 缺数据库升级/回滚兼容测试；
 - 认证缺 strict parser、登录限速、Cookie Origin/CSRF、Credential 生命周期、既有 Socket 撤销和最后 admin 防锁死测试；
 - FRP 缺同 Client 多实例约束、secret 脱敏、默认实例原子性、Client 重启恢复、frpc 退出状态和删除孤儿的长期门禁；

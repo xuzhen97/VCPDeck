@@ -43,7 +43,7 @@
 - Storage 孤儿扫描、跨 Provider 迁移和容量策略；
 - Release 灰度、暂停/恢复、维护窗口和可观测进度；
 - 统一 OpenAPI/协议生成及 SDK 发布策略；
-- 多平台安装器和系统服务集成。
+- 扩展 Client 安装器到 ARM64/musl/macOS，并评估 Windows 无人登录 Service 与 PM2 之外的系统原生托管；当前只支持 ADR-0018 的 Windows/Linux x64 范围。
 
 ## 4. 产品方向候选
 
