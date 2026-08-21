@@ -202,11 +202,15 @@ describe("release command", () => {
 		await writeFile(win, "win-archive");
 		await writeFile(linux, "linux-archive");
 		const providerRequests: Array<{ url: string; body: string }> = [];
-		const directFetch = async (input: string | URL | Request, init?: RequestInit) => {
+		const directFetch = async (
+			input: string | URL | Request,
+			init?: RequestInit,
+		) => {
 			const url = String(input);
 			const body = Buffer.from(init?.body as ArrayBuffer).toString("utf8");
 			providerRequests.push({ url, body });
-			if (url.endsWith("win-x64-stale")) return new Response(null, { status: 403 });
+			if (url.endsWith("win-x64-stale"))
+				return new Response(null, { status: 403 });
 			return new Response(null, { status: 200 });
 		};
 		const logs: string[] = [];
@@ -307,17 +311,13 @@ describe("release command", () => {
 		await writeFile(linux, "linux-archive");
 		const logs: string[] = [];
 
-		await runReleaseCommand(
-			"upload",
-			[win, linux, "--wait", "--timeout=2"],
-			{
-				paths: state.paths,
-				processEnv: state.processEnv,
-				pollIntervalMs: 10,
-				requestTimeoutMs: 500,
-				log: (message) => logs.push(message),
-			},
-		);
+		await runReleaseCommand("upload", [win, linux, "--wait", "--timeout=2"], {
+			paths: state.paths,
+			processEnv: state.processEnv,
+			pollIntervalMs: 10,
+			requestTimeoutMs: 500,
+			log: (message) => logs.push(message),
+		});
 
 		expect(logs.join("\n")).toContain("发版 1.2.3 验收完成");
 	});

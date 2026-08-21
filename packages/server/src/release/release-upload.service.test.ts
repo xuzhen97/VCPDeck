@@ -25,7 +25,11 @@ function fixture(options: { backend?: "local" | "alibaba"; row?: any } = {}) {
 	const delegate = {
 		findUnique: vi.fn(async () => row),
 		create: vi.fn(async ({ data }: any) => {
-			row = { ...data, createdByName: data.createdByName, createdVia: data.createdVia };
+			row = {
+				...data,
+				createdByName: data.createdByName,
+				createdVia: data.createdVia,
+			};
 			return row;
 		}),
 		delete: vi.fn(async () => {
@@ -64,8 +68,9 @@ function fixture(options: { backend?: "local" | "alibaba"; row?: any } = {}) {
 	const releases = {
 		findByVersion: vi.fn(async () => null as any),
 		create: vi.fn(async ({ archives }: any) => release(archives) as any),
-		addArchive: vi.fn(async (_version: string, platform: string, archive: any) =>
-			release({ [platform]: archive }) as any,
+		addArchive: vi.fn(
+			async (_version: string, platform: string, archive: any) =>
+				release({ [platform]: archive }) as any,
 		),
 		hasAllArchives: vi.fn(() => false),
 	};
@@ -76,7 +81,14 @@ function fixture(options: { backend?: "local" | "alibaba"; row?: any } = {}) {
 		releases as never,
 		orchestrator as never,
 	);
-	return { service, delegate, storage, releases, orchestrator, getRow: () => row };
+	return {
+		service,
+		delegate,
+		storage,
+		releases,
+		orchestrator,
+		getRow: () => row,
+	};
 }
 
 function pendingRow(overrides: Record<string, unknown> = {}) {
@@ -103,7 +115,9 @@ describe("ReleaseUploadService", () => {
 
 	it("Local 后端只协商 server 模式", async () => {
 		const { service, storage, delegate } = fixture({ backend: "local" });
-		await expect(service.createSession(input)).resolves.toEqual({ mode: "server" });
+		await expect(service.createSession(input)).resolves.toEqual({
+			mode: "server",
+		});
 		expect(storage.createReleaseDirectUpload).not.toHaveBeenCalled();
 		expect(delegate.create).not.toHaveBeenCalled();
 	});
@@ -158,7 +172,9 @@ describe("ReleaseUploadService", () => {
 	});
 
 	it("完成 Provider 后登记 storage 元数据并更新会话", async () => {
-		const { service, storage, releases, delegate } = fixture({ row: pendingRow() });
+		const { service, storage, releases, delegate } = fixture({
+			row: pendingRow(),
+		});
 		const result = await service.completeSession("session-1", 100);
 		expect(storage.completeReleaseDirectUpload).toHaveBeenCalledWith(
 			"provider-file",
@@ -187,7 +203,9 @@ describe("ReleaseUploadService", () => {
 	});
 
 	it("Release 已登记但会话未完成时修复状态且不重复 complete", async () => {
-		const { service, releases, storage, delegate } = fixture({ row: pendingRow() });
+		const { service, releases, storage, delegate } = fixture({
+			row: pendingRow(),
+		});
 		releases.findByVersion.mockResolvedValue(
 			release({
 				"win-x64": {

@@ -472,7 +472,8 @@ async function uploadDirectArchive(
 			const length = Math.min(session.partSize, size - start);
 			const bytes = Buffer.allocUnsafe(length);
 			const { bytesRead } = await handle.read(bytes, 0, length, start);
-			if (bytesRead !== length) throw new Error(`读取分片 ${part.partNumber} 不完整`);
+			if (bytesRead !== length)
+				throw new Error(`读取分片 ${part.partNumber} 不完整`);
 			uploadedHash.update(bytes);
 			await putDirectPart(
 				client,
@@ -528,7 +529,9 @@ async function putDirectPart(
 				}
 				continue;
 			}
-			lastError = new Error(`分片 ${partNumber} 上传失败：HTTP ${response.status}`);
+			lastError = new Error(
+				`分片 ${partNumber} 上传失败：HTTP ${response.status}`,
+			);
 			if (response.status < 500) break;
 		} catch (error) {
 			lastError = error instanceof Error ? error : new Error(String(error));

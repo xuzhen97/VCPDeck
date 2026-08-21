@@ -461,9 +461,7 @@ async function uploadArchive(platform) {
 	}
 
 	const session = created.body;
-	const parts = [...session.parts].sort(
-		(a, b) => a.partNumber - b.partNumber,
-	);
+	const parts = [...session.parts].sort((a, b) => a.partNumber - b.partNumber);
 	if (
 		!Number.isInteger(session.partSize) ||
 		session.partSize < 1 ||
