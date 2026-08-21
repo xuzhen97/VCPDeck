@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-21
+
+### Fixed
+
+- 修复 Client 一键安装的 Windows 引导脚本通过 `node -e` 传递探测表达式时，Windows PowerShell 5.1 删除 JavaScript 内嵌引号，导致已满足要求的 Node.js 24+ x64 被误判为不可用并反复下载的问题。
+
 ## [0.2.3] - 2026-08-21
 
 ### Fixed

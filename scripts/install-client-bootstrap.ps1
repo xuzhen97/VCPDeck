@@ -16,7 +16,10 @@ $preflight = Invoke-RestMethod -Uri "$ServerOrigin/api/client-installer/prefligh
 
 function Test-Node([string]$Path) {
   if (-not $Path -or -not (Test-Path $Path)) { return $false }
-  try { & $Path -e 'process.exit(process.arch === "x64" && Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)'; return $LASTEXITCODE -eq 0 } catch { return $false }
+  try {
+    'process.exit(process.arch === "x64" && Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)' | & $Path -
+    return $LASTEXITCODE -eq 0
+  } catch { return $false }
 }
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not (Test-Node $node)) {

@@ -1,6 +1,13 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs");
+const { spawnSync } = require("node:child_process");
+const {
+	mkdtempSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+	rmSync,
+} = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const installer = require("./install-client.cjs");
@@ -13,6 +20,36 @@ test("parseArgs 接受固定 Origin、平台和 Node", () => {
 	]);
 	assert.equal(result.serverOrigin, "https://deck.example.com");
 	assert.equal(result.platform, "linux-x64");
+});
+
+test("Windows bootstrap 的 Node 探测兼容 Windows PowerShell 5.1", () => {
+	const source = readFileSync(
+		join(__dirname, "install-client-bootstrap.ps1"),
+		"utf8",
+	);
+	assert.match(source, /\| & \$Path -/);
+	assert.doesNotMatch(source, /& \$Path -e/);
+
+	if (process.platform !== "win32") return;
+	const start = source.indexOf("function Test-Node");
+	const end = source.indexOf("\n$node =", start);
+	assert.ok(start >= 0 && end > start, "应能提取 Test-Node 函数");
+	const dir = mkdtempSync(join(tmpdir(), "vcpdeck-node-probe-"));
+	try {
+		const probe = join(dir, "probe.ps1");
+		writeFileSync(
+			probe,
+			`${source.slice(start, end)}\n$node = (Get-Command node -ErrorAction Stop).Source\nif (-not (Test-Node $node)) { exit 1 }\n`,
+		);
+		const result = spawnSync(
+			"powershell.exe",
+			["-NoProfile", "-NonInteractive", "-File", probe],
+			{ encoding: "utf8" },
+		);
+		assert.equal(result.status, 0, result.stderr || result.stdout);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("parseArgs 拒绝不支持平台与不可用 Node", () => {
@@ -65,9 +102,7 @@ test("installPm2Retry 瞬时失败会重试并从后续 registry 成功", () => 
 		(registry) => {
 			calls.push(registry);
 			// r1 两次都失败，r2 第一次成功
-			return registry === "r1"
-				? { ok: false, stderr: "ETIMEDOUT" }
-				: { ok: true };
+			return registry === "r1" ? { ok: false, stderr: "ETIMEDOUT" } : { ok: true };
 		},
 		() => {},
 	);
