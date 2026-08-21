@@ -133,6 +133,7 @@ function startFrpc(frps: FrpsInfo, _socket: SocketLike): void {
 	daemonProcess = spawn(frpcPath, ["-c", configPath], {
 		cwd: workDir,
 		stdio: "pipe",
+		windowsHide: true,
 	});
 
 	daemonProcess.stderr?.on("data", (d: Buffer) => {

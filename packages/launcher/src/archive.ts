@@ -23,18 +23,19 @@ export async function extractArchive(
 						"-Command",
 						`Expand-Archive -LiteralPath "${archivePath}" -DestinationPath "${destDir}" -Force`,
 					],
-					{ stdio: "inherit" },
+					{ stdio: "inherit", windowsHide: true },
 				);
 			} else {
 				execFileSync("unzip", ["-o", archivePath, "-d", destDir], {
 					stdio: "inherit",
+					windowsHide: true,
 				});
 			}
 		} else {
 			execFileSync(
 				isWin ? "C:\\Windows\\System32\\tar.exe" : "tar",
 				["-xzf", archivePath, "-C", destDir],
-				{ stdio: "inherit" },
+				{ stdio: "inherit", windowsHide: true },
 			);
 		}
 	} catch (e) {

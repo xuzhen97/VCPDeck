@@ -187,6 +187,8 @@ export class Daemon {
 		const child = spawn(this.nodePath, [artifact.entry], {
 			cwd: join(versionDir, artifact.dir),
 			stdio: "inherit",
+			// Windows 下必须隐藏子进程控制台，否则 client 会弹可见黑窗
+			windowsHide: true,
 			env: {
 				...process.env,
 				VCPDECK_LAUNCHER_PORT: port ? String(port) : undefined,

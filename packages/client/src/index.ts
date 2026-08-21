@@ -156,8 +156,7 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 				const { allClosed } = await deps.supervisor.applyStateAck(ack);
 				if (generation !== connectionGeneration) return;
 				if (!ack.reportAgain) return;
-				if (allClosed && !closureConfirmed)
-					reportState(generation, retry, true);
+				if (allClosed && !closureConfirmed) reportState(generation, retry, true);
 				else if (!allClosed && retry < 2)
 					setTimeout(() => reportState(generation, retry + 1), 100);
 				else scheduleControlledReconnect(generation);
@@ -188,9 +187,7 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 					setTimeout(() => resolve(undefined), 3000),
 				),
 			]).catch(() => undefined);
-			const terminalStatus = await deps
-				.getTerminalStatus()
-				.catch(() => undefined);
+			const terminalStatus = await deps.getTerminalStatus().catch(() => undefined);
 			if (generation === connectionGeneration)
 				socket.emit(
 					Events.REGISTER,
@@ -326,9 +323,7 @@ function createShellDiscoveryEnv(): ShellDiscoveryEnv {
 		resolveExecutable: async (name) => {
 			const { access } = await import("node:fs/promises");
 			const exts = isWin
-				? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
-						.split(";")
-						.filter(Boolean)
+				? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
 				: [""];
 			const seps = isWin ? ["\\", "/"] : ["/"];
 			for (const dir of dirs) {
@@ -383,8 +378,7 @@ function createPtySpawner(): (opts: PtySpawnOptions) => PtyAdapter {
 	let ptyModule: typeof import("@lydell/node-pty") | null = null;
 	return (opts) => {
 		if (!ptyModule) {
-			ptyModule =
-				require("@lydell/node-pty") as typeof import("@lydell/node-pty");
+			ptyModule = require("@lydell/node-pty") as typeof import("@lydell/node-pty");
 		}
 		const baseOptions = {
 			name: opts.name,

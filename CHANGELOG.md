@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-21
+
+### Fixed
+
+- Launcher 在 Windows 上拉起 Client 时未设置 `windowsHide`，导致 Client 控制台以可见黑窗出现（用户关闭窗口会杀死 Client 并被再次拉起、再弹新窗）；现已隐藏，并同步覆盖更新解压（powershell/tar/unzip）、frpc 守护与 Job 命令执行等子进程。
+- Client 一键安装生成的 PM2 ecosystem 增加 `windowsHide`，Launcher 自身不再可能弹出控制台。
+
 ## [0.2.2] - 2026-08-21
 
 ### Fixed

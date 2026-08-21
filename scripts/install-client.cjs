@@ -295,6 +295,7 @@ function writeEcosystem(appDir, nodePath, envPath) {
 					autorestart: true,
 					restart_delay: 2000,
 					kill_timeout: 15000,
+					windowsHide: true,
 				},
 			],
 		},
@@ -332,7 +333,9 @@ function registerStartupTask(
 		);
 		return "windows-logon-task";
 	} catch (error) {
-		if (/(access.*denied|拒绝访问|eacces)/i.test(String(error?.message ?? error))) {
+		if (
+			/(access.*denied|拒绝访问|eacces)/i.test(String(error?.message ?? error))
+		) {
 			warn(
 				`[vcpdeck] 未能注册开机自启：创建计划任务需要管理员权限（当前非管理员）。` +
 					`Client 已在线，但重启后不会自动恢复；请以管理员身份重跑安装命令以补上自启。`,
@@ -628,7 +631,9 @@ async function main() {
 	console.log(`  PM2: ${PM2_NAME}`);
 	console.log(`  自启: ${startup}`);
 	if (startup === "not-configured") {
-		console.log(`  提示: 未注册开机自启；请以管理员身份重跑同一条安装命令以补齐。`);
+		console.log(
+			`  提示: 未注册开机自启；请以管理员身份重跑同一条安装命令以补齐。`,
+		);
 	}
 }
 

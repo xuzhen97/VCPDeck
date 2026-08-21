@@ -59,12 +59,14 @@ export function executeExec(job: ExecJob, socket: Socket) {
 			shell: true,
 			cwd: job.cwd,
 			timeout: job.timeout,
+			windowsHide: true,
 		});
 	} else {
 		child = spawn(job.executable, job.args, {
 			shell: false,
 			cwd: job.cwd,
 			timeout: job.timeout,
+			windowsHide: true,
 		});
 	}
 
