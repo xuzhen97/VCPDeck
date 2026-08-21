@@ -52,6 +52,45 @@ test("Windows bootstrap 的 Node 探测兼容 Windows PowerShell 5.1", () => {
 	}
 });
 
+test("resolveGlobalPm2 将全局 pm2.cmd 解析为 node + bin/pm2，避免无 shell spawn .cmd", () => {
+	const dir = mkdtempSync(join(tmpdir(), "vcpdeck-pm2-resolve-"));
+	try {
+		const nodePath = process.execPath;
+		// 非 .cmd 命令直接透传
+		assert.deepEqual(installer.resolveGlobalPm2("/usr/bin/pm2", nodePath), {
+			command: "/usr/bin/pm2",
+			argsPrefix: [],
+		});
+		assert.equal(installer.resolveGlobalPm2(null, nodePath), null);
+
+		// pm2.cmd 旁有 pm2 包入口 bin/pm2 时用 node 执行
+		const pm2Bin = join(dir, "node_modules", "pm2", "bin");
+		mkdirSync(pm2Bin, { recursive: true });
+		writeFileSync(join(pm2Bin, "pm2"), "");
+		assert.deepEqual(installer.resolveGlobalPm2(join(dir, "pm2.cmd"), nodePath), {
+			command: nodePath,
+			argsPrefix: [join(pm2Bin, "pm2")],
+		});
+
+		// 解析不到 pm2.js 时返回 null，回退私有安装
+		assert.equal(
+			installer.resolveGlobalPm2(
+				join(tmpdir(), "no-such-dir", "pm2.cmd"),
+				nodePath,
+			),
+			null,
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("npmPath 在 Windows 上优先 npm-cli.js，避免直接执行 npm.cmd", () => {
+	if (process.platform !== "win32") return;
+	const npm = installer.npmPath(process.execPath);
+	assert.ok(npm.endsWith("npm-cli.js"), `应优先 npm-cli.js，实际 ${npm}`);
+});
+
 test("parseArgs 拒绝不支持平台与不可用 Node", () => {
 	assert.throws(
 		() =>

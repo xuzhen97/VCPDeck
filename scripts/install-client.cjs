@@ -170,12 +170,14 @@ function writeLauncherEnv(appDir, serverOrigin, psk, clientId) {
 	return path;
 }
 
+// Windows 上禁止无 shell 直接 spawn .cmd/.bat（Node 18.20+ 返回 EINVAL），
+// 因此优先返回 npm-cli.js，由调用方用 nodePath 执行。
 function npmPath(nodePath) {
 	const candidates =
 		platform() === "win32"
 			? [
-					join(dirname(nodePath), "npm.cmd"),
 					join(dirname(nodePath), "node_modules", "npm", "bin", "npm-cli.js"),
+					join(dirname(nodePath), "npm.cmd"),
 				]
 			: [
 					join(dirname(nodePath), "npm"),
@@ -217,9 +219,24 @@ function installPm2Retry(registries, install, log = console.log) {
 	return { ok: false, lastError };
 }
 
+/** 把全局 pm2.cmd 解析为可用 node 执行的 pm2 入口；解析失败返回 null。 */
+function resolveGlobalPm2(existing, nodePath) {
+	if (!existing || !/\.cmd$/i.test(existing)) {
+		return existing ? { command: existing, argsPrefix: [] } : null;
+	}
+	// pm2 包的真实入口是 bin/pm2（带 shebang 的 JS，可由 node 直接执行）
+	const cli = join(dirname(existing), "node_modules", "pm2", "bin", "pm2");
+	// Windows 上无 shell 直接执行 .cmd 会 EINVAL；解析不到入口时返回 null，
+	// 由调用方回退到私有安装。
+	return existsSync(cli) ? { command: nodePath, argsPrefix: [cli] } : null;
+}
+
 function ensurePm2(nodePath, registries) {
-	const existing = findCommand(platform() === "win32" ? "pm2.cmd" : "pm2");
-	if (existing) return { command: existing, argsPrefix: [] };
+	const existing = resolveGlobalPm2(
+		findCommand(platform() === "win32" ? "pm2.cmd" : "pm2"),
+		nodePath,
+	);
+	if (existing) return existing;
 	const toolRoot = join(homedir(), ".vcpdeck", "tools", "pm2");
 	const cli = join(toolRoot, "node_modules", "pm2", "bin", "pm2");
 	if (!existsSync(cli)) {
@@ -251,8 +268,13 @@ function ensurePm2(nodePath, registries) {
 			);
 			const ok = out.status === 0 && existsSync(cli);
 			if (ok && out.stdout) console.log(out.stdout.trimEnd());
-			// 失败时保留真实输出，便于区分网络与 npm 配置问题
-			return { ok, stderr: ok ? "" : `${out.stdout || ""}${out.stderr || ""}` };
+			// 失败时保留真实输出与启动错误，便于区分网络、npm 配置和无法启动问题
+			return {
+				ok,
+				stderr: ok
+					? ""
+					: `${out.error?.message || ""}${out.stdout || ""}${out.stderr || ""}`,
+			};
 		});
 		if (!result.ok) {
 			const detail = result.lastError
@@ -654,5 +676,7 @@ module.exports = {
 	normalizeOrigin,
 	ensureClientId,
 	installPm2Retry,
+	resolveGlobalPm2,
+	npmPath,
 	registerStartupTask,
 };
