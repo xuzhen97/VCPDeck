@@ -57,3 +57,79 @@ test("readEnv 与 normalizeOrigin 支持已有安装冲突检测", () => {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("installPm2Retry 瞬时失败会重试并从后续 registry 成功", () => {
+	const calls = [];
+	const result = installer.installPm2Retry(
+		["r1", "r2"],
+		(registry) => {
+			calls.push(registry);
+			// r1 两次都失败，r2 第一次成功
+			return registry === "r1"
+				? { ok: false, stderr: "ETIMEDOUT" }
+				: { ok: true };
+		},
+		() => {},
+	);
+	assert.equal(result.ok, true);
+	assert.deepEqual(calls, ["r1", "r1", "r2"]);
+});
+
+test("installPm2Retry 全部失败时保留最近真实错误", () => {
+	const result = installer.installPm2Retry(
+		["r1", "r2"],
+		() => ({ ok: false, stderr: "npm ERR! 404 Not Found" }),
+		() => {},
+	);
+	assert.equal(result.ok, false);
+	assert.match(result.lastError, /npm ERR! 404/);
+});
+
+test("registerStartupTask 非管理员被拒时降级为 not-configured 并警示", () => {
+	const warnings = [];
+	const outcome = installer.registerStartupTask(
+		"VCPDeck PM2 Startup",
+		"C:\\Users\\xuzhe\\.vcpdeck\\launcher-client\\pm2-resurrect.cmd",
+		() => {
+			const error = new Error("spawn schtasks.exe 拒绝访问。\r\n");
+			throw error;
+		},
+		(message) => warnings.push(message),
+	);
+	assert.equal(outcome, "not-configured");
+	assert.equal(warnings.length, 1);
+	assert.match(warnings[0], /管理员/);
+});
+
+test("registerStartupTask 英文 Access is denied 同样降级", () => {
+	const outcome = installer.registerStartupTask(
+		"T",
+		"C:\\x\\pm2-resurrect.cmd",
+		() => {
+			throw new Error("Access is denied.");
+		},
+		() => {},
+	);
+	assert.equal(outcome, "not-configured");
+});
+
+test("registerStartupTask 非权限错误仍抛出", () => {
+	assert.throws(() =>
+		installer.registerStartupTask("T", "C:\\x", () => {
+			throw new Error("schtasks 已存在但指向其他命令");
+		}),
+	);
+});
+
+test("registerStartupTask 创建成功返回 windows-logon-task", () => {
+	const called = [];
+	const outcome = installer.registerStartupTask(
+		"T",
+		"C:\\x\\pm2-resurrect.cmd",
+		(file, args) => {
+			called.push([file, args[4]]);
+		},
+	);
+	assert.equal(outcome, "windows-logon-task");
+	assert.deepEqual(called, [["schtasks.exe", "T"]]);
+});

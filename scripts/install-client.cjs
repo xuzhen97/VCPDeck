@@ -201,6 +201,22 @@ function findCommand(name) {
 	return probe.status === 0 ? probe.stdout.trim().split(/\r?\n/)[0] : null;
 }
 
+/** 尝试多个 registry 安装 PM2；瞬时失败重试一次，并保留最近一次真实错误用于诊断。 */
+function installPm2Retry(registries, install, log = console.log) {
+	let lastError = "";
+	for (const registry of registries) {
+		for (let attempt = 1; attempt <= 2; attempt += 1) {
+			log(
+				`[vcpdeck] 尝试 PM2 registry: ${registry}${attempt > 1 ? `（第 ${attempt} 次）` : ""}`,
+			);
+			const result = install(registry);
+			if (result.ok) return { ok: true };
+			if (result.stderr?.trim()) lastError = result.stderr.trim();
+		}
+	}
+	return { ok: false, lastError };
+}
+
 function ensurePm2(nodePath, registries) {
 	const existing = findCommand(platform() === "win32" ? "pm2.cmd" : "pm2");
 	if (existing) return { command: existing, argsPrefix: [] };
@@ -213,12 +229,10 @@ function ensurePm2(nodePath, registries) {
 			JSON.stringify({ private: true }, null, 2),
 		);
 		const npm = npmPath(nodePath);
-		let installed = false;
-		for (const registry of registries) {
-			console.log(`[vcpdeck] 尝试 PM2 registry: ${registry}`);
-			const command = npm.endsWith(".js") ? nodePath : npm;
-			const prefix = npm.endsWith(".js") ? [npm] : [];
-			const result = spawnSync(
+		const command = npm.endsWith(".js") ? nodePath : npm;
+		const prefix = npm.endsWith(".js") ? [npm] : [];
+		const result = installPm2Retry(registries, (registry) => {
+			const out = spawnSync(
 				command,
 				[
 					...prefix,
@@ -231,15 +245,25 @@ function ensurePm2(nodePath, registries) {
 				],
 				{
 					cwd: toolRoot,
-					stdio: "inherit",
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "pipe"],
 				},
 			);
-			if (result.status === 0 && existsSync(cli)) {
-				installed = true;
-				break;
-			}
+			const ok = out.status === 0 && existsSync(cli);
+			if (ok && out.stdout) console.log(out.stdout.trimEnd());
+			// 失败时保留真实输出，便于区分网络与 npm 配置问题
+			return { ok, stderr: ok ? "" : `${out.stdout || ""}${out.stderr || ""}` };
+		});
+		if (!result.ok) {
+			const detail = result.lastError
+				.split(/\r?\n/)
+				.filter(Boolean)
+				.slice(-3)
+				.join(" | ");
+			throw new Error(
+				`国内与官方 registry 均无法安装 PM2${detail ? `；最近错误: ${detail}` : ""}`,
+			);
 		}
-		if (!installed) throw new Error("国内与官方 registry 均无法安装 PM2");
 	}
 	return { command: nodePath, argsPrefix: [cli] };
 }
@@ -281,6 +305,44 @@ function writeEcosystem(appDir, nodePath, envPath) {
 	return path;
 }
 
+/** 注册 Windows 开机自启任务；非管理员无法创建根目录任务时降级为警告，不视为安装失败。
+ * exec 与 warn 可注入以便测试。 */
+function registerStartupTask(
+	taskName,
+	wrapper,
+	exec = execFileSync,
+	warn = console.error,
+) {
+	try {
+		exec(
+			"schtasks.exe",
+			[
+				"/Create",
+				"/SC",
+				"ONLOGON",
+				"/TN",
+				taskName,
+				"/TR",
+				`"${wrapper}"`,
+				"/RL",
+				"LIMITED",
+				"/F",
+			],
+			{ stdio: "inherit" },
+		);
+		return "windows-logon-task";
+	} catch (error) {
+		if (/(access.*denied|拒绝访问|eacces)/i.test(String(error?.message ?? error))) {
+			warn(
+				`[vcpdeck] 未能注册开机自启：创建计划任务需要管理员权限（当前非管理员）。` +
+					`Client 已在线，但重启后不会自动恢复；请以管理员身份重跑安装命令以补上自启。`,
+			);
+			return "not-configured";
+		}
+		throw error;
+	}
+}
+
 function configureStartup(pm2, nodePath, appDir) {
 	if (platform() === "win32") {
 		const wrapper = join(appDir, "pm2-resurrect.cmd");
@@ -301,22 +363,7 @@ function configureStartup(pm2, nodePath, appDir) {
 				throw new Error(`Windows 计划任务 ${taskName} 已存在但指向其他命令`);
 			}
 		} else {
-			execFileSync(
-				"schtasks.exe",
-				[
-					"/Create",
-					"/SC",
-					"ONLOGON",
-					"/TN",
-					taskName,
-					"/TR",
-					`"${wrapper}"`,
-					"/RL",
-					"LIMITED",
-					"/F",
-				],
-				{ stdio: "inherit" },
-			);
+			return registerStartupTask(taskName, wrapper);
 		}
 		return "windows-logon-task";
 	}
@@ -547,12 +594,12 @@ async function main() {
 		runPm2(pm2, ["restart", ecosystem, "--only", PM2_NAME, "--update-env"]);
 	} else runPm2(pm2, ["start", ecosystem, "--only", PM2_NAME]);
 	runPm2(pm2, ["save"]);
-	const startup = configureStartup(pm2, args.nodePath, config.appDir);
 	const processInfo = pm2Process(pm2);
 	if (processInfo?.pm2_env?.status !== "online")
 		throw new Error("PM2 中 Launcher 未处于 online");
 
-	saveState("verify", { releaseVersion: bootstrap.releaseVersion, startup });
+	// 先验证 Client 上线：这是安装的核心结果，不应被后续可选的自启配置失败掩盖
+	saveState("verify", { releaseVersion: bootstrap.releaseVersion });
 	await waitForClient(
 		args.serverOrigin,
 		clientId,
@@ -561,6 +608,16 @@ async function main() {
 		config.name,
 		bootstrap.verificationTimeoutMs || 120_000,
 	);
+
+	// 开机自启属于最后一步最佳努力：失败（如非管理员）只降级为警告并给出修复指引
+	let startup = "not-configured";
+	try {
+		startup = configureStartup(pm2, args.nodePath, config.appDir);
+	} catch (error) {
+		console.error(
+			`[vcpdeck] 未能配置开机自启: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 	saveState("done", {
 		releaseVersion: bootstrap.releaseVersion,
 		startup,
@@ -570,6 +627,9 @@ async function main() {
 	console.log(`  版本: ${bootstrap.releaseVersion}`);
 	console.log(`  PM2: ${PM2_NAME}`);
 	console.log(`  自启: ${startup}`);
+	if (startup === "not-configured") {
+		console.log(`  提示: 未注册开机自启；请以管理员身份重跑同一条安装命令以补齐。`);
+	}
 }
 
 if (require.main === module) {
@@ -583,4 +643,11 @@ if (require.main === module) {
 	});
 }
 
-module.exports = { parseArgs, readEnv, normalizeOrigin, ensureClientId };
+module.exports = {
+	parseArgs,
+	readEnv,
+	normalizeOrigin,
+	ensureClientId,
+	installPm2Retry,
+	registerStartupTask,
+};
