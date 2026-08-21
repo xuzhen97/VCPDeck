@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import { VcpDeckApiError, type VcpDeckClient } from "@vcpdeck/sdk";
 import {
 	ReleaseClientState,
@@ -29,6 +29,10 @@ export interface ReleaseCommandContext {
 	log?: (message: string) => void;
 	pollIntervalMs?: number;
 	requestTimeoutMs?: number;
+	/** Release 直传 Provider 时使用；测试可注入。 */
+	directFetch?: typeof globalThis.fetch;
+	/** 分片重试退避；测试可缩短。 */
+	directRetryDelayMs?: number;
 }
 
 interface ReleaseClientCounts {
@@ -80,7 +84,7 @@ async function runUploadCommand(
 	}
 	const environment = await resolveCommandEnvironment(options, context);
 	const log = context.log ?? console.log;
-	const client = await uploadRelease(positionals, environment, log);
+	const client = await uploadRelease(positionals, environment, log, context);
 	if (options.wait) {
 		await waitForRelease(
 			client,
@@ -162,11 +166,12 @@ async function uploadRelease(
 	zipPaths: string[],
 	environment: ResolvedEnvironment,
 	log: (message: string) => void,
+	context: ReleaseCommandContext,
 ): Promise<VcpDeckClient> {
 	log(formatEnvironmentSummary(environment));
 	const client = await createAuthenticatedClient(environment);
 	for (const zipPath of zipPaths) {
-		await uploadOne(client, zipPath, log);
+		await uploadOne(client, zipPath, log, context);
 	}
 	log("[vcpdeck] 上传完成（两个平台构件齐备后服务端自动开始更新）");
 	return client;
@@ -360,11 +365,12 @@ function sha256File(path: string): Promise<string> {
 	});
 }
 
-/** 上传单个平台包；文件读取与摘要留在 Node CLI，REST 协议由 SDK 负责。 */
+/** 上传单个平台包；Alibaba 直传 Provider，Local/旧 Server 使用 legacy raw。 */
 async function uploadOne(
 	client: VcpDeckClient,
 	zipPath: string,
 	log: (message: string) => void,
+	context: ReleaseCommandContext,
 ): Promise<ReleaseInfo> {
 	const { version, platform } = platformOfFile(zipPath);
 	const sha256 = await sha256File(zipPath);
@@ -372,6 +378,56 @@ async function uploadOne(
 	log(
 		`[vcpdeck] 上传 ${zipPath} (${(size / 1024 / 1024).toFixed(1)} MB, ${platform}, sha256=${sha256.slice(0, 12)}…)`,
 	);
+
+	let session;
+	try {
+		session = await client.releases.createUploadSession({
+			version,
+			platform,
+			sha256,
+			size,
+		});
+	} catch (error) {
+		if (!(error instanceof VcpDeckApiError) || error.status !== 404) throw error;
+		log("[vcpdeck] 旧 Server 不支持直传会话，使用 legacy 引导上传");
+		return legacyUpload(client, zipPath, version, platform, sha256);
+	}
+
+	if (session.mode === "existing") {
+		log(`[vcpdeck] ${platform} 相同构件已登记，跳过上传`);
+		return session.release;
+	}
+	if (session.mode === "server") {
+		return legacyUpload(client, zipPath, version, platform, sha256);
+	}
+	if (session.mode !== "direct") {
+		throw new Error("Server 返回未知 Release 上传模式");
+	}
+
+	await uploadDirectArchive(
+		client,
+		zipPath,
+		platform,
+		size,
+		sha256,
+		session,
+		log,
+		context,
+	);
+	const { release } = await client.releases.completeUploadSession(
+		session.sessionId,
+		size,
+	);
+	return release;
+}
+
+async function legacyUpload(
+	client: VcpDeckClient,
+	zipPath: string,
+	version: string,
+	platform: ReleasePlatform,
+	sha256: string,
+): Promise<ReleaseInfo> {
 	const { release } = await client.releases.upload({
 		version,
 		platform,
@@ -380,6 +436,115 @@ async function uploadOne(
 		duplex: "half",
 	});
 	return release;
+}
+
+async function uploadDirectArchive(
+	client: VcpDeckClient,
+	zipPath: string,
+	platform: ReleasePlatform,
+	size: number,
+	expectedSha256: string,
+	session: {
+		sessionId: string;
+		partSize: number;
+		parts: Array<{ partNumber: number; url: string }>;
+	},
+	log: (message: string) => void,
+	context: ReleaseCommandContext,
+): Promise<void> {
+	const expectedParts = Math.ceil(size / session.partSize);
+	const parts = [...session.parts].sort((a, b) => a.partNumber - b.partNumber);
+	if (
+		session.partSize < 1 ||
+		parts.length !== expectedParts ||
+		parts.some(
+			(part, index) =>
+				part.partNumber !== index + 1 || !isSafeDirectUploadUrl(part.url),
+		)
+	) {
+		throw new Error("Server 返回的 Release 直传分片不完整或 URL 不安全");
+	}
+	const handle = await open(zipPath, "r");
+	const uploadedHash = createHash("sha256");
+	try {
+		for (const part of parts) {
+			const start = (part.partNumber - 1) * session.partSize;
+			const length = Math.min(session.partSize, size - start);
+			const bytes = Buffer.allocUnsafe(length);
+			const { bytesRead } = await handle.read(bytes, 0, length, start);
+			if (bytesRead !== length) throw new Error(`读取分片 ${part.partNumber} 不完整`);
+			uploadedHash.update(bytes);
+			await putDirectPart(
+				client,
+				session.sessionId,
+				part.partNumber,
+				part.url,
+				bytes,
+				context,
+			);
+			log(
+				`[vcpdeck] ${platform} 直传进度 ${Math.min(100, ((start + length) / size) * 100).toFixed(1)}%`,
+			);
+		}
+	} finally {
+		await handle.close();
+	}
+	if (uploadedHash.digest("hex") !== expectedSha256) {
+		throw new Error("构件在计算 SHA-256 后发生变化，拒绝完成上传");
+	}
+}
+
+async function putDirectPart(
+	client: VcpDeckClient,
+	sessionId: string,
+	partNumber: number,
+	initialUrl: string,
+	bytes: Buffer,
+	context: ReleaseCommandContext,
+): Promise<void> {
+	const fetcher = context.directFetch ?? globalThis.fetch;
+	const retryDelay = context.directRetryDelayMs ?? 500;
+	let url = initialUrl;
+	let lastError: Error | undefined;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			const response = await fetcher(url, {
+				method: "PUT",
+				headers: {
+					"Content-Type": "",
+					"Content-Length": String(bytes.length),
+				},
+				body: bytes as unknown as BodyInit,
+			});
+			if (response.ok) return;
+			if (response.status === 403 && attempt < 2) {
+				const refreshed = await client.releases.refreshUploadParts(sessionId, [
+					partNumber,
+				]);
+				url =
+					refreshed.parts.find((part) => part.partNumber === partNumber)?.url ?? "";
+				if (!isSafeDirectUploadUrl(url)) {
+					throw new Error(`分片 ${partNumber} URL 刷新失败或不安全`);
+				}
+				continue;
+			}
+			lastError = new Error(`分片 ${partNumber} 上传失败：HTTP ${response.status}`);
+			if (response.status < 500) break;
+		} catch (error) {
+			lastError = error instanceof Error ? error : new Error(String(error));
+		}
+		if (attempt < 2) await sleep(retryDelay * (attempt + 1));
+	}
+	throw lastError ?? new Error(`分片 ${partNumber} 上传失败`);
+}
+
+function isSafeDirectUploadUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return url.protocol === "https:" && !url.username && !url.password;
+	} catch {
+		return false;
+	}
 }
 
 function exclusiveAlias(

@@ -142,6 +142,17 @@ pnpm --filter @vcpdeck/client start
 - `env remove` 不遍历项目选择器，删除前应自行确认哪些项目引用该名称；
 - 高风险操作前若环境/Server 与预期不符，立即停止，不使用 `--server` 绕过后继续执行。
 
+### Release 上传失败或未登记
+
+- 先运行 `vcpdeck release status <version>` 查询权威状态；非幂等 legacy raw POST 网络结果不明时不要盲目重复；
+- Alibaba 后端正常流程会先创建 `/api/releases/uploads` 会话，再由 CLI 直接 PUT Provider 分片；Server 日志和入站流量不应出现完整 zip；
+- `RELEASE_DIRECT_UPLOAD_REQUIRED` 表示当前 Alibaba 后端拒绝 legacy raw 上传，必须使用 `0.2.1+` CLI，不能通过延长 Server 超时或代理中转绕过；
+- `RELEASE_UPLOAD_PROVIDER_FAILED`：检查阿里云 OAuth、配额、文件夹权限和网络；响应只给安全摘要，详细外部响应不得进入普通日志；
+- 403 分片 URL 由 CLI 自动经 Server 刷新；重跑相同版本/平台/SHA/大小会恢复持久化会话并换取全部新 URL；
+- `RELEASE_UPLOAD_SESSION_EXPIRED`：重新运行同一命令创建新 Provider 会话；过期对象删除是尽力而为，应检查阿里云中转目录孤儿；
+- `RELEASE_UPLOAD_SESSION_CONFLICT` 或 `RELEASE_ARCHIVE_EXISTS`：核对本地构件 SHA/大小，不覆盖同版本不同构件，修复后使用新版本号；
+- 从旧 Server 首次升级且公网 legacy 上传超时：将构件和 CLI 用 `rsync/scp` 复制到 Server 主机，从回环地址执行一次引导；升级后恢复 Alibaba 直传。
+
 ### Client 一键安装失败
 
 - `CLIENT_INSTALLER_DISABLED`：回 `/releases` 启用入口；不会影响已有 Client；

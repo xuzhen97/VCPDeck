@@ -73,12 +73,12 @@ node scripts/smoke-launcher.cjs
 | Terminal | 协议 parser、operator/viewer/token、snapshot/output 同序列、上游 gap/resync、UTF-8 上限、持续输入速率、generation、SQLite 状态、首次/重复 attach-detach TTL、expired 上报、真实 PTY 和进程树 |
 | Pi | capability/协议 parser、Owner/Observer、runId/CAS、cwd/projectKey、Session 树、交互/非阻塞 Extension 投影与 Trust、图片、SSE、重连/重启、隐私和真实模型 smoke |
 | Storage Provider | 签名篡改/过期、上传下载、Provider 故障、孤儿清理 |
-| Storage 阿里云盘真环境验收 | `node scripts/test-release-alibaba.cjs`（ADR-0016 一键端到端）：脚本自建同一临时 DB、Server/Client Launcher 并完成打包/安装/更新/清理；仅首次输入 clientId、浏览器 OAuth code 或 3001 端口冲突时需人工介入 |
+| Storage 阿里云盘真环境验收 | `node scripts/test-release-alibaba.cjs`（ADR-0019 一键端到端）：脚本自建同一临时 DB、Server/Client Launcher，按会话把两个 Release 分片直接 PUT Provider，验证 Server 本地无目标 zip、下载 302、更新与清理；仅首次输入 clientId、浏览器 OAuth code 或 3001 端口冲突时需人工介入 |
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |
 | Auth/Security | 密码/Cookie/Bearer、禁用/启用、撤销/过期、修改密码、既有 Socket、最后 admin、parser/限速、Actor、防泄漏 |
-| Release/Launcher | SHA、archive 路径安全、Windows/Linux 格式、drain、Server 恢复、Client 补更、数据库兼容和回退 |
+| Release/Launcher | Shared 严格 parser、Local SHA/raw、Alibaba 会话持久化/恢复/分片刷新/Provider 安全错误/URL 不落库、CLI 实际发送字节 SHA、Server 本地无正文、Windows/Linux 格式、drain、Server 恢复、Client 补更、数据库兼容和回退 |
 | Client 一键安装 | 默认关闭、Actor 开关、同版本 done Release、平台拒绝、Node/PM2 镜像回退、SHA、其他 Server 冲突、幂等修复、PM2 只托管 Launcher、Linux 重启、Windows 登录恢复和 Server 上线验收 |
-| CLI 多环境与 Release | strict parser、明文秘密/未知字段拒绝、flag/env/project/global 优先级、Git 根、项目 fail closed、Token-first 注册、password/Bearer 缺失、`env check` 身份且不泄漏 Token、直连冲突、原子写入/权限、真实本地 HTTP Release 上传，以及 `status/wait` 的重启断线、成功、Release/Client 失败和超时 |
+| CLI 多环境与 Release | strict parser、明文秘密/未知字段拒绝、flag/env/project/global 优先级、Git 根、项目 fail closed、Token-first 注册、password/Bearer 缺失、`env check` 身份且不泄漏 Token、直连冲突、原子写入/权限、Local raw 与 Alibaba Provider 分片直传/403 刷新/URL 脱敏/旧 Server 引导兼容，以及 `status/wait` 的重启断线、成功、Release/Client 失败和超时 |
 | Git 分发 | 在仓库外用 Node.js 24+/pnpm 10.26+ 从同一 Tag 安装 SDK/Shared，验证构建许可、JS/TS 导入、类型声明和单文件打包；从不同 cwd 调用同一 Skill CLI 验证项目环境隔离 |
 | Frontend | loading/error/empty、刷新重连、无敏感原文渲染 |
 
@@ -126,7 +126,7 @@ Release 不得只凭构建成功发布。至少确认：
 - Terminal attach/input/resync/close、snapshot/seq、控制权、Client/Server 重启、TTL/expired 和真实 PTY；
 - Pi Session CRUD/fork/clone、prompt/steer/follow-up/compact/abort、Extension/Trust、图片、SSE、Worker/Client/Server reconnect；
 - FRPS probe、单实例映射、frpc 退出/重启、删除孤儿和凭据不泄漏；
-- Windows/Linux 构件从上传到 Server 更新、Client 逐台更新、离线补更和失败回退的完整链路；
+- Windows/Linux 构件从上传到 Server 更新、Client 逐台更新、离线补更和失败回退的完整链路；Alibaba 后端必须证明上传/下载正文均不经过 Server；
 - 同一 Git Tag 的 Pi Skill 安装/升级与 SDK/Shared 仓库外安装；
 - 数据库和 Storage 恢复；
 - CHANGELOG/compatibility/deployment/operations 已更新。
@@ -141,7 +141,7 @@ Release 不得只凭构建成功发布。至少确认：
 - 失败、跳过项和已知限制；
 - 验收人。
 
-- `scripts/test-release-alibaba.cjs`：ADR-0016 发布构件经阿里云盘直连分发的唯一交互入口。直接运行后自动打包基线/目标版本、用 `install.cjs` 安装并启动隔离的 Server/Client Launcher、在同一临时 DB 中完成阿里云盘授权、上传并验证 `storage.mode=direct` 与 302 外部 HTTPS 直链、等待 Server/Client 自更新、删除本测试云端对象并清理本测试进程/目录。仅在缺少 clientId、浏览器 OAuth code 或 3001 端口被其他进程占用时暂停请人处理。
+- `scripts/test-release-alibaba.cjs`：ADR-0019 发布构件向阿里云盘上传/下载双向直连的唯一交互入口。直接运行后自动打包基线/目标版本、用 `install.cjs` 安装并启动隔离的 Server/Client Launcher、在同一临时 DB 中完成阿里云盘授权、按会话分片 PUT 两个平台构件、验证 `storage.mode=direct`、Server Local Release 目录无目标 zip与下载 302、等待 Server/Client 自更新、删除本测试云端对象并清理本测试进程/目录。仅在缺少 clientId、浏览器 OAuth code 或 3001 端口被其他进程占用时暂停请人处理。
 
 验证文档是时间点证据，不是永久“已支持”声明。支持范围以 `compatibility.md` 和当前 CI 矩阵为准。
 

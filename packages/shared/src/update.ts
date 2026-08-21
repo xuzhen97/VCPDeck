@@ -87,16 +87,143 @@ export interface ReleaseClientEntry {
 /** 发布包支持的目标平台（打包脚本产出对应的分发 zip） */
 export type ReleasePlatform = "win-x64" | "linux-x64";
 
+/** Release 上传会话稳定错误码。 */
+export const ReleaseUploadErrorCode = {
+	DIRECT_UPLOAD_REQUIRED: "RELEASE_DIRECT_UPLOAD_REQUIRED",
+	SESSION_NOT_FOUND: "RELEASE_UPLOAD_SESSION_NOT_FOUND",
+	SESSION_EXPIRED: "RELEASE_UPLOAD_SESSION_EXPIRED",
+	SESSION_CONFLICT: "RELEASE_UPLOAD_SESSION_CONFLICT",
+	SIZE_MISMATCH: "RELEASE_UPLOAD_SIZE_MISMATCH",
+	PROVIDER_FAILED: "RELEASE_UPLOAD_PROVIDER_FAILED",
+} as const;
+
+/** 创建 Release 上传会话的严格输入。 */
+export interface ReleaseUploadCreateInput {
+	version: string;
+	platform: ReleasePlatform;
+	sha256: string;
+	size: number;
+}
+
+/** 外部 Provider 的单个直传分片。 */
+export interface ReleaseUploadPart {
+	partNumber: number;
+	url: string;
+}
+
+/** Release 上传会话协商结果。 */
+export type ReleaseUploadSession =
+	| { mode: "server" }
+	| { mode: "existing"; release: ReleaseInfo }
+	| {
+			mode: "direct";
+			sessionId: string;
+			partSize: number;
+			parts: ReleaseUploadPart[];
+			expiresAt: string;
+	  };
+
+/** 严格解析 Release 上传会话创建输入。 */
+export function parseReleaseUploadCreateInput(
+	value: unknown,
+): ReleaseUploadCreateInput {
+	if (
+		!isRecord(value) ||
+		!hasOnlyKeys(value, ["version", "platform", "sha256", "size"])
+	) {
+		throw new Error("body 必须且只能包含 version/platform/sha256/size");
+	}
+	if (
+		typeof value.version !== "string" ||
+		!/^\d+\.\d+\.\d+$/.test(value.version)
+	) {
+		throw new Error("version 格式应为 x.y.z");
+	}
+	if (value.platform !== "win-x64" && value.platform !== "linux-x64") {
+		throw new Error("platform 应为 win-x64 或 linux-x64");
+	}
+	if (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)) {
+		throw new Error("sha256 应为 64 位小写十六进制");
+	}
+	if (
+		typeof value.size !== "number" ||
+		!Number.isSafeInteger(value.size) ||
+		value.size < 1 ||
+		value.size > 2_147_483_647
+	) {
+		throw new Error("size 应为 1–2147483647 的整数");
+	}
+	return {
+		version: value.version,
+		platform: value.platform,
+		sha256: value.sha256,
+		size: value.size,
+	};
+}
+
+/** 严格解析需要刷新的分片编号。 */
+export function parseReleaseUploadPartRefresh(value: unknown): {
+	partNumbers: number[];
+} {
+	if (
+		!isRecord(value) ||
+		!hasOnlyKeys(value, ["partNumbers"]) ||
+		!Array.isArray(value.partNumbers)
+	) {
+		throw new Error("body 必须且只能包含 partNumbers 数组");
+	}
+	const partNumbers = value.partNumbers;
+	if (
+		partNumbers.length < 1 ||
+		partNumbers.length > 100 ||
+		partNumbers.some(
+			(part) => !Number.isInteger(part) || part < 1 || part > 10_000,
+		) ||
+		new Set(partNumbers).size !== partNumbers.length
+	) {
+		throw new Error("partNumbers 必须包含 1–100 个不重复的 1–10000 整数");
+	}
+	return { partNumbers: partNumbers as number[] };
+}
+
+/** 严格解析 Release 直传完成输入。 */
+export function parseReleaseUploadComplete(value: unknown): {
+	uploadedBytes: number;
+} {
+	if (
+		!isRecord(value) ||
+		!hasOnlyKeys(value, ["uploadedBytes"]) ||
+		typeof value.uploadedBytes !== "number" ||
+		!Number.isSafeInteger(value.uploadedBytes) ||
+		value.uploadedBytes < 1 ||
+		value.uploadedBytes > 2_147_483_647
+	) {
+		throw new Error("body 必须且只能包含有效整数 uploadedBytes");
+	}
+	return { uploadedBytes: value.uploadedBytes };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
+	const actual = Object.keys(value);
+	return (
+		actual.length === keys.length && actual.every((key) => keys.includes(key))
+	);
+}
+
 /** 单个平台的发布构件信息（校验值与体积） */
 export interface ReleaseArchiveInfo {
 	sha256: string;
 	size: number;
 	fileName: string;
-	/** 外部存储直连信息（ADR-0016；Local 后端无此字段） */
+	/** 外部存储直连信息（ADR-0019；Local 后端无此字段） */
 	storage?: ReleaseArchiveStorage;
 }
 
-/** 发布构件存储信息（ADR-0016：外部存储直连分发）
+/** 发布构件存储信息（ADR-0019：外部存储上传/下载双向直连）
  *  Local 后端无此字段；目标机经统一入口 302 直连存储下载。 */
 export interface ReleaseArchiveStorage {
 	/** 存储后端 kind（local / alibaba 等） */

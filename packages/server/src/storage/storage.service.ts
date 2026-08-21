@@ -110,6 +110,40 @@ export class StorageService implements OnModuleInit {
 		return p as AlibabaStorageProvider;
 	}
 
+	/** 为 Release 创建外部 Provider 直传会话（ADR-0019）。 */
+	async createReleaseDirectUpload(
+		size: number,
+		name: string,
+	): Promise<{
+		fileId: string;
+		uploadId: string;
+		partSize: number;
+		parts: Array<{ partNumber: number; url: string }>;
+	}> {
+		return this.requireDirectProvider().createDirectUpload(size, name);
+	}
+
+	/** 刷新 Release 直传会话的指定分片 URL。 */
+	async refreshReleaseDirectUploadParts(
+		fileId: string,
+		uploadId: string,
+		partNumbers: number[],
+	): Promise<Array<{ partNumber: number; url: string }>> {
+		return this.requireDirectProvider().refreshPartUrls(
+			fileId,
+			uploadId,
+			partNumbers,
+		);
+	}
+
+	/** 完成 Release 直传并由 Provider 合并分片。 */
+	async completeReleaseDirectUpload(
+		fileId: string,
+		uploadId: string,
+	): Promise<void> {
+		await this.requireDirectProvider().completeDirectUpload(fileId, uploadId);
+	}
+
 	/** 是否支持目标机直连下载（ADR-0016：字节不经过 Server） */
 	supportsDirectDownload(): boolean {
 		const p = this.getProvider();

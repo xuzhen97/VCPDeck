@@ -15,7 +15,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI �
 | Server ↔ Client Terminal | `terminal.pty` capabilityDetails + Shared 严格运行时解析 | 无独立数字版本；缺能力时拒绝，seq/generation/state 变化需整套同版本发布 |
 | Server ↔ Frontend | REST/Socket.IO/SSE | Frontend 应与 Server 同一发布版本部署 |
 | SDK ↔ Server | REST DTO 和错误 | SDK/Shared 可从同一 Git Tag 子目录安装；只支持与 Server 同版本的标准组合 |
-| CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | Pi 用户级 Git package 安装；升级必须显式切换 Tag |
+| CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | Pi 用户级 Git package 安装；升级必须显式切换 Tag；`0.2.1+` CLI 支持 Alibaba Release 分片直传 |
 | CLI 配置 | 用户级/项目级 JSON `version=1`（ADR-0017） | `--token-env` 成为推荐入口但仍写入既有 Bearer 结构；0.1.0 password/Bearer 配置与 `--auth=bearer` 保持兼容；`--server` 直连保持兼容 |
 | Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry | `launcherMinVersion` 字段存在，但当前 Launcher 未执行校验 |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
@@ -57,7 +57,8 @@ Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x
 ### 5.1 通常兼容
 
 - REST 响应新增可选字段；
-- Release `archives[platform]` 新增可选 `storage` 字段（ADR-0016：外部存储直连信息；缺失即 Local，新旧记录互读）；
+- Release `archives[platform]` 的可选 `storage` 字段（外部存储直连信息；缺失即 Local，新旧记录互读）；
+- `0.2.1+` 新增独立 Release 上传会话 API；新 CLI 对旧 Server 的 404 会回退 legacy raw，引导升级兼容；
 - Client 新增 capability；
 - Socket payload 新增接收方明确忽略的可选字段；
 - 新增独立 API、Job 类型或事件且旧端不会收到；
@@ -72,7 +73,7 @@ Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x
 - 升级 Pi SDK、Session JSONL 版本、Worker Runtime API 或事件投影；
 - 将 exec script 从 `executable + args` 迁移到 runtime ID；
 - 数据库字段改名、非空约束或数据回填；
-- Release manifest 或 Launcher 控制协议变化；
+- Release manifest、上传会话或 Launcher 控制协议变化；
 - 改变 FrpsInstance secret DTO、默认实例、端口池、mapping 状态/删除语义或 Client 单/多 frpc runtime。
 
 ### 5.3 破坏性变化
@@ -94,6 +95,13 @@ Terminal 当前没有独立协议版本，且 snapshotSeq/网络 output seq、ge
 认证当前使用服务端 opaque Session/Credential。Cookie/token/Actor 变化必须同时评估现有 Session 和 Credential 的失效/迁移、Frontend/SDK/CLI、`/app` handshake 和回滚；不能在无明确迁移时改为 JWT 或新摘要语义。
 
 FRP 当前 Server 多实例模型与 Client 单 frpc runtime 不一致。无论选择每 Client 强制单实例还是每实例独立 frpc，都属于需要新 ADR、数据迁移、双端发布和真实 FRPS E2E 的破坏性变更。
+
+### 5.4 Release 上传兼容窗口
+
+- `0.2.1+` Server + Alibaba：必须走创建/刷新/完成会话，旧 raw 入口在读取正文前返回 `RELEASE_DIRECT_UPLOAD_REQUIRED`；旧 CLI 不能向该组合发布；
+- `0.2.1+` CLI + 旧 Server：创建会话端点返回 404 时回退 legacy raw，仅用于从旧版本引导升级；
+- Local 后端：新旧 CLI 均可使用 raw stream，新 CLI 会先协商得到 `mode=server`；
+- 首次引导若公网 raw 上传受旧 Server 请求时限影响，应从 Server 本机/近端执行，不修改已发布 Tag、不复用失败版本号。
 
 ## 6. 数据库兼容
 

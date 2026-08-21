@@ -35,7 +35,8 @@ TODO、工作流、聊天和 VCPToolBox 桥接目前没有落地数据模型，�
 | TerminalSession | `id` | SQLite；PTY 在 Client | 只持久化元数据，不保存正文 |
 | TerminalAuditEvent | `id` | SQLite | 终端生命周期最小审计 |
 | Pi Session | `jobId === sessionId` | Job + 远程 Pi JSONL | Server 保存生命周期元数据；正文由远程 Pi 管理 |
-| Release | `version` | SQLite + 发布文件目录 | 全局更新状态和各 Client 结果 |
+| Release | `version` | SQLite + Storage Provider/发布文件目录 | 全局更新状态、平台构件元数据和各 Client 结果 |
+| ReleaseUploadSession | `id`；`version + platform` 唯一 | SQLite；正文直传外部 Provider | Alibaba 分片会话控制面：声明 SHA/大小、Provider file/upload id、分片大小、操作者、状态和有效期；不保存 URL |
 | ClientInstallerConfig | `default` | SQLite | Client 一键安装开关及最后变更者摘要；默认关闭 |
 | Launcher VersionStore | 版本号 | 主机文件系统 | 当前/历史构件和回退点 |
 
@@ -225,10 +226,11 @@ uploaded → updating_server → updating_clients → done
 不变量：
 
 - version 唯一且格式为 `x.y.z`；
-- 上传和下载后均校验 SHA-256；
+- Local 上传由 Server 复核 SHA-256；Alibaba 创建任务固定大小、CLI 对实际发送字节复核声明 SHA，Launcher 下载后统一复核权威 SHA；
 - Server 先更新，恢复编排后再逐个更新 Client；
 - Launcher 管理本机 current 指针、健康探测和回退；
 - 离线 Client 在后续注册时补更；
+- Alibaba Release 上传会话按 `version + platform` 唯一；相同 SHA/大小可恢复或幂等跳过，不同构件拒绝覆盖；预签名 URL 不持久化；
 - Launcher 自身当前不参与自动更新；
 - Client 一键安装只选择 `version === Server VERSION`、`status=done` 且含目标平台 archive 的 Release；
 - 一键安装开关只控制安装入口，不撤销既有 Client 或轮换共享 PSK。

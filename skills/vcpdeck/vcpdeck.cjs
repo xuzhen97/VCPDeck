@@ -37,7 +37,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.2.0";
+    exports2.VERSION = "0.2.1";
   }
 });
 
@@ -90,7 +90,10 @@ var require_update = __commonJS({
   "../shared/dist/update.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.ReleaseClientState = exports2.ReleaseStatus = void 0;
+    exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = void 0;
+    exports2.parseReleaseUploadCreateInput = parseReleaseUploadCreateInput;
+    exports2.parseReleaseUploadPartRefresh = parseReleaseUploadPartRefresh;
+    exports2.parseReleaseUploadComplete = parseReleaseUploadComplete;
     exports2.platformFromOs = platformFromOs;
     var ReleaseStatus2;
     (function(ReleaseStatus3) {
@@ -107,6 +110,60 @@ var require_update = __commonJS({
       ReleaseClientState3["DONE"] = "done";
       ReleaseClientState3["FAILED"] = "failed";
     })(ReleaseClientState2 || (exports2.ReleaseClientState = ReleaseClientState2 = {}));
+    exports2.ReleaseUploadErrorCode = {
+      DIRECT_UPLOAD_REQUIRED: "RELEASE_DIRECT_UPLOAD_REQUIRED",
+      SESSION_NOT_FOUND: "RELEASE_UPLOAD_SESSION_NOT_FOUND",
+      SESSION_EXPIRED: "RELEASE_UPLOAD_SESSION_EXPIRED",
+      SESSION_CONFLICT: "RELEASE_UPLOAD_SESSION_CONFLICT",
+      SIZE_MISMATCH: "RELEASE_UPLOAD_SIZE_MISMATCH",
+      PROVIDER_FAILED: "RELEASE_UPLOAD_PROVIDER_FAILED"
+    };
+    function parseReleaseUploadCreateInput(value) {
+      if (!isRecord2(value) || !hasOnlyKeys(value, ["version", "platform", "sha256", "size"])) {
+        throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B version/platform/sha256/size");
+      }
+      if (typeof value.version !== "string" || !/^\d+\.\d+\.\d+$/.test(value.version)) {
+        throw new Error("version \u683C\u5F0F\u5E94\u4E3A x.y.z");
+      }
+      if (value.platform !== "win-x64" && value.platform !== "linux-x64") {
+        throw new Error("platform \u5E94\u4E3A win-x64 \u6216 linux-x64");
+      }
+      if (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)) {
+        throw new Error("sha256 \u5E94\u4E3A 64 \u4F4D\u5C0F\u5199\u5341\u516D\u8FDB\u5236");
+      }
+      if (typeof value.size !== "number" || !Number.isSafeInteger(value.size) || value.size < 1 || value.size > 2147483647) {
+        throw new Error("size \u5E94\u4E3A 1\u20132147483647 \u7684\u6574\u6570");
+      }
+      return {
+        version: value.version,
+        platform: value.platform,
+        sha256: value.sha256,
+        size: value.size
+      };
+    }
+    function parseReleaseUploadPartRefresh(value) {
+      if (!isRecord2(value) || !hasOnlyKeys(value, ["partNumbers"]) || !Array.isArray(value.partNumbers)) {
+        throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B partNumbers \u6570\u7EC4");
+      }
+      const partNumbers = value.partNumbers;
+      if (partNumbers.length < 1 || partNumbers.length > 100 || partNumbers.some((part) => !Number.isInteger(part) || part < 1 || part > 1e4) || new Set(partNumbers).size !== partNumbers.length) {
+        throw new Error("partNumbers \u5FC5\u987B\u5305\u542B 1\u2013100 \u4E2A\u4E0D\u91CD\u590D\u7684 1\u201310000 \u6574\u6570");
+      }
+      return { partNumbers };
+    }
+    function parseReleaseUploadComplete(value) {
+      if (!isRecord2(value) || !hasOnlyKeys(value, ["uploadedBytes"]) || typeof value.uploadedBytes !== "number" || !Number.isSafeInteger(value.uploadedBytes) || value.uploadedBytes < 1 || value.uploadedBytes > 2147483647) {
+        throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B\u6709\u6548\u6574\u6570 uploadedBytes");
+      }
+      return { uploadedBytes: value.uploadedBytes };
+    }
+    function isRecord2(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function hasOnlyKeys(value, keys) {
+      const actual = Object.keys(value);
+      return actual.length === keys.length && actual.every((key) => keys.includes(key));
+    }
     function platformFromOs(os) {
       if (!os)
         return null;
@@ -1274,7 +1331,7 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FrpJobType = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.platformFromOs = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.FrpJobType = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
     var version_js_1 = require_version();
     Object.defineProperty(exports2, "VERSION", { enumerable: true, get: function() {
       return version_js_1.VERSION;
@@ -1301,6 +1358,18 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "ReleaseStatus", { enumerable: true, get: function() {
       return update_js_1.ReleaseStatus;
+    } });
+    Object.defineProperty(exports2, "ReleaseUploadErrorCode", { enumerable: true, get: function() {
+      return update_js_1.ReleaseUploadErrorCode;
+    } });
+    Object.defineProperty(exports2, "parseReleaseUploadComplete", { enumerable: true, get: function() {
+      return update_js_1.parseReleaseUploadComplete;
+    } });
+    Object.defineProperty(exports2, "parseReleaseUploadCreateInput", { enumerable: true, get: function() {
+      return update_js_1.parseReleaseUploadCreateInput;
+    } });
+    Object.defineProperty(exports2, "parseReleaseUploadPartRefresh", { enumerable: true, get: function() {
+      return update_js_1.parseReleaseUploadPartRefresh;
     } });
     Object.defineProperty(exports2, "platformFromOs", { enumerable: true, get: function() {
       return update_js_1.platformFromOs;
@@ -1746,6 +1815,10 @@ function createReleasesApi(client) {
       const qs = params.toString();
       return client.request("GET", `/api/releases${qs ? `?${qs}` : ""}`, void 0, signal);
     },
+    createUploadSession: (input, signal) => client.request("POST", "/api/releases/uploads", input, signal),
+    refreshUploadParts: (sessionId, partNumbers, signal) => client.request("POST", `/api/releases/uploads/${encodeURIComponent(sessionId)}/parts`, { partNumbers }, signal),
+    completeUploadSession: (sessionId, uploadedBytes, signal) => client.request("POST", `/api/releases/uploads/${encodeURIComponent(sessionId)}/complete`, { uploadedBytes }, signal),
+    /** Local 后端及旧 Server 引导使用的 legacy raw 上传。 */
     upload: async (input, signal) => {
       const params = new URLSearchParams({
         version: input.version,
@@ -2630,7 +2703,7 @@ async function runUploadCommand(argv, context) {
   }
   const environment = await resolveCommandEnvironment(options, context);
   const log = context.log ?? console.log;
-  const client = await uploadRelease(positionals, environment, log);
+  const client = await uploadRelease(positionals, environment, log, context);
   if (options.wait) {
     await waitForRelease(client, platformOfFile(positionals[0]).version, parseTimeoutSeconds(options), log, context);
   } else {
@@ -2681,11 +2754,11 @@ async function resolveCommandEnvironment(options, context) {
     processEnv: context.processEnv
   });
 }
-async function uploadRelease(zipPaths, environment, log) {
+async function uploadRelease(zipPaths, environment, log, context) {
   log(formatEnvironmentSummary(environment));
   const client = await createAuthenticatedClient(environment);
   for (const zipPath of zipPaths) {
-    await uploadOne(client, zipPath, log);
+    await uploadOne(client, zipPath, log, context);
   }
   log("[vcpdeck] \u4E0A\u4F20\u5B8C\u6210\uFF08\u4E24\u4E2A\u5E73\u53F0\u6784\u4EF6\u9F50\u5907\u540E\u670D\u52A1\u7AEF\u81EA\u52A8\u5F00\u59CB\u66F4\u65B0\uFF09");
   return client;
@@ -2836,11 +2909,40 @@ function sha256File(path) {
     (0, import_node_fs2.createReadStream)(path).on("error", reject).on("data", (chunk) => hash.update(chunk)).on("end", () => resolve2(hash.digest("hex")));
   });
 }
-async function uploadOne(client, zipPath, log) {
+async function uploadOne(client, zipPath, log, context) {
   const { version, platform } = platformOfFile(zipPath);
   const sha256 = await sha256File(zipPath);
   const { size } = await (0, import_promises2.stat)(zipPath);
   log(`[vcpdeck] \u4E0A\u4F20 ${zipPath} (${(size / 1024 / 1024).toFixed(1)} MB, ${platform}, sha256=${sha256.slice(0, 12)}\u2026)`);
+  let session;
+  try {
+    session = await client.releases.createUploadSession({
+      version,
+      platform,
+      sha256,
+      size
+    });
+  } catch (error) {
+    if (!(error instanceof VcpDeckApiError) || error.status !== 404)
+      throw error;
+    log("[vcpdeck] \u65E7 Server \u4E0D\u652F\u6301\u76F4\u4F20\u4F1A\u8BDD\uFF0C\u4F7F\u7528 legacy \u5F15\u5BFC\u4E0A\u4F20");
+    return legacyUpload(client, zipPath, version, platform, sha256);
+  }
+  if (session.mode === "existing") {
+    log(`[vcpdeck] ${platform} \u76F8\u540C\u6784\u4EF6\u5DF2\u767B\u8BB0\uFF0C\u8DF3\u8FC7\u4E0A\u4F20`);
+    return session.release;
+  }
+  if (session.mode === "server") {
+    return legacyUpload(client, zipPath, version, platform, sha256);
+  }
+  if (session.mode !== "direct") {
+    throw new Error("Server \u8FD4\u56DE\u672A\u77E5 Release \u4E0A\u4F20\u6A21\u5F0F");
+  }
+  await uploadDirectArchive(client, zipPath, platform, size, sha256, session, log, context);
+  const { release } = await client.releases.completeUploadSession(session.sessionId, size);
+  return release;
+}
+async function legacyUpload(client, zipPath, version, platform, sha256) {
   const { release } = await client.releases.upload({
     version,
     platform,
@@ -2849,6 +2951,79 @@ async function uploadOne(client, zipPath, log) {
     duplex: "half"
   });
   return release;
+}
+async function uploadDirectArchive(client, zipPath, platform, size, expectedSha256, session, log, context) {
+  const expectedParts = Math.ceil(size / session.partSize);
+  const parts = [...session.parts].sort((a, b) => a.partNumber - b.partNumber);
+  if (session.partSize < 1 || parts.length !== expectedParts || parts.some((part, index) => part.partNumber !== index + 1 || !isSafeDirectUploadUrl(part.url))) {
+    throw new Error("Server \u8FD4\u56DE\u7684 Release \u76F4\u4F20\u5206\u7247\u4E0D\u5B8C\u6574\u6216 URL \u4E0D\u5B89\u5168");
+  }
+  const handle = await (0, import_promises2.open)(zipPath, "r");
+  const uploadedHash = (0, import_node_crypto.createHash)("sha256");
+  try {
+    for (const part of parts) {
+      const start = (part.partNumber - 1) * session.partSize;
+      const length = Math.min(session.partSize, size - start);
+      const bytes = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(bytes, 0, length, start);
+      if (bytesRead !== length)
+        throw new Error(`\u8BFB\u53D6\u5206\u7247 ${part.partNumber} \u4E0D\u5B8C\u6574`);
+      uploadedHash.update(bytes);
+      await putDirectPart(client, session.sessionId, part.partNumber, part.url, bytes, context);
+      log(`[vcpdeck] ${platform} \u76F4\u4F20\u8FDB\u5EA6 ${Math.min(100, (start + length) / size * 100).toFixed(1)}%`);
+    }
+  } finally {
+    await handle.close();
+  }
+  if (uploadedHash.digest("hex") !== expectedSha256) {
+    throw new Error("\u6784\u4EF6\u5728\u8BA1\u7B97 SHA-256 \u540E\u53D1\u751F\u53D8\u5316\uFF0C\u62D2\u7EDD\u5B8C\u6210\u4E0A\u4F20");
+  }
+}
+async function putDirectPart(client, sessionId, partNumber, initialUrl, bytes, context) {
+  const fetcher = context.directFetch ?? globalThis.fetch;
+  const retryDelay = context.directRetryDelayMs ?? 500;
+  let url = initialUrl;
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetcher(url, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "",
+          "Content-Length": String(bytes.length)
+        },
+        body: bytes
+      });
+      if (response.ok)
+        return;
+      if (response.status === 403 && attempt < 2) {
+        const refreshed = await client.releases.refreshUploadParts(sessionId, [
+          partNumber
+        ]);
+        url = refreshed.parts.find((part) => part.partNumber === partNumber)?.url ?? "";
+        if (!isSafeDirectUploadUrl(url)) {
+          throw new Error(`\u5206\u7247 ${partNumber} URL \u5237\u65B0\u5931\u8D25\u6216\u4E0D\u5B89\u5168`);
+        }
+        continue;
+      }
+      lastError = new Error(`\u5206\u7247 ${partNumber} \u4E0A\u4F20\u5931\u8D25\uFF1AHTTP ${response.status}`);
+      if (response.status < 500)
+        break;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+    if (attempt < 2)
+      await sleep2(retryDelay * (attempt + 1));
+  }
+  throw lastError ?? new Error(`\u5206\u7247 ${partNumber} \u4E0A\u4F20\u5931\u8D25`);
+}
+function isSafeDirectUploadUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
 }
 function exclusiveAlias2(options, first, second) {
   const firstValue = stringOption(options, first);

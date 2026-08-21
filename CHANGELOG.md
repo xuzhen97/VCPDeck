@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-21
+
+### Fixed
+
+- 修复启用阿里云存储后 Release 构件仍先完整上传到 Server、再由 Server 转存，导致大构件受 Node.js HTTP 请求接收时限影响且占用 Server 带宽与临时磁盘的问题。
+- CLI 现在先创建持久化 Release 上传会话，再把 zip 分片直接 PUT 到阿里云盘；分片 URL 失效时经 Server 刷新，完成后由 Server 合并、登记 Release 并触发既有自更新编排。
+
+### Security
+
+- 阿里云后端强制使用 Release 直传会话，旧 raw 上传入口在读取构件正文前拒绝；预签名 URL 仅通过 `no-store` 响应返回，不写入数据库、日志或错误。
+- Provider 原始错误归一化为稳定安全摘要；CLI 日志只显示平台、SHA-256 前缀和百分比，不输出预签名 URL 或凭据。
+
+### Migration
+
+- 新增持久化 `ReleaseUploadSession`，保存版本、平台、声明 SHA-256/大小、Provider file/upload id、分片大小、操作者与有效期，不保存预签名 URL。
+- Local Storage 继续使用 Server raw stream 上传；从不支持直传协议的旧 Server 首次升级仍可使用 legacy 引导，升级后 Alibaba Release 上传必须直连。
+
 ## [0.2.0] - 2026-08-21
 
 ### Added

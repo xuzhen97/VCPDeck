@@ -76,6 +76,28 @@ model ClientInstallerConfig {
   updatedAt           DateTime @updatedAt
 }
 
+model ReleaseUploadSession {
+  id                  String   @id
+  version             String
+  platform            String
+  sha256              String
+  size                Int
+  provider            String
+  providerKey         String
+  providerUploadId    String
+  partSize            Int
+  status              String   @default("pending") // pending | completed
+  createdByIdentityId String?
+  createdByName       String?
+  createdVia          String?
+  expiresAt           DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([version, platform])
+  @@index([expiresAt])
+}
+
 model Identity {
   id           String         @id
   username     String         @unique

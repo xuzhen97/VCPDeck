@@ -32,7 +32,7 @@
 14. 建立自动备份、恢复演练和数据保留清理；
 15. 补齐浏览器 E2E、数据库升级测试和安全 fuzz；
 16. 清理/归档与代码冲突的历史设计文档；
-17. 按 ADR-0016 将发布归档接入 Storage Provider：统一 Server 下载入口（Local 直发、外部后端 302 临时直链、目标机直连存储不占 Server 带宽），上传转存 provider 并扩展 Release 记录，保持 CLI/协议/Launcher 兼容。
+17. 按 ADR-0019 完成发布构件上传/下载双向数据面分离：Alibaba 由 CLI 分片直传 Provider、下载经统一入口 302，Server 只管理权限、持久化会话、元数据和编排；Local 保留 Server raw stream。
 
 ## 3. 中期候选：可运营性
 

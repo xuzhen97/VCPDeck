@@ -32,6 +32,9 @@ function mockOrchestrator() {
 
 function mockStorage() {
 	return {
+		getBackendConfig: vi
+			.fn()
+			.mockResolvedValue({ kind: "local", updatedAt: null }),
 		supportsDirectDownload: vi.fn().mockReturnValue(false),
 		getDirectDownloadUrl: vi.fn(),
 		uploadStream: vi.fn(),
@@ -234,35 +237,25 @@ describe("ReleaseController", () => {
 			);
 		});
 
-		it("支持直连时上传转存 provider 并记录 storage（ADR-0016）", async () => {
-			service.verifyZipSha256.mockResolvedValue(true);
-			service.findByVersion.mockResolvedValue(null);
-			service.hasAllArchives.mockReturnValue(false);
-			service.create.mockResolvedValue({ version: "1.2.1" });
-			storage.supportsDirectDownload.mockReturnValue(true);
-			storage.uploadStream.mockResolvedValue({
-				key: "file-1",
-				storageKind: "alibaba",
+		it("Alibaba 后端在读取 raw body 前拒绝旧上传入口（ADR-0019）", async () => {
+			storage.getBackendConfig.mockResolvedValue({
+				kind: "alibaba",
+				updatedAt: null,
 			});
+			const req = fakeReq();
+			const iterator = vi.spyOn(req, Symbol.asyncIterator);
 
-			await controller.upload(fakeReq(), "1.2.1", "win-x64", "a".repeat(64));
-
-			expect(storage.uploadStream).toHaveBeenCalledWith(expect.any(Object), {
-				clientId: "release",
-				filename: "vcpdeck-1.2.1-win-x64.zip",
-				size: zipBytes.length,
-			});
-			expect(service.create).toHaveBeenCalledWith(
-				expect.objectContaining({
-					archives: {
-						"win-x64": expect.objectContaining({
-							storage: { provider: "alibaba", key: "file-1", mode: "direct" },
-						}),
-					},
-				}),
+			const err = await catchHttpError(
+				controller.upload(req, "1.2.1", "win-x64", "a".repeat(64)),
 			);
-			// 不落本地：最终路径不存在
-			await expect(access(releaseZipPath("1.2.1", "win-x64"))).rejects.toThrow();
+
+			expect(err.getStatus()).toBe(409);
+			expect(err.getResponse()).toMatchObject({
+				code: "RELEASE_DIRECT_UPLOAD_REQUIRED",
+			});
+			expect(iterator).not.toHaveBeenCalled();
+			expect(service.verifyZipSha256).not.toHaveBeenCalled();
+			expect(storage.uploadStream).not.toHaveBeenCalled();
 		});
 	});
 

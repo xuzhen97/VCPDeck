@@ -1,6 +1,6 @@
 # ADR-0016：发布构件经 Storage Provider 分发，统一 Server 入口 + 临时直链重定向
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0019
 - 日期：2026-08-18
 - 决策者：项目维护者
 - 关联：[ADR-0006](./0006-file-control-and-data-plane-separation.md)、[ADR-0012](./0012-bundled-release-artifacts.md)、[`design/release-and-update.md`](../design/release-and-update.md)、[`architecture.md`](../architecture.md)

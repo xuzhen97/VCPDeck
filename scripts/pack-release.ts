@@ -527,15 +527,12 @@ async function main(): Promise<void> {
 			results.push({ name: archivePath, sha256, platform: variant });
 		}
 		console.log("");
-		for (const { name, sha256, platform } of results) {
+		for (const { name, sha256 } of results) {
 			console.log(`[pack-release] 完成: ${name}`);
 			console.log(`[pack-release] sha256: ${sha256}`);
-			console.log(
-				`[pack-release] 上传（${platform}）: curl -X POST "<server>/api/releases/upload?version=${args.version}&platform=${platform}&sha256=${sha256}" -H "content-type: application/zip" --data-binary "@${name}"`,
-			);
 		}
 		console.log(
-			"[pack-release] 推荐使用 CLI：vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] --wait --timeout=1800（首次先执行 vcpdeck env add/use）",
+			"[pack-release] 使用 CLI 上传：vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] --wait --timeout=1800（Alibaba 直传 Provider；Local 由 CLI 协商 Server raw stream）",
 		);
 		console.log(
 			`[pack-release] 安装/卸载脚本与 zip 平级: ${join(ROOT, args.output, "install.cjs / uninstall.cjs")}`,

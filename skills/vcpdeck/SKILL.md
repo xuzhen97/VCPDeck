@@ -82,9 +82,9 @@ Server 更新并探活 → 逐台更新在线 Client → 离线 Client 后续注
 ### 安全边界
 
 - 第二个平台构件上传成功后会立即触发更新，没有额外确认关卡。
-- 上传前必须复述 Server URL、目标版本和两个 archive 路径，并取得明确确认。
+- 上传前必须复述 Server URL、目标版本和两个 archive 路径，并取得明确确认；Alibaba 模式还应说明构件将直接发送到 Provider。
 - 优先使用用户在 Frontend `/settings/tokens` 创建并保存在本机环境变量中的专用 Bearer Token；不得让用户把 Token 贴到对话中。用户名/密码只用于旧环境或直连兼容。
-- Release 上传是不可盲目重试的 POST。网络结果不明或只上传了一个平台时，先核对发版页面和 Release 记录。
+- Release 控制面 POST 网络结果不明时先核对发版页面和 Release 记录。Alibaba 相同 SHA/大小的持久化会话可恢复，但不同构件和 legacy raw POST 不得盲目重试。
 - 同一版本号不得复用。失败后修复问题并使用新版本号。
 - Launcher 回退只切回应用版本目录，不回退数据库、Storage 或外部副作用；发布前必须确认备份。
 
@@ -127,7 +127,7 @@ node "<vcpdeck-cli>" release upload \
   --wait --timeout=1800
 ```
 
-命令默认使用刚确认的项目/全局环境，也可显式添加 `--env=<name>`。不要添加 `--password` 或临时改用 `--server` 绕过项目选择。CLI 从环境变量读取凭据、计算 SHA-256，并通过 SDK 流式上传。两个构件必须版本相同且平台各一个。非幂等上传请求不会自动重试；`--wait` 只重试安全的 GET 查询，并容忍 Server 重启期间短暂不可达。
+命令默认使用刚确认的项目/全局环境，也可显式添加 `--env=<name>`。不要添加 `--password` 或临时改用 `--server` 绕过项目选择。CLI 从环境变量读取凭据并计算 SHA-256。两个构件必须版本相同且平台各一个。Alibaba 后端由 Server 创建持久化上传会话和短期分片 URL，CLI 把构件分片直接 PUT 到 Provider，403 时经 Server 刷新 URL；Server 不接收构件正文。CLI 对实际发送字节再次计算 SHA-256，URL 不输出、不落盘。相同 SHA/大小会话可恢复或幂等跳过，不同构件拒绝覆盖。Local 后端由 Server 协商为 legacy raw stream；旧 Server 会话端点 404 时也只为引导升级回退 legacy raw。`--wait` 只重试安全的 GET 查询，并容忍 Server 重启期间短暂不可达。
 
 #### 4. 核对结果
 

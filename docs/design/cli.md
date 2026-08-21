@@ -141,7 +141,11 @@ vcpdeck release upload ... \
 
 直连密码优先来自 `VCPDECK_ADMIN_PASSWORD`；`--password` 仍兼容但会暴露在 Shell history/进程参数中，不推荐。`--server` 不能与 `--env` 同时使用，命名环境模式也不能混入 `--username` / `--password`。
 
-Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认证；Password 环境先通过 SDK 登录取得进程内 Cookie，仅为已有配置兼容。CLI 上传前显示最终环境安全摘要，并校验两个 archive 版本一致、平台互补。`status` 输出 Server、Release 和 Client 状态汇总；`wait`/`upload --wait` 仅重试安全 GET，容忍 Server 重启短暂断线，并要求 Server 版本匹配、Release `done`、所有已记录 Client 均 `done`；Release/Client 失败或超时均非零退出。离线 Client 不属于本次在线明细，后续注册补更。
+Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认证；Password 环境先通过 SDK 登录取得进程内 Cookie，仅为已有配置兼容。CLI 上传前显示最终环境安全摘要，并校验两个 archive 版本一致、平台互补、计算声明 SHA-256。
+
+每个平台先向 Server 协商上传模式：Alibaba 返回持久化会话与短期分片 URL，CLI 从本地范围读取并逐片直接 PUT Provider，403 时只经 Server 刷新该分片 URL；全部发送后再次核对实际发送字节 SHA，再通知 Server 完成登记。URL 不输出、不落盘；相同已登记构件跳过，相同未完成会话刷新后继续。Local 返回 `mode=server` 并使用 legacy raw stream；旧 Server 会话端点 404 时也回退 legacy raw，仅用于引导升级。
+
+`status` 输出 Server、Release 和 Client 状态汇总；`wait`/`upload --wait` 仅重试安全 GET，容忍 Server 重启短暂断线，并要求 Server 版本匹配、Release `done`、所有已记录 Client 均 `done`；Release/Client 失败或超时均非零退出。离线 Client 不属于本次在线明细，后续注册补更。
 
 ## 6. 安全与故障边界
 
@@ -149,7 +153,7 @@ Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认
 - 项目选择器不能改变 Server 或凭据引用，降低不可信仓库诱导泄密风险；
 - 项目仍可选择本机已注册生产环境，因此副作用命令必须展示最终 Server 并取得确认；
 - 输出不得包含密码、Token、Cookie、PSK、签名 URL 或原始敏感响应；
-- 非幂等 POST 网络结果不明时先查询 Server 权威状态，不盲目重试；
+- 非幂等 POST 网络结果不明时先查询 Server 权威状态；Release 直传可按持久化会话恢复同 SHA/大小构件，但不同构件绝不覆盖；
 - `env current` 的成功只表示配置可解析，不表示 Server 可达或凭据有效；`env check` 才验证 Server、凭据和实际身份；
 - 环境删除不会修复项目引用，被删除环境的项目后续明确失败。
 
@@ -158,7 +162,7 @@ Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认
 正式版本通过 Pi 用户级 Git package 安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.2.0
+pi install git:github.com/xuzhen97/VCPDeck@v0.2.1
 ```
 
 Pi 克隆整个仓库，从 `skills/vcpdeck/SKILL.md` 发现 Skill；同目录 `vcpdeck.cjs` 是随 Tag 提交的 CLI 单文件构件。所有项目共享这一份安装。升级到新 Tag 时再次执行 `pi install ...@vX.Y.Z`，固定 Tag 不会由 `pi update --extensions` 自动推进。
@@ -176,8 +180,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.2.0&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.2.0&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.2.1&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.2.1&path:/packages/shared"
 ```
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。

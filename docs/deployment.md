@@ -300,7 +300,7 @@ location / {
 pnpm release --version=x.y.z
 ```
 
-产出 `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`，并打印各自的 sha256。上传任选其一：
+产出 `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`，并打印各自的 sha256。推荐统一使用 CLI：Alibaba 后端会协商分片并把构件直接 PUT 到 Provider，Server 只处理认证、会话和登记；Local 后端由 CLI 自动选择 Server raw stream。
 
 #### 方式一：CLI（推荐命名环境；第二个平台齐备即自动开始更新）
 
@@ -320,21 +320,11 @@ node packages/cli/dist/index.js release upload \
 
 已有自动化仍可使用 `--server=<url> --username=<name>` 直连，并由 `VCPDECK_ADMIN_PASSWORD` 提供密码；不推荐把 `--password` 写入命令行。
 
-#### 方式二：curl（先用登录会话，再按打包输出打印的 sha256 逐个上传）
+Alibaba 直传会话把版本、平台、SHA-256、大小、Provider file/upload id 和过期时间持久化；URL 只驻留 CLI 内存。网络失败时重新执行同一命令：相同会话会刷新全部 URL，相同已登记构件会跳过，不同构件拒绝覆盖。Local 后端和不支持会话 API 的旧 Server仍使用 raw stream。
 
-> 示例为 Bash / Git Bash 语法；Windows PowerShell 请使用 `curl.exe`，登录时用 `-c cookies.txt` 保存会话、后续请求用 `-b cookies.txt` 携带。
+> raw `curl --data-binary` 只适用于 Local 后端或从旧 Server 首次升级时的引导。`0.2.1+` 的 Alibaba 后端会在读取正文前返回 `RELEASE_DIRECT_UPLOAD_REQUIRED`，不得通过延长超时或代理中转绕过直传要求。
 
-```bash
-curl -s -c - -X POST https://<server>:3001/api/auth/login \
-  -H 'content-type: application/json' \
-  -d '{"username":"admin","password":"<密码>"}' | grep vcpdeck_session
-curl -X POST 'https://<server>:3001/api/releases/upload?version=x.y.z&platform=win-x64&sha256=<win sha256>' \
-  -b 'vcpdeck_session=<cookie>' -H 'content-type: application/zip' \
-  --data-binary @dist-release/vcpdeck-x.y.z-win-x64.zip
-curl -X POST 'https://<server>:3001/api/releases/upload?version=x.y.z&platform=linux-x64&sha256=<linux sha256>' \
-  -b 'vcpdeck_session=<cookie>' -H 'content-type: application/zip' \
-  --data-binary @dist-release/vcpdeck-x.y.z-linux-x64.zip
-```
+从 `0.1.2` 等旧 Server 首次升级到支持直传的版本时，如果公网 legacy 上传超过 Server 接收时限：先用 `rsync/scp` 将两个 zip 和 CLI 构件复制到 Server 主机，再从 `http://127.0.0.1:<port>` 运行同一 `release upload --wait` 命令。该近端 raw 上传只用于一次性引导；升级后后续 Alibaba Release 必须直传。
 
 两个平台构件齐备后编排自动开始，无需其他触发。
 

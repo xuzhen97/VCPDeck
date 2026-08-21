@@ -15,7 +15,7 @@
 | 签名 URL | `/api/storage/upload/*`、`download/*` 或外部 URL | 文件正文 | 签名、过期时间和范围 |
 | 本机 HTTP | Launcher 随机 `127.0.0.1` 端口 | `/prepare`、`/apply` | `x-launcher-token` |
 
-默认 JSON 请求使用 `Content-Type: application/json`；Release 上传和文件正文使用原始字节流。
+默认 JSON 请求使用 `Content-Type: application/json`。Local Release 上传和 Local 文件正文使用原始字节流；Alibaba Release/文件正文按 Server 签发的分片 URL 直接 PUT 到 Provider。
 
 ## 2. REST 约定
 
@@ -99,7 +99,7 @@ SDK 将失败归一化为 `VcpDeckApiError(status, code?, details?)`。新增接
 
 - GET 可安全重试；
 - DELETE 只有明确声明幂等时才自动重试；
-- Job 创建、终端创建、Release 上传等 POST 不应由客户端盲目重试，否则可能产生重复资源；
+- Job 创建、终端创建等 POST 不应由客户端盲目重试；Release 直传会话按版本+平台+SHA+大小恢复，相同构件可幂等继续，但网络结果不明时仍应先查询 Release/会话状态；
 - Job 取消在终态上应视为已收敛，但当前调用方仍应读取返回状态确认；
 - 网络超时不等于服务端未执行，优先按资源 ID 查询结果。
 
@@ -125,12 +125,17 @@ SDK 将失败归一化为 `VcpDeckApiError(status, code?, details?)`。新增接
 
 | 端点 | 认证 | 当前语义 |
 | --- | --- | --- |
-| `POST /api/releases/upload?version=&platform=&sha256=` | Cookie/Bearer | 原始 archive 字节流；校验版本格式、平台（win-x64/linux-x64）和声明 SHA-256；两个平台构件齐备后异步触发更新 |
+| `POST /api/releases/uploads` | Cookie/Bearer | 提交版本、平台、SHA-256 和大小；Alibaba 返回持久化会话与分片 URL，Local 返回 `mode=server`；响应 `no-store` |
+| `POST /api/releases/uploads/:sessionId/parts` | Cookie/Bearer | 刷新指定 Alibaba 分片 URL；只接受不重复的有效分片编号，响应 `no-store` |
+| `POST /api/releases/uploads/:sessionId/complete` | Cookie/Bearer | 校验完成上报字节数、通知 Provider 合并并登记 Release；响应 `no-store` |
+| `POST /api/releases/upload?version=&platform=&sha256=` | Cookie/Bearer | Local 或旧 Server 引导使用的原始 archive 字节流；Alibaba 后端在读取正文前返回 `RELEASE_DIRECT_UPLOAD_REQUIRED` |
 | `GET /api/releases?page=&pageSize=` | Cookie/Bearer | 分页查询 Release 和 Client 更新明细 |
 | `GET /api/releases/:version/file?platform=` | Public | Launcher 下载对应平台 archive；完整性以该平台构件 sha256 为准 |
 | `GET /api/status` | Public | 返回 `serverVersion` 和当前活动 Release，供 Launcher 探活 |
 
-上传响应只证明构件已保存并登记，不证明 Server/Client 更新成功。调用方必须继续查询 Release 状态。版本号当前要求严格 `x.y.z`；相同版本不得复用，且活动 Release 期间不要并发上传新版本。详细状态和失败边界见 [`design/release-and-update.md`](./design/release-and-update.md)。
+Alibaba 模式下，预签名 URL 只在 `no-store` 响应和 CLI 内存中存在，不持久化、不记录日志；构件正文直接进入 Provider，不经过 Server。会话记录版本、平台、声明 SHA-256/大小、Provider file/upload id、分片大小、操作者和有效期。创建任务固定总大小，CLI 完成上报必须一致；Server 不读取直传正文，Launcher 下载后独立计算 SHA-256。
+
+完成响应只证明构件已保存并登记，不证明 Server/Client 更新成功。调用方必须继续查询 Release 状态。版本号要求严格 `x.y.z`；相同平台的相同 SHA/大小可幂等跳过，不同构件拒绝覆盖，且活动 Release 期间不要并发上传新版本。详细状态和失败边界见 [`design/release-and-update.md`](./design/release-and-update.md)。
 
 ### 2.8 Client 一键安装 REST 协议
 

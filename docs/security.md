@@ -17,7 +17,7 @@ VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可
 - 阿里云 clientSecret/accessToken/refreshToken；
 - Storage 签名 URL；
 - 命令、脚本、环境变量、路径、终端正文、Pi prompt/响应和文件内容；
-- Release 构件及其下载路径；
+- Release 构件、上传分片 URL及下载路径；
 - Client 一键安装 bootstrap 响应和目标机 `launcher.env`；
 - SQLite 数据库和远程 Pi Session。
 
@@ -131,9 +131,11 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 
 当前更新包只做 SHA-256 完整性校验，没有发布者数字签名。公开下载端点意味着任何能获得版本号的人可下载构件；SHA-256 只能检测传输/内容不一致，不能证明构件来源。
 
+Alibaba Release 上传的数据面直接连接 Provider：Server 只签发/刷新短期单文件分片 URL并持久化会话元数据，不接收正文。URL 响应必须 `no-store`，不得进入数据库、Release、日志、错误或测试快照；CLI 不持有 Provider OAuth 长期凭据。Provider 创建任务固定大小，CLI 对实际发送字节二次计算 SHA-256，Launcher 下载后再次复核；Server 不读取直传正文，不能声称独立计算了直传内容哈希。
+
 生产要求：
 
-- 上传只允许可信身份和受控网络；
+- 上传控制面只允许可信身份和受控网络；
 - 发布构建机、依赖锁文件和构件目录受保护；
 - SHA-256 通过独立可信渠道记录；
 - Launcher 控制接口只绑定 127.0.0.1，`control.json` 权限限制为运行账户；
@@ -145,7 +147,7 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 ## 10. 网络安全
 
 - 公网部署必须使用 HTTPS/WSS；
-- 反向代理限制请求体、超时和上传大小；
+- 反向代理限制 Local/旧 Server legacy raw 请求体、超时和上传大小；Alibaba Release 正常上传只有小型 JSON 控制请求，构件正文不经过 Server；
 - `/api/releases/:version/file`、`/api/status` 和签名 Storage 端点虽公开，仍应由网络 ACL、速率限制和审计保护；
 - Server 当前没有内建速率限制、登录锁定、CSRF Token 或独立 Cookie 写请求 Origin Guard；SameSite=Strict 与精确 CORS 只降低部分风险；
 - CORS 只允许明确 Frontend Origin，不能使用宽泛 Origin；

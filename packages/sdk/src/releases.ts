@@ -2,6 +2,9 @@ import type {
 	PaginatedResult,
 	ReleaseInfo,
 	ReleasePlatform,
+	ReleaseUploadCreateInput,
+	ReleaseUploadPart,
+	ReleaseUploadSession,
 } from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
 
@@ -42,6 +45,39 @@ export function createReleasesApi(
 				signal,
 			);
 		},
+		createUploadSession: (
+			input: ReleaseUploadCreateInput,
+			signal?: AbortSignal,
+		) =>
+			client.request<ReleaseUploadSession>(
+				"POST",
+				"/api/releases/uploads",
+				input,
+				signal,
+			),
+		refreshUploadParts: (
+			sessionId: string,
+			partNumbers: number[],
+			signal?: AbortSignal,
+		) =>
+			client.request<{ parts: ReleaseUploadPart[] }>(
+				"POST",
+				`/api/releases/uploads/${encodeURIComponent(sessionId)}/parts`,
+				{ partNumbers },
+				signal,
+			),
+		completeUploadSession: (
+			sessionId: string,
+			uploadedBytes: number,
+			signal?: AbortSignal,
+		) =>
+			client.request<{ release: ReleaseInfo }>(
+				"POST",
+				`/api/releases/uploads/${encodeURIComponent(sessionId)}/complete`,
+				{ uploadedBytes },
+				signal,
+			),
+		/** Local 后端及旧 Server 引导使用的 legacy raw 上传。 */
 		upload: async (input: ReleaseUploadInput, signal?: AbortSignal) => {
 			const params = new URLSearchParams({
 				version: input.version,

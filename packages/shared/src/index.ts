@@ -68,6 +68,9 @@ export type {
 	ReleaseClientEntry,
 	ReleaseInfo,
 	ReleasePlatform,
+	ReleaseUploadCreateInput,
+	ReleaseUploadPart,
+	ReleaseUploadSession,
 	ServerShutdownNotice,
 	UpdateFailed,
 	UpdateManifest,
@@ -77,6 +80,10 @@ export type {
 export {
 	ReleaseClientState,
 	ReleaseStatus,
+	ReleaseUploadErrorCode,
+	parseReleaseUploadComplete,
+	parseReleaseUploadCreateInput,
+	parseReleaseUploadPartRefresh,
 	platformFromOs,
 } from "./update.js";
 export {

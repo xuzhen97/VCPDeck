@@ -17,7 +17,7 @@ import {
 	Res,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -30,11 +30,7 @@ import { DirectUrlCache } from "./direct-url-cache.js";
 import { StorageService } from "../storage/storage.service.js";
 import { Public } from "../auth/public.decorator.js";
 import { Actor } from "../auth/actor.decorator.js";
-import type {
-	ActorContext,
-	ReleaseArchiveStorage,
-	ReleasePlatform,
-} from "@vcpdeck/shared";
+import type { ActorContext, ReleasePlatform } from "@vcpdeck/shared";
 
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
@@ -65,6 +61,7 @@ const RELEASE_ERROR_STATUS: Record<string, number> = {
 	RELEASE_NOT_FOUND: 404,
 	RELEASE_INVALID_TRANSITION: 409,
 	RELEASE_SHA256_MISMATCH: 400,
+	RELEASE_DIRECT_UPLOAD_REQUIRED: 409,
 };
 
 function toHttp(e: ReleaseError): HttpException {
@@ -87,7 +84,7 @@ async function moveFile(src: string, dest: string): Promise<void> {
 
 @Controller("api/releases")
 export class ReleaseController {
-	/** 外部存储直链短时缓存（ADR-0016：用的时候现取，短 TTL 不暴露给目标机） */
+	/** 外部存储直链短时缓存（ADR-0019：用的时候现取，短 TTL 不暴露给目标机） */
 	private readonly directUrls = new DirectUrlCache();
 
 	constructor(
@@ -132,7 +129,7 @@ export class ReleaseController {
 				message: `release ${version} 缺少 ${platform} 构件`,
 			});
 		}
-		// ADR-0016：外部存储后端 302 到临时直链，目标机直连下载不占 Server 带宽
+		// ADR-0019：外部存储后端 302 到临时直链，目标机直连下载不占 Server 带宽
 		const archive = info.archives[platform];
 		if (archive?.storage?.mode === "direct" && archive.storage.key) {
 			const directUrl = await this.resolveDirectUrl(
@@ -189,6 +186,15 @@ export class ReleaseController {
 		if (!sha256 || !SHA256_RE.test(sha256)) {
 			throw new BadRequestException("sha256 应为 64 位十六进制");
 		}
+		const backend = await this.storage.getBackendConfig();
+		if (backend.kind === "alibaba") {
+			throw toHttp(
+				new ReleaseError(
+					"RELEASE_DIRECT_UPLOAD_REQUIRED",
+					"Alibaba 存储必须使用 Release 直传会话",
+				),
+			);
+		}
 
 		await mkdir(UPLOAD_TMP_DIR, { recursive: true });
 		const tempPath = join(UPLOAD_TMP_DIR, randomUUID());
@@ -202,32 +208,13 @@ export class ReleaseController {
 					"文件 sha256 与声明不符",
 				);
 			}
-		const fileName = `vcpdeck-${version}-${platform}.zip`;
-		const size = (await stat(tempPath)).size;
-		let storage: ReleaseArchiveStorage | undefined;
-		if (this.storage.supportsDirectDownload()) {
-			// ADR-0016：外部存储后端——转存 provider，目标机下载经统一入口 302 直连
-			const entry = await this.storage.uploadStream(
-				createReadStream(tempPath),
-				{ clientId: "release", filename: fileName, size },
-			);
-			storage = {
-				provider: entry.storageKind,
-				key: entry.key,
-				mode: "direct",
-			};
-		} else {
+			const fileName = `vcpdeck-${version}-${platform}.zip`;
+			const size = (await stat(tempPath)).size;
 			const finalPath = releaseZipPath(version, platform);
 			await mkdir(releasesDir(), { recursive: true });
 			await moveFile(tempPath, finalPath);
 			moved = true;
-		}
-		const archive = {
-			sha256,
-			fileName,
-			size,
-			...(storage ? { storage } : {}),
-		};
+			const archive = { sha256, fileName, size };
 			const existing = await this.service.findByVersion(version);
 			const release = existing
 				? await this.service.addArchive(version, platform, archive)
@@ -257,7 +244,7 @@ export class ReleaseController {
 	}
 
 	/**
-	 * 换取直链下载 URL（ADR-0016）：短时缓存，过期/失败时重新换取；
+	 * 换取直链下载 URL（ADR-0019）：短时缓存，过期/失败时重新换取；
 	 * 不支持的 provider 或换取失败返回 null，由调用方降级。
 	 */
 	private async resolveDirectUrl(

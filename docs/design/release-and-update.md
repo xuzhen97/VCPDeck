@@ -15,7 +15,7 @@
 - Server 更新成功后，再逐台更新在线 Client；
 - 离线或晚到 Client 在后续注册时对齐最近目标版本；
 - 更新前停止接受新 Job，并在有界时间内等待活跃 Job；
-- 更新包在上传和下载后都进行 SHA-256 完整性校验；
+- Local 更新包由 Server 上传时复核 SHA-256；外部直传由 CLI 声明 SHA-256、Provider 固定上传大小并由 Launcher 下载后独立复核；
 - Linux 与 Windows 使用各自可行的 current 指针方式。
 
 ### 1.2 当前非目标
@@ -34,9 +34,9 @@
 | 组件 | 当前职责 |
 | --- | --- |
 | `scripts/pack-release.ts` | 同步 Shared/SDK/CLI 与运行时版本、构建 Shared/SDK/CLI/Server/Client/Frontend/Launcher、生成并验证 `skills/vcpdeck/vcpdeck.cjs`、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
-| CLI `release upload/status/wait` | 解析命名/项目环境（ADR-0017）、参数与文件名，读取本地 archive、计算 SHA-256 和输出安全进度；password 登录/Bearer、原始字节流上传及 API 错误归一化复用 `@vcpdeck/sdk`；`wait` 仅重试安全 GET，并同时验收 Server 版本、Release 与 Client 明细 |
-| `ReleaseController` | Release 列表、构件下载、上传校验和自动触发编排 |
-| `ReleaseService` | Release 持久化、状态转换、Client 更新明细和 SHA-256 复核 |
+| CLI `release upload/status/wait` | 解析命名/项目环境（ADR-0017）、参数与文件名，读取本地 archive、计算 SHA-256 和输出安全进度；Alibaba 模式按 Server 签发的分片 URL 直接 PUT 到 Provider，Local/旧 Server 引导使用 raw stream；`wait` 仅重试安全 GET，并同时验收 Server 版本、Release 与 Client 明细 |
+| `ReleaseController` / `ReleaseUploadController` | Release 列表、Local raw 上传、外部直传会话创建/刷新/完成、构件下载和自动触发编排 |
+| `ReleaseUploadService` / `ReleaseService` | 持久化上传会话与 Release、登记 Provider 元数据、状态转换和 Client 更新明细 |
 | `ReleaseOrchestrator` | Server 更新、启动后恢复、在线 Client 逐台更新和后续补更 |
 | `ServerDrain` / `JobScheduler` | 更新时关闭新 Job 派发闸门并等待活跃 Job 收敛 |
 | Client update handler | Launcher prepare、拒绝新 Job、等待 executor 跟踪的活动 Job、ready/failed 上报和 apply |
@@ -55,12 +55,12 @@ Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由
 | --- | --- | --- |
 | Release 元数据和阶段 | SQLite `Release` | Server 重启后恢复编排的依据 |
 | 单 Client 更新结果 | `Release.clientStates` JSON | `clientId → {state,reason?,at}` |
-| Release archive | Local 后端：`VCPDECK_RELEASES_DIR`，默认 `./data/releases`；外部存储后端：Provider 对象（key 记录于 `Release.archives[platform].storage`） | 必须位于应用版本目录之外；外部后端下载经统一入口 302 直链（ADR-0016） |
+| Release archive | Local 后端：`VCPDECK_RELEASES_DIR`，默认 `./data/releases`；外部存储后端：Provider 对象（key 记录于 `Release.archives[platform].storage`） | 必须位于应用版本目录之外；外部后端上传/下载数据面直连（ADR-0019） |
 | 当前应用版本 | Launcher `apps/current` 或 `apps/state.json` | Linux 使用 symlink；Windows 使用 state 文件 |
 | 已准备目标版本 | Launcher 进程内 `pendingVersion` | Launcher 重启后不保留 |
 | 运行中的业务进程 | Launcher `Daemon` | Server 数据库不能证明进程仍健康 |
 | Server/Client 构建版本 | `@vcpdeck/shared` 的 `VERSION` | `pnpm release --version=x.y.z` 同步并保留，提交与同版本 Git Tag 后成为正式发布 |
-| archive SHA-256 | 上传请求、`Release.sha256`、`UpdateRequest.sha256` | 当前 manifest 内的 `sha256` 留空，不是权威值 |
+| archive SHA-256 | CLI 上传声明、`Release.archives[platform].sha256`、`UpdateRequest.sha256` | 当前 manifest 内的 `sha256` 留空；Local 由 Server 上传时复核，Alibaba 直传由 Launcher 下载后复核 |
 
 业务数据、数据库、Storage 和 Release archive 必须存放在 Launcher `apps/<version>/` 之外。current 切换只改变应用构件，不迁移或恢复持久数据。
 
@@ -128,7 +128,7 @@ client/
 
 打包统一产出 `.zip`（纯 JS 的 archiver 生成，构建机平台无关），Server 保存与 Launcher 解压都按 `.zip` 处理，先前的 tar.gz 全链路缺口已消除。
 
-每次发版产出两份按平台分开的 zip（win-x64 / linux-x64），构建机不再决定目标平台；Server 更新流程按目标机平台选择对应包（上传两次、下载带 `platform` 参数），详见 ADR-0012。注意 Linux 目标机的终端后端来自 @lydell/node-pty 的 glibc 预编译包，不覆盖 musl（Alpine）环境。
+每次发版产出两份按平台分开的 zip（win-x64 / linux-x64），构建机不再决定目标平台；Server 更新流程按目标机平台选择对应包（上传两次、下载带 `platform` 参数），详见 ADR-0012。Alibaba 后端的两个 zip 由 CLI 分片直传 Provider，Server 只处理会话和登记；Local 后端继续接收 raw stream。注意 Linux 目标机的终端后端来自 @lydell/node-pty 的 glibc 预编译包，不覆盖 musl（Alpine）环境。
 
 linux frp 裸 ELF 在打包时从 `.gz` 包装内存解压注入 zip（开发机杀毒会删除磁盘上的裸 ELF）；`.gz` 副本仍随包保留。
 
@@ -171,14 +171,20 @@ pending → updating → done | failed
 sequenceDiagram
     participant O as Operator/CLI
     participant S as Old Server
+    participant P as Storage Provider
     participant DB as SQLite
     participant L as Server Launcher
     participant N as New Server
 
-    O->>S: CLI 经 SDK POST release archive + version + platform + sha256（win-x64）
-    S->>S: 流式计算并复核 SHA-256
+    O->>S: 创建 win-x64 上传会话（version/platform/sha256/size）
+    S->>P: 创建固定大小的分片上传任务
+    S->>DB: 持久化会话（不保存 URL）
+    S-->>O: no-store 分片 URL
+    O->>P: 直接 PUT win-x64 分片
+    O->>S: complete(uploadedBytes)
+    S->>P: 合并分片
     S->>DB: 创建 uploaded Release（含 win-x64 构件）
-    O->>S: POST release archive + version + platform + sha256（linux-x64）
+    O->>S: 同样直传并完成 linux-x64
     S->>DB: 补充 linux-x64 构件 → 两平台齐备，触发编排
     S->>L: POST /prepare
     L->>L: 下载、校验、解压
@@ -208,7 +214,7 @@ sequenceDiagram
 
 Server/Client 在 `/apply` 返回后不再把「本进程未被接管」立即落库/上报失败：连接被 Launcher 掐断与进程存活无法可靠区分，终局以新进程重启后的版本对账与 Client 重连注册为准；明确的 Launcher HTTP 错误仍会标记失败。
 
-下载入口统一为 `GET /api/releases/:version/file?platform=`（ADR-0016）：Local 后端直接 `sendFile`；外部存储后端由 Server 持凭证换取临时直链并 **302** 到直链（目标机 `fetch` 自动跟随，字节流直连存储不占 Server 带宽）；直链短时缓存、过期重新换取，短 TTL 不暴露给目标机与协议。
+下载入口统一为 `GET /api/releases/:version/file?platform=`（ADR-0019）：Local 后端直接 `sendFile`；外部存储后端由 Server 持凭证换取临时直链并 **302** 到直链（目标机 `fetch` 自动跟随，字节流直连存储不占 Server 带宽）；直链短时缓存、过期重新换取，短 TTL 不暴露给目标机与协议。
 
 当前 `preStart` 在停止旧 Server 之前执行。默认 `prisma db push` 可能与旧 Server 同时访问数据库，且其 schema 变化不会在应用回退时自动逆转；生产发布不能把该默认钩子当作安全迁移策略。
 
@@ -312,8 +318,8 @@ Launcher 启动时：
 
 - Release 上传受全局身份认证保护，但当前没有额外 admin-only 检查；
 - 构件下载和 `/api/status` 是公开端点；
-- Server 上传时重新计算 SHA-256；
-- Launcher 下载后再次计算 SHA-256；
+- Local raw 上传由 Server 重新计算 SHA-256；
+- Alibaba 直传时 Server 不接收正文：Provider 创建任务固定大小，CLI 完成字节数必须匹配会话，Launcher 下载后重新计算 SHA-256；
 - SHA-256 能检测内容不一致，不能证明发布者身份；
 - Launcher 控制通道依赖 loopback 和随机 Token；
 - 更新 URL 只接受带主机名的 HTTP/HTTPS；
@@ -361,7 +367,7 @@ Launcher 的回退单位是应用版本目录，不是整个系统状态。涉�
 
 - Shared update 类型和事件；
 - Release 状态合法/非法转换和并发条件更新；
-- 上传 SHA 不匹配、重复版本、构件缺失和认证；
+- Local 上传 SHA 不匹配、Alibaba 直传会话持久化/分片刷新/大小/安全错误、重复版本、构件缺失和认证；
 - Launcher `/prepare`、`/apply`、Token、解压和 URL 校验；
 - Linux symlink 与 Windows state 指针切换；
 - system/cache/download Node 选择；

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * VCPDeck 发布构件经阿里云盘直连自更新的一键集成测试（ADR-0016）。
+ * VCPDeck 发布构件向阿里云盘直传并自更新的一键集成测试（ADR-0019）。
  *
  * 直接运行：
  *   node scripts/test-release-alibaba.cjs
  *
  * 脚本自动完成：依赖检查、基线打包、Server/Client 安装与启动、临时 DB、
- * 阿里云盘配置、目标版本打包、构件上传、302 直链验证、Server/Client
- * 自更新、云端测试对象删除、Launcher 停止和临时目录清理。
+ * 阿里云盘配置、目标版本打包、CLI 等价分片直传、302 直链验证、
+ * Server/Client 自更新、云端测试对象删除、Launcher 停止和临时目录清理。
  *
  * 仅在必要时暂停：
  *   1. 未设置 ALIBABA_CLIENT_ID 时输入 clientId；
@@ -25,12 +25,16 @@ const { execFileSync, spawn } = require("node:child_process");
 const { createHash, randomBytes } = require("node:crypto");
 const {
 	appendFileSync,
+	closeSync,
 	createReadStream,
 	existsSync,
+	openSync,
 	readFileSync,
+	readSync,
 	mkdirSync,
 	mkdtempSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } = require("node:fs");
 const { once } = require("node:events");
@@ -441,25 +445,92 @@ function rememberUploadedKeys(release) {
 async function uploadArchive(platform) {
 	const path = archivePath(TARGET_VERSION, platform);
 	const sha256 = await sha256File(path);
-	const response = await api(
-		"POST",
-		`/api/releases/upload?version=${TARGET_VERSION}&platform=${platform}&sha256=${sha256}`,
-		{
-			headers: { "content-type": "application/zip" },
-			body: createReadStream(path),
-		},
-	);
-	const text = await response.text();
-	if (!response.ok) {
-		throw new Error(`上传 ${platform} 失败: HTTP ${response.status} ${text}`);
+	const size = statSync(path).size;
+	const created = await apiJson("POST", "/api/releases/uploads", {
+		json: { version: TARGET_VERSION, platform, sha256, size },
+	});
+	if ((created.status !== 200 && created.status !== 201) || !created.body) {
+		throw new Error(`创建 ${platform} 直传会话失败: HTTP ${created.status}`);
 	}
-	if (!text) return null;
+	if (created.body.mode === "existing") {
+		rememberUploadedKeys(created.body.release);
+		return created.body.release;
+	}
+	if (created.body.mode !== "direct") {
+		throw new Error(`Alibaba 后端返回非 direct 上传模式: ${created.body.mode}`);
+	}
+
+	const session = created.body;
+	const parts = [...session.parts].sort(
+		(a, b) => a.partNumber - b.partNumber,
+	);
+	if (
+		!Number.isInteger(session.partSize) ||
+		session.partSize < 1 ||
+		parts.length !== Math.ceil(size / session.partSize)
+	) {
+		throw new Error("直传会话分片信息不完整");
+	}
+	const fd = openSync(path, "r");
 	try {
-		const release = JSON.parse(text).release ?? null;
-		rememberUploadedKeys(release);
-		return release;
-	} catch {
-		throw new Error(`上传 ${platform} 响应不是合法 JSON`);
+		for (const part of parts) {
+			const start = (part.partNumber - 1) * session.partSize;
+			const length = Math.min(session.partSize, size - start);
+			const bytes = Buffer.allocUnsafe(length);
+			if (readSync(fd, bytes, 0, length, start) !== length) {
+				throw new Error(`读取 ${platform} 分片 ${part.partNumber} 不完整`);
+			}
+			await putReleasePart(session.sessionId, part, bytes);
+		}
+	} finally {
+		closeSync(fd);
+	}
+
+	const completed = await apiJson(
+		"POST",
+		`/api/releases/uploads/${encodeURIComponent(session.sessionId)}/complete`,
+		{ json: { uploadedBytes: size } },
+	);
+	if (
+		(completed.status !== 200 && completed.status !== 201) ||
+		!completed.body?.release
+	) {
+		throw new Error(`完成 ${platform} 直传失败: HTTP ${completed.status}`);
+	}
+	rememberUploadedKeys(completed.body.release);
+	return completed.body.release;
+}
+
+async function putReleasePart(sessionId, initialPart, bytes) {
+	let url = initialPart.url;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const response = await fetch(url, {
+			method: "PUT",
+			headers: {
+				"Content-Type": "",
+				"Content-Length": String(bytes.length),
+			},
+			body: bytes,
+		});
+		if (response.ok) return;
+		if (response.status === 403 && attempt < 2) {
+			const refreshed = await apiJson(
+				"POST",
+				`/api/releases/uploads/${encodeURIComponent(sessionId)}/parts`,
+				{ json: { partNumbers: [initialPart.partNumber] } },
+			);
+			url = refreshed.body?.parts?.find(
+				(part) => part.partNumber === initialPart.partNumber,
+			)?.url;
+			if (!url) throw new Error(`刷新分片 ${initialPart.partNumber} URL 失败`);
+			continue;
+		}
+		if (response.status < 500 || attempt === 2) {
+			throw new Error(
+				`Provider 分片 ${initialPart.partNumber} 上传失败: HTTP ${response.status}`,
+			);
+		}
+		await sleep(500 * (attempt + 1));
 	}
 }
 
@@ -766,7 +837,7 @@ function printReport() {
 		`\n  ${passed}/${results.length} passed, ${failed} failed, ${warned} warnings\n`,
 	);
 	if (failed === 0) {
-		console.log("✅ ADR-0016 阿里云盘直连分发自更新链路验证通过");
+		console.log("✅ ADR-0019 阿里云盘上传/下载双向直连自更新链路验证通过");
 	}
 }
 
