@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-08-21
+
 ### Fixed
 
 - 修复 Client 一键安装在 Windows 上无法安装 PM2 的问题：安装器此前优先直接 spawn `npm.cmd`，Node 18.20+ 因 CVE-2024-27980 防护返回 EINVAL 且无任何输出，导致四个 registry 尝试全部静默失败；现改为用 `node + npm-cli.js` 执行 npm，全局 `pm2.cmd` 也解析为 `node + bin/pm2` 执行，并把进程启动错误纳入失败摘要。
