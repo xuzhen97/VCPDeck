@@ -16,6 +16,7 @@ CLI 是操作员和 Pi Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访�
 - `files write/mkdir/delete/move` 文件写操作（覆盖写、递归建目录、删除、移动，确认门由调用方负责）；
 - `files download/upload` 文件传输（Storage Provider 直传链路，Server 只签名；download 校验 sha256）；
 - `pi models/sessions/new/run/abort` Pi 子任务（在目标机驱动 Pi Agent 并取回回复）；
+- `frp instances/mappings` 与 `storage status` FRP/存储状态只读查询；
 - `release upload/status/wait` 双平台发布上传、权威状态查询和 Server/Client 终态等待。
 
 CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 Skill 中复制 HTTP。SDK 不读取 HOME、当前目录或 CLI 配置，只接受解析后的 `baseUrl` 和认证。
@@ -220,7 +221,19 @@ Pi 子任务通过 Server Pi 命名空间驱动目标机上的 Pi Agent（要求
 
 Windows Git Bash 会话注意：MSYS 会把 `/etc` 这类绝对路径参数改写为宿主安装路径（如 `C:/Program Files/Git/etc`），传 POSIX 风格路径时用 `MSYS_NO_PATHCONV=1` 或改用 Windows 形式。
 
-## 10. 安全与故障边界
+## 10. FRP 与 Storage 命令
+
+```text
+vcpdeck frp instances [--page=<n>] [--env=<name>] [--json]
+vcpdeck frp mappings [--client=<name|id>] [--page=<n>] [--env=<name>] [--json]
+vcpdeck storage status [--env=<name>] [--json]
+```
+
+只读查询：FRP 服务实例与映射状态（mappings 支持 `--client` 名称/ID 过滤）、当前激活的存储后端。分页遵循 PaginatedResult 惯例。
+
+**安全红线**：实例信息含 authToken/dashboard 密码，CLI 输出仅做安全投影（名称/服务器/Dashboard 地址/是否默认），凭据绝不进入 stdout/stderr/日志。已知非能力：实例创建/探活/设默认、映射创建/删除、后端切换等写操作未暴露。
+
+## 11. 安全与故障边界
 
 - 用户级配置、项目配置和所有 CLI 参数都视为不可信输入并严格解析；
 - 项目选择器不能改变 Server 或凭据引用，降低不可信仓库诱导泄密风险；
@@ -230,7 +243,7 @@ Windows Git Bash 会话注意：MSYS 会把 `/etc` 这类绝对路径参数改�
 - `env current` 的成功只表示配置可解析，不表示 Server 可达或凭据有效；`env check` 才验证 Server、凭据和实际身份；
 - 环境删除不会修复项目引用，被删除环境的项目后续明确失败。
 
-## 11. Skill 安装与当前项目 cwd
+## 12. Skill 安装与当前项目 cwd
 
 正式版本通过 Pi 用户级 Git package 安装：
 
@@ -244,7 +257,7 @@ Skill 调用 CLI 时从 `SKILL.md` 解析 `vcpdeck.cjs` 的绝对路径，但必
 
 `skills/vcpdeck/SKILL.md` 通过 CLI `env current` 取得环境权威摘要，不直接读取 JSON。后续每个 CLI 业务命令都复用同一环境解析结果，并在 Skill 中新增对应功能章节。Server/SDK 已有 API 不等于 CLI 命令已落地。
 
-## 12. SDK/Shared Git 安装
+## 13. SDK/Shared Git 安装
 
 SDK 不读取 CLI 的 HOME/cwd 配置，只接受调用方提供的 `baseUrl` 与认证。Node.js 24+、pnpm 10.26+ 的目标项目可从同一个稳定 Tag 直接安装 SDK 与 Shared：
 
@@ -259,7 +272,7 @@ pnpm \
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。
 
-## 13. 测试与验收
+## 14. 测试与验收
 
 当前单元/集成测试覆盖：
 
@@ -280,6 +293,7 @@ pnpm \
 - `files roots/list/stat/read` 覆盖四子命令、授权根探测与多根 fail closed、稳定错误码转译、排序汇总和 `--json` 输出；
 - `files write/mkdir/delete/move` 覆盖 payload 形状（content 来自 --input/递归/覆盖语义）、成功摘要、失败错误码转译和用法校验；
 - `files download/upload` 覆盖导出+签名 URL 拉取+sha256 校验、sha 不一致删除半成品、分片直传与导入终态等待。
-- `pi models/sessions/new/run/abort` 覆盖 cwdRef 推导、多根 fail closed、运行循环（prompt→轮询→回复提取）、既有会话 open 复用、扩展输入报错和中止。
+- `pi models/sessions/new/run/abort` 覆盖 cwdRef 推导、多根 fail closed、运行循环（prompt→轮询→回复提取）、既有会话 open 复用、扩展输入报错和中止；
+- `frp/storage` 覆盖实例/映射表格与过滤、凭据字段脱敏断言和后端状态输出。
 
-当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 Files/Jobs/Clients/Pi/Release 之外的其余业务 CLI 命令（Terminal、FRP、Storage 等）。
+当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 Files/Jobs/Clients/Pi/Frp/Storage/Release 的写操作与 Terminal 域。

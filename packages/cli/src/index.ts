@@ -8,6 +8,8 @@ import { runEnvCommand } from "./env-command.js";
 import { runFilesCommand } from "./files-command.js";
 import { runJobsCommand } from "./jobs-command.js";
 import { runPiCommand } from "./pi-command.js";
+import { runFrpCommand } from "./frp-command.js";
+import { runStorageCommand } from "./storage-command.js";
 import { runClientsCommand } from "./clients-command.js";
 import { runReleaseCommand } from "./release-command.js";
 
@@ -36,6 +38,14 @@ export async function run(
 		}
 		if (command === "pi") {
 			await runPiCommand(subcommand, rest, { log });
+			return 0;
+		}
+		if (command === "frp") {
+			await runFrpCommand(subcommand, rest, { log });
+			return 0;
+		}
+		if (command === "storage") {
+			await runStorageCommand(subcommand, rest, { log });
 			return 0;
 		}
 		if (command === "files") {

@@ -1,6 +1,6 @@
 ---
 name: vcpdeck
-description: Use VCPDeck through its CLI to access cockpit capabilities exposed by the VCPDeck Server. Use when the user asks to operate VCPDeck from Pi, inspect available CLI capabilities, list registered Client machines and their online status, query Jobs and diagnose Job failures with full stdout/stderr output, run shell commands on a Client machine or cancel running Jobs (with mandatory user confirmation), browse directories and read text files on a Client machine, write/mkdir/delete/move remote files (with mandatory user confirmation), transfer files between a Client machine and local disk via Storage direct upload (with mandatory user confirmation), dispatch subtasks to the Pi agent running on a Client machine and retrieve its reply (with mandatory user confirmation), publish or update VCPDeck, or use machine, Job, file, Terminal, Pi, FRP, Storage, and other commands as they become available.
+description: Use VCPDeck through its CLI to access cockpit capabilities exposed by the VCPDeck Server. Use when the user asks to operate VCPDeck from Pi, inspect available CLI capabilities, list registered Client machines and their online status, query Jobs and diagnose Job failures with full stdout/stderr output, run shell commands on a Client machine or cancel running Jobs (with mandatory user confirmation), browse directories and read text files on a Client machine, write/mkdir/delete/move remote files (with mandatory user confirmation), transfer files between a Client machine and local disk via Storage direct upload (with mandatory user confirmation), dispatch subtasks to the Pi agent running on a Client machine and retrieve its reply (with mandatory user confirmation), inspect FRP instances/mappings and Storage backend status, publish or update VCPDeck, or use machine, Job, file, Terminal, Pi, FRP, Storage, and other commands as they become available.
 compatibility: Requires Node.js 24+, the bundled vcpdeck.cjs CLI beside this file, and network access to the VCPDeck Server. Individual capabilities may have additional requirements; Release packaging also requires the VCPDeck repository and pnpm 10.26+.
 ---
 
@@ -38,8 +38,10 @@ pnpm --filter @vcpdeck/cli build
 | 文件写入（写操作） | `files write/mkdir/delete/move` | 已实现 | 覆盖写/递归建目录/删除（不可恢复）/移动重命名；**必须先取得用户明确确认**（确认门见功能章节） |
 | 文件传输（写操作） | `files download/upload` | 已实现 | 经 Storage Provider 直传链路（Server 只签名不承载字节）；download 校验 sha256；**必须先取得用户明确确认** |
 | Pi 子任务（写操作） | `pi models/sessions/new/run/abort` | 已实现 | 在目标机驱动 Pi Agent 执行子任务并取回回复；**最强确认门：必须先取得用户明确确认** |
+| FRP 查询（只读） | `frp instances/mappings` | 已实现 | 服务实例与映射状态；凭据字段（token/密码）绝不进入输出 |
+| Storage 查询（只读） | `storage status` | 已实现 | 当前激活的存储后端类型 |
 | Release / 自更新 | `release upload/status/wait` | 已实现 | 上传双平台构件；查询或等待 Server/Client 权威终态，失败或超时返回非零退出 |
-| 机器写入、Terminal、FRP、Storage 等 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明；Pi 会话 fork/clone/navigate/compact 等高级操作亦未暴露 |
+| Terminal、FRP/Storage 写操作（建实例/删映射/切后端等）、机器写入 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明 |
 
 ## 功能：环境选择
 
@@ -340,6 +342,26 @@ node "<vcpdeck-cli>" pi abort <client> --session=<id> [--env=<name>] [--json]
 ### 与 Server 能力的对齐情况
 
 已对齐：模型列表、会话列表、会话创建/打开、子任务下发与回复提取、中止。未对齐：会话高级操作与多模态输入。
+
+## 功能：FRP 与 Storage 状态查询（只读）
+
+### 可用命令
+
+```bash
+node "<vcpdeck-cli>" frp instances [--page=<n>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" frp mappings [--client=<name|id>] [--page=<n>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" storage status [--env=<name>] [--json]
+```
+
+以 CLI `--help` 为命令事实来源。
+
+### 功能语义与敏感字段红线
+
+`frp instances` 列出 FRP 服务实例（名称、服务器地址端口、Dashboard 地址、是否默认）；`frp mappings` 列出映射（名称、机器、类型、本地地址、远程端口、状态、公网 URL），支持 `--client` 名称/ID 过滤。**实例信息中的 authToken 与 dashboard 密码属于凭据，CLI 输出已做安全投影，Agent 不得尝试从其他渠道获取或展示这些字段**。`storage status` 显示当前激活的存储后端类型（local/alibaba）与配置更新时间。
+
+### 操作分级与对齐情况
+
+三个子命令均为只读 GET，幂等无副作用，无需确认门。已对齐：实例/映射列表查询、存储后端状态。未对齐：FRP 实例创建/探活/设默认、映射创建/删除，Storage 后端切换——这些写操作落地时适用确认门。
 
 ## 后续 CLI 能力扩展规则
 

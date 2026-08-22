@@ -3790,9 +3790,193 @@ function sleep4(ms) {
   return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
 
+// dist/table.js
+function formatTable3(rows, columns) {
+  const widths = columns.map((column) => Math.max(column.length, ...rows.map((row) => row[column].length)));
+  const line = (cells) => cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
+  return [
+    line(columns.map((column) => column.toUpperCase())),
+    ...rows.map((row) => line(columns.map((column) => row[column])))
+  ].join("\n");
+}
+
+// dist/frp-command.js
+function safeInstance(instance) {
+  return {
+    name: instance.name,
+    server: `${instance.serverAddr}:${instance.serverPort}`,
+    dashboard: instance.dashboardHost !== null ? `${instance.dashboardScheme}://${instance.dashboardHost}:${instance.dashboardPort}` : "-",
+    default: instance.isDefault ? "yes" : "-"
+  };
+}
+async function runFrpCommand(subcommand, argv, context = {}) {
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "instances" || subcommand === "mappings" || subcommand === void 0) && hasHelp4(argv);
+  if (helpRequested) {
+    (context.log ?? console.log)(frpUsage());
+    return;
+  }
+  if (subcommand === "instances") {
+    await runInstances(argv, context);
+    return;
+  }
+  if (subcommand === "mappings") {
+    await runMappings(argv, context);
+    return;
+  }
+  throw new Error(frpUsage());
+}
+function hasHelp4(argv) {
+  return argv.includes("--help") || argv.includes("-h");
+}
+function frpUsage() {
+  return [
+    "FRP \u547D\u4EE4\uFF08\u53EA\u8BFB\uFF09:",
+    "  vcpdeck frp instances [--page=<n>] [--env=<name>] [--json]",
+    "  vcpdeck frp mappings [--client=<name|id>] [--page=<n>] [--env=<name>] [--json]"
+  ].join("\n");
+}
+async function runInstances(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "page"],
+    boolean: ["json"]
+  });
+  if (positionals.length > 0)
+    throw new Error(frpUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias5(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  const result = await client.frp.instances.list({
+    page: parsePage2(stringOption(options, "page"))
+  });
+  if (options.json === true) {
+    const safe = result.data.map(safeInstance);
+    (context.log ?? console.log)(JSON.stringify({ ...result, data: safe }, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  log(`FRP \u670D\u52A1\u5B9E\u4F8B\uFF08${result.total}\uFF09\uFF1A`);
+  log(formatTable3(result.data.map(safeInstance), ["name", "server", "dashboard", "default"]));
+}
+async function runMappings(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "client", "page"],
+    boolean: ["json"]
+  });
+  if (positionals.length > 0)
+    throw new Error(frpUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias5(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  const clientFilter = stringOption(options, "client");
+  const clientId = clientFilter ? await resolveClientId(clientFilter, context.paths, context.processEnv) : void 0;
+  const result = await client.frp.list({
+    clientId,
+    page: parsePage2(stringOption(options, "page"))
+  });
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(result, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  if (result.data.length === 0) {
+    log("\u5F53\u524D\u8FC7\u6EE4\u6761\u4EF6\u4E0B\u6CA1\u6709\u6620\u5C04\u3002");
+    return;
+  }
+  log(`FRP \u6620\u5C04\uFF08\u5171 ${result.total} \xB7 \u7B2C ${result.page}/${result.totalPages} \u9875\uFF09\uFF1A`);
+  log(formatTable3(result.data.map((mapping) => ({
+    name: mapping.name,
+    client: mapping.clientId,
+    type: mapping.proxyType,
+    local: `${mapping.localIp}:${mapping.localPort}`,
+    remote: mapping.remotePort === null ? "-" : String(mapping.remotePort),
+    status: mapping.status,
+    url: mapping.publicUrl ?? "-"
+  })), ["name", "client", "type", "local", "remote", "status", "url"]));
+}
+function exclusiveAlias5(options, first, second) {
+  const firstValue = stringOption(options, first);
+  const secondValue = stringOption(options, second);
+  if (firstValue && secondValue) {
+    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
+  }
+  return firstValue ?? secondValue;
+}
+function parsePage2(raw) {
+  if (raw === void 0)
+    return void 0;
+  const page = Number(raw);
+  if (!Number.isInteger(page) || page < 1) {
+    throw new Error("--page \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570");
+  }
+  return page;
+}
+
+// dist/storage-command.js
+async function runStorageCommand(subcommand, argv, context = {}) {
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "status" || subcommand === void 0) && hasHelp5(argv);
+  if (helpRequested) {
+    (context.log ?? console.log)(storageUsage());
+    return;
+  }
+  if (subcommand === "status") {
+    await runStatus(argv, context);
+    return;
+  }
+  throw new Error(storageUsage());
+}
+function hasHelp5(argv) {
+  return argv.includes("--help") || argv.includes("-h");
+}
+function storageUsage() {
+  return [
+    "Storage \u547D\u4EE4\uFF08\u53EA\u8BFB\uFF09:",
+    "  vcpdeck storage status [--env=<name>] [--json]  # \u67E5\u770B\u5F53\u524D\u6FC0\u6D3B\u7684\u5B58\u50A8\u540E\u7AEF"
+  ].join("\n");
+}
+async function runStatus(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment"],
+    boolean: ["json"]
+  });
+  if (positionals.length > 0)
+    throw new Error(storageUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias6(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  const config = await client.storage.getBackendConfig();
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(config, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  log(`Storage \u540E\u7AEF: ${config.kind}`);
+  if (config.updatedAt)
+    log(`\u914D\u7F6E\u66F4\u65B0\u65F6\u95F4: ${config.updatedAt}`);
+}
+function exclusiveAlias6(options, first, second) {
+  const firstValue = stringOption(options, first);
+  const secondValue = stringOption(options, second);
+  if (firstValue && secondValue) {
+    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
+  }
+  return firstValue ?? secondValue;
+}
+
 // dist/clients-command.js
 async function runClientsCommand(subcommand, argv, context = {}) {
-  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === void 0) && hasHelp4(argv);
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === void 0) && hasHelp6(argv);
   if (helpRequested) {
     (context.log ?? console.log)(clientsUsage());
     return;
@@ -3803,7 +3987,7 @@ async function runClientsCommand(subcommand, argv, context = {}) {
   }
   throw new Error(clientsUsage());
 }
-function hasHelp4(argv) {
+function hasHelp6(argv) {
   return argv.includes("--help") || argv.includes("-h");
 }
 function clientsUsage() {
@@ -3818,7 +4002,7 @@ async function runListClients(argv, context) {
     boolean: ["json"]
   });
   const environment = await resolveEnvironment({
-    environment: exclusiveAlias5(options, "env", "environment"),
+    environment: exclusiveAlias7(options, "env", "environment"),
     paths: context.paths,
     processEnv: context.processEnv
   });
@@ -3854,7 +4038,7 @@ function formatClientsSummary(clients) {
   const onlineCount = clients.filter((client) => client.online).length;
   return [
     `\u5171 ${clients.length} \u53F0 \xB7 \u5728\u7EBF ${onlineCount} \xB7 \u79BB\u7EBF ${clients.length - onlineCount}`,
-    formatTable3(rows, [
+    formatTable4(rows, [
       "name",
       "hostname",
       "os",
@@ -3865,7 +4049,7 @@ function formatClientsSummary(clients) {
     ])
   ].join("\n");
 }
-function exclusiveAlias5(options, first, second) {
+function exclusiveAlias7(options, first, second) {
   const firstValue = stringOption(options, first);
   const secondValue = stringOption(options, second);
   if (firstValue && secondValue) {
@@ -3876,7 +4060,7 @@ function exclusiveAlias5(options, first, second) {
 function formatPercent(value) {
   return value === null ? "-" : `${value.toFixed(0)}%`;
 }
-function formatTable3(rows, columns) {
+function formatTable4(rows, columns) {
   const widths = columns.map((column) => Math.max(column.length, ...rows.map((row) => row[column].length)));
   const line = (cells) => cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
   return [
@@ -3963,7 +4147,7 @@ async function runInspectCommand(subcommand, argv, context) {
   log(formatReleaseSummary(snapshot.release, snapshot.serverVersion));
 }
 async function resolveCommandEnvironment(options, context) {
-  const environment = exclusiveAlias6(options, "env", "environment");
+  const environment = exclusiveAlias8(options, "env", "environment");
   const server = stringOption(options, "server");
   const username = stringOption(options, "username");
   const password = stringOption(options, "password");
@@ -4250,7 +4434,7 @@ function isSafeDirectUploadUrl(value) {
     return false;
   }
 }
-function exclusiveAlias6(options, first, second) {
+function exclusiveAlias8(options, first, second) {
   const firstValue = stringOption(options, first);
   const secondValue = stringOption(options, second);
   if (firstValue && secondValue) {
@@ -4275,6 +4459,14 @@ async function run(argv, context = {}) {
     }
     if (command === "pi") {
       await runPiCommand(subcommand, rest, { log });
+      return 0;
+    }
+    if (command === "frp") {
+      await runFrpCommand(subcommand, rest, { log });
+      return 0;
+    }
+    if (command === "storage") {
+      await runStorageCommand(subcommand, rest, { log });
       return 0;
     }
     if (command === "files") {
