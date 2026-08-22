@@ -331,6 +331,7 @@ export function StoragePage() {
 						["aliyun", "阿里云盘"],
 					].map(([value, label], index) => (
 						<button
+							type="button"
 							key={value}
 							ref={(element) => {
 								tabRefs.current[index] = element;

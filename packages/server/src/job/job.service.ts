@@ -1,4 +1,6 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { JobScheduler } from "./job.scheduler.js";
 import { JobStatus, type JobProgress } from "@vcpdeck/shared";
@@ -60,6 +62,16 @@ function parseProgress(raw: string | null): JobProgress | null {
   return null;
 }
 
+/** Job 输出 spool 目录（相对路径按 ADR-0014 锚定 VCPDECK_APP_DIR，版本目录外不漂移）。 */
+const JOB_OUTPUT_BASE_DIR = "./data/job-outputs";
+
+/** 解析 Job 输出 spool 根目录；绝对路径原样，相对路径锚定 appDir 或 cwd。 */
+export function resolveJobOutputDir(
+	appDir = process.env.VCPDECK_APP_DIR,
+): string {
+	return resolve(appDir || process.cwd(), JOB_OUTPUT_BASE_DIR);
+}
+
 @Injectable()
 export class JobService {
   constructor(
@@ -67,6 +79,7 @@ export class JobService {
     @Inject(JobScheduler) private readonly scheduler: JobScheduler,
     @Inject(FileService) private readonly fileService: FileService,
     @Inject(StorageService) private readonly storage: StorageService,
+    @Optional() private readonly outputDir: string = resolveJobOutputDir(),
   ) {}
 
   /** 创建等待浏览器上传的文件导入会话。 */
@@ -410,10 +423,28 @@ export class JobService {
     };
   }
 
-  async appendOutputRaw(jobId: string, _text: string) {
-    // ponytail: stdout/stderr 暂不持久化，仅实时转发。后续加 output spool 时在此实现。
+  /** stdout/stderr 片段落盘（tee）；Job 不存在时静默忽略，不阻塞实时转发。 */
+  async appendOutputRaw(jobId: string, text: string) {
+    if (!text) return;
     const job = await this.prisma.job.findUnique({ where: { id: jobId } });
     if (!job) return;
+    await mkdir(this.outputDir, { recursive: true });
+    await appendFile(join(this.outputDir, `${jobId}.log`), text, "utf8");
+  }
+
+  /**
+   * 读取 Job 输出 spool 全文；仅详情查询时调用。
+   * 返回 null 表示 Job 不存在或没有输出文件。
+   */
+  async readJobOutput(jobId: string): Promise<string | null> {
+    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+    if (!job) return null;
+    try {
+      return await readFile(join(this.outputDir, `${jobId}.log`), "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
   }
 
   /** 更新 job 传输段进度（file.export 上传时由 client 上报） */

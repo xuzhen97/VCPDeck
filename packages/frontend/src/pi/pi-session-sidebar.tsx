@@ -384,7 +384,7 @@ function SessionRow({
 							"size-1.5 shrink-0 rounded-full",
 							session.running ? "bg-green-500" : "bg-muted-foreground/40",
 						)}
-						aria-label={session.running ? "运行中" : "空闲"}
+						title={session.running ? "运行中" : "空闲"}
 					/>
 					<span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
 						{title}

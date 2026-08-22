@@ -77,13 +77,22 @@ export function TerminalTabs({
 							{session.status !== "detached" && session.status !== "active" && (
 								<StatusChip label={label} tone={tabTone(session.status)} />
 							)}
+							{/* biome-ignore lint/a11y/useSemanticElements: 嵌套于父按钮内，不能改为真实 button；键盘支持已补齐，重构另行处理 */}
 							<span
 								role="button"
+								tabIndex={0}
 								aria-label={`${TERMINAL_ENDED.has(session.status) ? "清除终端" : "关闭终端"} ${session.shellLabel} ${index + 1}`}
 								className="rounded p-0.5 hover:bg-destructive/20 hover:text-destructive"
 								onClick={(event) => {
 									event.stopPropagation();
 									onCloseTab(session.sessionId);
+								}}
+								onKeyDown={(event) => {
+									if (event.key === "Enter" || event.key === " ") {
+										event.preventDefault();
+										event.stopPropagation();
+										onCloseTab(session.sessionId);
+									}
 								}}
 							>
 								<X className="size-3" />

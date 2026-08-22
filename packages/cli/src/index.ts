@@ -1,10 +1,13 @@
 /**
  * VCPDeck CLI 入口。
  *
- * 当前能力：多环境配置、Release 双平台上传及 Server/Client 自更新终态验收。
+ * 当前能力：多环境配置、Client 列表查询、Job 查询/执行/取消与失败现场、文件只读浏览、Release 双平台上传及 Server/Client 自更新终态验收。
  */
 import { VERSION } from "@vcpdeck/shared";
 import { runEnvCommand } from "./env-command.js";
+import { runFilesCommand } from "./files-command.js";
+import { runJobsCommand } from "./jobs-command.js";
+import { runClientsCommand } from "./clients-command.js";
 import { runReleaseCommand } from "./release-command.js";
 
 /** CLI 运行时依赖，测试可注入输出。 */
@@ -28,6 +31,18 @@ export async function run(
 		}
 		if (command === "env") {
 			await runEnvCommand(subcommand, rest, { log });
+			return 0;
+		}
+		if (command === "files") {
+			await runFilesCommand(subcommand, rest, { log });
+			return 0;
+		}
+		if (command === "jobs") {
+			await runJobsCommand(subcommand, rest, { log });
+			return 0;
+		}
+		if (command === "clients") {
+			await runClientsCommand(subcommand, rest, { log });
 			return 0;
 		}
 		if (command === "release") {
@@ -65,6 +80,21 @@ export function helpText(): string {
 		"  兼容密码: ... --auth=password --username=<name> --password-env=<VAR>",
 		"  vcpdeck env remove <name>",
 		"  vcpdeck env use <name> --global|--local",
+		"",
+		"Clients:",
+		"  vcpdeck clients list [--env=<name>] [--json]",
+		"",
+		"Jobs:",
+		"  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
+		"  vcpdeck jobs get <jobId> [--env=<name>] [--json]",
+		"  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
+		"  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]",
+		"",
+		"Files（只读）:",
+		"  vcpdeck files roots <client> [--env=<name>] [--json]",
+		"  vcpdeck files list <client> <path> [--root=<dir>] [--env=<name>] [--json]",
+		"  vcpdeck files stat <client> <path> [--root=<dir>] [--env=<name>] [--json]",
+		"  vcpdeck files read <client> <path> [--root=<dir>] [--max-bytes=<n>] [--env=<name>] [--json]",
 		"",
 		"Release:",
 		"  vcpdeck release status <version> [--env=<name>]",

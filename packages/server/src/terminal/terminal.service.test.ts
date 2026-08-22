@@ -360,7 +360,7 @@ describe("attach 与单写多读", () => {
 			(r) => r.request.action === "session.input",
 		);
 		expect(inputReq).toBeTruthy();
-		expect((inputReq?.request as { data: string }).data).toBe("ls\r");
+		expect((inputReq!.request as { data: string }).data).toBe("ls\r");
 	});
 
 	it("未知 attachment 的 input 返回 TERMINAL_SESSION_NOT_FOUND", async () => {
@@ -803,7 +803,7 @@ describe("listSessions 过滤", () => {
 			],
 		});
 		const endStatuses = (
-			lastSessionWhere?.OR as Array<{ status: { notIn: string[] } }>
+			lastSessionWhere!.OR as Array<{ status: { notIn: string[] } }>
 		)[0]?.status?.notIn;
 		expect(endStatuses).toEqual(
 			expect.arrayContaining(["closed", "exited", "expired", "error"]),

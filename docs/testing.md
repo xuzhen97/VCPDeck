@@ -32,6 +32,8 @@ pnpm build
 pnpm test
 ```
 
+`pnpm lint` 由根目录 `biome.json` 驱动（Biome，仅 linter 不含格式化；覆盖 `packages/*/src` 与 `scripts`）：错误级诊断阻塞门禁；降级为 warning 的规则（NestJS DI 未使用参数、noExplicitAny、非空断言等）为已知技术债，新增代码不应新增此类告警。
+
 按包：
 
 ```bash

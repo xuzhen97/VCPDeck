@@ -310,4 +310,13 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
     if (!job) throw new NotFoundException(`Job "${jobId}" not found`);
     return job;
   }
+
+  /** Job 输出 spool 全文；仅详情诊断时调用，不进入列表路径。 */
+  @Get("jobs/:jobId/output")
+  async getJobOutput(@Param("jobId") jobId: string) {
+    const job = await this.jobService.findById(jobId);
+    if (!job) throw new NotFoundException(`Job "${jobId}" not found`);
+    const output = await this.jobService.readJobOutput(jobId);
+    return { jobId, output };
+  }
 }

@@ -39,7 +39,7 @@ const { io } = require("socket.io-client");
 	// 第二次连接：带 token 重连恢复
 	await new Promise((r) => setTimeout(r, 500));
 	socket = await connect();
-	let snapshots = [];
+	const snapshots = [];
 	socket.on("terminal:snapshot", (m) => snapshots.push(m));
 	const attached2 = await emitAck(socket, "terminal:attach", {
 		sessionId: created.sessionId,

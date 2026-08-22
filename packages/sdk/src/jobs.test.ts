@@ -49,6 +49,25 @@ describe("jobs", () => {
 		);
 	});
 
+	it("output 请求输出端点并透传 signal", async () => {
+		const request = vi
+			.fn()
+			.mockResolvedValueOnce({ jobId: "j1", output: "boom\n" });
+		const controller = new AbortController();
+		const jobs = createJobsApi({ request } as never);
+
+		await expect(jobs.output("j1", controller.signal)).resolves.toEqual({
+			jobId: "j1",
+			output: "boom\n",
+		});
+		expect(request).toHaveBeenCalledWith(
+			"GET",
+			"/api/jobs/j1/output",
+			undefined,
+			controller.signal,
+		);
+	});
+
 	it("stops local waiting when aborted", async () => {
 		vi.useFakeTimers();
 		const controller = new AbortController();

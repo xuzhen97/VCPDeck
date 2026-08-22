@@ -217,7 +217,7 @@ describe("ReleaseService", () => {
 				at: expect.any(String),
 			});
 			const written = (
-				prisma.release.update.mock.calls[0]?.[0] as {
+				prisma.release.update.mock.calls[0]![0] as {
 					data: { clientStates: string };
 				}
 			).data.clientStates;

@@ -1,6 +1,6 @@
 # CLI 与多环境配置设计
 
-> 状态：Current｜维护责任：CLI/SDK 维护者｜最后核验：2026-08-18｜适用版本：当前 `main`
+> 状态：Current｜维护责任：CLI/SDK 维护者｜最后核验：2026-08-22｜适用版本：当前 `main`
 
 本文描述当前 VCPDeck CLI 的职责、环境配置、安全边界和已落地命令。长期取舍见 [ADR-0017](../adr/0017-cli-multi-environment-configuration.md)；REST 与认证语义见 [`protocols.md`](../protocols.md) 和 [`design/identity-and-authentication.md`](./identity-and-authentication.md)。
 
@@ -9,6 +9,12 @@
 CLI 是操作员和 Pi Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访问 Server。当前已落地：
 
 - 多环境注册、查看、选择与项目默认环境；
+- `clients list` 已注册 Client 只读列表查询；
+- `jobs list/get` Job 只读查询与失败现场（含 stdout/stderr spool 全文）；
+- `jobs run/cancel` Job 执行与取消；
+- `files roots/list/stat/read` 文件只读浏览（授权根探测、目录列表、元信息、文本读取）；
+- `files write/mkdir/delete/move` 文件写操作（覆盖写、递归建目录、删除、移动，确认门由调用方负责）；
+- `files download/upload` 文件传输（Storage Provider 直传链路，Server 只签名；download 校验 sha256）；
 - `release upload/status/wait` 双平台发布上传、权威状态查询和 Server/Client 终态等待。
 
 CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 Skill 中复制 HTTP。SDK 不读取 HOME、当前目录或 CLI 配置，只接受解析后的 `baseUrl` 和认证。
@@ -147,7 +153,57 @@ Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认
 
 `status` 输出 Server、Release 和 Client 状态汇总；`wait`/`upload --wait` 仅重试安全 GET，容忍 Server 重启短暂断线，并要求 Server 版本匹配、Release `done`、所有已记录 Client 均 `done`；Release/Client 失败或超时均非零退出。离线 Client 不属于本次在线明细，后续注册补更。
 
-## 6. 安全与故障边界
+## 6. Clients 命令
+
+当前只读：
+
+```text
+vcpdeck clients list [--env=<name>] [--json]
+```
+
+`list` 通过 SDK 请求 `/api/clients`，输出所有已注册 Client 的安全摘要（名称、hostname、OS、在线状态、CPU/内存使用率、版本）。在线状态与心跳由 Server 维护，CLI 不做本地推断，输出是查询时刻快照。
+
+默认输出人类可读表格（在线优先、按名称稳定排序）并附总数/在线/离线汇总；`--json` 跳过环境摘要，stdout 为纯 JSON `ClientInfo[]`，供 Agent 和脚本解析。空列表输出明确提示而非报错。
+
+本命令只支持命名环境（含 `--env` 临时覆盖），不提供 Release 那样的 `--server` 直连兼容模式。GET 幂等且无副作用，失败可直接重试。Server 端 `PATCH /api/clients/:id/name` 重命名尚未暴露为 CLI 命令。
+
+## 7. Jobs 命令
+
+```text
+vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]
+vcpdeck jobs get <jobId> [--env=<name>] [--json]
+vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>
+vcpdeck jobs cancel <jobId> [--env=<name>] [--json]
+```
+
+`list` 请求 `/api/jobs` 返回分页摘要；`--client` 接受机器名称或 ID，CLI 先查机器列表解析为 `clientId`；`--status` 校验合法值（JobStatus 全集加 `active` 聚合）。人类可读表格进行中优先，其余按创建时间倒序。
+
+`get` 输出单条详情：错误码/消息、`result`（如 exec 的 `exitCode`）、时间线与操作者，并附输出 spool 全文（无则显示“无落盘输出”）。stdout/stderr 由 Server 在 Client 实时上报时旁路落盘到 `data/job-outputs/<jobId>.log`（锚定 `VCPDECK_APP_DIR`），完整保留不封顶、无自动清理；只在详情路径读取，不进入列表。输出正文视为敏感数据，仅在显式查询时返回。
+
+`run` 创建 exec Job（写操作）：`--` 后的命令 token 以空格连接为 command 模式 payload 交由目标机 shell 执行（Windows 下 Client 自动 chcp 65001）；目标机必须在线。`--wait` 轮询终态（仅重试安全 GET，容忍 Server 重启短暂不可达），失败终态非零退出并自动带出错误摘要与输出全文；`--wait-timeout` 默认 1800 秒。`cancel` 提交取消：pending 立即 `cancelled`，running 返回 `cancelling`，终态用 `get` 核对。`run` 非幂等，网络结果不明时先查询权威状态；命令 token 含空格时引号边界可能丢失，CLI 会提示核对。script 模式与其他 Job 类型（file.*/frp 等）未暴露。
+
+## 8. Files 命令
+
+```text
+vcpdeck files roots <client> [--env=<name>] [--json]
+vcpdeck files list <client> <path> [--root=<dir>] [--env=<name>] [--json]
+vcpdeck files stat <client> <path> [--root=<dir>] [--env=<name>] [--json]
+vcpdeck files read <client> <path> [--root=<dir>] [--max-bytes=<n>] [--env=<name>] [--json]
+vcpdeck files write <client> <path> [--root=<dir>] [--input=<file>] [--env=<name>] [--json]  # 覆盖写；缺省 --input 时读 stdin
+vcpdeck files mkdir <client> <path> [--root=<dir>] [--env=<name>] [--json]  # 递归创建
+vcpdeck files delete <client> <path> [--root=<dir>] [--recursive] [--env=<name>] [--json]  # 不可恢复
+vcpdeck files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]
+vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]
+vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]
+```
+
+文件操作通过创建 `file.*` Job 并等待终态实现。`rootDir` 是授权根：显式 `--root` 优先；缺省时经 `file.roots` 探测——唯一根直接使用，多根 fail closed 要求显式指定。`list` 目录优先按名称排序并附汇总；`read` 默认上限 256KB（`--max-bytes` 可调）；失败非零退出并带稳定错误码（`PATH_NOT_FOUND`/`PATH_CONFLICT` 等）。文件内容属敏感正文，仅在显式查询时返回。
+
+写操作语义（由 Client 权威定义）：`write` 原子覆盖写（tmp+rename），内容来自 `--input` 或 stdin，不进命令行参数；`mkdir` 递归创建；`delete` 非递归遇非空目录报 `PATH_CONFLICT`，`--recursive` 解锁；`move` 目标存在默认拒绝，`--overwrite` 解锁。所有写操作执行前输出目标摘要（机器、授权根、路径、影响）；确认门由调用方负责，删除不可恢复且 `--recursive` 删除整个目录树必须单独强调。写操作非幂等，网络结果不明时先用只读命令核对权威状态。
+
+已知非能力：无（本节能力已对齐 Server 文件域；Terminal/Pi 等其他域见对应章节）。传输链路：`download` 导出后经 Server 签发的短期下载令牌从 Storage 拉取并校验 sha256；`upload` 经 upload-sessions 协商后分片直传 Provider（403 仅刷新该分片 URL），完成后由 Client 从存储拉取导入。字节流不经过 Server——阿里云为 Provider 预签名 URL 直传，Local 后端经 Server 中转是无外部存储时的固有行为；签名 URL 不输出、不落盘、不进日志。传输非幂等，网络结果不明时先用只读命令核对两侧状态。
+
+## 9. 安全与故障边界
 
 - 用户级配置、项目配置和所有 CLI 参数都视为不可信输入并严格解析；
 - 项目选择器不能改变 Server 或凭据引用，降低不可信仓库诱导泄密风险；
@@ -157,7 +213,7 @@ Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认
 - `env current` 的成功只表示配置可解析，不表示 Server 可达或凭据有效；`env check` 才验证 Server、凭据和实际身份；
 - 环境删除不会修复项目引用，被删除环境的项目后续明确失败。
 
-## 7. Skill 安装与当前项目 cwd
+## 10. Skill 安装与当前项目 cwd
 
 正式版本通过 Pi 用户级 Git package 安装：
 
@@ -171,7 +227,7 @@ Skill 调用 CLI 时从 `SKILL.md` 解析 `vcpdeck.cjs` 的绝对路径，但必
 
 `skills/vcpdeck/SKILL.md` 通过 CLI `env current` 取得环境权威摘要，不直接读取 JSON。后续每个 CLI 业务命令都复用同一环境解析结果，并在 Skill 中新增对应功能章节。Server/SDK 已有 API 不等于 CLI 命令已落地。
 
-## 8. SDK/Shared Git 安装
+## 11. SDK/Shared Git 安装
 
 SDK 不读取 CLI 的 HOME/cwd 配置，只接受调用方提供的 `baseUrl` 与认证。Node.js 24+、pnpm 10.26+ 的目标项目可从同一个稳定 Tag 直接安装 SDK 与 Shared：
 
@@ -186,7 +242,7 @@ pnpm \
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。
 
-## 9. 测试与验收
+## 12. 测试与验收
 
 当前单元/集成测试覆盖：
 
@@ -199,6 +255,13 @@ pnpm \
 - `env add/list/show/current/check/use/remove`；
 - `env check` 使用 Bearer 调用真实本地 HTTP Server 并显示 Token 身份，且不输出 Token；
 - 命名 Bearer 环境通过真实本地 HTTP Server 上传两个平台构件；
-- `release status/wait` 覆盖 Server 重启暂时不可达、成功终态、Release failed、Client failed 和超时。
+- `release status/wait` 覆盖 Server 重启暂时不可达、成功终态、Release failed、Client failed 和超时；
+- `clients list` 覆盖未知子命令/选项拒绝、别名冲突、Bearer 环境请求 `/api/clients` 且不泄露 Token、人类可读表格排序与汇总、`--json` 纯 JSON 输出和空列表提示；
+- Server 端 output spool 覆盖流式追加、未知 Job 忽略、spool 读取 null 语义和 `jobs/:id/output` 端点；
+- `jobs list/get` 覆盖用法/非法参数拒绝、名称解析为 clientId、分页表格排序、失败现场展示（错误摘要 + 输出全文）、`--json` 输出和未匹配机器报错；
+- `jobs run/cancel` 覆盖 `--` 分隔符解析、payload 形状（command 模式/cwd/timeout）、创建摘要、`--wait` 成功与失败（失败自动带出现场）、取消状态展示和 `--json` 输出；
+- `files roots/list/stat/read` 覆盖四子命令、授权根探测与多根 fail closed、稳定错误码转译、排序汇总和 `--json` 输出；
+- `files write/mkdir/delete/move` 覆盖 payload 形状（content 来自 --input/递归/覆盖语义）、成功摘要、失败错误码转译和用法校验；
+- `files download/upload` 覆盖导出+签名 URL 拉取+sha256 校验、sha 不一致删除半成品、分片直传与导入终态等待。
 
-当前已知非能力：系统凭据存储、共享环境目录、`--json`、交互式密码输入，以及 Release 之外的业务 CLI 命令。
+当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 Files/Jobs/Clients/Release 之外的其余业务 CLI 命令（Terminal、Pi、FRP、Storage 等）。

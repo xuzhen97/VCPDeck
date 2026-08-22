@@ -30,7 +30,7 @@ function fakeSocket() {
 	};
 	const ack = (event: string, result: unknown) => {
 		const call = emitCalls.find((c) => c.event === event && typeof c.args[1] === "function");
-		(call?.args[1] as (r: unknown) => void)(result);
+		(call!.args[1] as (r: unknown) => void)(result);
 	};
 	return { socket, emitCalls, listeners, fire, ack };
 }

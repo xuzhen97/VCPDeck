@@ -618,6 +618,7 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 											browser.selectedEntry?.name === item.name &&
 											browser.selectedEntry?.kind === item.kind;
 										return (
+											// biome-ignore lint/a11y/useSemanticElements: 遗留 role=button 行样式，语义化重构另行处理
 											<div
 												key={item.name}
 												role="button"
@@ -681,6 +682,8 @@ export function FilesPanel({ clientId }: { clientId: string }) {
 
 			{/* 右键菜单 */}
 			{contextMenu && (
+				// biome-ignore lint/a11y/useKeyWithClickEvents: 遮罩点击关闭为有意设计
+				// biome-ignore lint/a11y/noStaticElementInteractions: 同上
 				<div
 					className="fixed inset-0 z-40"
 					onClick={() => setContextMenu(null)}
@@ -1001,6 +1004,8 @@ function FileViewerDialog({
 	}
 
 	return (
+		// biome-ignore lint/a11y/useKeyWithClickEvents: 遮罩点击关闭为有意设计
+		// biome-ignore lint/a11y/noStaticElementInteractions: 同上
 		<div
 			className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 ${
 				fullscreen ? "p-0" : "p-6"

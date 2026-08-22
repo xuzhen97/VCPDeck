@@ -7,6 +7,7 @@ export interface ParsedCommandArgs {
 /**
  * 解析 `--name=value`、`--name value` 与布尔长选项。
  * 未声明、重复或缺值选项会明确失败，避免静默拼写错误。
+ * 裸 `--` 为分隔符：其后所有参数原样作为位置参数，不再解析选项。
  */
 export function parseCommandArgs(
 	argv: string[],
@@ -22,6 +23,10 @@ export function parseCommandArgs(
 
 	for (let index = 0; index < argv.length; index++) {
 		const arg = argv[index];
+		if (arg === "--") {
+			positionals.push(...argv.slice(index + 1));
+			break;
+		}
 		if (!arg.startsWith("--")) {
 			positionals.push(arg);
 			continue;

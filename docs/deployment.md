@@ -205,6 +205,7 @@ Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt
 
 - SQLite 文件及其同目录数据库文件；
 - `data/storage`（使用 Local Provider 时；相对 baseDir 自动锚定到 `<VCPDECK_APP_DIR>/data/storage`，见 ADR-0014）；
+- `data/job-outputs`（Job stdout/stderr spool；相对路径同样锚定 `<VCPDECK_APP_DIR>`，完整保留不封顶、无自动清理，可能含敏感输出，备份与访问权限应与 Storage 同级对待）；
 - `data/releases` 或 `VCPDECK_RELEASES_DIR`；
 - Launcher `VCPDECK_APP_DIR`；
 - Client `~/.vcpdeck/client-id`；

@@ -50,6 +50,7 @@ export function Drawer({
 				<div className="mb-6 flex items-center justify-between">
 					<h2 className="text-lg font-semibold">{title}</h2>
 					<button
+						type="button"
 						onClick={onClose}
 						className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary/60"
 						aria-label="关闭"

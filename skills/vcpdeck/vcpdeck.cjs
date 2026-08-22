@@ -1455,17 +1455,17 @@ var require_dist = __commonJS({
       JobType2["FRP_LIST"] = "frp.list";
       JobType2["FILE_ROOTS"] = "file.roots";
     })(JobType || (exports2.JobType = JobType = {}));
-    var JobStatus;
-    (function(JobStatus2) {
-      JobStatus2["IDLE"] = "idle";
-      JobStatus2["PENDING"] = "pending";
-      JobStatus2["RUNNING"] = "running";
-      JobStatus2["WAITING_INPUT"] = "waiting_input";
-      JobStatus2["DONE"] = "done";
-      JobStatus2["ERROR"] = "error";
-      JobStatus2["DISCONNECTED"] = "disconnected";
-      JobStatus2["CANCELLED"] = "cancelled";
-    })(JobStatus || (exports2.JobStatus = JobStatus = {}));
+    var JobStatus3;
+    (function(JobStatus4) {
+      JobStatus4["IDLE"] = "idle";
+      JobStatus4["PENDING"] = "pending";
+      JobStatus4["RUNNING"] = "running";
+      JobStatus4["WAITING_INPUT"] = "waiting_input";
+      JobStatus4["DONE"] = "done";
+      JobStatus4["ERROR"] = "error";
+      JobStatus4["DISCONNECTED"] = "disconnected";
+      JobStatus4["CANCELLED"] = "cancelled";
+    })(JobStatus3 || (exports2.JobStatus = JobStatus3 = {}));
     exports2.FileErrorCode = {
       PATH_NOT_FOUND: "PATH_NOT_FOUND",
       PATH_NOT_ALLOWED: "PATH_NOT_ALLOWED",
@@ -1500,7 +1500,7 @@ __export(index_exports, {
   run: () => run
 });
 module.exports = __toCommonJS(index_exports);
-var import_shared3 = __toESM(require_dist(), 1);
+var import_shared5 = __toESM(require_dist(), 1);
 
 // ../sdk/dist/aliyundrive.js
 function createAliyunDriveApi(client) {
@@ -1669,6 +1669,8 @@ function createJobsApi(client) {
       return client.request("GET", `/api/jobs${qs ? `?${qs}` : ""}`, void 0, signal);
     },
     get: (jobId, signal) => client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}`, void 0, signal),
+    /** 获取 Job 输出 spool 全文；output 为 null 表示没有落盘输出。 */
+    output: (jobId, signal) => client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}/output`, void 0, signal),
     create: (input, signal) => client.request("POST", "/api/jobs", input, signal),
     cancel: (jobId, signal) => client.request("POST", `/api/jobs/${encodeURIComponent(jobId)}/cancel`, void 0, signal),
     async wait(jobId, options = {}) {
@@ -2254,6 +2256,10 @@ function parseCommandArgs(argv, schema = {}) {
   const positionals = [];
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
+    if (arg === "--") {
+      positionals.push(...argv.slice(index + 1));
+      break;
+    }
     if (!arg.startsWith("--")) {
       positionals.push(arg);
       continue;
@@ -2660,14 +2666,965 @@ function assertNoArgs(argv) {
     throw new Error("\u8BE5\u547D\u4EE4\u4E0D\u63A5\u53D7\u53C2\u6570");
 }
 
-// dist/release-command.js
-var import_node_crypto = require("node:crypto");
+// dist/files-command.js
 var import_node_fs2 = require("node:fs");
 var import_promises2 = require("node:fs/promises");
+var import_node_crypto = require("node:crypto");
+var import_promises3 = require("node:stream/promises");
+var import_node_stream = require("node:stream");
+var import_shared3 = __toESM(require_dist(), 1);
+
+// dist/client-resolver.js
+async function resolveClientId(clientFilter, paths, processEnv) {
+  const environment = await resolveEnvironment({ paths, processEnv });
+  const client = await createAuthenticatedClient(environment);
+  const clients = await client.clients.list();
+  const matched = clients.find((entry) => entry.clientId === clientFilter || entry.name === clientFilter);
+  if (!matched) {
+    throw new Error(`\u672A\u627E\u5230 Client "${clientFilter}"\uFF1B\u5148\u7528 vcpdeck clients list \u67E5\u770B\u53EF\u7528\u673A\u5668`);
+  }
+  return matched.clientId;
+}
+
+// dist/jobs-command.js
 var import_shared2 = __toESM(require_dist(), 1);
+var STATUS_FILTERS = /* @__PURE__ */ new Set([...Object.values(import_shared2.JobStatus), "active"]);
+var DEFAULT_WAIT_TIMEOUT_SECONDS = 1800;
+var POLL_INTERVAL_MS = 2e3;
+var TERMINAL_STATUSES2 = /* @__PURE__ */ new Set([
+  import_shared2.JobStatus.DONE,
+  import_shared2.JobStatus.ERROR,
+  import_shared2.JobStatus.CANCELLED,
+  import_shared2.JobStatus.DISCONNECTED
+]);
+async function runJobsCommand(subcommand, argv, context = {}) {
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === "get" || subcommand === "run" || subcommand === "cancel" || subcommand === void 0) && hasHelp(argv);
+  if (helpRequested) {
+    (context.log ?? console.log)(jobsUsage());
+    return;
+  }
+  if (subcommand === "list") {
+    await runListJobs(argv, context);
+    return;
+  }
+  if (subcommand === "get") {
+    await runGetJob(argv, context);
+    return;
+  }
+  if (subcommand === "run") {
+    await runExecJob(argv, context);
+    return;
+  }
+  if (subcommand === "cancel") {
+    await runCancelJob(argv, context);
+    return;
+  }
+  throw new Error(jobsUsage());
+}
+function hasHelp(argv) {
+  return argv.includes("--help") || argv.includes("-h");
+}
+function jobsUsage() {
+  return [
+    "Jobs \u547D\u4EE4:",
+    "  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
+    "  vcpdeck jobs get <jobId> [--env=<name>] [--json]  # \u542B\u5931\u8D25\u73B0\u573A\uFF08stdout/stderr spool\uFF09",
+    "  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
+    "  # \u5199\u64CD\u4F5C\uFF1A\u547D\u4EE4 token \u4EE5\u7A7A\u683C\u8FDE\u63A5\u540E\u4EA4\u7531\u76EE\u6807\u673A shell \u6267\u884C\uFF1B\u786E\u8BA4\u95E8\u7531\u8C03\u7528\u65B9\u8D1F\u8D23",
+    "  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]"
+  ].join("\n");
+}
+function parseListArgs(argv) {
+  return parseCommandArgs(argv, {
+    value: ["env", "environment", "client", "status", "page"],
+    boolean: ["json"]
+  });
+}
+async function runListJobs(argv, context) {
+  const { positionals, options } = parseListArgs(argv);
+  if (positionals.length > 0)
+    throw new Error(jobsUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias2(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const status = requireValidStatus(stringOption(options, "status"));
+  const page = parsePage(stringOption(options, "page"));
+  const clientFilter = stringOption(options, "client");
+  const log = context.log ?? console.log;
+  const client = await createAuthenticatedClient(environment);
+  const clientId = clientFilter ? await resolveClientId(clientFilter, context.paths, context.processEnv) : void 0;
+  const result = await client.jobs.list({ clientId, status, page });
+  if (options.json === true) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(formatJobsList(result));
+}
+async function runGetJob(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment"],
+    boolean: ["json"]
+  });
+  if (positionals.length !== 1)
+    throw new Error(jobsUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias2(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const log = context.log ?? console.log;
+  const client = await createAuthenticatedClient(environment);
+  const jobId = positionals[0];
+  const job = await client.jobs.get(jobId);
+  const { output } = await client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}/output`);
+  if (options.json === true) {
+    log(JSON.stringify({ ...job, output }, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(formatJobDetail(job, output));
+}
+async function runExecJob(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "cwd", "timeout", "wait-timeout"],
+    boolean: ["json", "wait"]
+  });
+  const [clientFilter, ...commandTokens] = positionals;
+  if (!clientFilter || commandTokens.length === 0) {
+    throw new Error(jobsUsage());
+  }
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias2(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const timeout = parsePositiveSeconds(stringOption(options, "timeout"), "--timeout");
+  const waitTimeout = parsePositiveSeconds(stringOption(options, "wait-timeout"), "--wait-timeout") ?? DEFAULT_WAIT_TIMEOUT_SECONDS;
+  const log = context.log ?? console.log;
+  const client = await createAuthenticatedClient(environment);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const payload = {
+    mode: "command",
+    command: commandTokens.join(" ")
+  };
+  const cwd = stringOption(options, "cwd");
+  if (cwd)
+    payload.cwd = cwd;
+  if (!cwd && commandTokens.some((token) => token.includes(" "))) {
+    log("[vcpdeck] \u6CE8\u610F\uFF1A\u542B\u7A7A\u683C\u7684 token \u8FDE\u63A5\u540E\u5F15\u53F7\u8FB9\u754C\u53EF\u80FD\u4E22\u5931\uFF0C\u8BF7\u6838\u5BF9\u547D\u4EE4\u8BED\u4E49");
+  }
+  if (options.json !== true) {
+    log(formatEnvironmentSummary(environment));
+    log(`[vcpdeck] \u5728 ${clientFilter} \u4E0A\u6267\u884C: ${payload.command}`);
+  }
+  const created = await client.jobs.create({
+    clientId,
+    type: "exec",
+    payload,
+    timeout
+  });
+  if (options.wait !== true) {
+    if (options.json === true) {
+      log(JSON.stringify(created, null, 2));
+    } else {
+      log(`[vcpdeck] Job \u5DF2\u521B\u5EFA: ${created.jobId}\uFF08${created.status}\uFF09\uFF1B\u7528 jobs get ${created.jobId} \u67E5\u8BE2\u7ED3\u679C\uFF0C\u6216\u52A0 --wait \u76F4\u63A5\u7B49\u5F85\u7EC8\u6001`);
+    }
+    return;
+  }
+  const job = await waitForTerminalJob(client, created.jobId, waitTimeout, log, context.pollIntervalMs ?? POLL_INTERVAL_MS);
+  const output = await readJobOutputText(client, job.jobId).catch(() => null);
+  if (options.json === true) {
+    log(JSON.stringify({ ...job, output }, null, 2));
+  }
+  if (job.status !== import_shared2.JobStatus.DONE) {
+    if (options.json !== true)
+      log(formatJobDetail(job, output));
+    throw new Error(`Job ${job.jobId} \u7EC8\u6001\u4E3A ${job.status}`);
+  }
+  if (options.json !== true)
+    log(formatJobDetail(job, output));
+}
+async function waitForTerminalJob(client, jobId, timeoutSeconds, log, pollIntervalMs) {
+  const deadline = Date.now() + timeoutSeconds * 1e3;
+  let lastStatus;
+  while (Date.now() < deadline) {
+    try {
+      const job = await client.jobs.get(jobId);
+      if (TERMINAL_STATUSES2.has(job.status))
+        return job;
+      if (job.status !== lastStatus) {
+        log(`[vcpdeck] Job ${jobId} \u72B6\u6001: ${job.status}`);
+        lastStatus = job.status;
+      }
+    } catch (error) {
+      if (!isTransientReadError(error))
+        throw error;
+      log("[vcpdeck] Server \u6682\u65F6\u4E0D\u53EF\u8FBE\uFF0C\u7EE7\u7EED\u7B49\u5F85\u2026");
+    }
+    await sleep2(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
+  }
+  throw new Error(`\u7B49\u5F85 Job ${jobId} \u7EC8\u6001\u8D85\u65F6\uFF08${timeoutSeconds} \u79D2\uFF09\uFF1B\u7528 jobs get ${jobId} \u67E5\u8BE2\u5F53\u524D\u72B6\u6001`);
+}
+async function readJobOutputText(client, jobId) {
+  const { output } = await client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}/output`);
+  return output;
+}
+async function runCancelJob(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment"],
+    boolean: ["json"]
+  });
+  if (positionals.length !== 1)
+    throw new Error(jobsUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias2(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const log = context.log ?? console.log;
+  const client = await createAuthenticatedClient(environment);
+  const result = await client.jobs.cancel(positionals[0]);
+  if (options.json === true) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(`[vcpdeck] Job ${result.jobId} \u53D6\u6D88\u8BF7\u6C42\u5DF2\u63D0\u4EA4\uFF0C\u5F53\u524D\u72B6\u6001: ${result.status}${result.status === "cancelling" ? "\uFF08\u7B49\u5F85 Client \u786E\u8BA4\uFF0C\u7EC8\u6001\u7528 jobs get \u6838\u5BF9\uFF09" : ""}`);
+}
+function formatJobsList(result) {
+  const sorted = [...result.data].sort((a, b) => {
+    const active = (job) => job.status === import_shared2.JobStatus.RUNNING || job.status === import_shared2.JobStatus.PENDING || job.status === import_shared2.JobStatus.WAITING_INPUT ? 0 : 1;
+    const byActive = active(a) - active(b);
+    if (byActive !== 0)
+      return byActive;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+  const rows = sorted.map((job) => ({
+    jobId: job.jobId,
+    client: job.clientName ?? job.clientId,
+    type: job.type,
+    status: job.status,
+    error: job.errorCode ?? "-",
+    created: job.createdAt
+  }));
+  const body = rows.length === 0 ? ["\u5F53\u524D\u8FC7\u6EE4\u6761\u4EF6\u4E0B\u6CA1\u6709 Job\u3002"] : [
+    formatTable(rows, [
+      "jobId",
+      "client",
+      "type",
+      "status",
+      "error",
+      "created"
+    ])
+  ];
+  return [
+    `\u5171 ${result.total} \u6761 \xB7 \u7B2C ${result.page}/${result.totalPages} \u9875`,
+    ...body
+  ].join("\n");
+}
+function formatJobDetail(job, output) {
+  const lines = [
+    `Job: ${job.jobId}`,
+    `Client: ${job.clientName ?? job.clientId}`,
+    `Type: ${job.type}`,
+    `Status: ${job.status}`
+  ];
+  if (job.errorCode || job.errorMessage) {
+    lines.push(`Error: ${job.errorCode ?? "-"}${job.errorMessage ? ` \u2014 ${job.errorMessage}` : ""}`);
+  }
+  lines.push(`Created: ${job.createdAt}`);
+  if (job.startedAt)
+    lines.push(`Started: ${job.startedAt}`);
+  if (job.finishedAt)
+    lines.push(`Finished: ${job.finishedAt}`);
+  if (job.createdByName || job.createdVia) {
+    lines.push(`Creator: ${job.createdByName ?? "-"} (${job.createdVia ?? "-"})`);
+  }
+  if (job.result && Object.keys(job.result).length > 0) {
+    lines.push(`Result: ${JSON.stringify(job.result)}`);
+  }
+  if (output === null) {
+    lines.push("\uFF08\u65E0\u843D\u76D8\u8F93\u51FA\uFF09");
+  } else {
+    lines.push("\u2500\u2500 \u8F93\u51FA\uFF08stdout/stderr\uFF09\u2500\u2500", output.trimEnd());
+  }
+  return lines.join("\n");
+}
+function exclusiveAlias2(options, first, second) {
+  const firstValue = stringOption(options, first);
+  const secondValue = stringOption(options, second);
+  if (firstValue && secondValue) {
+    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
+  }
+  return firstValue ?? secondValue;
+}
+function requireValidStatus(raw) {
+  if (raw === void 0)
+    return void 0;
+  if (!STATUS_FILTERS.has(raw)) {
+    throw new Error(`--status \u5FC5\u987B\u662F ${[...STATUS_FILTERS].join("/")} \u4E4B\u4E00`);
+  }
+  return raw;
+}
+function parsePage(raw) {
+  if (raw === void 0)
+    return void 0;
+  const page = Number(raw);
+  if (!Number.isInteger(page) || page < 1) {
+    throw new Error("--page \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570");
+  }
+  return page;
+}
+function parsePositiveSeconds(raw, flag) {
+  if (raw === void 0)
+    return void 0;
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds < 1) {
+    throw new Error(`${flag} \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570\u79D2`);
+  }
+  return seconds;
+}
+function isTransientReadError(error) {
+  if (error instanceof VcpDeckApiError) {
+    return error.status === 0 || [502, 503, 504].includes(error.status);
+  }
+  return error instanceof Error && error.name === "AbortError";
+}
+function sleep2(ms) {
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
+}
+function formatTable(rows, columns) {
+  const widths = columns.map((column) => Math.max(column.length, ...rows.map((row) => row[column].length)));
+  const line = (cells) => cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
+  return [
+    line(columns.map((column) => column.toUpperCase())),
+    ...rows.map((row) => line(columns.map((column) => row[column])))
+  ].join("\n");
+}
+
+// dist/files-command.js
+var DEFAULT_WAIT_TIMEOUT_SECONDS2 = 120;
+var POLL_INTERVAL_MS2 = 1e3;
+async function runFilesCommand(subcommand, argv, context = {}) {
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "roots" || subcommand === "list" || subcommand === "stat" || subcommand === "read" || subcommand === "write" || subcommand === "mkdir" || subcommand === "delete" || subcommand === "move" || subcommand === "download" || subcommand === "upload" || subcommand === void 0) && hasHelp2(argv);
+  if (helpRequested) {
+    (context.log ?? console.log)(filesUsage());
+    return;
+  }
+  if (subcommand === "roots") {
+    await runRoots(argv, context);
+    return;
+  }
+  if (subcommand === "list") {
+    await runList(argv, context);
+    return;
+  }
+  if (subcommand === "stat") {
+    await runStat(argv, context);
+    return;
+  }
+  if (subcommand === "read") {
+    await runRead(argv, context);
+    return;
+  }
+  if (subcommand === "write") {
+    await runWrite(argv, context);
+    return;
+  }
+  if (subcommand === "mkdir") {
+    await runMkdir(argv, context);
+    return;
+  }
+  if (subcommand === "delete") {
+    await runDelete(argv, context);
+    return;
+  }
+  if (subcommand === "move") {
+    await runMove(argv, context);
+    return;
+  }
+  if (subcommand === "download") {
+    await runDownload(argv, context);
+    return;
+  }
+  if (subcommand === "upload") {
+    await runUpload(argv, context);
+    return;
+  }
+  throw new Error(filesUsage());
+}
+function hasHelp2(argv) {
+  return argv.includes("--help") || argv.includes("-h");
+}
+function filesUsage() {
+  return [
+    "Files \u547D\u4EE4:",
+    "  \u53EA\u8BFB:",
+    "  vcpdeck files roots <client> [--env=<name>] [--json]",
+    "  vcpdeck files list <client> <path> [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck files stat <client> <path> [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck files read <client> <path> [--root=<dir>] [--max-bytes=<n>] [--env=<name>] [--json]",
+    "  # \u7F3A\u7701 --root \u65F6\u81EA\u52A8\u63A2\u6D4B\uFF1A\u552F\u4E00\u6839\u76F4\u63A5\u4F7F\u7528\uFF0C\u591A\u6839\u8981\u6C42\u663E\u5F0F\u6307\u5B9A",
+    "  \u5199\u64CD\u4F5C\uFF08\u8C03\u7528\u65B9\u987B\u5148\u53D6\u5F97\u7528\u6237\u786E\u8BA4\uFF09:",
+    "  vcpdeck files write <client> <path> [--root=<dir>] [--input=<file>] [--env=<name>] [--json]  # \u8986\u76D6\u5199\uFF1B\u7F3A\u7701 --input \u65F6\u8BFB stdin",
+    "  vcpdeck files mkdir <client> <path> [--root=<dir>] [--env=<name>] [--json]  # \u9012\u5F52\u521B\u5EFA",
+    "  vcpdeck files delete <client> <path> [--root=<dir>] [--recursive] [--env=<name>] [--json]  # \u4E0D\u53EF\u6062\u590D",
+    "  vcpdeck files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
+    "  \u4F20\u8F93\uFF08\u8C03\u7528\u65B9\u987B\u5148\u53D6\u5F97\u7528\u6237\u786E\u8BA4\uFF1B\u5B57\u8282\u6D41\u8D70 Storage Provider \u76F4\u4F20\uFF0C\u4E0D\u7ECF Server \u4E2D\u8F6C\uFF09:",
+    "  vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]"
+  ].join("\n");
+}
+async function runFileJob(client, clientId, type, payload, context) {
+  const created = await client.jobs.create({ clientId, type, payload });
+  const job = await waitForTerminalJob(client, created.jobId, DEFAULT_WAIT_TIMEOUT_SECONDS2, () => {
+  }, context.pollIntervalMs ?? POLL_INTERVAL_MS2);
+  if (job.status !== import_shared3.JobStatus.DONE)
+    throw formatFileJobFailure(job);
+  return job.result;
+}
+function formatFileJobFailure(job) {
+  const result = job.result ?? {};
+  const code = job.errorCode ?? (typeof result.errorCode === "string" ? result.errorCode : null);
+  const message = job.errorMessage ?? (typeof result.errorMessage === "string" ? result.errorMessage : null);
+  return new Error(`\u6587\u4EF6\u64CD\u4F5C\u5931\u8D25\uFF08${job.status}${code ? `/${code}` : ""}\uFF09${message ? `\uFF1A${message}` : ""}`);
+}
+async function resolveRootDir(client, clientId, explicitRoot, context) {
+  if (explicitRoot)
+    return explicitRoot;
+  const roots = await fetchRoots(client, clientId, context);
+  if (roots.length === 1)
+    return roots[0];
+  if (roots.length === 0)
+    throw new Error("\u76EE\u6807\u673A\u672A\u62A5\u544A\u53EF\u7528\u6839\u76EE\u5F55");
+  throw new Error(`\u76EE\u6807\u673A\u6709\u591A\u4E2A\u53EF\u7528\u6839\uFF08${roots.join("\u3001")}\uFF09\uFF1B\u8BF7\u7528 --root=<dir> \u6307\u5B9A\u6388\u6743\u6839`);
+}
+async function fetchRoots(client, clientId, context) {
+  const result = await runFileJob(client, clientId, "file.roots", {}, context);
+  return Array.isArray(result?.roots) ? result.roots : [];
+}
+function parseMaxBytes(raw) {
+  if (raw === void 0)
+    return void 0;
+  const bytes = Number(raw);
+  if (!Number.isInteger(bytes) || bytes < 1) {
+    throw new Error("--max-bytes \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570");
+  }
+  return bytes;
+}
+function parseFileArgs(argv, extraValueOptions = [], booleanOptions = [], requirePath = false) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "root", ...extraValueOptions],
+    boolean: ["json", ...booleanOptions]
+  });
+  const [clientFilter, path] = positionals;
+  if (!clientFilter || requirePath && !path)
+    throw new Error(filesUsage());
+  return { clientFilter, path, options };
+}
+async function openContext(context, options) {
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias3(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  return { environment, client };
+}
+async function runRoots(argv, context) {
+  const { clientFilter, options } = parseFileArgs(argv, [], [], false);
+  const { environment, client } = await openContext(context, options);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const roots = await fetchRoots(client, clientId, context);
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(roots, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  log(`\u53EF\u7528\u6839\u76EE\u5F55\uFF08${roots.length}\uFF09\uFF1A`);
+  for (const root of roots)
+    log(`  ${root}`);
+}
+async function runList(argv, context) {
+  const { clientFilter, path, options } = parseFileArgs(argv, [], [], true);
+  const { environment, client } = await openContext(context, options);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+  const entries = await runFileJob(client, clientId, "file.list", { rootDir, path }, context);
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(entries, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  log(formatListing(rootDir, path, entries.entries));
+}
+function formatListing(rootDir, path, entries) {
+  if (entries.length === 0)
+    return `${joinDisplayPath(rootDir, path)}\uFF1A\u7A7A\u76EE\u5F55`;
+  const sorted = [...entries].sort((a, b) => {
+    if (a.kind !== b.kind)
+      return a.kind === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  const dirCount = sorted.filter((entry) => entry.kind === "dir").length;
+  const lines = sorted.map((entry) => ({
+    name: entry.name,
+    kind: entry.kind,
+    size: entry.kind === "dir" ? "-" : String(entry.size),
+    mtime: entry.mtime
+  }));
+  return [
+    `${joinDisplayPath(rootDir, path)}\uFF1A\u5171 ${sorted.length} \u9879 \xB7 \u76EE\u5F55 ${dirCount} \xB7 \u6587\u4EF6 ${sorted.length - dirCount}`,
+    formatTable2(lines, ["name", "kind", "size", "mtime"])
+  ].join("\n");
+}
+function joinDisplayPath(rootDir, path) {
+  return `${rootDir.replace(/[\\/]+$/, "")}/${path.replace(/^[\\/]+/, "")}`;
+}
+async function runStat(argv, context) {
+  const { clientFilter, path, options } = parseFileArgs(argv, [], [], true);
+  const { environment, client } = await openContext(context, options);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+  const stat3 = await runFileJob(client, clientId, "file.stat", { rootDir, path }, context);
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(stat3, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  log([
+    `Path: ${joinDisplayPath(rootDir, path)}`,
+    `Kind: ${stat3.kind}`,
+    `Size: ${stat3.size}`,
+    `Mtime: ${stat3.mtime}`
+  ].join("\n"));
+}
+async function runRead(argv, context) {
+  const { clientFilter, path, options } = parseFileArgs(argv, ["max-bytes"], [], true);
+  const { environment, client } = await openContext(context, options);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+  const maxBytes = parseMaxBytes(stringOption(options, "max-bytes"));
+  const result = await runFileJob(client, clientId, "file.readText", { rootDir, path, ...maxBytes === void 0 ? {} : { maxBytes } }, context);
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(result, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  log(`\u2500\u2500 ${joinDisplayPath(rootDir, path)}\uFF08${result.size} bytes\uFF09\u2500\u2500`);
+  log(result.content.trimEnd());
+}
+function logChangeResult(log, action, displayPath, result, xtra) {
+  log(`[vcpdeck] \u5DF2${action}: ${result.path ?? displayPath}${xtra ? `\uFF08${xtra}\uFF09` : ""}`);
+}
+async function readWriteContent(options) {
+  const input = stringOption(options, "input");
+  if (input)
+    return (0, import_promises2.readFile)(input, "utf8");
+  const chunks = [];
+  for await (const chunk of process.stdin)
+    chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+async function runWrite(argv, context) {
+  const { clientFilter, path, options } = parseFileArgs(argv, ["input"], [], true);
+  const { environment, client } = await openContext(context, options);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+  const content = await readWriteContent(options);
+  const bytes = Buffer.byteLength(content, "utf8");
+  const log = context.log ?? console.log;
+  if (options.json !== true) {
+    log(formatEnvironmentSummary(environment));
+    log(`[vcpdeck] \u5199\u5165 ${clientFilter}:${joinDisplayPath(rootDir, path)}\uFF08${bytes} bytes\uFF0C\u8986\u76D6\u5DF2\u6709\u6587\u4EF6\uFF09`);
+  }
+  const result = await runFileJob(client, clientId, "file.writeText", { rootDir, path, content }, context);
+  if (options.json === true) {
+    log(JSON.stringify({ ...result, bytes }, null, 2));
+    return;
+  }
+  logChangeResult(log, "\u5199\u5165", joinDisplayPath(rootDir, path), result, `${bytes} bytes`);
+}
+async function runMkdir(argv, context) {
+  const { clientFilter, path, options } = parseFileArgs(argv, [], [], true);
+  const { environment, client } = await openContext(context, options);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+  const log = context.log ?? console.log;
+  if (options.json !== true)
+    log(formatEnvironmentSummary(environment));
+  log(`[vcpdeck] \u521B\u5EFA\u76EE\u5F55 ${clientFilter}:${joinDisplayPath(rootDir, path)}\uFF08\u9012\u5F52\uFF09`);
+  const result = await runFileJob(client, clientId, "file.mkdir", { rootDir, path }, context);
+  if (options.json === true) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  logChangeResult(log, "\u521B\u5EFA\u76EE\u5F55", joinDisplayPath(rootDir, path), result);
+}
+async function runDelete(argv, context) {
+  const { clientFilter, path, options } = parseFileArgs(argv, [], ["recursive"], true);
+  const { environment, client } = await openContext(context, options);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+  const recursive = options.recursive === true;
+  const payload = { rootDir, path };
+  if (recursive)
+    payload.recursive = true;
+  const log = context.log ?? console.log;
+  if (options.json !== true)
+    log(formatEnvironmentSummary(environment));
+  log(`[vcpdeck] \u5220\u9664 ${clientFilter}:${joinDisplayPath(rootDir, path)}${recursive ? "\uFF08\u9012\u5F52\u5220\u9664\u6574\u4E2A\u76EE\u5F55\u6811\uFF0C\u4E0D\u53EF\u6062\u590D\uFF09" : "\uFF08\u4E0D\u53EF\u6062\u590D\uFF09"}`);
+  const result = await runFileJob(client, clientId, "file.delete", payload, context);
+  if (options.json === true) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  logChangeResult(log, "\u5220\u9664", joinDisplayPath(rootDir, path), result);
+}
+async function runMove(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "root"],
+    boolean: ["json", "overwrite"]
+  });
+  const [clientFilter, source, destination] = positionals;
+  if (!clientFilter || !source || !destination)
+    throw new Error(filesUsage());
+  const { environment, client } = await openContext(context, options);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+  const overwrite = options.overwrite === true;
+  const payload = { rootDir, source, destination };
+  if (overwrite)
+    payload.overwrite = true;
+  const log = context.log ?? console.log;
+  if (options.json !== true)
+    log(formatEnvironmentSummary(environment));
+  log(`[vcpdeck] \u79FB\u52A8 ${clientFilter}:${joinDisplayPath(rootDir, source)} \u2192 ${joinDisplayPath(rootDir, destination)}${overwrite ? "\uFF08\u8986\u76D6\u76EE\u6807\uFF09" : ""}`);
+  const result = await runFileJob(client, clientId, "file.move", payload, context);
+  if (options.json === true) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  logChangeResult(log, "\u79FB\u52A8", joinDisplayPath(rootDir, source), result);
+}
+async function runDownload(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "root"],
+    boolean: ["json"]
+  });
+  const [clientFilter, remotePath, localPath] = positionals;
+  if (!clientFilter || !remotePath || !localPath) {
+    throw new Error(filesUsage());
+  }
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias3(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+  const log = context.log ?? console.log;
+  if (options.json !== true) {
+    log(formatEnvironmentSummary(environment));
+    log(`[vcpdeck] \u5BFC\u51FA ${clientFilter}:${joinDisplayPath(rootDir, remotePath)} \u2192 ${localPath}\uFF08Storage \u76F4\u4F20\u94FE\u8DEF\uFF09`);
+  }
+  const transfer = await runFileJob(client, clientId, "file.export", { rootDir, path: remotePath }, context);
+  const token = await client.storage.createDownloadToken({ key: transfer.key });
+  const actualSha256 = await fetchToFile(token.url, localPath, context);
+  if (actualSha256 !== transfer.sha256) {
+    await (0, import_promises2.unlink)(localPath).catch(() => {
+    });
+    throw new Error(`\u4E0B\u8F7D\u6587\u4EF6 SHA-256 \u4E0D\u4E00\u81F4\uFF08\u671F\u671B ${transfer.sha256}\uFF0C\u5B9E\u9645 ${actualSha256}\uFF09\uFF0C\u5DF2\u5220\u9664\u672C\u5730\u534A\u6210\u54C1`);
+  }
+  if (options.json === true) {
+    log(JSON.stringify({ ...transfer, localPath }, null, 2));
+    return;
+  }
+  log(`[vcpdeck] \u5DF2\u4E0B\u8F7D ${localPath}\uFF08${transfer.size} bytes\uFF0Csha256 \u6821\u9A8C\u901A\u8FC7\uFF09`);
+}
+async function fetchToFile(url, localPath, context) {
+  const fetcher = context.directFetch ?? globalThis.fetch;
+  const response = await fetcher(url);
+  if (!response.ok || !response.body) {
+    throw new Error(`\u6587\u4EF6\u4E0B\u8F7D\u5931\u8D25\uFF1AHTTP ${response.status}`);
+  }
+  const hash = (0, import_node_crypto.createHash)("sha256");
+  await (0, import_promises3.pipeline)(import_node_stream.Readable.fromWeb(response.body), async function* (source) {
+    for await (const chunk of source) {
+      hash.update(chunk);
+      yield chunk;
+    }
+  }, (0, import_node_fs2.createWriteStream)(localPath));
+  return hash.digest("hex");
+}
+async function runUpload(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "root"],
+    boolean: ["json", "overwrite"]
+  });
+  const [clientFilter, localPath, remotePath] = positionals;
+  if (!clientFilter || !localPath || !remotePath) {
+    throw new Error(filesUsage());
+  }
+  const fileStat = await (0, import_promises2.stat)(localPath).catch(() => null);
+  if (!fileStat?.isFile()) {
+    throw new Error(`\u672C\u5730\u6587\u4EF6\u4E0D\u5B58\u5728\u6216\u4E0D\u662F\u666E\u901A\u6587\u4EF6: ${localPath}`);
+  }
+  const size = fileStat.size;
+  const filename = localPath.split(/[\\/]/).pop() ?? "upload.bin";
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias3(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+  const overwrite = options.overwrite === true;
+  const log = context.log ?? console.log;
+  const progressLog = options.json === true ? () => {
+  } : log;
+  if (options.json !== true) {
+    log(formatEnvironmentSummary(environment));
+    log(`[vcpdeck] \u4E0A\u4F20 ${localPath} \u2192 ${clientFilter}:${joinDisplayPath(rootDir, remotePath)}\uFF08${size} bytes\uFF0CStorage \u76F4\u4F20\u94FE\u8DEF\uFF09`);
+  }
+  const session = await client.files.createUploadSession({
+    clientId,
+    rootDir,
+    targetPath: remotePath,
+    filename,
+    size,
+    ...overwrite ? { overwrite: true } : {}
+  });
+  progressLog(`[vcpdeck] \u4E0A\u4F20\u6A21\u5F0F: ${session.upload.kind}`);
+  await uploadToTarget(client, localPath, size, session.upload, environment.server, session.jobId, progressLog, context);
+  const created = await client.files.completeUpload(session.jobId, {
+    uploadedBytes: size
+  });
+  progressLog(`[vcpdeck] \u5BFC\u5165 Job: ${created.jobId}\uFF08${created.status}\uFF09\uFF0C\u7B49\u5F85\u76EE\u6807\u673A\u62C9\u53D6\u2026`);
+  const job = await waitForTerminalJob(client, created.jobId, DEFAULT_WAIT_TIMEOUT_SECONDS2, () => {
+  }, context.pollIntervalMs ?? POLL_INTERVAL_MS2);
+  if (job.status !== import_shared3.JobStatus.DONE)
+    throw formatFileJobFailure(job);
+  const imported = job.result;
+  if (options.json === true) {
+    log(JSON.stringify({ fileId: session.fileId, jobId: created.jobId, ...imported, localPath }, null, 2));
+    return;
+  }
+  log(`[vcpdeck] \u5DF2\u4E0A\u4F20 ${localPath} \u2192 ${imported.path ?? remotePath}\uFF08${imported.size} bytes\uFF0Csha256=${imported.sha256.slice(0, 12)}\u2026\uFF09`);
+}
+async function uploadToTarget(client, localPath, size, upload, baseUrl, jobId, progressLog, context) {
+  if (upload.kind === "proxy") {
+    const fetcher = context.directFetch ?? globalThis.fetch;
+    const response = await fetcher(resolveServerUrl(baseUrl, upload.url), {
+      method: "PUT",
+      headers: { "Content-Length": String(size) },
+      body: (0, import_node_fs2.createReadStream)(localPath),
+      duplex: "half"
+    });
+    if (!response.ok)
+      throw new Error(`\u6587\u4EF6\u4E0A\u4F20\u5931\u8D25\uFF1AHTTP ${response.status}`);
+    return;
+  }
+  if (upload.kind !== "direct")
+    throw new Error("Server \u8FD4\u56DE\u672A\u77E5\u4E0A\u4F20\u6A21\u5F0F");
+  const parts = [...upload.parts].sort((a, b) => a.partNumber - b.partNumber);
+  const expectedParts = Math.ceil(size / upload.partSize);
+  if (upload.partSize < 1 || parts.length !== expectedParts || parts.some((part, index) => part.partNumber !== index + 1)) {
+    throw new Error("Server \u8FD4\u56DE\u7684\u4E0A\u4F20\u5206\u7247\u4E0D\u5B8C\u6574");
+  }
+  const handle = await (0, import_promises2.open)(localPath, "r");
+  try {
+    for (const part of parts) {
+      const start = (part.partNumber - 1) * upload.partSize;
+      const length = Math.min(upload.partSize, size - start);
+      const bytes = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(bytes, 0, length, start);
+      if (bytesRead !== length) {
+        throw new Error(`\u8BFB\u53D6\u5206\u7247 ${part.partNumber} \u4E0D\u5B8C\u6574`);
+      }
+      await putFilePart(client, jobId, part.partNumber, part.url, bytes, context);
+      progressLog(`[vcpdeck] \u76F4\u4F20\u8FDB\u5EA6 ${Math.min(100, (start + length) / size * 100).toFixed(1)}%`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+function resolveServerUrl(baseUrl, url) {
+  try {
+    new URL(url);
+    return url;
+  } catch {
+    return `${baseUrl.replace(/\/+$/, "")}/${url.replace(/^\/+/, "")}`;
+  }
+}
+function sleep3(ms) {
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
+}
+async function putFilePart(client, jobId, partNumber, initialUrl, bytes, context) {
+  const fetcher = context.directFetch ?? globalThis.fetch;
+  let url = initialUrl;
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetcher(url, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "",
+          "Content-Length": String(bytes.length)
+        },
+        body: bytes
+      });
+      if (response.ok)
+        return;
+      if (response.status === 403 && attempt < 2) {
+        const refreshed = await client.files.refreshUploadPartUrls(jobId, [
+          partNumber
+        ]);
+        url = refreshed.find((part) => part.partNumber === partNumber)?.url ?? "";
+        if (!url)
+          throw new Error(`\u5206\u7247 ${partNumber} URL \u5237\u65B0\u5931\u8D25`);
+        continue;
+      }
+      lastError = new Error(`\u5206\u7247 ${partNumber} \u4E0A\u4F20\u5931\u8D25\uFF1AHTTP ${response.status}`);
+      if (response.status < 500)
+        break;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+    if (attempt < 2)
+      await sleep3(500 * (attempt + 1));
+  }
+  throw lastError ?? new Error(`\u5206\u7247 ${partNumber} \u4E0A\u4F20\u5931\u8D25`);
+}
+function exclusiveAlias3(options, first, second) {
+  const firstValue = stringOption(options, first);
+  const secondValue = stringOption(options, second);
+  if (firstValue && secondValue) {
+    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
+  }
+  return firstValue ?? secondValue;
+}
+function formatTable2(rows, columns) {
+  const widths = columns.map((column) => Math.max(column.length, ...rows.map((row) => row[column].length)));
+  const line = (cells) => cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
+  return [
+    line(columns.map((column) => column.toUpperCase())),
+    ...rows.map((row) => line(columns.map((column) => row[column])))
+  ].join("\n");
+}
+
+// dist/clients-command.js
+async function runClientsCommand(subcommand, argv, context = {}) {
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === void 0) && hasHelp3(argv);
+  if (helpRequested) {
+    (context.log ?? console.log)(clientsUsage());
+    return;
+  }
+  if (subcommand === "list") {
+    await runListClients(argv, context);
+    return;
+  }
+  throw new Error(clientsUsage());
+}
+function hasHelp3(argv) {
+  return argv.includes("--help") || argv.includes("-h");
+}
+function clientsUsage() {
+  return [
+    "Clients \u547D\u4EE4:",
+    "  vcpdeck clients list [--env=<name>] [--json]"
+  ].join("\n");
+}
+async function runListClients(argv, context) {
+  const { options } = parseCommandArgs(argv, {
+    value: ["env", "environment"],
+    boolean: ["json"]
+  });
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias4(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const log = context.log ?? console.log;
+  if (options.json === true) {
+    const client2 = await createAuthenticatedClient(environment);
+    const clients2 = await client2.clients.list();
+    log(JSON.stringify(clients2, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  const client = await createAuthenticatedClient(environment);
+  const clients = await client.clients.list();
+  log(formatClientsSummary(clients));
+}
+function formatClientsSummary(clients) {
+  if (clients.length === 0)
+    return "\u6CA1\u6709\u5DF2\u6CE8\u518C\u7684 Client\u3002";
+  const sorted = [...clients].sort((a, b) => {
+    if (a.online !== b.online)
+      return a.online ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  const rows = sorted.map((client) => ({
+    name: client.name,
+    hostname: client.hostname,
+    os: client.os,
+    state: client.online ? "online" : "offline",
+    cpu: formatPercent(client.cpuPercent),
+    mem: formatPercent(client.memPercent),
+    version: client.clientVersion
+  }));
+  const onlineCount = clients.filter((client) => client.online).length;
+  return [
+    `\u5171 ${clients.length} \u53F0 \xB7 \u5728\u7EBF ${onlineCount} \xB7 \u79BB\u7EBF ${clients.length - onlineCount}`,
+    formatTable3(rows, [
+      "name",
+      "hostname",
+      "os",
+      "state",
+      "cpu",
+      "mem",
+      "version"
+    ])
+  ].join("\n");
+}
+function exclusiveAlias4(options, first, second) {
+  const firstValue = stringOption(options, first);
+  const secondValue = stringOption(options, second);
+  if (firstValue && secondValue) {
+    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
+  }
+  return firstValue ?? secondValue;
+}
+function formatPercent(value) {
+  return value === null ? "-" : `${value.toFixed(0)}%`;
+}
+function formatTable3(rows, columns) {
+  const widths = columns.map((column) => Math.max(column.length, ...rows.map((row) => row[column].length)));
+  const line = (cells) => cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
+  return [
+    line(columns.map((column) => column.toUpperCase())),
+    ...rows.map((row) => line(columns.map((column) => row[column])))
+  ].join("\n");
+}
+
+// dist/release-command.js
+var import_node_crypto2 = require("node:crypto");
+var import_node_fs3 = require("node:fs");
+var import_promises4 = require("node:fs/promises");
+var import_shared4 = __toESM(require_dist(), 1);
 var VERSION_RE = /^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)\.zip$/;
 var VERSION_INPUT_RE = /^\d+\.\d+\.\d+$/;
-var DEFAULT_WAIT_TIMEOUT_SECONDS = 1800;
+var DEFAULT_WAIT_TIMEOUT_SECONDS3 = 1800;
 var DEFAULT_POLL_INTERVAL_MS = 5e3;
 var DEFAULT_REQUEST_TIMEOUT_MS = 15e3;
 async function runReleaseCommand(subcommand, argv, context = {}) {
@@ -2738,7 +3695,7 @@ async function runInspectCommand(subcommand, argv, context) {
   log(formatReleaseSummary(snapshot.release, snapshot.serverVersion));
 }
 async function resolveCommandEnvironment(options, context) {
-  const environment = exclusiveAlias2(options, "env", "environment");
+  const environment = exclusiveAlias5(options, "env", "environment");
   const server = stringOption(options, "server");
   const username = stringOption(options, "username");
   const password = stringOption(options, "password");
@@ -2781,20 +3738,20 @@ async function waitForRelease(client, version, timeoutSeconds, log, context) {
         lastSummary = summary;
       }
       assertReleaseNotFailed(snapshot.release);
-      if (snapshot.release.status === import_shared2.ReleaseStatus.DONE) {
+      if (snapshot.release.status === import_shared4.ReleaseStatus.DONE) {
         assertReleaseCompleted(snapshot.release, snapshot.serverVersion);
         log(`[vcpdeck] \u53D1\u7248 ${version} \u9A8C\u6536\u5B8C\u6210`);
         return;
       }
     } catch (error) {
-      if (!isTransientReadError(error))
+      if (!isTransientReadError2(error))
         throw error;
       if (!waitingForServer) {
         log("[vcpdeck] Server \u6682\u65F6\u4E0D\u53EF\u8FBE\uFF0C\u7B49\u5F85\u91CD\u542F\u5B8C\u6210\u2026");
         waitingForServer = true;
       }
     }
-    await sleep2(Math.min(pollInterval, Math.max(0, deadline - Date.now())));
+    await sleep4(Math.min(pollInterval, Math.max(0, deadline - Date.now())));
   }
   throw new Error(`\u7B49\u5F85\u53D1\u7248 ${version} \u8D85\u65F6\uFF08${timeoutSeconds} \u79D2\uFF09`);
 }
@@ -2839,11 +3796,11 @@ function countClientStates(release) {
     pending: 0
   };
   for (const entry of Object.values(release.clientStates)) {
-    if (entry.state === import_shared2.ReleaseClientState.DONE)
+    if (entry.state === import_shared4.ReleaseClientState.DONE)
       counts.done++;
-    else if (entry.state === import_shared2.ReleaseClientState.FAILED)
+    else if (entry.state === import_shared4.ReleaseClientState.FAILED)
       counts.failed++;
-    else if (entry.state === import_shared2.ReleaseClientState.UPDATING)
+    else if (entry.state === import_shared4.ReleaseClientState.UPDATING)
       counts.updating++;
     else
       counts.pending++;
@@ -2851,7 +3808,7 @@ function countClientStates(release) {
   return counts;
 }
 function assertReleaseNotFailed(release) {
-  if (release.status === import_shared2.ReleaseStatus.FAILED) {
+  if (release.status === import_shared4.ReleaseStatus.FAILED) {
     throw new Error(`\u53D1\u7248 ${release.version} \u5931\u8D25${release.errorMessage ? `: ${release.errorMessage}` : ""}`);
   }
 }
@@ -2867,7 +3824,7 @@ function assertReleaseCompleted(release, serverVersion) {
     throw new Error(`\u53D1\u7248 ${release.version} \u5DF2\u7ED3\u675F\uFF0C\u4F46\u4ECD\u6709\u672A\u5B8C\u6210\u7684 Client`);
   }
 }
-function isTransientReadError(error) {
+function isTransientReadError2(error) {
   if (error instanceof VcpDeckApiError) {
     return error.status === 0 || [502, 503, 504].includes(error.status);
   }
@@ -2876,14 +3833,14 @@ function isTransientReadError(error) {
 function parseTimeoutSeconds(options) {
   const raw = stringOption(options, "timeout");
   if (!raw)
-    return DEFAULT_WAIT_TIMEOUT_SECONDS;
+    return DEFAULT_WAIT_TIMEOUT_SECONDS3;
   const seconds = Number(raw);
   if (!Number.isInteger(seconds) || seconds < 1 || seconds > 86400) {
     throw new Error("--timeout \u5FC5\u987B\u662F 1\u201386400 \u79D2\u7684\u6574\u6570");
   }
   return seconds;
 }
-function sleep2(ms) {
+function sleep4(ms) {
   return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
 function validateArchives(zipPaths) {
@@ -2905,14 +3862,14 @@ function platformOfFile(path) {
 }
 function sha256File(path) {
   return new Promise((resolve2, reject) => {
-    const hash = (0, import_node_crypto.createHash)("sha256");
-    (0, import_node_fs2.createReadStream)(path).on("error", reject).on("data", (chunk) => hash.update(chunk)).on("end", () => resolve2(hash.digest("hex")));
+    const hash = (0, import_node_crypto2.createHash)("sha256");
+    (0, import_node_fs3.createReadStream)(path).on("error", reject).on("data", (chunk) => hash.update(chunk)).on("end", () => resolve2(hash.digest("hex")));
   });
 }
 async function uploadOne(client, zipPath, log, context) {
   const { version, platform } = platformOfFile(zipPath);
   const sha256 = await sha256File(zipPath);
-  const { size } = await (0, import_promises2.stat)(zipPath);
+  const { size } = await (0, import_promises4.stat)(zipPath);
   log(`[vcpdeck] \u4E0A\u4F20 ${zipPath} (${(size / 1024 / 1024).toFixed(1)} MB, ${platform}, sha256=${sha256.slice(0, 12)}\u2026)`);
   let session;
   try {
@@ -2947,7 +3904,7 @@ async function legacyUpload(client, zipPath, version, platform, sha256) {
     version,
     platform,
     sha256,
-    archive: (0, import_node_fs2.createReadStream)(zipPath),
+    archive: (0, import_node_fs3.createReadStream)(zipPath),
     duplex: "half"
   });
   return release;
@@ -2958,8 +3915,8 @@ async function uploadDirectArchive(client, zipPath, platform, size, expectedSha2
   if (session.partSize < 1 || parts.length !== expectedParts || parts.some((part, index) => part.partNumber !== index + 1 || !isSafeDirectUploadUrl(part.url))) {
     throw new Error("Server \u8FD4\u56DE\u7684 Release \u76F4\u4F20\u5206\u7247\u4E0D\u5B8C\u6574\u6216 URL \u4E0D\u5B89\u5168");
   }
-  const handle = await (0, import_promises2.open)(zipPath, "r");
-  const uploadedHash = (0, import_node_crypto.createHash)("sha256");
+  const handle = await (0, import_promises4.open)(zipPath, "r");
+  const uploadedHash = (0, import_node_crypto2.createHash)("sha256");
   try {
     for (const part of parts) {
       const start = (part.partNumber - 1) * session.partSize;
@@ -3013,7 +3970,7 @@ async function putDirectPart(client, sessionId, partNumber, initialUrl, bytes, c
       lastError = error instanceof Error ? error : new Error(String(error));
     }
     if (attempt < 2)
-      await sleep2(retryDelay * (attempt + 1));
+      await sleep4(retryDelay * (attempt + 1));
   }
   throw lastError ?? new Error(`\u5206\u7247 ${partNumber} \u4E0A\u4F20\u5931\u8D25`);
 }
@@ -3025,7 +3982,7 @@ function isSafeDirectUploadUrl(value) {
     return false;
   }
 }
-function exclusiveAlias2(options, first, second) {
+function exclusiveAlias5(options, first, second) {
   const firstValue = stringOption(options, first);
   const secondValue = stringOption(options, second);
   if (firstValue && secondValue) {
@@ -3041,11 +3998,23 @@ async function run(argv, context = {}) {
   const [command, subcommand, ...rest] = argv;
   try {
     if (command === "version" || command === "--version" || command === "-v") {
-      log(import_shared3.VERSION);
+      log(import_shared5.VERSION);
       return 0;
     }
     if (command === "env") {
       await runEnvCommand(subcommand, rest, { log });
+      return 0;
+    }
+    if (command === "files") {
+      await runFilesCommand(subcommand, rest, { log });
+      return 0;
+    }
+    if (command === "jobs") {
+      await runJobsCommand(subcommand, rest, { log });
+      return 0;
+    }
+    if (command === "clients") {
+      await runClientsCommand(subcommand, rest, { log });
       return 0;
     }
     if (command === "release") {
@@ -3078,6 +4047,21 @@ function helpText() {
     "  \u517C\u5BB9\u5BC6\u7801: ... --auth=password --username=<name> --password-env=<VAR>",
     "  vcpdeck env remove <name>",
     "  vcpdeck env use <name> --global|--local",
+    "",
+    "Clients:",
+    "  vcpdeck clients list [--env=<name>] [--json]",
+    "",
+    "Jobs:",
+    "  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
+    "  vcpdeck jobs get <jobId> [--env=<name>] [--json]",
+    "  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
+    "  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]",
+    "",
+    "Files\uFF08\u53EA\u8BFB\uFF09:",
+    "  vcpdeck files roots <client> [--env=<name>] [--json]",
+    "  vcpdeck files list <client> <path> [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck files stat <client> <path> [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck files read <client> <path> [--root=<dir>] [--max-bytes=<n>] [--env=<name>] [--json]",
     "",
     "Release:",
     "  vcpdeck release status <version> [--env=<name>]",

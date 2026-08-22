@@ -1,6 +1,6 @@
 ---
 name: vcpdeck
-description: Use VCPDeck through its CLI to access cockpit capabilities exposed by the VCPDeck Server. Use when the user asks to operate VCPDeck from Pi, inspect available CLI capabilities, publish or update VCPDeck, or use machine, Job, file, Terminal, Pi, FRP, Storage, and other commands as they become available. Currently the implemented CLI capability is Release upload and Server/Client self-update initiation.
+description: Use VCPDeck through its CLI to access cockpit capabilities exposed by the VCPDeck Server. Use when the user asks to operate VCPDeck from Pi, inspect available CLI capabilities, list registered Client machines and their online status, query Jobs and diagnose Job failures with full stdout/stderr output, run shell commands on a Client machine or cancel running Jobs (with mandatory user confirmation), browse directories and read text files on a Client machine, write/mkdir/delete/move remote files (with mandatory user confirmation), transfer files between a Client machine and local disk via Storage direct upload (with mandatory user confirmation), publish or update VCPDeck, or use machine, Job, file, Terminal, Pi, FRP, Storage, and other commands as they become available.
 compatibility: Requires Node.js 24+, the bundled vcpdeck.cjs CLI beside this file, and network access to the VCPDeck Server. Individual capabilities may have additional requirements; Release packaging also requires the VCPDeck repository and pnpm 10.26+.
 ---
 
@@ -31,8 +31,14 @@ pnpm --filter @vcpdeck/cli build
 | 功能域 | CLI 命令 | 状态 | 说明 |
 | --- | --- | --- | --- |
 | 多环境配置 | `env add/list/show/current/check/use/remove` | 已实现 | 用户级注册环境，项目级只选择默认环境；`check` 验证 Token 对应身份 |
+| 机器查询（只读） | `clients list` | 已实现 | 列出已注册 Client 及在线状态；`--json` 输出原始 `ClientInfo[]`，供 Agent 解析 |
+| Job 查询（只读） | `jobs list` / `jobs get` | 已实现 | 分页查询 Job 及失败现场（错误摘要 + stdout/stderr spool 全文）；`--json` 供 Agent 解析 |
+| Job 执行/取消（写操作） | `jobs run` / `jobs cancel` | 已实现 | 在目标机执行 shell 命令；**必须先取得用户明确确认**（确认门见功能章节） |
+| 文件浏览（只读） | `files roots/list/stat/read` | 已实现 | 授权根探测、目录列表、元信息与文本读取（默认上限 256KB）；`--json` 供 Agent 解析 |
+| 文件写入（写操作） | `files write/mkdir/delete/move` | 已实现 | 覆盖写/递归建目录/删除（不可恢复）/移动重命名；**必须先取得用户明确确认**（确认门见功能章节） |
+| 文件传输（写操作） | `files download/upload` | 已实现 | 经 Storage Provider 直传链路（Server 只签名不承载字节）；download 校验 sha256；**必须先取得用户明确确认** |
 | Release / 自更新 | `release upload/status/wait` | 已实现 | 上传双平台构件；查询或等待 Server/Client 权威终态，失败或超时返回非零退出 |
-| 机器、Job、文件、Terminal、Pi、FRP、Storage 等 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明，不直接绕过 CLI 调用 |
+| 机器写入、Terminal、Pi、FRP、Storage 等 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明 |
 
 ## 功能：环境选择
 
@@ -147,6 +153,149 @@ node "<vcpdeck-cli>" release wait x.y.z --timeout=1800
 - Launcher 自动更新；Launcher 升级遵循独立人工流程和兼容检查。
 - 灰度、分组、暂停/恢复、维护窗口或数据库自动回滚。
 - CLI 自身在线更新。
+
+## 功能：机器查询（Clients，只读）
+
+### 可用命令
+
+```bash
+node "<vcpdeck-cli>" clients list [--env=<name>] [--json]
+```
+
+以 CLI `--help` 和源码为命令事实来源；当前只有 `list` 一个只读子命令。
+
+### 功能语义与状态权威
+
+`clients list` 通过 SDK 请求 Server `GET /api/clients`，返回所有已注册 Client 的安全摘要：名称（全局唯一别名）、hostname、OS、在线状态、CPU/内存使用率、磁盘、版本和 capability 摘要。在线状态与心跳由 Server 维护，CLI 不做本地推断；输出反映的是查询时刻的快照。
+
+默认输出人类可读表格（在线优先、按名称排序），并附总数/在线/离线汇总。**Agent 解析时必须加 `--json`**：该模式跳过环境摘要，stdout 为纯 JSON `ClientInfo[]`，可直接 `JSON.parse`。
+
+### 认证与敏感信息
+
+认证与环境选择遵循本 Skill「环境选择」章节；读操作也建议先 `env current` 核对目标 Server。列表结果中的 hostname、硬件信息和路径属于环境信息，可向操作者展示，但不得将 Token、Cookie 或凭据变量值写入命令或回复。
+
+### 操作分级与确认门
+
+当前 `clients list` 是只读 GET，幂等且无副作用，无需用户确认即可执行。后续若增加 rename 等写命令，必须在执行前展示目标对象并取得明确确认。
+
+### 幂等性与失败处置
+
+GET 天然幂等，失败可直接重试；网络错误或非 2xx 时 CLI 非零退出并输出安全错误摘要。空列表输出“没有已注册的 Client。”，这是正常结果而非错误。离线 Client 仍会出现在列表中（`online: false`），其 CPU/内存等运行时字段可能为 `null`。
+
+### 成功判定与已知限制
+
+成功判定：命令零退出且 JSON 数组可解析。已知限制：只有列表查询，没有单机详情过滤；不能通过本命令对机器执行任何操作——执行类需求（Job、Terminal、Pi 等）尚未形成 CLI 命令，应明确告知用户尚未落地。
+
+### 与 Server 能力的对齐情况
+
+已对齐：`GET /api/clients` 列表查询。未对齐：`PATCH /api/clients/:id/name` 重命名及一切远程操作能力，等待后续任务落地。
+
+## 功能：Job 查询、执行与失败诊断
+
+### 可用命令
+
+```bash
+node "<vcpdeck-cli>" jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" jobs get <jobId> [--env=<name>] [--json]
+node "<vcpdeck-cli>" jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>
+node "<vcpdeck-cli>" jobs cancel <jobId> [--env=<name>] [--json]
+```
+
+`--status` 允许值：`pending/running/waiting_input/done/error/cancelled/disconnected/active`。以 CLI `--help` 为命令事实来源。
+
+### 功能语义与状态权威
+
+`jobs list` 通过 SDK 请求 Server `GET /api/jobs`，返回分页 Job 摘要（`PaginatedResult`）；`--client` 接受机器名称或 ID，CLI 先查机器列表解析为 `clientId`。`jobs get` 取详情与输出 spool。`jobs run` 创建 exec Job（command 模式，`--` 后的命令 token 以空格连接后交由目标机 shell 执行，Windows 下自动 chcp 65001）；目标机必须在线，否则 Server 拒绝。`jobs cancel` 提交取消：pending 立即 `cancelled`；running 返回 `cancelling`，终态需用 `jobs get` 核对。
+
+Job 状态权威在 Server；输出 spool 由 Server 在 Client 实时上报 stdout/stderr 时旁路落盘（`<data>/job-outputs/<jobId>.log`），完整保留不封顶，只在详情路径读取。
+
+### 确认门（写操作强制）
+
+`jobs run` 与 `jobs cancel` 是写操作。**执行前必须向用户展示并取得明确确认**：
+
+1. 目标环境（`env current` 的 Server 地址与环境名）；
+2. 目标机器名称与在线状态；
+3. 完整命令文本（含 cwd 与超时）；
+4. 预期影响（远程命令继承 Client OS 账户权限，不是沙箱；破坏性命令必须单独强调）。
+
+用户未明确同意前不得执行；用户只表达“看看/查询”类意图时绝不能升级为 run。`jobs cancel` 需展示目标 Job 的机器、命令与当前状态。批量执行多条命令时逐条确认，不得打包默认同意。
+
+### 执行与失败诊断流程（闭环）
+
+1. 推荐使用 `jobs run <client> --wait` 等待终态：成功输出 `result` 与全文；**失败时 CLI 非零退出并自动带出错误摘要与完整 stdout/stderr 现场**，Agent 直接定位根因；
+2. 未加 `--wait` 时用 `jobs get <jobId>` 查询；
+3. 事后排查：`jobs list --status=error` → `jobs get <jobId>`；
+4. 需要机器上下文时用 `clients list` 核对状态。
+
+全程不需要登录目标机器。若输出显示“（无落盘输出）”，说明该 Job 执行期间没有产生 stdout/stderr 或产生早于 spool 功能上线。
+
+### 认证、敏感信息与操作分级
+
+认证与环境选择遵循「环境选择」章节。**stdout/stderr 与命令文本都属于敏感正文**：可能包含路径、环境变量甚至密钥；向用户报告时先给安全摘要（错误码、退出码、关键错误行），原样输出前应说明内容可能敏感，不得写入日志或长期存储。
+
+操作分级：`list/get` 只读 GET 无需确认；`run/cancel` 写操作必须确认门；`run --wait` 只是同步等待方式，不改变写操作性质。非幂等 POST 网络结果不明时先用 `jobs list`/`jobs get` 查权威状态，不盲目重试创建。
+
+### 幂等性、成功判定与已知限制
+
+`list/get` GET 幂等可直接重试；`run` 非幂等（重复执行会重复创建 Job），结果不明时先查询；`cancel` 幂等（重复取消已取消 Job 由 Server 权威态决定）。`run --wait` 仅重试安全 GET，容忍 Server 重启短暂不可达，超时非零退出。成功判定：零退出且 `--json` 输出可解析。已知限制：只支持 command 模式（script 模式未暴露）；输出 spool 无自动清理；没有按时间范围过滤。
+
+### 与 Server 能力的对齐情况
+
+已对齐：Job 列表/详情/输出/创建（exec command 模式）/取消。未对齐：script 模式、file.*/frp 等其他 Job 类型、SDK `jobs.wait` 的 CLI 暴露，等待后续任务落地。
+
+## 功能：文件管理（浏览、读取与写入）
+
+### 可用命令
+
+```bash
+node "<vcpdeck-cli>" files roots <client> [--env=<name>] [--json]
+node "<vcpdeck-cli>" files list <client> <path> [--root=<dir>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" files stat <client> <path> [--root=<dir>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" files read <client> <path> [--root=<dir>] [--max-bytes=<n>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" files write <client> <path> [--root=<dir>] [--input=<file>] [--env=<name>] [--json]  # 覆盖写；缺省 --input 时读 stdin
+node "<vcpdeck-cli>" files mkdir <client> <path> [--root=<dir>] [--env=<name>] [--json]  # 递归创建
+node "<vcpdeck-cli>" files delete <client> <path> [--root=<dir>] [--recursive] [--env=<name>] [--json]  # 不可恢复
+node "<vcpdeck-cli>" files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]
+node "<vcpdeck-cli>" files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]
+```
+
+以 CLI `--help` 为命令事实来源。
+
+### 功能语义与授权根（rootDir）
+
+文件操作通过创建 `file.*` Job 并等待终态实现，目标机必须在线。`rootDir` 是授权根（`resolveSafePath` 的基准目录）：显式 `--root=<dir>` 优先；缺省时自动探测（`file.roots`）——唯一根直接使用，多根时 fail closed 并要求显式指定，不猜测。`path` 相对授权根解析。
+
+只读三件套：`list` 输出目录项（目录优先、按名称排序，含总数汇总）；`stat` 输出单个路径元信息；`read` 读取文本（默认上限 256KB，`--max-bytes` 可调）。失败时 CLI 非零退出并带 Server 稳定错误码（`PATH_NOT_FOUND`/`PATH_NOT_ALLOWED`/`PATH_CONFLICT`/`IO_ERROR` 等）。
+
+写操作语义（由 Client 权威定义）：`write` 原子覆盖写（tmp+rename），内容来自 `--input` 本地文件或 stdin；`mkdir` 递归创建；`delete` 非递归遇非空目录报 `PATH_CONFLICT`，`--recursive` 解锁；`move` 目标存在默认拒绝，`--overwrite` 解锁。所有写操作执行前 CLI 会输出目标摘要（机器、授权根、路径、影响）。
+
+### 确认门（写操作强制）
+
+`write/mkdir/delete/move` 是改变目标机状态的写操作。**执行前必须向用户展示并取得明确确认**：
+
+1. 目标环境（Server 地址与环境名）；
+2. 目标机器、授权根和完整目标路径；
+3. 操作影响：`write` 会覆盖已有文件；`delete` **不可恢复**，`--recursive` 会删除整个目录树，必须单独强调；`move --overwrite` 会覆盖目标；
+4. 写入内容来源（不展示可能含秘密的完整内容，除非用户要求）。
+
+用户未明确同意前不得执行；“看看/读取”类意图绝不能升级为写操作。批量操作逐条确认。远程文件操作继承 Client OS 账户权限，不是沙箱。
+
+### 敏感内容规则
+
+**文件内容属于敏感正文**：可能包含凭据、密钥或隐私数据；向用户报告时先给摘要（路径、大小、关键行），原样输出大段内容前应说明并征得同意，不得写入日志或长期存储。`read` 只针对文本文件，二进制文件结果不可靠；写入内容经 stdin 或本地文件传入，避免秘密出现在命令行参数中。
+
+### 幂等性与成功判定
+
+`roots/list/stat/read` 不改变目标机状态，失败可直接重试；`write/mkdir/delete/move` 非幂等（重复执行会重复变更），网络结果不明时先用只读命令核对权威状态。成功判定：零退出且 `--json` 输出可解析。
+
+### 文件传输（download/upload，确认门 + 直传链路）
+
+`download` 导出目标机文件：创建 `file.export` Job（Client 分片直传 Storage Provider）→ Server 签发短期下载令牌 → CLI 从签名 URL 拉取到 `<localPath>` 并校验 sha256，不一致时删除本地半成品并报错。`upload` 先分片直传本地文件到 Storage Provider（403 经 Server 仅刷新该分片 URL），完成后创建导入 Job 由 Client 从存储拉取落盘。
+
+**直传约束**：字节流不经过 Server——阿里云后端为 Provider 预签名 URL 直传；Local 后端经 Server 中转是无外部存储时的固有行为。签名 URL 不输出、不落盘、不进日志。
+
+确认门要求：展示源/目标路径、文件大小、是否覆盖（download 覆盖本地同名文件；upload 默认拒绝覆盖远端已存在文件，`--overwrite` 解锁），取得明确确认后执行。传输非幂等：网络结果不明时先用只读命令核对两侧状态，不盲目重传。大文件传输耗时较长，CLI 有进度输出，不要在未完成时重复触发。
 
 ## 后续 CLI 能力扩展规则
 

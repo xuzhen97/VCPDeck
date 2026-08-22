@@ -47,6 +47,14 @@ export function createJobsApi(client: Pick<VcpDeckClient, "request">) {
 				undefined,
 				signal,
 			),
+		/** 获取 Job 输出 spool 全文；output 为 null 表示没有落盘输出。 */
+		output: (jobId: string, signal?: AbortSignal) =>
+			client.request<{ jobId: string; output: string | null }>(
+				"GET",
+				`/api/jobs/${encodeURIComponent(jobId)}/output`,
+				undefined,
+				signal,
+			),
 		create: (input: JobCreate, signal?: AbortSignal) =>
 			client.request<JobCreateResult>("POST", "/api/jobs", input, signal),
 		cancel: (jobId: string, signal?: AbortSignal) =>
@@ -57,9 +65,7 @@ export function createJobsApi(client: Pick<VcpDeckClient, "request">) {
 				signal,
 			),
 		async wait(jobId: string, options: WaitJobOptions = {}): Promise<JobInfo> {
-			const delays = options.delays?.length
-				? options.delays
-				: [1000, 2000, 5000];
+			const delays = options.delays?.length ? options.delays : [1000, 2000, 5000];
 			for (let attempt = 0; ; attempt++) {
 				const delay = delays[Math.min(attempt, delays.length - 1)] ?? 5000;
 				await sleep(delay, options.signal);

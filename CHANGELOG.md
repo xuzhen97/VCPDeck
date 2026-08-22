@@ -2,7 +2,21 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
-## [Unreleased]
+## [0.3.0] - 2026-08-22
+
+### Fixed
+
+- 修复 Launcher 自动下载 Node 运行时后 spawn ENOENT 的死循环：官方压缩包解压后的顶层目录（`node-v<version>-<plat>-<arch>`）未归一化为缓存标准布局 `node-<version>`，导致返回的路径永远不存在，目标机在系统无合格 Node 时反复崩溃重启、无法上线；现解压后归一化目录并校验二进制存在，缓存扫描跳过二进制缺失的损坏条目。
+
+### Added
+
+- 引入 Biome 作为仓库 lint 门禁：`pnpm lint` 覆盖 `packages/*/src` 与 `scripts`（仅 linter，不含格式化）；错误级诊断阻塞，存量风格/测试类噪音规则降级为 warning 并记录为技术债。修复全部存量错误（可选链不安全用法、void 返回、pi-panel hook 顺序缺陷、a11y 基础项）。
+- CLI 新增 `vcpdeck files download/upload`（写操作，需确认门）：文件传输走 Storage Provider 直传链路——download 导出后经短期签名 URL 拉取并校验 sha256（不一致删除本地半成品）；upload 经 upload-sessions 协商后分片直传 Provider（403 仅刷新该分片 URL），由 Client 从存储拉取导入；字节流不经过 Server。
+- CLI 新增 `vcpdeck files write/mkdir/delete/move`（写操作，需确认门）：覆盖写（原子 tmp+rename，内容来自 `--input` 或 stdin 不进 argv）、递归建目录、删除（不可恢复，非空目录需 `--recursive`）、移动重命名（目标存在默认拒绝，`--overwrite` 解锁）；失败带稳定错误码。Skill 确认门扩展到文件域（删除/覆盖影响单独强调）。
+- CLI 新增 `vcpdeck files roots/list/stat/read`（只读）：授权根探测（多根 fail closed）、目录列表、元信息与文本读取（默认上限 256KB），失败带稳定错误码；`--json` 输出纯 JSON 供 Agent 解析。文件传输后续必须复用 Storage Provider 直传链路，不经 Server 中转。
+- CLI 新增 `vcpdeck jobs run/cancel`（写操作）：在指定机器上执行 shell 命令（exec command 模式，`--` 分隔符保护命令 token），`--wait` 轮询终态且失败时自动带出错误摘要与完整 stdout/stderr 现场（非零退出）；取消请求返回 Server 权威状态。同步在 vcpdeck Skill 中确立写操作确认门（展示环境/机器/命令/影响并取得用户明确确认）。参数解析器支持 `--` 分隔符。
+- Job 失败根因闭环：Server 在 Client 实时上报 stdout/stderr 时旁路落盘到 `data/job-outputs/<jobId>.log`（完整保留不封顶、无自动清理），新增只读端点 `GET /api/jobs/:id/output`；SDK 新增 `jobs.output()`。
+- CLI 新增 `vcpdeck jobs list/get`（只读）：分页查询 Job、按机器名/ID 与状态过滤，`get` 展示错误摘要与完整失败现场输出；`--json` 输出纯 JSON 供 Agent 解析。同步更新 vcpdeck Skill（含失败诊断流程）与 CLI/部署文档。
 
 ## [0.2.5] - 2026-08-21
 

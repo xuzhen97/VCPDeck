@@ -32,9 +32,18 @@ export function resolveFrontendDir(): string | null {
 export function createFrontendFallback(publicDir: string) {
 	const indexHtml = join(publicDir, "index.html");
 	return (req: Request, res: Response, next: NextFunction): void => {
-		if (req.method !== "GET" && req.method !== "HEAD") return next();
-		if (!req.accepts("html")) return next();
-		if (API_PREFIX_RE.test(req.path)) return next();
+		if (req.method !== "GET" && req.method !== "HEAD") {
+			next();
+			return;
+		}
+		if (!req.accepts("html")) {
+			next();
+			return;
+		}
+		if (API_PREFIX_RE.test(req.path)) {
+			next();
+			return;
+		}
 		res.sendFile(indexHtml);
 	};
 }

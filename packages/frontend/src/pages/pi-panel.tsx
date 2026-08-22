@@ -177,6 +177,21 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 		[sdk.pi, client.clientId, cwdRef, sessionId],
 	);
 
+	/** 文件 API 注入会话侧栏；仅依赖 sdk，必须置于条件早返回之前以保证 hook 顺序稳定 */
+	const filesApi = useMemo(
+		() => ({
+			roots: (clientId: string, signal?: AbortSignal) =>
+				sdk.files.roots(clientId, signal),
+			list: (
+				clientId: string,
+				rootDir: string,
+				path: string,
+				signal?: AbortSignal,
+			) => sdk.files.list(clientId, rootDir, path, signal),
+		}),
+		[sdk],
+	);
+
 	// 不可用态
 	if (capability && !capability.available) {
 		return (
@@ -219,20 +234,6 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 	const mutableSessionIds = isObserver
 		? new Set<string>()
 		: new Set<string>(["*"]);
-
-	const filesApi = useMemo(
-		() => ({
-			roots: (clientId: string, signal?: AbortSignal) =>
-				sdk.files.roots(clientId, signal),
-			list: (
-				clientId: string,
-				rootDir: string,
-				path: string,
-				signal?: AbortSignal,
-			) => sdk.files.list(clientId, rootDir, path, signal),
-		}),
-		[sdk],
-	);
 
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-2">
