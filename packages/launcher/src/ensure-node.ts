@@ -6,7 +6,7 @@
  * 下载源默认官方，可配镜像（npmmirror）；参考 ensure-frpc.cjs 的复用模式。
  */
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, renameSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -63,10 +63,11 @@ async function detectSystemNode(): Promise<string | null> {
 	}
 }
 
-/** 缓存目录中满足约束的最高版本目录名（如 node-24.5.0） */
+/** 缓存目录中满足约束且二进制存在的最高版本目录名（如 node-24.5.0） */
 function findCachedRuntime(
 	cacheDir: string,
 	constraint: string,
+	platform: string,
 ): string | null {
 	if (!existsSync(cacheDir)) return null;
 	let best: { version: string; dir: string } | null = null;
@@ -74,6 +75,8 @@ function findCachedRuntime(
 		const m = /^node-(v?\d+\.\d+\.\d+)$/.exec(name);
 		if (!m) continue;
 		if (!satisfiesConstraint(m[1], constraint)) continue;
+		// 跳过二进制缺失的损坏条目（如历史 bug 留下的半成品），避免选中后 spawn ENOENT
+		if (!existsSync(nodeBinPath(cacheDir, name, platform))) continue;
 		if (!best || compareVersions(m[1], best.version) > 0) {
 			best = { version: m[1], dir: name };
 		}
@@ -118,7 +121,11 @@ export async function ensureNodeRuntime(
 		return "node";
 	}
 
-	const cachedDir = findCachedRuntime(options.cacheDir, options.constraint);
+	const cachedDir = findCachedRuntime(
+		options.cacheDir,
+		options.constraint,
+		platform,
+	);
 	if (cachedDir) {
 		return nodeBinPath(options.cacheDir, cachedDir, platform);
 	}
@@ -145,19 +152,17 @@ export async function ensureNodeRuntime(
 
 	const extract =
 		options.downloadAndExtract ??
-		(async (version: string, cache: string, ctx) => {
-			await downloadNodeArchive(version, cache, ctx);
-			return nodeBinPath(cache, `node-${version}`, ctx.platform);
-		});
+		((version: string, cache: string, ctx) =>
+			downloadNodeArchive(version, cache, ctx));
 	return extract(target, options.cacheDir, { platform, arch, downloadBase });
 }
 
-/** 下载并解压官方 Node 发行包（zip / tar.gz，复用系统解压工具） */
+/** 下载并解压官方 Node 发行包（zip / tar.gz，复用系统解压工具），返回校验后的二进制路径 */
 async function downloadNodeArchive(
 	version: string,
 	cacheDir: string,
 	ctx: { platform: string; arch: string; downloadBase: string },
-): Promise<void> {
+): Promise<string> {
 	const plat = ctx.platform.replace("win32", "win");
 	const ext = ctx.platform === "win32" ? "zip" : "tar.gz";
 	const fileName = `node-v${version}-${plat}-${ctx.arch}.${ext}`;
@@ -172,4 +177,29 @@ async function downloadNodeArchive(
 	}
 
 	await extractArchive(archivePath, cacheDir);
+	return normalizeNodeCacheLayout(version, cacheDir, ctx.platform, ctx.arch);
+}
+
+/**
+ * 把官方压缩包解压出的顶层目录（node-v<version>-<plat>-<arch>）归一化为缓存
+ * 标准布局 node-<version>，并校验二进制存在；与 findCachedRuntime/nodeBinPath
+ * 的约定保持一致。返回校验后的可执行文件路径。
+ */
+export function normalizeNodeCacheLayout(
+	version: string,
+	cacheDir: string,
+	platform: string,
+	arch: string,
+): string {
+	const plat = platform.replace("win32", "win");
+	const extractedDir = join(cacheDir, `node-v${version}-${plat}-${arch}`);
+	const targetBin = nodeBinPath(cacheDir, `node-${version}`, platform);
+	if (existsSync(targetBin)) return targetBin;
+	if (existsSync(extractedDir)) {
+		renameSync(extractedDir, join(cacheDir, `node-${version}`));
+	}
+	if (!existsSync(targetBin)) {
+		throw new Error(`解压后未找到 Node 可执行文件: ${targetBin}`);
+	}
+	return targetBin;
 }

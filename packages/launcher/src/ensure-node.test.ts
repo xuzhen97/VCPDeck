@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	ensureNodeRuntime,
+	normalizeNodeCacheLayout,
 	parseNodeVersion,
 	satisfiesConstraint,
 } from "./ensure-node.js";
@@ -111,11 +112,78 @@ describe("ensureNodeRuntime", () => {
 		expect(path).toContain("node-25.3.0");
 	});
 
+	it("缓存条目二进制缺失（损坏半成品）→ 跳过并回退下载", async () => {
+		execNodeVersion.mockResolvedValue(null);
+		// node-25.3.0 目录存在但二进制缺失（历史 bug 留下的半成品）
+		await mkdir(join(cacheDir, "node-25.3.0", "bin"), { recursive: true });
+		fetchIndex.mockResolvedValue([{ version: "v24.5.0" }]);
+		downloadAndExtract.mockResolvedValue(
+			join(cacheDir, "node-24.5.0", "bin", "node"),
+		);
+
+		const path = await run();
+
+		expect(path).toContain("node-24.5.0");
+		expect(fetchIndex).toHaveBeenCalled();
+	});
+
 	it("index 中无满足版本 → 抛错", async () => {
 		execNodeVersion.mockResolvedValue(null);
 		fetchIndex.mockResolvedValue([{ version: "v22.0.0" }]);
 
 		await expect(run()).rejects.toThrow("无满足");
 		expect(downloadAndExtract).not.toHaveBeenCalled();
+	});
+});
+
+describe("normalizeNodeCacheLayout", () => {
+	let dir: string;
+	let cacheDir: string;
+
+	beforeEach(async () => {
+		dir = await mkdtemp(join(tmpdir(), "ensure-node-layout-"));
+		cacheDir = join(dir, "node");
+	});
+
+	afterEach(async () => {
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("Windows zip：顶层目录归一化为 node-<version> 并返回二进制路径", async () => {
+		await mkdir(join(cacheDir, "node-v26.7.0-win-x64"), { recursive: true });
+		await writeFile(join(cacheDir, "node-v26.7.0-win-x64", "node.exe"), "x");
+
+		const path = normalizeNodeCacheLayout("26.7.0", cacheDir, "win32", "x64");
+
+		expect(path).toBe(join(cacheDir, "node-26.7.0", "node.exe"));
+	});
+
+	it("Linux tar.gz：顶层目录归一化后返回 bin/node 路径", async () => {
+		await mkdir(join(cacheDir, "node-v24.5.0-linux-x64", "bin"), {
+			recursive: true,
+		});
+		await writeFile(join(cacheDir, "node-v24.5.0-linux-x64", "bin", "node"), "x");
+
+		const path = normalizeNodeCacheLayout("24.5.0", cacheDir, "linux", "x64");
+
+		expect(path).toBe(join(cacheDir, "node-24.5.0", "bin", "node"));
+	});
+
+	it("标准布局已存在时直接复用，不要求解压目录存在", () => {
+		// 模拟重复调用：目标布局已归一化完成
+		return mkdir(join(cacheDir, "node-26.7.0"), { recursive: true })
+			.then(() => writeFile(join(cacheDir, "node-26.7.0", "node.exe"), "x"))
+			.then(() => {
+				const path = normalizeNodeCacheLayout("26.7.0", cacheDir, "win32", "x64");
+				expect(path).toBe(join(cacheDir, "node-26.7.0", "node.exe"));
+			});
+	});
+
+	it("解压结果与目标布局均缺失二进制 → 抛错", async () => {
+		await mkdir(cacheDir, { recursive: true });
+
+		expect(() =>
+			normalizeNodeCacheLayout("26.7.0", cacheDir, "win32", "x64"),
+		).toThrow("未找到 Node 可执行文件");
 	});
 });
