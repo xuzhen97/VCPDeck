@@ -269,7 +269,7 @@ async function runAttach(
 
 	let attachmentId: string | null = null;
 	let closed = false;
-	let exitCode = 0;
+	const exitCode = 0;
 	const rawStdin = stdin as NodeJS.ReadStream & {
 		setRawMode?: (mode: boolean) => void;
 	};

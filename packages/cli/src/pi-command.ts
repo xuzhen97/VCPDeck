@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline/promises";
+import { stdin as nodeStdin, stdout as nodeStdout } from "node:process";
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import { createAuthenticatedClient } from "./authenticated-client.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
@@ -13,6 +15,10 @@ export interface PiCommandContext {
 	log?: (message: string) => void;
 	/** 运行状态轮询间隔；测试可缩短。 */
 	pollIntervalMs?: number;
+	/** REPL 输入流；测试可注入（默认 process.stdin）。 */
+	input?: NodeJS.ReadableStream;
+	/** REPL 输出流；测试可注入（默认 process.stdout）。 */
+	output?: NodeJS.WritableStream;
 }
 
 const DEFAULT_RUN_TIMEOUT_SECONDS = 600;
@@ -36,6 +42,7 @@ export async function runPiCommand(
 			subcommand === "sessions" ||
 			subcommand === "new" ||
 			subcommand === "run" ||
+			subcommand === "attach" ||
 			subcommand === "abort" ||
 			subcommand === undefined) &&
 			hasHelp(argv));
@@ -59,6 +66,10 @@ export async function runPiCommand(
 		await runRun(argv, context);
 		return;
 	}
+	if (subcommand === "attach") {
+		await runAttachRepl(argv, context);
+		return;
+	}
 	if (subcommand === "abort") {
 		await runAbort(argv, context);
 		return;
@@ -78,6 +89,7 @@ function piUsage(): string {
 		"  vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]",
 		"  vcpdeck pi run <client> \"提示词\" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]",
 		"  # 写操作：在目标机驱动 AI Agent 执行任务；调用方须先取得用户明确确认",
+		"  vcpdeck pi attach <client> [--cwd=<path>] [--session=<id>] [--root=<dir>] [--env=<name>]  # 交互式对话；/exit 退出",
 		"  vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]",
 		"  # 缺省 --root 时自动探测：唯一根直接使用，多根要求显式指定",
 	].join("\n");
@@ -121,7 +133,6 @@ async function resolveCwdRef(
 	client: VcpDeckClient,
 	clientId: string,
 	options: Record<string, string | true>,
-	context: PiCommandContext,
 ): Promise<CwdRef> {
 	const explicitRoot = stringOption(options, "root");
 	let rootDir = explicitRoot;
@@ -150,7 +161,7 @@ async function runModels(
 	if (!clientFilter || positionals.length > 1) throw new Error(piUsage());
 	const { environment, client } = await openContext(context, options);
 	const clientId = await resolveClientIdOrThrow(clientFilter, context);
-	const cwdRef = await resolveCwdRef(client, clientId, options, context);
+	const cwdRef = await resolveCwdRef(client, clientId, options);
 	const models = await client.pi.models(clientId, cwdRef);
 	if (options.json === true) {
 		(context.log ?? console.log)(JSON.stringify(models, null, 2));
@@ -179,7 +190,7 @@ async function runSessions(
 	if (!clientFilter || positionals.length > 1) throw new Error(piUsage());
 	const { environment, client } = await openContext(context, options);
 	const clientId = await resolveClientIdOrThrow(clientFilter, context);
-	const cwdRef = await resolveCwdRef(client, clientId, options, context);
+	const cwdRef = await resolveCwdRef(client, clientId, options);
 	const sessions = await client.pi.sessions.list(clientId, cwdRef);
 	if (options.json === true) {
 		(context.log ?? console.log)(JSON.stringify(sessions, null, 2));
@@ -206,7 +217,7 @@ async function runNew(argv: string[], context: PiCommandContext): Promise<void> 
 	if (!clientFilter || positionals.length > 1) throw new Error(piUsage());
 	const { environment, client } = await openContext(context, options);
 	const clientId = await resolveClientIdOrThrow(clientFilter, context);
-	const cwdRef = await resolveCwdRef(client, clientId, options, context);
+	const cwdRef = await resolveCwdRef(client, clientId, options);
 	const created = await client.pi.agent.newSession(clientId, cwdRef);
 	if (options.json === true) {
 		(context.log ?? console.log)(JSON.stringify(created, null, 2));
@@ -265,7 +276,7 @@ async function runRun(argv: string[], context: PiCommandContext): Promise<void> 
 	});
 	const client = await createAuthenticatedClient(environment);
 	const clientId = await resolveClientIdOrThrow(clientFilter, context);
-	const cwdRef = await resolveCwdRef(client, clientId, options, context);
+	const cwdRef = await resolveCwdRef(client, clientId, options);
 	const log = context.log ?? console.log;
 	const progressLog = options.json === true ? () => {} : log;
 	if (options.json !== true) {
@@ -294,27 +305,15 @@ async function runRun(argv: string[], context: PiCommandContext): Promise<void> 
 	});
 	progressLog("[vcpdeck] 提示词已提交，等待 Pi 完成…");
 
-	const deadline = Date.now() + waitTimeout * 1_000;
-	let lastStatus: string | undefined;
-	while (Date.now() < deadline) {
-		const state = (await client.pi.agent.state(
-			clientId,
-			sessionId,
-			cwdRef,
-		)) as { status?: string };
-		const status = typeof state?.status === "string" ? state.status : "unknown";
-		if (status === "idle") break;
-		if (status !== lastStatus) {
-			progressLog(`[vcpdeck] Pi 状态: ${status}`);
-			lastStatus = status;
-		}
-		if (status === "waiting_for_extension_input") {
-			throw new Error(
-				`Pi 正在等待扩展输入（会话 ${sessionId}）；请在 Frontend 处理后重试，或用 pi abort 中止`,
-			);
-		}
-		await sleep(Math.min(POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())));
-	}
+	await waitUntilIdle(
+		client,
+		clientId,
+		sessionId,
+		cwdRef,
+		waitTimeout,
+		(s: string) => progressLog(`[vcpdeck] Pi 状态: ${s}`),
+		context.pollIntervalMs ?? POLL_INTERVAL_MS,
+	);
 
 	const page = (await client.pi.sessions.context(
 		clientId,
@@ -374,4 +373,141 @@ function parsePositiveSeconds(
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 轮询 agent.state 至 idle；waiting_for_extension_input 视为需人工干预并抛错。 */
+async function waitUntilIdle(
+	client: VcpDeckClient,
+	clientId: string,
+	sessionId: string,
+	cwdRef: CwdRef,
+	timeoutSeconds: number,
+	onStatus: ((status: string) => void) | undefined,
+	pollIntervalMs: number,
+): Promise<void> {
+	const deadline = Date.now() + timeoutSeconds * 1_000;
+	let lastStatus: string | undefined;
+	while (Date.now() < deadline) {
+		const state = (await client.pi.agent.state(
+			clientId,
+			sessionId,
+			cwdRef,
+		)) as { status?: string };
+		const status = typeof state?.status === "string" ? state.status : "unknown";
+		if (status === "idle") return;
+		if (status !== lastStatus) {
+			onStatus?.(status);
+			lastStatus = status;
+		}
+		if (status === "waiting_for_extension_input") {
+			throw new Error(
+				`Pi 正在等待扩展输入（会话 ${sessionId}）；请在 Frontend 处理后重试，或用 pi abort 中止`,
+			);
+		}
+		await sleep(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
+	}
+	throw new Error(`等待 Pi 完成超时（${timeoutSeconds} 秒）`);
+}
+
+/** 交互式对话 REPL：输入提示词 → 等待完成 → 取回回复，循环继续；/exit 或 Ctrl+D 退出。 */
+async function runAttachRepl(
+	argv: string[],
+	context: PiCommandContext,
+): Promise<void> {
+	const { positionals, options } = parseCommandArgs(argv, {
+		value: ["env", "environment", "root", "cwd", "session", "timeout"],
+		boolean: ["json"],
+	});
+	const [clientFilter] = positionals;
+	if (!clientFilter || positionals.length > 1) throw new Error(piUsage());
+	if (options.json === true)
+		throw new Error("pi attach 不支持 --json（交互式输出）");
+	const perPromptTimeout =
+		parsePositiveSeconds(stringOption(options, "timeout"), "--timeout") ??
+		DEFAULT_RUN_TIMEOUT_SECONDS;
+	const environment = await resolveEnvironment({
+		environment: exclusiveAlias(options, "env", "environment"),
+		paths: context.paths,
+		processEnv: context.processEnv,
+	});
+	const client = await createAuthenticatedClient(environment);
+	const clientId = await resolveClientIdOrThrow(clientFilter, context);
+	const cwdRef = await resolveCwdRef(client, clientId, options);
+	const output = context.output ?? nodeStdout;
+	const input = context.input ?? nodeStdin;
+	const pollIntervalMs = context.pollIntervalMs ?? POLL_INTERVAL_MS;
+	output.write(formatEnvironmentSummary(environment) + "\n");
+
+	const existingSession = stringOption(options, "session");
+	let sessionId: string;
+	if (existingSession) {
+		sessionId = existingSession;
+		await client.pi.agent.open(clientId, sessionId, cwdRef);
+	} else {
+		const created = await client.pi.agent.newSession(clientId, cwdRef);
+		sessionId = created.sessionId;
+	}
+	output.write(
+		`── Pi 交互会话 ──\n机器: ${clientFilter}\ncwd: ${cwdRef.rootDir}${cwdRef.relativePath === "." ? "" : `/${cwdRef.relativePath}`}\n会话: ${sessionId}\n内建命令: /abort 中止当前运行 · /state 查看状态 · /exit 或 Ctrl+D 退出\n\n`,
+	);
+
+	const rl = createInterface({
+		input,
+		output,
+		terminal: input === nodeStdin && output === nodeStdout,
+	});
+	try {
+		for (;;) {
+			let line: string;
+			try {
+				line = (await rl.question("pi> ")).trim();
+			} catch {
+				break; // EOF（Ctrl+D）
+			}
+			if (!line) continue;
+			if (line === "/exit" || line === "/quit") break;
+			if (line === "/state") {
+				const state = (await client.pi.agent.state(
+					clientId,
+					sessionId,
+					cwdRef,
+				)) as { status?: string };
+				output.write(`[Pi 状态] ${state?.status ?? "未知"}\n`);
+				continue;
+			}
+			if (line === "/abort") {
+				await client.pi.agent.abort(clientId, sessionId, sessionId);
+				output.write("[已提交中止请求]\n");
+				continue;
+			}
+			try {
+				await client.pi.agent.prompt(clientId, sessionId, cwdRef, {
+					submissionId: randomUUID(),
+					prompt: line,
+				});
+				await waitUntilIdle(
+					client,
+					clientId,
+					sessionId,
+					cwdRef,
+					perPromptTimeout,
+					(s: string) => output.write(`[Pi ${s}…]\n`),
+					pollIntervalMs,
+				);
+				const page = (await client.pi.sessions.context(
+					clientId,
+					sessionId,
+					cwdRef,
+				)) as ContextPageShape;
+				const reply = extractLastAssistantText(page);
+				output.write(reply ? `\n${reply}\n\n` : "\n(无文本回复)\n\n");
+			} catch (error) {
+				output.write(
+					`[错误] ${error instanceof Error ? error.message : String(error)}\n`,
+				);
+			}
+		}
+	} finally {
+		rl.close();
+	}
 }
