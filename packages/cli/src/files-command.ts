@@ -681,9 +681,13 @@ async function runDownload(
 		{ rootDir, path: remotePath },
 		context,
 	);
-	// Server 只签发短期下载令牌：阿里云为 Provider 直链，Local 为签名中转
+	// Server 只签发短期下载令牌：阿里云为 Provider 直链，Local 为签名中转（相对地址需拼 Server）
 	const token = await client.storage.createDownloadToken({ key: transfer.key });
-	const actualSha256 = await fetchToFile(token.url, localPath, context);
+	const actualSha256 = await fetchToFile(
+		resolveServerUrl(environment.server, token.url),
+		localPath,
+		context,
+	);
 	if (actualSha256 !== transfer.sha256) {
 		await unlink(localPath).catch(() => {});
 		throw new Error(

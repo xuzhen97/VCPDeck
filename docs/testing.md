@@ -18,6 +18,7 @@
 | Frontend 组件测试 | Vitest + Testing Library + jsdom | 路由、状态、交互、敏感信息不渲染 |
 | 包内集成测试 | `*.integration.test.ts` | Server Gateway/Broker、Client Pi Worker、Terminal |
 | 项目 E2E | `scripts/test.cjs` | 真实 Server + mock/真实 Client + REST/WS |
+| CLI 能力 E2E | `scripts/test-cli-capabilities.cjs` | 真实 Server + Client 上驱动 CLI 构建产物，逐域验证 clients/jobs/files/frp/storage/terminal/pi 与错误路径（临时物全部隔离在 `.tmp/cli-e2e/`） |
 | FRP E2E | `scripts/test-frp.cjs` | 真实 frps/frpc、TCP/HTTP 映射 |
 | Launcher 冒烟 | `scripts/smoke-launcher.cjs` | prepare/apply、探活、失败回退 |
 | 手工/环境验收 | `docs/verification/` | Windows PTY、外部存储、真实网络和发布演练 |
@@ -62,6 +63,15 @@ node scripts/smoke-launcher.cjs
 ```
 
 `pnpm test` 会使用 3001 端口并重建隔离测试数据库；执行前不要让开发 Server 占用端口。FRP 测试输出 `SKIP` 不算通过。
+
+CLI 能力端到端：
+
+```bash
+pnpm build          # 需先构建 server/client/cli
+test:cli            # 即 node scripts/test-cli-capabilities.cjs
+```
+
+AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明确同意后以 `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=<同意文本>` 前缀运行；人工 shell 无需此变量。
 
 ## 4. 变更对应测试
 
