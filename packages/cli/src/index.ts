@@ -7,6 +7,7 @@ import { VERSION } from "@vcpdeck/shared";
 import { runEnvCommand } from "./env-command.js";
 import { runFilesCommand } from "./files-command.js";
 import { runJobsCommand } from "./jobs-command.js";
+import { runPiCommand } from "./pi-command.js";
 import { runClientsCommand } from "./clients-command.js";
 import { runReleaseCommand } from "./release-command.js";
 
@@ -31,6 +32,10 @@ export async function run(
 		}
 		if (command === "env") {
 			await runEnvCommand(subcommand, rest, { log });
+			return 0;
+		}
+		if (command === "pi") {
+			await runPiCommand(subcommand, rest, { log });
 			return 0;
 		}
 		if (command === "files") {
@@ -90,11 +95,24 @@ export function helpText(): string {
 		"  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
 		"  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]",
 		"",
-		"Files（只读）:",
+		"Files:",
 		"  vcpdeck files roots <client> [--env=<name>] [--json]",
 		"  vcpdeck files list <client> <path> [--root=<dir>] [--env=<name>] [--json]",
 		"  vcpdeck files stat <client> <path> [--root=<dir>] [--env=<name>] [--json]",
 		"  vcpdeck files read <client> <path> [--root=<dir>] [--max-bytes=<n>] [--env=<name>] [--json]",
+		"  vcpdeck files write <client> <path> [--root=<dir>] [--input=<file>] [--env=<name>] [--json]",
+		"  vcpdeck files mkdir <client> <path> [--root=<dir>] [--env=<name>] [--json]",
+		"  vcpdeck files delete <client> <path> [--root=<dir>] [--recursive] [--env=<name>] [--json]",
+		"  vcpdeck files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
+		"  vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]",
+		"  vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
+		"",
+		"Pi:",
+		"  vcpdeck pi models <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]",
+		"  vcpdeck pi sessions <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]",
+		"  vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]",
+		"  vcpdeck pi run <client> \"提示词\" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]",
+		"  vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]",
 		"",
 		"Release:",
 		"  vcpdeck release status <version> [--env=<name>]",

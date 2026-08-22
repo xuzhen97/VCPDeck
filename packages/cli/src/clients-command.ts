@@ -5,7 +5,6 @@ import type { ConfigPaths } from "./config.js";
 import {
 	formatEnvironmentSummary,
 	resolveEnvironment,
-	type ResolvedEnvironment,
 } from "./environment.js";
 
 /** Clients 命令运行时依赖，测试可注入。 */

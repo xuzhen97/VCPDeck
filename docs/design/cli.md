@@ -15,6 +15,7 @@ CLI 是操作员和 Pi Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访�
 - `files roots/list/stat/read` 文件只读浏览（授权根探测、目录列表、元信息、文本读取）；
 - `files write/mkdir/delete/move` 文件写操作（覆盖写、递归建目录、删除、移动，确认门由调用方负责）；
 - `files download/upload` 文件传输（Storage Provider 直传链路，Server 只签名；download 校验 sha256）；
+- `pi models/sessions/new/run/abort` Pi 子任务（在目标机驱动 Pi Agent 并取回回复）；
 - `release upload/status/wait` 双平台发布上传、权威状态查询和 Server/Client 终态等待。
 
 CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 Skill 中复制 HTTP。SDK 不读取 HOME、当前目录或 CLI 配置，只接受解析后的 `baseUrl` 和认证。
@@ -203,7 +204,23 @@ vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwri
 
 已知非能力：无（本节能力已对齐 Server 文件域；Terminal/Pi 等其他域见对应章节）。传输链路：`download` 导出后经 Server 签发的短期下载令牌从 Storage 拉取并校验 sha256；`upload` 经 upload-sessions 协商后分片直传 Provider（403 仅刷新该分片 URL），完成后由 Client 从存储拉取导入。字节流不经过 Server——阿里云为 Provider 预签名 URL 直传，Local 后端经 Server 中转是无外部存储时的固有行为；签名 URL 不输出、不落盘、不进日志。传输非幂等，网络结果不明时先用只读命令核对两侧状态。
 
-## 9. 安全与故障边界
+## 9. Pi 命令
+
+```text
+vcpdeck pi models <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]
+vcpdeck pi sessions <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]
+vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]
+vcpdeck pi run <client> "提示词" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]
+vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]
+```
+
+Pi 子任务通过 Server Pi 命名空间驱动目标机上的 Pi Agent（要求 `pi` capability）。运行循环：`prompt` 提交即返回 → 轮询 `agent.state` 至 `idle`（默认超时 600 秒）→ `context` 提取最后一条 assistant 消息的文本回复。注意 Server 的 `complete` 是中断标记而非等待，CLI 不使用它等待任务。授权根与文件域同规则。`waiting_for_extension_input` 时明确报错，需到 Frontend 处理扩展输入。
+
+会话策略：`run` 缺省自动创建新会话（子任务隔离）；`--session` 复用既有会话（先 open 再 prompt）。`run/prompt/new` 非幂等——重复提交会重复执行子任务。已知限制：未暴露 fork/clone/navigate/compact/setModel/附件与图片输入。
+
+Windows Git Bash 会话注意：MSYS 会把 `/etc` 这类绝对路径参数改写为宿主安装路径（如 `C:/Program Files/Git/etc`），传 POSIX 风格路径时用 `MSYS_NO_PATHCONV=1` 或改用 Windows 形式。
+
+## 10. 安全与故障边界
 
 - 用户级配置、项目配置和所有 CLI 参数都视为不可信输入并严格解析；
 - 项目选择器不能改变 Server 或凭据引用，降低不可信仓库诱导泄密风险；
@@ -213,7 +230,7 @@ vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwri
 - `env current` 的成功只表示配置可解析，不表示 Server 可达或凭据有效；`env check` 才验证 Server、凭据和实际身份；
 - 环境删除不会修复项目引用，被删除环境的项目后续明确失败。
 
-## 10. Skill 安装与当前项目 cwd
+## 11. Skill 安装与当前项目 cwd
 
 正式版本通过 Pi 用户级 Git package 安装：
 
@@ -227,7 +244,7 @@ Skill 调用 CLI 时从 `SKILL.md` 解析 `vcpdeck.cjs` 的绝对路径，但必
 
 `skills/vcpdeck/SKILL.md` 通过 CLI `env current` 取得环境权威摘要，不直接读取 JSON。后续每个 CLI 业务命令都复用同一环境解析结果，并在 Skill 中新增对应功能章节。Server/SDK 已有 API 不等于 CLI 命令已落地。
 
-## 11. SDK/Shared Git 安装
+## 12. SDK/Shared Git 安装
 
 SDK 不读取 CLI 的 HOME/cwd 配置，只接受调用方提供的 `baseUrl` 与认证。Node.js 24+、pnpm 10.26+ 的目标项目可从同一个稳定 Tag 直接安装 SDK 与 Shared：
 
@@ -242,7 +259,7 @@ pnpm \
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。
 
-## 12. 测试与验收
+## 13. 测试与验收
 
 当前单元/集成测试覆盖：
 
@@ -263,5 +280,6 @@ pnpm \
 - `files roots/list/stat/read` 覆盖四子命令、授权根探测与多根 fail closed、稳定错误码转译、排序汇总和 `--json` 输出；
 - `files write/mkdir/delete/move` 覆盖 payload 形状（content 来自 --input/递归/覆盖语义）、成功摘要、失败错误码转译和用法校验；
 - `files download/upload` 覆盖导出+签名 URL 拉取+sha256 校验、sha 不一致删除半成品、分片直传与导入终态等待。
+- `pi models/sessions/new/run/abort` 覆盖 cwdRef 推导、多根 fail closed、运行循环（prompt→轮询→回复提取）、既有会话 open 复用、扩展输入报错和中止。
 
-当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 Files/Jobs/Clients/Release 之外的其余业务 CLI 命令（Terminal、Pi、FRP、Storage 等）。
+当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 Files/Jobs/Clients/Pi/Release 之外的其余业务 CLI 命令（Terminal、FRP、Storage 等）。

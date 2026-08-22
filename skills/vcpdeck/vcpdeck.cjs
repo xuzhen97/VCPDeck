@@ -2685,6 +2685,10 @@ async function resolveClientId(clientFilter, paths, processEnv) {
   }
   return matched.clientId;
 }
+async function fetchClientRoots(client, clientId) {
+  const roots = await client.files.roots(clientId);
+  return Array.isArray(roots) ? roots : [];
+}
 
 // dist/jobs-command.js
 var import_shared2 = __toESM(require_dist(), 1);
@@ -3522,9 +3526,273 @@ function formatTable2(rows, columns) {
   ].join("\n");
 }
 
+// dist/pi-command.js
+var import_node_crypto2 = require("node:crypto");
+var DEFAULT_RUN_TIMEOUT_SECONDS = 600;
+var POLL_INTERVAL_MS3 = 3e3;
+async function runPiCommand(subcommand, argv, context = {}) {
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "models" || subcommand === "sessions" || subcommand === "new" || subcommand === "run" || subcommand === "abort" || subcommand === void 0) && hasHelp3(argv);
+  if (helpRequested) {
+    (context.log ?? console.log)(piUsage());
+    return;
+  }
+  if (subcommand === "models") {
+    await runModels(argv, context);
+    return;
+  }
+  if (subcommand === "sessions") {
+    await runSessions(argv, context);
+    return;
+  }
+  if (subcommand === "new") {
+    await runNew(argv, context);
+    return;
+  }
+  if (subcommand === "run") {
+    await runRun(argv, context);
+    return;
+  }
+  if (subcommand === "abort") {
+    await runAbort(argv, context);
+    return;
+  }
+  throw new Error(piUsage());
+}
+function hasHelp3(argv) {
+  return argv.includes("--help") || argv.includes("-h");
+}
+function piUsage() {
+  return [
+    "Pi \u547D\u4EE4:",
+    "  vcpdeck pi models <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck pi sessions <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]",
+    '  vcpdeck pi run <client> "\u63D0\u793A\u8BCD" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]',
+    "  # \u5199\u64CD\u4F5C\uFF1A\u5728\u76EE\u6807\u673A\u9A71\u52A8 AI Agent \u6267\u884C\u4EFB\u52A1\uFF1B\u8C03\u7528\u65B9\u987B\u5148\u53D6\u5F97\u7528\u6237\u660E\u786E\u786E\u8BA4",
+    "  vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]",
+    "  # \u7F3A\u7701 --root \u65F6\u81EA\u52A8\u63A2\u6D4B\uFF1A\u552F\u4E00\u6839\u76F4\u63A5\u4F7F\u7528\uFF0C\u591A\u6839\u8981\u6C42\u663E\u5F0F\u6307\u5B9A"
+  ].join("\n");
+}
+function exclusiveAlias4(options, first, second) {
+  const firstValue = stringOption(options, first);
+  const secondValue = stringOption(options, second);
+  if (firstValue && secondValue) {
+    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
+  }
+  return firstValue ?? secondValue;
+}
+async function openContext2(context, options) {
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias4(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  return { environment, client };
+}
+async function resolveClientIdOrThrow(clientFilter, context) {
+  return resolveClientId(clientFilter, context.paths, context.processEnv);
+}
+async function resolveCwdRef(client, clientId, options, context) {
+  const explicitRoot = stringOption(options, "root");
+  let rootDir = explicitRoot;
+  if (!rootDir) {
+    const roots = await fetchClientRoots(client, clientId);
+    if (roots.length === 1)
+      rootDir = roots[0];
+    else if (roots.length === 0)
+      throw new Error("\u76EE\u6807\u673A\u672A\u62A5\u544A\u53EF\u7528\u6839\u76EE\u5F55\uFF08\u6216 Pi capability \u7F3A\u5931\uFF09");
+    else
+      throw new Error(`\u76EE\u6807\u673A\u6709\u591A\u4E2A\u53EF\u7528\u6839\uFF08${roots.join("\u3001")}\uFF09\uFF1B\u8BF7\u7528 --root=<dir> \u6307\u5B9A\u6388\u6743\u6839`);
+  }
+  return { rootDir, relativePath: stringOption(options, "cwd") ?? "." };
+}
+async function runModels(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "root", "cwd"],
+    boolean: ["json"]
+  });
+  const [clientFilter] = positionals;
+  if (!clientFilter || positionals.length > 1)
+    throw new Error(piUsage());
+  const { environment, client } = await openContext2(context, options);
+  const clientId = await resolveClientIdOrThrow(clientFilter, context);
+  const cwdRef = await resolveCwdRef(client, clientId, options, context);
+  const models = await client.pi.models(clientId, cwdRef);
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(models, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  log(`\u53EF\u7528\u6A21\u578B\uFF08${models.length}\uFF09\uFF1A`);
+  for (const model of models)
+    log(`  ${model.provider}/${model.modelId}`);
+}
+async function runSessions(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "root", "cwd"],
+    boolean: ["json"]
+  });
+  const [clientFilter] = positionals;
+  if (!clientFilter || positionals.length > 1)
+    throw new Error(piUsage());
+  const { environment, client } = await openContext2(context, options);
+  const clientId = await resolveClientIdOrThrow(clientFilter, context);
+  const cwdRef = await resolveCwdRef(client, clientId, options, context);
+  const sessions = await client.pi.sessions.list(clientId, cwdRef);
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(sessions, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  if (!Array.isArray(sessions)) {
+    log(JSON.stringify(sessions, null, 2));
+    return;
+  }
+  log(`\u4F1A\u8BDD\uFF08${sessions.length}\uFF09\uFF1A`);
+  for (const item of sessions) {
+    log(`  ${item.sessionId ?? "?"}  ${item.name ?? ""}`);
+  }
+}
+async function runNew(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "root", "cwd"],
+    boolean: ["json"]
+  });
+  const [clientFilter] = positionals;
+  if (!clientFilter || positionals.length > 1)
+    throw new Error(piUsage());
+  const { environment, client } = await openContext2(context, options);
+  const clientId = await resolveClientIdOrThrow(clientFilter, context);
+  const cwdRef = await resolveCwdRef(client, clientId, options, context);
+  const created = await client.pi.agent.newSession(clientId, cwdRef);
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(created, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  log(`[vcpdeck] \u65B0\u4F1A\u8BDD\u5DF2\u521B\u5EFA: ${created.sessionId}`);
+}
+function extractLastAssistantText(page) {
+  const messages = Array.isArray(page?.messages) ? page.messages : [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== "assistant")
+      continue;
+    const text = (message.content ?? []).filter((part) => part?.type === "text").map((part) => part.text ?? "").join("\n").trim();
+    return text.length > 0 ? text : null;
+  }
+  return null;
+}
+async function runRun(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "root", "cwd", "session", "timeout"],
+    boolean: ["json"]
+  });
+  const [clientFilter, ...promptTokens] = positionals;
+  const prompt = promptTokens.join(" ");
+  if (!clientFilter || !prompt)
+    throw new Error(piUsage());
+  const timeout = parsePositiveSeconds2(stringOption(options, "timeout"), "--timeout");
+  const waitTimeout = timeout ?? DEFAULT_RUN_TIMEOUT_SECONDS;
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias4(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  const clientId = await resolveClientIdOrThrow(clientFilter, context);
+  const cwdRef = await resolveCwdRef(client, clientId, options, context);
+  const log = context.log ?? console.log;
+  const progressLog = options.json === true ? () => {
+  } : log;
+  if (options.json !== true) {
+    log(formatEnvironmentSummary(environment));
+    log(`[vcpdeck] Pi \u5B50\u4EFB\u52A1 \u2192 ${clientFilter}:${cwdRef.relativePath}\uFF08${waitTimeout}s \u8D85\u65F6\uFF09`);
+    log(`[vcpdeck] \u63D0\u793A\u8BCD: ${prompt}`);
+  }
+  const existingSession = stringOption(options, "session");
+  let sessionId;
+  if (existingSession) {
+    sessionId = existingSession;
+    await client.pi.agent.open(clientId, sessionId, cwdRef);
+    progressLog(`[vcpdeck] \u5DF2\u6253\u5F00\u65E2\u6709\u4F1A\u8BDD ${sessionId}`);
+  } else {
+    const created = await client.pi.agent.newSession(clientId, cwdRef);
+    sessionId = created.sessionId;
+    progressLog(`[vcpdeck] \u5DF2\u521B\u5EFA\u65B0\u4F1A\u8BDD ${sessionId}`);
+  }
+  await client.pi.agent.prompt(clientId, sessionId, cwdRef, {
+    submissionId: (0, import_node_crypto2.randomUUID)(),
+    prompt
+  });
+  progressLog("[vcpdeck] \u63D0\u793A\u8BCD\u5DF2\u63D0\u4EA4\uFF0C\u7B49\u5F85 Pi \u5B8C\u6210\u2026");
+  const deadline = Date.now() + waitTimeout * 1e3;
+  let lastStatus;
+  while (Date.now() < deadline) {
+    const state = await client.pi.agent.state(clientId, sessionId, cwdRef);
+    const status = typeof state?.status === "string" ? state.status : "unknown";
+    if (status === "idle")
+      break;
+    if (status !== lastStatus) {
+      progressLog(`[vcpdeck] Pi \u72B6\u6001: ${status}`);
+      lastStatus = status;
+    }
+    if (status === "waiting_for_extension_input") {
+      throw new Error(`Pi \u6B63\u5728\u7B49\u5F85\u6269\u5C55\u8F93\u5165\uFF08\u4F1A\u8BDD ${sessionId}\uFF09\uFF1B\u8BF7\u5728 Frontend \u5904\u7406\u540E\u91CD\u8BD5\uFF0C\u6216\u7528 pi abort \u4E2D\u6B62`);
+    }
+    await sleep4(Math.min(POLL_INTERVAL_MS3, Math.max(0, deadline - Date.now())));
+  }
+  const page = await client.pi.sessions.context(clientId, sessionId, cwdRef);
+  const reply = extractLastAssistantText(page);
+  if (options.json === true) {
+    log(JSON.stringify({ sessionId, prompt, reply, messages: page?.messages ?? [] }, null, 2));
+  } else if (reply !== null) {
+    log(`\u2500\u2500 Pi \u56DE\u590D \u2500\u2500
+${reply}`);
+  } else {
+    log("\uFF08\u672A\u53D6\u5230\u52A9\u624B\u6587\u672C\u56DE\u590D\uFF1B\u7528 --json \u67E5\u770B\u5B8C\u6574\u4E0A\u4E0B\u6587\uFF09");
+  }
+}
+async function runAbort(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "session"],
+    boolean: ["json"]
+  });
+  const [clientFilter] = positionals;
+  const sessionId = stringOption(options, "session");
+  if (!clientFilter || !sessionId)
+    throw new Error(piUsage());
+  const { environment, client } = await openContext2(context, options);
+  const clientId = await resolveClientIdOrThrow(clientFilter, context);
+  const result = await client.pi.agent.abort(clientId, sessionId, sessionId);
+  if (options.json === true) {
+    (context.log ?? console.log)(JSON.stringify(result, null, 2));
+    return;
+  }
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  log(`[vcpdeck] \u4F1A\u8BDD ${sessionId} \u4E2D\u6B62\u8BF7\u6C42\u5DF2\u63D0\u4EA4`);
+}
+function parsePositiveSeconds2(raw, flag) {
+  if (raw === void 0)
+    return void 0;
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds < 1) {
+    throw new Error(`${flag} \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570\u79D2`);
+  }
+  return seconds;
+}
+function sleep4(ms) {
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
+}
+
 // dist/clients-command.js
 async function runClientsCommand(subcommand, argv, context = {}) {
-  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === void 0) && hasHelp3(argv);
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === void 0) && hasHelp4(argv);
   if (helpRequested) {
     (context.log ?? console.log)(clientsUsage());
     return;
@@ -3535,7 +3803,7 @@ async function runClientsCommand(subcommand, argv, context = {}) {
   }
   throw new Error(clientsUsage());
 }
-function hasHelp3(argv) {
+function hasHelp4(argv) {
   return argv.includes("--help") || argv.includes("-h");
 }
 function clientsUsage() {
@@ -3550,7 +3818,7 @@ async function runListClients(argv, context) {
     boolean: ["json"]
   });
   const environment = await resolveEnvironment({
-    environment: exclusiveAlias4(options, "env", "environment"),
+    environment: exclusiveAlias5(options, "env", "environment"),
     paths: context.paths,
     processEnv: context.processEnv
   });
@@ -3597,7 +3865,7 @@ function formatClientsSummary(clients) {
     ])
   ].join("\n");
 }
-function exclusiveAlias4(options, first, second) {
+function exclusiveAlias5(options, first, second) {
   const firstValue = stringOption(options, first);
   const secondValue = stringOption(options, second);
   if (firstValue && secondValue) {
@@ -3618,7 +3886,7 @@ function formatTable3(rows, columns) {
 }
 
 // dist/release-command.js
-var import_node_crypto2 = require("node:crypto");
+var import_node_crypto3 = require("node:crypto");
 var import_node_fs3 = require("node:fs");
 var import_promises4 = require("node:fs/promises");
 var import_shared4 = __toESM(require_dist(), 1);
@@ -3695,7 +3963,7 @@ async function runInspectCommand(subcommand, argv, context) {
   log(formatReleaseSummary(snapshot.release, snapshot.serverVersion));
 }
 async function resolveCommandEnvironment(options, context) {
-  const environment = exclusiveAlias5(options, "env", "environment");
+  const environment = exclusiveAlias6(options, "env", "environment");
   const server = stringOption(options, "server");
   const username = stringOption(options, "username");
   const password = stringOption(options, "password");
@@ -3751,7 +4019,7 @@ async function waitForRelease(client, version, timeoutSeconds, log, context) {
         waitingForServer = true;
       }
     }
-    await sleep4(Math.min(pollInterval, Math.max(0, deadline - Date.now())));
+    await sleep5(Math.min(pollInterval, Math.max(0, deadline - Date.now())));
   }
   throw new Error(`\u7B49\u5F85\u53D1\u7248 ${version} \u8D85\u65F6\uFF08${timeoutSeconds} \u79D2\uFF09`);
 }
@@ -3840,7 +4108,7 @@ function parseTimeoutSeconds(options) {
   }
   return seconds;
 }
-function sleep4(ms) {
+function sleep5(ms) {
   return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
 function validateArchives(zipPaths) {
@@ -3862,7 +4130,7 @@ function platformOfFile(path) {
 }
 function sha256File(path) {
   return new Promise((resolve2, reject) => {
-    const hash = (0, import_node_crypto2.createHash)("sha256");
+    const hash = (0, import_node_crypto3.createHash)("sha256");
     (0, import_node_fs3.createReadStream)(path).on("error", reject).on("data", (chunk) => hash.update(chunk)).on("end", () => resolve2(hash.digest("hex")));
   });
 }
@@ -3916,7 +4184,7 @@ async function uploadDirectArchive(client, zipPath, platform, size, expectedSha2
     throw new Error("Server \u8FD4\u56DE\u7684 Release \u76F4\u4F20\u5206\u7247\u4E0D\u5B8C\u6574\u6216 URL \u4E0D\u5B89\u5168");
   }
   const handle = await (0, import_promises4.open)(zipPath, "r");
-  const uploadedHash = (0, import_node_crypto2.createHash)("sha256");
+  const uploadedHash = (0, import_node_crypto3.createHash)("sha256");
   try {
     for (const part of parts) {
       const start = (part.partNumber - 1) * session.partSize;
@@ -3970,7 +4238,7 @@ async function putDirectPart(client, sessionId, partNumber, initialUrl, bytes, c
       lastError = error instanceof Error ? error : new Error(String(error));
     }
     if (attempt < 2)
-      await sleep4(retryDelay * (attempt + 1));
+      await sleep5(retryDelay * (attempt + 1));
   }
   throw lastError ?? new Error(`\u5206\u7247 ${partNumber} \u4E0A\u4F20\u5931\u8D25`);
 }
@@ -3982,7 +4250,7 @@ function isSafeDirectUploadUrl(value) {
     return false;
   }
 }
-function exclusiveAlias5(options, first, second) {
+function exclusiveAlias6(options, first, second) {
   const firstValue = stringOption(options, first);
   const secondValue = stringOption(options, second);
   if (firstValue && secondValue) {
@@ -4003,6 +4271,10 @@ async function run(argv, context = {}) {
     }
     if (command === "env") {
       await runEnvCommand(subcommand, rest, { log });
+      return 0;
+    }
+    if (command === "pi") {
+      await runPiCommand(subcommand, rest, { log });
       return 0;
     }
     if (command === "files") {
@@ -4057,11 +4329,24 @@ function helpText() {
     "  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
     "  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]",
     "",
-    "Files\uFF08\u53EA\u8BFB\uFF09:",
+    "Files:",
     "  vcpdeck files roots <client> [--env=<name>] [--json]",
     "  vcpdeck files list <client> <path> [--root=<dir>] [--env=<name>] [--json]",
     "  vcpdeck files stat <client> <path> [--root=<dir>] [--env=<name>] [--json]",
     "  vcpdeck files read <client> <path> [--root=<dir>] [--max-bytes=<n>] [--env=<name>] [--json]",
+    "  vcpdeck files write <client> <path> [--root=<dir>] [--input=<file>] [--env=<name>] [--json]",
+    "  vcpdeck files mkdir <client> <path> [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck files delete <client> <path> [--root=<dir>] [--recursive] [--env=<name>] [--json]",
+    "  vcpdeck files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
+    "  vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
+    "",
+    "Pi:",
+    "  vcpdeck pi models <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck pi sessions <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]",
+    "  vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]",
+    '  vcpdeck pi run <client> "\u63D0\u793A\u8BCD" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]',
+    "  vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]",
     "",
     "Release:",
     "  vcpdeck release status <version> [--env=<name>]",

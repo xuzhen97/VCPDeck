@@ -1,4 +1,5 @@
 import { createAuthenticatedClient } from "./authenticated-client.js";
+import type { VcpDeckClient } from "@vcpdeck/sdk";
 import type { ConfigPaths } from "./config.js";
 import { resolveEnvironment } from "./environment.js";
 
@@ -20,4 +21,13 @@ export async function resolveClientId(
 		);
 	}
 	return matched.clientId;
+}
+
+/** 探测目标机可用授权根（file.roots）。 */
+export async function fetchClientRoots(
+	client: VcpDeckClient,
+	clientId: string,
+): Promise<string[]> {
+	const roots = await client.files.roots(clientId);
+	return Array.isArray(roots) ? roots : [];
 }
