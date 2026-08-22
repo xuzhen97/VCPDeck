@@ -213,12 +213,15 @@ vcpdeck pi models <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]
 vcpdeck pi sessions <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]
 vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]
 vcpdeck pi run <client> "提示词" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]
+vcpdeck pi attach <client> [--cwd=<path>] [--session=<id>] [--root=<dir>] [--env=<name>]
 vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]
 ```
 
 Pi 子任务通过 Server Pi 命名空间驱动目标机上的 Pi Agent（要求 `pi` capability）。运行循环：`prompt` 提交即返回 → 轮询 `agent.state` 至 `idle`（默认超时 600 秒）→ `context` 提取最后一条 assistant 消息的文本回复。注意 Server 的 `complete` 是中断标记而非等待，CLI 不使用它等待任务。授权根与文件域同规则。`waiting_for_extension_input` 时明确报错，需到 Frontend 处理扩展输入。
 
 会话策略：`run` 缺省自动创建新会话（子任务隔离）；`--session` 复用既有会话（先 open 再 prompt）。`run/prompt/new` 非幂等——重复提交会重复执行子任务。已知限制：未暴露 fork/clone/navigate/compact/setModel/附件与图片输入。
+
+`attach` 为交互式 REPL：readline 循环内每行作为提示词下发，等待 idle 后打印最后一条助手回复；`/abort`、`/state` 内建命令与 `/exit`/Ctrl+D 退出；单轮超时不退出 REPL，报告后可继续。
 
 Windows Git Bash 会话注意：MSYS 会把 `/etc` 这类绝对路径参数改写为宿主安装路径（如 `C:/Program Files/Git/etc`），传 POSIX 风格路径时用 `MSYS_NO_PATHCONV=1` 或改用 Windows 形式。
 

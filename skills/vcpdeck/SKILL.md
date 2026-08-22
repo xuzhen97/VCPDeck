@@ -310,6 +310,7 @@ node "<vcpdeck-cli>" pi models <client> [--cwd=<path>] [--root=<dir>] [--env=<na
 node "<vcpdeck-cli>" pi sessions <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]
 node "<vcpdeck-cli>" pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]
 node "<vcpdeck-cli>" pi run <client> "提示词" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" pi attach <client> [--cwd=<path>] [--session=<id>] [--root=<dir>] [--env=<name>]  # 交互式对话 REPL；/exit 或 Ctrl+D 退出
 node "<vcpdeck-cli>" pi abort <client> --session=<id> [--env=<name>] [--json]
 ```
 
@@ -320,6 +321,8 @@ node "<vcpdeck-cli>" pi abort <client> --session=<id> [--env=<name>] [--json]
 `run` 在目标机的 Pi Agent 上执行子任务：提交提示词 → 轮询 agent.state 至 `idle`（默认超时 600 秒，可调）→ 从会话上下文提取最后一条助手文本回复并输出。缺省自动创建新会话（子任务隔离）；`--session=<id>` 复用既有会话延续上下文（先 open 再 prompt）。`waiting_for_extension_input` 表示 Pi 在等待扩展输入，CLI 会明确报错——需在 Frontend 处理或 `pi abort` 中止。`complete` 是中断标记不是等待，Agent 不得用它等待任务完成。
 
 授权根与文件域一致：显式 `--root` 优先，缺省探测唯一根，多根 fail closed；`--cwd` 为相对路径（缺省 `.`），是 Pi 在目标机上的工作目录。
+
+`attach` 为交互式对话模式：readline 循环内每行作为提示词下发，等待 idle 后打印最后一条助手回复，循环继续；`/abort` 中止当前运行、`/state` 查看状态、`/exit` 或 Ctrl+D 退出。单轮超时或扩展输入等待只报告不退出，可继续输入。
 
 ### 确认门（最强级，强制）
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createInterface } from "node:readline/promises";
+import { createInterface } from "node:readline";
 import { stdin as nodeStdin, stdout as nodeStdout } from "node:process";
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import { createAuthenticatedClient } from "./authenticated-client.js";
@@ -436,7 +436,8 @@ async function runAttachRepl(
 	const output = context.output ?? nodeStdout;
 	const input = context.input ?? nodeStdin;
 	const pollIntervalMs = context.pollIntervalMs ?? POLL_INTERVAL_MS;
-	output.write(formatEnvironmentSummary(environment) + "\n");
+	const LF = String.fromCharCode(10);
+	output.write(formatEnvironmentSummary(environment) + LF);
 
 	const existingSession = stringOption(options, "session");
 	let sessionId: string;
@@ -448,23 +449,57 @@ async function runAttachRepl(
 		sessionId = created.sessionId;
 	}
 	output.write(
-		`── Pi 交互会话 ──\n机器: ${clientFilter}\ncwd: ${cwdRef.rootDir}${cwdRef.relativePath === "." ? "" : `/${cwdRef.relativePath}`}\n会话: ${sessionId}\n内建命令: /abort 中止当前运行 · /state 查看状态 · /exit 或 Ctrl+D 退出\n\n`,
+		"── Pi 交互会话 ──" +
+		LF +
+		"机器: " + clientFilter +
+		LF +
+		"cwd: " + cwdRef.rootDir +
+		(cwdRef.relativePath === "." ? "" : "/" + cwdRef.relativePath) +
+		LF +
+		"会话: " + sessionId +
+		LF +
+		"内建命令: /abort 中止当前运行 · /state 查看状态 · /exit 或 Ctrl+D 退出" +
+		LF + LF,
 	);
-
 	const rl = createInterface({
 		input,
 		output,
 		terminal: input === nodeStdin && output === nodeStdout,
 	});
+	// 行队列：异步处理期间到达的行先缓冲，避免 promises 版 question 丢行
+	const pendingLines: string[] = [];
+	let waiter: ((line: string) => void) | null = null;
+	let inputClosed = false;
+	rl.on("line", (line: string) => {
+		const trimmed = line.trim();
+		if (waiter) {
+			const resolveLine = waiter;
+			waiter = null;
+			resolveLine(trimmed);
+		} else {
+			pendingLines.push(trimmed);
+		}
+	});
+	rl.on("close", () => {
+		inputClosed = true;
+		waiter?.("");
+	});
+	const askLine = (): Promise<string> => {
+		const buffered = pendingLines.shift();
+		if (buffered !== undefined) return Promise.resolve(buffered);
+		if (inputClosed) return Promise.resolve("");
+		return new Promise((resolve) => {
+			waiter = resolve;
+		});
+	};
 	try {
 		for (;;) {
-			let line: string;
-			try {
-				line = (await rl.question("pi> ")).trim();
-			} catch {
-				break; // EOF（Ctrl+D）
+			const raw = await askLine();
+			const line = raw.trim();
+			if (!line) {
+				if (inputClosed && pendingLines.length === 0) break;
+				continue;
 			}
-			if (!line) continue;
 			if (line === "/exit" || line === "/quit") break;
 			if (line === "/state") {
 				const state = (await client.pi.agent.state(
@@ -472,12 +507,12 @@ async function runAttachRepl(
 					sessionId,
 					cwdRef,
 				)) as { status?: string };
-				output.write(`[Pi 状态] ${state?.status ?? "未知"}\n`);
+				output.write("[Pi 状态] " + (state?.status ?? "未知") + LF);
 				continue;
 			}
 			if (line === "/abort") {
 				await client.pi.agent.abort(clientId, sessionId, sessionId);
-				output.write("[已提交中止请求]\n");
+				output.write("[已提交中止请求]" + LF);
 				continue;
 			}
 			try {
@@ -491,7 +526,7 @@ async function runAttachRepl(
 					sessionId,
 					cwdRef,
 					perPromptTimeout,
-					(s: string) => output.write(`[Pi ${s}…]\n`),
+					(s: string) => output.write("[Pi " + s + "…" + LF),
 					pollIntervalMs,
 				);
 				const page = (await client.pi.sessions.context(
@@ -500,12 +535,14 @@ async function runAttachRepl(
 					cwdRef,
 				)) as ContextPageShape;
 				const reply = extractLastAssistantText(page);
-				output.write(reply ? `\n${reply}\n\n` : "\n(无文本回复)\n\n");
+				output.write(reply ? LF + reply + LF + LF : LF + "(无文本回复)" + LF + LF);
 			} catch (error) {
 				output.write(
-					`[错误] ${error instanceof Error ? error.message : String(error)}\n`,
+					"[错误] " + (error instanceof Error ? error.message : String(error)) +
+					LF,
 				);
 			}
+			if (inputClosed && pendingLines.length === 0) break;
 		}
 	} finally {
 		rl.close();

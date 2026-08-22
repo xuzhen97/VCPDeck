@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { PassThrough } from "node:stream";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -189,7 +190,7 @@ describe("pi command", () => {
 		});
 		const first = await fixture(ok.port);
 		const lines: string[] = [];
-		await runPiCommand("models", ["workstation", "--root=D:\\\\"], {
+		await runPiCommand("models", ["workstation", "--root=D:\\"], {
 			paths: first.paths,
 			processEnv: first.processEnv,
 			log: (m) => lines.push(m),
@@ -254,7 +255,7 @@ describe("pi command", () => {
 		await expect(
 			runPiCommand(
 				"run",
-				["workstation", "继续", "--session=s-existing", "--root=D:\\\\"],
+				["workstation", "继续", "--session=s-existing", "--root=D:\\"],
 				{ paths: first.paths, processEnv: first.processEnv, pollIntervalMs: 1, log: () => {} },
 			),
 		).rejects.toThrow("等待扩展输入");
@@ -266,7 +267,7 @@ describe("pi command", () => {
 		const lines: string[] = [];
 		await runPiCommand(
 			"run",
-			["workstation", "收尾", "--session=s-exist", "--root=D:\\\\"],
+			["workstation", "收尾", "--session=s-exist", "--root=D:\\"],
 			{ paths: second.paths, processEnv: second.processEnv, pollIntervalMs: 1, log: (m) => lines.push(m) },
 		);
 		expect(lines.join("\n")).toContain("已打开既有会话 s-exist");
@@ -283,5 +284,69 @@ describe("pi command", () => {
 			log: (m) => lines.push(m),
 		});
 		expect(lines.join("\n")).toContain("中止请求已提交");
+	});
+
+	describe("pi attach REPL", () => {
+		function makeStreams() {
+			const input = new PassThrough();
+			const output = new PassThrough();
+			const chunks: Buffer[] = [];
+			output.on("data", (c: Buffer) => chunks.push(c));
+			return {
+				input,
+				output,
+				text: () => Buffer.concat(chunks).toString("utf8"),
+			};
+		}
+
+		it("多轮对话：每轮提交提示词、取回回复；/exit 退出", async () => {
+			const { port, bodies } = await listenPi({
+				stateSequence: ["running", "idle", "running", "idle"],
+				contextMessages: [
+					{ role: "assistant", content: [{ type: "text", text: "第一轮回复" }] },
+				],
+			});
+			const { paths, processEnv } = await fixture(port);
+			const streams = makeStreams();
+			streams.input.write("第一问\n第二问\n/exit\n");
+			streams.input.end();
+			await runPiCommand("attach", ["workstation", "--root=D:\\"], {
+				paths,
+				processEnv,
+				pollIntervalMs: 1,
+				input: streams.input,
+				output: streams.output,
+			});
+			const prompts = bodies.filter(
+				(b) => (b as { kind?: string }).kind === "prompt",
+			) as Array<{ body: { prompt: string } }>;
+			expect(prompts.map((p) => p.body.prompt)).toEqual(["第一问", "第二问"]);
+			expect(streams.text()).toContain("第一轮回复");
+			expect(streams.text()).toContain("── Pi 交互会话 ──");
+		});
+
+		it("/abort 提交中止；EOF 退出；单轮失败不退出 REPL", async () => {
+			const { port } = await listenPi({
+				stateSequence: ["waiting_for_extension_input", "running", "idle"],
+				contextMessages: [
+					{ role: "assistant", content: [{ type: "text", text: "恢复后回复" }] },
+				],
+			});
+			const { paths, processEnv } = await fixture(port);
+			const streams = makeStreams();
+			streams.input.write("触发扩展\n重试\n/abort\n");
+			streams.input.end();
+			await runPiCommand("attach", ["workstation", "--root=D:\\"], {
+				paths,
+				processEnv,
+				pollIntervalMs: 1,
+				input: streams.input,
+				output: streams.output,
+			});
+			const text = streams.text();
+			expect(text).toContain("等待扩展输入");
+			expect(text).toContain("恢复后回复");
+			expect(text).toContain("已提交中止请求");
+		});
 	});
 });
