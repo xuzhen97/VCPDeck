@@ -9,7 +9,6 @@ import { runFilesCommand } from "./files-command.js";
 import { runJobsCommand } from "./jobs-command.js";
 import { runPiCommand } from "./pi-command.js";
 import { runFrpCommand } from "./frp-command.js";
-import { runStorageCommand } from "./storage-command.js";
 import { runClientsCommand } from "./clients-command.js";
 import { runReleaseCommand } from "./release-command.js";
 
@@ -45,6 +44,8 @@ export async function run(
 			return 0;
 		}
 		if (command === "storage") {
+			// 懒加载：命令模块按需解析，保持启动轻量
+			const { runStorageCommand } = await import("./storage-command.js");
 			await runStorageCommand(subcommand, rest, { log });
 			return 0;
 		}

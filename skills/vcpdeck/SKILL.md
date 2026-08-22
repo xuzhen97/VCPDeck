@@ -188,7 +188,7 @@ GET 天然幂等，失败可直接重试；网络错误或非 2xx 时 CLI 非零
 
 ### 成功判定与已知限制
 
-成功判定：命令零退出且 JSON 数组可解析。已知限制：只有列表查询，没有单机详情过滤；不能通过本命令对机器执行任何操作——执行类需求（Job、Terminal、Pi 等）尚未形成 CLI 命令，应明确告知用户尚未落地。
+成功判定：命令零退出且 JSON 数组可解析。已知限制：只有列表查询，没有单机详情过滤；机器上的命令执行用 `jobs run`，交互式终端与 Pi 子任务分别见 Terminal/Pi 功能章节。
 
 ### 与 Server 能力的对齐情况
 
@@ -363,6 +363,31 @@ node "<vcpdeck-cli>" storage status [--env=<name>] [--json]
 ### 操作分级与对齐情况
 
 三个子命令均为只读 GET，幂等无副作用，无需确认门。已对齐：实例/映射列表查询、存储后端状态。未对齐：FRP 实例创建/探活/设默认、映射创建/删除，Storage 后端切换——这些写操作落地时适用确认门。
+
+## 功能：Terminal 生命周期与终端直连
+
+### 可用命令
+
+```bash
+node "<vcpdeck-cli>" terminal shells <client> [--env=<name>] [--json]
+node "<vcpdeck-cli>" terminal list <client> [--status=<status>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" terminal close <client> <sessionId> [--env=<name>] [--json]  # 写操作需确认
+node "<vcpdeck-cli>" terminal attach <client> <sessionId> [--env=<name>]  # 本地终端直连远端 PTY；Ctrl+Q 退出
+```
+
+以 CLI `--help` 为命令事实来源。
+
+### 功能语义与边界
+
+`shells` 探测目标机可用 Shell；`list` 列出会话（sessionId/shell/status/创建者，`--status` 为首页内本地过滤）；`close` 关闭会话（写操作需确认门，先取详情展示目标摘要再删除）。
+
+**attach 是终端直连**：本地终端进入 raw mode 后经 `/app` 数据面（Bearer 握手认证）双向桥接远端 PTY——按键直传、输出直写、resize 同步，vim/htop 等 TUI 应用可用，体感与 SSH 一致。交互体感受操作者到 Server 的网络延迟影响。安全退出序列为 `Ctrl+Q`（直接断开本地连接不会通知 Server，应尽量使用退出序列或 `terminal close`）。
+
+已知限制：仅支持 Bearer 环境（密码环境的登录态无法传给 socket 握手）；交互式内容经 Server 中继（审计与隐私预期见 docs/security.md）；不支持会话录制回放。
+
+### 操作分级与确认门
+
+`shells/list` 只读幂等无需确认；`close` 写操作需展示机器/会话/shell/创建者并取得明确确认；`attach` 本身不改变目标机状态（附着到既有 PTY），但接入后用户的键入即为真实操作——Skill 应提醒用户正在操作真实机器。
 
 ## 后续 CLI 能力扩展规则
 

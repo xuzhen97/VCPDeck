@@ -5,7 +5,6 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["src/**/*"],
-  "files": ["src/storage-command.ts"],
+  "include": ["src/**/*", "src/storage-command.ts"],
   "exclude": ["node_modules", "dist"]
 }
