@@ -45,14 +45,42 @@ function parseArgs(argv) {
 	return options;
 }
 
-async function download(url, dest) {
-	const response = await fetch(url);
-	if (!response.ok) {
-		throw new Error(`下载失败：HTTP ${response.status}（${url}）`);
+const DOWNLOAD_ATTEMPTS = 3;
+
+/** 多源重试下载：raw 主源 + jsDelivr 镜像；404 视为致命（tag/repo 错误），网络类错误重试。 */
+async function downloadResilient(repo, tag, entry, dest) {
+	const mirrors = [
+		{ label: "raw", url: `https://raw.githubusercontent.com/${repo}/${tag}/${entry}` },
+		{ label: "jsDelivr", url: `https://cdn.jsdelivr.net/gh/${repo}@${tag}/${entry}` },
+	];
+	let lastError = null;
+	let sawNotFound = false;
+	for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
+		for (const mirror of mirrors) {
+			try {
+				const response = await fetch(mirror.url);
+				if (response.status === 404) {
+					sawNotFound = true;
+					throw new Error(`HTTP 404（检查 --tag/--repo 是否正确）`);
+				}
+				if (!response.ok) {
+					throw new Error(`HTTP ${response.status}`);
+				}
+				const text = await response.text();
+				fs.writeFileSync(dest, text);
+				return { source: mirror.label, bytes: text.length };
+			} catch (error) {
+				lastError = error;
+				console.log(
+					`[vcpdeck:install] 第 ${attempt}/${DOWNLOAD_ATTEMPTS} 次尝试失败（${mirror.label}）：${error.message}`,
+				);
+			}
+		}
+		if (attempt < DOWNLOAD_ATTEMPTS && !sawNotFound) {
+			await new Promise((r) => setTimeout(r, 1500));
+		}
 	}
-	const text = await response.text();
-	fs.writeFileSync(dest, text);
-	return text.length;
+	throw lastError ?? new Error("下载失败");
 }
 
 /** POSIX：自动追加到 ~/.bashrc（带标记，幂等）。 */
@@ -103,15 +131,16 @@ function main() {
 	const options = parseArgs(process.argv);
 	const dir = options.dir ?? path.join(os.homedir(), ".vcpdeck", "bin");
 	const entry = "skills/vcpdeck/vcpdeck.cjs";
-	const url = `https://raw.githubusercontent.com/${options.repo}/${options.tag}/${entry}`;
 
 	fs.mkdirSync(dir, { recursive: true });
 	const cliPath = path.join(dir, "vcpdeck.cjs");
 
-	console.log(`[vcpdeck:install] 下载 ${url}`);
-	download(url, cliPath)
-		.then((bytes) => {
-			console.log(`[vcpdeck:install] 已写入 ${cliPath}（${bytes} bytes）`);
+	console.log(
+		`[vcpdeck:install] 下载 ${options.repo}@${options.tag}（raw + jsDelivr 镜像，自动重试）`,
+	);
+	downloadResilient(options.repo, options.tag, entry, cliPath)
+		.then(({ source, bytes }) => {
+			console.log(`[vcpdeck:install] 已写入 ${cliPath}（${bytes} bytes，源: ${source}）`);
 
 			const targetNative = cliPath.split(path.sep).join("/");
 			fs.writeFileSync(
@@ -145,10 +174,17 @@ function main() {
 			console.log("[vcpdeck:install] 完成。环境配置: vcpdeck env add/list/use。");
 		})
 		.catch((error) => {
-			console.error(`[vcpdeck:install] ${error.message}`);
-			console.error(
-				"[vcpdeck:install] 私有仓库请改用: git clone --depth 1 --branch <tag> 后 node scripts/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs",
-			);
+			const message = String(error?.message ?? error);
+			console.error(`[vcpdeck:install] ${message}`);
+			if (/404/.test(message)) {
+				console.error(
+					"[vcpdeck:install] 未找到目标文件：请核对 --tag 与 --repo 是否正确；私有仓库请改用: git clone --depth 1 --branch <tag> 后 node scripts/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs",
+				);
+			} else {
+				console.error(
+					"[vcpdeck:install] 多次尝试（含镜像）仍失败，通常是到 GitHub 的网络不稳定；请稍后重跑同一命令。",
+				);
+			}
 			process.exit(1);
 		});
 }
