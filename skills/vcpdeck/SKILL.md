@@ -40,7 +40,7 @@ pnpm --filter @vcpdeck/cli build
 | Pi 子任务（写操作） | `pi models/sessions/new/run/abort` | 已实现 | 在目标机驱动 Pi Agent 执行子任务并取回回复；**最强确认门：必须先取得用户明确确认** |
 | FRP 查询（只读） | `frp instances/mappings` | 已实现 | 服务实例与映射状态；凭据字段（token/密码）绝不进入输出 |
 | Storage 查询（只读） | `storage status` | 已实现 | 当前激活的存储后端类型 |
-| Terminal 生命周期 | `terminal shells/list/close` | 已实现 | Shell 探测与会话列表（只读）、关闭会话（写操作需确认）；交互式 PTY 在 Frontend |
+| Terminal 生命周期 | `terminal new/shells/list/close` | 已实现 | 创建会话（返回 sessionId 供 attach）、Shell 探测与会话列表（只读）、关闭会话（写操作需确认）；交互式 PTY 经 attach 直连 |
 | Release / 自更新 | `release upload/status/wait` | 已实现 | 上传双平台构件；查询或等待 Server/Client 权威终态，失败或超时返回非零退出 |
 | Terminal、FRP/Storage 写操作（建实例/删映射/切后端等）、机器写入 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明 |
 
@@ -373,6 +373,7 @@ node "<vcpdeck-cli>" storage status [--env=<name>] [--json]
 ### 可用命令
 
 ```bash
+node "<vcpdeck-cli>" terminal new <client> [--shell=<id>] [--cols=<n>] [--rows=<n>] [--env=<name>] [--json]  # 创建会话，返回 sessionId
 node "<vcpdeck-cli>" terminal shells <client> [--env=<name>] [--json]
 node "<vcpdeck-cli>" terminal list <client> [--status=<status>] [--env=<name>] [--json]
 node "<vcpdeck-cli>" terminal close <client> <sessionId> [--env=<name>] [--json]  # 写操作需确认

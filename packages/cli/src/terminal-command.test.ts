@@ -103,6 +103,64 @@ describe("terminal command", () => {
 		expect(parsed[0].id).toBe("pwsh");
 	});
 
+	it("new 创建终端会话：缺省选默认 shell，输出 attach 连接命令", async () => {
+		let createBody: unknown = null;
+		const server: Server = createServer((request, response) => {
+			const path = (request.url ?? "").split("?")[0];
+			response.setHeader("content-type", "application/json");
+			if (path === "/api/clients") {
+				response.end(
+					JSON.stringify([{ clientId: "c1", name: "ws", online: true }]),
+				);
+				return;
+			}
+			if (path.endsWith("/terminals/shells")) {
+				response.end(
+					JSON.stringify([
+						{ id: "pwsh", label: "PowerShell", kind: "powershell", isDefault: false },
+						{ id: "cmd", label: "CMD", kind: "cmd", isDefault: true },
+					]),
+				);
+				return;
+			}
+			if (path === "/api/clients/c1/terminals" && request.method === "POST") {
+				let body = "";
+				request.on("data", (c) => (body += c));
+				request.on("end", () => {
+					createBody = JSON.parse(body || "{}");
+					response.end(
+						JSON.stringify({
+							sessionId: "ts-1",
+							clientId: "c1",
+							status: "active",
+							shellId: "cmd",
+							cols: 120,
+							rows: 30,
+							createdAt: "2026-08-23T00:00:00.000Z",
+						}),
+					);
+				});
+				return;
+			}
+			response.statusCode = 404;
+			response.end("{}");
+		});
+		servers.push(server);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const port = (server.address() as { port: number }).port;
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runTerminalCommand("new", ["ws"], {
+			paths,
+			processEnv,
+			log: (m) => lines.push(m),
+		});
+		expect(createBody).toEqual({ shellId: "cmd", cols: 120, rows: 30 });
+		const text = lines.join("\n");
+		expect(text).toContain("已创建终端会话 ts-1");
+		expect(text).toContain("vcpdeck terminal attach ws ts-1");
+	});
+
 	it("list 输出会话表格；--status 本地过滤", async () => {
 		const requests: RecordedRequest[] = [];
 		const server: Server = createServer((request, response) => {

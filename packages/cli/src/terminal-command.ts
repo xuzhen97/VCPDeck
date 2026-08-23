@@ -43,13 +43,18 @@ export async function runTerminalCommand(
 	const helpRequested =
 		subcommand === "--help" ||
 		subcommand === "-h" ||
-		((subcommand === "shells" ||
+		((subcommand === "new" ||
+			subcommand === "shells" ||
 			subcommand === "list" ||
 			subcommand === "close" ||
 			subcommand === undefined) &&
 			hasHelp(argv));
 	if (helpRequested) {
 		(context.log ?? console.log)(terminalUsage());
+		return;
+	}
+	if (subcommand === "new") {
+		await runNew(argv, context);
 		return;
 	}
 	if (subcommand === "shells") {
@@ -78,6 +83,7 @@ function hasHelp(argv: string[]): boolean {
 function terminalUsage(): string {
 	return [
 		"Terminal 命令:",
+		"  vcpdeck terminal new <client> [--shell=<id>] [--cols=<n>] [--rows=<n>] [--env=<name>] [--json]  # 创建会话，返回 sessionId",
 		"  vcpdeck terminal shells <client> [--env=<name>] [--json]",
 		"  vcpdeck terminal list <client> [--status=<status>] [--env=<name>] [--json]",
 		"  vcpdeck terminal close <client> <sessionId> [--env=<name>] [--json]  # 写操作，会话将被终止",
@@ -131,6 +137,59 @@ async function runShells(
 			["id", "label", "kind", "default"],
 		),
 	);
+}
+
+/** 创建终端会话：缺省选 isDefault shell；返回 sessionId 供 attach 使用。 */
+async function runNew(
+	argv: string[],
+	context: TerminalCommandContext,
+): Promise<void> {
+	const { positionals, options } = parseCommandArgs(argv, {
+		value: ["env", "environment", "shell", "cols", "rows"],
+		boolean: ["json"],
+	});
+	const [clientFilter] = positionals;
+	if (!clientFilter || positionals.length > 1) throw new Error(terminalUsage());
+	const { environment, client } = await openContext(context, options);
+	const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+	const log = context.log ?? console.log;
+	const shells = (await client.terminals.shells(clientId)) as Array<{
+		id: string;
+		label?: string;
+		isDefault?: boolean;
+	}>;
+	const shellOption = stringOption(options, "shell");
+	const shell =
+		shells.find((item) => item.id === shellOption) ??
+		shells.find((item) => item.isDefault) ??
+		shells[0];
+	if (!shell) {
+		throw new Error("目标机未报告可用 Shell，无法创建终端会话");
+	}
+	const cols = parseTerminalSize(stringOption(options, "cols"), "--cols", 120);
+	const rows = parseTerminalSize(stringOption(options, "rows"), "--rows", 30);
+	const created = (await client.terminals.create(clientId, {
+		shellId: shell.id,
+		cols,
+		rows,
+	})) as { sessionId: string; status?: string; shellLabel?: string };
+	if (options.json === true) {
+		log(JSON.stringify(created, null, 2));
+		return;
+	}
+	log(formatEnvironmentSummary(environment));
+	log(`[vcpdeck] 已创建终端会话 ${created.sessionId}\n（${created.shellLabel ?? shell.label ?? shell.id}，${cols}x${rows}）`);
+	log(`[vcpdeck] 连接: vcpdeck terminal attach ${clientFilter} ${created.sessionId}`);
+}
+
+/** 解析终端尺寸选项：非整数或越界时报错。 */
+function parseTerminalSize(raw: string | undefined, flag: string, fallback: number): number {
+	if (raw === undefined) return fallback;
+	const value = Number(raw);
+	if (!Number.isInteger(value) || value < 2 || value > 500) {
+		throw new Error(`${flag} 必须是 2-500 的整数`);
+	}
+	return value;
 }
 
 async function runList(

@@ -11274,9 +11274,13 @@ __export(terminal_command_exports, {
   runTerminalCommand: () => runTerminalCommand
 });
 async function runTerminalCommand(subcommand, argv, context = {}) {
-  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "shells" || subcommand === "list" || subcommand === "close" || subcommand === void 0) && hasHelp7(argv);
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "new" || subcommand === "shells" || subcommand === "list" || subcommand === "close" || subcommand === void 0) && hasHelp7(argv);
   if (helpRequested) {
     (context.log ?? console.log)(terminalUsage());
+    return;
+  }
+  if (subcommand === "new") {
+    await runNew2(argv, context);
     return;
   }
   if (subcommand === "shells") {
@@ -11303,6 +11307,7 @@ function hasHelp7(argv) {
 function terminalUsage() {
   return [
     "Terminal \u547D\u4EE4:",
+    "  vcpdeck terminal new <client> [--shell=<id>] [--cols=<n>] [--rows=<n>] [--env=<name>] [--json]  # \u521B\u5EFA\u4F1A\u8BDD\uFF0C\u8FD4\u56DE sessionId",
     "  vcpdeck terminal shells <client> [--env=<name>] [--json]",
     "  vcpdeck terminal list <client> [--status=<status>] [--env=<name>] [--json]",
     "  vcpdeck terminal close <client> <sessionId> [--env=<name>] [--json]  # \u5199\u64CD\u4F5C\uFF0C\u4F1A\u8BDD\u5C06\u88AB\u7EC8\u6B62",
@@ -11343,6 +11348,48 @@ async function runShells(argv, context) {
     kind: shell.kind,
     default: shell.isDefault ? "yes" : "-"
   })), ["id", "label", "kind", "default"]));
+}
+async function runNew2(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "shell", "cols", "rows"],
+    boolean: ["json"]
+  });
+  const [clientFilter] = positionals;
+  if (!clientFilter || positionals.length > 1)
+    throw new Error(terminalUsage());
+  const { environment, client } = await openContext3(context, options);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const log = context.log ?? console.log;
+  const shells = await client.terminals.shells(clientId);
+  const shellOption = stringOption(options, "shell");
+  const shell = shells.find((item) => item.id === shellOption) ?? shells.find((item) => item.isDefault) ?? shells[0];
+  if (!shell) {
+    throw new Error("\u76EE\u6807\u673A\u672A\u62A5\u544A\u53EF\u7528 Shell\uFF0C\u65E0\u6CD5\u521B\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD");
+  }
+  const cols = parseTerminalSize(stringOption(options, "cols"), "--cols", 120);
+  const rows = parseTerminalSize(stringOption(options, "rows"), "--rows", 30);
+  const created = await client.terminals.create(clientId, {
+    shellId: shell.id,
+    cols,
+    rows
+  });
+  if (options.json === true) {
+    log(JSON.stringify(created, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(`[vcpdeck] \u5DF2\u521B\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD ${created.sessionId}
+\uFF08${created.shellLabel ?? shell.label ?? shell.id}\uFF0C${cols}x${rows}\uFF09`);
+  log(`[vcpdeck] \u8FDE\u63A5: vcpdeck terminal attach ${clientFilter} ${created.sessionId}`);
+}
+function parseTerminalSize(raw, flag, fallback) {
+  if (raw === void 0)
+    return fallback;
+  const value2 = Number(raw);
+  if (!Number.isInteger(value2) || value2 < 2 || value2 > 500) {
+    throw new Error(`${flag} \u5FC5\u987B\u662F 2-500 \u7684\u6574\u6570`);
+  }
+  return value2;
 }
 async function runList2(argv, context) {
   const { positionals, options } = parseCommandArgs(argv, {

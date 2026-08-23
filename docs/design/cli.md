@@ -228,14 +228,16 @@ Windows Git Bash 会话注意：MSYS 会把 `/etc` 这类绝对路径参数改�
 ## 10. Terminal 命令
 
 ```text
+vcpdeck terminal new <client> [--shell=<id>] [--cols=<n>] [--rows=<n>] [--env=<name>] [--json]
 vcpdeck terminal shells <client> [--env=<name>] [--json]
 vcpdeck terminal list <client> [--status=<status>] [--env=<name>] [--json]
 vcpdeck terminal close <client> <sessionId> [--env=<name>] [--json]
+vcpdeck terminal attach <client> <sessionId> [--env=<name>]
 ```
 
-终端生命周期管理：`shells` 探测目标机可用 Shell（pwsh/cmd/bash 等）；`list` 列出会话（sessionId/shell/status/创建者等，`--status` 为首页内本地过滤——SDK 列表为分页 API，无服务端 status 参数）；`close` 关闭会话（写操作需确认门，先取详情展示目标摘要再删除）。
+终端全生命周期：`new` 创建会话（缺省选 isDefault shell，返回 sessionId 供 attach；写操作需确认门）；`shells` 探测目标机可用 Shell（pwsh/cmd/bash 等）；`list` 列出会话（sessionId/shell/status/创建者等，`--status` 为首页内本地过滤——SDK 列表为分页 API，无服务端 status 参数）；`close` 关闭会话（写操作需确认门，先取详情展示目标摘要再删除）。
 
-**边界**：交互式 PTY 输入输出保留在 Frontend（Socket.IO 数据面），CLI 仅管理生命周期，不提供交互式会话。已知非能力：会话创建与交互式使用未暴露。
+**边界**：交互式 PTY 的 TUI 直连由 `attach` 提供（/app 数据面，Bearer 握手认证，Ctrl+Q 退出，见 ADR-0020）；Frontend 浏览器终端仍走同数据面。已知非能力：CLI 不做会话审计查询。
 
 ## 11. FRP 与 Storage 命令
 
