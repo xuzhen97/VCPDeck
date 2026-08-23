@@ -164,6 +164,14 @@ pnpm --filter @vcpdeck/client start
 - Launcher online 但验收超时：运行 `pm2 logs vcpdeck-client-launcher --lines 100`，核对 `launcher.env`、Server 可达性、PSK 和 `/client` WebSocket；
 - 失败会保留 `~/.vcpdeck/client-install.json`、缓存、版本目录与 PM2 现场，修复后重跑同一固定命令。
 
+### Client PM2 进程丢失
+
+- 现象：`pm2 list` 为空且 `pm2 describe vcpdeck-client-launcher` 不存在，但 `~/.pm2/dump.pm2` 存在——PM2 守护被清空而恢复快照仍在；
+- 恢复：`pm2 resurrect` 后 `pm2 list` 确认进程回 online，再到驾驶台或 `vcpdeck clients list` 核对在线；
+- 起不来时 `pm2 logs vcpdeck-client-launcher --lines 100` 核对 `launcher.env`、Server 可达性与 PSK；
+- 自启单元/计划任务也被删时，Linux 重跑 `pm2 startup` 按提示注册 systemd；Windows 重跑一键安装固定命令重建登录触发任务；
+- 全程不得动 `~/.vcpdeck/client-id`，否则会以新身份注册成新机器。
+
 ### Client 无法连接
 
 - 核对 `VCPDECK_SERVER` 和网络/DNS/TLS；
