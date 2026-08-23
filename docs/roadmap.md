@@ -1,6 +1,6 @@
 # VCPDeck 路线图
 
-> 状态：Planning｜维护责任：项目负责人｜最后核验：2026-08-15｜说明：优先级候选，不代表交付承诺
+> 状态：Planning｜维护责任：项目负责人｜最后核验：2026-08-23｜说明：优先级候选，不代表交付承诺
 
 ## 1. 已形成闭环
 
@@ -12,6 +12,7 @@
 - 浏览器交互式终端；
 - 人机交互式远程 Pi Session；
 - Release、Launcher、Server/Client 更新基础实现；
+- CLI 全域命令对齐控制面能力（jobs/files/frp/storage/terminal/pi），支持 TUI 终端直连与 Pi 交互 REPL，并有真实 Server+Client 的 CLI 能力端到端测试；
 - React 驾驶台和框架无关 SDK。
 
 ## 2. 近期优先级：可靠性与安全基线
