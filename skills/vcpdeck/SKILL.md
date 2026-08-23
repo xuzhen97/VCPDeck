@@ -76,6 +76,7 @@ node "<vcpdeck-cli>" env check
 5. CLI 成功退出只证明该命令定义的同步阶段成功；涉及异步 Job、Release 或远程运行态时，继续按对应功能说明核对终态。
 6. 只报告安全摘要、资源 ID、稳定错误码、状态和下一步，不原样输出可能含敏感信息的 payload 或外部响应。
 7. 当前没有对应 CLI 命令的能力应明确告知用户尚未落地，不通过临时 curl、任意 shell 或在 Skill 中复制 SDK 实现来伪造 CLI 能力。
+8. Windows 盘符根路径统一写正斜杠形式（`--root=D:/`）：Git Bash 下 `--root="D:\\"` 的尾反斜杠会转义闭引号导致命令未执行即报错；正斜杠与授权根匹配等价。
 
 ## 功能：Release 上传与 Server/Client 自更新
 

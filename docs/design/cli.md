@@ -223,7 +223,7 @@ Pi 子任务通过 Server Pi 命名空间驱动目标机上的 Pi Agent（要求
 
 `attach` 为交互式 REPL：readline 循环内每行作为提示词下发，等待 idle 后打印最后一条助手回复；`/abort`、`/state` 内建命令与 `/exit`/Ctrl+D 退出；单轮超时不退出 REPL，报告后可继续。
 
-Windows Git Bash 会话注意：MSYS 会把 `/etc` 这类绝对路径参数改写为宿主安装路径（如 `C:/Program Files/Git/etc`），传 POSIX 风格路径时用 `MSYS_NO_PATHCONV=1` 或改用 Windows 形式。
+Windows Git Bash 会话注意：MSYS 会把 `/etc` 这类绝对路径参数改写为宿主安装路径（如 `C:/Program Files/Git/etc`），传 POSIX 风格路径时用 `MSYS_NO_PATHCONV=1` 或改用 Windows 形式。盘符根路径统一写正斜杠形式（`--root=D:/`）：`--root="D:\\"` 的尾反斜杠会转义闭引号，命令未执行即报 shell 引号错误；两种形式与授权根匹配等价，显式根由 Client 侧授权校验 fail closed。
 
 ## 10. Terminal 命令
 
