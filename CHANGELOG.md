@@ -2,21 +2,30 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
-## [0.3.0] - 2026-08-22
+## [0.4.0] - 2026-08-23
 
 ### Fixed
 
-- 修复 Launcher 自动下载 Node 运行时后 spawn ENOENT 的死循环：官方压缩包解压后的顶层目录（`node-v<version>-<plat>-<arch>`）未归一化为缓存标准布局 `node-<version>`，导致返回的路径永远不存在，目标机在系统无合格 Node 时反复崩溃重启、无法上线；现解压后归一化目录并校验二进制存在，缓存扫描跳过二进制缺失的损坏条目。
 - CLI 修复 `terminal` 命令组未接入分发入口的问题：shells/list/close/attach 已实现并有单测，但入口未路由导致实际二进制报“未知命令”，现已在 `vcpdeck --help` 与分发中接入。
 - CLI 修复 `files download` 在本地存储后端下的签名下载地址为相对路径导致请求失败的问题：现按环境 Server 地址拼接（外部 Provider 绝对直链不受影响）。
 
 ### Added
 
+- CLI 新增 `vcpdeck terminal attach`：本地终端 raw mode 直连远端 PTY（经 /app 数据面与 Bearer 握手认证），TUI 体感与 SSH 一致，Ctrl+Q 退出；决策见 ADR-0020。
 - CLI 新增 `vcpdeck pi attach`：交互式对话 REPL 驱动远端 Pi 子任务——每行提示词下发、等待完成后取回助手回复、循环继续；支持 /abort、/state 内建命令与 /exit 退出。
-- 新增 CLI 能力端到端测试脚本 `scripts/test-cli-capabilities.cjs`（`pnpm test:cli`）：真实 Server + Client 上驱动 CLI 构建产物逐域验证（clients/jobs 失败闭环/files 全周期与直传往返/frp/storage/terminal/pi/错误路径），临时物全部隔离在 `.tmp/cli-e2e/`；AI Agent 会话运行需以操作者同意文本设置 `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION`。
 - CLI 新增 `vcpdeck terminal shells/list/close`：Shell 探测与会话生命周期管理（关闭为写操作需确认门）；交互式 PTY 输入输出保留在 Frontend（Socket.IO），CLI 仅管理生命周期。
-- CLI 新增 `vcpdeck frp instances/mappings` 与 `vcpdeck storage status`（只读）：FRP 服务实例/映射状态查询（凭据字段安全投影，token/密码绝不进入输出）与存储后端状态；映射支持 `--client` 名称/ID 过滤。
 - CLI 新增 `vcpdeck pi models/sessions/new/run/abort`：在目标机驱动 Pi Agent 执行子任务——prompt 提交后轮询 agent.state 至 idle，从会话上下文提取最后一条助手文本回复；缺省自动创建新会话，`--session` 复用既有会话；扩展输入等待时明确报错（需到 Frontend 处理）。写操作需最强确认门。
+- CLI 新增 `vcpdeck frp instances/mappings` 与 `vcpdeck storage status`（只读）：FRP 服务实例/映射状态查询（凭据字段安全投影，token/密码绝不进入输出）与存储后端状态；映射支持 `--client` 名称/ID 过滤。
+- 新增 CLI 能力端到端测试脚本 `scripts/test-cli-capabilities.cjs`（`pnpm test:cli`）：真实 Server + Client 上驱动 CLI 构建产物逐域验证（clients/jobs 失败闭环/files 全周期与直传往返/frp/storage/terminal/pi/错误路径），临时物全部隔离在 `.tmp/cli-e2e/`；AI Agent 会话运行需以操作者同意文本设置 `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION`。
+
+## [0.3.0] - 2026-08-22
+
+### Fixed
+
+- 修复 Launcher 自动下载 Node 运行时后 spawn ENOENT 的死循环：官方压缩包解压后的顶层目录（`node-v<version>-<plat>-<arch>`）未归一化为缓存标准布局 `node-<version>`，导致返回的路径永远不存在，目标机在系统无合格 Node 时反复崩溃重启、无法上线；现解压后归一化目录并校验二进制存在，缓存扫描跳过二进制缺失的损坏条目。
+
+### Added
+
 - 引入 Biome 作为仓库 lint 门禁：`pnpm lint` 覆盖 `packages/*/src` 与 `scripts`（仅 linter，不含格式化）；错误级诊断阻塞，存量风格/测试类噪音规则降级为 warning 并记录为技术债。修复全部存量错误（可选链不安全用法、void 返回、pi-panel hook 顺序缺陷、a11y 基础项）。
 - CLI 新增 `vcpdeck files download/upload`（写操作，需确认门）：文件传输走 Storage Provider 直传链路——download 导出后经短期签名 URL 拉取并校验 sha256（不一致删除本地半成品）；upload 经 upload-sessions 协商后分片直传 Provider（403 仅刷新该分片 URL），由 Client 从存储拉取导入；字节流不经过 Server。
 - CLI 新增 `vcpdeck files write/mkdir/delete/move`（写操作，需确认门）：覆盖写（原子 tmp+rename，内容来自 `--input` 或 stdin 不进 argv）、递归建目录、删除（不可恢复，非空目录需 `--recursive`）、移动重命名（目标存在默认拒绝，`--overwrite` 解锁）；失败带稳定错误码。Skill 确认门扩展到文件域（删除/覆盖影响单独强调）。
