@@ -329,10 +329,16 @@ node scripts/link-cli.cjs --target=<file>     # 改指其他入口（如 Skill �
 
 Tab 补全：`vcpdeck completions bash` 输出追加到 `~/.bashrc` 后 source（或开新终端）；`vcpdeck completions powershell` 追加到 `$PROFILE`。补全覆盖顶层命令、各域子命令、常用 flag 与生成时嵌入的已配置环境名（`--env=` 候选，零网络请求）；环境增删后需重新生成。
 
-其它机器远程一键安装（目标机器只需 Node 18+ 与外网；Linux/Git Bash/PowerShell 同款写法，含三次重试与正确退出码，Windows 注意 `--` 分隔符）：
+其它机器远程一键安装（目标机器只需 Node 18+ 与外网）。**Linux / Git Bash**（单命令，含三次重试与正确退出码）：
 
 ```bash
 node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.4.0
+```
+
+**Windows PowerShell** 两步形式（PS 5.1 原生参数传递会吞掉内嵌双引号，勿用单命令；Windows 注意 `--` 分隔符仅适用于 bash 形式）：
+
+```powershell
+irm https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs -OutFile "$env:TEMP\install-cli.cjs"; node "$env:TEMP\install-cli.cjs" --tag=v0.4.0
 ```
 
 脚本从 GitHub raw 下载随 tag 提交的单文件 CLI 包（skills/vcpdeck/vcpdeck.cjs，esbuild 打包零 npm 依赖）到 `~/.vcpdeck/bin`，生成双垫片并自动配置 PATH（Windows 写用户 PATH；POSIX 追加 ~/.bashrc），最后自验收 `--version`。推荐固定 `--tag=<版本>`；私有仓库 raw 需凭据，可改用 git clone 后 `node scripts/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs`。

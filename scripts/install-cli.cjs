@@ -4,9 +4,11 @@
  * 从 GitHub raw 下载随 tag 提交的单文件 CLI 包（skills/vcpdeck/vcpdeck.cjs，
  * esbuild 打包、零 npm 依赖），写入本地 bin 目录并生成 vcpdeck 垫片。
  *
- * 用法（目标机器只需有 Node 18+ 和外网访问，一条命令完成安装；含三次重试与正确退出码）：
- *   Linux / Git Bash / Windows PowerShell（同款写法）:
+ * 用法（目标机器只需有 Node 18+ 和外网访问）：
+ *   Linux / Git Bash（单命令，含三次重试与正确退出码）：
  *     node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.4.0
+ *   Windows PowerShell（两步形式；PS 5.1 原生参数传递会吞掉内嵌双引号，勿用单命令）：
+ *     irm https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs -OutFile "$env:TEMP\install-cli.cjs"; node "$env:TEMP\install-cli.cjs" --tag=v0.4.0
  *
  * 两步等价形式（先把脚本落盘再执行）：
  *   curl -fsSL <脚本URL> -o install-cli.cjs && node install-cli.cjs --tag=v0.4.0
