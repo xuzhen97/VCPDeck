@@ -60,10 +60,10 @@ VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server�
 node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.4.0
 ```
 
-**Windows PowerShell** 必须用两步形式（PS 5.1 原生参数传递会吞掉内嵌双引号，勿用单命令）：
+**Windows PowerShell** 单行形式（JS 全单引号 + 外层双引号，避开 PS 5.1 吞内嵌双引号的问题；勿改写引号形式）：
 
 ```powershell
-irm https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs -OutFile "$env:TEMP\install-cli.cjs"; node "$env:TEMP\install-cli.cjs" --tag=v0.4.0
+node -e "const u='https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs';const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error('安装失败:',String(e));process.exit(1)})" -- --tag=v0.5.0
 ```
 
 脚本从 GitHub raw 下载随 Tag 提交的单文件包（零 npm 依赖），写入 `~/.vcpdeck/bin`、生成双垫片（CMD/PowerShell 与 Git Bash）、自动配置 PATH 并自验收。开新终端后配置环境：

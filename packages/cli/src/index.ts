@@ -140,6 +140,7 @@ export function helpText(): string {
 		"  vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]",
 		"",
 		"Terminal:",
+		"  vcpdeck terminal new <client> [--shell=<id>] [--cols=<n>] [--rows=<n>] [--env=<name>] [--json]",
 		"  vcpdeck terminal shells <client> [--env=<name>] [--json]",
 		"  vcpdeck terminal list <client> [--status=<status>] [--env=<name>] [--json]",
 		"  vcpdeck terminal close <client> <sessionId> [--env=<name>] [--json]  # 写操作需确认",

@@ -13894,6 +13894,7 @@ function helpText() {
     "  vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]",
     "",
     "Terminal:",
+    "  vcpdeck terminal new <client> [--shell=<id>] [--cols=<n>] [--rows=<n>] [--env=<name>] [--json]",
     "  vcpdeck terminal shells <client> [--env=<name>] [--json]",
     "  vcpdeck terminal list <client> [--status=<status>] [--env=<name>] [--json]",
     "  vcpdeck terminal close <client> <sessionId> [--env=<name>] [--json]  # \u5199\u64CD\u4F5C\u9700\u786E\u8BA4",
