@@ -311,6 +311,20 @@ pnpm \
 - `files download/upload` 覆盖导出+签名 URL 拉取+sha256 校验、sha 不一致删除半成品、分片直传与导入终态等待。
 - `pi models/sessions/new/run/abort` 覆盖 cwdRef 推导、多根 fail closed、运行循环（prompt→轮询→回复提取）、既有会话 open 复用、扩展输入报错和中止；
 - `frp/storage` 覆盖实例/映射表格与过滤、凭据字段脱敏断言和后端状态输出；
-- `terminal shells/list/close` 覆盖 shell 探测、会话列表 `--status` 本地过滤和关闭流程（先取详情再删除）。
+- `terminal shells/list/close` 覆盖 shell 探测、会话列表 `--status` 本地过滤和关闭流程（先取详情再删除）；
+- `completions bash/powershell` 覆盖命令树与环境名嵌入、配置缺失降级、未知类型拒绝和用法输出。
 
-当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 Files/Jobs/Clients/Pi/Frp/Storage/Release 的写操作与 Terminal 的交互式 PTY 输入输出（生命周期管理已对齐）。
+当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 FRP/Storage/Clients 的写操作（建实例、映射增删、切后端、rename）与 Pi 高级会话操作（fork/clone/navigate/compact/setModel/附件）。
+
+## 16. 全局安装与 Shell 补全
+
+```bash
+pnpm vcpdeck:link                              # 默认指向仓库构建产物 packages/cli/dist/index.js
+node scripts/link-cli.cjs --target=<file>     # 改指其他入口（如 Skill 内 vcpdeck.cjs 单文件包）
+```
+
+向 Node 可执行文件所在目录写入两个垫片：`vcpdeck.cmd`（CMD/PowerShell）与无扩展名 `vcpdeck`（Git Bash/MSYS）；不经 npm/pnpm link，不触碰 pnpm store，入口文件更新即时生效。卸载即删除两个垫片。
+
+环境切换用既有命令：`vcpdeck env use <name> --global|--local`，`vcpdeck env current` 核对。
+
+Tab 补全：`vcpdeck completions bash` 输出追加到 `~/.bashrc` 后 source（或开新终端）；`vcpdeck completions powershell` 追加到 `$PROFILE`。补全覆盖顶层命令、各域子命令、常用 flag 与生成时嵌入的已配置环境名（`--env=` 候选，零网络请求）；环境增删后需重新生成。

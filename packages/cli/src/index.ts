@@ -55,6 +55,14 @@ export async function run(
 			await runTerminalCommand(subcommand, rest, { log });
 			return 0;
 		}
+		if (command === "completions") {
+			// 懒加载：补全生成只在显式调用时解析
+			const { runCompletionsCommand } = await import(
+				"./completions-command.js"
+			);
+			await runCompletionsCommand(subcommand, { log });
+			return 0;
+		}
 		if (command === "files") {
 			await runFilesCommand(subcommand, rest, { log });
 			return 0;
@@ -142,6 +150,11 @@ export function helpText(): string {
 		"  vcpdeck release wait <version> [--env=<name>] [--timeout=<seconds>]",
 		"  vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] [--wait] [--timeout=<seconds>]",
 		"  兼容直连: 添加 --server=<url> [--username=<name> --password=<value>]",
+		"",
+		"Shell 补全:",
+		"  vcpdeck completions bash        # 输出 Bash 补全脚本（Git Bash，追加到 ~/.bashrc）",
+		"  vcpdeck completions powershell  # 输出 PowerShell 补全脚本（追加到 $PROFILE）",
+		"  环境增删后请重新生成以刷新 --env= 候选",
 	].join("\n");
 }
 

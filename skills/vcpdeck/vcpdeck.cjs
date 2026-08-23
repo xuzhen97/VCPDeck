@@ -11525,6 +11525,145 @@ var init_terminal_command = __esm({
   }
 });
 
+// dist/completions-command.js
+var completions_command_exports = {};
+__export(completions_command_exports, {
+  runCompletionsCommand: () => runCompletionsCommand
+});
+function completionsUsage() {
+  return [
+    "\u7528\u6CD5:",
+    "  vcpdeck completions bash        # \u8F93\u51FA Bash \u8865\u5168\u811A\u672C\uFF08Git Bash\uFF09",
+    "  vcpdeck completions powershell  # \u8F93\u51FA PowerShell \u8865\u5168\u811A\u672C",
+    "",
+    "\u542F\u7528\u65B9\u5F0F\u89C1\u8F93\u51FA\u5934\u90E8\u6CE8\u91CA\uFF1B\u73AF\u5883\u589E\u5220\u540E\u8BF7\u91CD\u65B0\u751F\u6210\u3002"
+  ].join("\n");
+}
+async function resolveEnvironmentNames(paths) {
+  try {
+    const config = await loadCliConfig(paths.globalConfigPath);
+    return Object.keys(config.environments ?? {}).sort((a, b) => a.localeCompare(b));
+  } catch {
+    return [];
+  }
+}
+function generateBash(envNames) {
+  const envList = envNames.join(" ");
+  const prefixed = envNames.map((n) => `--env=${n}`).join(" ");
+  const caseBranches = Object.entries(COMMAND_TREE).map(([cmd, subs]) => `		${cmd}) subs="${subs.join(" ")}";;`).join("\n");
+  return `# vcpdeck Bash \u8865\u5168\uFF08\u7531 vcpdeck completions bash \u751F\u6210\uFF1B\u73AF\u5883\u53D8\u66F4\u540E\u8BF7\u91CD\u65B0\u751F\u6210\uFF09
+# \u542F\u7528\uFF1A\u628A\u4E0B\u9762\u6574\u6BB5\u8FFD\u52A0\u5230 ~/.bashrc \u540E source ~/.bashrc\uFF08\u6216\u5F00\u65B0\u7EC8\u7AEF\uFF09
+_vcpdeck() {
+	local cur cmd subs
+	cur="\${COMP_WORDS[COMP_CWORD]}"
+	if [ "\${COMP_WORDS[1]}" ] && [ "\${COMP_CWORD}" -ge 2 ]; then :; fi
+	cmd="\${COMP_WORDS[1]}"
+	case "\${COMP_WORDS[COMP_CWORD-1]}" in
+		--env) COMPREPLY=( $(compgen -W "${envList}" -- "$cur") ); return 0 ;;
+	esac
+	if [[ "$cur" == --env=* ]]; then
+		COMPREPLY=( $(compgen -W "${prefixed}" -- "$cur") ); return 0
+	fi
+	if [[ "$cur" == -* ]]; then
+		COMPREPLY=( $(compgen -W "${COMMON_FLAGS.join(" ")}" -- "$cur") ); return 0
+	fi
+	if [ "$COMP_CWORD" -eq 1 ]; then
+		COMPREPLY=( $(compgen -W "${TOP_LEVEL.join(" ")} --version" -- "$cur") ); return 0
+	fi
+	subs=""
+	case "$cmd" in
+${caseBranches}
+	esac
+	COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
+}
+complete -F _vcpdeck vcpdeck
+`;
+}
+function generatePowerShell(envNames) {
+  const envArray = envNames.map((n) => `'${n}'`).join(",");
+  const subPairs = Object.entries(COMMAND_TREE).map(([cmd, subs]) => `	'${cmd}' = @('${subs.join("','")}');`).join("\n");
+  return `# vcpdeck PowerShell \u8865\u5168\uFF08\u7531 vcpdeck completions powershell \u751F\u6210\uFF1B\u73AF\u5883\u53D8\u66F4\u540E\u8BF7\u91CD\u65B0\u751F\u6210\uFF09
+# \u542F\u7528\uFF1A\u628A\u4E0B\u9762\u6574\u6BB5\u8FFD\u52A0\u5230 $PROFILE \u540E\u91CD\u5F00\u7EC8\u7AEF\uFF08. \u6216\u6267\u884C\u8BE5\u6587\u4EF6\u4E00\u6B21\u4EA6\u53EF\uFF09
+Register-ArgumentCompleter -CommandName vcpdeck -Native -ScriptBlock {
+	param($wordToComplete, $commandAst)
+	$envNames = @(${envArray})
+	$subCommands = @{
+${subPairs}
+	}
+	$topLevel = @('${TOP_LEVEL.join("','")}')
+	$args_ = @($commandAst.CommandElements | Select-Object -Skip 1)
+	$candidates = @()
+	if ($args_.Count -le 1) {
+		$candidates = $topLevel + @('--version')
+	} elseif ($subCommands.ContainsKey([string]$args_[0])) {
+		$candidates = $subCommands[[string]$args_[0]]
+	}
+	if ($wordToComplete -like '--env=*') {
+		$candidates = @($envNames | ForEach-Object { "--env=$_" })
+	} else {
+		$candidates += @('${COMMON_FLAGS.join("','")}')
+	}
+	$candidates |
+		Where-Object { $_ -like "$wordToComplete*" } |
+		ForEach-Object {
+			[System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+		}
+}
+`;
+}
+async function runCompletionsCommand(subcommand, context = {}) {
+  const log = context.log ?? console.log;
+  const paths = context.paths ?? {
+    globalConfigPath: (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".vcpdeck", "cli", "config.json"),
+    cwd: process.cwd()
+  };
+  if (subcommand === void 0 || subcommand === "--help" || subcommand === "-h") {
+    log(completionsUsage());
+    return;
+  }
+  if (subcommand !== "bash" && subcommand !== "powershell") {
+    throw new Error(`\u672A\u77E5\u8865\u5168\u7C7B\u578B: ${subcommand}
+
+${completionsUsage()}`);
+  }
+  const envNames = await resolveEnvironmentNames(paths);
+  log(subcommand === "bash" ? generateBash(envNames) : generatePowerShell(envNames));
+}
+var import_node_os2, import_node_path2, COMMAND_TREE, TOP_LEVEL, COMMON_FLAGS;
+var init_completions_command = __esm({
+  "dist/completions-command.js"() {
+    "use strict";
+    import_node_os2 = require("node:os");
+    import_node_path2 = require("node:path");
+    init_config();
+    COMMAND_TREE = {
+      env: ["list", "show", "current", "check", "add", "remove", "use"],
+      clients: ["list"],
+      jobs: ["list", "get", "run", "cancel"],
+      files: [
+        "roots",
+        "list",
+        "stat",
+        "read",
+        "write",
+        "mkdir",
+        "delete",
+        "move",
+        "download",
+        "upload"
+      ],
+      pi: ["models", "sessions", "new", "run", "attach", "abort"],
+      terminal: ["shells", "list", "close", "attach"],
+      frp: ["instances", "mappings"],
+      storage: ["status"],
+      release: ["status", "wait", "upload"],
+      completions: ["bash", "powershell"]
+    };
+    TOP_LEVEL = [...Object.keys(COMMAND_TREE), "help"];
+    COMMON_FLAGS = ["--json", "--env=", "--help"];
+  }
+});
+
 // dist/index.js
 var index_exports = {};
 __export(index_exports, {
@@ -13631,6 +13770,11 @@ async function run(argv, context = {}) {
       await runTerminalCommand2(subcommand, rest, { log });
       return 0;
     }
+    if (command === "completions") {
+      const { runCompletionsCommand: runCompletionsCommand2 } = await Promise.resolve().then(() => (init_completions_command(), completions_command_exports));
+      await runCompletionsCommand2(subcommand, { log });
+      return 0;
+    }
     if (command === "files") {
       await runFilesCommand(subcommand, rest, { log });
       return 0;
@@ -13712,7 +13856,12 @@ function helpText() {
     "  vcpdeck release status <version> [--env=<name>]",
     "  vcpdeck release wait <version> [--env=<name>] [--timeout=<seconds>]",
     "  vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] [--wait] [--timeout=<seconds>]",
-    "  \u517C\u5BB9\u76F4\u8FDE: \u6DFB\u52A0 --server=<url> [--username=<name> --password=<value>]"
+    "  \u517C\u5BB9\u76F4\u8FDE: \u6DFB\u52A0 --server=<url> [--username=<name> --password=<value>]",
+    "",
+    "Shell \u8865\u5168:",
+    "  vcpdeck completions bash        # \u8F93\u51FA Bash \u8865\u5168\u811A\u672C\uFF08Git Bash\uFF0C\u8FFD\u52A0\u5230 ~/.bashrc\uFF09",
+    "  vcpdeck completions powershell  # \u8F93\u51FA PowerShell \u8865\u5168\u811A\u672C\uFF08\u8FFD\u52A0\u5230 $PROFILE\uFF09",
+    "  \u73AF\u5883\u589E\u5220\u540E\u8BF7\u91CD\u65B0\u751F\u6210\u4EE5\u5237\u65B0 --env= \u5019\u9009"
   ].join("\n");
 }
 function messageOf(cause) {

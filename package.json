@@ -11,7 +11,8 @@
     "release": "npx tsx scripts/pack-release.ts",
     "download:frp": "npx tsx scripts/download-frp.ts",
     "test:frp": "node scripts/test-frp.cjs",
-    "test:cli": "node scripts/test-cli-capabilities.cjs"
+    "test:cli": "node scripts/test-cli-capabilities.cjs",
+    "vcpdeck:link": "node scripts/link-cli.cjs"
   },
   "devDependencies": {
     "@types/archiver": "^8.0.0",
