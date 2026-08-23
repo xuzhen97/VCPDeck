@@ -52,18 +52,36 @@ VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server�
 
 ## 从 GitHub 安装
 
+### CLI 全局命令（目标机器只需 Node 18+ 与外网）
+
+一条命令安装为全局 `vcpdeck` 命令（Linux / Git Bash / Windows PowerShell 同款写法；含三次重试，Windows 注意 `--` 分隔符）:
+
+```bash
+node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.4.0
+```
+
+脚本从 GitHub raw 下载随 Tag 提交的单文件包（零 npm 依赖），写入 `~/.vcpdeck/bin`、生成双垫片（CMD/PowerShell 与 Git Bash）、自动配置 PATH 并自验收。开新终端后配置环境：
+
+```bash
+vcpdeck env add prod --server=https://deck.example.com --token-env=VCPDECK_PROD_TOKEN
+vcpdeck env use prod --global
+vcpdeck env check
+```
+
+Tab 补全：`vcpdeck completions bash` 追加到 `~/.bashrc`，或 `vcpdeck completions powershell` 追加到 `$PROFILE`。仓库开发机可用 `pnpm vcpdeck:link` 把构建产物装成全局命令。详见 [`docs/design/cli.md`](docs/design/cli.md) §16。
+
 ### Pi Skill
 
 Node.js 24+ 环境中按稳定 Tag 用户级安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.2.2
+pi install git:github.com/xuzhen97/VCPDeck@v0.4.0
 ```
 
 Pi 会克隆整个仓库并发现 `skills/vcpdeck/SKILL.md`；同目录 `vcpdeck.cjs` 已随 Tag 提交，无需在安装机编译。升级或回滚需显式切换 Tag，例如：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.2.2
+pi install git:github.com/xuzhen97/VCPDeck@v0.4.0
 ```
 
 Skill 与 CLI 用户级只安装一份，但执行时保留当前项目 cwd，因此每个项目都可以用自己的 `.vcpdeck.json` 选择用户级已注册环境。
@@ -77,6 +95,8 @@ node "<vcpdeck-cli>" env add prod \
 node "<vcpdeck-cli>" env use prod --global
 node "<vcpdeck-cli>" env check
 ```
+
+上节已用 `install-cli.cjs` 或 `pnpm vcpdeck:link` 安装全局命令时，直接以 `vcpdeck` 代替 `node "<vcpdeck-cli>"`。
 
 `env check` 会通过 SDK 显示 Token 对应的实际身份，但不会输出 Token。修改个人用户名不会使 Token 环境失效；用户名/密码模式仅保留兼容。
 
