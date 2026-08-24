@@ -395,17 +395,17 @@ GET    /api/frp/mappings/:id
 DELETE /api/frp/mappings/:id
 ```
 
-创建请求可选 `frpsInstanceId`；省略时使用默认实例。Server 检查 Client 在线且声明 `frp`，持久化 inactive mapping 和 pending `frp.create` Job，再立即派发。`active` 当前只表示 Client spawn 未同步失败，不证明 FRPS 注册、local service 或公网可达。
+创建请求可选 `name`、`frpsInstanceId` 和 `timeoutSeconds`（默认 30，范围 1–300）。省略 name 时 Server 按 `<proxyType>-<localPort>` 生成同实例唯一名称；TCP 可选 remotePort，HTTP/HTTPS 必须提供 customDomain 且不分配 remotePort。Server 要求目标实例配置可认证 Dashboard，持久化 `provisioning` mapping 与 running `frp.create` Job 后立即派发。响应包含 `operationJobId`；调用方等待该 Job。Client 完成本地 frpc 动作且 Dashboard 确认同类型/name 的 proxy 出现后才进入 `active`。`active` 不证明 local service、DNS、TLS 或公网可达。
 
-删除当前先删除 FrpMapping，再派发 `frp.delete`；响应 `{deleted:true}` 不证明远端 proxy 已清理。Client 断线会让 Server status 变 inactive，但独立 frpc 可能继续工作。
+创建确认失败自动派发 `frp.delete` 回滚；回滚成功后删除 mapping，回滚失败保留 `error`。删除先把 mapping 置为 `deleting` 并返回含新 `operationJobId` 的映射，只有 Client 清理且 Dashboard 确认 proxy 消失后才删除记录；失败保留 `errorCode/errorMessage` 并允许再次 DELETE 重试。Client 断线仍只把 active 标为 inactive，独立 frpc 可能继续工作。
 
 ### 7.3 Job payload 与多实例偏移
 
 - `frp.create` payload 含完整 frps serverAddr/serverPort/authToken，并进入 Job/SQLite；
 - `frp.delete` 含 mappingId/name；
 - `frp.list` 返回 Client 进程内 registry；
-- FRP Job 当前缺严格 Shared parser、稳定错误码和完整 Actor；
-- Server 可选择多个 FrpsInstance，但 Client 只有单个 frpc/lastFrpsInfo；同一 Client 不能可靠同时使用多个实例。
+- FRP 创建 REST 输入由 Shared 严格 parser 拒绝未知字段和类型冲突，写操作错误使用稳定安全 code；内部 Job 仍未保存完整 Actor；
+- Client 只有单个 frpc/lastFrpsInfo；Server 当前拒绝同一 Client 跨 FrpsInstance 创建映射。
 
 完整数据权威、安全和恢复边界见 [`design/frp.md`](./design/frp.md)。
 

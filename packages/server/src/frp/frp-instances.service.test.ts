@@ -201,4 +201,75 @@ describe("FrpsInstancesService", () => {
 			expect(result.isDefault).toBe(true);
 		});
 	});
+
+	describe("listDashboardProxies", () => {
+		const instance = {
+			id: "frps_def",
+			name: "default",
+			serverAddr: "1.2.3.4",
+			serverPort: 7000,
+			authToken: "token",
+			dashboardScheme: "http",
+			dashboardHost: "dashboard.internal",
+			dashboardPort: 7500,
+			dashboardUser: "operator",
+			dashboardPassword: "secret",
+			portRangeStart: 20000,
+			portRangeEnd: 21000,
+			isDefault: true,
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+		} as const;
+
+		it("严格返回三类 proxy，并携带正确 Basic Auth", async () => {
+			const fetcher = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+				const type = String(input).split("/").at(-1);
+				return Response.json({
+					proxies: [{ name: `${type}-proxy`, conf: { remotePort: 20100 } }],
+				});
+			});
+			vi.stubGlobal("fetch", fetcher);
+
+			const result = await service.listDashboardProxies(instance);
+
+			expect(result.list).toEqual([
+				{ name: "tcp-proxy", proxyType: "tcp", remotePort: 20100 },
+				{ name: "http-proxy", proxyType: "http", remotePort: 20100 },
+				{ name: "https-proxy", proxyType: "https", remotePort: 20100 },
+			]);
+			expect(fetcher.mock.calls[0]?.[1]?.headers).toEqual({
+				Authorization: `Basic ${Buffer.from("operator:secret").toString("base64")}`,
+			});
+		});
+
+		it("未配置 Dashboard 时返回稳定错误码", async () => {
+			await expect(
+				service.listDashboardProxies({ ...instance, dashboardHost: null }),
+			).rejects.toMatchObject({ code: "FRPS_DASHBOARD_REQUIRED" });
+		});
+
+		it.each([
+			[401, "FRPS_DASHBOARD_AUTH_FAILED"],
+			[503, "FRPS_DASHBOARD_UNREACHABLE"],
+		] as const)("HTTP %s 映射为 %s", async (status, code) => {
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockResolvedValue(new Response("failure", { status })),
+			);
+			await expect(service.listDashboardProxies(instance)).rejects.toMatchObject({
+				code,
+			});
+		});
+
+		it("网络错误不泄露原始外部错误", async () => {
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockRejectedValue(new Error("secret upstream detail")),
+			);
+			await expect(service.listDashboardProxies(instance)).rejects.toMatchObject({
+				code: "FRPS_DASHBOARD_UNREACHABLE",
+				message: "FRPS Dashboard 不可达",
+			});
+		});
+	});
 });

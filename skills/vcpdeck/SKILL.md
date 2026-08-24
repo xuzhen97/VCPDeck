@@ -39,10 +39,11 @@ pnpm --filter @vcpdeck/cli build
 | 文件传输（写操作） | `files download/upload` | 已实现 | 经 Storage Provider 直传链路（Server 只签名不承载字节）；download 校验 sha256；**必须先取得用户明确确认** |
 | Pi 子任务（写操作） | `pi models/sessions/new/run/abort` | 已实现 | 在目标机驱动 Pi Agent 执行子任务并取回回复；**最强确认门：必须先取得用户明确确认** |
 | FRP 查询（只读） | `frp instances/mappings` | 已实现 | 服务实例与映射状态；凭据字段（token/密码）绝不进入输出 |
+| FRP 映射写操作 | `frp mapping create/delete` | 已实现 | Client frpc 动作与 FRPS Dashboard 双重确认；**必须先取得用户明确确认** |
 | Storage 查询（只读） | `storage status` | 已实现 | 当前激活的存储后端类型 |
 | Terminal 生命周期 | `terminal new/shells/list/close` | 已实现 | 创建会话（返回 sessionId 供 attach）、Shell 探测与会话列表（只读）、关闭会话（写操作需确认）；交互式 PTY 经 attach 直连 |
 | Release / 自更新 | `release upload/status/wait` | 已实现 | 上传双平台构件；查询或等待 Server/Client 权威终态，失败或超时返回非零退出 |
-| Terminal、FRP/Storage 写操作（建实例/删映射/切后端等）、机器写入 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明 |
+| FRP 实例写操作、Storage 后端切换、机器写入 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明 |
 
 ## 功能：环境选择
 
@@ -348,13 +349,15 @@ node "<vcpdeck-cli>" pi abort <client> --session=<id> [--env=<name>] [--json]
 
 已对齐：模型列表、会话列表、会话创建/打开、子任务下发与回复提取、中止。未对齐：会话高级操作与多模态输入。
 
-## 功能：FRP 与 Storage 状态查询（只读）
+## 功能：FRP 映射与 Storage 状态
 
 ### 可用命令
 
 ```bash
 node "<vcpdeck-cli>" frp instances [--page=<n>] [--env=<name>] [--json]
 node "<vcpdeck-cli>" frp mappings [--client=<name|id>] [--page=<n>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" frp mapping create <client> --local-port=<port> [--type=tcp|http|https] [--local-ip=<host>] [--remote-port=<port>] [--domain=<domain>] [--name=<name>] [--instance=<id>] [--timeout=<seconds>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" frp mapping delete <mappingId> [--timeout=<seconds>] [--env=<name>] [--json]
 node "<vcpdeck-cli>" storage status [--env=<name>] [--json]
 ```
 
@@ -364,9 +367,13 @@ node "<vcpdeck-cli>" storage status [--env=<name>] [--json]
 
 `frp instances` 列出 FRP 服务实例（名称、服务器地址端口、Dashboard 地址、是否默认）；`frp mappings` 列出映射（名称、机器、类型、本地地址、远程端口、状态、公网 URL），支持 `--client` 名称/ID 过滤。**实例信息中的 authToken 与 dashboard 密码属于凭据，CLI 输出已做安全投影，Agent 不得尝试从其他渠道获取或展示这些字段**。`storage status` 显示当前激活的存储后端类型（local/alibaba）与配置更新时间。
 
-### 操作分级与对齐情况
+### 写操作语义与确认门
 
-三个子命令均为只读 GET，幂等无副作用，无需确认门。已对齐：实例/映射列表查询、存储后端状态。未对齐：FRP 实例创建/探活/设默认、映射创建/删除，Storage 后端切换——这些写操作落地时适用确认门。
+`mapping create` 支持 TCP/HTTP/HTTPS；name 可省略，缺省由 Server 生成唯一名称；HTTP/HTTPS 必须提供 domain，TCP 可选 remotePort。`mapping delete` 接受 mappingId。两者默认使用 30 秒 Dashboard 确认窗口，可用 `--timeout=1..300` 覆盖；只有 Client 已正确更新 frpc 且 FRPS Dashboard 确认 proxy 出现/消失时才零退出，不验证本地服务或公网可达。创建确认失败由 Server 自动回滚；回滚或删除失败保留 error 映射。若 Client 派发后完全不回报，当前 Server 无 FRP Job 后台超时监控，CLI 会继续等待；可由用户中止，随后先用 `frp mappings`/`jobs get` 核对，不能盲目重试 create。
+
+create/delete 都是写操作，执行前必须先运行 `env current`/`env check`，并向用户展示环境与 Server、Client、类型、本地端点、公网端口或域名、实例/名称（若指定）和影响；取得明确确认后才能执行。delete 还要展示 mappingId/name/公网端点。用户说“查看”不能升级为写操作。
+
+只读 `instances/mappings/storage status` 幂等无需确认。已对齐：实例/映射列表、映射 create/delete 和 Storage 状态；未对齐：FRP 实例创建/探活/设默认与 Storage 后端切换。
 
 ## 功能：Terminal 生命周期与终端直连
 

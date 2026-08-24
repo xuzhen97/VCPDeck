@@ -16,6 +16,7 @@ export interface AllocateOptions {
 	portRangeStart?: number;
 	portRangeEnd?: number;
 	dashboard?: DashboardConfig | null;
+	usedPorts?: Iterable<number>;
 }
 
 export class PortAllocator {
@@ -36,6 +37,7 @@ export class PortAllocator {
 
 		return this.withLock(async () => {
 			const usedPorts = await this.loadUsedPorts(dashboard);
+			for (const port of options?.usedPorts ?? []) usedPorts.add(port);
 
 			if (typeof options?.preferredPort === "number") {
 				const p = options.preferredPort;

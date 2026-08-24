@@ -29,7 +29,8 @@ function makeGateway() {
 		}),
 	};
 	const frpService = {
-		updateStatus: vi.fn(),
+		settleClientOperation: vi.fn(),
+		failClientOperation: vi.fn(),
 		markInactiveByClientId: vi.fn(async () => {}),
 	};
 	const piRequests = {
@@ -385,6 +386,108 @@ describe("ClientGateway terminal routing", () => {
 });
 
 describe("ClientGateway.handleJobDone", () => {
+	it("FRP Dashboard 收敛成功后才终结 Job", async () => {
+		const { gateway, jobService, frpService } = makeGateway();
+		frpService.settleClientOperation.mockResolvedValue({
+			terminal: true,
+			result: { mappingId: "fm_1", status: "active" },
+		});
+
+		await gateway.handleJobDone({
+			jobId: "job-1",
+			type: "frp.create",
+			result: { mappingId: "fm_1", status: "active" },
+		} as never);
+
+		expect(frpService.settleClientOperation).toHaveBeenCalledWith(
+			"job-1",
+			"frp.create",
+		);
+		expect(jobService.markDone).toHaveBeenCalledWith("job-1", "frp.create", {
+			mappingId: "fm_1",
+			status: "active",
+		});
+	});
+
+	it("创建超时派发回滚且不提前终结创建 Job", async () => {
+		const { gateway, jobService, frpService, emit } = makeGateway();
+		frpService.settleClientOperation.mockResolvedValue({
+			terminal: false,
+			dispatch: {
+				jobId: "rollback-job",
+				clientId: "c1",
+				type: "frp.delete",
+				payload: { mappingId: "fm_1", name: "tcp-1919" },
+			},
+		});
+
+		await gateway.handleJobDone({
+			jobId: "job-1",
+			type: "frp.create",
+			result: { mappingId: "fm_1", status: "active" },
+		} as never);
+
+		expect(jobService.markDone).not.toHaveBeenCalled();
+		expect(emit).toHaveBeenCalledWith(
+			"job:dispatch",
+			expect.objectContaining({ jobId: "rollback-job", type: "frp.delete" }),
+		);
+	});
+
+	it("回滚终态同时终结原创建 Job", async () => {
+		const { gateway, jobService, frpService } = makeGateway();
+		frpService.settleClientOperation.mockResolvedValue({
+			terminal: true,
+			result: { mappingId: "fm_1", deleted: true },
+			relatedJob: {
+				jobId: "create-job",
+				errorCode: "FRP_PROXY_CONFIRM_TIMEOUT",
+				errorMessage: "已自动回滚",
+			},
+		});
+
+		await gateway.handleJobDone({
+			jobId: "rollback-job",
+			type: "frp.delete",
+			result: { mappingId: "fm_1", deleted: true },
+		} as never);
+
+		expect(jobService.markDone).toHaveBeenCalledWith(
+			"create-job",
+			"frp.create",
+			expect.objectContaining({
+				errorCode: "FRP_PROXY_CONFIRM_TIMEOUT",
+			}),
+		);
+	});
+
+	it("FRP Client 失败进入服务收敛，不走通用立即终态", async () => {
+		const { gateway, jobService, frpService } = makeGateway();
+		frpService.failClientOperation.mockResolvedValue({
+			terminal: false,
+			dispatch: {
+				jobId: "rollback-job",
+				clientId: "c1",
+				type: "frp.delete",
+				payload: { mappingId: "fm_1", name: "tcp-1919" },
+			},
+		});
+
+		await gateway.handleJobDone({
+			jobId: "create-job",
+			type: "frp.create",
+			error: { code: "FRPC_START_FAILED", message: "frpc 启动失败" },
+		} as never);
+
+		expect(frpService.failClientOperation).toHaveBeenCalledWith(
+			"create-job",
+			"frp.create",
+			"FRPC_START_FAILED",
+			"frpc 启动失败",
+		);
+		expect(jobService.markDone).not.toHaveBeenCalled();
+	});
+
 	it("用数据库中的真实 key 覆盖 Client 回传的临时 key", async () => {
 		const { gateway, jobService, fileService } = makeGateway();
 		const result = {

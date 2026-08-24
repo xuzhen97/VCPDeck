@@ -372,6 +372,60 @@ export class ClientGateway {
       return;
     }
 
+    // ── FRP 回调：Client 只完成本地动作，Server 再以 Dashboard 收敛 ──
+    if (type === "frp.create" || type === "frp.delete") {
+      const outcome = raw.error
+        ? await this.frpService.failClientOperation(
+            data.jobId,
+            type,
+            raw.error.code || "IO_ERROR",
+            raw.error.message || "",
+          )
+        : await this.frpService.settleClientOperation(data.jobId, type);
+      if (!outcome.terminal) {
+        this.sendDispatch(outcome.dispatch);
+        return;
+      }
+      const result = {
+        ...outcome.result,
+        ...(outcome.errorCode
+          ? {
+              errorCode: outcome.errorCode,
+              errorMessage: outcome.errorMessage,
+            }
+          : {}),
+      };
+      const next = await this.jobService.markDone(data.jobId, type, result);
+      this.server.emit(Events.JOB_UPDATE, {
+        jobId: data.jobId,
+        type,
+        status: outcome.errorCode ? JobStatus.ERROR : JobStatus.DONE,
+        errorCode: outcome.errorCode,
+        errorMessage: outcome.errorMessage,
+        result: outcome.result,
+      } satisfies JobUpdate);
+      if (outcome.relatedJob) {
+        const relatedNext = await this.jobService.markDone(
+          outcome.relatedJob.jobId,
+          "frp.create",
+          {
+            errorCode: outcome.relatedJob.errorCode,
+            errorMessage: outcome.relatedJob.errorMessage,
+          },
+        );
+        this.server.emit(Events.JOB_UPDATE, {
+          jobId: outcome.relatedJob.jobId,
+          type: "frp.create",
+          status: JobStatus.ERROR,
+          errorCode: outcome.relatedJob.errorCode,
+          errorMessage: outcome.relatedJob.errorMessage,
+        } satisfies JobUpdate);
+        if (relatedNext) this.sendDispatch(relatedNext);
+      }
+      if (next) this.sendDispatch(next);
+      return;
+    }
+
     // ── 其他 Job 类型 ──
     // ── 非 exec error 终态 ──
     if (raw.error) {
@@ -390,24 +444,6 @@ export class ClientGateway {
     }
 
     let result: Record<string, unknown> = raw.result;
-
-    // ── FRP 回调 ──
-    if (type === "frp.create" || type === "frp.delete") {
-      const mappingId = result?.mappingId as string | undefined;
-      const status = result?.status as string ?? (raw.error ? "error" : "active");
-      if (mappingId) {
-        await this.frpService.updateStatus(mappingId, status);
-      }
-      const next = await this.jobService.markDone(data.jobId, type, result ?? {});
-      this.server.emit(Events.JOB_UPDATE, {
-        jobId: data.jobId,
-        type,
-        status: raw.error ? JobStatus.ERROR : JobStatus.DONE,
-        result: raw.result,
-      } satisfies JobUpdate);
-      if (next) this.sendDispatch(next);
-      return;
-    }
 
     if (type === "frp.list") {
       const next = await this.jobService.markDone(data.jobId, type, result ?? {});

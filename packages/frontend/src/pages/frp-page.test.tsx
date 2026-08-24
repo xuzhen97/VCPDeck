@@ -22,9 +22,12 @@ const identity: IdentityInfo = {
 	disabledAt: null,
 	createdAt: "2026-07-26T00:00:00.000Z",
 };
-const mapping = (status = "inactive"): FrpMappingInfo => ({
+const mapping = (
+	status: FrpMappingInfo["status"] = "inactive",
+): FrpMappingInfo => ({
 	id: "fm_1",
 	clientId: "client-1",
+	frpsInstanceId: "frps_1",
 	name: "local-web",
 	proxyType: "tcp",
 	localIp: "127.0.0.1",
@@ -33,6 +36,9 @@ const mapping = (status = "inactive"): FrpMappingInfo => ({
 	customDomain: null,
 	status,
 	publicUrl: "example.com:20080",
+	operationJobId: status === "active" ? null : "job-1",
+	errorCode: null,
+	errorMessage: null,
 	createdAt: "2026-07-26T00:00:00.000Z",
 	updatedAt: "2026-07-26T00:00:00.000Z",
 });
@@ -162,9 +168,9 @@ describe("FrpPage", () => {
 });
 
 describe("FrpPanel", () => {
-	it("polls an inactive mapping until active", async () => {
+	it("waits a provisioning mapping until active", async () => {
 		const get = vi.fn();
-		const create = vi.fn().mockResolvedValue(mapping("inactive"));
+		const createAndWait = vi.fn().mockResolvedValue(mapping("active"));
 		renderPanel({
 			list: vi.fn().mockResolvedValue({
 				data: [],
@@ -173,18 +179,26 @@ describe("FrpPanel", () => {
 				pageSize: 20,
 				totalPages: 0,
 			}),
-			create,
+			create: vi.fn(),
+			createAndWait,
 			get,
 			delete: vi.fn(),
+			deleteAndWait: vi.fn(),
 		});
 		await userEvent.click(
 			await screen.findByRole("button", { name: "新增映射" }),
 		);
-		await userEvent.type(await screen.findByLabelText("映射名称"), "local-web");
+		await userEvent.type(
+		await screen.findByLabelText("映射名称（可选）"),
+		"local-web",
+	);
 		await userEvent.type(screen.getByLabelText("本地端口"), "3000");
 		await userEvent.click(screen.getByRole("button", { name: "创建映射" }));
 		expect(get).not.toHaveBeenCalled();
-		expect(await screen.findByText("inactive")).toBeTruthy();
+		expect(createAndWait).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "local-web", timeoutSeconds: 30 }),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
 	});
 
 	it("opens the mapping form in a wide drawer", async () => {
@@ -280,7 +294,7 @@ describe("FrpPanel", () => {
 	});
 
 	it("selects the default frps instance when creating a mapping", async () => {
-		const create = vi.fn().mockResolvedValue(mapping("active"));
+		const createAndWait = vi.fn().mockResolvedValue(mapping("active"));
 		renderPanel({
 			list: vi.fn().mockResolvedValue({
 				data: [],
@@ -289,9 +303,11 @@ describe("FrpPanel", () => {
 				pageSize: 20,
 				totalPages: 0,
 			}),
-			create,
+			create: vi.fn(),
+			createAndWait,
 			get: vi.fn(),
 			delete: vi.fn(),
+			deleteAndWait: vi.fn(),
 			instances: {
 				list: vi.fn().mockResolvedValue({
 					data: [frpsInstance()],
@@ -310,18 +326,24 @@ describe("FrpPanel", () => {
 		expect(
 			screen.getByText("1.2.3.4:7000 · 端口范围 20000–21000"),
 		).toBeVisible();
-		await userEvent.type(screen.getByLabelText("映射名称"), "local-web");
+		await userEvent.type(
+			screen.getByLabelText("映射名称（可选）"),
+			"local-web",
+		);
 		await userEvent.type(screen.getByLabelText("本地端口"), "3000");
 		await userEvent.click(screen.getByRole("button", { name: "创建映射" }));
 
-		expect(create).toHaveBeenCalledWith(
-			expect.objectContaining({ frpsInstanceId: "frps_1" }),
-			expect.any(AbortSignal),
+		expect(createAndWait).toHaveBeenCalledWith(
+			expect.objectContaining({
+				frpsInstanceId: "frps_1",
+				timeoutSeconds: 30,
+			}),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 	});
 
 	it("allows retrying after mapping creation fails", async () => {
-		const create = vi.fn().mockRejectedValue(new Error("创建失败"));
+		const createAndWait = vi.fn().mockRejectedValue(new Error("创建失败"));
 		renderPanel({
 			list: vi.fn().mockResolvedValue({
 				data: [],
@@ -330,14 +352,19 @@ describe("FrpPanel", () => {
 				pageSize: 20,
 				totalPages: 0,
 			}),
-			create,
+			create: vi.fn(),
+			createAndWait,
 			get: vi.fn(),
 			delete: vi.fn(),
+			deleteAndWait: vi.fn(),
 		});
 		await userEvent.click(
 			await screen.findByRole("button", { name: "新增映射" }),
 		);
-		await userEvent.type(screen.getByLabelText("映射名称"), "local-web");
+		await userEvent.type(
+			screen.getByLabelText("映射名称（可选）"),
+			"local-web",
+		);
 		await userEvent.type(screen.getByLabelText("本地端口"), "3000");
 		await userEvent.click(screen.getByRole("button", { name: "创建映射" }));
 		expect(await screen.findByRole("alert")).toHaveTextContent("创建失败");
@@ -345,7 +372,7 @@ describe("FrpPanel", () => {
 	});
 
 	it("falls back to the server default when instances cannot load", async () => {
-		const create = vi.fn().mockResolvedValue(mapping("active"));
+		const createAndWait = vi.fn().mockResolvedValue(mapping("active"));
 		renderPanel({
 			list: vi.fn().mockResolvedValue({
 				data: [],
@@ -354,9 +381,11 @@ describe("FrpPanel", () => {
 				pageSize: 20,
 				totalPages: 0,
 			}),
-			create,
+			create: vi.fn(),
+			createAndWait,
 			get: vi.fn(),
 			delete: vi.fn(),
+			deleteAndWait: vi.fn(),
 			instances: {
 				list: vi.fn().mockRejectedValue(new Error("offline")),
 			},
@@ -368,14 +397,19 @@ describe("FrpPanel", () => {
 		expect(
 			await screen.findByText("无法加载 frps 实例，将使用服务端默认实例"),
 		).toBeVisible();
-		await userEvent.type(screen.getByLabelText("映射名称"), "local-web");
+		await userEvent.type(
+			screen.getByLabelText("映射名称（可选）"),
+			"local-web",
+		);
 		await userEvent.type(screen.getByLabelText("本地端口"), "3000");
 		await userEvent.click(screen.getByRole("button", { name: "创建映射" }));
 
-		expect(create.mock.calls[0]?.[0]).not.toHaveProperty("frpsInstanceId");
+		expect(createAndWait.mock.calls[0]?.[0]).not.toHaveProperty(
+			"frpsInstanceId",
+		);
 	});
 
-	it("requires the mapping name and explains deletion limits", async () => {
+	it("mapping name is optional and deletion waits for FRPS confirmation", async () => {
 		const remove = vi.fn().mockResolvedValue({ id: "fm_1", deleted: true });
 		renderPanel({
 			list: vi.fn().mockResolvedValue({
@@ -387,7 +421,8 @@ describe("FrpPanel", () => {
 			}),
 			create: vi.fn(),
 			get: vi.fn(),
-			delete: remove,
+			delete: vi.fn(),
+			deleteAndWait: remove,
 		});
 		await userEvent.click(
 			(await screen.findAllByRole("button", { name: "更多操作" }))[0]!,
@@ -399,11 +434,10 @@ describe("FrpPanel", () => {
 		expect(confirm).toBeDisabled();
 		await userEvent.type(screen.getByLabelText("输入目标以确认"), "local-web");
 		await userEvent.click(confirm);
-		expect(remove).toHaveBeenCalledWith("fm_1");
-		expect(
-			await screen.findByText(
-				"已移除 Server 映射记录；Client 清理状态尚未确认",
-			),
-		).toBeVisible();
+		expect(remove).toHaveBeenCalledWith(
+			"fm_1",
+			expect.objectContaining({ timeoutSeconds: 30 }),
+		);
+		expect(await screen.findByText("映射已从 Client 与 FRPS 删除")).toBeVisible();
 	});
 });

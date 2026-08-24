@@ -601,6 +601,39 @@ export type StorageProviderKind =
 
 // ── FRP 端口映射 ──
 
+/** FRP 映射控制面状态。 */
+export const FRP_MAPPING_STATUSES = [
+	"provisioning",
+	"active",
+	"inactive",
+	"deleting",
+	"error",
+] as const;
+export type FrpMappingStatus = (typeof FRP_MAPPING_STATUSES)[number];
+
+/** FRP 写操作稳定错误码。 */
+export const FRP_ERROR_CODES = [
+	"FRPS_DASHBOARD_REQUIRED",
+	"FRPS_DASHBOARD_UNREACHABLE",
+	"FRPS_DASHBOARD_AUTH_FAILED",
+	"FRP_PROXY_NAME_CONFLICT",
+	"FRP_PROXY_CONFIRM_TIMEOUT",
+	"FRP_PROXY_REMOVE_TIMEOUT",
+	"FRP_ROLLBACK_FAILED",
+	"FRPC_NOT_FOUND",
+	"FRPC_START_FAILED",
+	"FRPC_STOP_FAILED",
+] as const;
+export type FrpErrorCode = (typeof FRP_ERROR_CODES)[number];
+
+/** FRP 信任边界输入错误。 */
+export class FrpProtocolError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "FrpProtocolError";
+	}
+}
+
 export const FrpJobType = {
 	FRP_CREATE: "frp.create",
 	FRP_DELETE: "frp.delete",
@@ -615,7 +648,7 @@ export interface FrpCreatePayload {
 	proxyType: "tcp" | "http" | "https";
 	localIp: string;
 	localPort: number;
-	remotePort: number;
+	remotePort?: number;
 	customDomain?: string;
 	frpsInfo: {
 		serverAddr: string;
@@ -628,6 +661,8 @@ export interface FrpCreatePayload {
 export interface FrpDeletePayload {
 	mappingId: string;
 	name: string;
+	/** 创建确认失败时，关联等待回滚结果的原始 create Job。 */
+	rollbackOfJobId?: string;
 }
 
 /** frp.create / frp.delete 的 JOB_DONE 结果 */
@@ -653,18 +688,22 @@ export interface FrpListResult {
 	}[];
 }
 
-/** REST API 返回的映射信息 */
+/** REST API 返回的映射信息。 */
 export interface FrpMappingInfo {
 	id: string;
 	clientId: string;
+	frpsInstanceId: string | null;
 	name: string;
-	proxyType: string;
+	proxyType: "tcp" | "http" | "https";
 	localIp: string;
 	localPort: number;
 	remotePort: number | null;
 	customDomain: string | null;
-	status: string;
+	status: FrpMappingStatus;
 	publicUrl: string | null;
+	operationJobId: string | null;
+	errorCode: FrpErrorCode | null;
+	errorMessage: string | null;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -678,16 +717,132 @@ export interface PaginatedResult<T> {
 	totalPages: number;
 }
 
-/** 创建映射 REST 请求体 */
+/** 创建映射 REST 请求体。 */
 export interface FrpMappingCreateRequest {
 	clientId: string;
-	name: string;
+	name?: string;
 	proxyType: "tcp" | "http" | "https";
 	localIp?: string;
 	localPort: number;
 	remotePort?: number;
 	customDomain?: string;
 	frpsInstanceId?: string;
+	timeoutSeconds?: number;
+}
+
+/** 解析 FRP Dashboard 确认时限，默认 30 秒。 */
+export function parseFrpOperationTimeout(value: unknown): number {
+	const parsed = value === undefined ? 30 : Number(value);
+	if (!Number.isInteger(parsed) || parsed < 1 || parsed > 300) {
+		throw new FrpProtocolError("timeoutSeconds 必须是 1–300 的整数");
+	}
+	return parsed;
+}
+
+/** 严格解析创建映射 REST 请求。 */
+export function parseFrpMappingCreateRequest(
+	value: unknown,
+): FrpMappingCreateRequest & { localIp: string; timeoutSeconds: number } {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new FrpProtocolError("FRP 创建请求必须是对象");
+	}
+	const input = value as Record<string, unknown>;
+	const allowed = new Set([
+		"clientId",
+		"name",
+		"proxyType",
+		"localIp",
+		"localPort",
+		"remotePort",
+		"customDomain",
+		"frpsInstanceId",
+		"timeoutSeconds",
+	]);
+	for (const key of Object.keys(input)) {
+		if (!allowed.has(key)) throw new FrpProtocolError(`FRP 创建请求含未知字段 ${key}`);
+	}
+	const clientId = frpString(input.clientId, "clientId", 128);
+	const proxyType = input.proxyType;
+	if (proxyType !== "tcp" && proxyType !== "http" && proxyType !== "https") {
+		throw new FrpProtocolError("proxyType 必须是 tcp、http 或 https");
+	}
+	const localPort = frpPort(input.localPort, "localPort");
+	const name = optionalFrpString(input.name, "name", 64, /^[A-Za-z0-9._-]+$/);
+	const localIp = optionalFrpString(
+		input.localIp,
+		"localIp",
+		255,
+		/^[A-Za-z0-9.:%_-]+$/,
+	) ?? "127.0.0.1";
+	const frpsInstanceId = optionalFrpString(
+		input.frpsInstanceId,
+		"frpsInstanceId",
+		128,
+	);
+	const remotePort =
+		input.remotePort === undefined
+			? undefined
+			: frpPort(input.remotePort, "remotePort");
+	const customDomain = optionalFrpString(
+		input.customDomain,
+		"customDomain",
+		253,
+		/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/,
+	);
+	if (proxyType === "tcp" && customDomain) {
+		throw new FrpProtocolError("TCP 映射不允许 customDomain");
+	}
+	if (proxyType !== "tcp" && remotePort !== undefined) {
+		throw new FrpProtocolError("HTTP/HTTPS 映射不允许 remotePort");
+	}
+	if (proxyType !== "tcp" && !customDomain) {
+		throw new FrpProtocolError("HTTP/HTTPS 映射必须提供 customDomain");
+	}
+	return {
+		clientId,
+		...(name ? { name } : {}),
+		proxyType,
+		localIp,
+		localPort,
+		...(remotePort !== undefined ? { remotePort } : {}),
+		...(customDomain ? { customDomain } : {}),
+		...(frpsInstanceId ? { frpsInstanceId } : {}),
+		timeoutSeconds: parseFrpOperationTimeout(input.timeoutSeconds),
+	};
+}
+
+function frpString(
+	value: unknown,
+	field: string,
+	maxLength: number,
+	pattern?: RegExp,
+): string {
+	if (
+		typeof value !== "string" ||
+		value.length < 1 ||
+		value.length > maxLength ||
+		value !== value.trim() ||
+		(pattern && !pattern.test(value))
+	) {
+		throw new FrpProtocolError(`${field} 格式无效`);
+	}
+	return value;
+}
+
+function optionalFrpString(
+	value: unknown,
+	field: string,
+	maxLength: number,
+	pattern?: RegExp,
+): string | undefined {
+	return value === undefined ? undefined : frpString(value, field, maxLength, pattern);
+}
+
+function frpPort(value: unknown, field: string): number {
+	if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 65535) {
+		throw new FrpProtocolError(`${field} 必须是 1–65535 的整数`);
+	}
+	return value as number;
 }
 
 // ── FRP 实例配置 ──

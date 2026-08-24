@@ -24,12 +24,12 @@
 | Storage 预签名上传/下载 | 已实现 | 已实现 | 下载用于文件导出 | 未实现 | 未实现 | 本地上传后 import 尚无闭环 |
 | Storage 后端配置 | 已实现 | 不涉及 | 已实现（仅写安全字段） | 未实现 | 未实现 | 不读取 raw config |
 | 阿里云盘 OAuth | 已实现 | 不涉及 | 已实现 | 未实现 | 未实现 | 只展示安全状态，授权 URL 校验 origin |
-| FRP 映射 | 已实现 | 已实现 | 已实现 | 未实现 | 未实现 | 创建/查询可用；删除仍有已知缺陷 |
+| FRP 映射 | 已实现 | 已实现 | 已实现 | 已实现 create/delete | 已实现确认门 | Client frpc + FRPS Dashboard 双重确认 |
 | Job WebSocket 实时输出 | 部分实现 | 已实现 | 未实现 | 未实现 | 未实现 | 暂不作为对接方案 |
 | Release 上传与自更新 | 已实现 | 已实现更新配合 | 已实现审计页 | 已实现双平台上传 | CLI 总 Skill 中已实现该功能章节 | 上传后 Server 先自更新，再逐台更新在线 Client |
 | `agent.run` | 仅有类型占位 | 未实现 | 未实现 | 未实现 | 未实现 | 不得调用 |
 
-当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘、发布审计和账号设置。VCPDeck Skill 是 CLI 的统一能力入口；其中当前已落地的功能章节只有 Release 双平台上传与自更新，机器管理、Job 等命令仍未实现，后续随 CLI 对齐 Server 能力逐项补充。
+当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘、发布审计和账号设置。VCPDeck Skill 是 CLI 的统一能力入口；机器、Job、文件、Terminal、Pi、FRP 映射、Storage 状态与 Release 等章节均以 CLI 当前 help/源码为准。
 
 > **安全提示：** 当前任意已认证身份都等价于远程机器操作员，可执行 shell、操作文件并修改 Storage/FRP；Job 也不按身份隔离。只向可信操作者发放账号和 Token。
 
@@ -1121,15 +1121,16 @@ OAuth 会话只保存在 Server 内存中，Server 重启后必须重新 start�
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `clientId` | 是 | 在线且支持 FRP 的 Client |
-| `name` | 是 | frpc proxy 名称 |
+| `name` | 否 | frpc proxy 名称；省略时按类型/本地端口生成唯一名称 |
 | `proxyType` | 是 | `tcp`、`http`、`https` |
 | `localIp` | 否 | 默认 `127.0.0.1` |
 | `localPort` | 是 | 本地服务端口 |
-| `remotePort` | 否 | 首选公网端口，省略则自动分配 |
-| `customDomain` | 否 | HTTP/HTTPS 自定义域名 |
-| `frpsInstanceId` | 否 | 省略时使用逻辑默认实例；同一 Client 当前不要跨实例 |
+| `remotePort` | 否 | 仅 TCP；首选公网端口，省略则自动分配 |
+| `customDomain` | 条件必填 | HTTP/HTTPS 必填，TCP 禁止 |
+| `frpsInstanceId` | 否 | 省略时使用逻辑默认实例；同一 Client 强制单实例 |
+| `timeoutSeconds` | 否 | Dashboard 确认时限，默认 30，范围 1–300 |
 
-响应立即返回，不等待 frpc 启动：
+响应立即返回 provisioning 映射和 operationJobId；完整完成需等待该 Job：
 
 ```json
 {
@@ -1141,23 +1142,17 @@ OAuth 会话只保存在 Server 内存中，Server 重启后必须重新 start�
   "localPort": 3000,
   "remotePort": 20080,
   "customDomain": null,
-  "status": "inactive",
-  "publicUrl": "frp.example.com:20080",
+"status": "provisioning",
+"publicUrl": "frp.example.com:20080",
+"operationJobId": "job-uuid",
+"errorCode": null,
+"errorMessage": null,
   "createdAt": "2026-07-26T00:00:00.000Z",
   "updatedAt": "2026-07-26T00:00:00.000Z"
 }
 ```
 
-创建接口不返回内部 Job ID。调用端应轮询映射详情：
-
-```text
-GET /api/frp/mappings/:id
-  → inactive：继续等待
-  → active：成功
-  → error：失败
-```
-
-建议沿用 1s、2s、5s 间隔，并设置调用端等待上限。`inactive` 也可能表示 Client 后续断线；`active` 当前只表示 frpc spawn 未同步失败，不证明 FRPS 注册、本地服务或公网可达。
+调用端使用 SDK `frp.createAndWait` 或轮询 `GET /api/jobs/:operationJobId`。done 后详情为 active；error 同时返回稳定 errorCode/safe message。创建未确认时 Server 自动回滚，回滚失败保留 error 映射。active 表示本次 Client frpc 动作和 FRPS Dashboard 注册均已确认，但不证明本地服务或公网可达。
 
 ### 10.2 列表和详情
 
@@ -1171,21 +1166,14 @@ GET /api/frp/mappings/:id
 
 ### 10.3 删除映射
 
-#### `DELETE /api/frp/mappings/:id`
+#### `DELETE /api/frp/mappings/:id?timeoutSeconds=30`
 
-- 危险操作：必须确认
+- 危险操作：必须确认；
+- 立即返回 status=deleting 的映射和 operationJobId；
+- SDK/CLI 等待 Job done 后才返回 `{id,deleted:true}`；
+- Server 只在 Client 清理且 FRPS Dashboard 确认 proxy 消失后删除记录；失败保留 error 记录供重试。
 
-```json
-{ "id": "fm_12345678", "deleted": true }
-```
-
-**当前已知缺陷：** Server 会先删除数据库映射，再下发 `frp.delete` Job；Client 完成后 Gateway 又尝试更新已删除映射状态，可能导致 Prisma 更新失败，使内部删除 Job 无法正常进入终态。REST 会在下发前就返回 `deleted: true`，因此它只代表 Server 记录已删除，不足以证明 Client frpc 已清理成功。
-
-在修复前：
-
-- Frontend/CLI/Skill 必须把结果描述为“已提交删除并移除 Server 映射记录”；
-- 不应宣称远端 frpc 已确认清理；
-- 关键映射删除后应人工检查目标端口、FRPS Dashboard 或 Client frpc 状态。Client 重启也不会按 SQLite 自动恢复映射。完整当前边界见 [`docs/design/frp.md`](./design/frp.md)。
+Client 重启仍不会按 SQLite 自动恢复映射。完整当前边界见 [`docs/design/frp.md`](./design/frp.md)。
 
 实现：
 
@@ -1241,7 +1229,7 @@ const terminal = await sdk.jobs.wait(job.jobId);
 - [x] 文件操作使用 `file.roots`，并对删除/覆盖要求精确目标确认；
 - [x] export 可下载；不提供缺少 `fileId` 闭环的本地 import UI；
 - [x] 阿里云盘配置/OAuth 只读取安全状态，不读取 raw config；
-- [x] FRP 创建可轮询状态，删除显示 Client 清理未确认；
+- [x] FRP 创建/删除等待 Client frpc 与 FRPS Dashboard 双重确认；
 - [x] 加载、空列表和错误状态有明确 UI。
 
 仍未实现实时 stdout/stderr、本地上传后 import、离线 Client 历史和 `agent.run`；这些限制不能由 Frontend 伪造或绕过。

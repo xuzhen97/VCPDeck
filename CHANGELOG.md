@@ -19,17 +19,16 @@
 
 - README「从 GitHub 安装」补充 CLI 全局命令安装与 Tab 补全；design/cli.md 新增 §16 全局安装与 Shell 补全、修正 §10 终端边界与 §15 过时清单；operations.md 新增「Client PM2 进程丢失」处置。
 
-## [Unreleased]
+## [0.6.0] - 2026-08-24
 
 ### Added
 
-- CLI 新增 `vcpdeck completions bash|powershell`：生成 Shell 补全脚本——覆盖顶层命令、各域子命令、常用 flag 与生成时嵌入的已配置环境名（`--env=` 候选，零网络请求）；环境增删后重新生成。
-- 新增 `pnpm vcpdeck:link`（scripts/link-cli.cjs）：将 CLI 安装为全局 `vcpdeck` 命令——向 Node 可执行目录写入 CMD/PowerShell 与 Git Bash 两个垫片，不经 npm/pnpm link、不触碰 pnpm store；支持 `--target=`/`--dir=` 定制。
-- 新增远程一键安装脚本 `scripts/install-cli.cjs`：仅有 Node 18+ 的联网机器可用单条 `node -e 'fetch(…).then(eval)' -- --tag=<版本>` 从 GitHub raw 下载随 tag 提交的单文件 CLI 包并生成垫片、自动配置 PATH、自验收；Windows/POSIX 双端。
-- CLI 新增 `vcpdeck terminal new <client> [--shell=<id>] [--cols=<n>] [--rows=<n>]`：创建终端会话（缺省选默认 Shell），输出 sessionId 与 attach 连接命令——纯命令行即可完成建会话到 TUI 直连的全流程，无需经 Frontend。
+- CLI 新增 `vcpdeck frp mapping create/delete`：覆盖 TCP/HTTP/HTTPS、可选自动名称、实例/端口/域名与 1–300 秒确认时限；命令等待 Client frpc 动作和 FRPS Dashboard 双重确认后才成功，`--json` 输出稳定结果。
+- FRP 映射新增 `provisioning/deleting/error` 收敛状态、同实例 proxy name 唯一约束和 `operationJobId`；创建确认失败自动回滚，删除确认成功后才移除控制面记录。
 
 ### Fixed
 
+- 修复 FRP 创建在 `spawn(frpc)` 后立即误报 active、删除先删数据库导致孤儿 proxy 和内部 Job 无法终结的问题；Client 启动/重启失败会恢复内存 registry 与旧 frpc 配置，Dashboard 故障按未确认收敛而不让 Job 永久卡住。
 - CLI 修复 `terminal attach` 重连后沦为只读的问题：Server 对 operator 断开设计有 30 秒重连保护期，期间须携带 reconnectToken 才能恢复可输入模式——CLI 此前未保存也未回传该令牌，导致退出后 30 秒内重连只能拿到 viewer（画面正常但键盘无效）。现令牌持久化于配置目录并在 attach 时自动回传。
 
 ## [0.4.0] - 2026-08-23

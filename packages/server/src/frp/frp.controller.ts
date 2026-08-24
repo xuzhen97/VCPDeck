@@ -13,7 +13,11 @@ import {
 } from "@nestjs/common";
 import { FrpService } from "./frp.service.js";
 import { ClientGateway } from "../events/client.gateway.js";
-import type { FrpMappingCreateRequest } from "@vcpdeck/shared";
+import {
+  FrpProtocolError,
+  parseFrpMappingCreateRequest,
+  parseFrpOperationTimeout,
+} from "@vcpdeck/shared";
 
 @Controller("api/frp")
 export class FrpController {
@@ -23,20 +27,24 @@ export class FrpController {
   ) {}
 
   @Post("mappings")
-  async create(@Body() body: FrpMappingCreateRequest) {
-    if (!body.clientId || !body.name || !body.proxyType || body.localPort === undefined) {
-      throw new BadRequestException("缺少必填字段：clientId, name, proxyType, localPort");
-    }
-    if (!["tcp", "http", "https"].includes(body.proxyType)) {
-      throw new BadRequestException(`无效的 proxyType: ${body.proxyType}`);
-    }
-
+  async create(@Body() body: unknown) {
     try {
-      const { mapping, dispatch } = await this.frpService.createMapping(body);
+      const input = parseFrpMappingCreateRequest(body);
+      const { mapping, dispatch } = await this.frpService.createMapping(input);
       this.gateway.sendDispatch(dispatch);
       return mapping;
-    } catch (e: any) {
-      throw new BadRequestException(e.message);
+    } catch (error) {
+      if (error instanceof FrpProtocolError) {
+        throw new BadRequestException({
+          code: "FRP_PROTOCOL_INVALID",
+          message: error.message,
+        });
+      }
+      const failure = error as { code?: string; message?: string };
+      throw new BadRequestException({
+        code: failure.code ?? "FRP_OPERATION_FAILED",
+        message: failure.message ?? "FRP 映射创建失败",
+      });
     }
   }
 
@@ -61,16 +69,34 @@ export class FrpController {
   }
 
   @Delete("mappings/:id")
-  async delete(@Param("id") id: string) {
+  async delete(
+    @Param("id") id: string,
+    @Query("timeoutSeconds") timeoutSeconds?: string,
+  ) {
     try {
-      const result = await this.frpService.deleteMapping(id);
+      const timeout = parseFrpOperationTimeout(timeoutSeconds);
+      const result = await this.frpService.deleteMapping(id, timeout);
       if (!result) {
-        throw new BadRequestException(`映射 "${id}" 不存在`);
+        throw new BadRequestException({
+          code: "FRP_MAPPING_NOT_FOUND",
+          message: `映射 "${id}" 不存在`,
+        });
       }
       this.gateway.sendDispatch(result.dispatch);
-      return { id, deleted: true };
-    } catch (e: any) {
-      throw new BadRequestException(e.message);
+      return result.mapping;
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      if (error instanceof FrpProtocolError) {
+        throw new BadRequestException({
+          code: "FRP_PROTOCOL_INVALID",
+          message: error.message,
+        });
+      }
+      const failure = error as { code?: string; message?: string };
+      throw new BadRequestException({
+        code: failure.code ?? "FRP_OPERATION_FAILED",
+        message: failure.message ?? "FRP 映射删除失败",
+      });
     }
   }
 }

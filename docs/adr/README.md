@@ -78,3 +78,5 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0017](./0017-cli-multi-environment-configuration.md) | Accepted | CLI 使用用户级环境注册表，项目配置只选择环境；严格优先级与 fail-closed 解析 |
 | [0018](./0018-public-client-installer-and-pm2-supervision.md) | Accepted | 提供公开可控的 Client 一键安装入口，并由 PM2 只守护 Launcher |
 | [0019](./0019-direct-release-upload-to-external-storage.md) | Accepted | 外部 Storage Provider 的 Release 上传与下载数据面均直连，Server 只控制权限、会话、元数据和编排 |
+| [0020](./0020-cli-dataplane-namespace.md) | Accepted | CLI 复用 `/app` 数据面命名空间接入终端与 Pi 交互 |
+| [0021](./0021-frp-dashboard-confirmed-mapping-lifecycle.md) | Accepted | FRP 映射以 Client 动作和 FRPS Dashboard 双重确认收敛 |

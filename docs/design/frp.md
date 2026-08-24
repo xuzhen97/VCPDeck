@@ -1,6 +1,6 @@
 # VCPDeck FRP 设计
 
-> 状态：Current｜维护责任：FRP/Client 维护者｜最后核验：2026-08-15｜适用版本：当前 `main`
+> 状态：Current｜维护责任：FRP/Client 维护者｜最后核验：2026-08-24｜适用版本：当前 `main`
 >
 > 事实来源：`packages/shared/src/index.ts`、`packages/server/src/frp/`、`packages/server/src/events/client.gateway.ts`、`packages/client/src/frpc-daemon.ts`、`packages/sdk/src/frp.ts`、Frontend FRP 页面、Prisma schema
 
@@ -15,6 +15,7 @@
 - FRPS TCP/Dashboard probe 和 proxy 摘要；
 - 每个实例的端口范围；
 - FrpMapping 创建、分页查询、详情和删除；
+- `provisioning/active/inactive/deleting/error` 状态与 FRPS Dashboard 完成确认；
 - `frp.create/delete/list` Typed Job；
 - Client 按平台发现 frpc，并生成合并 TOML、启动/重启单个 frpc；
 - Client 断线时 Server 把 active mapping 标为 inactive；
@@ -26,7 +27,7 @@
 - FRPS 的安装、升级、HA、证书签发或用户管理；
 - 每 Client 多个独立 frpc runtime；
 - Client 重启后按 SQLite 自动重建全部映射；
-- frpc 进程持续健康监督和 FRPS 注册确认；
+- frpc 进程持续健康监督（创建/删除时会确认 FRPS 注册状态，但不持续巡检）；
 - 按 Identity/Client 隔离 FRPS 凭据；
 - FRPS Token 加密存储或 API 脱敏；
 - UDP、STCP、XTCP、SUDP 等代理类型；
@@ -51,9 +52,9 @@ flowchart LR
 | 组件 | 当前职责 |
 | --- | --- |
 | `FrpsInstancesController/Service` | 实例 CRUD、默认实例、环境变量迁移、probe、REST DTO |
-| `FrpController/Service` | 映射持久化、Client/capability 检查、端口分配、Typed Job 创建 |
-| `PortAllocator` | 进程内串行分配、DB 与可选 Dashboard 已用端口合并 |
-| `ClientGateway` | 派发 Job、完成时更新 mapping status、断线置 inactive |
+| `FrpController/Service` | 严格解析、映射持久化、Client/capability/单实例检查、端口分配、Typed Job 和 Dashboard 收敛 |
+| `PortAllocator` | 进程内串行分配、DB 与本次严格 Dashboard 查询的已用端口合并 |
+| `ClientGateway` | 派发 Job、调用映射收敛、回滚编排、断线置 inactive |
 | Client `frpc-daemon` | 内存 proxy registry、合并 TOML、单 frpc 启停和 Job 回报 |
 | FRPS | 接收 frpc、暴露 remotePort/customDomain；不由 VCPDeck 持久化运行状态 |
 | Frontend/SDK | 实例、probe、映射 CRUD 的调用和展示 |
@@ -63,14 +64,14 @@ flowchart LR
 | 数据或资源 | 权威位置 | 当前持久性 |
 | --- | --- | --- |
 | FrpsInstance 配置 | Server / SQLite | 持久化，包括明文秘密 |
-| FrpMapping 期望配置 | Server / SQLite | 持久化，删除时当前先删记录 |
+| FrpMapping 期望配置 | Server / SQLite | 持久化；删除在 FRPS 确认消失后才删记录 |
 | 创建/删除调度状态 | Server Job / SQLite | 持久化；payload 可能含 FRPS Token |
 | proxy registry | Client 进程内 `proxies` | Client 重启后丢失 |
 | 当前 FRPS 连接信息 | Client `lastFrpsInfo` | 进程内，仅保存最后一次 create 的实例 |
 | 合并 frpc TOML | Client 工作目录 | 明文磁盘文件 |
 | frpc 进程 | Client OS | 非持久资源，无独立 Supervisor |
 | FRPS 已注册 proxy | FRPS runtime / Dashboard | probe 时读取，不是 Server 持久权威 |
-| mapping status | Server/SQLite 的近似投影 | `active/inactive/error` 不等于实时健康 |
+| mapping status | Server/SQLite 的操作投影 | `active` 表示操作时 Dashboard 已确认，不等于持续健康或公网可达 |
 
 FrpMapping 记录表达控制面期望；实际 proxy 是否注册并可访问必须结合 Client 进程、frpc 日志、FRPS Dashboard、防火墙和本地服务检查。
 
@@ -129,29 +130,22 @@ Server 启动时，若 FrpsInstance 表为空，会从以下变量创建一个�
 
 ```text
 POST /api/frp/mappings
-  → 检查 Client 存在、在线、capability 含 frp
-  → 选择指定或默认 FrpsInstance
-  → 分配 remotePort
-  → 创建 inactive FrpMapping
-  → 创建 pending frp.create Job
+  → Shared 严格解析；检查 Client 在线/capability/单 FrpsInstance
+  → 要求 Dashboard 可认证，检查 DB + FRPS proxy name
+  → TCP 分配 remotePort；HTTP/HTTPS 使用 customDomain
+  → 创建 provisioning FrpMapping + running frp.create Job
   → Gateway 立即派发
-  → Client 更新内存 proxy、写 TOML、spawn frpc
-  → Client 立即回 JOB_DONE
-  → Server 更新 mapping status
+  → Client 原子更新内存 proxy、写 TOML，等待 frpc spawn
+  → Client 回 JOB_DONE（只代表本地动作完成）
+  → Server 轮询 Dashboard；proxy 出现后 active/done
+  → 未确认则派发 delete 回滚；回滚失败保留 error
 ```
 
-支持 proxyType：`tcp/http/https`。Browser 可提交 localIp/localPort、首选 remotePort 和 customDomain。当前只做少量必填/proxyType 检查，没有完整严格 parser、主机/IP/域名规范化、字符串长度或未知字段拒绝。
+支持 proxyType：`tcp/http/https`。name 可选，缺省为 `<proxyType>-<localPort>`，冲突追加短随机后缀；同一 FrpsInstance 内由数据库唯一约束兜底。TCP 可选 remotePort 且禁止 customDomain；HTTP/HTTPS 必须提供 customDomain 且不分配 remotePort。Shared parser 拒绝未知字段、非法端口、类型冲突和危险名称字符，默认确认时限 30 秒（1–300）。
 
 ### 6.1 active 的含义
 
-Client 在 `spawn(frpc)` 未同步抛错后立即回报 `active`：
-
-- 不等待 frpc 与 FRPS 建立连接；
-- 不等待 Dashboard 出现 proxy；
-- 不检查目标 local service；
-- frpc 后续退出只写 Client 日志，不主动通知 Server 把 mapping 置 inactive/error。
-
-因此 active 只表示“Client 已尝试启动当前合并配置”，不是可达性或持续健康保证。
+Client 的 JOB_DONE 只表示本地配置写入且收到 child `spawn` 事件；Server 必须再从 FRPS Dashboard 观察到相同 proxyType/name 才把 mapping 标为 active 并完成 Job。active 因此表示“本次操作时 Client 本地动作和 FRPS 注册都已确认”，但仍不检查目标 local service、DNS、TLS 或公网访问，且 frpc 后续退出只写 Client 日志，不主动更新 mapping。因此 active 不是持续健康保证。
 
 ## 7. 端口分配
 
@@ -197,7 +191,7 @@ Server 数据模型允许每个 FrpMapping 关联不同 FrpsInstance，但 Clien
 - 原来属于其他实例的 proxy 也会被送往最后一个实例；
 - delete 后重启同样使用 lastFrpsInfo。
 
-因此当前只可靠支持“同一 Client 的所有活动映射使用同一个 FRPS 实例”。不能把 Server 的多实例 CRUD 描述成同一 Client 可同时连接多个 FRPS。
+因此当前 Server 强制“同一 Client 的所有映射使用同一个 FRPS 实例”；发现已有其他实例映射时，新建请求失败。不能把 Server 的多实例 CRUD 描述成同一 Client 可同时连接多个 FRPS。
 
 长期方向需维护者另行决定并新增 ADR：
 
@@ -212,15 +206,14 @@ Server 数据模型允许每个 FrpMapping 关联不同 FrpsInstance，但 Clien
 
 当前 Server 删除流程：
 
-1. 创建 pending `frp.delete` Job；
-2. 读取旧 mapping 作为响应；
-3. 立即删除 FrpMapping DB 记录；
-4. 立即把端口视为可重新分配；
-5. 派发 Client delete；
-6. Client 从内存 registry 删除并重启/停止 frpc；
-7. Client 回报 deleted。
+1. 创建 running `frp.delete` Job，把 mapping 置为 deleting 并返回 operationJobId；
+2. 派发 Client delete；
+3. Client 从内存 registry 删除并重启/停止 frpc，失败时恢复 registry 和旧配置；
+4. Client JOB_DONE 后，Server 轮询 Dashboard；
+5. proxy 消失后才删除 FrpMapping，Job done；
+6. 超时、Dashboard 故障或 Client 失败时保留 error mapping 和安全错误摘要，可再次 DELETE 重试。
 
-如果 Client 离线、派发失败、Job 丢失或 Client 清理失败，控制面记录已经消失，而远端 proxy 可能仍存在。完成回调尝试更新已删除 mapping 也无法形成可靠状态。DELETE 响应只表示 Server 已接受并删除控制面记录，不能证明 FRPS proxy 已清理。
+创建确认失败使用同一删除链自动回滚。回滚成功后原创建 Job 以 error 终结并说明已回滚；回滚失败保留 `FRP_ROLLBACK_FAILED`。
 
 ### 9.2 Client 断线
 
@@ -355,16 +348,14 @@ DELETE /api/frp/mappings/:id
 4. 环境迁移有 `test-frp-token`、admin/admin 开发默认；
 5. 默认实例无数据库约束或事务，可能出现零个/竞态；
 6. 端口占用查询跨所有实例，不能在不同 FRPS 复用端口；
-7. 输入缺严格运行时 parser和稳定错误码；
-8. active 在 spawn 后立即返回，不确认 FRPS 注册或本地服务；
-9. frpc 后续退出不更新 Server mapping status；
-10. Client 重启不自动恢复映射；
-11. 删除先移除 DB 记录再清理 Client；成功回调又对已删除 mapping 执行 Prisma update，可能阻止内部 delete Job 进入终态，并可遗留孤儿 proxy；
-12. Client 断线置 inactive 但 frpc 可能仍工作；
-13. FRP 内部 Job 未保存 Actor，FRP Job 取消不可靠；
-14. Dashboard http 默认无传输加密，probe error 缺稳定安全 allowlist。
+7. frpc 后续退出不更新 Server mapping status；
+8. Client 重启不自动恢复映射；
+9. Client 断线置 inactive 但 frpc 可能仍工作；
+10. FRP 内部 Job 未保存 Actor，FRP Job 取消不可靠；
+11. Dashboard http 默认无传输加密，probe error 缺稳定安全 allowlist；
+12. 创建/删除收敛依赖 Dashboard，Server 在确认循环中重启时目前没有自动恢复该循环；Client 派发后完全不回报时也没有 FRP Job 后台超时监控。
 
-这些缺口进入 [`roadmap.md`](../roadmap.md) 或 Issue；本次文档迁移不决定多实例长期方案，也不修改运行代码。
+这些缺口进入 [`roadmap.md`](../roadmap.md) 或 Issue；多实例长期 runtime 方案仍需单独 ADR。映射操作完成门见 [`ADR-0021`](../adr/0021-frp-dashboard-confirmed-mapping-lifecycle.md)。
 
 ## 17. 相关文档
 

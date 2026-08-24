@@ -1334,7 +1334,9 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FrpJobType = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
+    exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
     Object.defineProperty(exports2, "VERSION", { enumerable: true, get: function() {
       return version_js_1.VERSION;
@@ -1458,17 +1460,17 @@ var require_dist = __commonJS({
       JobType2["FRP_LIST"] = "frp.list";
       JobType2["FILE_ROOTS"] = "file.roots";
     })(JobType || (exports2.JobType = JobType = {}));
-    var JobStatus3;
-    (function(JobStatus4) {
-      JobStatus4["IDLE"] = "idle";
-      JobStatus4["PENDING"] = "pending";
-      JobStatus4["RUNNING"] = "running";
-      JobStatus4["WAITING_INPUT"] = "waiting_input";
-      JobStatus4["DONE"] = "done";
-      JobStatus4["ERROR"] = "error";
-      JobStatus4["DISCONNECTED"] = "disconnected";
-      JobStatus4["CANCELLED"] = "cancelled";
-    })(JobStatus3 || (exports2.JobStatus = JobStatus3 = {}));
+    var JobStatus4;
+    (function(JobStatus5) {
+      JobStatus5["IDLE"] = "idle";
+      JobStatus5["PENDING"] = "pending";
+      JobStatus5["RUNNING"] = "running";
+      JobStatus5["WAITING_INPUT"] = "waiting_input";
+      JobStatus5["DONE"] = "done";
+      JobStatus5["ERROR"] = "error";
+      JobStatus5["DISCONNECTED"] = "disconnected";
+      JobStatus5["CANCELLED"] = "cancelled";
+    })(JobStatus4 || (exports2.JobStatus = JobStatus4 = {}));
     exports2.FileErrorCode = {
       PATH_NOT_FOUND: "PATH_NOT_FOUND",
       PATH_NOT_ALLOWED: "PATH_NOT_ALLOWED",
@@ -1488,11 +1490,111 @@ var require_dist = __commonJS({
     exports2.StorageProviderKind = {
       LOCAL: "local"
     };
+    exports2.FRP_MAPPING_STATUSES = [
+      "provisioning",
+      "active",
+      "inactive",
+      "deleting",
+      "error"
+    ];
+    exports2.FRP_ERROR_CODES = [
+      "FRPS_DASHBOARD_REQUIRED",
+      "FRPS_DASHBOARD_UNREACHABLE",
+      "FRPS_DASHBOARD_AUTH_FAILED",
+      "FRP_PROXY_NAME_CONFLICT",
+      "FRP_PROXY_CONFIRM_TIMEOUT",
+      "FRP_PROXY_REMOVE_TIMEOUT",
+      "FRP_ROLLBACK_FAILED",
+      "FRPC_NOT_FOUND",
+      "FRPC_START_FAILED",
+      "FRPC_STOP_FAILED"
+    ];
+    var FrpProtocolError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "FrpProtocolError";
+      }
+    };
+    exports2.FrpProtocolError = FrpProtocolError;
     exports2.FrpJobType = {
       FRP_CREATE: "frp.create",
       FRP_DELETE: "frp.delete",
       FRP_LIST: "frp.list"
     };
+    function parseFrpOperationTimeout(value2) {
+      const parsed = value2 === void 0 ? 30 : Number(value2);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 300) {
+        throw new FrpProtocolError("timeoutSeconds \u5FC5\u987B\u662F 1\u2013300 \u7684\u6574\u6570");
+      }
+      return parsed;
+    }
+    function parseFrpMappingCreateRequest(value2) {
+      if (!value2 || typeof value2 !== "object" || Array.isArray(value2)) {
+        throw new FrpProtocolError("FRP \u521B\u5EFA\u8BF7\u6C42\u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      const input = value2;
+      const allowed = /* @__PURE__ */ new Set([
+        "clientId",
+        "name",
+        "proxyType",
+        "localIp",
+        "localPort",
+        "remotePort",
+        "customDomain",
+        "frpsInstanceId",
+        "timeoutSeconds"
+      ]);
+      for (const key of Object.keys(input)) {
+        if (!allowed.has(key))
+          throw new FrpProtocolError(`FRP \u521B\u5EFA\u8BF7\u6C42\u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      const clientId = frpString(input.clientId, "clientId", 128);
+      const proxyType = input.proxyType;
+      if (proxyType !== "tcp" && proxyType !== "http" && proxyType !== "https") {
+        throw new FrpProtocolError("proxyType \u5FC5\u987B\u662F tcp\u3001http \u6216 https");
+      }
+      const localPort = frpPort(input.localPort, "localPort");
+      const name = optionalFrpString(input.name, "name", 64, /^[A-Za-z0-9._-]+$/);
+      const localIp = optionalFrpString(input.localIp, "localIp", 255, /^[A-Za-z0-9.:%_-]+$/) ?? "127.0.0.1";
+      const frpsInstanceId = optionalFrpString(input.frpsInstanceId, "frpsInstanceId", 128);
+      const remotePort = input.remotePort === void 0 ? void 0 : frpPort(input.remotePort, "remotePort");
+      const customDomain = optionalFrpString(input.customDomain, "customDomain", 253, /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/);
+      if (proxyType === "tcp" && customDomain) {
+        throw new FrpProtocolError("TCP \u6620\u5C04\u4E0D\u5141\u8BB8 customDomain");
+      }
+      if (proxyType !== "tcp" && remotePort !== void 0) {
+        throw new FrpProtocolError("HTTP/HTTPS \u6620\u5C04\u4E0D\u5141\u8BB8 remotePort");
+      }
+      if (proxyType !== "tcp" && !customDomain) {
+        throw new FrpProtocolError("HTTP/HTTPS \u6620\u5C04\u5FC5\u987B\u63D0\u4F9B customDomain");
+      }
+      return {
+        clientId,
+        ...name ? { name } : {},
+        proxyType,
+        localIp,
+        localPort,
+        ...remotePort !== void 0 ? { remotePort } : {},
+        ...customDomain ? { customDomain } : {},
+        ...frpsInstanceId ? { frpsInstanceId } : {},
+        timeoutSeconds: parseFrpOperationTimeout(input.timeoutSeconds)
+      };
+    }
+    function frpString(value2, field, maxLength, pattern) {
+      if (typeof value2 !== "string" || value2.length < 1 || value2.length > maxLength || value2 !== value2.trim() || pattern && !pattern.test(value2)) {
+        throw new FrpProtocolError(`${field} \u683C\u5F0F\u65E0\u6548`);
+      }
+      return value2;
+    }
+    function optionalFrpString(value2, field, maxLength, pattern) {
+      return value2 === void 0 ? void 0 : frpString(value2, field, maxLength, pattern);
+    }
+    function frpPort(value2, field) {
+      if (!Number.isInteger(value2) || value2 < 1 || value2 > 65535) {
+        throw new FrpProtocolError(`${field} \u5FC5\u987B\u662F 1\u201365535 \u7684\u6574\u6570`);
+      }
+      return value2;
+    }
   }
 });
 
@@ -1634,7 +1736,7 @@ var init_files = __esm({
 });
 
 // ../sdk/dist/frp.js
-function createFrpApi(client) {
+function createFrpApi(client, jobs) {
   return {
     list: (options, signal) => {
       const params = new URLSearchParams();
@@ -1649,7 +1751,44 @@ function createFrpApi(client) {
     },
     get: (id, signal) => client.request("GET", `/api/frp/mappings/${encodeURIComponent(id)}`, void 0, signal),
     create: (input, signal) => client.request("POST", "/api/frp/mappings", input, signal),
-    delete: (id, signal) => client.request("DELETE", `/api/frp/mappings/${encodeURIComponent(id)}`, void 0, signal),
+    async createAndWait(input, options = {}) {
+      if (!jobs)
+        throw new Error("FRP wait requires Jobs API");
+      const mapping = await client.request("POST", "/api/frp/mappings", input, options.signal);
+      if (!mapping.operationJobId)
+        throw new Error("Server \u672A\u8FD4\u56DE FRP operationJobId");
+      const job = await jobs.wait(mapping.operationJobId, options);
+      if (job.status !== import_shared.JobStatus.DONE) {
+        throw new FrpOperationError(job.errorCode ?? "FRP_OPERATION_FAILED", job.errorMessage ?? "FRP \u6620\u5C04\u521B\u5EFA\u5931\u8D25");
+      }
+      return client.request("GET", `/api/frp/mappings/${encodeURIComponent(mapping.id)}`, void 0, options.signal);
+    },
+    delete: (id, optionsOrSignal = {}) => {
+      const options = optionsOrSignal instanceof AbortSignal ? { signal: optionsOrSignal } : optionsOrSignal;
+      const params = new URLSearchParams();
+      if (options.timeoutSeconds) {
+        params.set("timeoutSeconds", String(options.timeoutSeconds));
+      }
+      const query = params.toString();
+      return client.request("DELETE", `/api/frp/mappings/${encodeURIComponent(id)}${query ? `?${query}` : ""}`, void 0, options.signal);
+    },
+    async deleteAndWait(id, options = {}) {
+      if (!jobs)
+        throw new Error("FRP wait requires Jobs API");
+      const params = new URLSearchParams();
+      if (options.timeoutSeconds) {
+        params.set("timeoutSeconds", String(options.timeoutSeconds));
+      }
+      const query = params.toString();
+      const mapping = await client.request("DELETE", `/api/frp/mappings/${encodeURIComponent(id)}${query ? `?${query}` : ""}`, void 0, options.signal);
+      if (!mapping.operationJobId)
+        throw new Error("Server \u672A\u8FD4\u56DE FRP operationJobId");
+      const job = await jobs.wait(mapping.operationJobId, options);
+      if (job.status !== import_shared.JobStatus.DONE) {
+        throw new FrpOperationError(job.errorCode ?? "FRP_OPERATION_FAILED", job.errorMessage ?? "FRP \u6620\u5C04\u5220\u9664\u5931\u8D25");
+      }
+      return { id, deleted: true };
+    },
     instances: {
       list: (options, signal) => {
         const params = new URLSearchParams();
@@ -1669,9 +1808,19 @@ function createFrpApi(client) {
     }
   };
 }
+var import_shared, FrpOperationError;
 var init_frp = __esm({
   "../sdk/dist/frp.js"() {
     "use strict";
+    import_shared = __toESM(require_dist(), 1);
+    FrpOperationError = class extends Error {
+      code;
+      constructor(code, message) {
+        super(message);
+        this.code = code;
+        this.name = "FrpOperationError";
+      }
+    };
   }
 });
 
@@ -1787,7 +1936,7 @@ function createPiApi(client) {
       newSession: (clientId, cwdRef, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/new`, { ...cwdRef }, signal),
       open: (clientId, sessionId, cwdRef, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/open`, cwdRef, signal),
       complete: (clientId, sessionId, runId, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/complete`, runId === void 0 ? {} : { runId }, signal),
-      state: async (clientId, sessionId, cwdRef, signal) => (0, import_shared.parsePiAgentState)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}?${cwdQuery(cwdRef)}`, void 0, signal)),
+      state: async (clientId, sessionId, cwdRef, signal) => (0, import_shared2.parsePiAgentState)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}?${cwdQuery(cwdRef)}`, void 0, signal)),
       prompt: (clientId, sessionId, cwdRef, input, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}`, {
         ...cwdRef,
         type: "prompt",
@@ -1833,11 +1982,11 @@ function createPiApi(client) {
     running: (clientId, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/running`, void 0, signal)
   };
 }
-var import_shared;
+var import_shared2;
 var init_pi = __esm({
   "../sdk/dist/pi.js"() {
     "use strict";
-    import_shared = __toESM(require_dist(), 1);
+    import_shared2 = __toESM(require_dist(), 1);
   }
 });
 
@@ -2010,7 +2159,7 @@ var init_client = __esm({
         this.clientInstaller = createClientInstallerApi(this);
         this.storage = createStorageApi(this);
         this.aliyundrive = createAliyunDriveApi(this);
-        this.frp = createFrpApi(this);
+        this.frp = createFrpApi(this, this.jobs);
         this.pi = createPiApi(this);
         this.releases = createReleasesApi(this);
         this.terminals = createTerminalsApi(this);
@@ -2554,10 +2703,9 @@ var init_environment = __esm({
 });
 
 // dist/client-resolver.js
-async function resolveClientId(clientFilter, paths, processEnv) {
-  const environment = await resolveEnvironment({ paths, processEnv });
-  const client = await createAuthenticatedClient(environment);
-  const clients = await client.clients.list();
+async function resolveClientId(clientFilter, paths, processEnv, client) {
+  const resolvedClient = client ?? await createAuthenticatedClient(await resolveEnvironment({ paths, processEnv }));
+  const clients = await resolvedClient.clients.list();
   const matched = clients.find((entry) => entry.clientId === clientFilter || entry.name === clientFilter);
   if (!matched) {
     throw new Error(`\u672A\u627E\u5230 Client "${clientFilter}"\uFF1B\u5148\u7528 vcpdeck clients list \u67E5\u770B\u53EF\u7528\u673A\u5668`);
@@ -3393,7 +3541,7 @@ var require_cjs = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/globals.node.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/globals.node.js
 function createCookieJar() {
   return new CookieJar();
 }
@@ -3438,7 +3586,7 @@ function parse2(setCookieString) {
 }
 var nextTick, globalThisShim, defaultBinaryType, CookieJar;
 var init_globals_node = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/globals.node.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/globals.node.js"() {
     nextTick = process.nextTick;
     globalThisShim = global;
     defaultBinaryType = "nodebuffer";
@@ -3486,7 +3634,7 @@ var init_globals_node = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/util.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/util.js
 function pick(obj, ...attr) {
   return attr.reduce((acc, k) => {
     if (obj.hasOwnProperty(k)) {
@@ -3532,7 +3680,7 @@ function randomString() {
 }
 var NATIVE_SET_TIMEOUT, NATIVE_CLEAR_TIMEOUT, BASE64_OVERHEAD;
 var init_util = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/util.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/util.js"() {
     init_globals_node();
     NATIVE_SET_TIMEOUT = globalThisShim.setTimeout;
     NATIVE_CLEAR_TIMEOUT = globalThisShim.clearTimeout;
@@ -3540,7 +3688,7 @@ var init_util = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/parseqs.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/parseqs.js
 function encode(obj) {
   let str = "";
   for (let i in obj) {
@@ -3562,7 +3710,7 @@ function decode(qs) {
   return qry;
 }
 var init_parseqs = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/parseqs.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/parseqs.js"() {
   }
 });
 
@@ -3682,9 +3830,9 @@ var require_ms = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/common.js
+// ../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/common.js
 var require_common = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/common.js"(exports2, module2) {
+  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/common.js"(exports2, module2) {
     function setup(env) {
       createDebug.debug = createDebug;
       createDebug.default = createDebug;
@@ -3859,9 +4007,9 @@ var require_common = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/browser.js
+// ../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/browser.js
 var require_browser = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/browser.js"(exports2, module2) {
+  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/browser.js"(exports2, module2) {
     exports2.formatArgs = formatArgs;
     exports2.save = save;
     exports2.load = load;
@@ -4144,9 +4292,9 @@ var require_supports_color = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/node.js
+// ../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/node.js
 var require_node = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/node.js"(exports2, module2) {
+  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/node.js"(exports2, module2) {
     var tty = require("tty");
     var util = require("util");
     exports2.init = init;
@@ -4318,9 +4466,9 @@ var require_node = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/index.js
+// ../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/index.js
 var require_src = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/index.js"(exports2, module2) {
+  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/index.js"(exports2, module2) {
     if (typeof process === "undefined" || process.type === "renderer" || process.browser === true || process.__nwjs) {
       module2.exports = require_browser();
     } else {
@@ -4329,10 +4477,10 @@ var require_src = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transport.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transport.js
 var import_component_emitter, import_debug, debug, TransportError, Transport;
 var init_transport = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transport.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transport.js"() {
     init_esm();
     import_component_emitter = __toESM(require_cjs(), 1);
     init_util();
@@ -4472,10 +4620,10 @@ var init_transport = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling.js
 var import_debug2, debug2, Polling;
 var init_polling = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling.js"() {
     init_transport();
     init_util();
     init_esm();
@@ -4625,10 +4773,10 @@ var init_polling = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/has-cors.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/has-cors.js
 var value, hasCORS;
 var init_has_cors = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/has-cors.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/has-cors.js"() {
     value = false;
     try {
       value = typeof XMLHttpRequest !== "undefined" && "withCredentials" in new XMLHttpRequest();
@@ -4638,7 +4786,7 @@ var init_has_cors = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.js
 function empty() {
 }
 function unloadHandler() {
@@ -4665,7 +4813,7 @@ function newRequest(opts) {
 }
 var import_component_emitter2, import_debug3, debug3, BaseXHR, Request, hasXHR2;
 var init_polling_xhr = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.js"() {
     init_polling();
     import_component_emitter2 = __toESM(require_cjs(), 1);
     init_util();
@@ -4883,10 +5031,10 @@ var init_polling_xhr = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.node.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.node.js
 var XMLHttpRequestModule, XMLHttpRequest2, XHR;
 var init_polling_xhr_node = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.node.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.node.js"() {
     XMLHttpRequestModule = __toESM(require_XMLHttpRequest(), 1);
     init_polling_xhr();
     XMLHttpRequest2 = XMLHttpRequestModule.default || XMLHttpRequestModule;
@@ -8585,10 +8733,10 @@ var init_wrapper = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/websocket.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/websocket.js
 var import_debug4, debug4, isReactNative, BaseWS, WebSocketCtor;
 var init_websocket = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/websocket.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/websocket.js"() {
     init_transport();
     init_util();
     init_esm();
@@ -8683,10 +8831,10 @@ var init_websocket = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/websocket.node.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/websocket.node.js
 var WS;
 var init_websocket_node = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/websocket.node.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/websocket.node.js"() {
     init_wrapper();
     init_websocket();
     WS = class extends BaseWS {
@@ -8721,10 +8869,10 @@ var init_websocket_node = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/webtransport.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/webtransport.js
 var import_debug5, debug5, WT;
 var init_webtransport = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/webtransport.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/webtransport.js"() {
     init_transport();
     init_globals_node();
     init_esm();
@@ -8799,10 +8947,10 @@ var init_webtransport = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/index.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/index.js
 var transports;
 var init_transports = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/index.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/index.js"() {
     init_polling_xhr_node();
     init_websocket_node();
     init_webtransport();
@@ -8814,7 +8962,7 @@ var init_transports = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/parseuri.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/parseuri.js
 function parse3(str) {
   if (str.length > 8e3) {
     throw "URI too long";
@@ -8858,7 +9006,7 @@ function queryKey(uri, query) {
 }
 var re, parts;
 var init_parseuri = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/parseuri.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/parseuri.js"() {
     re = /^(?:(?![^:@\/?#]+:[^:@\/]*@)(http|https|ws|wss):\/\/)?((?:(([^:@\/?#]*)(?::([^:@\/?#]*))?)?@)?((?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}|[^:\/?#]*)(?::(\d*))?)(((\/(?:[^?#](?![^?#\/]*\.[^?#\/.]+(?:[?#]|$)))*\/?)?([^?#\/]*))(?:\?([^#]*))?(?:#(.*))?)/;
     parts = [
       "source",
@@ -8879,10 +9027,10 @@ var init_parseuri = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/socket.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/socket.js
 var import_component_emitter3, import_debug6, debug6, withEventListeners, OFFLINE_EVENT_LISTENERS, SocketWithoutUpgrade, SocketWithUpgrade, Socket;
 var init_socket = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/socket.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/socket.js"() {
     init_transports();
     init_util();
     init_parseqs();
@@ -9488,17 +9636,17 @@ var init_socket = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-fetch.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-fetch.js
 var init_polling_fetch = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-fetch.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-fetch.js"() {
     init_polling();
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/index.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/index.js
 var protocol2;
 var init_esm_debug = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/index.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/index.js"() {
     init_socket();
     init_socket();
     init_transport();
@@ -9516,7 +9664,7 @@ var init_esm_debug = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/url.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/url.js
 function url(uri, path = "", loc) {
   let obj = uri;
   loc = loc || typeof location !== "undefined" && location;
@@ -9557,14 +9705,14 @@ function url(uri, path = "", loc) {
 }
 var import_debug7, debug7;
 var init_url = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/url.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/url.js"() {
     init_esm_debug();
     import_debug7 = __toESM(require_src(), 1);
     debug7 = (0, import_debug7.default)("socket.io-client:url");
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/is-binary.js
+// ../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/is-binary.js
 function isBinary(obj) {
   return withNativeArrayBuffer && (obj instanceof ArrayBuffer || isView(obj)) || withNativeBlob && obj instanceof Blob || withNativeFile && obj instanceof File;
 }
@@ -9595,7 +9743,7 @@ function hasBinary(obj, toJSON) {
 }
 var withNativeArrayBuffer, isView, toString, withNativeBlob, withNativeFile;
 var init_is_binary = __esm({
-  "../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/is-binary.js"() {
+  "../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/is-binary.js"() {
     withNativeArrayBuffer = typeof ArrayBuffer === "function";
     isView = (obj) => {
       return typeof ArrayBuffer.isView === "function" ? ArrayBuffer.isView(obj) : obj.buffer instanceof ArrayBuffer;
@@ -9606,7 +9754,7 @@ var init_is_binary = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/binary.js
+// ../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/binary.js
 function deconstructPacket(packet) {
   const buffers = [];
   const packetData = packet.data;
@@ -9671,12 +9819,12 @@ function _reconstructPacket(data, buffers) {
   return data;
 }
 var init_binary = __esm({
-  "../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/binary.js"() {
+  "../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/binary.js"() {
     init_is_binary();
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/index.js
+// ../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/index.js
 var esm_debug_exports = {};
 __export(esm_debug_exports, {
   Decoder: () => Decoder,
@@ -9715,7 +9863,7 @@ function isPacketValid(packet) {
 }
 var import_component_emitter4, import_debug8, debug8, RESERVED_EVENTS, protocol3, PacketType, Encoder, Decoder, BinaryReconstructor, isInteger;
 var init_esm_debug2 = __esm({
-  "../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/index.js"() {
+  "../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/index.js"() {
     import_component_emitter4 = __toESM(require_cjs(), 1);
     init_binary();
     init_is_binary();
@@ -9989,7 +10137,7 @@ var init_esm_debug2 = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/on.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/on.js
 function on(obj, ev, fn) {
   obj.on(ev, fn);
   return function subDestroy() {
@@ -9997,14 +10145,14 @@ function on(obj, ev, fn) {
   };
 }
 var init_on = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/on.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/on.js"() {
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/socket.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/socket.js
 var import_component_emitter5, import_debug9, debug9, RESERVED_EVENTS2, Socket2;
 var init_socket2 = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/socket.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/socket.js"() {
     init_esm_debug2();
     init_on();
     import_component_emitter5 = __toESM(require_cjs(), 1);
@@ -10804,7 +10952,7 @@ var init_socket2 = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/contrib/backo2.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/contrib/backo2.js
 function Backoff(opts) {
   opts = opts || {};
   this.ms = opts.min || 100;
@@ -10814,7 +10962,7 @@ function Backoff(opts) {
   this.attempts = 0;
 }
 var init_backo2 = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/contrib/backo2.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/contrib/backo2.js"() {
     Backoff.prototype.duration = function() {
       var ms = this.ms * Math.pow(this.factor, this.attempts++);
       if (this.jitter) {
@@ -10839,10 +10987,10 @@ var init_backo2 = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/manager.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/manager.js
 var import_component_emitter6, import_debug10, debug10, Manager;
 var init_manager = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/manager.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/manager.js"() {
     init_esm_debug();
     init_socket2();
     init_esm_debug2();
@@ -11219,7 +11367,7 @@ var init_manager = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/index.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/index.js
 function lookup(uri, opts) {
   if (typeof uri === "object") {
     opts = uri;
@@ -11250,7 +11398,7 @@ function lookup(uri, opts) {
 }
 var import_debug11, debug11, cache;
 var init_esm_debug3 = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/index.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/index.js"() {
     init_url();
     init_manager();
     init_socket2();
@@ -11500,23 +11648,23 @@ async function runAttach(argv, context) {
     process.exitCode = 1;
     log(`[vcpdeck] \u8FDE\u63A5\u5931\u8D25: ${err.message}`);
   });
-  socket.on(import_shared5.Events.TERMINAL_OUTPUT, (payload) => {
+  socket.on(import_shared6.Events.TERMINAL_OUTPUT, (payload) => {
     const chunk = payload;
     if (!chunk || typeof chunk.data !== "string")
       return;
     stdout.write(chunk.data);
-    socket.emit(import_shared5.Events.TERMINAL_ACK_OUTPUT, {
+    socket.emit(import_shared6.Events.TERMINAL_ACK_OUTPUT, {
       sessionId,
       attachmentId,
       seq: chunk.seq
     });
   });
-  socket.on(import_shared5.Events.TERMINAL_SNAPSHOT, (payload) => {
+  socket.on(import_shared6.Events.TERMINAL_SNAPSHOT, (payload) => {
     const snapshot = payload;
     if (typeof snapshot?.data === "string")
       stdout.write(snapshot.data);
   });
-  socket.on(import_shared5.Events.TERMINAL_EXIT, () => {
+  socket.on(import_shared6.Events.TERMINAL_EXIT, () => {
     log("\n[vcpdeck] \u4F1A\u8BDD\u5DF2\u7ED3\u675F");
     void removeReconnectToken(storePath, sessionId);
     cleanup();
@@ -11525,7 +11673,7 @@ async function runAttach(argv, context) {
     if (!closed)
       log("\n[vcpdeck] \u8FDE\u63A5\u5DF2\u65AD\u5F00");
   });
-  socket.emit(import_shared5.Events.TERMINAL_ATTACH, reconnectToken ? { sessionId, reconnectToken } : { sessionId }, async (response) => {
+  socket.emit(import_shared6.Events.TERMINAL_ATTACH, reconnectToken ? { sessionId, reconnectToken } : { sessionId }, async (response) => {
     const ack = response;
     if (!ack?.ok) {
       cleanup();
@@ -11542,7 +11690,7 @@ async function runAttach(argv, context) {
     const sendResize = () => {
       if (closed || !attachmentId)
         return;
-      socket.emit(import_shared5.Events.TERMINAL_RESIZE, {
+      socket.emit(import_shared6.Events.TERMINAL_RESIZE, {
         sessionId,
         attachmentId,
         cols: stdout.columns ?? 80,
@@ -11555,12 +11703,12 @@ async function runAttach(argv, context) {
       if (closed)
         return;
       if (buf.includes(17)) {
-        socket.emit(import_shared5.Events.TERMINAL_DETACH, { sessionId, attachmentId });
+        socket.emit(import_shared6.Events.TERMINAL_DETACH, { sessionId, attachmentId });
         cleanup();
         log("\n[vcpdeck] \u5DF2\u9000\u51FA attach");
         return;
       }
-      socket.emit(import_shared5.Events.TERMINAL_INPUT, {
+      socket.emit(import_shared6.Events.TERMINAL_INPUT, {
         sessionId,
         attachmentId,
         data: buf.toString("latin1")
@@ -11599,12 +11747,12 @@ async function removeReconnectToken(storePath, sessionId) {
   } catch {
   }
 }
-var import_shared5, import_promises5, import_node_os2, import_node_path2;
+var import_shared6, import_promises5, import_node_os2, import_node_path2;
 var init_terminal_command = __esm({
   "dist/terminal-command.js"() {
     "use strict";
     init_esm_debug3();
-    import_shared5 = __toESM(require_dist(), 1);
+    import_shared6 = __toESM(require_dist(), 1);
     import_promises5 = require("node:fs/promises");
     import_node_os2 = require("node:os");
     import_node_path2 = require("node:path");
@@ -11745,7 +11893,7 @@ var init_completions_command = __esm({
       ],
       pi: ["models", "sessions", "new", "run", "attach", "abort"],
       terminal: ["shells", "list", "close", "attach"],
-      frp: ["instances", "mappings"],
+      frp: ["instances", "mappings", "mapping"],
       storage: ["status"],
       release: ["status", "wait", "upload"],
       completions: ["bash", "powershell"]
@@ -11762,7 +11910,7 @@ __export(index_exports, {
   run: () => run
 });
 module.exports = __toCommonJS(index_exports);
-var import_shared6 = __toESM(require_dist(), 1);
+var import_shared7 = __toESM(require_dist(), 1);
 
 // dist/env-command.js
 init_authenticated_client();
@@ -11997,27 +12145,27 @@ var import_promises2 = require("node:fs/promises");
 var import_node_crypto = require("node:crypto");
 var import_promises3 = require("node:stream/promises");
 var import_node_stream = require("node:stream");
-var import_shared3 = __toESM(require_dist(), 1);
+var import_shared4 = __toESM(require_dist(), 1);
 init_authenticated_client();
 init_arguments();
 init_client_resolver();
 init_environment();
 
 // dist/jobs-command.js
-var import_shared2 = __toESM(require_dist(), 1);
+var import_shared3 = __toESM(require_dist(), 1);
 init_dist();
 init_authenticated_client();
 init_arguments();
 init_client_resolver();
 init_environment();
-var STATUS_FILTERS = /* @__PURE__ */ new Set([...Object.values(import_shared2.JobStatus), "active"]);
+var STATUS_FILTERS = /* @__PURE__ */ new Set([...Object.values(import_shared3.JobStatus), "active"]);
 var DEFAULT_WAIT_TIMEOUT_SECONDS = 1800;
 var POLL_INTERVAL_MS = 2e3;
 var TERMINAL_STATUSES2 = /* @__PURE__ */ new Set([
-  import_shared2.JobStatus.DONE,
-  import_shared2.JobStatus.ERROR,
-  import_shared2.JobStatus.CANCELLED,
-  import_shared2.JobStatus.DISCONNECTED
+  import_shared3.JobStatus.DONE,
+  import_shared3.JobStatus.ERROR,
+  import_shared3.JobStatus.CANCELLED,
+  import_shared3.JobStatus.DISCONNECTED
 ]);
 async function runJobsCommand(subcommand, argv, context = {}) {
   const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === "get" || subcommand === "run" || subcommand === "cancel" || subcommand === void 0) && hasHelp(argv);
@@ -12161,7 +12309,7 @@ async function runExecJob(argv, context) {
   if (options.json === true) {
     log(JSON.stringify({ ...job, output }, null, 2));
   }
-  if (job.status !== import_shared2.JobStatus.DONE) {
+  if (job.status !== import_shared3.JobStatus.DONE) {
     if (options.json !== true)
       log(formatJobDetail(job, output));
     throw new Error(`Job ${job.jobId} \u7EC8\u6001\u4E3A ${job.status}`);
@@ -12218,7 +12366,7 @@ async function runCancelJob(argv, context) {
 }
 function formatJobsList(result) {
   const sorted = [...result.data].sort((a, b) => {
-    const active = (job) => job.status === import_shared2.JobStatus.RUNNING || job.status === import_shared2.JobStatus.PENDING || job.status === import_shared2.JobStatus.WAITING_INPUT ? 0 : 1;
+    const active = (job) => job.status === import_shared3.JobStatus.RUNNING || job.status === import_shared3.JobStatus.PENDING || job.status === import_shared3.JobStatus.WAITING_INPUT ? 0 : 1;
     const byActive = active(a) - active(b);
     if (byActive !== 0)
       return byActive;
@@ -12404,7 +12552,7 @@ async function runFileJob(client, clientId, type, payload, context) {
   const created = await client.jobs.create({ clientId, type, payload });
   const job = await waitForTerminalJob(client, created.jobId, DEFAULT_WAIT_TIMEOUT_SECONDS2, () => {
   }, context.pollIntervalMs ?? POLL_INTERVAL_MS2);
-  if (job.status !== import_shared3.JobStatus.DONE)
+  if (job.status !== import_shared4.JobStatus.DONE)
     throw formatFileJobFailure(job);
   return job.result;
 }
@@ -12734,7 +12882,7 @@ async function runUpload(argv, context) {
   progressLog(`[vcpdeck] \u5BFC\u5165 Job: ${created.jobId}\uFF08${created.status}\uFF09\uFF0C\u7B49\u5F85\u76EE\u6807\u673A\u62C9\u53D6\u2026`);
   const job = await waitForTerminalJob(client, created.jobId, DEFAULT_WAIT_TIMEOUT_SECONDS2, () => {
   }, context.pollIntervalMs ?? POLL_INTERVAL_MS2);
-  if (job.status !== import_shared3.JobStatus.DONE)
+  if (job.status !== import_shared4.JobStatus.DONE)
     throw formatFileJobFailure(job);
   const imported = job.result;
   if (options.json === true) {
@@ -13244,7 +13392,7 @@ function safeInstance(instance) {
   };
 }
 async function runFrpCommand(subcommand, argv, context = {}) {
-  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "instances" || subcommand === "mappings" || subcommand === void 0) && hasHelp4(argv);
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "instances" || subcommand === "mappings" || subcommand === "mapping" || subcommand === void 0) && hasHelp4(argv);
   if (helpRequested) {
     (context.log ?? console.log)(frpUsage());
     return;
@@ -13257,6 +13405,10 @@ async function runFrpCommand(subcommand, argv, context = {}) {
     await runMappings(argv, context);
     return;
   }
+  if (subcommand === "mapping") {
+    await runMapping(argv, context);
+    return;
+  }
   throw new Error(frpUsage());
 }
 function hasHelp4(argv) {
@@ -13264,9 +13416,11 @@ function hasHelp4(argv) {
 }
 function frpUsage() {
   return [
-    "FRP \u547D\u4EE4\uFF08\u53EA\u8BFB\uFF09:",
+    "FRP \u547D\u4EE4:",
     "  vcpdeck frp instances [--page=<n>] [--env=<name>] [--json]",
-    "  vcpdeck frp mappings [--client=<name|id>] [--page=<n>] [--env=<name>] [--json]"
+    "  vcpdeck frp mappings [--client=<name|id>] [--page=<n>] [--env=<name>] [--json]",
+    "  vcpdeck frp mapping create <client> --local-port=<port> [--type=tcp|http|https] [--local-ip=<host>] [--remote-port=<port>] [--domain=<domain>] [--name=<name>] [--instance=<id>] [--timeout=<seconds>] [--env=<name>] [--json]",
+    "  vcpdeck frp mapping delete <mappingId> [--timeout=<seconds>] [--env=<name>] [--json]"
   ].join("\n");
 }
 async function runInstances(argv, context) {
@@ -13295,6 +13449,105 @@ async function runInstances(argv, context) {
   log(`FRP \u670D\u52A1\u5B9E\u4F8B\uFF08${result.total}\uFF09\uFF1A`);
   log(formatTable3(result.data.map(safeInstance), ["name", "server", "dashboard", "default"]));
 }
+async function runMapping(argv, context) {
+  const [action, ...rest] = argv;
+  if (action === "create") {
+    await runCreateMapping(rest, context);
+    return;
+  }
+  if (action === "delete") {
+    await runDeleteMapping(rest, context);
+    return;
+  }
+  throw new Error(frpUsage());
+}
+async function runCreateMapping(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: [
+      "env",
+      "environment",
+      "type",
+      "local-ip",
+      "local-port",
+      "remote-port",
+      "domain",
+      "name",
+      "instance",
+      "timeout"
+    ],
+    boolean: ["json"]
+  });
+  if (positionals.length !== 1)
+    throw new Error(frpUsage());
+  const localPort = parsePort(stringOption(options, "local-port"), "--local-port");
+  const proxyType = stringOption(options, "type") ?? "tcp";
+  if (!(/* @__PURE__ */ new Set(["tcp", "http", "https"])).has(proxyType)) {
+    throw new Error("--type \u5FC5\u987B\u662F tcp\u3001http \u6216 https");
+  }
+  const remotePort = parseOptionalPort(stringOption(options, "remote-port"), "--remote-port");
+  const customDomain = stringOption(options, "domain");
+  if (proxyType === "tcp" && customDomain) {
+    throw new Error("TCP \u6620\u5C04\u4E0D\u63A5\u53D7 --domain");
+  }
+  if (proxyType !== "tcp" && !customDomain) {
+    throw new Error("HTTP/HTTPS \u6620\u5C04\u5FC5\u987B\u63D0\u4F9B --domain");
+  }
+  if (proxyType !== "tcp" && remotePort !== void 0) {
+    throw new Error("HTTP/HTTPS \u6620\u5C04\u4E0D\u63A5\u53D7 --remote-port");
+  }
+  const timeoutSeconds = parseTimeout(stringOption(options, "timeout"));
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias5(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  const clientId = await resolveClientId(positionals[0], context.paths, context.processEnv, client);
+  const mapping = await client.frp.createAndWait({
+    clientId,
+    proxyType,
+    localIp: stringOption(options, "local-ip") ?? "127.0.0.1",
+    localPort,
+    ...remotePort === void 0 ? {} : { remotePort },
+    ...customDomain ? { customDomain } : {},
+    ...stringOption(options, "name") ? { name: stringOption(options, "name") } : {},
+    ...stringOption(options, "instance") ? { frpsInstanceId: stringOption(options, "instance") } : {},
+    timeoutSeconds
+  }, { delays: [context.pollIntervalMs ?? 1e3] });
+  const log = context.log ?? console.log;
+  if (options.json === true) {
+    log(JSON.stringify(mapping, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(`FRP \u6620\u5C04\u5DF2\u5EFA\u7ACB\uFF1A${mapping.name} (${mapping.publicUrl ?? mapping.id})`);
+}
+async function runDeleteMapping(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "timeout"],
+    boolean: ["json"]
+  });
+  if (positionals.length !== 1)
+    throw new Error(frpUsage());
+  const timeoutSeconds = parseTimeout(stringOption(options, "timeout"));
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias5(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  const result = await client.frp.deleteAndWait(positionals[0], {
+    timeoutSeconds,
+    delays: [context.pollIntervalMs ?? 1e3]
+  });
+  const log = context.log ?? console.log;
+  if (options.json === true) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(`FRP \u6620\u5C04\u5DF2\u5220\u9664\uFF1A${result.id}`);
+}
 async function runMappings(argv, context) {
   const { positionals, options } = parseCommandArgs(argv, {
     value: ["env", "environment", "client", "page"],
@@ -13309,7 +13562,7 @@ async function runMappings(argv, context) {
   });
   const client = await createAuthenticatedClient(environment);
   const clientFilter = stringOption(options, "client");
-  const clientId = clientFilter ? await resolveClientId(clientFilter, context.paths, context.processEnv) : void 0;
+  const clientId = clientFilter ? await resolveClientId(clientFilter, context.paths, context.processEnv, client) : void 0;
   const result = await client.frp.list({
     clientId,
     page: parsePage2(stringOption(options, "page"))
@@ -13351,6 +13604,23 @@ function parsePage2(raw) {
     throw new Error("--page \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570");
   }
   return page;
+}
+function parsePort(raw, option) {
+  const port = Number(raw);
+  if (!raw || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${option} \u5FC5\u987B\u662F 1\u201365535 \u7684\u6574\u6570`);
+  }
+  return port;
+}
+function parseOptionalPort(raw, option) {
+  return raw === void 0 ? void 0 : parsePort(raw, option);
+}
+function parseTimeout(raw) {
+  const timeout = raw === void 0 ? 30 : Number(raw);
+  if (!Number.isInteger(timeout) || timeout < 1 || timeout > 300) {
+    throw new Error("--timeout \u5FC5\u987B\u662F 1\u2013300 \u7684\u6574\u6570");
+  }
+  return timeout;
 }
 
 // dist/clients-command.js
@@ -13456,7 +13726,7 @@ var import_node_crypto3 = require("node:crypto");
 var import_node_fs3 = require("node:fs");
 var import_promises4 = require("node:fs/promises");
 init_dist();
-var import_shared4 = __toESM(require_dist(), 1);
+var import_shared5 = __toESM(require_dist(), 1);
 init_authenticated_client();
 init_arguments();
 init_environment();
@@ -13576,7 +13846,7 @@ async function waitForRelease(client, version, timeoutSeconds, log, context) {
         lastSummary = summary;
       }
       assertReleaseNotFailed(snapshot.release);
-      if (snapshot.release.status === import_shared4.ReleaseStatus.DONE) {
+      if (snapshot.release.status === import_shared5.ReleaseStatus.DONE) {
         assertReleaseCompleted(snapshot.release, snapshot.serverVersion);
         log(`[vcpdeck] \u53D1\u7248 ${version} \u9A8C\u6536\u5B8C\u6210`);
         return;
@@ -13634,11 +13904,11 @@ function countClientStates(release) {
     pending: 0
   };
   for (const entry of Object.values(release.clientStates)) {
-    if (entry.state === import_shared4.ReleaseClientState.DONE)
+    if (entry.state === import_shared5.ReleaseClientState.DONE)
       counts.done++;
-    else if (entry.state === import_shared4.ReleaseClientState.FAILED)
+    else if (entry.state === import_shared5.ReleaseClientState.FAILED)
       counts.failed++;
-    else if (entry.state === import_shared4.ReleaseClientState.UPDATING)
+    else if (entry.state === import_shared5.ReleaseClientState.UPDATING)
       counts.updating++;
     else
       counts.pending++;
@@ -13646,7 +13916,7 @@ function countClientStates(release) {
   return counts;
 }
 function assertReleaseNotFailed(release) {
-  if (release.status === import_shared4.ReleaseStatus.FAILED) {
+  if (release.status === import_shared5.ReleaseStatus.FAILED) {
     throw new Error(`\u53D1\u7248 ${release.version} \u5931\u8D25${release.errorMessage ? `: ${release.errorMessage}` : ""}`);
   }
 }
@@ -13836,7 +14106,7 @@ async function run(argv, context = {}) {
   const [command, subcommand, ...rest] = argv;
   try {
     if (command === "version" || command === "--version" || command === "-v") {
-      log(import_shared6.VERSION);
+      log(import_shared7.VERSION);
       return 0;
     }
     if (command === "env") {
@@ -13936,6 +14206,15 @@ function helpText() {
     "  vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]",
     '  vcpdeck pi run <client> "\u63D0\u793A\u8BCD" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]',
     "  vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]",
+    "",
+    "FRP:",
+    "  vcpdeck frp instances [--page=<n>] [--env=<name>] [--json]",
+    "  vcpdeck frp mappings [--client=<name|id>] [--page=<n>] [--env=<name>] [--json]",
+    "  vcpdeck frp mapping create <client> --local-port=<port> [--type=tcp|http|https] [--domain=<domain>] [--name=<name>] [--instance=<id>] [--timeout=<seconds>] [--env=<name>] [--json]",
+    "  vcpdeck frp mapping delete <mappingId> [--timeout=<seconds>] [--env=<name>] [--json]",
+    "",
+    "Storage:",
+    "  vcpdeck storage status [--env=<name>] [--json]",
     "",
     "Terminal:",
     "  vcpdeck terminal new <client> [--shell=<id>] [--cols=<n>] [--rows=<n>] [--env=<name>] [--json]",

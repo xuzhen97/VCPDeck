@@ -259,7 +259,7 @@ pnpm --filter @vcpdeck/client start
 - 检查 Client frpc 进程、stderr、`frpc-combined.toml` 权限和本地服务；
 - 同一 Client 当前只有单个 frpc/lastFrpsInfo，不要跨多个 FrpsInstance 创建活动映射；
 - 核对 remotePort/customDomain、防火墙和 DNS；不同实例的端口当前也按全局 DB 集合占用；
-- `active` 只表示 spawn 未同步失败；frpc 后续退出不会立即更新 Server；
+- `active` 表示 Client 本地 frpc 动作完成且 FRPS Dashboard 已确认 proxy 注册；它仍不证明本地服务、公网、DNS 或 TLS 可达，frpc 后续退出也不会立即更新 Server；
 - Client 断线会令映射状态 inactive，但控制连接和 FRP 是独立链路，frpc 可能仍工作；
 - Client 重启后 proxy 内存不会从 SQLite 自动恢复；
 - 删除后仍可达时在 FRPS Dashboard 查孤儿 proxy；Server 当前先删 DB 再清理 Client；

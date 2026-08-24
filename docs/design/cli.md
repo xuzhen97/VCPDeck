@@ -1,6 +1,6 @@
 # CLI 与多环境配置设计
 
-> 状态：Current｜维护责任：CLI/SDK 维护者｜最后核验：2026-08-22｜适用版本：当前 `main`
+> 状态：Current｜维护责任：CLI/SDK 维护者｜最后核验：2026-08-24｜适用版本：当前 `main`
 
 本文描述当前 VCPDeck CLI 的职责、环境配置、安全边界和已落地命令。长期取舍见 [ADR-0017](../adr/0017-cli-multi-environment-configuration.md)；REST 与认证语义见 [`protocols.md`](../protocols.md) 和 [`design/identity-and-authentication.md`](./identity-and-authentication.md)。
 
@@ -16,7 +16,8 @@ CLI 是操作员和 Pi Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访�
 - `files write/mkdir/delete/move` 文件写操作（覆盖写、递归建目录、删除、移动，确认门由调用方负责）；
 - `files download/upload` 文件传输（Storage Provider 直传链路，Server 只签名；download 校验 sha256）；
 - `pi models/sessions/new/run/abort` Pi 子任务（在目标机驱动 Pi Agent 并取回回复）；
-- `frp instances/mappings` 与 `storage status` FRP/存储状态只读查询；
+- `frp instances/mappings` FRP 状态查询与 `frp mapping create/delete` 完整映射写操作；
+- `storage status` 存储后端状态只读查询；
 - `terminal shells/list/close` Terminal 生命周期管理；
 - `release upload/status/wait` 双平台发布上传、权威状态查询和 Server/Client 终态等待。
 
@@ -246,12 +247,18 @@ vcpdeck terminal attach <client> <sessionId> [--env=<name>]
 ```text
 vcpdeck frp instances [--page=<n>] [--env=<name>] [--json]
 vcpdeck frp mappings [--client=<name|id>] [--page=<n>] [--env=<name>] [--json]
+vcpdeck frp mapping create <client> --local-port=<port> [--type=tcp|http|https] [--local-ip=<host>] [--remote-port=<port>] [--domain=<domain>] [--name=<name>] [--instance=<id>] [--timeout=<seconds>] [--env=<name>] [--json]
+vcpdeck frp mapping delete <mappingId> [--timeout=<seconds>] [--env=<name>] [--json]
 vcpdeck storage status [--env=<name>] [--json]
 ```
 
 只读查询：FRP 服务实例与映射状态（mappings 支持 `--client` 名称/ID 过滤）、当前激活的存储后端。分页遵循 PaginatedResult 惯例。
 
-**安全红线**：实例信息含 authToken/dashboard 密码，CLI 输出仅做安全投影（名称/服务器/Dashboard 地址/是否默认），凭据绝不进入 stdout/stderr/日志。已知非能力：实例创建/探活/设默认、映射创建/删除、后端切换等写操作未暴露。
+写操作：create 支持 TCP/HTTP/HTTPS，name 可省略；HTTP/HTTPS 要求 domain，TCP 可选 remotePort。create/delete 默认使用 30 秒 Dashboard 确认窗口，可用 `--timeout=1..300` 覆盖。CLI 只在 Client frpc 动作完成且 FRPS Dashboard 确认 proxy 出现/消失后零退出；不验证本地服务或公网可达。创建确认失败由 Server 自动回滚；回滚/删除失败保留 error 记录供查询和重试。当前若 Client 派发后完全不回报，Server 尚无 FRP Job 后台超时监控，CLI 会继续等待直到进程被用户中止；此时先用 mappings/jobs 核对，不盲目重试 create。
+
+**确认门**：create 会把目标服务暴露到 FRPS，delete 会停止映射；调用方执行前必须展示环境/Server、Client、类型、本地端点、公网端口或域名、目标实例/名称（若指定）并取得明确确认。delete 还需展示 mappingId/name 与当前公网端点。
+
+**安全红线**：实例信息含 authToken/dashboard 密码，CLI 输出仅做安全投影（名称/服务器/Dashboard 地址/是否默认），凭据绝不进入 stdout/stderr/日志。已知非能力仅剩实例创建/探活/设默认和 Storage 后端切换等写操作。
 
 ## 12. 安全与故障边界
 
@@ -314,11 +321,11 @@ pnpm \
 - `files write/mkdir/delete/move` 覆盖 payload 形状（content 来自 --input/递归/覆盖语义）、成功摘要、失败错误码转译和用法校验；
 - `files download/upload` 覆盖导出+签名 URL 拉取+sha256 校验、sha 不一致删除半成品、分片直传与导入终态等待。
 - `pi models/sessions/new/run/abort` 覆盖 cwdRef 推导、多根 fail closed、运行循环（prompt→轮询→回复提取）、既有会话 open 复用、扩展输入报错和中止；
-- `frp/storage` 覆盖实例/映射表格与过滤、凭据字段脱敏断言和后端状态输出；
+- `frp/storage` 覆盖实例/映射表格与过滤、凭据字段脱敏、TCP/HTTP/HTTPS create、完整 Job 等待、delete、timeout、JSON 和后端状态输出；
 - `terminal shells/list/close` 覆盖 shell 探测、会话列表 `--status` 本地过滤和关闭流程（先取详情再删除）；
 - `completions bash/powershell` 覆盖命令树与环境名嵌入、配置缺失降级、未知类型拒绝和用法输出。
 
-当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 FRP/Storage/Clients 的写操作（建实例、映射增删、切后端、rename）与 Pi 高级会话操作（fork/clone/navigate/compact/setModel/附件）。
+当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 FRP 实例写操作、Storage 后端切换、Client rename 与 Pi 高级会话操作（fork/clone/navigate/compact/setModel/附件）。
 
 ## 16. 全局安装与 Shell 补全
 

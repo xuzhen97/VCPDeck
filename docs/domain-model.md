@@ -154,11 +154,11 @@ File 记录只保存 Storage 对象元数据；import/export 正文由当前 Sto
 ## 7. FRP
 
 - FrpsInstance 保存 FRPS 连接地址、明文 Token、Dashboard 凭据和端口范围；只能有一个逻辑默认实例，但该约束当前没有数据库唯一性或事务保证；
-- FrpMapping 归属一个 Client，并关联创建时选择的 FrpsInstance；
-- 映射创建先持久化为 `inactive`，再通过 `frp.create` Job 请求 Client 更新 frpc；`active` 当前只表示 spawn 未同步失败，不保证 FRPS 注册或目标服务可达；
-- Server 可保存多个实例，但 Client 只有一个 `proxies[] + lastFrpsInfo + frpc` runtime；同一 Client 跨多个 FRPS 的活动映射不可靠；
+- FrpMapping 归属一个 Client，并关联创建时选择的 FrpsInstance；同一实例内 proxy name 由数据库唯一约束保护；
+- 映射状态为 `provisioning/active/inactive/deleting/error`：创建先持久化为 `provisioning`，Client 完成本地 frpc 动作且 FRPS Dashboard 确认 proxy 出现后才进入 `active`；这仍不保证本地服务或公网可达；
+- Server 可保存多个实例，但 Client 只有一个 `proxies[] + lastFrpsInfo + frpc` runtime；Server 当前拒绝同一 Client 跨 FrpsInstance 创建映射；
 - Client 断线时原 `active` 映射标记为 `inactive`，但独立 frpc 连接可能仍工作；Client 重启后内存 proxy 丢失且不会自动恢复；
-- 删除当前先删除控制面记录，再下发远程清理；失败可能遗留 FRPS/Client 孤儿 proxy；
+- 删除先进入 `deleting` 并保留控制面记录；Client 清理且 Dashboard 确认 proxy 消失后才删除记录，失败保留 `error` 供重试；
 - FRPS Token 还会进入 Job payload 和 Client TOML，相关数据都按秘密处理；
 - 完整运行态和已知偏移见 [`design/frp.md`](./design/frp.md)。
 

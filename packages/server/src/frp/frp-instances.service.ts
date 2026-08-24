@@ -12,6 +12,20 @@ import type {
 	ProbeResult,
 } from "@vcpdeck/shared";
 
+/** FRPS Dashboard 写操作确认失败。 */
+export class FrpsDashboardError extends Error {
+	constructor(
+		public readonly code:
+			| "FRPS_DASHBOARD_REQUIRED"
+			| "FRPS_DASHBOARD_UNREACHABLE"
+			| "FRPS_DASHBOARD_AUTH_FAILED",
+		message: string,
+	) {
+		super(message);
+		this.name = "FrpsDashboardError";
+	}
+}
+
 @Injectable()
 export class FrpsInstancesService {
 	private readonly logger = new Logger(FrpsInstancesService.name);
@@ -313,30 +327,41 @@ export class FrpsInstancesService {
 		}
 	}
 
-	/** 拉取 frps 已注册 proxy 列表 */
-	private async fetchProxyList(
+	/** 严格拉取 FRPS 已注册 proxy；写操作不得把 Dashboard 失败当空列表。 */
+	async listDashboardProxies(
 		instance: FrpsInstanceInfo,
-	): Promise<ProbeResult["proxies"]> {
+	): Promise<NonNullable<ProbeResult["proxies"]>> {
+		if (!instance.dashboardHost) {
+			throw new FrpsDashboardError(
+				"FRPS_DASHBOARD_REQUIRED",
+				"FRPS 实例必须配置 Dashboard",
+			);
+		}
 		const auth = Buffer.from(
 			`${instance.dashboardUser}:${instance.dashboardPassword}`,
 		).toString("base64");
 		const base = `${instance.dashboardScheme}://${instance.dashboardHost}:${instance.dashboardPort}`;
 		const types = ["tcp", "http", "https"] as const;
-
 		try {
 			const results = await Promise.all(
-				types.map(async (t) => {
-					const res = await fetch(`${base}/api/proxy/${t}`, {
+				types.map(async (proxyType) => {
+					const response = await fetch(`${base}/api/proxy/${proxyType}`, {
 						headers: { Authorization: `Basic ${auth}` },
 						signal: AbortSignal.timeout(5000),
 					});
-					if (!res.ok)
-						return [] as {
-							name: string;
-							proxyType: string;
-							remotePort: number | null;
-						}[];
-					const body = (await res.json()) as {
+					if (response.status === 401 || response.status === 403) {
+						throw new FrpsDashboardError(
+							"FRPS_DASHBOARD_AUTH_FAILED",
+							"FRPS Dashboard 认证失败",
+						);
+					}
+					if (!response.ok) {
+						throw new FrpsDashboardError(
+							"FRPS_DASHBOARD_UNREACHABLE",
+							"FRPS Dashboard 不可达",
+						);
+					}
+					const body = (await response.json()) as {
 						proxies?: Array<{
 							name?: string;
 							remotePort?: number;
@@ -344,35 +369,48 @@ export class FrpsInstancesService {
 						}>;
 					};
 					return (body.proxies ?? [])
-						.filter((p) => typeof p.name === "string")
-						.map((p) => ({
-							name: p.name!,
-							proxyType: t,
-							remotePort: p.remotePort ?? p.conf?.remotePort ?? null,
+						.filter((proxy) => typeof proxy.name === "string")
+						.map((proxy) => ({
+							name: proxy.name!,
+							proxyType,
+							remotePort:
+								proxy.remotePort ?? proxy.conf?.remotePort ?? null,
 						}));
 				}),
 			);
-
-			const flat = results.flat();
-			const usedPorts = [
-				...new Set(
-					flat
-						.map((p) => p.remotePort)
-						.filter((p): p is number => p !== null)
-						.sort((a, b) => a - b),
-				),
-			];
-
+			const list = results.flat();
 			return {
-				total: flat.length,
+				total: list.length,
 				byType: {
-					tcp: flat.filter((p) => p.proxyType === "tcp").length,
-					http: flat.filter((p) => p.proxyType === "http").length,
-					https: flat.filter((p) => p.proxyType === "https").length,
+					tcp: list.filter((proxy) => proxy.proxyType === "tcp").length,
+					http: list.filter((proxy) => proxy.proxyType === "http").length,
+					https: list.filter((proxy) => proxy.proxyType === "https").length,
 				},
-				list: flat,
-				usedPorts,
+				list,
+				usedPorts: [
+					...new Set(
+						list
+							.map((proxy) => proxy.remotePort)
+							.filter((port): port is number => port !== null)
+							.sort((a, b) => a - b),
+					),
+				],
 			};
+		} catch (error) {
+			if (error instanceof FrpsDashboardError) throw error;
+			throw new FrpsDashboardError(
+				"FRPS_DASHBOARD_UNREACHABLE",
+				"FRPS Dashboard 不可达",
+			);
+		}
+	}
+
+	/** 健康摘要沿用宽松语义；写操作使用 listDashboardProxies。 */
+	private async fetchProxyList(
+		instance: FrpsInstanceInfo,
+	): Promise<ProbeResult["proxies"]> {
+		try {
+			return await this.listDashboardProxies(instance);
 		} catch {
 			return null;
 		}

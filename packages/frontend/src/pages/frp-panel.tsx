@@ -85,27 +85,26 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		const next = new AbortController();
 		controller.current = next;
 		try {
-			const mapping = await sdk.frp.create(
+			const mapping = await sdk.frp.createAndWait(
 				{
 					clientId: targetClientId,
-					name,
+					...(name ? { name } : {}),
 					proxyType,
 					localIp,
 					localPort: Number(localPort),
 					...(frpsInstanceId ? { frpsInstanceId } : {}),
-					...(remotePort ? { remotePort: Number(remotePort) } : {}),
+					...(proxyType === "tcp" && remotePort
+						? { remotePort: Number(remotePort) }
+						: {}),
 					...(proxyType !== "tcp" && customDomain ? { customDomain } : {}),
+					timeoutSeconds: 30,
 				},
-				next.signal,
+				{ signal: next.signal },
 			);
 			setCreated(mapping);
-			const terminal = await waitForMapping(mapping, next.signal, sdk.frp.get);
-			setCreated(terminal);
 			setCreating(false);
-			if (terminal.status === "active" || terminal.status === "error") {
-				setDrawerOpen(false);
-				resetForm();
-			}
+			setDrawerOpen(false);
+			resetForm();
 			resource.reload();
 		} catch (error) {
 			if (!next.signal.aborted) {
@@ -156,9 +155,9 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 
 	async function remove() {
 		if (!deleting) return;
-		await sdk.frp.delete(deleting.id);
+		await sdk.frp.deleteAndWait(deleting.id, { timeoutSeconds: 30 });
 		setDeleting(undefined);
-		setNotice("已移除 Server 映射记录；Client 清理状态尚未确认");
+		setNotice("映射已从 Client 与 FRPS 删除");
 		resource.reload();
 	}
 
@@ -377,12 +376,13 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 							</div>
 						)}
 						<div className="space-y-2">
-							<Label htmlFor="frp-name">映射名称</Label>
+							<Label htmlFor="frp-name">映射名称（可选）</Label>
 							<Input
 								id="frp-name"
+								aria-label="映射名称（可选）"
 								value={name}
 								onChange={(event) => setName(event.target.value)}
-								required
+								placeholder="留空时按类型和本地端口生成"
 							/>
 						</div>
 						<div className="space-y-2">
@@ -462,17 +462,19 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 						</div>
 					</FormSection>
 					<FormSection title="公网入口">
-						<div className="space-y-2">
-							<Label htmlFor="remote-port">公网端口（可选）</Label>
-							<Input
-								id="remote-port"
-								type="number"
-								min="1"
-								max="65535"
-								value={remotePort}
-								onChange={(event) => setRemotePort(event.target.value)}
-							/>
-						</div>
+						{proxyType === "tcp" && (
+							<div className="space-y-2">
+								<Label htmlFor="remote-port">公网端口（可选）</Label>
+								<Input
+									id="remote-port"
+									type="number"
+									min="1"
+									max="65535"
+									value={remotePort}
+									onChange={(event) => setRemotePort(event.target.value)}
+								/>
+							</div>
+						)}
 						{proxyType !== "tcp" && (
 							<div className="space-y-2">
 								<Label htmlFor="custom-domain">自定义域名</Label>
@@ -548,9 +550,13 @@ function shortId(value: string) {
 function statusLabel(status: string) {
 	return status === "active"
 		? "运行中"
-		: status === "error"
-			? "异常"
-			: "待启动";
+		: status === "provisioning"
+			? "创建中"
+			: status === "deleting"
+				? "删除中"
+				: status === "error"
+					? "异常"
+					: "未确认";
 }
 
 function statusTone(status: string): "success" | "warning" | "danger" {
@@ -559,39 +565,4 @@ function statusTone(status: string): "success" | "warning" | "danger" {
 		: status === "error"
 			? "danger"
 			: "warning";
-}
-
-function waitForMapping(
-	initial: FrpMappingInfo,
-	signal: AbortSignal,
-	get: (id: string, signal?: AbortSignal) => Promise<FrpMappingInfo>,
-): Promise<FrpMappingInfo> {
-	const delays = [1000, 2000, 5000];
-	const startedAt = Date.now();
-	async function poll(
-		current: FrpMappingInfo,
-		attempt: number,
-	): Promise<FrpMappingInfo> {
-		if (current.status !== "inactive" || Date.now() - startedAt >= 60_000)
-			return current;
-		await sleep(delays[Math.min(attempt, delays.length - 1)] ?? 5000, signal);
-		return get(current.id, signal).then((next) => poll(next, attempt + 1));
-	}
-	return poll(initial, 0);
-}
-
-function sleep(ms: number, signal: AbortSignal) {
-	return new Promise<void>((resolve, reject) => {
-		if (signal.aborted)
-			return reject(new DOMException("Aborted", "AbortError"));
-		const timer = setTimeout(resolve, ms);
-		signal.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timer);
-				reject(new DOMException("Aborted", "AbortError"));
-			},
-			{ once: true },
-		);
-	});
 }

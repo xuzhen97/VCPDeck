@@ -120,37 +120,40 @@ function stopFrpc(): void {
 	daemonProcess = null;
 }
 
-/** 启动（或重启）frpc */
-function startFrpc(frps: FrpsInfo, _socket: SocketLike): void {
+/** 启动（或重启）frpc；spawn 事件后才算本地启动成功。 */
+function startFrpc(frps: FrpsInfo): Promise<void> {
 	stopFrpc();
-
 	const frpcPath = resolveFrpcPath();
-	if (!frpcPath) return;
-
+	if (!frpcPath) return Promise.reject(new Error("frpc 二进制不存在"));
 	const configPath = writeCombinedConfig(frps);
 	const workDir = getWorkDir();
-
-	daemonProcess = spawn(frpcPath, ["-c", configPath], {
+	const child = spawn(frpcPath, ["-c", configPath], {
 		cwd: workDir,
 		stdio: "pipe",
 		windowsHide: true,
 	});
-
-	daemonProcess.stderr?.on("data", (d: Buffer) => {
-		console.log(`[frpc] ${d.toString().trim()}`);
+	daemonProcess = child;
+	child.stderr?.on("data", (data: Buffer) => {
+		console.log(`[frpc] ${data.toString().trim()}`);
 	});
-
-	daemonProcess.on("exit", (code) => {
+	child.on("exit", (code) => {
 		console.log(`[frpc] 已退出 (code ${code})`);
-		daemonProcess = null;
+		if (daemonProcess === child) daemonProcess = null;
+	});
+	return new Promise((resolve, reject) => {
+		child.once("spawn", resolve);
+		child.once("error", () => {
+			if (daemonProcess === child) daemonProcess = null;
+			reject(new Error("frpc 启动失败"));
+		});
 	});
 }
 
 /** 收到 frp.create Job */
-export function handleFrpCreate(
+export async function handleFrpCreate(
 	payload: FrpCreatePayload & { _jobId: string },
 	socket: SocketLike,
-): void {
+): Promise<void> {
 	if (!isFrpAvailable()) {
 		socket.emit(Events.JOB_DONE, {
 			jobId: payload._jobId,
@@ -175,7 +178,7 @@ export function handleFrpCreate(
 		return;
 	}
 
-	proxies.push({
+	const proxy: FrpcProxy = {
 		mappingId: payload.mappingId,
 		name: payload.name,
 		type: payload.proxyType,
@@ -183,16 +186,26 @@ export function handleFrpCreate(
 		localPort: payload.localPort,
 		remotePort: payload.remotePort,
 		customDomain: payload.customDomain,
-	});
-
+	};
+	proxies.push(proxy);
+	const previousFrpsInfo = lastFrpsInfo;
 	lastFrpsInfo = payload.frpsInfo;
 	try {
-		startFrpc(payload.frpsInfo, socket);
-	} catch (e: any) {
+		await startFrpc(payload.frpsInfo);
+	} catch {
+		proxies.splice(proxies.indexOf(proxy), 1);
+		lastFrpsInfo = previousFrpsInfo;
+		if (previousFrpsInfo && proxies.length > 0) {
+			try {
+				await startFrpc(previousFrpsInfo);
+			} catch {
+				// 旧配置恢复失败仍由本次 Job 报错；Server 保留映射状态供排查。
+			}
+		}
 		socket.emit(Events.JOB_DONE, {
 			jobId: payload._jobId,
 			type: "frp.create",
-			error: { code: "FRPC_START_FAILED", message: e.message },
+			error: { code: "FRPC_START_FAILED", message: "frpc 启动失败" },
 		});
 		return;
 	}
@@ -205,20 +218,35 @@ export function handleFrpCreate(
 }
 
 /** 收到 frp.delete Job */
-export function handleFrpDelete(
+export async function handleFrpDelete(
 	payload: FrpDeletePayload & { _jobId: string },
 	socket: SocketLike,
-): void {
-	const idx = proxies.findIndex((p) => p.mappingId === payload.mappingId);
-	if (idx !== -1) proxies.splice(idx, 1);
-
-	if (proxies.length === 0) {
-		stopFrpc();
-	} else if (lastFrpsInfo) {
-		startFrpc(lastFrpsInfo, socket);
+): Promise<void> {
+	const index = proxies.findIndex((proxy) => proxy.mappingId === payload.mappingId);
+	const removed = index === -1 ? undefined : proxies.splice(index, 1)[0];
+	try {
+		if (proxies.length === 0) {
+			stopFrpc();
+		} else if (lastFrpsInfo) {
+			await startFrpc(lastFrpsInfo);
+		}
+	} catch {
+		if (removed) proxies.splice(index, 0, removed);
+		if (lastFrpsInfo) {
+			try {
+				await startFrpc(lastFrpsInfo);
+			} catch {
+				// 原配置恢复失败仍由本次 Job 报错；Server 保留 error 映射供排查。
+			}
+		}
+		socket.emit(Events.JOB_DONE, {
+			jobId: payload._jobId,
+			type: "frp.delete",
+			error: { code: "FRPC_START_FAILED", message: "frpc 启动失败" },
+		});
+		return;
 	}
-
-	socket.emit(Events.JOB_DONE, {
+	 socket.emit(Events.JOB_DONE, {
 		jobId: payload._jobId,
 		type: "frp.delete",
 		result: { mappingId: payload.mappingId, deleted: true },

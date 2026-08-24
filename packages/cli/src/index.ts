@@ -1,7 +1,7 @@
 /**
  * VCPDeck CLI 入口。
  *
- * 当前能力：多环境配置、Client 列表查询、Job 查询/执行/取消与失败现场、文件只读浏览与写操作/传输、FRP/Storage 只读查询、Terminal 生命周期与 PTY 直连、Pi 子任务与交互 REPL、Release 双平台上传及 Server/Client 自更新终态验收。
+ * 当前能力：多环境配置、Client 列表查询、Job 查询/执行/取消与失败现场、文件只读浏览与写操作/传输、FRP 查询与映射增删、Storage 查询、Terminal 生命周期与 PTY 直连、Pi 子任务与交互 REPL、Release 双平台上传及 Server/Client 自更新终态验收。
  */
 import { VERSION } from "@vcpdeck/shared";
 import { runEnvCommand } from "./env-command.js";
@@ -138,6 +138,15 @@ export function helpText(): string {
 		"  vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]",
 		"  vcpdeck pi run <client> \"提示词\" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]",
 		"  vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]",
+		"",
+		"FRP:",
+		"  vcpdeck frp instances [--page=<n>] [--env=<name>] [--json]",
+		"  vcpdeck frp mappings [--client=<name|id>] [--page=<n>] [--env=<name>] [--json]",
+		"  vcpdeck frp mapping create <client> --local-port=<port> [--type=tcp|http|https] [--domain=<domain>] [--name=<name>] [--instance=<id>] [--timeout=<seconds>] [--env=<name>] [--json]",
+		"  vcpdeck frp mapping delete <mappingId> [--timeout=<seconds>] [--env=<name>] [--json]",
+		"",
+		"Storage:",
+		"  vcpdeck storage status [--env=<name>] [--json]",
 		"",
 		"Terminal:",
 		"  vcpdeck terminal new <client> [--shell=<id>] [--cols=<n>] [--rows=<n>] [--env=<name>] [--json]",

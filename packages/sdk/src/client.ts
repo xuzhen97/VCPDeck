@@ -82,7 +82,7 @@ export class VcpDeckClient {
 		this.clientInstaller = createClientInstallerApi(this);
 		this.storage = createStorageApi(this);
 		this.aliyundrive = createAliyunDriveApi(this);
-		this.frp = createFrpApi(this);
+		this.frp = createFrpApi(this, this.jobs);
 		this.pi = createPiApi(this);
 		this.releases = createReleasesApi(this);
 		this.terminals = createTerminalsApi(this);
@@ -147,9 +147,18 @@ export class VcpDeckClient {
 	}
 }
 
-function parseJson(text: string): unknown {
+type JsonValue =
+	| null
+	| boolean
+	| number
+	| string
+	| JsonValue[]
+	| { [key: string]: JsonValue }
+	| undefined;
+
+function parseJson(text: string): JsonValue {
 	try {
-		return JSON.parse(text);
+		return JSON.parse(text) as JsonValue;
 	} catch {
 		return undefined;
 	}

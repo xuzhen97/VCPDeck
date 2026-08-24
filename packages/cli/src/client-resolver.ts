@@ -8,10 +8,14 @@ export async function resolveClientId(
 	clientFilter: string,
 	paths?: ConfigPaths,
 	processEnv?: NodeJS.ProcessEnv,
+	client?: VcpDeckClient,
 ): Promise<string> {
-	const environment = await resolveEnvironment({ paths, processEnv });
-	const client = await createAuthenticatedClient(environment);
-	const clients = await client.clients.list();
+	const resolvedClient =
+		client ??
+		(await createAuthenticatedClient(
+			await resolveEnvironment({ paths, processEnv }),
+		));
+	const clients = await resolvedClient.clients.list();
 	const matched = clients.find(
 		(entry) => entry.clientId === clientFilter || entry.name === clientFilter,
 	);

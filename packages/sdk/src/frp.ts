@@ -1,6 +1,7 @@
-import type {
-	FrpMappingCreateRequest,
-	FrpMappingInfo,
+import {
+	JobStatus,
+	type FrpMappingCreateRequest,
+	type FrpMappingInfo,
 	FrpsInstanceCreateRequest,
 	FrpsInstanceUpdateRequest,
 	FrpsInstanceInfo,
@@ -8,9 +9,28 @@ import type {
 	ProbeResult,
 } from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
+import type { WaitJobOptions, createJobsApi } from "./jobs.js";
+
+export interface WaitFrpOptions extends WaitJobOptions {
+	timeoutSeconds?: number;
+}
+
+/** FRP 完整操作失败。 */
+export class FrpOperationError extends Error {
+	constructor(
+		public readonly code: string,
+		message: string,
+	) {
+		super(message);
+		this.name = "FrpOperationError";
+	}
+}
 
 /** 创建 FRP REST API。 */
-export function createFrpApi(client: Pick<VcpDeckClient, "request">) {
+export function createFrpApi(
+	client: Pick<VcpDeckClient, "request">,
+	jobs?: ReturnType<typeof createJobsApi>,
+) {
 	return {
 		list: (
 			options?: { clientId?: string; page?: number; pageSize?: number },
@@ -42,13 +62,78 @@ export function createFrpApi(client: Pick<VcpDeckClient, "request">) {
 				input,
 				signal,
 			),
-		delete: (id: string, signal?: AbortSignal) =>
-			client.request<{ id: string; deleted: true }>(
-				"DELETE",
-				`/api/frp/mappings/${encodeURIComponent(id)}`,
+		async createAndWait(
+			input: FrpMappingCreateRequest,
+			options: WaitFrpOptions = {},
+		): Promise<FrpMappingInfo> {
+			if (!jobs) throw new Error("FRP wait requires Jobs API");
+			const mapping = await client.request<FrpMappingInfo>(
+				"POST",
+				"/api/frp/mappings",
+				input,
+				options.signal,
+			);
+			if (!mapping.operationJobId) throw new Error("Server 未返回 FRP operationJobId");
+			const job = await jobs.wait(mapping.operationJobId, options);
+			if (job.status !== JobStatus.DONE) {
+				throw new FrpOperationError(
+					job.errorCode ?? "FRP_OPERATION_FAILED",
+					job.errorMessage ?? "FRP 映射创建失败",
+				);
+			}
+			return client.request<FrpMappingInfo>(
+				"GET",
+				`/api/frp/mappings/${encodeURIComponent(mapping.id)}`,
 				undefined,
-				signal,
-			),
+				options.signal,
+			);
+		},
+		delete: (
+			id: string,
+			optionsOrSignal: WaitFrpOptions | AbortSignal = {},
+		) => {
+			const options =
+				optionsOrSignal instanceof AbortSignal
+					? { signal: optionsOrSignal }
+					: optionsOrSignal;
+			const params = new URLSearchParams();
+			if (options.timeoutSeconds) {
+				params.set("timeoutSeconds", String(options.timeoutSeconds));
+			}
+			const query = params.toString();
+			return client.request<FrpMappingInfo>(
+				"DELETE",
+				`/api/frp/mappings/${encodeURIComponent(id)}${query ? `?${query}` : ""}`,
+				undefined,
+				options.signal,
+			);
+		},
+		async deleteAndWait(
+			id: string,
+			options: WaitFrpOptions = {},
+		): Promise<{ id: string; deleted: true }> {
+			if (!jobs) throw new Error("FRP wait requires Jobs API");
+			const params = new URLSearchParams();
+			if (options.timeoutSeconds) {
+				params.set("timeoutSeconds", String(options.timeoutSeconds));
+			}
+			const query = params.toString();
+			const mapping = await client.request<FrpMappingInfo>(
+				"DELETE",
+				`/api/frp/mappings/${encodeURIComponent(id)}${query ? `?${query}` : ""}`,
+				undefined,
+				options.signal,
+			);
+			if (!mapping.operationJobId) throw new Error("Server 未返回 FRP operationJobId");
+			const job = await jobs.wait(mapping.operationJobId, options);
+			if (job.status !== JobStatus.DONE) {
+				throw new FrpOperationError(
+					job.errorCode ?? "FRP_OPERATION_FAILED",
+					job.errorMessage ?? "FRP 映射删除失败",
+				);
+			}
+			return { id, deleted: true };
+		},
 		instances: {
 			list: (
 				options?: { page?: number; pageSize?: number },
