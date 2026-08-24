@@ -2,7 +2,7 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
-## [Unreleased]
+## [0.6.2] - 2026-08-24
 
 ### Added
 
@@ -10,7 +10,7 @@
 
 ### Changed
 
-- Launcher 在 Windows 解压 zip 优先使用系统 bsdtar（`System32	ar.exe` 流式解压，较 PowerShell Expand-Archive 快数倍），失败自动兜底 Expand-Archive 并输出实际使用的解压器；Launcher prepare 新增下载（含体积）/校验/解压分项与总耗时日志。
+- Launcher 在 Windows 解压 zip 优先使用系统 bsdtar（`System32 ar.exe` 流式解压，较 PowerShell Expand-Archive 快数倍），失败自动兜底 Expand-Archive 并输出实际使用的解压器；Launcher prepare 新增下载（含体积）/校验/解压分项与总耗时日志。
 
 ## [0.6.1] - 2026-08-24
 

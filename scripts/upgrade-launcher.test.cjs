@@ -40,92 +40,104 @@ const isolatedEnv = () => {
 	};
 };
 
-test("deriveAppDir 从脚本自身位置向上四级推导 appDir", () => {
-	const { root, installerDir } = (() => {
-		const r = makeFixture();
-		return { root: r.root, installerDir: r.installerDir };
-	})();
-	const mod = require(join(installerDir, "upgrade-launcher.cjs"));
-	assert.equal(
-		mod.deriveAppDir(join(installerDir, "upgrade-launcher.cjs")),
-		root,
+function runInFixture(fixture, args) {
+	return spawnSync(
+		process.execPath,
+		[join(fixture.installerDir, "upgrade-launcher.cjs"), ...args],
+		{ encoding: "utf8", env: isolatedEnv(), timeout: 60_000 },
 	);
-	rmSync(root, { recursive: true, force: true });
+}
+
+test("deriveAppDir 从脚本自身位置向上四级推导 appDir", () => {
+	const f = makeFixture();
+	const mod = require(join(f.installerDir, "upgrade-launcher.cjs"));
+	assert.equal(
+		mod.deriveAppDir(join(f.installerDir, "upgrade-launcher.cjs")),
+		f.root,
+	);
+	rmSync(f.root, { recursive: true, force: true });
 });
 
 test("findVersionDir：显式版本优先；缺 payload 报错；自动取最新", () => {
-	const { root } = makeFixture();
+	const f = makeFixture();
 	const mod = require(SCRIPT);
-	const appsRoot = join(root, "apps");
+	const appsRoot = join(f.root, "apps");
 
 	assert.equal(mod.findVersionDir(appsRoot, "0.6.2"), join(appsRoot, "0.6.2"));
 	assert.throws(() => mod.findVersionDir(appsRoot, "9.9.9"), /缺少/);
-
-	// 更新 mtime 的旧版本不影响"取最新"
 	assert.equal(mod.findVersionDir(appsRoot, undefined), join(appsRoot, "0.6.2"));
-	rmSync(root, { recursive: true, force: true });
+	rmSync(f.root, { recursive: true, force: true });
 });
 
-test("parseArgs 识别 dry-run/version/app-dir 并拒绝未知参数", () => {
+test("parseArgs 识别全部开关并拒绝未知参数", () => {
 	const { parseArgs } = require(SCRIPT);
-	assert.deepEqual(parseArgs(["--dry-run", "--version=1.2.3"]), {
-		dryRun: true,
-		version: "1.2.3",
-		appDir: undefined,
-	});
+	assert.deepEqual(
+		parseArgs(["--dry-run", "--status", "--apply-detached", "--version=1.2.3"]),
+		{
+			dryRun: true,
+			status: true,
+			applyDetached: true,
+			version: "1.2.3",
+			appDir: undefined,
+			source: undefined,
+		},
+	);
+	assert.equal(parseArgs(["--source=C:/x/m.js"]).source, "C:/x/m.js");
 	assert.throws(() => parseArgs(["--bogus"]), /未知参数/);
 });
 
 test("dry-run：输出规划与 sha256，不修改任何文件", () => {
-	const { root } = makeFixture();
-	const res = spawnSync(
-		process.execPath,
-		[
-			join(root, "apps", "0.6.2", "client", "installer", "upgrade-launcher.cjs"),
-			"--dry-run",
-			`--app-dir=${root}`,
-		],
-		{ encoding: "utf8", env: isolatedEnv() },
-	);
+	const f = makeFixture();
+	const res = runInFixture(f, ["--dry-run", `--app-dir=${f.root}`]);
 	assert.equal(res.status, 0, res.stderr);
 	assert.match(res.stdout, /0\.6\.2/);
 	assert.match(res.stdout, /sha256/);
 	assert.match(res.stdout, /dry-run/);
-	assert.equal(readFileSync(join(root, "dist", "main.js"), "utf8"), "OLD-LAUNCHER");
-	rmSync(root, { recursive: true, force: true });
+	assert.equal(readFileSync(join(f.root, "dist", "main.js"), "utf8"), "OLD-LAUNCHER");
+	rmSync(f.root, { recursive: true, force: true });
 });
 
 test("已安装与目标一致 → 跳过且不触碰 pm2", () => {
-	const { root } = makeFixture();
-	writeFileSync(join(root, "dist", "main.js"), "NEW-LAUNCHER");
-	const res = spawnSync(
-		process.execPath,
-		[
-			join(root, "apps", "0.6.2", "client", "installer", "upgrade-launcher.cjs"),
-			`--app-dir=${root}`,
-		],
-		{ encoding: "utf8", env: isolatedEnv() },
-	);
+	const f = makeFixture();
+	writeFileSync(join(f.root, "dist", "main.js"), "NEW-LAUNCHER");
+	const res = runInFixture(f, [`--app-dir=${f.root}`]);
 	assert.equal(res.status, 0, res.stderr);
 	assert.match(res.stdout, /跳过/);
-	rmSync(root, { recursive: true, force: true });
+	rmSync(f.root, { recursive: true, force: true });
 });
 
-test("pm2 不可用时快速失败且不留任何更改（备份未产生、原文件未动）", () => {
-	const { root } = makeFixture();
-	const res = spawnSync(
-		process.execPath,
-		[
-			join(root, "apps", "0.6.2", "client", "installer", "upgrade-launcher.cjs"),
-			`--app-dir=${root}`,
-		],
-		{ encoding: "utf8", env: isolatedEnv(), timeout: 60_000 },
-	);
+test("常规路径：父进程零改动并转交分离执行（Job 载体不被自杀）", () => {
+	const f = makeFixture();
+	const res = runInFixture(f, [`--app-dir=${f.root}`]);
+	assert.equal(res.status, 0, res.stderr);
+	assert.match(res.stdout, /分离执行/);
+	assert.match(res.stdout, /--status/);
+	assert.equal(readFileSync(join(f.root, "dist", "main.js"), "utf8"), "OLD-LAUNCHER");
+	rmSync(f.root, { recursive: true, force: true });
+});
+
+test("--apply-detached：pm2 不可用时快速失败且不留任何更改", () => {
+	const f = makeFixture();
+	const res = runInFixture(f, ["--apply-detached", `--app-dir=${f.root}`]);
 	assert.notEqual(res.status, 0);
-	assert.equal(readFileSync(join(root, "dist", "main.js"), "utf8"), "OLD-LAUNCHER");
+	assert.match(`${res.stderr}${res.stdout}`, /pm2/);
+	assert.equal(readFileSync(join(f.root, "dist", "main.js"), "utf8"), "OLD-LAUNCHER");
 	const backups = require("node:fs")
-		.readdirSync(join(root, "dist"))
-		.filter((f) => f.startsWith("main.js.bak"));
+		.readdirSync(join(f.root, "dist"))
+		.filter((x) => x.startsWith("main.js.bak"));
 	assert.deepEqual(backups, []);
-	rmSync(root, { recursive: true, force: true });
+	rmSync(f.root, { recursive: true, force: true });
+});
+
+test("--status：文件不一致报未完成；一致时报通过（pm2 缺失降级提示）", () => {
+	const f = makeFixture();
+	const mismatch = runInFixture(f, ["--status", `--app-dir=${f.root}`]);
+	assert.notEqual(mismatch.status, 0);
+	assert.match(mismatch.stdout, /未完成/);
+
+	writeFileSync(join(f.root, "dist", "main.js"), "NEW-LAUNCHER");
+	const ok = runInFixture(f, ["--status", `--app-dir=${f.root}`]);
+	assert.equal(ok.status, 0, ok.stderr);
+	assert.match(ok.stdout, /文件一致/);
+	rmSync(f.root, { recursive: true, force: true });
 });
