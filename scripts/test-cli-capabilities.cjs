@@ -700,6 +700,30 @@ async function testTerminalLifecycle(hasPty) {
 		}
 	}
 	{
+		const { code, out, err } = await cli([
+			"terminal",
+			"new",
+			clientId,
+			"--json",
+		]);
+		const parsed = parseJsonOutput(out);
+		const newSessionId = parsed?.sessionId;
+		if (code !== 0 || !newSessionId) {
+			fail("terminal new 创建会话", `code=${code} err=${err.slice(0, 160)}`);
+			return;
+		}
+		pass("terminal new 创建会话并返回 sessionId", newSessionId);
+		const closed = await cli([
+			"terminal",
+			"close",
+			clientId,
+			newSessionId,
+			"--json",
+		]);
+		if (closed.code === 0) pass("terminal close 关闭新建会话（生命周期闭环）");
+		else fail("terminal close 新建会话", `code=${closed.code}`);
+	}
+	{
 		const { code, out } = await cli([
 			"terminal",
 			"list",
@@ -720,7 +744,6 @@ async function testTerminalLifecycle(hasPty) {
 			"close",
 			clientId,
 			"nonexistent-session-e2e",
-			"--yes",
 			"--json",
 		]);
 		if (code !== 0) {
