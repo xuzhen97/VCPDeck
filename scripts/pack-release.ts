@@ -287,6 +287,16 @@ async function stagePackage(
 		}
 	}
 
+	// Client 一键升级 Launcher 脚本随包分发（apps/<V>/client/installer/），供远程 Job 执行
+	if (pkgName === "client") {
+		const installerDir = join(target, "installer");
+		mkdirSync(installerDir, { recursive: true });
+		cpSync(
+			join(ROOT, "scripts", "upgrade-launcher.cjs"),
+			join(installerDir, "upgrade-launcher.cjs"),
+			);
+	}
+
 	// 4. 外部依赖精简安装：supportedArchitectures（pnpm 11 从 pnpm-workspace.yaml 读取）
 	//    允许 Windows 构建机同时安装 linux 平台绑定包（libsql / node-pty），实现单包跨平台
 	const deps = resolveExternalDeps(pkgName);

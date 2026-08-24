@@ -377,7 +377,22 @@ Launcher 的自动回退只覆盖“新版本探活失败”。需要人工回�
 
 ### 9.8 Launcher 升级（仅需要时）
 
-Launcher 随发布包分发但**不随业务版本自动更新**（[ADR-0015](./adr/0015-launcher-distributed-with-release.md)）。仅当发布说明要求新 Launcher 时，在各主机停止当前 Launcher 后，用新包内的 `launcher/dist/main.js` 替换 `<app-dir>/dist/main.js` 并重启；同机 Server/Client 分别替换各自 app-dir。
+Launcher 随发布包分发但**不随业务版本自动更新**（[ADR-0015](./adr/0015-launcher-distributed-with-release.md)）。
+
+#### 一键升级（推荐，Client 机）
+
+业务版本更新完成后，目标机 `apps/<V>/client/installer/upgrade-launcher.cjs` 已随包就位（材料零下载，直接取本机已解压版本的 launcher payload）。从操作机一条远程 Job 完成：
+
+```bash
+node "<vcpdeck-cli>" jobs run <client> --wait -- \
+  node "$HOME/.vcpdeck/launcher-client/apps/<V>/client/installer/upgrade-launcher.cjs" --version=<V>
+```
+
+脚本行为：停 PM2 守护 `vcpdeck-client-launcher` → 备份并覆盖 `<app-dir>/dist/main.js` → `startOrRestart` → 校验在线；失败自动还原备份并重启旧版；已安装 sha256 与目标一致时幂等跳过。建议先加 `--dry-run` 核对源/目标。首次引入该脚本前目标机上尚无此文件，可先用 `files upload` 上传一次。默认 `<app-dir>` 为 `~/.vcpdeck/launcher-client`；脚本从自身位置自动推导 app-dir，也可 `--app-dir=` 显式指定。Server 侧 Launcher 仍按下方手动流程处理。
+
+#### 手动升级（回退方案）
+
+仅当无法使用一键脚本时：在各主机停止当前 Launcher 后，用新包内的 `launcher/dist/main.js` 替换 `<app-dir>/dist/main.js` 并重启；同机 Server/Client 分别替换各自 app-dir。
 
 关键限制：
 

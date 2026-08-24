@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- 新增 `scripts/upgrade-launcher.cjs` 一键升级 Launcher：材料取自本机已解压版本的 launcher payload，停守护→备份覆盖→重启→验证在线，失败自动还原、sha256 一致幂等跳过；随发版 zip 分发于 `client/installer/`，可经 `vcpdeck jobs run` 远程执行（deployment.md §9.8）。
+
 ### Changed
 
 - Launcher 在 Windows 解压 zip 优先使用系统 bsdtar（`System32	ar.exe` 流式解压，较 PowerShell Expand-Archive 快数倍），失败自动兜底 Expand-Archive 并输出实际使用的解压器；Launcher prepare 新增下载（含体积）/校验/解压分项与总耗时日志。
