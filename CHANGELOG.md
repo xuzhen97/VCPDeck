@@ -19,7 +19,7 @@
 
 - README「从 GitHub 安装」补充 CLI 全局命令安装与 Tab 补全；design/cli.md 新增 §16 全局安装与 Shell 补全、修正 §10 终端边界与 §15 过时清单；operations.md 新增「Client PM2 进程丢失」处置。
 
-## [0.6.0] - 2026-08-24
+## [0.6.1] - 2026-08-24
 
 ### Added
 
