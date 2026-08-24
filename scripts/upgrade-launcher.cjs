@@ -137,6 +137,16 @@ function runPm2(pm, args) {
 	});
 }
 
+/**
+ * 重启已注册守护：优先按名 restart（兼容无 ecosystem.config.cjs 的旧版/
+ * 手动安装——该文件仅新增装法写入；再失败才回退 startOrRestart 文件）。
+ */
+function restartGuard(pm, appDir) {
+	const byName = runPm2(pm, ["restart", PM2_NAME]);
+	if (byName.status === 0) return byName;
+	return runPm2(pm, ["startOrRestart", join(appDir, "ecosystem.config.cjs")]);
+}
+
 /** 守护进程是否在线（读 pm2 jlist 权威状态） */
 function pm2Online(pm) {
 	const result = runPm2(pm, ["jlist"]);
@@ -175,10 +185,9 @@ function applyDetached(appDir, sourceMain) {
 		copyFileSync(sourceMain, installedMain);
 		log("已覆盖 dist/main.js，重启守护…");
 
-		const eco = join(appDir, "ecosystem.config.cjs");
-		const started = runPm2(pm, ["startOrRestart", eco]);
+		const started = restartGuard(pm, appDir);
 		if (started.status !== 0) {
-			throw new Error(`pm2 startOrRestart 失败: ${(started.stderr || "").trim()}`);
+			throw new Error(`重启守护失败: ${(started.stderr || "").trim()}`);
 		}
 
 		const deadline = Date.now() + 30_000;
@@ -194,7 +203,7 @@ function applyDetached(appDir, sourceMain) {
 		if (existsSync(backup)) {
 			log("还原备份并重启旧版…");
 			copyFileSync(backup, installedMain);
-			runPm2(pm, ["startOrRestart", join(appDir, "ecosystem.config.cjs")]);
+			restartGuard(pm, appDir);
 		}
 		return 1;
 	}
