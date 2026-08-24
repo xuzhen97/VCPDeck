@@ -105,6 +105,47 @@ describe("Updater", () => {
 		});
 	});
 
+	describe("prepare 阶段计时日志", () => {
+		it("成功路径输出 下载/校验/解压/总耗时 各阶段日志", async () => {
+			const logs: string[] = [];
+			const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => {
+				logs.push(a.join(" "));
+			});
+			const deps = makeDeps();
+			deps.verifySha256.mockResolvedValue(true);
+			const updater = new Updater(deps as unknown as UpdaterDeps);
+
+			await updater.prepare({
+				url: "http://x",
+				sha256: "a".repeat(64),
+				version: "1.2.1",
+			});
+			spy.mockRestore();
+
+			const text = logs.join("\n");
+			expect(text).toContain("prepare 1.2.1");
+			expect(text).toContain("下载");
+			expect(text).toContain("校验");
+			expect(text).toContain("解压");
+			expect(text).toContain("总耗时");
+		});
+
+		it("幂等跳过时不产生阶段日志", async () => {
+			const logs: string[] = [];
+			const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => {
+				logs.push(a.join(" "));
+			});
+			const deps = makeDeps();
+			deps.versions.exists.mockReturnValue(true);
+			const updater = new Updater(deps as unknown as UpdaterDeps);
+
+			await updater.prepare({ url: "http://x", sha256: "a".repeat(64), version: "1.2.1" });
+			spy.mockRestore();
+
+			expect(logs.join("\n")).not.toContain("下载");
+		});
+	});
+
 	describe("apply", () => {
 		it("成功路径：停旧 → 切换 → 启动 → 探活通过", async () => {
 			const deps = makeDeps();

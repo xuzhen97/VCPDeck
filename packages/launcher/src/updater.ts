@@ -3,7 +3,7 @@
  * - prepare：下载 → sha256 校验 → 解压到 apps/<version>/（服务进程仍在运行）
  * - apply：停旧进程 → 切换 current → 启动 → 探活 → 失败自动回退旧版本
  */
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { VersionStore } from "./versions.js";
@@ -33,6 +33,21 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** 距给定起点经过的秒数（一位小数） */
+function secs(from: number): string {
+	return `${((Date.now() - from) / 1000).toFixed(1)}s`;
+}
+
+/** zip 体积（MB，一位小数）；不可得时返回 null */
+async function fileSizeMB(path: string): Promise<string | null> {
+	try {
+		const s = await stat(path);
+		return (s.size / 1024 / 1024).toFixed(1);
+	} catch {
+		return null;
+	}
+}
+
 export class Updater {
 	constructor(private readonly deps: UpdaterDeps) {}
 
@@ -45,16 +60,27 @@ export class Updater {
 		if (this.deps.versions.exists(input.version)) return;
 
 		const zipPath = join(tmpdir(), `vcpdeck-${input.version}.zip`);
+		const startedAt = Date.now();
 		try {
+			let phaseStart = Date.now();
 			await this.deps.downloadZip(input.url, zipPath);
+			const sizeMB = await fileSizeMB(zipPath);
+			console.log(
+				`[launcher] prepare ${input.version} 下载完成: ${secs(phaseStart)}${sizeMB ? `，${sizeMB}MB` : ""}`,
+			);
+			phaseStart = Date.now();
 			const ok = await this.deps.verifySha256(zipPath, input.sha256);
 			if (!ok) {
 				throw new Error(`sha256 校验失败: ${input.version}`);
 			}
+			console.log(`[launcher] prepare ${input.version} 校验通过: ${secs(phaseStart)}`);
+			phaseStart = Date.now();
 			await this.deps.extractZip(
 				zipPath,
 				this.deps.versions.versionDir(input.version),
 			);
+			console.log(`[launcher] prepare ${input.version} 解压完成: ${secs(phaseStart)}`);
+			console.log(`[launcher] prepare ${input.version} 总耗时: ${secs(startedAt)}`);
 		} finally {
 			await rm(zipPath, { force: true }).catch(() => undefined);
 		}
