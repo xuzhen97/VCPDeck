@@ -388,7 +388,7 @@ node "<vcpdeck-cli>" jobs run <client> --wait -- \
   node "$HOME/.vcpdeck/launcher-client/apps/<V>/client/installer/upgrade-launcher.cjs" --version=<V>
 ```
 
-脚本行为：停 PM2 守护 `vcpdeck-client-launcher` → 备份并覆盖 `<app-dir>/dist/main.js` → `startOrRestart` → 校验在线；失败自动还原备份并重启旧版；已安装 sha256 与目标一致时幂等跳过。建议先加 `--dry-run` 核对源/目标。首次引入该脚本前目标机上尚无此文件，可先用 `files upload` 上传一次。默认 `<app-dir>` 为 `~/.vcpdeck/launcher-client`；脚本从自身位置自动推导 app-dir，也可 `--app-dir=` 显式指定。Server 侧 Launcher 仍按下方手动流程处理。
+脚本行为：停 PM2 守护 `vcpdeck-client-launcher` → 备份并覆盖 `<app-dir>/dist/main.js` → 按名 `pm2 restart` 重启（名称未知时才回退 `startOrRestart ecosystem.config.cjs`，兼容无该文件的旧版/手动安装，如自定义目录部署）→ 校验在线；失败自动还原备份并重启旧版；已安装 sha256 与目标一致时幂等跳过。建议先加 `--dry-run` 核对源/目标。首次引入该脚本前目标机上尚无此文件，可先用 `files upload` 上传一次。默认 `<app-dir>` 为 `~/.vcpdeck/launcher-client`；脚本从自身位置自动推导 app-dir，也可 `--app-dir=` 显式指定。Server 侧 Launcher 仍按下方手动流程处理。
 
 #### 手动升级（回退方案）
 
