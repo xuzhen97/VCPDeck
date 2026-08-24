@@ -237,6 +237,8 @@ vcpdeck terminal attach <client> <sessionId> [--env=<name>]
 
 终端全生命周期：`new` 创建会话（缺省选 isDefault shell，返回 sessionId 供 attach；写操作需确认门）；`shells` 探测目标机可用 Shell（pwsh/cmd/bash 等）；`list` 列出会话（sessionId/shell/status/创建者等，`--status` 为首页内本地过滤——SDK 列表为分页 API，无服务端 status 参数）；`close` 关闭会话（写操作需确认门，先取详情展示目标摘要再删除）。
 
+重连操作权：operator 断开后 Server 保留 30 秒保护期，期间须携带 reconnectToken 重连才能恢复可输入模式，否则降级 viewer 只读。CLI 将令牌持久化在配置目录 `terminal-reconnect.json` 并于 attach 时自动回传，跨进程退出重进仍能恢复操作权；会话结束（远端 EXIT）后自动清除对应条目。
+
 **边界**：交互式 PTY 的 TUI 直连由 `attach` 提供（/app 数据面，Bearer 握手认证，Ctrl+Q 退出，见 ADR-0020）；Frontend 浏览器终端仍走同数据面。已知非能力：CLI 不做会话审计查询。
 
 ## 11. FRP 与 Storage 命令

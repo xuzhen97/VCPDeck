@@ -1,9 +1,13 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { runTerminalCommand } from "./terminal-command.js";
+import {
+	loadReconnectToken,
+	runTerminalCommand,
+} from "./terminal-command.js";
 import { saveCliConfig, type ConfigPaths } from "./config.js";
 
 const tempDirectories: string[] = [];
@@ -325,5 +329,130 @@ describe("terminal command", () => {
 		).toBe(true);
 		expect(lines.join("\n")).toContain("已关闭");
 		expect(lines.join("\n")).toContain("创建者 admin");
+	});
+});
+
+describe("terminal attach 重连令牌", () => {
+	class FakeSocket {
+		handlers = new Map<string, (payload?: unknown) => void>();
+		attachPayloads: Array<Record<string, unknown>> = [];
+		on(event: string, cb: (payload?: unknown) => void) {
+			this.handlers.set(event, cb);
+		}
+		emit(
+			event: string,
+			payload?: unknown,
+			cb?: (response: unknown) => void,
+		) {
+			if (event === "terminal:attach") {
+				this.attachPayloads.push(payload as Record<string, unknown>);
+				const token = (payload as { reconnectToken?: string }).reconnectToken;
+				cb?.({
+					ok: true,
+					data: {
+						attachmentId: `ta_${this.attachPayloads.length}`,
+						reconnectToken: token ? "rt_2" : "rt_1",
+						mode: "operator",
+					},
+				});
+			}
+		}
+		disconnect() {}
+	}
+
+	function makeRestMock(): Server {
+		const server: Server = createServer((request, response) => {
+			const path = (request.url ?? "").split("?")[0];
+			response.setHeader("content-type", "application/json");
+			if (path === "/api/clients") {
+				response.end(
+					JSON.stringify([{ clientId: "c1", name: "ws", online: true }]),
+				);
+				return;
+			}
+			if (path === "/api/clients/c1/terminals/ts-1") {
+				response.end(JSON.stringify({ shellLabel: "pwsh", status: "detached" }));
+				return;
+			}
+			response.statusCode = 404;
+			response.end("{}");
+		});
+		servers.push(server);
+		return server;
+	}
+
+	async function waitFor(
+		cond: () => boolean | Promise<boolean>,
+		timeoutMs = 2000,
+	) {
+		const start = Date.now();
+		while (!(await cond())) {
+			if (Date.now() - start > timeoutMs) throw new Error("waitFor 超时");
+			await new Promise((r) => setTimeout(r, 10));
+		}
+	}
+
+	it("attach 后持久化重连令牌；再次 attach 回传令牌恢复操作权", async () => {
+		makeRestMock();
+		const sockets: FakeSocket[] = [];
+		const input1 = new PassThrough();
+		const server = servers[servers.length - 1];
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const port = (server.address() as { port: number }).port;
+		const { paths, processEnv } = await fixture(port);
+
+		// 第一次 attach：无令牌 → ack 下发 rt_1 并落盘
+		await runTerminalCommand("attach", ["ws", "ts-1"], {
+			paths,
+			processEnv,
+			log: () => {},
+			input: input1,
+			stdout: new PassThrough(),
+			socketFactory: () => {
+				const s = new FakeSocket();
+				sockets.push(s);
+				return s as never;
+			},
+		});
+		const storePath = join(
+			dirname(paths.globalConfigPath),
+			"terminal-reconnect.json",
+		);
+		await waitFor(() =>
+			loadReconnectToken(storePath, "ts-1").then((t) => t === "rt_1"),
+		);
+		expect(await readFile(storePath, "utf8")).toContain("rt_1");
+		expect(sockets[0].attachPayloads[0]).toEqual({ sessionId: "ts-1" });
+
+		// 模拟 Ctrl+Q 结束第一次连接
+		input1.write(Buffer.from([0x11]));
+		await new Promise((r) => setTimeout(r, 30));
+
+		// 第二次 attach：回传 rt_1，服务端下发新令牌 rt_2
+		const input2 = new PassThrough();
+		await runTerminalCommand("attach", ["ws", "ts-1"], {
+			paths,
+			processEnv,
+			log: () => {},
+			input: input2,
+			stdout: new PassThrough(),
+			socketFactory: () => {
+				const s = new FakeSocket();
+				sockets.push(s);
+				return s as never;
+			},
+		});
+		await waitFor(() => sockets.length >= 2 && sockets[1].attachPayloads.length > 0);
+		expect(sockets[1].attachPayloads[0]).toEqual({
+			sessionId: "ts-1",
+			reconnectToken: "rt_1",
+		});
+		await waitFor(() =>
+			loadReconnectToken(storePath, "ts-1").then((t) => t === "rt_2"),
+		);
+
+		// 收尾：Ctrl+Q 清理，避免悬挂句柄
+		input2.write(Buffer.from([0x11]));
+		await new Promise((r) => setTimeout(r, 30));
 	});
 });

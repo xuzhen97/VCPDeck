@@ -11271,7 +11271,11 @@ var init_esm_debug3 = __esm({
 // dist/terminal-command.js
 var terminal_command_exports = {};
 __export(terminal_command_exports, {
-  runTerminalCommand: () => runTerminalCommand
+  loadReconnectToken: () => loadReconnectToken,
+  reconnectStorePath: () => reconnectStorePath,
+  removeReconnectToken: () => removeReconnectToken,
+  runTerminalCommand: () => runTerminalCommand,
+  saveReconnectToken: () => saveReconnectToken
 });
 async function runTerminalCommand(subcommand, argv, context = {}) {
   const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "new" || subcommand === "shells" || subcommand === "list" || subcommand === "close" || subcommand === void 0) && hasHelp7(argv);
@@ -11470,6 +11474,8 @@ async function runAttach(argv, context) {
   const info = await client.terminals.get(clientId, sessionId);
   const log = context.log ?? console.log;
   log(`[vcpdeck] attach ${clientFilter} \u4F1A\u8BDD ${sessionId}\uFF08${info?.shellLabel ?? "?"}, status=${info?.status ?? "?"}\uFF09\uFF1BCtrl+Q \u9000\u51FA`);
+  const storePath = reconnectStorePath(context);
+  const reconnectToken = await loadReconnectToken(storePath, sessionId);
   const stdout = context.stdout ?? process.stdout;
   const stdin = context.input ?? process.stdin;
   const socketFactory = context.socketFactory ?? ((url2, auth) => lookup(url2, { auth, transports: ["websocket"] }));
@@ -11512,13 +11518,14 @@ async function runAttach(argv, context) {
   });
   socket.on(import_shared5.Events.TERMINAL_EXIT, () => {
     log("\n[vcpdeck] \u4F1A\u8BDD\u5DF2\u7ED3\u675F");
+    void removeReconnectToken(storePath, sessionId);
     cleanup();
   });
   socket.on("disconnect", () => {
     if (!closed)
       log("\n[vcpdeck] \u8FDE\u63A5\u5DF2\u65AD\u5F00");
   });
-  socket.emit(import_shared5.Events.TERMINAL_ATTACH, { sessionId }, (response) => {
+  socket.emit(import_shared5.Events.TERMINAL_ATTACH, reconnectToken ? { sessionId, reconnectToken } : { sessionId }, async (response) => {
     const ack = response;
     if (!ack?.ok) {
       cleanup();
@@ -11527,6 +11534,9 @@ async function runAttach(argv, context) {
       return;
     }
     attachmentId = ack.data?.attachmentId ?? null;
+    if (ack.data?.reconnectToken) {
+      await saveReconnectToken(storePath, sessionId, ack.data.reconnectToken);
+    }
     rawStdin.setRawMode?.(true);
     stdin.resume();
     const sendResize = () => {
@@ -11558,12 +11568,46 @@ async function runAttach(argv, context) {
     });
   });
 }
-var import_shared5;
+function reconnectStorePath(context) {
+  const globalConfigPath = context.paths?.globalConfigPath ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".vcpdeck", "cli", "config.json");
+  return (0, import_node_path2.join)((0, import_node_path2.dirname)(globalConfigPath), "terminal-reconnect.json");
+}
+async function loadReconnectToken(storePath, sessionId) {
+  try {
+    const store = JSON.parse(await (0, import_promises5.readFile)(storePath, "utf8"));
+    return store[sessionId];
+  } catch {
+    return void 0;
+  }
+}
+async function saveReconnectToken(storePath, sessionId, token) {
+  let store = {};
+  try {
+    store = JSON.parse(await (0, import_promises5.readFile)(storePath, "utf8"));
+  } catch {
+  }
+  store[sessionId] = token;
+  await (0, import_promises5.writeFile)(storePath, JSON.stringify(store, null, 2));
+}
+async function removeReconnectToken(storePath, sessionId) {
+  try {
+    const store = JSON.parse(await (0, import_promises5.readFile)(storePath, "utf8"));
+    if (!(sessionId in store))
+      return;
+    delete store[sessionId];
+    await (0, import_promises5.writeFile)(storePath, JSON.stringify(store, null, 2));
+  } catch {
+  }
+}
+var import_shared5, import_promises5, import_node_os2, import_node_path2;
 var init_terminal_command = __esm({
   "dist/terminal-command.js"() {
     "use strict";
     init_esm_debug3();
     import_shared5 = __toESM(require_dist(), 1);
+    import_promises5 = require("node:fs/promises");
+    import_node_os2 = require("node:os");
+    import_node_path2 = require("node:path");
     init_authenticated_client();
     init_arguments();
     init_client_resolver();
@@ -11661,7 +11705,7 @@ ${subPairs}
 async function runCompletionsCommand(subcommand, context = {}) {
   const log = context.log ?? console.log;
   const paths = context.paths ?? {
-    globalConfigPath: (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".vcpdeck", "cli", "config.json"),
+    globalConfigPath: (0, import_node_path3.join)((0, import_node_os3.homedir)(), ".vcpdeck", "cli", "config.json"),
     cwd: process.cwd()
   };
   if (subcommand === void 0 || subcommand === "--help" || subcommand === "-h") {
@@ -11676,12 +11720,12 @@ ${completionsUsage()}`);
   const envNames = await resolveEnvironmentNames(paths);
   log(subcommand === "bash" ? generateBash(envNames) : generatePowerShell(envNames));
 }
-var import_node_os2, import_node_path2, COMMAND_TREE, TOP_LEVEL, COMMON_FLAGS;
+var import_node_os3, import_node_path3, COMMAND_TREE, TOP_LEVEL, COMMON_FLAGS;
 var init_completions_command = __esm({
   "dist/completions-command.js"() {
     "use strict";
-    import_node_os2 = require("node:os");
-    import_node_path2 = require("node:path");
+    import_node_os3 = require("node:os");
+    import_node_path3 = require("node:path");
     init_config();
     COMMAND_TREE = {
       env: ["list", "show", "current", "check", "add", "remove", "use"],

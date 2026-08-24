@@ -1,5 +1,8 @@
 import { io as ioClient } from "socket.io-client";
 import { Events } from "@vcpdeck/shared";
+import { readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { createAuthenticatedClient } from "./authenticated-client.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
 import { resolveClientId } from "./client-resolver.js";
@@ -318,6 +321,8 @@ async function runAttach(
 	log(
 		`[vcpdeck] attach ${clientFilter} 会话 ${sessionId}（${info?.shellLabel ?? "?"}, status=${info?.status ?? "?"}）；Ctrl+Q 退出`,
 	);
+	const storePath = reconnectStorePath(context);
+	const reconnectToken = await loadReconnectToken(storePath, sessionId);
 
 	const stdout = context.stdout ?? process.stdout;
 	const stdin = context.input ?? process.stdin;
@@ -362,6 +367,7 @@ async function runAttach(
 	});
 	socket.on(Events.TERMINAL_EXIT, () => {
 		log("\n[vcpdeck] 会话已结束");
+		void removeReconnectToken(storePath, sessionId);
 		cleanup();
 	});
 	socket.on("disconnect", () => {
@@ -370,16 +376,19 @@ async function runAttach(
 
 	socket.emit(
 		Events.TERMINAL_ATTACH,
-		{ sessionId },
-		(response: unknown) => {
-			const ack = response as AttachAck;
-			if (!ack?.ok) {
-				cleanup();
-				process.exitCode = 1;
-				log(`[vcpdeck] attach 失败: ${ack?.error?.message ?? "未知错误"}`);
-				return;
-			}
-			attachmentId = ack.data?.attachmentId ?? null;
+		reconnectToken ? { sessionId, reconnectToken } : { sessionId },
+		async (response: unknown) => {
+		const ack = response as AttachAck;
+		if (!ack?.ok) {
+			cleanup();
+			process.exitCode = 1;
+			log(`[vcpdeck] attach 失败: ${ack?.error?.message ?? "未知错误"}`);
+			return;
+		}
+		attachmentId = ack.data?.attachmentId ?? null;
+		if (ack.data?.reconnectToken) {
+			await saveReconnectToken(storePath, sessionId, ack.data.reconnectToken);
+		}
 			rawStdin.setRawMode?.(true);
 			stdin.resume();
 			const sendResize = () => {
@@ -410,4 +419,65 @@ async function runAttach(
 			void exitCode;
 		},
 	);
+}
+
+/** 重连令牌本地存储路径（与全局配置同目录）。 */
+export function reconnectStorePath(context: TerminalCommandContext): string {
+	const globalConfigPath =
+		context.paths?.globalConfigPath ??
+		join(homedir(), ".vcpdeck", "cli", "config.json");
+	return join(dirname(globalConfigPath), "terminal-reconnect.json");
+}
+
+/** 读取会话重连令牌；文件缺失或损坏时返回 undefined。 */
+export async function loadReconnectToken(
+	storePath: string,
+	sessionId: string,
+): Promise<string | undefined> {
+	try {
+		const store = JSON.parse(await readFile(storePath, "utf8")) as Record<
+			string,
+			string
+		>;
+		return store[sessionId];
+	} catch {
+		return undefined;
+	}
+}
+
+/** 保存/更新会话重连令牌。 */
+export async function saveReconnectToken(
+	storePath: string,
+	sessionId: string,
+	token: string,
+): Promise<void> {
+	let store: Record<string, string> = {};
+	try {
+		store = JSON.parse(await readFile(storePath, "utf8")) as Record<
+			string,
+			string
+		>;
+	} catch {
+		/* 首次创建 */
+	}
+	store[sessionId] = token;
+	await writeFile(storePath, JSON.stringify(store, null, 2));
+}
+
+/** 会话结束后移除重连令牌。 */
+export async function removeReconnectToken(
+	storePath: string,
+	sessionId: string,
+): Promise<void> {
+	try {
+		const store = JSON.parse(await readFile(storePath, "utf8")) as Record<
+			string,
+			string
+		>;
+		if (!(sessionId in store)) return;
+		delete store[sessionId];
+		await writeFile(storePath, JSON.stringify(store, null, 2));
+	} catch {
+		/* 忽略读取失败 */
+	}
 }
