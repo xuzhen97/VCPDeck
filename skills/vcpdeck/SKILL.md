@@ -78,6 +78,7 @@ node "<vcpdeck-cli>" env check
 6. 只报告安全摘要、资源 ID、稳定错误码、状态和下一步，不原样输出可能含敏感信息的 payload 或外部响应。
 7. 当前没有对应 CLI 命令的能力应明确告知用户尚未落地，不通过临时 curl、任意 shell 或在 Skill 中复制 SDK 实现来伪造 CLI 能力。
 8. Windows 盘符根路径统一写正斜杠形式（`--root=D:/`）：Git Bash 下 `--root="D:\\"` 的尾反斜杠会转义闭引号导致命令未执行即报错；正斜杠与授权根匹配等价。
+9. Windows Git Bash/MSYS 会在启动 `node.exe` 前改写 `/root/...` 等参数。全局 `vcpdeck` shell 垫片已禁用该转换；直接运行 bundled CLI 时统一使用 `MSYS_NO_PATHCONV=1 node "<vcpdeck-cli>" ...`。
 
 ## 功能：Release 上传与 Server/Client 自更新
 
@@ -211,7 +212,7 @@ node "<vcpdeck-cli>" jobs cancel <jobId> [--env=<name>] [--json]
 
 ### 功能语义与状态权威
 
-`jobs list` 通过 SDK 请求 Server `GET /api/jobs`，返回分页 Job 摘要（`PaginatedResult`）；`--client` 接受机器名称或 ID，CLI 先查机器列表解析为 `clientId`。`jobs get` 取详情与输出 spool。`jobs run` 创建 exec Job（command 模式，`--` 后的命令 token 以空格连接后交由目标机 shell 执行，Windows 下自动 chcp 65001）；目标机必须在线，否则 Server 拒绝。`jobs cancel` 提交取消：pending 立即 `cancelled`；running 返回 `cancelling`，终态需用 `jobs get` 核对。
+`jobs list` 通过 SDK 请求 Server `GET /api/jobs`，返回分页 Job 摘要（`PaginatedResult`）；`--client` 接受机器名称或 ID，CLI 先查机器列表解析为 `clientId`。`jobs get` 取详情与输出 spool。`jobs run` 创建 exec Job（command 模式，`--` 后的命令 token 以空格连接后交由目标机 shell 执行，Windows 下自动 chcp 65001）；复杂命令应作为 `--` 后的单一参数传入，例如 `-- 'sudo -n true; echo $?'`，避免多 token 重组丢失原参数边界。`--timeout` 是远端进程时限，`--wait-timeout` 是 CLI 等待终态时限，两者单位均为秒。目标机必须在线，否则 Server 拒绝。`jobs cancel` 提交取消：pending 立即 `cancelled`；running 返回 `cancelling`，终态需用 `jobs get` 核对。
 
 Job 状态权威在 Server；输出 spool 由 Server 在 Client 实时上报 stdout/stderr 时旁路落盘（`<data>/job-outputs/<jobId>.log`），完整保留不封顶，只在详情路径读取。
 
@@ -239,7 +240,7 @@ Job 状态权威在 Server；输出 spool 由 Server 在 Client 实时上报 std
 
 认证与环境选择遵循「环境选择」章节。**stdout/stderr 与命令文本都属于敏感正文**：可能包含路径、环境变量甚至密钥；向用户报告时先给安全摘要（错误码、退出码、关键错误行），原样输出前应说明内容可能敏感，不得写入日志或长期存储。
 
-操作分级：`list/get` 只读 GET 无需确认；`run/cancel` 写操作必须确认门；`run --wait` 只是同步等待方式，不改变写操作性质。非幂等 POST 网络结果不明时先用 `jobs list`/`jobs get` 查权威状态，不盲目重试创建。
+操作分级：`list/get` 只读 GET 无需确认；`run/cancel` 写操作必须确认门；`run --wait` 只是同步等待方式，不改变写操作性质。非幂等 POST 网络结果不明时先用 `jobs list`/`jobs get` 查权威状态，不盲目重试创建。使用 `--json` 时 stdout 只包含最终 JSON，等待状态、警告和暂时网络错误写入 stderr；Agent 应分别读取两条流，不用 `2>&1` 合并后再解析。
 
 ### 幂等性、成功判定与已知限制
 

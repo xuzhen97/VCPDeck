@@ -53,7 +53,7 @@ function main() {
 
 	const targetNative = target.split(path.sep).join("/");
 	const cmdShim = `@echo off\r\nnode "${targetNative}" %*\r\n`;
-	const shShim = `#!/bin/sh\nexec node "${targetNative}" "$@"\n`;
+	const shShim = `#!/bin/sh\nMSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 exec node "${targetNative}" "$@"\n`;
 
 	const cmdPath = path.join(dir, "vcpdeck.cmd");
 	const shPath = path.join(dir, "vcpdeck");

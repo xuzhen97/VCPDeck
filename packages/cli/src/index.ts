@@ -68,7 +68,7 @@ export async function run(
 			return 0;
 		}
 		if (command === "jobs") {
-			await runJobsCommand(subcommand, rest, { log });
+			await runJobsCommand(subcommand, rest, { log, error });
 			return 0;
 		}
 		if (command === "clients") {
@@ -118,6 +118,7 @@ export function helpText(): string {
 		"  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
 		"  vcpdeck jobs get <jobId> [--env=<name>] [--json]",
 		"  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
+		"  复杂命令建议作为 -- 后的单一参数；--json 仅在 stdout 输出 JSON，状态提示走 stderr",
 		"  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]",
 		"",
 		"Files:",

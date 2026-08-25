@@ -184,7 +184,7 @@ vcpdeck jobs cancel <jobId> [--env=<name>] [--json]
 
 `get` 输出单条详情：错误码/消息、`result`（如 exec 的 `exitCode`）、时间线与操作者，并附输出 spool 全文（无则显示“无落盘输出”）。stdout/stderr 由 Server 在 Client 实时上报时旁路落盘到 `data/job-outputs/<jobId>.log`（锚定 `VCPDECK_APP_DIR`），完整保留不封顶、无自动清理；只在详情路径读取，不进入列表。输出正文视为敏感数据，仅在显式查询时返回。
 
-`run` 创建 exec Job（写操作）：`--` 后的命令 token 以空格连接为 command 模式 payload 交由目标机 shell 执行（Windows 下 Client 自动 chcp 65001）；目标机必须在线。`--wait` 轮询终态（仅重试安全 GET，容忍 Server 重启短暂不可达），失败终态非零退出并自动带出错误摘要与输出全文；`--wait-timeout` 默认 1800 秒。`cancel` 提交取消：pending 立即 `cancelled`，running 返回 `cancelling`，终态用 `get` 核对。`run` 非幂等，网络结果不明时先查询权威状态；命令 token 含空格时引号边界可能丢失，CLI 会提示核对。script 模式与其他 Job 类型（file.*/frp 等）未暴露。
+`run` 创建 exec Job（写操作）：`--` 后的命令 token 以空格连接为 command 模式 payload 交由目标机 shell 执行（Windows 下 Client 自动 chcp 65001）；复杂命令应作为 `--` 后的单一参数传入，只有多个 token 中存在空白 token、原参数边界确实会丢失时 CLI 才警告。`--timeout` 是远端进程时限，CLI 接受秒并转换为 Job/Node `spawn` 使用的毫秒；`--wait-timeout` 是 CLI 本地等待终态时限，默认 1800 秒。目标机必须在线。`--wait` 仅重试安全 GET 并容忍 Server 重启短暂不可达；失败终态非零退出并自动带出错误摘要与输出全文。`--json` 时 stdout 只包含最终 JSON，状态、警告和暂时网络错误写入 stderr。`cancel` 提交取消：pending 立即 `cancelled`，running 返回 `cancelling`，终态用 `get` 核对。`run` 非幂等，网络结果不明时先查询权威状态。script 模式与其他 Job 类型（file.*/frp 等）未暴露。
 
 ## 8. Files 命令
 
@@ -275,7 +275,7 @@ vcpdeck storage status [--env=<name>] [--json]
 正式版本通过 Pi 用户级 Git package 安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.6.2
+pi install git:github.com/xuzhen97/VCPDeck@v0.6.3
 ```
 
 Pi 克隆整个仓库，从 `skills/vcpdeck/SKILL.md` 发现 Skill；同目录 `vcpdeck.cjs` 是随 Tag 提交的 CLI 单文件构件。所有项目共享这一份安装。升级到新 Tag 时再次执行 `pi install ...@vX.Y.Z`，固定 Tag 不会由 `pi update --extensions` 自动推进。
@@ -293,8 +293,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.6.2&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.6.2&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.6.3&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.6.3&path:/packages/shared"
 ```
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。
@@ -334,7 +334,7 @@ pnpm vcpdeck:link                              # 默认指向仓库构建产物 
 node scripts/link-cli.cjs --target=<file>     # 改指其他入口（如 Skill 内 vcpdeck.cjs 单文件包）
 ```
 
-向 Node 可执行文件所在目录写入两个垫片：`vcpdeck.cmd`（CMD/PowerShell）与无扩展名 `vcpdeck`（Git Bash/MSYS）；不经 npm/pnpm link，不触碰 pnpm store，入口文件更新即时生效。卸载即删除两个垫片。
+向 Node 可执行文件所在目录写入两个垫片：`vcpdeck.cmd`（CMD/PowerShell）与无扩展名 `vcpdeck`（Git Bash/MSYS）；不经 npm/pnpm link，不触碰 pnpm store，入口文件更新即时生效。Git Bash/MSYS 垫片在启动 Windows `node.exe` 前设置 `MSYS2_ARG_CONV_EXCL='*'` 和 `MSYS_NO_PATHCONV=1`，防止 `/root/...` 等远端 POSIX 路径被宿主转换。直接执行 `node <vcpdeck.cjs>` 不经过该垫片，调用方仍需显式设置 `MSYS_NO_PATHCONV=1`。卸载即删除两个垫片。
 
 环境切换用既有命令：`vcpdeck env use <name> --global|--local`，`vcpdeck env current` 核对。
 
@@ -343,13 +343,13 @@ Tab 补全：`vcpdeck completions bash` 输出追加到 `~/.bashrc` 后 source�
 其它机器远程一键安装（目标机器只需 Node 18+ 与外网）。**Linux / Git Bash**（单命令，含三次重试与正确退出码）：
 
 ```bash
-node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.6.2
+node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.6.3
 ```
 
 **Windows PowerShell** 单行形式（JS 全单引号 + 外层双引号，避开 PS 5.1 吞内嵌双引号的问题；两种 shell 的命令均含三次重试与正确退出码，勿混用/改写引号形式）：
 
 ```powershell
-node -e "const u='https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs';const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error('安装失败:',String(e));process.exit(1)})" -- --tag=v0.6.2
+node -e "const u='https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs';const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error('安装失败:',String(e));process.exit(1)})" -- --tag=v0.6.3
 ```
 
 脚本从 GitHub raw 下载随 tag 提交的单文件 CLI 包（skills/vcpdeck/vcpdeck.cjs，esbuild 打包零 npm 依赖）到 `~/.vcpdeck/bin`，生成双垫片并自动配置 PATH（Windows 写用户 PATH；POSIX 追加 ~/.bashrc），最后自验收 `--version`。推荐固定 `--tag=<版本>`；私有仓库 raw 需凭据，可改用 git clone 后 `node scripts/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs`。

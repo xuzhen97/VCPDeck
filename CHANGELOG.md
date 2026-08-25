@@ -4,9 +4,20 @@
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-25
+
 ### Added
 
 - Windows 一键安装器（install-client.cjs）：开机自启注册在非管理员权限被拒时自动弹 UAC 提权补注册（自包含 EncodedCommand payload，任务名/参数不变；取消或失败降级并打印可直接执行的 schtasks 命令），普通权限安装不再需要二次操作。
+
+### Changed
+
+- CLI `jobs run --json --wait` 的 stdout 现在只包含最终 JSON，等待状态、命令边界警告和暂时网络错误统一写入 stderr；复杂 shell 命令推荐作为 `--` 后的单一参数，安全单 token 不再产生误报警告。
+- CLI 的 Git Bash/MSYS shell 垫片默认禁用参数路径转换，避免 `/root/...` 等远端路径在启动 Windows `node.exe` 前被改写。
+
+### Fixed
+
+- 修复 `jobs run --timeout=<seconds>` 未转换单位、把秒数直接作为 Node.js 毫秒 timeout 下发，导致远端命令可能在几十毫秒后被提前终止的问题。
 
 ## [0.6.2] - 2026-08-24
 

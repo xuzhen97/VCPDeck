@@ -148,7 +148,10 @@ function main() {
 				`@echo off\r\nnode "${targetNative}" %*\r\n`,
 			);
 			const shPath = path.join(dir, "vcpdeck");
-			fs.writeFileSync(shPath, `#!/bin/sh\nexec node "${targetNative}" "$@"\n`);
+			fs.writeFileSync(
+				shPath,
+				`#!/bin/sh\nMSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 exec node "${targetNative}" "$@"\n`,
+			);
 			try {
 				fs.chmodSync(shPath, 0o755);
 			} catch {

@@ -41,7 +41,7 @@ Server 是 Job 生命周期权威，Client 是实际子进程运行态权威。S
 
 ### 3.1 创建请求
 
-`exec` 使用通用 Job 创建端点，`timeout` 位于 Job 顶层。
+`exec` 使用通用 Job 创建端点，`timeout` 位于 Job 顶层，协议和 Client `spawn` 的单位是毫秒。CLI 的 `jobs run --timeout=<seconds>` 对操作者使用秒，并在创建 Job 前转换为毫秒；`--wait-timeout` 仅控制 CLI 本地等待终态，不进入 Job。
 
 command 模式：
 
@@ -219,10 +219,12 @@ sequenceDiagram
 
 当前输出有两条路径：
 
-1. 过程输出通过 `job:stdout/stderr` 实时发送，`appendOutputRaw()` 当前不保存单个 chunk；
+1. 过程输出通过 `job:stdout/stderr` 实时发送，Server 用 `appendOutputRaw()` 把收到的 chunk 追加到同一个 `output` spool；
 2. Client 同时在内存中累计完整 stdout/stderr，进程关闭时放入 `job:done`；Server 将其写入 `Job.result`。
 
-因此“过程 chunk 不持久化”不等于“输出不持久化”。当前最终输出会出现在：
+`output` 表示 Server 观察到的跨流合并顺序，不保证与独立 `result.stdout` 或 `result.stderr` 的顺序相同。最终 `result.stdout`/`result.stderr` 分别保持各自流内容，空流当前可能省略字段。CLI `--json` 返回 Job result 与 `output`，stdout 只写最终 JSON，等待诊断写 stderr。
+
+当前输出会出现在：
 
 - Client 运行时内存；
 - Socket.IO 终局消息；

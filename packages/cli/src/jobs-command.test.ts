@@ -309,10 +309,106 @@ describe("jobs command", () => {
 			expect(bodies[0]).toMatchObject({
 				clientId: "client-1",
 				type: "exec",
-				timeout: 60,
+				timeout: 60_000,
 				payload: { mode: "command", command: "git status", cwd: "D:\\tmp" },
 			});
 			expect(lines.join("\n")).toContain("Job 已创建: job-run-1");
+		});
+
+		it("仅在多个 token 的空白参数边界会丢失时警告", async () => {
+			const { port } = await listen((request, response) => {
+				response.setHeader("content-type", "application/json");
+				if ((request.url ?? "") === "/api/clients") {
+					response.end(
+						JSON.stringify([{ clientId: "client-1", name: "ws", online: true }]),
+					);
+					return;
+				}
+				response.end(
+					JSON.stringify({ jobId: "job-run-1", status: "running", type: "exec" }),
+				);
+			});
+			const { paths, processEnv } = await fixture(port);
+			const warnings: string[] = [];
+			const context = {
+				paths,
+				processEnv,
+				log: () => {},
+				error: (message: string) => warnings.push(message),
+			};
+
+			await runJobsCommand("run", ["ws", "--", "sh /root/preflight.sh"], context);
+			expect(warnings).toEqual([]);
+
+			await runJobsCommand("run", ["ws", "--", "printf", "a b"], context);
+			expect(warnings.join("\n")).toContain("参数边界会丢失");
+		});
+
+		it("--wait --json 的 stdout 为单一 JSON，状态提示只写 stderr", async () => {
+			let created = 0;
+			const reads = new Map<string, number>();
+			const { port } = await listen((request, response) => {
+				const url = request.url ?? "";
+				response.setHeader("content-type", "application/json");
+				if (url === "/api/clients") {
+					response.end(
+						JSON.stringify([{ clientId: "client-1", name: "ws", online: true }]),
+					);
+					return;
+				}
+				if (url === "/api/jobs" && request.method === "POST") {
+					created++;
+					response.end(
+						JSON.stringify({ jobId: `job-json-${created}`, status: "running", type: "exec" }),
+					);
+					return;
+				}
+				if (url.endsWith("/output")) {
+					response.end(JSON.stringify({ jobId: url, output: "" }));
+					return;
+				}
+				const jobId = url.split("/").pop() ?? "";
+				const count = reads.get(jobId) ?? 0;
+				reads.set(jobId, count + 1);
+				const failed = jobId.endsWith("-2");
+				response.end(
+					JSON.stringify(
+						count === 0
+							? jobInfo({ jobId, status: JobStatus.RUNNING, result: null })
+							: jobInfo({
+									jobId,
+									status: failed ? JobStatus.ERROR : JobStatus.DONE,
+									result: { exitCode: failed ? 2 : 0 },
+								}),
+					),
+				);
+			});
+			const { paths, processEnv } = await fixture(port);
+
+			for (const shouldFail of [false, true]) {
+				const stdout: string[] = [];
+				const stderr: string[] = [];
+				const promise = runJobsCommand(
+					"run",
+					["ws", "--wait", "--json", "--", "echo", "a b"],
+					{
+						paths,
+						processEnv,
+						pollIntervalMs: 1,
+						log: (message) => stdout.push(message),
+						error: (message) => stderr.push(message),
+					},
+				);
+				if (shouldFail) await expect(promise).rejects.toThrow("终态为 error");
+				else await promise;
+
+				const parsed = JSON.parse(stdout.join("\n")) as JobInfo & {
+					output: string;
+				};
+				expect(parsed.status).toBe(shouldFail ? JobStatus.ERROR : JobStatus.DONE);
+				expect(stderr.join("\n")).toContain(`Job ${parsed.jobId} 状态: running`);
+				expect(stderr.join("\n")).toContain("参数边界会丢失");
+			}
 		});
 
 		it("--wait 成功终态输出详情与全文；失败终态非零退出并带出失败现场", async () => {

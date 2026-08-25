@@ -40,7 +40,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.6.2";
+    exports2.VERSION = "0.6.3";
   }
 });
 
@@ -12200,7 +12200,7 @@ function jobsUsage() {
     "  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
     "  vcpdeck jobs get <jobId> [--env=<name>] [--json]  # \u542B\u5931\u8D25\u73B0\u573A\uFF08stdout/stderr spool\uFF09",
     "  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
-    "  # \u5199\u64CD\u4F5C\uFF1A\u547D\u4EE4 token \u4EE5\u7A7A\u683C\u8FDE\u63A5\u540E\u4EA4\u7531\u76EE\u6807\u673A shell \u6267\u884C\uFF1B\u786E\u8BA4\u95E8\u7531\u8C03\u7528\u65B9\u8D1F\u8D23",
+    "  # \u5199\u64CD\u4F5C\uFF1A--timeout/--wait-timeout \u5355\u4F4D\u4E3A\u79D2\uFF1B\u590D\u6742\u547D\u4EE4\u5EFA\u8BAE\u4F5C\u4E3A -- \u540E\u7684\u5355\u4E00\u53C2\u6570\uFF1B\u786E\u8BA4\u95E8\u7531\u8C03\u7528\u65B9\u8D1F\u8D23",
     "  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]"
   ].join("\n");
 }
@@ -12274,6 +12274,7 @@ async function runExecJob(argv, context) {
   const timeout = parsePositiveSeconds(stringOption(options, "timeout"), "--timeout");
   const waitTimeout = parsePositiveSeconds(stringOption(options, "wait-timeout"), "--wait-timeout") ?? DEFAULT_WAIT_TIMEOUT_SECONDS;
   const log = context.log ?? console.log;
+  const error = context.error ?? console.error;
   const client = await createAuthenticatedClient(environment);
   const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
   const payload = {
@@ -12283,8 +12284,8 @@ async function runExecJob(argv, context) {
   const cwd = stringOption(options, "cwd");
   if (cwd)
     payload.cwd = cwd;
-  if (!cwd && commandTokens.some((token) => token.includes(" "))) {
-    log("[vcpdeck] \u6CE8\u610F\uFF1A\u542B\u7A7A\u683C\u7684 token \u8FDE\u63A5\u540E\u5F15\u53F7\u8FB9\u754C\u53EF\u80FD\u4E22\u5931\uFF0C\u8BF7\u6838\u5BF9\u547D\u4EE4\u8BED\u4E49");
+  if (commandTokens.length > 1 && commandTokens.some((token) => token.length === 0 || /\s/.test(token))) {
+    error("[vcpdeck] \u6CE8\u610F\uFF1A\u591A\u4E2A\u547D\u4EE4 token \u4EE5\u7A7A\u683C\u8FDE\u63A5\uFF0C\u542B\u7A7A\u767D token \u7684\u53C2\u6570\u8FB9\u754C\u4F1A\u4E22\u5931\uFF1B\u5EFA\u8BAE\u628A\u5B8C\u6574 shell \u547D\u4EE4\u4F5C\u4E3A -- \u540E\u7684\u5355\u4E00\u53C2\u6570");
   }
   if (options.json !== true) {
     log(formatEnvironmentSummary(environment));
@@ -12294,7 +12295,7 @@ async function runExecJob(argv, context) {
     clientId,
     type: "exec",
     payload,
-    timeout
+    timeout: timeout === void 0 ? void 0 : timeout * 1e3
   });
   if (options.wait !== true) {
     if (options.json === true) {
@@ -12304,7 +12305,7 @@ async function runExecJob(argv, context) {
     }
     return;
   }
-  const job = await waitForTerminalJob(client, created.jobId, waitTimeout, log, context.pollIntervalMs ?? POLL_INTERVAL_MS);
+  const job = await waitForTerminalJob(client, created.jobId, waitTimeout, options.json === true ? error : log, context.pollIntervalMs ?? POLL_INTERVAL_MS);
   const output = await readJobOutputText(client, job.jobId).catch(() => null);
   if (options.json === true) {
     log(JSON.stringify({ ...job, output }, null, 2));
@@ -14141,7 +14142,7 @@ async function run(argv, context = {}) {
       return 0;
     }
     if (command === "jobs") {
-      await runJobsCommand(subcommand, rest, { log });
+      await runJobsCommand(subcommand, rest, { log, error });
       return 0;
     }
     if (command === "clients") {
@@ -14186,6 +14187,7 @@ function helpText() {
     "  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
     "  vcpdeck jobs get <jobId> [--env=<name>] [--json]",
     "  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
+    "  \u590D\u6742\u547D\u4EE4\u5EFA\u8BAE\u4F5C\u4E3A -- \u540E\u7684\u5355\u4E00\u53C2\u6570\uFF1B--json \u4EC5\u5728 stdout \u8F93\u51FA JSON\uFF0C\u72B6\u6001\u63D0\u793A\u8D70 stderr",
     "  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]",
     "",
     "Files:",

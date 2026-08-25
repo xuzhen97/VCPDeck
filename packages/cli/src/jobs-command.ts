@@ -12,6 +12,7 @@ export interface JobsCommandContext {
 	paths?: ConfigPaths;
 	processEnv?: NodeJS.ProcessEnv;
 	log?: (message: string) => void;
+	error?: (message: string) => void;
 	/** 终态轮询间隔；测试可缩短。 */
 	pollIntervalMs?: number;
 }
@@ -78,7 +79,7 @@ function jobsUsage(): string {
 		"  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
 		"  vcpdeck jobs get <jobId> [--env=<name>] [--json]  # 含失败现场（stdout/stderr spool）",
 		"  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
-		"  # 写操作：命令 token 以空格连接后交由目标机 shell 执行；确认门由调用方负责",
+		"  # 写操作：--timeout/--wait-timeout 单位为秒；复杂命令建议作为 -- 后的单一参数；确认门由调用方负责",
 		"  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]",
 	].join("\n");
 }
@@ -182,6 +183,7 @@ async function runExecJob(
 			"--wait-timeout",
 		) ?? DEFAULT_WAIT_TIMEOUT_SECONDS;
 	const log = context.log ?? console.log;
+	const error = context.error ?? console.error;
 	const client = await createAuthenticatedClient(environment);
 	const clientId = await resolveClientId(
 		clientFilter,
@@ -196,8 +198,13 @@ async function runExecJob(
 	};
 	const cwd = stringOption(options, "cwd");
 	if (cwd) payload.cwd = cwd;
-	if (!cwd && commandTokens.some((token) => token.includes(" "))) {
-		log("[vcpdeck] 注意：含空格的 token 连接后引号边界可能丢失，请核对命令语义");
+	if (
+		commandTokens.length > 1 &&
+		commandTokens.some((token) => token.length === 0 || /\s/.test(token))
+	) {
+		error(
+			"[vcpdeck] 注意：多个命令 token 以空格连接，含空白 token 的参数边界会丢失；建议把完整 shell 命令作为 -- 后的单一参数",
+		);
 	}
 
 	if (options.json !== true) {
@@ -208,7 +215,7 @@ async function runExecJob(
 		clientId,
 		type: "exec",
 		payload,
-		timeout,
+		timeout: timeout === undefined ? undefined : timeout * 1_000,
 	});
 
 	if (options.wait !== true) {
@@ -226,7 +233,7 @@ async function runExecJob(
 		client,
 		created.jobId,
 		waitTimeout,
-		log,
+		options.json === true ? error : log,
 		context.pollIntervalMs ?? POLL_INTERVAL_MS,
 	);
 	// 成功与失败都取回输出；失败时非零退出并展示完整现场（闭环）
