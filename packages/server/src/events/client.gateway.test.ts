@@ -386,6 +386,34 @@ describe("ClientGateway terminal routing", () => {
 });
 
 describe("ClientGateway.handleJobDone", () => {
+	it("exec 基础设施错误保留输出并继续派发队列", async () => {
+		const { gateway, jobService, emit } = makeGateway();
+		jobService.markDone.mockResolvedValue({
+			jobId: "next-job",
+			clientId: "c1",
+			type: "exec",
+			payload: { mode: "command", command: "echo next" },
+			timeout: null,
+		});
+
+		await gateway.handleJobDone({
+			jobId: "job-1",
+			type: "exec",
+			error: { code: "EXEC_TIMEOUT", message: "Execution timed out" },
+			stdout: "READY\n",
+		} as never);
+
+		expect(jobService.markDone).toHaveBeenCalledWith("job-1", "exec", {
+			errorCode: "EXEC_TIMEOUT",
+			errorMessage: "Execution timed out",
+			stdout: "READY\n",
+		});
+		expect(emit).toHaveBeenCalledWith(
+			"job:dispatch",
+			expect.objectContaining({ jobId: "next-job" }),
+		);
+	});
+
 	it("FRP Dashboard 收敛成功后才终结 Job", async () => {
 		const { gateway, jobService, frpService } = makeGateway();
 		frpService.settleClientOperation.mockResolvedValue({

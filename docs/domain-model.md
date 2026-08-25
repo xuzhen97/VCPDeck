@@ -129,6 +129,7 @@ stateDiagram-v2
 - Server drain 时不派发新 Job；
 - 错误必须使用稳定 code 和安全 message，不能持久化 stack、密钥或文件正文；
 - exec 的过程 stdout/stderr 不单独持久化，但 Client 会聚合最终输出并写入 Job result；
+- exec 正常退出保存真实 exit code；超时和其他信号终止分别以 `EXEC_TIMEOUT`、`EXEC_SIGNALLED` 表达，不伪造成 exit code 1；
 - exec 断线期间中间输出可能丢失；当前无终局事件 spool，进程在断线期间结束时也可能无法在重连后补报；Client 重启后不能假定原子进程仍可对账；
 - 文件 handler/transfer 当前未完整进入 Executor 活动集合和重连状态报告，running 文件 Job 的取消、timeout 和断线终局补报不能视为可靠。
 

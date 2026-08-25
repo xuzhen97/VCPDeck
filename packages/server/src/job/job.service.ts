@@ -637,6 +637,7 @@ function toJobInfo(j: {
   payload: string;
   result: string | null;
   progress: string | null;
+  timeout: number | null;
   errorCode: string | null;
   errorMessage: string | null;
   createdAt: Date;
@@ -656,6 +657,7 @@ function toJobInfo(j: {
     payload: safeJsonParse(j.payload, {}),
     result: j.result ? safeJsonParse(j.result, null) : null,
     progress: parseProgress(j.progress),
+    timeout: j.timeout,
     errorCode: j.errorCode,
     errorMessage: j.errorMessage,
     createdAt: j.createdAt.toISOString(),

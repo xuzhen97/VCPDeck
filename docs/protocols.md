@@ -119,7 +119,7 @@ SDK 将失败归一化为 `VcpDeckApiError(status, code?, details?)`。新增接
 
 `timeout` 位于 Job 顶层。command 使用目标系统 Shell；script 使用 `spawn(executable,args,{shell:false})` 并从 stdin 接收源码。当前允许调用方提交 executable/args 是已知安全与兼容缺口，不是长期批准协议；ADR-0010 已决定迁移到 Client 声明的 runtime ID，但尚未实现。
 
-过程 `job:stdout/stderr` chunk 当前不持久化，但 Client 会累计完整最终输出，Server 将最终 stdout/stderr 保存到 `Job.result`。当前没有 script/output 应用层上限、稳定 `EXEC_TIMEOUT`、cwd root 校验或完整进程树取消。网络超时和 disconnected 都不证明远端未执行，调用方不得自动盲重试。完整当前边界见 [`design/remote-execution.md`](./design/remote-execution.md)。
+过程 `job:stdout/stderr` chunk 当前不持久化，但 Client 会累计完整最终输出，Server 将最终 stdout/stderr 保存到 `Job.result`。Client 对 exec timeout 使用独立计时器与平台进程树清理，并以 `EXEC_TIMEOUT` 收敛；其他信号终止使用 `EXEC_SIGNALLED`，两者保留已捕获输出。Job 详情返回顶层 `timeout`。当前仍没有 script/output 应用层上限或 cwd root 校验；显式 detached/系统服务和既有外部副作用也不由取消回滚。网络超时和 disconnected 都不证明远端未执行，调用方不得自动盲重试。完整当前边界见 [`design/remote-execution.md`](./design/remote-execution.md)。
 
 ### 2.7 Release REST 协议
 

@@ -341,7 +341,10 @@ export class ClientGateway {
       if (raw.error) {
         const errorCode: string = raw.error.code || "EXEC_FAILED";
         const errorMessage: string = raw.error.message || "";
-        await this.jobService.markDone(data.jobId, type, { errorCode, errorMessage });
+        const result: Record<string, unknown> = { errorCode, errorMessage };
+        if (raw.stdout) result.stdout = raw.stdout;
+        if (raw.stderr) result.stderr = raw.stderr;
+        const next = await this.jobService.markDone(data.jobId, type, result);
         this.server.emit(Events.JOB_UPDATE, {
           jobId: data.jobId,
           type,
@@ -350,6 +353,7 @@ export class ClientGateway {
           errorMessage,
           result: undefined,
         } satisfies JobUpdate);
+        if (next) this.sendDispatch(next);
         return;
       }
 

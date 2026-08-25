@@ -214,7 +214,7 @@ node "<vcpdeck-cli>" jobs cancel <jobId> [--env=<name>] [--json]
 
 `jobs list` 通过 SDK 请求 Server `GET /api/jobs`，返回分页 Job 摘要（`PaginatedResult`）；`--client` 接受机器名称或 ID，CLI 先查机器列表解析为 `clientId`。`jobs get` 取详情与输出 spool。`jobs run` 创建 exec Job（command 模式，`--` 后的命令 token 以空格连接后交由目标机 shell 执行，Windows 下自动 chcp 65001）；复杂命令应作为 `--` 后的单一参数传入，例如 `-- 'sudo -n true; echo $?'`，避免多 token 重组丢失原参数边界。`--timeout` 是远端进程时限，`--wait-timeout` 是 CLI 等待终态时限，两者单位均为秒。目标机必须在线，否则 Server 拒绝。`jobs cancel` 提交取消：pending 立即 `cancelled`；running 返回 `cancelling`，终态需用 `jobs get` 核对。
 
-Job 状态权威在 Server；输出 spool 由 Server 在 Client 实时上报 stdout/stderr 时旁路落盘（`<data>/job-outputs/<jobId>.log`），完整保留不封顶，只在详情路径读取。
+Job 状态权威在 Server；输出 spool 由 Server 在 Client 实时上报 stdout/stderr 时旁路落盘（`<data>/job-outputs/<jobId>.log`），完整保留不封顶，只在详情路径读取。正常非零退出保存真实 exitCode；远端进程超时返回 `EXEC_TIMEOUT`，其他信号终止返回 `EXEC_SIGNALLED`，两者均保留已捕获输出。timeout/取消会按平台终止进程树，但不能回滚已提交给系统服务管理器的进程或外部副作用。`jobs get` 同时展示 Job 顶层远端进程 timeout。
 
 ### 确认门（写操作强制）
 

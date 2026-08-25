@@ -252,6 +252,8 @@ export type ExecJobDone =
 			jobId: string;
 			type: "exec";
 			error: JobError;
+			stdout?: string;
+			stderr?: string;
 	  };
 
 // ── Job done（Client → Server，判别联合） ──
@@ -356,6 +358,8 @@ export interface JobInfo {
 	result: Record<string, unknown> | null;
 	/** 传输段进度（Storage 上传或 Client 导入时上报，无则 null） */
 	progress: JobProgress | null;
+	/** 远端进程超时（毫秒）；旧 Server 可能省略。 */
+	timeout?: number | null;
 	errorCode: string | null;
 	errorMessage: string | null;
 	createdAt: string;

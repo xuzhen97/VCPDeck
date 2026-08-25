@@ -209,10 +209,10 @@ sequenceDiagram
 - active process 由 Client 内存 `activeJobs` 跟踪；
 - close、spawn error 和 stdin error 通过 `settle()` 避免重复终态；
 - exit code 0 收敛为 done，非 0 收敛为 error；
-- `EXEC_SPAWN_FAILED` 和 `EXEC_STDIN_FAILED` 是当前稳定基础设施错误；
+- `EXEC_SPAWN_FAILED`、`EXEC_STDIN_FAILED`、`EXEC_TIMEOUT` 和 `EXEC_SIGNALLED` 是当前稳定基础设施错误；
 - `done/error/cancelled` 是终态；
 - disconnected 不是终态，Client 重连后用 status report 对账；
-- 当前没有稳定 `EXEC_TIMEOUT` 映射，spawn timeout 可能最终表现为非零退出；
+- Client 自主管理 timeout：超时终止进程树并上报 `EXEC_TIMEOUT`；其他无退出码的信号终止上报 `EXEC_SIGNALLED`，不再伪造成 `exitCode=1`；
 - 网络或本地等待超时不证明远端没有执行，不能自动盲重试。
 
 ## 6. 输出与数据留痕
@@ -243,16 +243,15 @@ sequenceDiagram
 当前取消流程：
 
 1. Server 下发 `job:cancel`；
-2. Client 在 `activeJobs` 查找直接子进程；
-3. 发送 SIGTERM；
-4. 5 秒后若直接进程仍未退出，发送 SIGKILL；
-5. close 事件按 cancelling 标记上报 `job:cancelled`。
+2. Client 在 `activeJobs` 查找活动进程；
+3. 复用 Terminal 的平台进程树清理：Windows 执行 `taskkill /PID <pid> /T /F`，POSIX 终止独立进程组；
+4. close 事件按 cancelling 标记上报 `job:cancelled`。
 
-当前不保证终止完整进程树。Shell 或脚本启动的后代进程可能残留；这与 Terminal 已有的进程树清理能力不同。看到 `cancelled` 时只能确认被跟踪直接进程已经收敛，不能推断所有后代副作用均停止。
+进程树终止只能收敛仍属于该树的进程；命令已显式 detached、提交给系统服务管理器或已产生外部副作用时，取消不会回滚这些结果。
 
 ### 7.2 超时
 
-`timeout` 直接传给 Node `spawn()`。当前没有独立定时器、进程树清理和稳定 timeout 错误映射。超时行为必须通过平台真实测试验证，调用方不能依赖 `EXEC_TIMEOUT`，因为该错误码尚未实现。
+Client 使用独立定时器管理 `timeout`，不依赖 Node `spawn({timeout})` 的模糊信号结果。到期时先记录 timeout 原因，再清理完整进程树；close 时以 `EXEC_TIMEOUT` 收敛并保留已捕获的 stdout/stderr。POSIX exec 以独立进程组启动，Windows 使用 `taskkill /T /F`。Job REST 详情返回顶层 `timeout`，CLI 与 Frontend 可显示真实配置。
 
 ### 7.3 断线
 
@@ -296,7 +295,7 @@ Client Socket 断开时直接进程可以继续运行，Server 将活动 Job 标
 | 双端严格运行时解析 | Server 只有手写基础校验；Client 使用类型断言和非空断言 |
 | 工作目录来自受控 root/canonical path | 当前只检查非空字符串 |
 | 受控大小和稳定错误 | 无 script/output 上限，无稳定 timeout 错误 |
-| 取消收敛远程执行 | 当前只杀直接子进程，不保证后代进程树 |
+| 取消收敛远程执行 | 已按平台终止进程树；显式 detached/系统服务与外部副作用仍不回滚 |
 
 维护者修改这些区域时，应朝 ADR-0010 和 ADR-0004 收敛，而不是继续扩大 arbitrary executable 协议。若要放弃该方向，必须新增 ADR supersede ADR-0010。
 

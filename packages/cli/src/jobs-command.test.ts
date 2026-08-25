@@ -45,6 +45,7 @@ function jobInfo(overrides: Partial<JobInfo> = {}): JobInfo {
 		payload: { command: "make check" },
 		result: { exitCode: 2 },
 		progress: null,
+		timeout: 40_000,
 		errorCode: null,
 		errorMessage: null,
 		createdAt: "2026-08-22T01:00:00.000Z",
@@ -203,6 +204,7 @@ describe("jobs command", () => {
 		const detail = lines.join("\n");
 		expect(detail).toContain("Status: error");
 		expect(detail).toContain("Error: EXEC_FAILED — 命令退出码非零");
+		expect(detail).toContain("Timeout: 40000 ms");
 		expect(detail).toContain("── 输出（stdout/stderr）──");
 		expect(detail).toContain("npm ERR! missing script");
 	});

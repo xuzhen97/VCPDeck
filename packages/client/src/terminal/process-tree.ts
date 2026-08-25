@@ -28,7 +28,7 @@ function taskkill(pid: number): Promise<number> {
 }
 
 /**
- * 终止 PTY 进程树。
+ * 终止进程树。
  * - POSIX：先 SIGTERM 进程组（-pid），兜底 kill(-pid, SIGKILL)；
  * - Windows：taskkill /T /F 结束进程树（ConPTY 关闭后仍可能残留子进程）。
  * 幂等：进程已退出时静默成功。
@@ -37,7 +37,7 @@ export async function killProcessTree(
 	pid: number,
 	env: ProcessTreeKillerEnv = {
 		platform: process.platform,
-		killGroupSignal: (p, sig) => process.kill(-p, sig),
+		killGroupSignal: (p, sig) => process.kill(p, sig),
 		runTaskkill: taskkill,
 	},
 ): Promise<void> {

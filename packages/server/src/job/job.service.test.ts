@@ -254,6 +254,7 @@ describe("JobService.list() 进度透出", () => {
 				payload: "{}",
 				result: null,
 				progress: JSON.stringify({ loaded: 66, total: 158 }),
+				timeout: 40_000,
 				errorCode: null,
 				errorMessage: null,
 				createdAt: new Date(),
@@ -267,6 +268,7 @@ describe("JobService.list() 进度透出", () => {
 
 		const page = await svc.list({ page: 1, pageSize: 20 });
 		expect(page.data[0]?.progress).toEqual({ loaded: 66, total: 158 });
+		expect(page.data[0]?.timeout).toBe(40_000);
 
 		const svcBad = makeService([
 			{
@@ -278,6 +280,7 @@ describe("JobService.list() 进度透出", () => {
 				payload: "{}",
 				result: null,
 				progress: "not-json",
+				timeout: null,
 				errorCode: null,
 				errorMessage: null,
 				createdAt: new Date(),
