@@ -196,14 +196,49 @@ test("registerStartupTask 非权限错误仍抛出", () => {
 });
 
 test("registerStartupTask 创建成功返回 windows-logon-task", () => {
-	const called = [];
-	const outcome = installer.registerStartupTask(
-		"T",
-		"C:\\x\\pm2-resurrect.cmd",
-		(file, args) => {
-			called.push([file, args[4]]);
-		},
-	);
-	assert.equal(outcome, "windows-logon-task");
-	assert.deepEqual(called, [["schtasks.exe", "T"]]);
+const called = [];
+const outcome = installer.registerStartupTask(
+"T",
+"C:\\x\\pm2-resurrect.cmd",
+(file, args) => {
+called.push([file, args[4]]);
+},
+);
+assert.equal(outcome, "windows-logon-task");
+assert.deepEqual(called, [["schtasks.exe", "T"]]);
+});
+
+test("retryStartupTaskAsAdmin 发起 UAC 提权重试且 payload 可解码验证", () => {
+const calls = [];
+const outcome = installer.retryStartupTaskAsAdmin(
+"VCPDeck PM2 Startup",
+"C:\\Users\\xuzhe\\.vcpdeck\\launcher-client\\pm2-resurrect.cmd",
+(args) => {
+calls.push(args.join(" "));
+return { status: 0, stdout: "" };
+},
+);
+assert.equal(outcome, "windows-logon-task(via-uac)");
+assert.equal(calls.length, 1);
+assert.match(calls[0], /-Verb RunAs -Wait -PassThru/);
+const m = calls[0].match(/-EncodedCommand','([^']+)'/);
+assert.ok(m, "应包含 EncodedCommand payload");
+const payload = Buffer.from(m[1], "base64").toString("utf16le");
+assert.match(payload, /\/Create/);
+assert.ok(payload.includes("VCPDeck PM2 Startup"));
+assert.ok(payload.includes("pm2-resurrect.cmd"));
+});
+
+test("retryStartupTaskAsAdmin 提权失败也降级并打印可复制兜底命令", () => {
+const warns = [];
+const outcome = installer.retryStartupTaskAsAdmin(
+"VCPDeck PM2 Startup",
+"C:\\x\\pm2-resurrect.cmd",
+() => ({ status: 1, stdout: "" }),
+(message) => warns.push(message),
+);
+assert.equal(outcome, "not-configured");
+assert.equal(warns.length, 1);
+assert.match(warns[0], /schtasks \/Create/);
+assert.ok(warns[0].includes("VCPDeck PM2 Startup"));
 });

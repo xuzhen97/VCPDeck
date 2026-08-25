@@ -368,6 +368,41 @@ function registerStartupTask(
 	}
 }
 
+/**
+ * 权限被拒时自动弹 UAC 提权补注册开机自启：
+ * - payload 完全自包含（UTF-16LE base64 → -EncodedCommand），适配一次性下载执行；
+ * - 提权子进程执行 schtasks 后 `exit $LASTEXITCODE`，父进程 Start-Process -Wait -PassThru 透传；
+ * - 成功返回 `windows-logon-task(via-uac)`；取消/失败降级 `not-configured` 并打印可复制兜底命令。
+ * startPwsh / warn 可注入以便测试（测试内绝不弹真实 UAC）。
+ */
+function retryStartupTaskAsAdmin(
+	taskName,
+	wrapper,
+	startPwsh = (args) =>
+		spawnSync("powershell.exe", args, { encoding: "utf8", windowsHide: true }),
+	warn = console.error,
+) {
+	const createCommand = `schtasks.exe /Create /SC ONLOGON /TN "${taskName}" /TR "${wrapper}" /RL LIMITED /F`;
+	const payload =
+		`${createCommand}\r\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
+	const encoded = Buffer.from(payload, "utf16le").toString("base64");
+	const parentCommand =
+		`$p = Start-Process powershell -Verb RunAs -Wait -PassThru ` +
+		`-ArgumentList '-NoProfile','-EncodedCommand','${encoded}'; exit $p.ExitCode`;
+	const result = startPwsh(["-NoProfile", "-Command", parentCommand]);
+	if (result.status === 0) {
+		console.log(
+			`[vcpdeck] 已通过 UAC 提权补注册开机自启（计划任务 ${taskName}）`,
+		);
+		return "windows-logon-task(via-uac)";
+	}
+	warn(
+		`[vcpdeck] 未能注册开机自启：UAC 提权被取消或失败。可手动以管理员身份运行：` +
+			`\n  ${createCommand.replace("schtasks.exe", "schtasks")}`,
+	);
+	return "not-configured";
+}
+
 function configureStartup(pm2, nodePath, appDir) {
 	if (platform() === "win32") {
 		const wrapper = join(appDir, "pm2-resurrect.cmd");
@@ -388,7 +423,12 @@ function configureStartup(pm2, nodePath, appDir) {
 				throw new Error(`Windows 计划任务 ${taskName} 已存在但指向其他命令`);
 			}
 		} else {
-			return registerStartupTask(taskName, wrapper);
+			const outcome = registerStartupTask(taskName, wrapper);
+			if (outcome === "not-configured") {
+				// 非管理员：自动弹 UAC 提权补注册，取消/失败再降级并给出可执行命令
+				return retryStartupTaskAsAdmin(taskName, wrapper);
+			}
+			return outcome;
 		}
 		return "windows-logon-task";
 	}
@@ -679,4 +719,5 @@ module.exports = {
 	resolveGlobalPm2,
 	npmPath,
 	registerStartupTask,
+	retryStartupTaskAsAdmin,
 };

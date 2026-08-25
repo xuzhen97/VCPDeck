@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [Unreleased]
+
+### Added
+
+- Windows 一键安装器（install-client.cjs）：开机自启注册在非管理员权限被拒时自动弹 UAC 提权补注册（自包含 EncodedCommand payload，任务名/参数不变；取消或失败降级并打印可直接执行的 schtasks 命令），普通权限安装不再需要二次操作。
+
 ## [0.6.2] - 2026-08-24
 
 ### Added
