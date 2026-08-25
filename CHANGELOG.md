@@ -4,9 +4,13 @@
 
 ## [Unreleased]
 
-### Fixed
+## [0.6.4] - 2026-08-26
 
-- Exec Job 现在明确区分正常非零退出、`EXEC_TIMEOUT` 与 `EXEC_SIGNALLED`；timeout/取消会终止完整进程树并保留已捕获输出，不再把无退出码的信号终止伪造成 `exitCode: 1`。Job 详情同步返回并展示顶层 timeout，exec 基础设施错误也会继续派发队列中的下一项。
+### Changed
+
+- Exec Job 现在明确区分正常非零退出、`EXEC_TIMEOUT` 与 `EXEC_SIGNALLED`；timeout/取消会终止完整进程树并保留已捕获输出，不再把无退出码的信号终止伪造成 `exitCode: 1`。
+- Job 详情、CLI 与 Frontend 统一展示 Job 顶层远端 timeout；exec 基础设施错误完成后继续派发队列中的下一项。
+- 远程命令执行文档、协议说明和 CLI Skill 同步更新 timeout、信号终止与进程树清理语义。
 
 ## [0.6.3] - 2026-08-25
 
