@@ -7,6 +7,7 @@
 ### Fixed
 
 - Client 一键安装生成的 PM2 ecosystem 现在过滤安装器进程继承的 `VCPDECK_*`，并通过 `launcher-env.cjs` preload 在启动时清除缓存值、主动加载 `launcher.env`，避免 PM2 缓存旧 `VCPDECK_SERVER` 后覆盖文件配置。
+- Exec Job 现在明确区分正常非零退出、`EXEC_TIMEOUT` 与 `EXEC_SIGNALLED`；timeout/取消会终止完整进程树并保留已捕获输出，不再把无退出码的信号终止伪造成 `exitCode: 1`。Job 详情同步返回并展示顶层 timeout，exec 基础设施错误也会继续派发队列中的下一项。
 
 ## [0.6.3] - 2026-08-25
 

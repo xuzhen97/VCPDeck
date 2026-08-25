@@ -350,7 +350,7 @@ function ExecutionContent({ job }: { job: JobInfo }) {
 	if (job.type !== "exec") return null;
 	const { payload } = job;
 	const cwd = typeof payload.cwd === "string" ? payload.cwd : null;
-	const timeout = typeof payload.timeout === "number" ? payload.timeout : null;
+	const timeout = job.timeout ?? null;
 
 	if (payload.mode === "command" && typeof payload.command === "string") {
 		return (

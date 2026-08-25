@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import type { Socket } from "socket.io-client";
+import { killProcessTree } from "./terminal/process-tree.js";
 import { Events } from "@vcpdeck/shared";
 import type {
 	JobOutput,
@@ -15,13 +16,17 @@ interface ActiveJob {
 	process: ChildProcess;
 	startTime: number;
 	cancelling?: boolean;
+	timedOut?: boolean;
+	timeoutTimer?: ReturnType<typeof setTimeout>;
 }
 
 const activeJobs = new Map<string, ActiveJob>();
 
 /** 幂等终态：只执行一次 action */
 function settle(jobId: string, action: () => void) {
-	if (!activeJobs.has(jobId)) return; // 已终态，忽略
+	const active = activeJobs.get(jobId);
+	if (!active) return; // 已终态，忽略
+	if (active.timeoutTimer) clearTimeout(active.timeoutTimer);
 	activeJobs.delete(jobId);
 	action();
 }
@@ -58,24 +63,39 @@ export function executeExec(job: ExecJob, socket: Socket) {
 		child = spawn(cmd, {
 			shell: true,
 			cwd: job.cwd,
-			timeout: job.timeout,
+			detached: process.platform !== "win32",
 			windowsHide: true,
 		});
 	} else {
 		child = spawn(job.executable, job.args, {
 			shell: false,
 			cwd: job.cwd,
-			timeout: job.timeout,
+			detached: process.platform !== "win32",
 			windowsHide: true,
 		});
 	}
 
 	// ── 注册 activeJob ──
-	activeJobs.set(job.jobId, {
+	const active: ActiveJob = {
 		jobId: job.jobId,
 		process: child,
 		startTime: Date.now(),
-	});
+	};
+	activeJobs.set(job.jobId, active);
+	if (job.timeout !== undefined) {
+		active.timeoutTimer = setTimeout(() => {
+			const current = activeJobs.get(job.jobId);
+			if (
+				!current ||
+				current.cancelling ||
+				current.process.exitCode !== null ||
+				current.process.signalCode !== null
+			)
+				return;
+			current.timedOut = true;
+			void terminateActiveJob(current);
+		}, job.timeout);
+	}
 
 	// ── stdout ──
 	child.stdout?.on("data", (data: Buffer) => {
@@ -98,20 +118,48 @@ export function executeExec(job: ExecJob, socket: Socket) {
 	});
 
 	// ── close（幂等） ──
-	child.on("close", (code) => {
-		// 先捕获 cancelling 标记，settle 会删除 map 条目
-		const wasCancelling = activeJobs.get(job.jobId)?.cancelling ?? false;
+	child.on("close", (code, signal) => {
+		// 先捕获终止原因，settle 会删除 map 条目
+		const current = activeJobs.get(job.jobId);
+		const wasCancelling = current?.cancelling ?? false;
+		const timedOut = current?.timedOut ?? false;
 		settle(job.jobId, () => {
+			if (timedOut) {
+				socket.emit(Events.JOB_DONE, {
+					jobId: job.jobId,
+					type: "exec" as const,
+					error: {
+						code: "EXEC_TIMEOUT",
+						message: `Execution timed out after ${job.timeout} ms`,
+					},
+					stdout: stdoutBuf || undefined,
+					stderr: stderrBuf || undefined,
+				} satisfies JobDone);
+				return;
+			}
 			if (wasCancelling) {
 				socket.emit(Events.JOB_CANCELLED, {
 					jobId: job.jobId,
 				} satisfies JobCancelled);
 				return;
 			}
+			if (code === null) {
+				socket.emit(Events.JOB_DONE, {
+					jobId: job.jobId,
+					type: "exec" as const,
+					error: {
+						code: "EXEC_SIGNALLED",
+						message: `Process terminated by ${signal ?? "an unknown signal"}`,
+					},
+					stdout: stdoutBuf || undefined,
+					stderr: stderrBuf || undefined,
+				} satisfies JobDone);
+				return;
+			}
 			socket.emit(Events.JOB_DONE, {
 				jobId: job.jobId,
 				type: "exec" as const,
-				exitCode: code ?? 1,
+				exitCode: code,
 				stdout: stdoutBuf || undefined,
 				stderr: stderrBuf || undefined,
 			} satisfies ExecJobDone);
@@ -135,12 +183,9 @@ export function executeExec(job: ExecJob, socket: Socket) {
 	// ── script 模式：写 stdin ──
 	if (job.mode === "script") {
 		child.stdin?.on("error", () => {
+			const current = activeJobs.get(job.jobId);
 			settle(job.jobId, () => {
-				try {
-					child.kill("SIGTERM");
-				} catch {
-					/* ignore */
-				}
+				if (current) void terminateActiveJob(current);
 				socket.emit(Events.JOB_DONE, {
 					jobId: job.jobId,
 					type: "exec" as const,
@@ -152,6 +197,24 @@ export function executeExec(job: ExecJob, socket: Socket) {
 			});
 		});
 		child.stdin?.end(job.script, "utf8");
+	}
+}
+
+/** 终止 Job 进程树；平台树清理失败时至少终止直接子进程。 */
+async function terminateActiveJob(active: ActiveJob): Promise<void> {
+	if (
+		active.process.exitCode !== null ||
+		active.process.signalCode !== null
+	)
+		return;
+	const pid = active.process.pid;
+	if (pid) await killProcessTree(pid);
+	if (active.process.exitCode === null) {
+		try {
+			active.process.kill("SIGKILL");
+		} catch {
+			/* 已退出 */
+		}
 	}
 }
 
@@ -172,30 +235,20 @@ export function killJob(jobId: string, socket: Socket) {
 		return;
 	}
 
-	try {
-		active.cancelling = true;
-		active.process.kill("SIGTERM");
-
-		const killTimer = setTimeout(() => {
-			if (active.process.exitCode === null) {
-				try {
-					active.process.kill("SIGKILL");
-				} catch {
-					// process already gone
-				}
-			}
-		}, 5000);
-
-		active.process.on("close", () => {
-			clearTimeout(killTimer);
-			// 幂等：close 事件中已通过 settle 处理
-		});
-	} catch (err: any) {
+	if (!active.timedOut) active.cancelling = true;
+	if (active.timeoutTimer) {
+		clearTimeout(active.timeoutTimer);
+		active.timeoutTimer = undefined;
+	}
+	void terminateActiveJob(active).catch((error: unknown) => {
 		socket.emit(Events.JOB_CANCEL_FAILED, {
 			jobId,
-			reason: err.message,
+			reason:
+				error instanceof Error
+					? safeSpawnErrorMessage(error.message)
+					: "Cancellation failed",
 		} satisfies JobCancelFailed);
-	}
+	});
 }
 
 export function getRunningJobIds(): string[] {

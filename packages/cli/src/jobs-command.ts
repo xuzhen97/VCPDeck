@@ -370,6 +370,7 @@ function formatJobDetail(job: JobInfo, output: string | null): string {
 			`Error: ${job.errorCode ?? "-"}${job.errorMessage ? ` — ${job.errorMessage}` : ""}`,
 		);
 	}
+	if (job.timeout != null) lines.push(`Timeout: ${job.timeout} ms`);
 	lines.push(`Created: ${job.createdAt}`);
 	if (job.startedAt) lines.push(`Started: ${job.startedAt}`);
 	if (job.finishedAt) lines.push(`Finished: ${job.finishedAt}`);

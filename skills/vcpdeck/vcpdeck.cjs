@@ -12406,6 +12406,8 @@ function formatJobDetail(job, output) {
   if (job.errorCode || job.errorMessage) {
     lines.push(`Error: ${job.errorCode ?? "-"}${job.errorMessage ? ` \u2014 ${job.errorMessage}` : ""}`);
   }
+  if (job.timeout != null)
+    lines.push(`Timeout: ${job.timeout} ms`);
   lines.push(`Created: ${job.createdAt}`);
   if (job.startedAt)
     lines.push(`Started: ${job.startedAt}`);
