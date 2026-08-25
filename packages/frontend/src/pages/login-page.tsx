@@ -1,4 +1,4 @@
-import { Boxes, Moon, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -48,7 +48,12 @@ export function LoginPage() {
 			<section className="hidden items-end p-12 lg:flex">
 				<div className="max-w-xl">
 					<div className="mb-6 flex items-center gap-3 text-primary">
-						<Boxes className="size-9" />
+						<img
+							src="/vcpdeck-logo.svg"
+							alt=""
+							aria-hidden="true"
+							className="size-10"
+						/>
 						<span className="text-xl font-semibold">VCPDeck</span>
 					</div>
 					<h1 className="text-5xl font-semibold leading-tight">

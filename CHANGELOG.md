@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Frontend 更新 VCPDeck 品牌标志，并将同一 SVG 用作浏览器 favicon。
+
 ### Fixed
 
 - Client 一键安装生成的 PM2 ecosystem 现在过滤安装器进程继承的 `VCPDECK_*`，并通过 `launcher-env.cjs` preload 在启动时清除缓存值、主动加载 `launcher.env`，避免 PM2 缓存旧 `VCPDECK_SERVER` 后覆盖文件配置。

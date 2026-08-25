@@ -1,6 +1,5 @@
 import type { IdentityInfo } from "@vcpdeck/shared";
 import {
-	Boxes,
 	Cable,
 	ChevronsLeft,
 	ChevronsRight,
@@ -82,7 +81,12 @@ export function ConsoleShell({
 						data-testid="sidebar-brand"
 						className="flex min-h-12 items-center gap-3 px-2"
 					>
-						<Boxes className="size-6 shrink-0 text-primary" />
+						<img
+							src="/vcpdeck-logo.svg"
+							alt=""
+							aria-hidden="true"
+							className="size-7 shrink-0"
+						/>
 						<span className="vcpdeck-sidebar-label min-w-0 flex-1 font-semibold">
 							VCPDeck
 						</span>
@@ -126,6 +130,12 @@ export function ConsoleShell({
 					<header className="relative z-40 flex h-16 items-center justify-between border-b border-border/70 bg-card/30 px-4 backdrop-blur-xl sm:px-6">
 						<div className="flex items-center gap-2">
 							<div className="flex items-center gap-2 lg:hidden">
+								<img
+									src="/vcpdeck-logo.svg"
+									alt=""
+									aria-hidden="true"
+									className="size-6 shrink-0"
+								/>
 								<span className="font-semibold">VCPDeck</span>
 								<Button
 									type="button"
