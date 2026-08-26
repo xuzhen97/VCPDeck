@@ -162,6 +162,7 @@ pnpm --filter @vcpdeck/client start
 - Node/PM2 下载失败：检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源。若 Node 输出的探测表达式丢失 `"x64"` 或 `"."` 引号，说明 Server 仍在提供不兼容 Windows PowerShell 5.1 的旧引导脚本，应先更新 Server 后重跑固定命令；
 - PM2 同名路径冲突：运行 `pm2 describe vcpdeck-client-launcher`，不要自动覆盖指向其他 app-dir 的进程；
 - Launcher online 但验收超时：运行 `pm2 logs vcpdeck-client-launcher --lines 100`，核对 `launcher.env`、Server 可达性、PSK 和 `/client` WebSocket；
+- 若修改 `launcher.env` 后仍连接旧 Server，运行 `pm2 env <id>` 核对 PM2 是否缓存了旧 `VCPDECK_SERVER`。Node `--env-file` 不覆盖已存在的同名进程环境；新版一键安装器会生成 `launcher-env.cjs` preload（先清除继承的 `VCPDECK_*`，再主动读取 `launcher.env`）并在 ecosystem 中设置 `filter_env: ["VCPDECK_"]`。旧安装应更新这些文件后，以 `pm2 delete vcpdeck-client-launcher`、`pm2 start <app-dir>/ecosystem.config.cjs --only vcpdeck-client-launcher`、`pm2 save` 重建进程，确保 `launcher.env` 是 Launcher 配置权威；
 - 失败会保留 `~/.vcpdeck/client-install.json`、缓存、版本目录与 PM2 现场，修复后重跑同一固定命令。
 
 ### Client PM2 进程丢失

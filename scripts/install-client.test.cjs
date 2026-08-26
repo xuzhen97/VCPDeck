@@ -91,6 +91,50 @@ test("npmPath 在 Windows 上优先 npm-cli.js，避免直接执行 npm.cmd", ()
 	assert.ok(npm.endsWith("npm-cli.js"), `应优先 npm-cli.js，实际 ${npm}`);
 });
 
+test("writeEcosystem 强制以 launcher.env 覆盖 PM2 缓存的 VCPDECK 环境", () => {
+	const dir = mkdtempSync(join(tmpdir(), "vcpdeck-ecosystem-"));
+	try {
+		const envPath = join(dir, "launcher.env");
+		writeFileSync(
+			envPath,
+			"VCPDECK_SERVER=http://new.example.com:3001\nVCPDECK_PSK=file-psk\n",
+		);
+		const ecosystemPath = installer.writeEcosystem(
+			dir,
+			process.execPath,
+			envPath,
+		);
+		delete require.cache[require.resolve(ecosystemPath)];
+		const config = require(ecosystemPath);
+		const envLoaderPath = join(dir, "launcher-env.cjs");
+		assert.deepEqual(config.apps[0].filter_env, ["VCPDECK_"]);
+		assert.deepEqual(config.apps[0].node_args, [
+			`--require=${envLoaderPath}`,
+		]);
+
+		const result = spawnSync(
+			process.execPath,
+			[
+				`--require=${envLoaderPath}`,
+				"-e",
+				"process.stdout.write(process.env.VCPDECK_SERVER + '|' + process.env.VCPDECK_PSK)",
+			],
+			{
+				encoding: "utf8",
+				env: {
+					...process.env,
+					VCPDECK_SERVER: "http://old.example.com:3001",
+					VCPDECK_PSK: "cached-psk",
+				},
+			},
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(result.stdout, "http://new.example.com:3001|file-psk");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("parseArgs 拒绝不支持平台与不可用 Node", () => {
 	assert.throws(
 		() =>

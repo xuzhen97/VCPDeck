@@ -304,6 +304,10 @@ function runPm2(pm2, args, options = {}) {
 }
 
 function writeEcosystem(appDir, nodePath, envPath) {
+	const envLoaderPath = join(appDir, "launcher-env.cjs");
+	const envLoader = `// 由 VCPDeck Client 一键安装器生成；launcher.env 是配置权威。\nfor (const key of Object.keys(process.env)) {\n  if (key.startsWith("VCPDECK_")) delete process.env[key];\n}\nprocess.loadEnvFile(${JSON.stringify(envPath)});\n`;
+	writeFileSync(envLoaderPath, envLoader);
+
 	const path = join(appDir, "ecosystem.config.cjs");
 	const config = `module.exports = ${JSON.stringify(
 		{
@@ -312,7 +316,11 @@ function writeEcosystem(appDir, nodePath, envPath) {
 					name: PM2_NAME,
 					script: join(appDir, "dist", "main.js"),
 					interpreter: nodePath,
-					node_args: `--env-file=${envPath}`,
+					// preload 先清除 PM2 缓存值，再主动读取 launcher.env；不依赖
+					// Node --env-file（不会覆盖同名变量）的默认优先级。
+					node_args: [`--require=${envLoaderPath}`],
+					// 同时阻止 PM2 在新建进程时继承安装器自身的 VCPDeck 配置。
+					filter_env: ["VCPDECK_"],
 					cwd: appDir,
 					autorestart: true,
 					restart_delay: 2000,
@@ -718,6 +726,7 @@ module.exports = {
 	installPm2Retry,
 	resolveGlobalPm2,
 	npmPath,
+	writeEcosystem,
 	registerStartupTask,
 	retryStartupTaskAsAdmin,
 };
