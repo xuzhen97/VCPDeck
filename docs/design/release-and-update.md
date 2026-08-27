@@ -158,12 +158,13 @@ pending → updating → done | failed
 当前语义：
 
 - Server 更新成功后才进入 Client 阶段；
-- 在线 Client 串行更新，每台等待重连、明确失败或超时；
+- 在线 Client 按在线列表串行更新，每台等待重连、明确失败或超时；
+- Client 阶段期间以旧版本注册的 Client 进入内存去重补更集合；每批更新完成后重新读取在线列表，并在阶段结束前补偿处理新增或遗漏的旧版本 Client；
 - 单台 Client 失败不会阻止后续 Client，Release 最终仍可为 `done`；
 - 失败明细保留在 `clientStates`；
 - Client 更新判断使用“版本是否等于目标版本”，不是 SemVer 小于比较；版本更高但不相等的 Client 也可能被拉回目标版本；
-- `failed` Client 当前不会自动无限重试；
-- 离线 Client 不阻塞 Release 进入 `done`，后续注册时再按最近的 `updating_clients/done` 目标补更。
+- `failed` Client 当前不会自动无限重试；目标版本重新注册才是单台 Client 更新成功信号；
+- Release 进入 `done` 不表示所有 Client 同时在线；离线 Client 和阶段期间上线的旧版本 Client 会在后续注册时，或通过当前阶段末尾的补偿扫描，按最近的 `updating_clients/done` 目标补更。
 
 ## 6. Server 更新流程
 

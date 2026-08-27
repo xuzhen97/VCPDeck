@@ -1,4 +1,4 @@
-import { Inject, forwardRef } from "@nestjs/common";
+import { Inject, forwardRef, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -53,10 +53,13 @@ import type {
 } from "@vcpdeck/shared";
 import { clientPsk } from "../client/client-psk.js";
 
+const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
+
 @WebSocketGateway({ namespace: "/client", cors: { origin: process.env.VCPDECK_CORS_ORIGIN || "http://localhost:5173" } })
-export class ClientGateway {
+export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   @WebSocketServer()
   server!: Server;
+  private staleClientTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     @Inject(ClientService) private readonly clientService: ClientService,
@@ -75,6 +78,19 @@ export class ClientGateway {
     @Inject(forwardRef(() => GatewayUpdateChannel))
     private readonly updateChannel: GatewayUpdateChannel,
   ) {}
+
+  onModuleInit() {
+    this.staleClientTimer = setInterval(() => {
+      void this.sweepStaleClients().catch((error: unknown) => {
+        console.error("[client] heartbeat sweep failed:", (error as { message?: string })?.message);
+      });
+    }, CLIENT_LIVENESS_SWEEP_INTERVAL_MS);
+  }
+
+  onModuleDestroy() {
+    if (this.staleClientTimer) clearInterval(this.staleClientTimer);
+    this.staleClientTimer = null;
+  }
 
   // ── Pi request 发送通道（避免与 PiModule 循环依赖） ──
   afterInit() {
@@ -107,18 +123,35 @@ export class ClientGateway {
 
   async handleDisconnect(client: Socket) {
     const clientId = client.data.clientId as string | undefined;
-    // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
-    this.piRequests.disconnect(client.id);
-    this.terminalBroker.disconnect(client.id);
-    if (clientId && await this.piRuns.disconnectGeneration(clientId, client.id)) {
-      await this.jobService.markDisconnected(clientId);
-      await this.frpService.markInactiveByClientId(clientId);
-    }
     if (clientId) {
-      await this.terminalService.handleClientDisconnect(clientId, client.id);
+      await this.cleanupClientConnection(clientId, client.id);
+    } else {
+      // 未完成 REGISTER 的 socket 也可能持有 broker pending request。
+      this.piRequests.disconnect(client.id);
+      this.terminalBroker.disconnect(client.id);
     }
     await this.clientService.markOfflineBySocketId(client.id);
     console.log(`[ws] disconnected: ${clientId ?? client.id}`);
+  }
+
+  /** 扫描并收敛停止心跳的 Client；数据库先以 socket lease 原子摘除，避免误伤新连接。 */
+  async sweepStaleClients(): Promise<void> {
+    const expired = await this.clientService.expireStaleClients();
+    for (const client of expired) {
+      if (client.socketId) await this.cleanupClientConnection(client.clientId, client.socketId);
+      console.log(`[ws] heartbeat timeout: ${client.clientId}`);
+    }
+  }
+
+  private async cleanupClientConnection(clientId: string, socketId: string): Promise<void> {
+    // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
+    this.piRequests.disconnect(socketId);
+    this.terminalBroker.disconnect(socketId);
+    if (await this.piRuns.disconnectGeneration(clientId, socketId)) {
+      await this.jobService.markDisconnected(clientId);
+      await this.frpService.markInactiveByClientId(clientId);
+    }
+    await this.terminalService.handleClientDisconnect(clientId, socketId);
   }
 
   // ── Client events ──

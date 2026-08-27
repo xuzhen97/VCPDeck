@@ -47,7 +47,7 @@ Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x
 3. Server Launcher 更新 Server，探活失败自动回退；
 4. 新 Server 从 Release 状态恢复；
 5. 在线 Client 逐台更新；
-6. 离线 Client 后续注册时补更；
+6. 离线 Client 后续注册，或在当前 Client 阶段期间上线时补更；
 7. Frontend 随 server 构件同版本分发（`server/public/` 同源托管，[ADR-0013](./adr/0013-frontend-bundled-with-server.md)）；跨源单独托管时需与目标 Server 版本同步发布并刷新缓存。
 
 不要先手工部署新 Client 再保留旧 Server。

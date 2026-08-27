@@ -87,7 +87,7 @@ node "<vcpdeck-cli>" env check
 `release upload` 上传两个平台 Release archive。第二个平台构件成功登记后，Server 自动编排：
 
 ```text
-Server 更新并探活 → 逐台更新在线 Client → 离线 Client 后续注册时补更
+Server 更新并探活 → 逐台更新在线 Client → 阶段期间上线及离线 Client 后续补更
 ```
 
 这里的“自更新”是 Server/Client 业务构件更新，**不是 CLI 替换自身，也不包括 Launcher 自动更新**。
@@ -153,7 +153,7 @@ node "<vcpdeck-cli>" release status x.y.z
 node "<vcpdeck-cli>" release wait x.y.z --timeout=1800
 ```
 
-离线 Client 不进入本次在线更新明细，也不阻塞 `done`；其后续注册时才补更。若状态为 `failed`，只报告安全错误摘要和失败阶段。不要自行重复版本、删除数据库记录或覆盖 Launcher。
+离线 Client 不进入本次在线更新明细，也不阻塞 `done`；其后续注册时补更，阶段期间上线的旧版本 Client 会在阶段末尾补偿扫描。若状态为 `failed`，只报告安全错误摘要和失败阶段。不要自行重复版本、删除数据库记录或覆盖 Launcher。
 
 ### 本功能当前不提供
 

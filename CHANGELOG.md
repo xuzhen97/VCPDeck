@@ -4,12 +4,16 @@
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-08-27
+
 ### Changed
 
 - Frontend 更新 VCPDeck 品牌标志，并将同一 SVG 用作浏览器 favicon。
 
 ### Fixed
 
+- Server 新增 Client 心跳超时扫描：超过 30 秒未收到心跳的机器会自动标记离线，并执行与 Socket 断线相同的 Job、FRP、Pi 和 Terminal 清理，避免机器失联后长期显示在线。
+- 修复 Release 更新期间重新上线的旧版本 Client 被遗漏的问题：Server 现在会在当前 Client 更新循环结束前补偿扫描并继续补更，已失败 Client 不会无限自动重试。
 - Client 一键安装生成的 PM2 ecosystem 现在过滤安装器进程继承的 `VCPDECK_*`，并通过 `launcher-env.cjs` preload 在启动时清除缓存值、主动加载 `launcher.env`，避免 PM2 缓存旧 `VCPDECK_SERVER` 后覆盖文件配置。
 
 ## [0.6.4] - 2026-08-26

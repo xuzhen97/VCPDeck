@@ -160,7 +160,7 @@ connect(PSK) → register → ack → status/pi/terminal state report → heartb
       └─ disconnect → Server 标记离线 → 自动重连 → 重新注册和对账
 ```
 
-Client 当前每 5 秒发送心跳。Server 以实际 Socket 断开作为离线信号，没有独立心跳超时扫描器。
+Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client，超过 30 秒未收到心跳（首次注册后也未收到心跳则以 connectedAt 判断）即按当前 socket lease 原子标记离线，并执行与 Socket 断线相同的 Job、FRP、Pi 和 Terminal 清理；实际 Socket 断开仍会立即触发相同处理。
 
 ### 3.2 事件方向
 

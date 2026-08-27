@@ -155,7 +155,7 @@ Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认
 
 每个平台先向 Server 协商上传模式：Alibaba 返回持久化会话与短期分片 URL，CLI 从本地范围读取并逐片直接 PUT Provider，403 时只经 Server 刷新该分片 URL；全部发送后再次核对实际发送字节 SHA，再通知 Server 完成登记。URL 不输出、不落盘；相同已登记构件跳过，相同未完成会话刷新后继续。Local 返回 `mode=server` 并使用 legacy raw stream；旧 Server 会话端点 404 时也回退 legacy raw，仅用于引导升级。
 
-`status` 输出 Server、Release 和 Client 状态汇总；`wait`/`upload --wait` 仅重试安全 GET，容忍 Server 重启短暂断线，并要求 Server 版本匹配、Release `done`、所有已记录 Client 均 `done`；Release/Client 失败或超时均非零退出。离线 Client 不属于本次在线明细，后续注册补更。
+`status` 输出 Server、Release 和 Client 状态汇总；`wait`/`upload --wait` 仅重试安全 GET，容忍 Server 重启短暂断线，并要求 Server 版本匹配、Release `done`、所有已记录 Client 均 `done`；Release/Client 失败或超时均非零退出。离线 Client 不属于本次在线明细，后续注册补更；Client 阶段期间上线的旧版本 Client 也会在阶段末尾补偿扫描处理。
 
 ## 6. Clients 命令
 
@@ -275,7 +275,7 @@ vcpdeck storage status [--env=<name>] [--json]
 正式版本通过 Pi 用户级 Git package 安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.6.4
+pi install git:github.com/xuzhen97/VCPDeck@v0.6.5
 ```
 
 Pi 克隆整个仓库，从 `skills/vcpdeck/SKILL.md` 发现 Skill；同目录 `vcpdeck.cjs` 是随 Tag 提交的 CLI 单文件构件。所有项目共享这一份安装。升级到新 Tag 时再次执行 `pi install ...@vX.Y.Z`，固定 Tag 不会由 `pi update --extensions` 自动推进。
@@ -293,8 +293,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.6.4&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.6.4&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.6.5&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.6.5&path:/packages/shared"
 ```
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。
@@ -343,13 +343,13 @@ Tab 补全：`vcpdeck completions bash` 输出追加到 `~/.bashrc` 后 source�
 其它机器远程一键安装（目标机器只需 Node 18+ 与外网）。**Linux / Git Bash**（单命令，含三次重试与正确退出码）：
 
 ```bash
-node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.6.4
+node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.6.5
 ```
 
 **Windows PowerShell** 单行形式（JS 全单引号 + 外层双引号，避开 PS 5.1 吞内嵌双引号的问题；两种 shell 的命令均含三次重试与正确退出码，勿混用/改写引号形式）：
 
 ```powershell
-node -e "const u='https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs';const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error('安装失败:',String(e));process.exit(1)})" -- --tag=v0.6.4
+node -e "const u='https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs';const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error('安装失败:',String(e));process.exit(1)})" -- --tag=v0.6.5
 ```
 
 脚本从 GitHub raw 下载随 tag 提交的单文件 CLI 包（skills/vcpdeck/vcpdeck.cjs，esbuild 打包零 npm 依赖）到 `~/.vcpdeck/bin`，生成双垫片并自动配置 PATH（Windows 写用户 PATH；POSIX 追加 ~/.bashrc），最后自验收 `--version`。推荐固定 `--tag=<版本>`；私有仓库 raw 需凭据，可改用 git clone 后 `node scripts/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs`。

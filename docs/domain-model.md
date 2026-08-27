@@ -66,6 +66,7 @@ Client 表示一台已注册的目标机器。
 
 - 注册成功时绑定 `socketId` 并置 `online=true`；
 - Socket 断开时清除绑定并置离线；
+- 连续超过 30 秒未收到心跳时，Server 按当前 socket lease 原子清除绑定并置离线；
 - 心跳更新 CPU、内存、磁盘、运行中 Job 和时间戳；
 - `GET /api/clients` 当前只返回在线 Client，数据库仍保留离线记录。
 
@@ -230,7 +231,7 @@ uploaded → updating_server → updating_clients → done
 - Local 上传由 Server 复核 SHA-256；Alibaba 创建任务固定大小、CLI 对实际发送字节复核声明 SHA，Launcher 下载后统一复核权威 SHA；
 - Server 先更新，恢复编排后再逐个更新 Client；
 - Launcher 管理本机 current 指针、健康探测和回退；
-- 离线 Client 在后续注册时补更；
+- 离线或 Client 阶段中途上线的旧版本 Client 由注册事件触发去重补更，Client 更新阶段结束前执行补偿扫描；已标记为 `failed` 的 Client 不自动重试；
 - Alibaba Release 上传会话按 `version + platform` 唯一；相同 SHA/大小可恢复或幂等跳过，不同构件拒绝覆盖；预签名 URL 不持久化；
 - Launcher 自身当前不参与自动更新；
 - Client 一键安装只选择 `version === Server VERSION`、`status=done` 且含目标平台 archive 的 Release；

@@ -14,6 +14,8 @@ export const CLIENT_NAME_TAKEN = "CLIENT_NAME_TAKEN";
 export const CLIENT_NOT_FOUND = "CLIENT_NOT_FOUND";
 /** 别名为空（400） */
 export const INVALID_CLIENT_NAME = "INVALID_CLIENT_NAME";
+/** Client 心跳超时阈值：超过两个以上心跳周期未上报即视为离线。 */
+export const CLIENT_HEARTBEAT_TIMEOUT_MS = 30_000;
 
 /** 服务层错误：稳定 code + statusCode，由 Controller 映射为 HttpException */
 function clientError(code: string, message: string, statusCode: number): Error {
@@ -56,6 +58,7 @@ export class ClientService {
       capabilities: JSON.stringify(dto.capabilities),
       capabilityDetails,
       online: true,
+      lastHeartbeatAt: new Date(),
       socketId,
       connectedAt: new Date(),
     };
@@ -134,11 +137,38 @@ export class ClientService {
     });
   }
 
+  /** 原子收敛心跳超时的 Client，返回实际成功收敛的 socket lease。 */
+  async expireStaleClients(now = new Date()): Promise<Array<{ clientId: string; socketId: string | null }>> {
+    const cutoff = new Date(now.getTime() - CLIENT_HEARTBEAT_TIMEOUT_MS);
+    const staleWhere = {
+      online: true,
+      OR: [
+        { lastHeartbeatAt: { lt: cutoff } },
+        { lastHeartbeatAt: null, connectedAt: { lt: cutoff } },
+      ],
+    };
+    const candidates = await this.prisma.client.findMany({
+      where: staleWhere,
+      select: { id: true, socketId: true },
+    });
+    const expired: Array<{ clientId: string; socketId: string | null }> = [];
+    for (const candidate of candidates) {
+      const result = await this.prisma.client.updateMany({
+        where: { ...staleWhere, id: candidate.id, socketId: candidate.socketId },
+        data: { online: false, socketId: null },
+      });
+      if (result.count > 0) {
+        expired.push({ clientId: candidate.id, socketId: candidate.socketId });
+      }
+    }
+    return expired;
+  }
+
   /** Re-bind socketId on reconnect without overwriting machine info. */
   async bindSocket(clientId: string, socketId: string) {
     await this.prisma.client.update({
       where: { id: clientId },
-      data: { online: true, socketId, connectedAt: new Date() },
+      data: { online: true, lastHeartbeatAt: new Date(), socketId, connectedAt: new Date() },
     });
   }
 

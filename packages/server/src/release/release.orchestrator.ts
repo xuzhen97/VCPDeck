@@ -12,6 +12,7 @@ import {
 	ReleaseStatus,
 	VERSION,
 	platformFromOs,
+	type ReleaseInfo,
 	type ServerShutdownNotice,
 	type UpdateRequest,
 } from "@vcpdeck/shared";
@@ -70,6 +71,7 @@ export class ReleaseOrchestrator {
 	private readonly clientTimeoutMs: number;
 	private activePhase: Promise<void> | null = null;
 	private pendingClients = new Map<string, ClientWaiter>();
+	private readonly queuedCatchUpClients = new Set<string>();
 
 	constructor(
 		@Inject(ReleaseService) private readonly releases: ReleaseService,
@@ -165,7 +167,9 @@ export class ReleaseOrchestrator {
 			}
 			return;
 		}
-		void this.triggerCatchUp(clientId, clientVersion);
+		void this.triggerCatchUp(clientId, clientVersion).catch((e) => {
+			console.error(`[release] 客户端补更触发失败: ${e}`);
+		});
 	}
 
 	/** 客户端明确上报更新失败（等待中的立即失败，其余仅记录） */
@@ -192,79 +196,136 @@ export class ReleaseOrchestrator {
 		if (!target || clientVersion === target.version) return;
 		if (target.clientStates[clientId]?.state === ReleaseClientState.FAILED)
 			return;
-		if (this.activePhase) return; // 进行中的循环会自行覆盖在线客户端
+		if (this.activePhase) {
+			this.queuedCatchUpClients.add(clientId);
+			return;
+		}
 		await this.runClientPhase(target.version);
 	}
 
 	/** 客户端阶段互斥入口（重入时复用进行中的循环） */
 	private runClientPhase(version: string): Promise<void> {
 		if (!this.activePhase) {
-			this.activePhase = this.runClientLoop(version)
-				.catch((e) => {
-					console.error(`[release] 客户端更新循环失败: ${e}`);
-				})
-				.finally(() => {
-					this.activePhase = null;
-					this.pendingClients.clear();
-				});
+			this.activePhase = this.runClientPhaseLoop(version);
 		}
 		return this.activePhase;
 	}
 
+	/** 阶段收尾后在同一个 Promise 中消费登记的补更 Client。 */
+	private async runClientPhaseLoop(version: string): Promise<void> {
+		try {
+			let currentVersion = version;
+			while (true) {
+				await this.runClientLoop(currentVersion);
+				const queued = [...this.queuedCatchUpClients];
+				this.queuedCatchUpClients.clear();
+				if (queued.length === 0) return;
+
+				const target = await this.releases.getLatestActiveTarget();
+				if (!target) return;
+				if (
+					queued.every(
+						(clientId) =>
+							target.clientStates[clientId]?.state ===
+							ReleaseClientState.FAILED,
+					)
+				)
+					return;
+				currentVersion = target.version;
+			}
+		} catch (e) {
+			console.error(`[release] 客户端更新循环失败: ${e}`);
+		} finally {
+			this.activePhase = null;
+			this.pendingClients.clear();
+		}
+	}
+
 	/** 全量依次更新：逐个等待「重连注册新版本 / 超时 / 失败」；按客户端 os 选择平台包 */
 	private async runClientLoop(version: string): Promise<void> {
-		const release = await this.releases.findByVersion(version);
+		const processedClientIds = new Set<string>();
+		while (true) {
+			const release = await this.releases.findByVersion(version);
+			if (!release) return;
+			const online = await this.channel.listOnlineClients();
+			const outdated = online.filter(
+				(client) =>
+					client.clientVersion !== version &&
+					!processedClientIds.has(client.clientId) &&
+					release.clientStates[client.clientId]?.state !==
+						ReleaseClientState.FAILED,
+			);
+			if (outdated.length === 0) {
+				if (this.queuedCatchUpClients.size > 0) {
+					this.queuedCatchUpClients.clear();
+					continue;
+				}
+				if (release.status === ReleaseStatus.UPDATING_CLIENTS) {
+					await this.releases.transitionStatus(
+						version,
+						ReleaseStatus.DONE,
+					);
+				}
+				return;
+			}
+			for (const client of outdated) {
+				processedClientIds.add(client.clientId);
+				await this.updateOneClient(version, release, client);
+			}
+		}
+	}
+
+	private async updateOneClient(
+		version: string,
+		release: ReleaseInfo,
+		client: { clientId: string; clientVersion: string; os: string },
+	): Promise<void> {
 		if (!release) return;
-		const online = await this.channel.listOnlineClients();
-		const outdated = online.filter((c) => c.clientVersion !== version);
-		for (const client of outdated) {
-			const platform = platformFromOs(client.os);
-			if (!platform || !release.archives[platform]) {
-				await this.releases.markClientState(
-					version,
-					client.clientId,
-					ReleaseClientState.FAILED,
-					`平台不受支持或构件缺失: ${client.os || "unknown"}`,
-				);
-				continue;
-			}
+		const platform = platformFromOs(client.os);
+		if (!platform || !release.archives[platform]) {
 			await this.releases.markClientState(
 				version,
 				client.clientId,
-				ReleaseClientState.UPDATING,
+				ReleaseClientState.FAILED,
+				`平台不受支持或构件缺失: ${client.os || "unknown"}`,
 			);
-			const request: UpdateRequest = {
-				releaseVersion: version,
-				url: `/api/releases/${version}/file?platform=${platform}`,
-				sha256: release.archives[platform].sha256,
-				timeoutMs: this.clientTimeoutMs,
-			};
-			const outcomePromise = this.waitClientOutcome(
+			return;
+		}
+		await this.releases.markClientState(
+			version,
+			client.clientId,
+			ReleaseClientState.UPDATING,
+		);
+		const request: UpdateRequest = {
+			releaseVersion: version,
+			url: `/api/releases/${version}/file?platform=${platform}`,
+			sha256: release.archives[platform].sha256,
+			timeoutMs: this.clientTimeoutMs,
+		};
+		const outcomePromise = this.waitClientOutcome(
+			client.clientId,
+			version,
+			request,
+		);
+		try {
+			// 先登记 waiter，再发事件，避免重连竞态丢失更新请求。
+			this.channel.sendUpdateRequest(client.clientId, request);
+		} catch (e) {
+			this.onUpdateFailed(
 				client.clientId,
 				version,
-				request,
-			);
-			try {
-				// 先登记 waiter，再发事件，避免重连竞态丢失更新请求。
-				this.channel.sendUpdateRequest(client.clientId, request);
-			} catch (e) {
-				this.onUpdateFailed(
-					client.clientId,
-					version,
-					e instanceof Error ? e.message : String(e),
-				);
-			}
-			const outcome = await outcomePromise;
-			await this.releases.markClientState(
-				version,
-				client.clientId,
-				outcome.outcome === "done"
-					? ReleaseClientState.DONE
-					: ReleaseClientState.FAILED,
-				outcome.reason,
+				e instanceof Error ? e.message : String(e),
 			);
 		}
-		await this.releases.transitionStatus(version, ReleaseStatus.DONE);
+		const outcome = await outcomePromise;
+		await this.releases.markClientState(
+			version,
+			client.clientId,
+			outcome.outcome === "done"
+				? ReleaseClientState.DONE
+				: ReleaseClientState.FAILED,
+			outcome.reason,
+		);
 	}
 
 	private waitClientOutcome(

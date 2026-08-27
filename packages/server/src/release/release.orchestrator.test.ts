@@ -187,7 +187,7 @@ describe("ReleaseOrchestrator", () => {
 			deps.releases.getActiveRelease.mockResolvedValue(
 				releaseInfo({ status: ReleaseStatus.UPDATING_SERVER }),
 			);
-			mockLoopRelease(deps, ReleaseStatus.UPDATING_SERVER);
+			mockLoopRelease(deps, ReleaseStatus.UPDATING_CLIENTS);
 			deps.channel.listOnlineClients.mockResolvedValue([
 				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
 				{ clientId: "c2", clientVersion: "1.1.0", os: "linux 6.8 x64" },
@@ -354,6 +354,106 @@ describe("ReleaseOrchestrator", () => {
 				ReleaseStatus.DONE,
 			);
 		});
+
+		it("其他 Client 更新期间上线的旧版本 Client 在当前循环结束后补更", async () => {
+			const target = mockLoopRelease(deps, ReleaseStatus.UPDATING_CLIENTS);
+			deps.releases.getActiveRelease.mockResolvedValue(target);
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			let online = [
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			];
+			deps.channel.listOnlineClients.mockImplementation(async () => online);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const phase = orchestrator.resumeAfterStartup();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledWith(
+					"c1",
+					expect.objectContaining({ releaseVersion: "1.2.1" }),
+				);
+			});
+
+			online = [
+				...online,
+				{ clientId: "c2", clientVersion: "1.1.0", os: "linux 6.8 x64" },
+			];
+			orchestrator.onClientRegistered("c2", "1.1.0");
+			online[0] = { ...online[0], clientVersion: "1.2.1" };
+			orchestrator.onClientRegistered("c1", "1.2.1");
+
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledWith(
+					"c2",
+					expect.objectContaining({
+						releaseVersion: "1.2.1",
+						url: "/api/releases/1.2.1/file?platform=linux-x64",
+					}),
+				);
+			});
+			online[1] = { ...online[1], clientVersion: "1.2.1" };
+			orchestrator.onClientRegistered("c2", "1.2.1");
+			await phase;
+
+			expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(2);
+			expect(deps.releases.markClientState).toHaveBeenCalledWith(
+				"1.2.1",
+				"c2",
+				ReleaseClientState.DONE,
+				undefined,
+			);
+		});
+
+		it("补更 Client 重复注册只创建一个更新流程", async () => {
+			const target = mockLoopRelease(deps, ReleaseStatus.UPDATING_CLIENTS);
+			deps.releases.getActiveRelease.mockResolvedValue(target);
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			let online = [
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			];
+			deps.channel.listOnlineClients.mockImplementation(async () => online);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const phase = orchestrator.resumeAfterStartup();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+			online = [
+				...online,
+				{ clientId: "c2", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			];
+			orchestrator.onClientRegistered("c2", "1.1.0");
+			orchestrator.onClientRegistered("c2", "1.1.0");
+			online[0] = { ...online[0], clientVersion: "1.2.1" };
+			orchestrator.onClientRegistered("c1", "1.2.1");
+
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(2);
+			});
+			online[1] = { ...online[1], clientVersion: "1.2.1" };
+			orchestrator.onClientRegistered("c2", "1.2.1");
+			await phase;
+
+			expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(2);
+		});
+
+		it("FAILED Client 后续以旧版本注册不再自动重试", async () => {
+			const target = mockLoopRelease(deps, ReleaseStatus.DONE);
+			target.clientStates.c1 = {
+				state: ReleaseClientState.FAILED,
+				reason: "回退",
+				at: "2026-08-15T04:00:00.000Z",
+			};
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			]);
+
+			orchestrator.onClientRegistered("c1", "1.1.0");
+			await Promise.resolve();
+
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
+		});
+
 		it("Server 重启期间旧版本重连会重发一次更新请求", async () => {
 			deps.releases.getActiveRelease.mockResolvedValue(
 				releaseInfo({ status: ReleaseStatus.UPDATING_CLIENTS }),
@@ -427,6 +527,7 @@ describe("ReleaseOrchestrator", () => {
 			]);
 			deps.releases.markClientState.mockResolvedValue({});
 
+			orchestrator.onClientRegistered("c2", "1.1.0");
 			orchestrator.onClientRegistered("c1", "1.1.0");
 			await vi.waitFor(() => {
 				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
@@ -447,6 +548,54 @@ describe("ReleaseOrchestrator", () => {
 			);
 			// 循环结束，仅 c1 被更新过（c2 已 failed，不重试）
 			expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			expect(deps.releases.transitionStatus).not.toHaveBeenCalledWith(
+				"1.2.1",
+				ReleaseStatus.DONE,
+			);
+		});
+
+		it("原循环收尾后上线的旧版本 Client 仍会补更，且 DONE Release 不重复流转", async () => {
+			const target = releaseInfo({ status: ReleaseStatus.UPDATING_CLIENTS });
+			deps.releases.getActiveRelease.mockResolvedValue(target);
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			deps.releases.findByVersion.mockResolvedValue(target);
+			let online = [
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			];
+			deps.channel.listOnlineClients.mockImplementation(async () => online);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const phase = orchestrator.resumeAfterStartup();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+			online[0] = { ...online[0], clientVersion: "1.2.1" };
+			orchestrator.onClientRegistered("c1", "1.2.1");
+			await phase;
+
+			target.status = ReleaseStatus.DONE;
+			online = [
+				...online,
+				{ clientId: "c2", clientVersion: "1.1.0", os: "linux 6.8 x64" },
+			];
+			orchestrator.onClientRegistered("c2", "1.1.0");
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledWith(
+					"c2",
+					expect.objectContaining({
+						releaseVersion: "1.2.1",
+						url: "/api/releases/1.2.1/file?platform=linux-x64",
+					}),
+				);
+			});
+			online[1] = { ...online[1], clientVersion: "1.2.1" };
+			orchestrator.onClientRegistered("c2", "1.2.1");
+
+			expect(deps.releases.transitionStatus).toHaveBeenCalledTimes(1);
+			expect(deps.releases.transitionStatus).toHaveBeenCalledWith(
+				"1.2.1",
+				ReleaseStatus.DONE,
+			);
 		});
 
 		it("已是最新版本的客户端注册不触发更新", () => {

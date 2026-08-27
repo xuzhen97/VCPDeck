@@ -17,6 +17,9 @@ function makeGateway() {
 		register: vi.fn(async () => {}),
 		getClientIdBySocketId: vi.fn(async () => "c1"),
 		markOfflineBySocketId: vi.fn(async () => {}),
+		expireStaleClients: vi.fn(
+			async (): Promise<Array<{ clientId: string; socketId: string | null }>> => [],
+		),
 	};
 	const jobService = {
 		markDone: vi.fn().mockResolvedValue(null),
@@ -133,6 +136,54 @@ const event: PiEvent = {
 	runId: "r1",
 	event: { type: "agent_start", sessionId: "s1" },
 };
+
+describe("ClientGateway client liveness", () => {
+	it("Gateway 初始化后每 5 秒扫描一次心跳超时", async () => {
+		const { gateway, clientService } = makeGateway();
+		vi.useFakeTimers();
+		try {
+			gateway.onModuleInit();
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(clientService.expireStaleClients).toHaveBeenCalledTimes(1);
+		} finally {
+			gateway.onModuleDestroy();
+			vi.useRealTimers();
+		}
+	});
+
+	it("未注册 Socket 断开时也释放 broker pending 请求", async () => {
+		const { gateway, piRequests, terminalBroker } = makeGateway();
+
+		await gateway.handleDisconnect(makeSocket());
+
+		expect(piRequests.disconnect).toHaveBeenCalledWith("socket-1");
+		expect(terminalBroker.disconnect).toHaveBeenCalledWith("socket-1");
+	});
+
+	it("心跳超时后按 socket lease 执行断线清理", async () => {
+		const {
+			gateway,
+			clientService,
+			piRuns,
+			jobService,
+			frpService,
+			terminalService,
+		} = makeGateway();
+		clientService.expireStaleClients.mockResolvedValue([
+			{ clientId: "c1", socketId: "socket-1" },
+		]);
+
+		await gateway.sweepStaleClients();
+
+		expect(piRuns.disconnectGeneration).toHaveBeenCalledWith("c1", "socket-1");
+		expect(jobService.markDisconnected).toHaveBeenCalledWith("c1");
+		expect(frpService.markInactiveByClientId).toHaveBeenCalledWith("c1");
+		expect(terminalService.handleClientDisconnect).toHaveBeenCalledWith(
+			"c1",
+			"socket-1",
+		);
+	});
+});
 
 describe("ClientGateway Pi generation routing", () => {
 	it("afterInit 精确投递 socketId，不使用 clientId room", () => {

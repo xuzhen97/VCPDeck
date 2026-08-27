@@ -186,6 +186,63 @@ describe("ClientService rename", () => {
 	});
 });
 
+describe("ClientService heartbeat liveness", () => {
+	it("超过 30 秒未收到心跳的在线 Client 被标记离线", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			{ id: "c1", socketId: "socket-1" },
+		]);
+		const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+		const prisma = prismaMock({ findMany, updateMany }) as never;
+		const service = new ClientService(prisma);
+
+		await expect(
+			service.expireStaleClients(new Date("2026-08-26T09:35:08.000Z")),
+		).resolves.toEqual([{ clientId: "c1", socketId: "socket-1" }]);
+		expect(findMany).toHaveBeenCalledWith({
+			where: {
+				online: true,
+				OR: [
+					{ lastHeartbeatAt: { lt: new Date("2026-08-26T09:34:38.000Z") } },
+					{ lastHeartbeatAt: null, connectedAt: { lt: new Date("2026-08-26T09:34:38.000Z") } },
+				],
+			},
+			select: { id: true, socketId: true },
+		});
+		expect(updateMany).toHaveBeenCalledWith({
+			where: {
+				id: "c1",
+				online: true,
+				socketId: "socket-1",
+				OR: [
+					{ lastHeartbeatAt: { lt: new Date("2026-08-26T09:34:38.000Z") } },
+					{ lastHeartbeatAt: null, connectedAt: { lt: new Date("2026-08-26T09:34:38.000Z") } },
+				],
+			},
+			data: { online: false, socketId: null },
+		});
+	});
+
+	it("注册和状态重绑刷新存活基线", async () => {
+		const prisma = prismaMock() as never;
+		const service = new ClientService(prisma);
+
+		await service.register(registerDto, "socket-1");
+		await service.bindSocket("c1", "socket-2");
+
+		const upsert = (prisma as { client: { upsert: ReturnType<typeof vi.fn> } })
+			.client.upsert;
+		const update = (prisma as { client: { update: ReturnType<typeof vi.fn> } })
+			.client.update;
+		expect(upsert.mock.calls[0]?.[0].create).toEqual(
+			expect.objectContaining({ lastHeartbeatAt: expect.any(Date) }),
+		);
+		expect(update).toHaveBeenCalledWith({
+			where: { id: "c1" },
+			data: expect.objectContaining({ lastHeartbeatAt: expect.any(Date) }),
+		});
+	});
+});
+
 describe("ClientService listOnline", () => {
 	it("name 为 null 时回退 hostname", async () => {
 		const findMany = vi
