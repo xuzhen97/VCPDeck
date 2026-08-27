@@ -50,6 +50,8 @@ Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x
 6. 离线 Client 后续注册，或在当前 Client 阶段期间上线时补更；
 7. Frontend 随 server 构件同版本分发（`server/public/` 同源托管，[ADR-0013](./adr/0013-frontend-bundled-with-server.md)）；跨源单独托管时需与目标 Server 版本同步发布并刷新缓存。
 
+Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba 直链遇到网络错误或 HTTP `500/502/503/504` 最多尝试 3 次；Launcher 从 Server 更新入口下载遇到网络错误或 HTTP `502/503/504` 最多尝试 3 次，并在每次尝试重新请求入口。确定性 `4xx`、URL 校验、SHA-256、解压、切换和探活失败不重试，也不改变失败 Client 不自动无限重试的语义。
+
 不要先手工部署新 Client 再保留旧 Server。
 
 ## 5. 兼容变更分类
@@ -130,7 +132,7 @@ manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身�
 - Server 与同版本真实 Client 的注册、Job、文件 parser/root/导入导出/取消和重连；
 - Pi 协议版本、锁定 SDK 版本、Session 打开/迁移和 Worker 重连；Terminal capability、真实 PTY、snapshot/seq、控制权和重连；
 - 数据库从上一支持版本升级；
-- Launcher 正常更新和失败回退；
+- Launcher 正常更新和失败回退（含瞬时下载失败的最多三次有界重试）；
 - Frontend 与新 Server 的 REST/Socket.IO/SSE；
 - 离线 Client 补更；
 - CHANGELOG 包含兼容性、迁移和回滚限制。

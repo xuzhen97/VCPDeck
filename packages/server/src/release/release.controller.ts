@@ -34,6 +34,24 @@ import type { ActorContext, ReleasePlatform } from "@vcpdeck/shared";
 
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
+const DIRECT_URL_ATTEMPTS = 3;
+const DIRECT_URL_RETRY_DELAYS_MS = [100, 250];
+
+function isTransientProviderError(error: unknown): boolean {
+	return (
+		error instanceof TypeError ||
+		(error instanceof Error && /HTTP (500|502|503|504)\b/.test(error.message))
+	);
+}
+
+function providerErrorStatus(error: unknown): string {
+	if (!(error instanceof Error)) return "unknown";
+	return /HTTP (\d{3})\b/.exec(error.message)?.[1] ?? "network";
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function isPlatform(v: string | undefined): v is ReleasePlatform {
 	return v === "win-x64" || v === "linux-x64";
@@ -255,19 +273,31 @@ export class ReleaseController {
 		const cacheKey = `${version}:${platform}:${key}`;
 		const cached = this.directUrls.get(cacheKey);
 		if (cached) return cached;
-		try {
-			const direct = await this.storage.getDirectDownloadUrl(key);
-			if (direct?.url) {
-				// 过期时间未知/非法时不缓存，避免短 TTL 直链被长期复用
-				if (Number.isFinite(direct.expiresAt) && direct.expiresAt > 0) {
-					this.directUrls.set(cacheKey, direct.url, direct.expiresAt);
+		for (let attempt = 0; attempt < DIRECT_URL_ATTEMPTS; attempt++) {
+			try {
+				const direct = await this.storage.getDirectDownloadUrl(key);
+				if (direct?.url) {
+					// 过期时间未知/非法时不缓存，避免短 TTL 直链被长期复用
+					if (Number.isFinite(direct.expiresAt) && direct.expiresAt > 0) {
+						this.directUrls.set(cacheKey, direct.url, direct.expiresAt);
+					}
+					return direct.url;
 				}
-				return direct.url;
+				return null;
+			} catch (e) {
+				const retryable = isTransientProviderError(e);
+				const status = providerErrorStatus(e);
+				if (!retryable || attempt >= DIRECT_URL_ATTEMPTS - 1) {
+					console.warn(
+						`[release] 直链换取失败: attempt=${attempt + 1}/${DIRECT_URL_ATTEMPTS}, status=${status}`,
+					);
+					return null;
+				}
+				console.warn(
+					`[release] 直链换取重试: attempt=${attempt + 1}/${DIRECT_URL_ATTEMPTS}, status=${status}`,
+				);
+				await sleep(DIRECT_URL_RETRY_DELAYS_MS[attempt] ?? 250);
 			}
-		} catch (e) {
-			console.warn(
-				`[release] 直链换取失败: ${e instanceof Error ? e.message : String(e)}`,
-			);
 		}
 		return null;
 	}

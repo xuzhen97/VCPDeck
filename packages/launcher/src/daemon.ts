@@ -31,6 +31,12 @@ const MAX_CRASH_RETRIES = 5;
 const STABLE_WINDOW_MS = 30_000;
 /** client 探活稳定窗口：启动后至少存活此时长才判健康（秒退进程判失败） */
 const CLIENT_PROBE_STABLE_MS = 3000;
+const DOWNLOAD_ATTEMPTS = 3;
+const DOWNLOAD_RETRY_DELAYS_MS = [500, 1000];
+
+function isTransientDownloadStatus(status: number): boolean {
+	return status === 502 || status === 503 || status === 504;
+}
 
 /** 读取版本目录下的 manifest.json；缺失/损坏返回 null */
 export function readManifest(versionDir: string): UpdateManifest | null {
@@ -72,6 +78,47 @@ function validateUpdateUrl(url: string): string {
 		throw new Error(`更新包 URL 缺少主机名`);
 	}
 	return parsed.toString();
+}
+
+/** 下载更新包，瞬时网络失败和 502/503/504 最多重试三次。 */
+export async function downloadWithRetry(
+	url: string,
+	destPath: string,
+	fetchImpl: typeof fetch = fetch,
+	sleepImpl: (ms: number) => Promise<void> = (ms) =>
+		new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<void> {
+	const fullUrl = validateUpdateUrl(url);
+	let lastError: unknown;
+	for (let attempt = 0; attempt < DOWNLOAD_ATTEMPTS; attempt++) {
+		let res: Response;
+		try {
+			res = await fetchImpl(fullUrl, {
+				signal: AbortSignal.timeout(900_000),
+			});
+		} catch (error) {
+			lastError = error;
+			if (attempt >= DOWNLOAD_ATTEMPTS - 1) {
+				throw new Error("下载失败: 网络错误");
+			}
+			await sleepImpl(DOWNLOAD_RETRY_DELAYS_MS[attempt] ?? 1000);
+			continue;
+		}
+
+		if (!res.ok) {
+			const error = new Error(`下载失败: HTTP ${res.status}`);
+			if (!isTransientDownloadStatus(res.status)) throw error;
+			lastError = error;
+			if (attempt >= DOWNLOAD_ATTEMPTS - 1) throw error;
+			await sleepImpl(DOWNLOAD_RETRY_DELAYS_MS[attempt] ?? 1000);
+			continue;
+		}
+
+		// 响应已成功后，写盘/流处理错误是本地或数据面错误，不重试。
+		await pipeline(res.body as never, createWriteStream(destPath));
+		return;
+	}
+	throw lastError instanceof Error ? lastError : new Error("下载失败: 网络错误");
 }
 
 export class Daemon {
@@ -281,15 +328,14 @@ export class Daemon {
 			versions: this.versions,
 			downloadZip: async (url, destPath) => {
 				// 相对路径（服务端自更新）拼本机服务地址
-				const fullUrl = validateUpdateUrl(
-					url.startsWith("http") ? url : new URL(url, this.probeUrl).toString(),
-				);
-				this.log(`下载更新包: ${fullUrl}`);
-				const res = await fetch(fullUrl, {
-					signal: AbortSignal.timeout(900_000),
+				const fullUrl = url.startsWith("http")
+					? url
+					: new URL(url, this.probeUrl).toString();
+				this.log("下载更新包");
+				await downloadWithRetry(fullUrl, destPath, fetch, async (ms) => {
+					this.log(`下载更新包重试等待: ${ms}ms`);
+					await new Promise((resolve) => setTimeout(resolve, ms));
 				});
-				if (!res.ok) throw new Error(`下载失败: HTTP ${res.status}`);
-				await pipeline(res.body as never, createWriteStream(destPath));
 			},
 			verifySha256: async (filePath, expected) =>
 				(await streamSha256(filePath)) === expected,

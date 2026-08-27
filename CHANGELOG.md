@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Release 更新下载对 Alibaba 直链换取和 Server 更新入口的瞬时网络失败增加最多三次有界重试，降低 Client 因临时直链失败而更新失败的概率；确定性错误和失败 Client 仍不会自动无限重试。
+
 ## [0.6.5] - 2026-08-27
 
 ### Changed

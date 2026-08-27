@@ -1,6 +1,6 @@
 {
   "name": "@vcpdeck/sdk",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "private": true,
   "type": "module",
   "files": [
@@ -22,7 +22,7 @@
   },
   "packageManager": "pnpm@10.26.0",
   "peerDependencies": {
-    "@vcpdeck/shared": "0.6.5"
+    "@vcpdeck/shared": "0.6.6"
   },
   "devDependencies": {
     "@vcpdeck/shared": "link:../shared",

@@ -79,6 +79,7 @@ describe("ReleaseController", () => {
 	});
 
 	afterEach(async () => {
+		vi.useRealTimers();
 		delete process.env.VCPDECK_RELEASES_DIR;
 		await rm(dir, { recursive: true, force: true });
 	});
@@ -378,6 +379,78 @@ describe("ReleaseController", () => {
 
 			expect(res.status).toHaveBeenCalledWith(502);
 			expect(res.redirect).not.toHaveBeenCalled();
+		});
+
+		it("直链换取瞬时失败后重试并成功返回 302", async () => {
+			vi.useFakeTimers();
+			service.findByVersion.mockResolvedValue({
+				version: "1.2.1",
+				archives: {
+					"win-x64": {
+						...winArchive,
+						storage: { provider: "alibaba", key: "file-1", mode: "direct" },
+					},
+				},
+			});
+			storage.getDirectDownloadUrl
+				.mockRejectedValueOnce(new TypeError("fetch failed"))
+				.mockResolvedValueOnce({
+					url: "https://storage.example/recovered",
+					expiresAt: Date.now() + 900_000,
+				});
+			const res = mockRes();
+
+			const request = controller.download("1.2.1", res as never, "win-x64");
+			await vi.runAllTimersAsync();
+			await request;
+
+			expect(storage.getDirectDownloadUrl).toHaveBeenCalledTimes(2);
+			expect(res.redirect).toHaveBeenCalledWith(
+				302,
+				"https://storage.example/recovered",
+			);
+		});
+
+		it("直链换取连续瞬时失败达到上限后返回安全 502", async () => {
+			vi.useFakeTimers();
+			service.findByVersion.mockResolvedValue({
+				version: "1.2.1",
+				archives: {
+					"win-x64": {
+						...winArchive,
+						storage: { provider: "alibaba", key: "file-1", mode: "direct" },
+					},
+				},
+			});
+			storage.getDirectDownloadUrl.mockRejectedValue(new Error("HTTP 502"));
+			const res = mockRes();
+
+			const request = controller.download("1.2.1", res as never, "win-x64");
+			await vi.runAllTimersAsync();
+			await request;
+
+			expect(storage.getDirectDownloadUrl).toHaveBeenCalledTimes(3);
+			expect(res.status).toHaveBeenCalledWith(502);
+			expect(res.redirect).not.toHaveBeenCalled();
+		});
+
+		it("直链换取确定性失败不重试", async () => {
+			service.findByVersion.mockResolvedValue({
+				version: "1.2.1",
+				archives: {
+					"win-x64": {
+						...winArchive,
+						storage: { provider: "alibaba", key: "file-1", mode: "direct" },
+					},
+				},
+			});
+			storage.getDirectDownloadUrl.mockRejectedValue(new Error("HTTP 404"));
+			const res = mockRes();
+
+			await controller.download("1.2.1", res as never, "win-x64");
+
+			expect(storage.getDirectDownloadUrl).toHaveBeenCalledTimes(1);
+			expect(res.status).toHaveBeenCalledWith(502);
 		});
 	});
 });
