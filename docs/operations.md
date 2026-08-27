@@ -26,6 +26,47 @@ pnpm --filter @vcpdeck/client start
 
 长期环境优先由 Launcher 启动 Server/Client；也可用 PM2 等外部进程管理器守护 Launcher 本身（只托管 Launcher，不托管业务进程，见 [`deployment.md`](./deployment.md) §4.6）；停止 Launcher 前应确认没有进行中的 Release、Job、Terminal 或 Pi run。
 
+### Windows Client 重启
+
+Windows 一键安装器可能把 PM2 安装到当前用户的私有目录，因此新开的 PowerShell 中直接执行 `pm2` 可能提示“找不到命令”。必须使用**安装 Client 的同一个 Windows 用户**，并只重启 PM2 管理的 Launcher：
+
+```powershell
+# 若 pm2.cmd 已在 PATH 中，直接执行：
+pm2 restart vcpdeck-client-launcher
+```
+
+如果 `pm2` 不在 PATH，使用安装器默认的私有 PM2 和 Node.js：
+
+```powershell
+$Pm2Cli = "$HOME\.vcpdeck\tools\pm2\node_modules\pm2\bin\pm2"
+
+# 优先使用安装器可能下载的用户私有 Node.js；没有时再使用 PATH 中的 Node.js
+$Node = (Get-ChildItem "$HOME\.vcpdeck\runtime\node\node-*\node.exe" `
+  -File -ErrorAction SilentlyContinue |
+  Sort-Object FullName -Descending |
+  Select-Object -First 1).FullName
+if (-not $Node) { $Node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source }
+if (-not $Node -or -not (Test-Path $Node)) { throw "找不到 Node.js" }
+if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
+
+& $Node $Pm2Cli restart vcpdeck-client-launcher
+& $Node $Pm2Cli status
+```
+
+电脑重启后若 PM2 进程列表没有恢复，可执行安装器生成的恢复脚本；它内含安装时使用的 Node.js 和 PM2 的绝对路径，不依赖 PATH：
+
+```powershell
+& "$HOME\.vcpdeck\launcher-client\pm2-resurrect.cmd"
+```
+
+然后再次执行上面的 `restart` 命令。排查日志时：
+
+```powershell
+& $Node $Pm2Cli logs vcpdeck-client-launcher --lines 100
+```
+
+若 `pm2-resurrect.cmd` 和私有 PM2 路径都不存在，说明安装未完整保留 PM2 现场；不要删除 `~/.vcpdeck/client-id`，应重跑 `/releases` 页面生成的同一条 Client 安装命令。
+
 ## 3. 健康与就绪检查
 
 | 检查 | 命令/位置 | 说明 |

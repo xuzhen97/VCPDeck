@@ -187,7 +187,7 @@ Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt
 - PM2 收集的 stdout/stderr 同样受 [`operations.md`](./operations.md) §4 的敏感信息规则约束；
 - 更新进行中**不要**重启 Launcher：进行中的 prepare/`pendingVersion` 存在 Launcher 内存，重启即丢失，`/apply` 会报“尚未 prepare”，Release 失败后需发布新版本重试；日常非更新窗口重启无影响，Launcher 会按 current 重新拉起业务进程并重写 `control.json`（新随机端口/Token 对业务进程透明）；
 - `kill_timeout` 只作用于 Launcher 本身；业务进程的停止由 Launcher 自己的 SIGTERM→10s→SIGKILL 流程负责；
-- Windows 下 PM2 的服务化与自动重启行为与 Linux 有差异；Client 一键安装的明确语义是当前用户登录后恢复，不是 Windows Service。
+- Windows 下 PM2 的服务化与自动重启行为与 Linux 有差异；Client 一键安装的明确语义是当前用户登录后恢复，不是 Windows Service；若新 PowerShell 找不到 `pm2`，按 [`operations.md`](./operations.md) §2 的私有 PM2 路径和 `pm2-resurrect.cmd` 说明操作。
 
 ### 4.7 从 `/releases` 一键安装 Client
 

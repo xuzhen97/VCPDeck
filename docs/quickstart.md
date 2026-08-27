@@ -199,6 +199,8 @@ node --env-file="$HOME/.vcpdeck/launcher-client/launcher.env" \
 
 出现 `[vcpdeck] connected as <id>` 即连接成功。Client 以运行账户权限执行命令/文件/终端/Pi，应使用权限受控的专用账户。
 
+Windows 一键安装默认可能将 PM2 放在用户私有目录，直接输入 `pm2` 可能提示找不到命令。重启 Client 时只重启 `vcpdeck-client-launcher`，具体 PowerShell 命令和 PM2/Node 路径见 [`operations.md`](./operations.md) §2；电脑重启后恢复 PM2 可执行安装器生成的 `pm2-resurrect.cmd`。
+
 ## 6. 验证通讯
 
 > 以下为 Bash / Git Bash 语法；Windows PowerShell 请使用 `curl.exe`，并改用 cookie 文件携带会话（见下方变体）。
