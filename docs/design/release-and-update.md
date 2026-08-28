@@ -1,10 +1,10 @@
 # Release 与自更新子系统设计
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-28｜适用版本：`0.6.8` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-28｜适用版本：`0.6.9` / 当前 `main`
 
 本文描述当前已经落地的 Release、Server/Client 更新和 Launcher 进程守护模型。长期决策理由见 [ADR-0003](../adr/0003-separate-launcher-for-updates.md)；构件生成、首次部署和回滚操作见 [`deployment.md`](../deployment.md)；兼容要求见 [`compatibility.md`](../compatibility.md)；故障处置见 [`operations.md`](../operations.md)。
 
-当前核心实现已经落地，Launcher smoke 已覆盖 prepare/apply、探活和失败回退；`0.6.8` 已完成 Server → Launcher → Windows/Linux 多 Client 生产发布验收。后续版本仍必须重复执行发布门禁，不能以历史验收替代本次构件验证。
+当前核心实现已经落地，Launcher smoke 已覆盖 prepare/apply、探活和失败回退；`0.6.9` 已完成 Server → Launcher → Windows/Linux 多 Client 生产发布验收。后续版本仍必须重复执行发布门禁，不能以历史验收替代本次构件验证。
 
 ## 1. 目标与非目标
 
