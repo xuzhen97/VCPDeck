@@ -348,7 +348,7 @@ Launcher 的回退单位是应用版本目录，不是整个系统状态。涉�
 | Launcher/control.json 不存在或 Token 无效 | prepare/apply 失败，Release 进入 failed 或 Client 上报 failed | 恢复 Launcher 与文件权限后重新发布/补更 |
 | 下载或 SHA-256 校验失败 | 不切换 current | 核对 archive、Release.sha256、网络和磁盘 |
 | 解压失败 | 目标版本可能留下不完整目录 | 删除不完整版本目录后重新 prepare |
-| 目标版本目录已存在 | `prepare` 直接跳过下载和校验 | 人工确认目录完整可信；异常时先删除再 prepare |
+| 目标版本目录已存在 | 仅当 manifest 可解析、版本号匹配且当前 artifact 的业务入口存在时，`prepare` 才跳过下载和校验；不完整目录会先清理再准备 | 仅含 Launcher payload 的目录会重新下载、校验和解压；完整目录继续幂等跳过 |
 | preStart 失败 | 不进入 current 切换，旧进程通常仍运行 | 修复迁移/权限；核对是否已有部分 DB 副作用 |
 | Server drain 超时 | Release 标为 failed，但 drain 闸门当前不会自动解除 | 检查活跃 Job；当前通常需重启 Server 恢复派发 |
 | 新 Server 探活失败 | Launcher 尝试回退 previous current | 确认旧 Server 与当前 DB 兼容 |

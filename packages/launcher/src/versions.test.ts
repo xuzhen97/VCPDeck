@@ -73,6 +73,7 @@ function makeFakeFs(dirs: string[]): VersionFsOps {
 			files.delete(p);
 		},
 		existsSync: () => true,
+		rm: async () => undefined,
 	};
 }
 
@@ -151,6 +152,92 @@ describe("VersionStore", () => {
 		it("未切换时 currentVersion 为 null", async () => {
 			const store = new VersionStore({ appsDir, platform: "win32" });
 			await expect(store.currentVersion()).resolves.toBeNull();
+		});
+	});
+
+	describe("isPrepared", () => {
+		const version = "1.2.3";
+		const manifest = {
+			version,
+			nodeVersion: ">=24",
+			launcherMinVersion: "0.0.0",
+			sha256: "",
+			artifacts: {
+				server: { dir: "server", entry: "dist/main.js" },
+				client: { dir: "client", entry: "dist/index.js" },
+			},
+		};
+
+		async function writeManifest(): Promise<void> {
+			await writeTextFile(
+				join(appsDir, version, "manifest.json"),
+				JSON.stringify(manifest),
+			);
+		}
+
+		it("仅有 Launcher payload 的目录不视为已准备", async () => {
+			await ensureDir(join(appsDir, version, "launcher", "dist"));
+			await writeTextFile(
+				join(appsDir, version, "launcher", "dist", "main.js"),
+				"launcher",
+			);
+
+			const store = new VersionStore({ appsDir });
+
+			expect(await store.isPrepared(version, "server")).toBe(false);
+			expect(await store.isPrepared(version, "client")).toBe(false);
+		});
+
+		it("manifest 损坏、版本不符或业务入口缺失均不视为已准备", async () => {
+			await ensureDir(join(appsDir, version));
+			const store = new VersionStore({ appsDir });
+
+			await writeTextFile(join(appsDir, version, "manifest.json"), "{");
+			expect(await store.isPrepared(version, "server")).toBe(false);
+
+			await writeTextFile(
+				join(appsDir, version, "manifest.json"),
+				JSON.stringify({ ...manifest, version: "9.9.9" }),
+			);
+			expect(await store.isPrepared(version, "server")).toBe(false);
+
+			await writeTextFile(
+				join(appsDir, version, "manifest.json"),
+				JSON.stringify(manifest),
+			);
+			expect(await store.isPrepared(version, "server")).toBe(false);
+		});
+
+		it("完整 Server 和 Client 目录视为已准备", async () => {
+			await ensureDir(join(appsDir, version, "server", "dist"));
+			await ensureDir(join(appsDir, version, "client", "dist"));
+			await writeManifest();
+			await writeTextFile(
+				join(appsDir, version, "server", "dist", "main.js"),
+				"server",
+			);
+			await writeTextFile(
+				join(appsDir, version, "client", "dist", "index.js"),
+				"client",
+			);
+
+			const store = new VersionStore({ appsDir });
+
+			expect(await store.isPrepared(version, "server")).toBe(true);
+			expect(await store.isPrepared(version, "client")).toBe(true);
+		});
+	});
+
+	describe("removeVersion", () => {
+		it("递归删除版本目录", async () => {
+			const versionDir = join(appsDir, "1.2.3", "launcher", "dist");
+			await ensureDir(versionDir);
+			await writeTextFile(join(versionDir, "main.js"), "partial");
+			const store = new VersionStore({ appsDir });
+
+			await store.removeVersion("1.2.3");
+
+			expect((await import("node:fs")).existsSync(join(appsDir, "1.2.3"))).toBe(false);
 		});
 	});
 

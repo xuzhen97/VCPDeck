@@ -6,6 +6,8 @@ type MockFn = ReturnType<typeof vi.fn>;
 interface MockedDeps {
 	versions: {
 		exists: MockFn;
+		isPrepared: MockFn;
+		removeVersion: MockFn;
 		currentVersion: MockFn;
 		switchTo: MockFn;
 		versionDir: MockFn;
@@ -16,6 +18,7 @@ interface MockedDeps {
 	stopProcess: MockFn;
 	startProcess: MockFn;
 	probe: MockFn;
+	artifact: "server" | "client";
 	probeRetries: number;
 	probeIntervalMs: number;
 }
@@ -24,6 +27,8 @@ function makeDeps(overrides: Partial<MockedDeps> = {}): MockedDeps {
 	return {
 		versions: {
 			exists: vi.fn().mockReturnValue(false),
+			isPrepared: vi.fn().mockResolvedValue(false),
+			removeVersion: vi.fn(),
 			currentVersion: vi.fn(),
 			switchTo: vi.fn(),
 			versionDir: vi.fn((v: string) => `/apps/${v}`),
@@ -35,6 +40,7 @@ function makeDeps(overrides: Partial<MockedDeps> = {}): MockedDeps {
 		startProcess: vi.fn(),
 		probe: vi.fn(),
 		probeRetries: 3,
+		artifact: "server",
 		probeIntervalMs: 100,
 		...overrides,
 	};
@@ -74,13 +80,45 @@ describe("Updater", () => {
 			expect(order).toEqual([...order].sort((a, b) => a - b));
 		});
 
-		it("版本目录已存在 → 幂等跳过", async () => {
+		it("只有 Launcher payload 的版本目录不得幂等跳过", async () => {
 			const deps = makeDeps();
-			deps.versions.exists.mockReturnValue(true);
+			deps.versions.isPrepared.mockResolvedValue(false);
+			deps.verifySha256.mockResolvedValue(true);
 			const updater = new Updater(deps as unknown as UpdaterDeps);
 
 			await updater.prepare({
-				url: "http://x",
+				url: "http://server/release.zip",
+				sha256: "a".repeat(64),
+				version: "1.2.1",
+			});
+
+			expect(deps.versions.removeVersion).toHaveBeenCalledWith("1.2.1");
+			expect(deps.downloadZip).toHaveBeenCalled();
+			expect(deps.extractZip).toHaveBeenCalled();
+		});
+
+		it("完整 Server 版本目录幂等跳过", async () => {
+			const deps = makeDeps({ artifact: "server" });
+			deps.versions.isPrepared.mockResolvedValue(true);
+			const updater = new Updater(deps as unknown as UpdaterDeps);
+
+			await updater.prepare({
+				url: "http://server/release.zip",
+				sha256: "a".repeat(64),
+				version: "1.2.1",
+			});
+
+			expect(deps.downloadZip).not.toHaveBeenCalled();
+			expect(deps.versions.removeVersion).not.toHaveBeenCalled();
+		});
+
+		it("完整 Client 版本目录幂等跳过", async () => {
+			const deps = makeDeps({ artifact: "client" });
+			deps.versions.isPrepared.mockResolvedValue(true);
+			const updater = new Updater(deps as unknown as UpdaterDeps);
+
+			await updater.prepare({
+				url: "http://server/release.zip",
 				sha256: "a".repeat(64),
 				version: "1.2.1",
 			});
@@ -136,7 +174,7 @@ describe("Updater", () => {
 				logs.push(a.join(" "));
 			});
 			const deps = makeDeps();
-			deps.versions.exists.mockReturnValue(true);
+			deps.versions.isPrepared.mockResolvedValue(true);
 			const updater = new Updater(deps as unknown as UpdaterDeps);
 
 			await updater.prepare({ url: "http://x", sha256: "a".repeat(64), version: "1.2.1" });

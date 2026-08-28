@@ -10,6 +10,7 @@ import type { VersionStore } from "./versions.js";
 
 export interface UpdaterDeps {
 	versions: VersionStore;
+	artifact: "server" | "client";
 	/** 下载 zip 到目标路径 */
 	downloadZip(url: string, destPath: string): Promise<void>;
 	/** 流式 sha256 校验 */
@@ -51,13 +52,16 @@ async function fileSizeMB(path: string): Promise<string | null> {
 export class Updater {
 	constructor(private readonly deps: UpdaterDeps) {}
 
-	/** 第一阶段：准备新版本（幂等，已存在版本目录直接跳过） */
+	/** 第一阶段：准备新版本（完整版本目录幂等跳过） */
 	async prepare(input: {
 		url: string;
 		sha256: string;
 		version: string;
 	}): Promise<void> {
-		if (this.deps.versions.exists(input.version)) return;
+		if (await this.deps.versions.isPrepared(input.version, this.deps.artifact)) {
+			return;
+		}
+		await this.deps.versions.removeVersion(input.version);
 
 		const zipPath = join(tmpdir(), `vcpdeck-${input.version}.zip`);
 		const startedAt = Date.now();

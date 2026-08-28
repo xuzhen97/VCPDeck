@@ -326,6 +326,7 @@ export class Daemon {
 	private buildUpdater(): Updater {
 		return new Updater({
 			versions: this.versions,
+			artifact: this.artifact,
 			downloadZip: async (url, destPath) => {
 				// 相对路径（服务端自更新）拼本机服务地址
 				const fullUrl = url.startsWith("http")

@@ -7,6 +7,7 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import { join } from "node:path";
+import type { UpdateManifest } from "@vcpdeck/shared";
 
 export interface VersionStoreOptions {
 	/** 应用目录下的 apps/ 目录 */
@@ -27,6 +28,7 @@ export interface VersionFsOps {
 	renameSync(oldPath: string, newPath: string): void;
 	unlinkSync(path: string): void;
 	existsSync(path: string): boolean;
+	rm(path: string): Promise<void>;
 }
 
 const realFs: VersionFsOps = {
@@ -38,6 +40,7 @@ const realFs: VersionFsOps = {
 	renameSync: fs.renameSync,
 	unlinkSync: fs.unlinkSync,
 	existsSync: fs.existsSync,
+	rm: (p) => fsp.rm(p, { recursive: true, force: true }),
 };
 
 interface StateFile {
@@ -104,6 +107,35 @@ export class VersionStore {
 	/** 版本目录路径（解压目标） */
 	versionDir(version: string): string {
 		return join(this.appsDir, version);
+	}
+
+	/** 判断指定构件的版本目录是否完整可启动 */
+	async isPrepared(version: string, artifact: "server" | "client"): Promise<boolean> {
+		const dir = this.versionDir(version);
+		try {
+			const manifest = JSON.parse(
+				await this.fs.readFile(join(dir, "manifest.json"), "utf-8"),
+			) as Partial<UpdateManifest>;
+			const artifactInfo = manifest.artifacts?.[artifact];
+			const expectedDir = artifact;
+			const expectedEntry = artifact === "server" ? "dist/main.js" : "dist/index.js";
+			if (
+				manifest.version !== version ||
+				artifactInfo?.dir !== expectedDir ||
+				artifactInfo.entry !== expectedEntry
+			) {
+				return false;
+			}
+			const entry = join(dir, artifactInfo.dir, artifactInfo.entry);
+			return this.fs.existsSync(entry);
+		} catch {
+			return false;
+		}
+	}
+
+	/** 删除不完整版本目录 */
+	async removeVersion(version: string): Promise<void> {
+		await this.fs.rm(this.versionDir(version));
 	}
 
 	/** 版本目录存在性（解压结果校验用） */
