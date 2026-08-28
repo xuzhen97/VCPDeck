@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.10] - 2026-08-28
+
+### Fixed
+
+- 修复 Alibaba 导出直传不提供 SHA-256 的问题：Client 在上传完成后顺序读源文件计算摘要并随 Job 结果上报，Server 回填 `File.sha256`，`files download` 的完整性校验恢复正常（此前 Alibaba 导出文件下载在 SHA-256 校验阶段报“期望 undefined”失败）。
+
 ## [0.6.9] - 2026-08-28
 
 ### Fixed

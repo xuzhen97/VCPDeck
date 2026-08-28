@@ -142,6 +142,17 @@ async function completeExportUpload(
 	return body.key ?? "";
 }
 
+/** 顺序读整个文件计算 SHA-256（分片并发直传无法在传输中保持哈希顺序）。 */
+function computeFileSha256(path: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const hash = createHash("sha256");
+		const stream = createReadStream(path);
+		stream.on("data", (chunk: Buffer) => hash.update(chunk));
+		stream.on("end", () => resolve(hash.digest("hex")));
+		stream.on("error", reject);
+	});
+}
+
 function emitDone(
 	socket: Socket,
 	jobId: string,
@@ -250,10 +261,12 @@ async function handleExport(
 			refreshUrl: (partNumber) => refreshExportPartUrl(jobId, partNumber),
 		});
 		const key = await completeExportUpload(jobId, total);
+		const sha256 = await computeFileSha256(safe);
 		emitDone(socket, jobId, "file.export", {
 			fileId: key,
 			key,
 			size: total,
+			sha256,
 		});
 		return;
 	}

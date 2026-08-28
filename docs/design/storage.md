@@ -185,7 +185,7 @@ sequenceDiagram
 5. Client 调用 `POST /api/files/client-export-sessions/:jobId/complete`，Server 校验字节数、合并对象并将 File 标记 completed；
 6. Client 上报 Job 结果；Browser 后续通过稳定下载入口取得临时外部 URL。
 
-Alibaba 直传当前以声明大小和 Provider 完成响应收敛，`File.sha256` 为空字符串；它不提供与 Local 路径相同的 Server 端字节哈希保证。Client 导出控制端点以共享 PSK（`x-vcpdeck-psk`）认证，PSK 不发送到 Provider 分片 URL；既有 `/api/files/export-sessions*` 保留给携带用户 Cookie/Bearer 的 SDK 调用。
+Alibaba 直传以声明大小和 Provider 完成响应收敛，`File.sha256` 由 Client 在上传完成后顺序读源文件计算并随结果上报、Server 回填；Server 不读取正文，因此是 Client 端哈希，不提供与 Local 路径相同的 Server 端字节哈希保证。Client 导出控制端点以共享 PSK（`x-vcpdeck-psk`）认证，PSK 不发送到 Provider 分片 URL；既有 `/api/files/export-sessions*` 保留给携带用户 Cookie/Bearer 的 SDK 调用。
 
 ## 7. File 与传输状态
 

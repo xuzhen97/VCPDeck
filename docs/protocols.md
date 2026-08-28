@@ -277,7 +277,7 @@ Pi 使用精确协议版本 `PI_SESSION_JOB_PROTOCOL_VERSION = 1`。不匹配时
 - `rootDir` 由调用方提交，未强制来自 Client `file.roots`；当前 symlink 和不存在目标父链校验不完整；
 - running 文件 Job 的 `timeout`/`job:cancel` 不会可靠中止 fs、HTTP 或分片操作；
 - 文件操作未完整进入 Client 重连状态报告，断线期间 progress/done 不保证补报；
-- Shared `FileTransferResult.sha256` 是必填，但 Alibaba export 和当前 import 实际结果不总是提供；import 当前只校验字节数，不校验 SHA-256；
+- Shared `FileTransferResult.sha256` 是必填，但当前 import 实际结果不总是提供；import 当前只校验字节数，不校验 SHA-256；
 - Gateway 的通用 progress/done/cancelled handler 当前未在 handler 内再次核对当前 Socket 与 Job 的 Client 归属；
 - 非 exec error 分支调用 `markDone()` 后没有发送其返回的下一条 dispatch，scheduler 可能已把后续 Job 标为 running，而 Client 实际未收到。
 
@@ -328,7 +328,7 @@ Browser 上传后导入远程机器：
 
 Client 导出：Client stat 文件后通过 `/api/files/client-export-sessions*` 创建 export session（携带 `x-vcpdeck-psk`），直接上传分片；分片 URL 返回 403 时通过 `part-urls` 续期指定分片，完成后 Server 将 File 置 completed，再由 Client 上报 Job 结果。PSK 只发送到 Server 控制端点，不发送到 Provider。
 
-Alibaba 直传当前以字节数和 Provider 完成响应收敛，Server 不读取全部正文，因此 `File.sha256` 为空，不提供 Local 路径同等级的 Server 端 SHA-256 保证。
+Alibaba 直传以字节数和 Provider 完成响应收敛，Server 不读取全部正文；Client 在上传完成后顺序读源文件计算 SHA-256 并随结果上报，Server 回填 `File.sha256`，因此是 Client 端哈希，不提供 Local 路径同等级的 Server 端 SHA-256 保证。
 
 ### 6.5 重试、幂等与恢复
 

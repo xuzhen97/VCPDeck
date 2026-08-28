@@ -132,9 +132,9 @@ Capability 是 Client 能力声明，不是用户权限。Server 创建 Job 时�
 2. Client stat 后通过 `POST /api/files/client-export-sessions`（携带 `x-vcpdeck-psk`）创建 export 分片会话；
 3. Client 最多三个 worker 直接 PUT 分片并上报进度；分片 URL 返回 403 时通过 `POST /api/files/client-export-sessions/:jobId/part-urls` 续期指定分片后重试；
 4. Client 通过 `POST /api/files/client-export-sessions/:jobId/complete` 请求 Provider complete，获得真实 key；
-5. Client 上报 `fileId/key/size`，不提供 SHA-256。
+5. Client 上报 `fileId/key/size/sha256`（上传完成后顺序读源文件计算）。
 
-Alibaba export 当前依靠字节数和 Provider 完成响应收敛。Client 导出控制请求必须携带共享 PSK `x-vcpdeck-psk`，PSK 只发送到 Server 控制端点，不发送到 Provider 分片 URL；既有 `/api/files/export-sessions*` 仍保留给携带用户 Cookie/Bearer 的 SDK 调用。
+Alibaba export 以字节数和 Provider 完成响应收敛，并由 Client 在上传完成后顺序读取源文件计算 SHA-256 随结果上报，Server 回填 File；Server 不读取正文，因此是 Client 端哈希而非 Server 端哈希保证。Client 导出控制请求必须携带共享 PSK `x-vcpdeck-psk`，PSK 只发送到 Server 控制端点，不发送到 Provider 分片 URL；既有 `/api/files/export-sessions*` 仍保留给携带用户 Cookie/Bearer 的 SDK 调用。
 
 ## 7. 文件导入：Storage → Client
 
@@ -159,10 +159,10 @@ SDK 也保留使用已完成 `fileId` 直接创建 `file.import` Job 的入口�
 | `readText` | path、rootDir、maxBytes 和完整返回 content | stat 大小限制后按 UTF-8读取；无摘要 |
 | `writeText` | path、rootDir 和完整 content | 无摘要；无正文大小硬上限 |
 | Local export | 路径、FileRef 元数据和结果；正文不进 Job JSON | Client 与 Local Provider 均读取正文并计算 SHA-256 |
-| Alibaba export | 路径、会话引用、大小和 Provider key | 声明/实际上传字节数与 Provider complete；无同等级 Server SHA-256 |
+| Alibaba export | 路径、会话引用、大小和 Provider key | 字节数与 Provider complete 收敛；Client 上传完成后计算并上报 SHA-256，非 Server 端哈希 |
 | Local/Alibaba import | 目标路径、FileRef、期望大小和结果；正文不进 Job JSON | Client 当前只比较实际字节数与 expectedSize，不校验 SHA-256 |
 
-`FileTransferResult.sha256` 在 Shared/SDK 中当前是必填，但 Alibaba export 和 import 实际结果不总是提供该字段，属于协议类型与运行行为偏移。调用方不得在未检查字段存在和 Provider 路径前把摘要当作统一保证。
+`FileTransferResult.sha256` 在 Shared/SDK 中当前是必填，但当前 import 实际结果不总是提供该字段，属于协议类型与运行行为偏移。调用方不得在未检查字段存在和 Provider 路径前把摘要当作统一保证。
 
 ## 9. 生命周期、取消与断线
 
@@ -253,7 +253,7 @@ FileRef URL 是临时凭据：
 3. 文件 Job 缺 Server/Client 双端严格 parser；
 4. `readText.maxBytes` 只是调用方参数，`writeText` 和传输没有统一应用层大小上限；
 5. import 未校验 SHA-256，`SHA256_MISMATCH` 当前未使用；
-6. `FileTransferResult.sha256` 与 Alibaba/当前 import 结果不一致；
+6. `FileTransferResult.sha256` 与当前 import 实际结果不一致（import 只按字节数收敛）；
 7. running 文件 Job 取消和 timeout 不会可靠中止文件/HTTP 操作；
 8. 文件 Job 未完整进入重连状态报告和终局补报；
 9. writeText 失败清理以及 write/move/import overwrite 语义缺少跨平台一致保证；
