@@ -1,13 +1,13 @@
-import { Inject, Injectable } from "@nestjs/common";
-import {
-	ReleaseStatus,
-	VERSION,
-	type ActorContext,
-	type ReleasePlatform,
-} from "@vcpdeck/shared";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { Inject, Injectable } from "@nestjs/common";
+import {
+	type ActorContext,
+	type ReleasePlatform,
+	ReleaseStatus,
+	VERSION,
+} from "@vcpdeck/shared";
 import { ClientService } from "../client/client.service.js";
 import { clientPsk } from "../client/client-psk.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -60,6 +60,9 @@ const INSTALLER_ASSETS = [
 	"install-client-bootstrap.ps1",
 	"install-client.cjs",
 	"install.cjs",
+	"uninstall-client-bootstrap.sh",
+	"uninstall-client-bootstrap.ps1",
+	"uninstall-client.cjs",
 ] as const;
 
 /** Client 安装领域错误。 */
@@ -120,7 +123,8 @@ export class ClientInstallerService {
 	async preflight(platform: ClientInstallerPlatform): Promise<ClientInstallerPreflight> {
 		const releasePlatform: ReleasePlatform = platform;
 		const release = await this.requireReadyRelease(releasePlatform);
-		const archive = release.archives[releasePlatform]!;
+		const archive = release.archives[releasePlatform];
+		if (!archive) throw new Error(`当前 Release 缺少 ${releasePlatform} 构件`);
 		const installer = this.readAsset("install-client.cjs");
 		const lowLevelInstaller = this.readAsset("install.cjs");
 		return {
@@ -141,7 +145,8 @@ export class ClientInstallerService {
 	async bootstrap(platform: ClientInstallerPlatform): Promise<ClientInstallerBootstrap> {
 		const releasePlatform: ReleasePlatform = platform;
 		const release = await this.requireReadyRelease(releasePlatform);
-		const archive = release.archives[releasePlatform]!;
+		const archive = release.archives[releasePlatform];
+		if (!archive) throw new Error(`当前 Release 缺少 ${releasePlatform} 构件`);
 		return {
 			serverVersion: VERSION,
 			releaseVersion: release.version,
@@ -268,7 +273,7 @@ export function installerAssetsDir(): string {
 		join(__dirname, "..", "..", "..", "scripts"),
 		join(__dirname, "..", "..", "..", "..", "scripts"),
 	];
-	return candidates.find((path) => existsSync(join(path, "install-client.cjs"))) ?? candidates[0]!;
+	return candidates.find((path) => existsSync(join(path, "install-client.cjs"))) ?? candidates[0] ?? "";
 }
 
 function sha256(value: Buffer): string {

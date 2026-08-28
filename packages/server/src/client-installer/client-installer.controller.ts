@@ -17,11 +17,11 @@ import type { Response } from "express";
 import { Actor } from "../auth/actor.decorator.js";
 import { Public } from "../auth/public.decorator.js";
 import {
-	ClientInstallerError,
-	ClientInstallerService,
 	type ClientInstallerBootstrap,
 	type ClientInstallerConfigInfo,
+	ClientInstallerError,
 	type ClientInstallerPreflight,
+	ClientInstallerService,
 } from "./client-installer.service.js";
 
 function parsePlatform(value: unknown): ReleasePlatform {
@@ -54,6 +54,9 @@ const ASSET_CONTENT_TYPES: Record<string, string> = {
 	"install-client-bootstrap.ps1": "text/plain; charset=utf-8",
 	"install-client.cjs": "text/javascript; charset=utf-8",
 	"install.cjs": "text/javascript; charset=utf-8",
+	"uninstall-client-bootstrap.sh": "text/x-shellscript; charset=utf-8",
+	"uninstall-client-bootstrap.ps1": "text/plain; charset=utf-8",
+	"uninstall-client.cjs": "text/javascript; charset=utf-8",
 };
 
 /** Client 一键安装配置、脚本、bootstrap 与上线验收 API。 */
@@ -95,7 +98,9 @@ export class ClientInstallerController {
 				platform === "win-x64"
 					? "install-client-bootstrap.ps1"
 					: "install-client-bootstrap.sh";
-			response.type(ASSET_CONTENT_TYPES[name]!).send(this.service.readAsset(name));
+			const contentType = ASSET_CONTENT_TYPES[name];
+			if (!contentType) throw new Error(`缺少资产类型: ${name}`);
+			response.type(contentType).send(this.service.readAsset(name));
 		} catch (error) {
 			throw this.toHttp(error);
 		}
@@ -109,15 +114,20 @@ export class ClientInstallerController {
 			throw new BadRequestException("未知安装资产");
 		}
 		try {
+			const contentType = ASSET_CONTENT_TYPES[name];
+			if (!contentType) throw new Error(`缺少资产类型: ${name}`);
 			response
-				.type(ASSET_CONTENT_TYPES[name]!)
+				.type(contentType)
 				.send(
 					this.service.readAsset(
 						name as
 							| "install-client-bootstrap.sh"
 							| "install-client-bootstrap.ps1"
 							| "install-client.cjs"
-							| "install.cjs",
+							| "install.cjs"
+							| "uninstall-client-bootstrap.sh"
+							| "uninstall-client-bootstrap.ps1"
+							| "uninstall-client.cjs",
 					),
 				);
 		} catch (error) {

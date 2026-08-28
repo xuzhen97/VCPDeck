@@ -1,11 +1,11 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import {
 	ReleaseClientState,
-	ReleaseStatus,
 	type ReleaseInfo,
+	ReleaseStatus,
 } from "@vcpdeck/shared";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
 import { AuthProvider } from "@/auth-context";
@@ -144,11 +144,18 @@ describe("ReleasesPage", () => {
 		);
 
 		expect(await screen.findByText("Client 一键安装")).toBeVisible();
-		expect(screen.getByText(/curl -fsSL/)).toHaveTextContent(
-			"/api/client-installer/scripts/linux-x64",
+		expect(
+			screen.getByText(/\/api\/client-installer\/scripts\/linux-x64/),
+		).toHaveTextContent("/api/client-installer/scripts/linux-x64");
+		expect(
+			screen.getByText(/\/api\/client-installer\/scripts\/win-x64/),
+		).toHaveTextContent("/api/client-installer/scripts/win-x64");
+		expect(await screen.findByText("Client 一键卸载")).toBeVisible();
+		expect(screen.getByText(/uninstall-client-bootstrap\.sh/)).toHaveTextContent(
+			"/api/client-installer/assets/uninstall-client-bootstrap.sh",
 		);
-		expect(screen.getByText(/scriptblock/)).toHaveTextContent(
-			"/api/client-installer/scripts/win-x64",
+		expect(screen.getByText(/uninstall-client-bootstrap\.ps1/)).toHaveTextContent(
+			"/api/client-installer/assets/uninstall-client-bootstrap.ps1",
 		);
 		await user.click(screen.getByRole("button", { name: "启用一键安装" }));
 		expect(client.clientInstaller.updateConfig).toHaveBeenCalledWith(true);

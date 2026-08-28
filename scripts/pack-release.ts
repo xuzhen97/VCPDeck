@@ -20,19 +20,19 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	cpSync,
+	createWriteStream,
 	existsSync,
 	mkdirSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
 	rmSync,
 	writeFileSync,
-	createWriteStream,
 } from "node:fs";
-import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { ZipArchive } from "archiver";
-import { bundleLauncher, bundleServer, bundleClient } from "./bundle-apps.js";
+import { bundleClient, bundleLauncher, bundleServer } from "./bundle-apps.js";
 
 const ROOT = resolve(__dirname, "..");
 const PLATFORMS = "win-x64,linux-x64";
@@ -282,6 +282,9 @@ async function stagePackage(
 			"install-client-bootstrap.ps1",
 			"install-client.cjs",
 			"install.cjs",
+			"uninstall-client-bootstrap.sh",
+			"uninstall-client-bootstrap.ps1",
+			"uninstall-client.cjs",
 		]) {
 			cpSync(join(ROOT, "scripts", name), join(installerDir, name));
 		}

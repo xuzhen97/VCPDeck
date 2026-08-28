@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import type { ActorContext } from "@vcpdeck/shared";
+import { describe, expect, it, vi } from "vitest";
 import { ClientInstallerController } from "./client-installer.controller.js";
 import { ClientInstallerError } from "./client-installer.service.js";
 
@@ -82,5 +82,14 @@ describe("ClientInstallerController", () => {
 		controller.getScript("linux-x64", res as never);
 		expect(res.send).toHaveBeenCalledWith(Buffer.from("echo installer"));
 		expect(String(res.send.mock.calls[0]?.[0])).not.toContain("secret");
+	});
+
+	it("公开卸载资产可以读取", () => {
+		const mock = service();
+		const controller = new ClientInstallerController(mock as never);
+		const res = response();
+		controller.getAsset("uninstall-client.cjs", res as never);
+		expect(mock.readAsset).toHaveBeenCalledWith("uninstall-client.cjs");
+		expect(res.send).toHaveBeenCalledWith(Buffer.from("echo installer"));
 	});
 });

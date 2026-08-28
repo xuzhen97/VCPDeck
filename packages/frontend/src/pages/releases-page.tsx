@@ -135,6 +135,8 @@ export function ReleasesPage() {
 	const installerOrigin = window.location.origin;
 	const linuxCommand = `curl -fsSL '${installerOrigin}/api/client-installer/scripts/linux-x64' | bash -s -- '${installerOrigin}'`;
 	const windowsCommand = `$script = irm '${installerOrigin}/api/client-installer/scripts/win-x64'; & ([scriptblock]::Create($script)) -ServerOrigin '${installerOrigin}'`;
+	const linuxUninstallCommand = `curl -fsSL '${installerOrigin}/api/client-installer/assets/uninstall-client-bootstrap.sh' | bash -s -- '${installerOrigin}'`;
+	const windowsUninstallCommand = `$script = irm '${installerOrigin}/api/client-installer/assets/uninstall-client-bootstrap.ps1'; & ([scriptblock]::Create($script)) -ServerOrigin '${installerOrigin}'`;
 	const localOrigin = ["localhost", "127.0.0.1", "::1"].includes(
 		window.location.hostname,
 	);
@@ -226,6 +228,8 @@ export function ReleasesPage() {
 				localOrigin={localOrigin}
 				linuxCommand={linuxCommand}
 				windowsCommand={windowsCommand}
+				linuxUninstallCommand={linuxUninstallCommand}
+				windowsUninstallCommand={windowsUninstallCommand}
 				onToggle={setInstallerEnabled}
 			/>
 			<Card>
@@ -339,6 +343,8 @@ function InstallerCard({
 	localOrigin,
 	linuxCommand,
 	windowsCommand,
+	linuxUninstallCommand,
+	windowsUninstallCommand,
 	onToggle,
 }: {
 	config: ClientInstallerConfigInfo | undefined;
@@ -348,10 +354,13 @@ function InstallerCard({
 	localOrigin: boolean;
 	linuxCommand: string;
 	windowsCommand: string;
+	linuxUninstallCommand: string;
+	windowsUninstallCommand: string;
 	onToggle: (enabled: boolean) => Promise<void>;
 }) {
 	const copy = async (value: string) => navigator.clipboard.writeText(value);
 	return (
+		<div className="space-y-4">
 		<Card>
 			<CardHeader>
 				<div className="flex flex-wrap items-center justify-between gap-3">
@@ -413,6 +422,36 @@ function InstallerCard({
 				</p>
 			</CardContent>
 		</Card>
+		<Card>
+			<CardHeader>
+				<CardTitle>Client 一键卸载</CardTitle>
+				<p className="mt-1 text-sm text-muted-foreground">
+					只清理本机 Client、PM2 Launcher 和对应自启配置，不影响 Server 数据、Client ID、缓存或其他 PM2 应用。
+				</p>
+			</CardHeader>
+			<CardContent className="space-y-4">
+				{[
+					["Windows PowerShell 5.1+", windowsUninstallCommand],
+					["Linux Bash", linuxUninstallCommand],
+				].map(([label, command]) => (
+					<div key={label} className="space-y-2">
+						<div className="flex items-center justify-between gap-2">
+							<p className="text-sm font-medium">{label}</p>
+							<Button size="sm" variant="outline" onClick={() => void copy(command)}>
+								复制命令
+							</Button>
+						</div>
+						<pre className="overflow-x-auto rounded-md bg-secondary/50 p-3 text-xs">
+							<code>{command}</code>
+						</pre>
+					</div>
+				))}
+				<p className="text-xs text-amber-300">
+					执行前请确认目标机上的 Client 不再使用；卸载失败时会保留现场，避免误删目录。
+				</p>
+			</CardContent>
+		</Card>
+		</div>
 	);
 }
 

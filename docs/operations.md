@@ -204,7 +204,8 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - PM2 同名路径冲突：运行 `pm2 describe vcpdeck-client-launcher`，不要自动覆盖指向其他 app-dir 的进程；
 - Launcher online 但验收超时：运行 `pm2 logs vcpdeck-client-launcher --lines 100`，核对 `launcher.env`、Server 可达性、PSK 和 `/client` WebSocket；
 - 若修改 `launcher.env` 后仍连接旧 Server，运行 `pm2 env <id>` 核对 PM2 是否缓存了旧 `VCPDECK_SERVER`。Node `--env-file` 不覆盖已存在的同名进程环境；新版一键安装器会生成 `launcher-env.cjs` preload（先清除继承的 `VCPDECK_*`，再主动读取 `launcher.env`）并在 ecosystem 中设置 `filter_env: ["VCPDECK_"]`。旧安装应更新这些文件后，以 `pm2 delete vcpdeck-client-launcher`、`pm2 start <app-dir>/ecosystem.config.cjs --only vcpdeck-client-launcher`、`pm2 save` 重建进程，确保 `launcher.env` 是 Launcher 配置权威；
-- 失败会保留 `~/.vcpdeck/client-install.json`、缓存、版本目录与 PM2 现场，修复后重跑同一固定命令。
+- 失败会保留 `~/.vcpdeck/client-install.json`、缓存、版本目录与 PM2 现场，修复后重跑同一固定命令；
+- `/releases` 的 Client 一键卸载命令只读取该安装状态，删除对应 `vcpdeck-client-launcher`、Client 目录和约定的自启配置，不删除 `~/.vcpdeck/client-id`、通用缓存、其他 PM2 应用或 Server 数据；找不到安装状态或同名 PM2 进程指向其他目录时会拒绝操作。
 
 ### Client PM2 进程丢失
 
@@ -246,7 +247,7 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - write/move/delete/import 不要盲目重试，先核对目标路径、`.vcpdeck-tmp-*`、Job、File 和 Provider 对象；
 - import 当前只验证字节数，不验证 SHA-256；Alibaba export 也没有 Local 同等级的 SHA-256；
 - `rootDir` 当前未绑定认证 root，处理疑似越界时先隔离 Client 并保全路径和 Job 元数据，不继续执行破坏性操作；
-- Alibaba export 分片 URL 过期时当前重新执行导出，不依赖尚未接通的续期路由；
+- Alibaba export 分片 URL 过期返回 403 时，Client 通过 `client-export-sessions/:jobId/part-urls` 续期指定分片；连续失败则导出失败并重新创建会话；
 - 详细实现偏移和恢复边界见 [`design/remote-files.md`](./design/remote-files.md)。
 
 ### Terminal 无输出、长期 starting 或要求重同步
@@ -282,6 +283,7 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - Provider 是否已切换，旧对象是否仍在原后端；
 - File 元数据和正文是否一致；
 - 检查磁盘空间、权限和外部存储授权。
+- `file.export` 以 `Export session failed: HTTP 401` 立即失败时，核对 Server/Client 的 `VCPDECK_PSK` 是否一致，并确认两端均已升级到包含 `client-export-sessions*` 认证的版本；不得把 PSK 写入日志或工单。
 
 ### Release 卡住或失败
 

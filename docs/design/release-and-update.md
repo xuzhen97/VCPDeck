@@ -47,7 +47,7 @@
 
 Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由安装脚本首次部署到 `<app-dir>/dist/main.js`，但不随业务版本自动覆盖。Server 负责全局控制面，Client 只负责本机更新配合；任何一方都不能在没有 Launcher 的情况下可靠完成自替换和失败回退。
 
-`/releases` 还提供默认关闭、持久化的 Client 一键安装入口（ADR-0018）。启用后，固定 Windows/Linux 命令会动态选择与运行中 Server 完全同版本且状态为 `done` 的 Release，准备用户私有 Node.js、安装 Client/Launcher，并由 PM2 只守护 Launcher。禁用只阻止新的安装请求，不影响已有 Client。
+`/releases` 还提供默认关闭、持久化的 Client 一键安装入口（ADR-0018）和 Client 一键卸载入口。启用后，固定 Windows/Linux 命令会动态选择与运行中 Server 完全同版本且状态为 `done` 的 Release，准备用户私有 Node.js、安装 Client/Launcher，并由 PM2 只守护 Launcher。禁用只阻止新的安装请求，不影响已有 Client。卸载命令在目标机本地读取 `~/.vcpdeck/client-install.json`，删除该 Client 的 PM2 Launcher、自启配置和安装目录，保留 `client-id`、通用缓存、其他 PM2 应用以及 Server 侧数据；缺少或不一致的安装状态会安全失败，不猜测目录。
 
 ## 3. 数据与状态权威
 

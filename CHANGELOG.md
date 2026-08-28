@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/releases` 新增 Client 一键卸载命令：Windows PowerShell 和 Linux Bash 均可复制执行；仅清理本机 Client、PM2 Launcher、自启配置和安装目录，保留 Client ID、缓存、其他 PM2 应用及 Server 数据。
+
+### Fixed
+
+- 修复 Alibaba Storage 模式下 Client 文件导出会话缺少共享 PSK导致 `files download` 在 `file.export` 阶段返回 HTTP 401的问题；新增 Client 专用 export 控制路径并接通分片 URL 403续期，PSK仅发送到 Server 控制端点。
+
 ## [0.6.7] - 2026-08-28
 
 ### Fixed
