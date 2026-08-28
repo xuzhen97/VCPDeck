@@ -1,6 +1,6 @@
 # VCPDeck 运维手册
 
-> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-08-15
+> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-08-28｜适用版本：`0.6.7` / 当前 `main`
 
 ## 1. 运行基线
 
@@ -291,8 +291,8 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - 核对构件 SHA-256、Node 约束和 `/api/status` 版本；
 - Launcher 回退后确认数据库仍兼容旧 Server；
 - Server drain 超时会令 Release 失败，但当前派发闸门不会自动解除；核对活跃 Job 后通常需要重启 Server 恢复派发；
-- 已存在的目标版本目录会令 Launcher 跳过重新下载和 SHA 校验，异常时先删除不完整目录再 prepare；
-- Windows zip 以外的 archive 全链路尚未验证，不得在唯一生产环境首次尝试。
+- Launcher 仅在目标版本的 manifest、版本号和当前 artifact 业务入口均完整时跳过 prepare；仅含 Launcher payload 或其他不完整目录会先清理，再重新下载、校验和解压；
+- Windows x64 与 Linux x64 zip 已完成 Server→多 Client 生产发布验收；其他平台或 archive 格式仍不得在唯一生产环境首次尝试。
 
 ### FRP 映射不可达或状态不一致
 

@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-15｜适用版本：当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-28｜适用版本：`0.6.7` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目尚未提供容器镜像或 systemd/Windows Service 安装器；发布 zip 含 Launcher，并由安装脚本自动部署，生产常驻由 Launcher 或外部服务管理器负责。
 
@@ -293,7 +293,7 @@ location / {
 2. 确认 `VCPDECK_RELEASES_DIR` 为版本目录外**绝对路径**（`install.cjs` 引导默认如此）；Local Storage 相对 `baseDir` 已锚定到 `VCPDECK_APP_DIR`，若曾在旧版本目录内写过 storage 文件，先按 [ADR-0014](./adr/0014-storage-basedir-anchor.md) 搬迁；
 3. 确认目标 Linux 机器已安装 `unzip`（自动更新解压依赖）；
 4. 确认版本号从未用过：同一版本重复上传会被拒绝（`RELEASE_DUPLICATE_VERSION`），且失败后不能“重试同一版本”，只能发布新版本号；
-5. 若发布说明要求新的 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 升级各主机 Launcher。
+5. 若发布依赖新 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 串行升级全部 Client Launcher，再单独升级 Server Launcher；每台完成 SHA-256、守护进程、控制端口和业务版本核验后才能继续。
 
 ### 9.2 构建并上传
 
@@ -396,7 +396,7 @@ node "<vcpdeck-cli>" jobs run <client> --wait -- \
 
 关键限制：
 
-- Server 先于 Client；
+- 依赖新 Launcher 的业务发布前，先串行升级并核验全部 Client Launcher，再单独升级 Server Launcher；业务 Release 编排仍是 Server 先更新、Client 后更新；
 - Launcher 负责应用版本回退，但不会自动回退数据库；
 - 发布前必须备份；
 - Frontend 随 Server 构件同版本分发，无需单独部署对齐；自定义跨源托管时需与 Server 同版本部署；
