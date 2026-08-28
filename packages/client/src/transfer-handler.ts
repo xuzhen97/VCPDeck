@@ -10,6 +10,12 @@ import { resolveSafePath } from "./file-handler.js";
 
 const SERVER_BASE = process.env.VCPDECK_SERVER || "http://localhost:3001";
 
+const CLIENT_PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
+const EXPORT_CONTROL_HEADERS = {
+	"content-type": "application/json",
+	"x-vcpdeck-psk": CLIENT_PSK,
+};
+
 /** 将相对 URL 转为绝对 URL；绝对 URL 必须与 Server 同源，防止拉取任意内网地址 */
 function absUrl(path: string): string {
 	if (path.startsWith("http://") || path.startsWith("https://")) {
@@ -85,9 +91,9 @@ async function negotiateExportSession(
 	jobId: string,
 	size: number,
 ): Promise<FileExportSession> {
-	const res = await fetch(absUrl("/api/files/export-sessions"), {
+	const res = await fetch(absUrl("/api/files/client-export-sessions"), {
 		method: "POST",
-		headers: { "content-type": "application/json" },
+		headers: EXPORT_CONTROL_HEADERS,
 		body: JSON.stringify({ jobId, size }),
 	});
 	if (!res.ok) throw new Error(`Export session failed: HTTP ${res.status}`);
@@ -100,10 +106,10 @@ async function refreshExportPartUrl(
 	partNumber: number,
 ): Promise<string> {
 	const res = await fetch(
-		absUrl(`/api/files/export-sessions/${jobId}/part-urls`),
+		absUrl(`/api/files/client-export-sessions/${jobId}/part-urls`),
 		{
 			method: "POST",
-			headers: { "content-type": "application/json" },
+			headers: EXPORT_CONTROL_HEADERS,
 			body: JSON.stringify({ partNumbers: [partNumber] }),
 		},
 	);
@@ -123,10 +129,10 @@ async function completeExportUpload(
 	uploadedBytes: number,
 ): Promise<string> {
 	const res = await fetch(
-		absUrl(`/api/files/export-sessions/${jobId}/complete`),
+		absUrl(`/api/files/client-export-sessions/${jobId}/complete`),
 		{
 			method: "POST",
-			headers: { "content-type": "application/json" },
+			headers: EXPORT_CONTROL_HEADERS,
 			body: JSON.stringify({ uploadedBytes }),
 		},
 	);

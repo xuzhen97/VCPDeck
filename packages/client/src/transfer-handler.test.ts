@@ -297,12 +297,87 @@ describe("handleTransfer file.export", () => {
 		);
 
 		expect(fetcher.mock.calls[0]?.[0]).toBe(
-			"http://localhost:3001/api/files/export-sessions",
+			"http://localhost:3001/api/files/client-export-sessions",
 		);
+		expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-vcpdeck-psk": "vcpdeck-dev-psk",
+			},
+		});
 		expect(fetcher.mock.calls[1]?.[0]).toBe("https://oss.example/p1");
+		expect(fetcher.mock.calls[1]?.[1]?.headers).toBeUndefined();
 		expect(fetcher.mock.calls[2]?.[0]).toBe(
-			"http://localhost:3001/api/files/export-sessions/job-1/complete",
+			"http://localhost:3001/api/files/client-export-sessions/job-1/complete",
 		);
+		expect(fetcher.mock.calls[2]?.[1]).toMatchObject({
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-vcpdeck-psk": "vcpdeck-dev-psk",
+			},
+		});
+		expect(doneCalls(socket)[0]?.[1].result).toMatchObject({
+			key: "aliyun-file",
+			size: 5,
+		});
+	});
+
+	it("导出分片 403 时用 Client PSK续期并只向新 URL重试", async () => {
+		const fetcher = vi
+			.fn()
+			.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({
+					fileId: "aliyun-file",
+					uploadId: "up-1",
+					partSize: 5,
+					parts: [{ partNumber: 1, url: "https://oss.example/old" }],
+				}),
+			})
+			.mockResolvedValueOnce({ ok: false, status: 403 })
+			.mockResolvedValueOnce({
+				ok: true,
+				json: async () => [
+					{ partNumber: 1, url: "https://oss.example/new" },
+				],
+			})
+			.mockResolvedValueOnce({ ok: true })
+			.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ key: "aliyun-file" }),
+			});
+		vi.stubGlobal("fetch", fetcher);
+		const socket = mockSocket();
+		const job = exportJob();
+
+		await handleTransfer(
+			{
+				...job,
+				payload: {
+					...job.payload,
+					uploadRef: { ...job.payload.uploadRef, url: "", direct: true },
+				},
+			},
+			socket,
+		);
+
+		expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+			"http://localhost:3001/api/files/client-export-sessions",
+			"https://oss.example/old",
+			"http://localhost:3001/api/files/client-export-sessions/job-1/part-urls",
+			"https://oss.example/new",
+			"http://localhost:3001/api/files/client-export-sessions/job-1/complete",
+		]);
+		expect(fetcher.mock.calls[2]?.[1]).toMatchObject({
+			method: "POST",
+			headers: expect.objectContaining({
+				"x-vcpdeck-psk": "vcpdeck-dev-psk",
+			}),
+		});
+		expect(fetcher.mock.calls[1]?.[1]?.headers).toBeUndefined();
+		expect(fetcher.mock.calls[3]?.[1]?.headers).toBeUndefined();
 		expect(doneCalls(socket)[0]?.[1].result).toMatchObject({
 			key: "aliyun-file",
 			size: 5,

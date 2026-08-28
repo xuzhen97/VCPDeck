@@ -10,8 +10,11 @@ import {
   Body,
   Param,
   Query,
+  Headers,
+  UnauthorizedException,
 } from "@nestjs/common";
 import { JobService } from "../job/job.service.js";
+import { clientPsk } from "../client/client-psk.js";
 import {
   ClientService,
   INVALID_CLIENT_NAME,
@@ -92,6 +95,14 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
 
 @Controller("api")
 	export class EventsController {
+	private assertClientPsk(value: string | undefined): void {
+		if (!value || value !== clientPsk()) {
+			throw new UnauthorizedException({
+				code: "CLIENT_AUTH_REQUIRED",
+				message: "Client authentication required",
+			});
+		}
+	}
 	constructor(
 		@Inject(JobService) private readonly jobService: JobService,
 		@Inject(ClientService) private readonly clientService: ClientService,
@@ -104,6 +115,53 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
   health() {
     return { ok: true };
   }
+
+  	/** 创建 Client 专用导出直传会话。 */
+	@Public()
+	@Post("files/client-export-sessions")
+	async createClientExportSession(
+		@Headers("x-vcpdeck-psk") psk: string | undefined,
+		@Body() body: { jobId?: string; size?: number },
+	) {
+		this.assertClientPsk(psk);
+		return this.createExportSession(body);
+	}
+
+	/** 完成 Client 专用导出直传。 */
+	@Public()
+	@Post("files/client-export-sessions/:jobId/complete")
+	async completeClientExportSession(
+		@Param("jobId") jobId: string,
+		@Headers("x-vcpdeck-psk") psk: string | undefined,
+		@Body() body: { uploadedBytes?: number },
+	) {
+		this.assertClientPsk(psk);
+		return this.completeExportSession(jobId, body);
+	}
+
+	/** 续期 Client 专用导出会话的指定分片 URL。 */
+	@Public()
+	@Post("files/client-export-sessions/:jobId/part-urls")
+	async refreshClientExportPartUrls(
+		@Param("jobId") jobId: string,
+		@Headers("x-vcpdeck-psk") psk: string | undefined,
+		@Body() body: { partNumbers?: number[] },
+	) {
+		this.assertClientPsk(psk);
+		const partNumbers = body?.partNumbers;
+		if (
+			!Array.isArray(partNumbers) ||
+			partNumbers.length === 0 ||
+			partNumbers.some((value) => !Number.isInteger(value) || value <= 0) ||
+			new Set(partNumbers).size !== partNumbers.length
+		) {
+			throw new BadRequestException({
+				code: "INVALID_PART_NUMBERS",
+				message: "partNumbers must contain unique positive integers",
+			});
+		}
+		return this.storageService.refreshDirectPartUrls(jobId, partNumbers);
+	}
 
   @Post("jobs")
   async createJob(@Body() body: JobCreate, @Actor() actor: ActorContext) {

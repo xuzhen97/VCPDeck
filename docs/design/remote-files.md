@@ -129,12 +129,12 @@ Capability 是 Client 能力声明，不是用户权限。Server 创建 Job 时�
 ### Alibaba 直传路径
 
 1. Server 初始下发 `direct=true` 的占位 uploadRef；
-2. Client stat 后创建 export 分片会话；
-3. Client 最多三个 worker 直接 PUT 分片并上报进度；
-4. Client 请求 Provider complete，获得真实 key；
+2. Client stat 后通过 `POST /api/files/client-export-sessions`（携带 `x-vcpdeck-psk`）创建 export 分片会话；
+3. Client 最多三个 worker 直接 PUT 分片并上报进度；分片 URL 返回 403 时通过 `POST /api/files/client-export-sessions/:jobId/part-urls` 续期指定分片后重试；
+4. Client 通过 `POST /api/files/client-export-sessions/:jobId/complete` 请求 Provider complete，获得真实 key；
 5. Client 上报 `fileId/key/size`，不提供 SHA-256。
 
-Alibaba export 当前依靠字节数和 Provider 完成响应收敛。Client 在 403 后调用的 export `part-urls` 路径与 Server 已实现路由不一致，URL 过期后不能依赖续期，应重新执行导出。
+Alibaba export 当前依靠字节数和 Provider 完成响应收敛。Client 导出控制请求必须携带共享 PSK `x-vcpdeck-psk`，PSK 只发送到 Server 控制端点，不发送到 Provider 分片 URL；既有 `/api/files/export-sessions*` 仍保留给携带用户 Cookie/Bearer 的 SDK 调用。
 
 ## 7. 文件导入：Storage → Client
 
@@ -258,8 +258,7 @@ FileRef URL 是临时凭据：
 8. 文件 Job 未完整进入重连状态报告和终局补报；
 9. writeText 失败清理以及 write/move/import overwrite 语义缺少跨平台一致保证；
 10. Gateway Job 结果未在 handler 内再次验证 Socket 所属 Client；
-11. Alibaba export 分片 URL 续期路由不一致；
-12. 文件 Job error 分支会推进 scheduler 但不发送返回的下一条 dispatch，可能形成虚假的 running Job。
+11. 文件 Job error 分支会推进 scheduler 但不发送返回的下一条 dispatch，可能形成虚假的 running Job。
 
 这些事项统一进入 [`../roadmap.md`](../roadmap.md) 或 Issue；在实现前不得写成当前保证。修复不得只改 Frontend 或单端类型，必须协调 Shared、Server、Client、SDK、测试、安全和兼容说明。
 

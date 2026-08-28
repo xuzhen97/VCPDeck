@@ -180,14 +180,12 @@ sequenceDiagram
 
 1. Server 创建 `file.export` Job 和 pending File；
 2. Client stat 远程文件得到真实大小；
-3. Client 调用导出会话端点，Server 在 Alibaba 创建分片任务；
-4. Client 最多三个 worker 并发上传分片并上报 Job 进度；
-5. Client 调用 complete，Server 校验字节数、合并对象并将 File 标记 completed；
+3. Client 调用 `POST /api/files/client-export-sessions`（携带 `x-vcpdeck-psk`），Server 在 Alibaba 创建分片任务；
+4. Client 最多三个 worker 并发上传分片并上报 Job 进度；分片 URL 返回 403 时通过 `POST /api/files/client-export-sessions/:jobId/part-urls` 续期后重试；
+5. Client 调用 `POST /api/files/client-export-sessions/:jobId/complete`，Server 校验字节数、合并对象并将 File 标记 completed；
 6. Client 上报 Job 结果；Browser 后续通过稳定下载入口取得临时外部 URL。
 
-Alibaba 直传当前以声明大小和 Provider 完成响应收敛，`File.sha256` 为空字符串；它不提供与 Local 路径相同的 Server 端字节哈希保证。
-
-**当前已知缺口：** Client 在导出分片 URL 返回 403 时请求 `/api/files/export-sessions/:jobId/part-urls`，但 Server 当前只实现 `/api/files/upload-sessions/:jobId/part-urls`。因此导出分片 URL 续期链路尚未正确接通；过期后的导出需要重新执行，不能把续期视为已支持。
+Alibaba 直传当前以声明大小和 Provider 完成响应收敛，`File.sha256` 为空字符串；它不提供与 Local 路径相同的 Server 端字节哈希保证。Client 导出控制端点以共享 PSK（`x-vcpdeck-psk`）认证，PSK 不发送到 Provider 分片 URL；既有 `/api/files/export-sessions*` 保留给携带用户 Cookie/Bearer 的 SDK 调用。
 
 ## 7. File 与传输状态
 
@@ -219,7 +217,7 @@ File 当前只有约定式的 `pending/completed` 状态；没有独立 `failed`
 
 Storage API 分为三类：
 
-1. **认证控制端点**：配置、Token、传输会话、complete、进度和 URL 续期；
+1. **认证控制端点**：配置、Token、传输会话、complete、进度和 URL 续期；Client 导出控制使用 `/api/files/client-export-sessions*`，以 `x-vcpdeck-psk` 认证（Public 路由绕过用户 AuthGuard 后在 Controller 内校验）；Browser/SDK 继续使用用户 Cookie/Bearer，包括既有 `/api/files/export-sessions*`；
 2. **短期能力端点**：Local 签名 PUT/GET；
 3. **Provider 外部 URL**：Alibaba 分片 PUT 和临时 GET。
 
@@ -242,7 +240,7 @@ Storage API 分为三类：
 | Local URL 到期/签名变化 | PUT/GET 拒绝 | 重新申请 Token 或使用稳定下载入口 |
 | Server 在 Local 上传中重启 | 连接中断；可通过 File 记录恢复最小元数据 | 调用方重新上传并查询 Job/File |
 | Server 在 Alibaba 直传中重启 | 内存 `uploadId` 映射丢失 | 当前需要重新创建传输会话 |
-| Alibaba 导出分片 URL 过期 | Client 请求的续期路由与 Server 当前路由不一致 | 当前重新执行导出；修复路由后再声明支持续期 |
+| Alibaba 导出分片 URL 过期 | Client 收到 403 后通过 `client-export-sessions/:jobId/part-urls` 续期指定分片并重试；续期失败则导出失败 | 确认 PSK 一致和 Provider 授权后重新创建导出会话 |
 | OAuth 过程中重启 | PKCE state/verifier 丢失 | 重新 start OAuth |
 | Alibaba Token 临近过期 | Provider 尝试刷新并写回 DB | 刷新失败时重新授权 |
 | Provider 切换 | 新操作使用新 Provider；旧对象不迁移，当前活动 Provider 也可能无法直接读取旧对象 | 切回原 Provider 或执行受控迁移 |

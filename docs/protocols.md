@@ -290,7 +290,8 @@ Pi 使用精确协议版本 `PI_SESSION_JOB_PROTOCOL_VERSION = 1`。不匹配时
 | 前缀/端点 | 用途 |
 | --- | --- |
 | `/api/files/upload-sessions*` | Browser 上传后导入远程机器：创建、进度、分片续期和完成 |
-| `/api/files/export-sessions*` | Client 导出直传：创建和完成；分片续期存在下述已知路由缺口 |
+| `/api/files/export-sessions*` | SDK 导出直传：创建和完成（用户 Cookie/Bearer） |
+| `/api/files/client-export-sessions*` | Client 导出直传：创建、分片续期和完成；Public 路由但必须携带 `x-vcpdeck-psk` |
 | `/api/storage/upload-token`、`download-token` | 签发 Local 或 Provider 下载能力 |
 | `/api/storage/download-redirect/:key` | 认证稳定下载入口；每次请求实时取得临时下载 URL并 302 |
 | `/api/storage/config` | 查询安全后端摘要或切换当前后端 |
@@ -325,7 +326,7 @@ Browser 上传后导入远程机器：
 5. Server 校验声明大小、调用 Provider 合并分片、将 File 置 completed；
 6. Job 进入 pending/running，Client 使用外部临时 GET URL导入目标路径。
 
-Client 导出：Client stat 文件后创建 export session，直接上传分片，完成后 Server 将 File 置 completed，再由 Client 上报 Job 结果。当前 Client 用于导出 URL 续期的 `/api/files/export-sessions/:jobId/part-urls` 与 Server 已实现的 upload-sessions 路由不一致，因此导出续期尚不可依赖；URL 过期后应重新执行导出。
+Client 导出：Client stat 文件后通过 `/api/files/client-export-sessions*` 创建 export session（携带 `x-vcpdeck-psk`），直接上传分片；分片 URL 返回 403 时通过 `part-urls` 续期指定分片，完成后 Server 将 File 置 completed，再由 Client 上报 Job 结果。PSK 只发送到 Server 控制端点，不发送到 Provider。
 
 Alibaba 直传当前以字节数和 Provider 完成响应收敛，Server 不读取全部正文，因此 `File.sha256` 为空，不提供 Local 路径同等级的 Server 端 SHA-256 保证。
 

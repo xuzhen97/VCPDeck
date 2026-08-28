@@ -1,5 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventsController } from "./events.controller.js";
+import { IS_PUBLIC_KEY } from "../auth/public.decorator.js";
+
+const TEST_PSK = "test-client-psk";
 
 function makeController() {
 	const jobService = {
@@ -94,6 +97,14 @@ describe("EventsController upload sessions", () => {
 	});
 
 	describe("导出直传会话端点", () => {
+		beforeEach(() => {
+			vi.stubEnv("VCPDECK_PSK", TEST_PSK);
+		});
+
+		afterEach(() => {
+			vi.unstubAllEnvs();
+		});
+
 		it("创建导出直传会话", async () => {
 			const { controller, storageService } = makeController();
 			const session = {
@@ -157,6 +168,183 @@ describe("EventsController upload sessions", () => {
 				64,
 			);
 		});
+
+		it.each([
+			[
+				"createClientExportSession",
+				(controller: EventsController, psk?: string) =>
+					controller.createClientExportSession(psk, {
+						jobId: "j1",
+						size: 100,
+					}),
+			],
+			[
+				"completeClientExportSession",
+				(controller: EventsController, psk?: string) =>
+					controller.completeClientExportSession("j1", psk, {
+						uploadedBytes: 100,
+					}),
+			],
+			[
+				"refreshClientExportPartUrls",
+				(controller: EventsController, psk?: string) =>
+					controller.refreshClientExportPartUrls("j1", psk, {
+						partNumbers: [1],
+					}),
+			],
+		])("%s 缺失 PSK时返回稳定 401", async (_name, call) => {
+			const { controller, storageService } = makeController();
+			await expect(call(controller)).rejects.toMatchObject({
+				status: 401,
+				response: {
+					code: "CLIENT_AUTH_REQUIRED",
+					message: "Client authentication required",
+				},
+			});
+			expect(storageService.createExportSession).not.toHaveBeenCalled();
+			expect(storageService.completeExportUpload).not.toHaveBeenCalled();
+			expect(storageService.refreshDirectPartUrls).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			[
+				"createClientExportSession",
+				(controller: EventsController) =>
+					controller.createClientExportSession("wrong-client-psk", {
+						jobId: "j1",
+						size: 100,
+					}),
+			],
+			[
+				"completeClientExportSession",
+				(controller: EventsController) =>
+					controller.completeClientExportSession("j1", "wrong-client-psk", {
+						uploadedBytes: 100,
+					}),
+			],
+			[
+				"refreshClientExportPartUrls",
+				(controller: EventsController) =>
+					controller.refreshClientExportPartUrls("j1", "wrong-client-psk", {
+						partNumbers: [1],
+					}),
+			],
+		])("%s 错误 PSK时返回稳定 401", async (_name, call) => {
+			const { controller, storageService } = makeController();
+			await expect(call(controller)).rejects.toMatchObject({
+				status: 401,
+				response: {
+					code: "CLIENT_AUTH_REQUIRED",
+					message: "Client authentication required",
+				},
+			});
+			expect(storageService.createExportSession).not.toHaveBeenCalled();
+			expect(storageService.completeExportUpload).not.toHaveBeenCalled();
+			expect(storageService.refreshDirectPartUrls).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			"createClientExportSession",
+			"completeClientExportSession",
+			"refreshClientExportPartUrls",
+		])("%s 标记为 Public", (name) => {
+			const method = EventsController.prototype[
+				name as keyof EventsController
+			] as unknown as object;
+			expect(Reflect.getMetadata(IS_PUBLIC_KEY, method)).toBe(true);
+		});
+
+		it("旧 SDK export-session 方法保持非 Public", () => {
+			expect(
+				Reflect.getMetadata(
+					IS_PUBLIC_KEY,
+					EventsController.prototype.createExportSession,
+				),
+			).not.toBe(true);
+			expect(
+				Reflect.getMetadata(
+					IS_PUBLIC_KEY,
+					EventsController.prototype.completeExportSession,
+				),
+			).not.toBe(true);
+		});
+
+		it("正确 PSK创建 Client export session并复用 StorageService", async () => {
+			const { controller, storageService } = makeController();
+			const session = {
+				fileId: "aliyun-file",
+				uploadId: "up-1",
+				partSize: 64,
+				parts: [{ partNumber: 1, url: "https://oss.example/p1" }],
+			};
+			storageService.createExportSession.mockResolvedValue(session);
+
+			await expect(
+				controller.createClientExportSession(TEST_PSK, {
+					jobId: "j1",
+					size: 100,
+				}),
+			).resolves.toBe(session);
+			expect(storageService.createExportSession).toHaveBeenCalledWith(
+				"j1",
+				100,
+			);
+		});
+
+		it("正确 PSK完成 Client export upload并复用 StorageService", async () => {
+			const { controller, storageService } = makeController();
+			storageService.completeExportUpload.mockResolvedValue({
+				key: "aliyun-file",
+			});
+
+			await expect(
+				controller.completeClientExportSession("j1", TEST_PSK, {
+					uploadedBytes: 100,
+				}),
+			).resolves.toEqual({ key: "aliyun-file" });
+			expect(storageService.completeExportUpload).toHaveBeenCalledWith(
+				"j1",
+				100,
+			);
+		});
+
+		it("正确 PSK续期 Client export 分片 URL", async () => {
+			const { controller, storageService } = makeController();
+			storageService.refreshDirectPartUrls.mockResolvedValue([
+				{ partNumber: 2, url: "https://oss.example/p2-new" },
+			]);
+
+			await expect(
+				controller.refreshClientExportPartUrls("j1", TEST_PSK, {
+					partNumbers: [2],
+				}),
+			).resolves.toEqual([
+				{ partNumber: 2, url: "https://oss.example/p2-new" },
+			]);
+			expect(storageService.refreshDirectPartUrls).toHaveBeenCalledWith(
+				"j1",
+				[2],
+			);
+		});
+
+		it.each<[number[]]>([
+			[[]],
+			[[0]],
+			[[-1]],
+			[[1.5]],
+			[[1, 1]],
+		])(
+			"Client export 续期拒绝非法分片编号 %j",
+			async (partNumbers) => {
+				const { controller, storageService } = makeController();
+				await expect(
+					controller.refreshClientExportPartUrls("j1", TEST_PSK, {
+						partNumbers,
+					}),
+				).rejects.toMatchObject({ status: 400 });
+				expect(storageService.refreshDirectPartUrls).not.toHaveBeenCalled();
+			},
+		);
 	});
 });
 
