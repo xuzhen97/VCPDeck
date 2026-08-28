@@ -307,6 +307,10 @@ describe("handleTransfer file.export", () => {
 			},
 		});
 		expect(fetcher.mock.calls[1]?.[0]).toBe("https://oss.example/p1");
+		expect(fetcher.mock.calls[1]?.[1]).toMatchObject({
+			method: "PUT",
+			duplex: "half",
+		});
 		expect(fetcher.mock.calls[1]?.[1]?.headers).toBeUndefined();
 		expect(fetcher.mock.calls[2]?.[0]).toBe(
 			"http://localhost:3001/api/files/client-export-sessions/job-1/complete",

@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.9] - 2026-08-28
+
+### Fixed
+
+- 修复 Alibaba 导出分片直传在认证修复后暴露的缺陷：分片 PUT 使用流式 body 但未声明 `duplex: "half"`，导致 Node fetch 在 Provider 上传阶段拒绝请求（`RequestInit: duplex option is required`）。
+
 ## [0.6.8] - 2026-08-28
 
 ### Added

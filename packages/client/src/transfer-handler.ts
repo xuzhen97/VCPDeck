@@ -66,7 +66,8 @@ async function uploadParts(
 					method: "PUT",
 					body: await opts.readPart(part.partNumber, start, end),
 					signal: opts.signal,
-				});
+					duplex: "half",
+				} as unknown as RequestInit);
 				if (res.ok) break;
 				if (res.status === 403 && attempt < PART_RETRIES) {
 					url = await opts.refreshUrl(part.partNumber);
