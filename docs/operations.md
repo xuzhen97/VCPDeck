@@ -201,7 +201,8 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - `CLIENT_INSTALLER_ARCHIVE_MISSING`：补齐目标平台 Release archive；
 - 平台检查失败：核对 x64、受支持发行版、glibc/systemd，WSL/容器/ARM64/musl 不在范围；当前仅额外支持 Bazzite x64，不自动支持其他 Fedora Atomic 发行版；
 - Bazzite 基础依赖失败：安装器只对缺失的 `curl`、`unzip`、`tar`、`xz` 或 CA 证书调用 `sudo rpm-ostree`，不应改用 `dnf install`；先执行 `rpm-ostree status` 检查 pending deployment、网络和 sudo 权限。若提示依赖将在重启后生效，手工重启 Bazzite 后重跑同一条安装命令；安装器不会自动重启；
-- Node/PM2 下载失败：检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源。若 Node 输出的探测表达式丢失 `"x64"` 或 `"."` 引号，说明 Server 仍在提供不兼容 Windows PowerShell 5.1 的旧引导脚本，应先更新 Server 后重跑固定命令；
+- Node/PM2 下载失败：检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源。Linux 系统无需预装 Node；若 PM2 安装错误包含 `env: “node”: 没有那个文件或目录`，说明 Server 仍在提供未把私有 Node `bin` 注入 npm 子进程 `PATH` 的旧安装器，应先更新 Server 后重跑同一固定命令。若 Node 输出的探测表达式丢失 `"x64"` 或 `"."` 引号，则是旧版 Windows PowerShell 5.1 引导脚本，同样先更新 Server；
+- Linux 安装末尾出现 `TMP_DIR: 未绑定的变量`：这是旧 bootstrap 的 EXIT trap 在函数返回后展开局部变量所致，不会删除已安装文件；更新 Server 后重跑同一固定命令完成幂等修复；
 - PM2 同名路径冲突：运行 `pm2 describe vcpdeck-client-launcher`，不要自动覆盖指向其他 app-dir 的进程；
 - Launcher online 但验收超时：运行 `pm2 logs vcpdeck-client-launcher --lines 100`，核对 `launcher.env`、Server 可达性、PSK 和 `/client` WebSocket；
 - 若修改 `launcher.env` 后仍连接旧 Server，运行 `pm2 env <id>` 核对 PM2 是否缓存了旧 `VCPDECK_SERVER`。Node `--env-file` 不覆盖已存在的同名进程环境；新版一键安装器会生成 `launcher-env.cjs` preload（先清除继承的 `VCPDECK_*`，再主动读取 `launcher.env`）并在 ecosystem 中设置 `filter_env: ["VCPDECK_"]`。旧安装应更新这些文件后，以 `pm2 delete vcpdeck-client-launcher`、`pm2 start <app-dir>/ecosystem.config.cjs --only vcpdeck-client-launcher`、`pm2 save` 重建进程，确保 `launcher.env` 是 Launcher 配置权威；

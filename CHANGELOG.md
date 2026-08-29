@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [0.6.13] - 2026-08-29
+
+### Fixed
+
+- 修复 Linux Client 首次安装在系统没有 Node.js 时，私有 npm 安装 PM2 的子进程无法通过 `PATH` 找到私有 `node`、最终误报所有 registry 失败的问题。
+- 修复 Linux bootstrap 的退出清理 trap 在 `main` 返回后引用已离开作用域的临时目录变量，导致 `set -u` 报 `TMP_DIR: 未绑定的变量` 的问题。
+
+## [0.6.12] - 2026-08-29
+
 ### Added
 
 - Client 一键安装器新增 Bazzite x86_64 支持：缺少基础命令时自动使用 `rpm-ostree` 补齐固定系统依赖，并支持实时应用或重启后续装。

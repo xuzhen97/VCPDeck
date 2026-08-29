@@ -105,4 +105,7 @@ if run_bash "$missing_rpm_script" >/dev/null 2>&1; then
   exit 1
 fi
 
+cleanup_script='source "$1"; dir="$(mktemp -d)"; register_cleanup_dir "$dir"; unset dir; exit 0'
+run_bash "$cleanup_script"
+
 echo "install-client-bootstrap tests: PASS"

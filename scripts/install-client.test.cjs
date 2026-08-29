@@ -9,7 +9,7 @@ const {
 	rmSync,
 } = require("node:fs");
 const { tmpdir } = require("node:os");
-const { join } = require("node:path");
+const { delimiter, dirname, join } = require("node:path");
 const installer = require("./install-client.cjs");
 
 test("parseArgs 接受固定 Origin、平台和 Node", () => {
@@ -176,6 +176,17 @@ test("readEnv 与 normalizeOrigin 支持已有安装冲突检测", () => {
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("私有 Node 的 bin 目录会注入 PM2 安装子进程 PATH", () => {
+	const nodePath = join("opt", "vcpdeck", "runtime", "node", "bin", "node");
+	const originalPath = ["usr", "local", "bin"].join(delimiter);
+	const env = installer.buildNodeRuntimeEnv(nodePath, {
+		PATH: originalPath,
+		VCPDECK_TEST: "preserved",
+	});
+	assert.equal(env.PATH, `${dirname(nodePath)}${delimiter}${originalPath}`);
+	assert.equal(env.VCPDECK_TEST, "preserved");
 });
 
 test("installPm2Retry 瞬时失败会重试并从后续 registry 成功", () => {

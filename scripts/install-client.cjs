@@ -11,7 +11,7 @@ const {
 	writeFileSync,
 } = require("node:fs");
 const { homedir, hostname, platform, userInfo } = require("node:os");
-const { basename, dirname, join, resolve } = require("node:path");
+const { basename, delimiter, dirname, join, resolve } = require("node:path");
 const { stdin, stdout } = require("node:process");
 const { createInterface } = require("node:readline/promises");
 
@@ -231,6 +231,17 @@ function resolveGlobalPm2(existing, nodePath) {
 	return existsSync(cli) ? { command: nodePath, argsPrefix: [cli] } : null;
 }
 
+/** 确保 npm 与其子进程可通过 env 找到安装器选定的私有 Node.js。 */
+function buildNodeRuntimeEnv(nodePath, baseEnv = process.env) {
+	const pathKey =
+		Object.keys(baseEnv).find((key) => key.toLowerCase() === "path") || "PATH";
+	const currentPath = baseEnv[pathKey] || "";
+	return {
+		...baseEnv,
+		[pathKey]: [dirname(nodePath), currentPath].filter(Boolean).join(delimiter),
+	};
+}
+
 function ensurePm2(nodePath, registries) {
 	const existing = resolveGlobalPm2(
 		findCommand(platform() === "win32" ? "pm2.cmd" : "pm2"),
@@ -263,6 +274,7 @@ function ensurePm2(nodePath, registries) {
 				{
 					cwd: toolRoot,
 					encoding: "utf8",
+					env: buildNodeRuntimeEnv(nodePath),
 					stdio: ["ignore", "pipe", "pipe"],
 				},
 			);
@@ -725,6 +737,7 @@ module.exports = {
 	ensureClientId,
 	installPm2Retry,
 	resolveGlobalPm2,
+	buildNodeRuntimeEnv,
 	npmPath,
 	writeEcosystem,
 	registerStartupTask,

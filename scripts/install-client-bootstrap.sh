@@ -10,6 +10,20 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+CLEANUP_DIRS=()
+
+cleanup_dirs() {
+  local dir
+  for dir in "${CLEANUP_DIRS[@]}"; do
+    rm -rf -- "$dir"
+  done
+}
+
+register_cleanup_dir() {
+  CLEANUP_DIRS+=("$1")
+  trap cleanup_dirs EXIT
+}
+
 detect_linux_family() {
   local os_release_path="$1"
   [[ -r "$os_release_path" ]] || {
@@ -186,7 +200,7 @@ main() {
       DIR="$RUNTIME_ROOT/node-$VERSION"
       if [[ ! -x "$DIR/bin/node" ]]; then
         TMP="$(mktemp -d)"
-        trap 'rm -rf "$TMP"' EXIT
+        register_cleanup_dir "$TMP"
         ARCHIVE="node-v$VERSION-linux-x64.tar.xz"
         curl -fL --connect-timeout 15 --max-time 600 "$BASE/v$VERSION/$ARCHIVE" -o "$TMP/$ARCHIVE" || continue
         curl -fsSL --connect-timeout 15 --max-time 60 "$BASE/v$VERSION/SHASUMS256.txt" -o "$TMP/SHASUMS256.txt" || continue
@@ -206,7 +220,7 @@ main() {
 
   local TMP_DIR
   TMP_DIR="$(mktemp -d)"
-  trap 'rm -rf "$TMP_DIR"' EXIT
+  register_cleanup_dir "$TMP_DIR"
   local INSTALLER_URL INSTALLER_SHA
   INSTALLER_URL="$(printf '%s' "$JSON" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).installerUrl))')"
   INSTALLER_SHA="$(printf '%s' "$JSON" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).installerSha256))')"
