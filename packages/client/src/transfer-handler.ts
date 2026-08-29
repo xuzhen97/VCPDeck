@@ -263,7 +263,7 @@ async function handleExport(
 		const key = await completeExportUpload(jobId, total);
 		const sha256 = await computeFileSha256(safe);
 		emitDone(socket, jobId, "file.export", {
-			fileId: key,
+			fileId: uploadRef.id,
 			key,
 			size: total,
 			sha256,

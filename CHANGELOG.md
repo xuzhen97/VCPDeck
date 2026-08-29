@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.11] - 2026-08-28
+
+### Fixed
+
+- 修复 Alibaba 导出直传完成时上报错误 fileId 的问题：Client 直接上传分支此前把 Provider 对象 ID 当作 `fileId` 上报，Server 以该值更新 File 记录时找不到记录（P2025）导致确认中断；现与本地路径一致，上报 File 记录 ID，真实对象 ID 由 `key` 字段承载。
+
 ## [0.6.10] - 2026-08-28
 
 ### Fixed

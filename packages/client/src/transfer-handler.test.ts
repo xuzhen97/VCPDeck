@@ -323,6 +323,7 @@ describe("handleTransfer file.export", () => {
 			},
 		});
 		expect(doneCalls(socket)[0]?.[1].result).toMatchObject({
+			fileId: "f1",
 			key: "aliyun-file",
 			size: 5,
 		});
