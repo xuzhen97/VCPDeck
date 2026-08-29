@@ -2,6 +2,20 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [Unreleased]
+
+### Added
+
+- Client 一键安装器新增 Bazzite x86_64 支持：缺少基础命令时自动使用 `rpm-ostree` 补齐固定系统依赖，并支持实时应用或重启后续装。
+
+### Fixed
+
+- 发布打包链路统一将 Linux Shell 安装资产规范化为 LF，修复 Windows CRLF 导致 Bash 将 `pipefail` 识别为无效选项的问题。
+
+### Changed
+
+- Bazzite 的系统依赖只在实际缺失时分层安装；无法实时应用时安装器提示重启但不会自动重启，Node.js 与 PM2 仍使用用户私有目录。
+
 ## [0.6.11] - 2026-08-28
 
 ### Fixed

@@ -33,6 +33,7 @@ import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { ZipArchive } from "archiver";
 import { bundleClient, bundleLauncher, bundleServer } from "./bundle-apps.js";
+import { copyInstallerAsset } from "./release-installer-assets.js";
 
 const ROOT = resolve(__dirname, "..");
 const PLATFORMS = "win-x64,linux-x64";
@@ -286,7 +287,7 @@ async function stagePackage(
 			"uninstall-client-bootstrap.ps1",
 			"uninstall-client.cjs",
 		]) {
-			cpSync(join(ROOT, "scripts", name), join(installerDir, name));
+			copyInstallerAsset(join(ROOT, "scripts", name), join(installerDir, name));
 		}
 	}
 

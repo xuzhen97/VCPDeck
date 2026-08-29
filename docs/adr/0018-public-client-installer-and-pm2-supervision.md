@@ -20,8 +20,8 @@
 3. 只有版本与运行中 Server 完全一致、状态为 `done` 且包含目标平台 archive 的 Release 才可首次安装。历史版本、活动 Release 和缺包平台均明确拒绝。
 4. 安装脚本与 preflight 可以公开获取且不含秘密。启用安装入口后，公开 bootstrap 可返回当前共享 `VCPDECK_PSK`、目标 Release 下载地址和 SHA-256；响应禁止缓存和普通日志记录。关闭入口只阻止后续安装请求，不轮换 PSK，也不撤销已安装 Client。
 5. 继续使用现有共享 `VCPDECK_PSK` 完成 Client `/client` Socket.IO 握手，不在本阶段引入每机证书、独立 PSK、撤销列表或 mTLS。
-6. 一键安装只支持 Windows 10/11 x64、Windows Server 2019+ x64，以及使用 systemd 和 glibc 的 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ x64。ARM64、musl/Alpine、CentOS 7、WSL、容器和无 systemd Linux 明确拒绝。
-7. Client、Launcher 和 PM2 以执行安装命令的当前用户运行；sudo/UAC 仅用于安装缺失的系统依赖和注册自启。Client 因此继承该用户的文件、Shell 与 Pi 配置权限。
+6. 一键安装支持 Windows 10/11 x64、Windows Server 2019+ x64，以及使用 systemd 和 glibc 的 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 与 Bazzite x64。Bazzite 之外的 Fedora Atomic 发行版未经逐项验收，不因 `ID_LIKE=fedora` 自动纳入支持。ARM64、musl/Alpine、CentOS 7、WSL、容器和无 systemd Linux 明确拒绝。
+7. Client、Launcher 和 PM2 以执行安装命令的当前用户运行；sudo/UAC 仅用于安装缺失的系统依赖和注册自启。Client 因此继承该用户的文件、Shell 与 Pi 配置权限。Bazzite 缺少固定基础命令时，安装器只对实际缺失项使用 `rpm-ostree` 分层系统 RPM：优先实时应用纯新增软件包；实时应用不可用时创建下次启动使用的 deployment、提示操作者重启并安全退出，不自动重启。Node.js 与 PM2 仍安装到用户私有目录，不进入 Bazzite 基础镜像。
 8. 第一版强制使用 PM2，且 PM2 只托管稳定 Launcher。业务 Client 仍由 Launcher 启动、更新、探活和回退，禁止 PM2 直接托管版本目录中的 Client 入口。
 9. 复用当前用户已有 PM2 时保留其他应用，只新增或修复固定名称的 VCPDeck Launcher，并用 `pm2 save` 保存完整进程列表。无 PM2 时安装到 VCPDeck 用户私有工具目录。
 10. Linux 使用 PM2 的 systemd startup 集成实现机器启动后恢复；Windows 使用当前用户登录触发的原生计划任务执行 PM2 `resurrect`。Windows 不承诺无人登录时运行，也不把非官方 `pm2-windows-startup` 作为核心依赖。
@@ -69,6 +69,8 @@
 - Windows 自启依赖登录计划任务，不是无人登录服务；
 - 国内镜像和 npm registry 增加外部供应链与可用性依赖；
 - 仅支持明确的 x64 平台矩阵，不能把 Node.js 自身支持 ARM64 等同于完整 Client 构件支持；
+- Bazzite 缺少基础命令时使用 package layering，可能延长系统更新或因依赖冲突阻塞更新；安装器因此只分层实际缺失的固定基础 RPM，且不把其他 Fedora Atomic 发行版推定为已支持；
+- Bazzite 的离线 deployment 需要操作者重启后重跑同一安装命令，安装器不会代替操作者重启系统；
 - 自定义安装目录、既有 PM2 和多 Node 环境增加跨平台验证成本。
 
 ### 兼容与迁移
@@ -86,11 +88,12 @@
 - 开关默认关闭、持久化并由任意有效业务身份操作；
 - 禁用、无同版本 `done` Release、缺平台 archive 时 fail closed；
 - 命令和脚本不包含 PSK，bootstrap 响应不可缓存且日志无 PSK；
-- Windows x64 与受支持 Linux x64 至少各完成一次无 Node/PM2 的真实首次安装；
+- Windows x64 与受支持 Linux x64 至少各完成一次无 Node/PM2 的真实首次安装；Bazzite 还必须覆盖基础依赖齐备、`rpm-ostree --apply-live` 成功、离线 deployment 后重启续装三条路径；
+- Bazzite 只分层实际缺失的固定基础 RPM，不调用 `dnf install`，不自动重启；其他 Fedora Atomic 发行版保持 fail closed；
 - 已有 Node/PM2/其他应用时不主动删除或重启其他应用；
 - PM2 只托管 Launcher，Client 自更新和回退仍工作；
 - Linux 重启后恢复，Windows 当前用户登录后恢复；
 - 同 Server 重跑幂等，其他 Server 安装明确拒绝；
 - Server 只有在 Client 在线、版本一致并完成能力上报后才确认成功。
 
-当系统需要公网不可信安装、多租户、逐机撤销、Windows 无人登录运行、ARM64/musl 或不使用 PM2 时，应创建新 ADR 重新评估本决策。
+当系统需要公网不可信安装、多租户、逐机撤销、Windows 无人登录运行、ARM64/musl、支持 Bazzite 之外的 Fedora Atomic 发行版或不使用 PM2 时，应创建新 ADR 重新评估本决策。

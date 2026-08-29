@@ -111,6 +111,21 @@ describe("ClientInstallerService", () => {
 		});
 	});
 
+	it("公开 Shell 安装资产统一使用 LF", () => {
+		const { prisma, releases, clients } = mocks(true);
+		const service = new ClientInstallerService(
+			prisma as never,
+			releases as never,
+			clients as never,
+		);
+		for (const name of [
+			"install-client-bootstrap.sh",
+			"uninstall-client-bootstrap.sh",
+		] as const) {
+			expect(service.readAsset(name).includes(0x0d)).toBe(false);
+		}
+	});
+
 	it("验收接口要求正确共享 PSK", () => {
 		const { prisma, releases, clients } = mocks(true);
 		const service = new ClientInstallerService(

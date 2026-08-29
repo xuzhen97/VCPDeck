@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-28｜适用版本：`0.6.11` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-29｜适用版本：`0.6.11` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目尚未提供容器镜像或 systemd/Windows Service 安装器；发布 zip 含 Launcher，并由安装脚本自动部署，生产常驻由 Launcher 或外部服务管理器负责。
 
@@ -193,9 +193,11 @@ Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt
 
 任意已登录操作者可在发版页启用或禁用入口。入口默认关闭，状态保存在 SQLite；启用后页面按当前 Origin 显示固定 Windows PowerShell 和 Linux Bash 命令。命令每次动态选择与 Server 版本完全一致、状态为 `done` 且含对应平台 archive 的 Release。
 
-安装器会询问显示名称和安装目录（均有默认值），然后：检测平台、复用合格 Node.js 24+ x64或安装用户私有 Node、下载并校验 Release、保留 `~/.vcpdeck/client-id`、写入 `launcher.env`、复用/私装 PM2、只托管 `vcpdeck-client-launcher`、注册自启并等待 Server 确认在线/版本/能力。失败保留现场，重跑同一命令继续修复。若已有配置指向其他 Server则拒绝。
+安装器会询问显示名称和安装目录（均有默认值），然后：检测平台、复用合格 Node.js 24+ x64或安装用户私有 Node、下载并校验 Release、保留 `~/.vcpdeck/client-id`、写入 `launcher.env`、复用/私装 PM2、只托管 `vcpdeck-client-launcher`、注册自启并等待 Server 确认在线/版本/能力。失败保留现场，重跑同一命令继续修复。若已有配置指向其他 Server则拒绝。Bazzite 依赖层析若提示重启，必须先重启系统，再重跑同一命令。
 
-支持范围：Windows 10/11 x64、Windows Server 2019+ x64；Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ x64 + glibc + systemd。不支持 ARM64、Alpine/musl、CentOS 7、WSL、容器及无 systemd Linux。Node 和 PM2 下载优先国内镜像，失败回退官方源。
+支持范围：Windows 10/11 x64、Windows Server 2019+ x64；Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd。不支持 ARM64、Alpine/musl、CentOS 7、WSL、容器、无 systemd Linux 及其他未经逐项验收的 Fedora Atomic 发行版。Node 和 PM2 下载优先国内镜像，失败回退官方源。
+
+Bazzite 缺少 `curl`、`unzip`、`tar`、`xz` 或系统 CA 证书时，安装器只对实际缺少的固定 RPM 请求 sudo，并优先执行 `rpm-ostree install -y --apply-live`。实时应用未能使依赖可用时，会创建下一次启动使用的 deployment，提示手工重启并重跑同一条安装命令，然后安全退出；安装器不会自动重启。Node.js 和 PM2 仍安装在 `~/.vcpdeck` 用户私有目录，不进入 Bazzite 基础镜像。Bazzite 的 package layering 可能延长或阻塞系统更新，使用前应确认可接受该运维影响。
 
 启用入口意味着任何能访问 Server 的机器都可取得共享 PSK；禁用只阻止新安装，不影响或撤销已有 Client。完整信任边界见 ADR-0018 和 [`security.md`](./security.md)。
 
