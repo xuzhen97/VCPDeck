@@ -1,10 +1,10 @@
 # Release 与自更新子系统设计
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-28｜适用版本：`0.6.11` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-29｜适用版本：`0.6.13` / 当前 `main`
 
 本文描述当前已经落地的 Release、Server/Client 更新和 Launcher 进程守护模型。长期决策理由见 [ADR-0003](../adr/0003-separate-launcher-for-updates.md)；构件生成、首次部署和回滚操作见 [`deployment.md`](../deployment.md)；兼容要求见 [`compatibility.md`](../compatibility.md)；故障处置见 [`operations.md`](../operations.md)。
 
-当前核心实现已经落地，Launcher smoke 已覆盖 prepare/apply、探活和失败回退；`0.6.11` 已完成 Server → Launcher → Windows/Linux 多 Client 生产发布验收。后续版本仍必须重复执行发布门禁，不能以历史验收替代本次构件验证。
+当前核心实现已经落地，Launcher smoke 已覆盖 prepare/apply、探活和失败回退；`0.6.13` 已完成 Server → Launcher → Windows/Linux 多 Client 生产发布验收，并在 Bazzite x64 上完成无系统 Node 的首次安装现场验证与修复。后续版本仍必须重复执行发布门禁，不能以历史验收替代本次构件验证。
 
 ## 1. 目标与非目标
 
@@ -298,11 +298,12 @@ Launcher 启动时：
 
 启动版本时 Launcher 按 manifest `nodeVersion`：
 
-1. 优先使用满足约束的系统 Node；
-2. 否则选择缓存中满足约束的最高版本；
-3. 否则从 Node 发行索引选择并下载满足约束的最高版本。
+1. 优先复用当前正在运行 Launcher 且满足约束的 Node，通过 `process.execPath` 取得绝对路径，不依赖 `PATH` 再探测自身；
+2. 当前运行时不满足时，尝试使用 `PATH` 中满足约束的系统 Node；
+3. 否则选择 Launcher 缓存中满足约束的最高版本；
+4. 否则从 Node 发行索引选择并下载满足约束的最高版本。
 
-当前约束解析只支持类似 `>=24` 的主版本下限，不是完整 SemVer range 实现。下载的 Node archive 当前没有独立发布者签名校验。
+当前约束解析只支持类似 `>=24` 的主版本下限，不是完整 SemVer range 实现。下载的 Node archive 当前没有独立发布者签名校验。复用当前运行时只在其版本满足 manifest 约束时发生；旧 Launcher 运行时不会绕过约束启动新业务版本。
 
 ### 8.4 守护与回退
 

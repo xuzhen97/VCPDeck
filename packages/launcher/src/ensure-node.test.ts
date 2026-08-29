@@ -50,7 +50,10 @@ describe("ensureNodeRuntime", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
-	function run(constraint = ">=24") {
+	function run(
+		constraint = ">=24",
+		currentRuntime = { version: "22.0.0", execPath: "/private/node" },
+	) {
 		return ensureNodeRuntime({
 			constraint,
 			cacheDir,
@@ -59,8 +62,23 @@ describe("ensureNodeRuntime", () => {
 			downloadAndExtract,
 			platform: "linux",
 			arch: "x64",
+			currentRuntime,
 		});
 	}
+
+	it("Launcher 当前运行时满足约束 → 直接复用绝对路径，不依赖 PATH 或下载", async () => {
+		await expect(
+			run(">=24", {
+				version: "26.8.1",
+				execPath: "/home/user/.vcpdeck/runtime/node/node-26.8.1/bin/node",
+			}),
+		).resolves.toBe(
+			"/home/user/.vcpdeck/runtime/node/node-26.8.1/bin/node",
+		);
+		expect(execNodeVersion).not.toHaveBeenCalled();
+		expect(fetchIndex).not.toHaveBeenCalled();
+		expect(downloadAndExtract).not.toHaveBeenCalled();
+	});
 
 	it("系统 node 满足约束 → 直接用系统 node，不下载", async () => {
 		execNodeVersion.mockResolvedValue("v24.5.0");

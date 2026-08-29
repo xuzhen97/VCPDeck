@@ -23,6 +23,8 @@ export interface NodeRuntimeOptions {
 	arch?: string;
 	/** 下载源基址，默认 https://nodejs.org/dist，可配镜像 */
 	downloadBase?: string;
+	/** 当前运行 Launcher 的 Node；默认使用 process.version/process.execPath。 */
+	currentRuntime?: { version: string; execPath: string };
 	/** 测试注入 */
 	execNodeVersion?: () => Promise<string | null>;
 	fetchIndex?: () => Promise<Array<{ version: string }>>;
@@ -105,7 +107,7 @@ function nodeBinPath(
 }
 
 /**
- * 确保 Node 运行时可用，返回可执行文件路径（"node" 或缓存内绝对路径）。
+ * 确保 Node 运行时可用，返回当前、系统或缓存内 Node 的可执行文件路径。
  */
 export async function ensureNodeRuntime(
 	options: NodeRuntimeOptions,
@@ -113,6 +115,13 @@ export async function ensureNodeRuntime(
 	const platform = options.platform ?? process.platform;
 	const arch = options.arch ?? process.arch;
 	const downloadBase = options.downloadBase ?? DEFAULT_DOWNLOAD_BASE;
+	const currentRuntime = options.currentRuntime ?? {
+		version: process.version,
+		execPath: process.execPath,
+	};
+	if (satisfiesConstraint(currentRuntime.version, options.constraint)) {
+		return currentRuntime.execPath;
+	}
 
 	const systemVersion = options.execNodeVersion
 		? await options.execNodeVersion()

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复无系统 Node.js 的 Linux Client 上 PM2 虽能启动 Launcher，但 Launcher 环境仍找不到私有 `node`、继而尝试从官方源下载第二份运行时并循环超时的问题；生成的 ecosystem 现在只持久化前置私有 Node `bin` 的安全 `PATH`，不写入其他安装器环境变量；Launcher 自身也会优先复用满足 manifest 约束的 `process.execPath`，不再依赖 `PATH` 重新发现当前运行时。
+
 ## [0.6.13] - 2026-08-29
 
 ### Fixed

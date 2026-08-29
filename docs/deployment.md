@@ -193,7 +193,7 @@ Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt
 
 任意已登录操作者可在发版页启用或禁用入口。入口默认关闭，状态保存在 SQLite；启用后页面按当前 Origin 显示固定 Windows PowerShell 和 Linux Bash 命令。命令每次动态选择与 Server 版本完全一致、状态为 `done` 且含对应平台 archive 的 Release。
 
-安装器会询问显示名称和安装目录（均有默认值），然后：检测平台、复用合格 Node.js 24+ x64 或安装用户私有 Node、下载并校验 Release、保留 `~/.vcpdeck/client-id`、写入 `launcher.env`、复用/私装 PM2、只托管 `vcpdeck-client-launcher`、注册自启并等待 Server 确认在线/版本/能力。私有 Node 的 `bin` 会显式注入 npm/PM2 子进程环境，不要求系统预装 Node 或把私有运行时写入用户全局 `PATH`。失败保留现场，重跑同一命令继续修复。若已有配置指向其他 Server 则拒绝。Bazzite 依赖分层若提示重启，必须先重启系统，再重跑同一命令。
+安装器会询问显示名称和安装目录（均有默认值），然后：检测平台、复用合格 Node.js 24+ x64 或安装用户私有 Node、下载并校验 Release、保留 `~/.vcpdeck/client-id`、写入 `launcher.env`、复用/私装 PM2、只托管 `vcpdeck-client-launcher`、注册自启并等待 Server 确认在线/版本/能力。私有 Node 的 `bin` 会显式注入 npm 安装子进程、PM2 Launcher 进程和 systemd startup 环境，不要求系统预装 Node 或把私有运行时写入用户全局 `PATH`；ecosystem 只持久化该安全 `PATH`，不复制安装器的其他环境变量。失败保留现场，重跑同一命令继续修复。若已有配置指向其他 Server 则拒绝。Bazzite 依赖分层若提示重启，必须先重启系统，再重跑同一命令。
 
 支持范围：Windows 10/11 x64、Windows Server 2019+ x64；Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd。不支持 ARM64、Alpine/musl、CentOS 7、WSL、容器、无 systemd Linux 及其他未经逐项验收的 Fedora Atomic 发行版。Node 和 PM2 下载优先国内镜像，失败回退官方源。
 

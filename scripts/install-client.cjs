@@ -321,6 +321,7 @@ function writeEcosystem(appDir, nodePath, envPath) {
 	writeFileSync(envLoaderPath, envLoader);
 
 	const path = join(appDir, "ecosystem.config.cjs");
+	const runtimeEnv = buildNodeRuntimeEnv(nodePath, { PATH: process.env.PATH || "" });
 	const config = `module.exports = ${JSON.stringify(
 		{
 			apps: [
@@ -333,6 +334,7 @@ function writeEcosystem(appDir, nodePath, envPath) {
 					node_args: [`--require=${envLoaderPath}`],
 					// 同时阻止 PM2 在新建进程时继承安装器自身的 VCPDeck 配置。
 					filter_env: ["VCPDECK_"],
+					env: runtimeEnv,
 					cwd: appDir,
 					autorestart: true,
 					restart_delay: 2000,

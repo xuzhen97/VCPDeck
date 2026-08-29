@@ -111,6 +111,11 @@ test("writeEcosystem 强制以 launcher.env 覆盖 PM2 缓存的 VCPDECK 环境"
 		assert.deepEqual(config.apps[0].node_args, [
 			`--require=${envLoaderPath}`,
 		]);
+		assert.deepEqual(Object.keys(config.apps[0].env), ["PATH"]);
+		assert.ok(
+			config.apps[0].env.PATH.startsWith(`${dirname(process.execPath)}${delimiter}`),
+			"PM2 Launcher 环境应优先使用安装器选定的私有 Node",
+		);
 
 		const result = spawnSync(
 			process.execPath,
