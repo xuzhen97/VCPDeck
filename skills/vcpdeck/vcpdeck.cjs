@@ -97,6 +97,7 @@ var require_update = __commonJS({
     exports2.parseReleaseUploadCreateInput = parseReleaseUploadCreateInput;
     exports2.parseReleaseUploadPartRefresh = parseReleaseUploadPartRefresh;
     exports2.parseReleaseUploadComplete = parseReleaseUploadComplete;
+    exports2.isReleaseArchiveAvailable = isReleaseArchiveAvailable;
     exports2.platformFromOs = platformFromOs;
     var ReleaseStatus2;
     (function(ReleaseStatus3) {
@@ -166,6 +167,9 @@ var require_update = __commonJS({
     function hasOnlyKeys(value2, keys) {
       const actual = Object.keys(value2);
       return actual.length === keys.length && actual.every((key) => keys.includes(key));
+    }
+    function isReleaseArchiveAvailable(archive) {
+      return Boolean(archive && (archive.availability === void 0 || archive.availability === "available"));
     }
     function platformFromOs(os) {
       if (!os)
@@ -1334,7 +1338,7 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -1378,6 +1382,9 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "platformFromOs", { enumerable: true, get: function() {
       return update_js_1.platformFromOs;
+    } });
+    Object.defineProperty(exports2, "isReleaseArchiveAvailable", { enumerable: true, get: function() {
+      return update_js_1.isReleaseArchiveAvailable;
     } });
     var pi_js_1 = require_pi();
     Object.defineProperty(exports2, "PI_ERROR_CODES", { enumerable: true, get: function() {
@@ -2022,6 +2029,8 @@ function createReleasesApi(client) {
       });
       return result.data;
     },
+    cleanupPreview: (signal) => client.request("GET", "/api/releases/cleanup/preview", void 0, signal),
+    cleanupRun: (signal) => client.request("POST", "/api/releases/cleanup/run", void 0, signal),
     status: (signal) => client.request("GET", "/api/status", void 0, signal)
   };
 }

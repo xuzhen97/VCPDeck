@@ -8,12 +8,14 @@ import { ReleaseController, releaseZipPath } from "./release.controller.js";
 import { ReleaseError } from "./release.service.js";
 
 function mockService() {
+	const findByVersion = vi.fn();
 	return {
 		create: vi.fn(),
 		addArchive: vi.fn(),
 		hasAllArchives: vi.fn(),
 		list: vi.fn(),
-		findByVersion: vi.fn(),
+		findByVersion,
+		findByVersionWithStorage: findByVersion,
 		verifyZipSha256: vi.fn(),
 	};
 }
@@ -64,6 +66,7 @@ describe("ReleaseController", () => {
 
 	beforeEach(async () => {
 		service = mockService();
+		service.findByVersionWithStorage = service.findByVersion;
 		orchestrator = mockOrchestrator();
 		orchestrator.startRelease.mockResolvedValue(undefined);
 		storage = mockStorage();
@@ -314,6 +317,51 @@ describe("ReleaseController", () => {
 			);
 
 			expect(err.getStatus()).toBe(404);
+		});
+
+		it("deleting archive 返回清理中的稳定冲突错误", async () => {
+			service.findByVersion.mockResolvedValue({
+				version: "1.2.1",
+				archives: {
+					"win-x64": { ...winArchive, availability: "deleting" },
+				},
+			});
+			const res = mockRes();
+
+			const err = await catchHttpError(
+				controller.download("1.2.1", res as never, "win-x64"),
+			);
+
+			expect(err.getStatus()).toBe(409);
+			expect(err.getResponse()).toMatchObject({
+				code: "RELEASE_ARCHIVE_CLEANING",
+			});
+			expect(res.sendFile).not.toHaveBeenCalled();
+		});
+
+		it("cleaned archive 返回不可恢复的稳定错误", async () => {
+			service.findByVersion.mockResolvedValue({
+				version: "1.2.1",
+				archives: {
+					"win-x64": {
+						...winArchive,
+						availability: "cleaned",
+						cleanedAt: "2026-08-29T00:00:00.000Z",
+						cleanupReason: "retention_policy",
+					},
+				},
+			});
+			const res = mockRes();
+
+			const err = await catchHttpError(
+				controller.download("1.2.1", res as never, "win-x64"),
+			);
+
+			expect(err.getStatus()).toBe(410);
+			expect(err.getResponse()).toMatchObject({
+				code: "RELEASE_ARCHIVE_CLEANED",
+			});
+			expect(res.sendFile).not.toHaveBeenCalled();
 		});
 
 		it("存在时 sendFile 到对应平台存储路径", async () => {

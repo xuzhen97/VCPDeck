@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Daemon, type VersionRetentionLike } from "./daemon.js";
 import { downloadWithRetry } from "./daemon.js";
 
 const tempDirs: string[] = [];
@@ -11,6 +12,112 @@ async function tempZipPath(): Promise<string> {
 	tempDirs.push(dir);
 	return join(dir, "x.zip");
 }
+
+describe("Daemon 版本保留生命周期", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function makeRetention(): VersionRetentionLike & {
+		initialize: ReturnType<typeof vi.fn>;
+		recordSuccessful: ReturnType<typeof vi.fn>;
+		cleanup: ReturnType<typeof vi.fn>;
+	} {
+		return {
+			initialize: vi.fn().mockResolvedValue(undefined),
+			recordSuccessful: vi.fn().mockResolvedValue(true),
+			cleanup: vi.fn().mockResolvedValue({
+				removed: [],
+				failed: [],
+				disabled: false,
+			}),
+		};
+	}
+
+	function internals(daemon: Daemon): {
+		initializeRetention(): Promise<void>;
+		scheduleRetentionStartupCleanup(): void;
+		cancelRetentionStartupCleanup(): void;
+		onSuccessfulApply(version: string, previous: string | null): Promise<void>;
+		pendingVersion: string | null;
+	} {
+		return daemon as unknown as {
+			initializeRetention(): Promise<void>;
+			scheduleRetentionStartupCleanup(): void;
+			cancelRetentionStartupCleanup(): void;
+			onSuccessfulApply(version: string, previous: string | null): Promise<void>;
+			pendingVersion: string | null;
+		};
+	}
+
+	it("启动 current 后初始化，并在稳定延时后执行补扫", async () => {
+		vi.useFakeTimers();
+		const retention = makeRetention();
+		const daemon = new Daemon({
+			appDir: "/tmp/vcpdeck-launcher-test",
+			artifact: "client",
+			retention,
+		});
+		const methods = internals(daemon);
+
+		await methods.initializeRetention();
+		methods.scheduleRetentionStartupCleanup();
+		await vi.advanceTimersByTimeAsync(29_999);
+		expect(retention.cleanup).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(retention.cleanup).toHaveBeenCalledOnce();
+		expect(retention.cleanup).toHaveBeenCalledWith(undefined);
+	});
+
+	it("启动补扫执行时保护尚未 apply 的 pending target", async () => {
+		vi.useFakeTimers();
+		const retention = makeRetention();
+		const daemon = new Daemon({
+			appDir: "/tmp/vcpdeck-launcher-test",
+			artifact: "client",
+			retention,
+		});
+		const methods = internals(daemon);
+		methods.pendingVersion = "1.3.0";
+
+		methods.scheduleRetentionStartupCleanup();
+		await vi.advanceTimersByTimeAsync(30_000);
+
+		expect(retention.cleanup).toHaveBeenCalledWith(new Set(["1.3.0"]));
+	});
+
+	it("成功 apply 记录 target，并保护 target 与 previous", async () => {
+		const retention = makeRetention();
+		const daemon = new Daemon({
+			appDir: "/tmp/vcpdeck-launcher-test",
+			artifact: "client",
+			retention,
+		});
+
+		await internals(daemon).onSuccessfulApply("1.3.0", "1.2.0");
+
+		expect(retention.recordSuccessful).toHaveBeenCalledWith("1.3.0");
+		expect(retention.cleanup).toHaveBeenCalledWith(new Set(["1.3.0", "1.2.0"]));
+	});
+
+	it("shutdown 前取消尚未执行的启动补扫", async () => {
+		vi.useFakeTimers();
+		const retention = makeRetention();
+		const daemon = new Daemon({
+			appDir: "/tmp/vcpdeck-launcher-test",
+			artifact: "client",
+			retention,
+		});
+		const methods = internals(daemon);
+
+		methods.scheduleRetentionStartupCleanup();
+		methods.cancelRetentionStartupCleanup();
+		await vi.advanceTimersByTimeAsync(30_000);
+
+		expect(retention.cleanup).not.toHaveBeenCalled();
+	});
+});
 
 describe("downloadWithRetry", () => {
 	afterEach(async () => {

@@ -23,6 +23,8 @@ export interface UpdaterDeps {
 	startProcess(): Promise<unknown>;
 	/** 健康探活（服务端：GET /api/status；客户端：进程存活） */
 	probe(version: string): Promise<boolean>;
+	/** 成功切换后的尽力记录钩子；失败不得影响已经健康的版本 */
+	onSuccessfulApply?: (version: string, previous: string | null) => Promise<void>;
 	probeRetries?: number;
 	probeIntervalMs?: number;
 }
@@ -98,7 +100,16 @@ export class Updater {
 		await this.deps.startProcess();
 
 		const healthy = await this.probeWithRetry(version);
-		if (healthy) return;
+		if (healthy) {
+			if (this.deps.onSuccessfulApply) {
+				try {
+					await this.deps.onSuccessfulApply(version, previous);
+				} catch {
+					console.warn("[launcher] 版本保留记录失败，继续使用已切换版本");
+				}
+			}
+			return;
+		}
 
 		if (previous) {
 			await this.deps.stopProcess();

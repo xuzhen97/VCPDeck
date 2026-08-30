@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Release archive 与 Launcher 本地版本清理：Server 按最近 3 个成功 Release + 30 天保底策略清理 Local/Provider 正文和过期上传会话，`/releases` 页面支持预览与确认执行；Release 审计行和 `clientStates` 保留不删。
+- Release archive 新增 `available`、`deleting`、`cleaned` 生命周期展示与安全分流；清理失败可恢复，Provider 不可用时不会猜测删除。
+- 新安装 Launcher 记录 `retention.json`，保留 current、最近 2 个成功历史版本、previous 和 prepare/apply 目标；新增一次性升级脚本的 `--app-dir`、`--source`、`--pm2-name` 参数，支持迁移同机 Server Launcher。
+
+### Changed
+
+- Launcher 启动后在稳定窗口执行本地版本补扫；保留状态损坏时暂停自动删除，存量 Launcher 不通过业务 Release 自动升级。
+
 ### Fixed
 
 - 修复无系统 Node.js 的 Linux Client 上 PM2 虽能启动 Launcher，但 Launcher 环境仍找不到私有 `node`、继而尝试从官方源下载第二份运行时并循环超时的问题；生成的 ecosystem 现在只持久化前置私有 Node `bin` 的安全 `PATH`，不写入其他安装器环境变量；Launcher 自身也会优先复用满足 manifest 约束的 `process.execPath`，不再依赖 `PATH` 重新发现当前运行时。

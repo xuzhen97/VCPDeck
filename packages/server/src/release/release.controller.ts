@@ -5,6 +5,7 @@
  */
 import {
 	BadRequestException,
+	ConflictException,
 	Controller,
 	Get,
 	HttpException,
@@ -17,10 +18,12 @@ import {
 	Res,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { createWriteStream, existsSync } from "node:fs";
-import { copyFile, mkdir, rename, rm, stat } from "node:fs/promises";
+import { constants, createWriteStream, existsSync } from "node:fs";
+import { copyFile, link, mkdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { releasesDir, releaseZipPath } from "./release-paths.js";
+export { releasesDir, releaseZipPath } from "./release-paths.js";
 import { pipeline } from "node:stream/promises";
 import type { IncomingMessage } from "node:http";
 import type { Response } from "express";
@@ -57,17 +60,22 @@ function isPlatform(v: string | undefined): v is ReleasePlatform {
 	return v === "win-x64" || v === "linux-x64";
 }
 
-/** release 存储目录（默认相对 server 运行目录，可经环境变量覆盖） */
-export function releasesDir(): string {
-	return process.env.VCPDECK_RELEASES_DIR || "./data/releases";
-}
-
-/** release zip 最终存储路径（按平台分开；绝对路径，res.sendFile 要求） */
-export function releaseZipPath(version: string, platform: ReleasePlatform): string {
-	return resolve(
-		process.env.VCPDECK_RELEASES_DIR || "./data/releases",
-		`vcpdeck-${version}-${platform}.zip`,
-	);
+/** Provider 返回的直链只允许带主机名的 HTTP(S) URL。 */
+function safeDirectUrl(value: string): string | null {
+	try {
+		const parsed = new URL(value);
+		if (
+			(parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+			!parsed.hostname ||
+			parsed.username ||
+			parsed.password
+		) {
+			return null;
+		}
+		return parsed.toString();
+	} catch {
+		return null;
+	}
 }
 
 /** 上传临时目录（校验通过后移动到最终路径） */
@@ -89,15 +97,21 @@ function toHttp(e: ReleaseError): HttpException {
 	);
 }
 
-/** 移动到最终路径；跨盘 EXDEV 时回退 copy+rm */
-async function moveFile(src: string, dest: string): Promise<void> {
+/** 移动到最终路径且不覆盖既有 archive；跨盘/不支持硬链接时独占复制。 */
+async function moveFileExclusive(src: string, dest: string): Promise<void> {
 	try {
-		await rename(src, dest);
-	} catch (e) {
-		if ((e as NodeJS.ErrnoException).code !== "EXDEV") throw e;
-		await copyFile(src, dest);
+		await link(src, dest);
 		await rm(src, { force: true });
+		return;
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "EEXIST") throw error;
+		if (code !== "EXDEV" && code !== "EPERM" && code !== "EOPNOTSUPP" && code !== "ENOSYS") {
+			throw error;
+		}
 	}
+	await copyFile(src, dest, constants.COPYFILE_EXCL);
+	await rm(src, { force: true });
 }
 
 @Controller("api/releases")
@@ -134,21 +148,37 @@ export class ReleaseController {
 		if (!isPlatform(platform)) {
 			throw new BadRequestException("platform 应为 win-x64 或 linux-x64");
 		}
-		const info = await this.service.findByVersion(version);
+		const info = await this.service.findByVersionWithStorage(version);
 		if (!info) {
 			throw new NotFoundException({
 				code: "RELEASE_NOT_FOUND",
 				message: `release ${version} 不存在`,
 			});
 		}
-		if (!info.archives[platform]) {
+		const archive = info.archives[platform];
+		if (!archive) {
 			throw new NotFoundException({
 				code: "RELEASE_ARCHIVE_MISSING",
 				message: `release ${version} 缺少 ${platform} 构件`,
 			});
 		}
+		if (archive.availability === "deleting") {
+			throw new ConflictException({
+				code: "RELEASE_ARCHIVE_CLEANING",
+				message: "更新包正在清理，请稍后重试",
+			});
+		}
+		if (archive.availability === "cleaned") {
+			throw new HttpException(
+				{
+					code: "RELEASE_ARCHIVE_CLEANED",
+					message: "更新包归档已清理",
+				},
+				410,
+			);
+		}
+		// 上面已排除缺失、deleting 和 cleaned，剩余状态均为可用 archive。
 		// ADR-0019：外部存储后端 302 到临时直链，目标机直连下载不占 Server 带宽
-		const archive = info.archives[platform];
 		if (archive?.storage?.mode === "direct" && archive.storage.key) {
 			const directUrl = await this.resolveDirectUrl(
 				version,
@@ -228,12 +258,28 @@ export class ReleaseController {
 			}
 			const fileName = `vcpdeck-${version}-${platform}.zip`;
 			const size = (await stat(tempPath)).size;
+				const existing = await this.service.findByVersionWithStorage(version);
+			if (existing?.archives[platform]) {
+				throw new ReleaseError(
+					"RELEASE_ARCHIVE_EXISTS",
+					`release ${version} 已存在 ${platform} 构件`,
+				);
+			}
 			const finalPath = releaseZipPath(version, platform);
 			await mkdir(releasesDir(), { recursive: true });
-			await moveFile(tempPath, finalPath);
+			try {
+				await moveFileExclusive(tempPath, finalPath);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+					throw new ReleaseError(
+						"RELEASE_ARCHIVE_EXISTS",
+						`release ${version} 已存在 ${platform} 构件`,
+					);
+				}
+				throw error;
+			}
 			moved = true;
 			const archive = { sha256, fileName, size };
-			const existing = await this.service.findByVersion(version);
 			const release = existing
 				? await this.service.addArchive(version, platform, archive)
 				: await this.service.create({
@@ -276,12 +322,18 @@ export class ReleaseController {
 		for (let attempt = 0; attempt < DIRECT_URL_ATTEMPTS; attempt++) {
 			try {
 				const direct = await this.storage.getDirectDownloadUrl(key);
-				if (direct?.url) {
+				const directUrl = direct?.url ? safeDirectUrl(direct.url) : null;
+				const expiresAt = direct?.expiresAt;
+				if (directUrl) {
 					// 过期时间未知/非法时不缓存，避免短 TTL 直链被长期复用
-					if (Number.isFinite(direct.expiresAt) && direct.expiresAt > 0) {
-						this.directUrls.set(cacheKey, direct.url, direct.expiresAt);
+					if (
+						typeof expiresAt === "number" &&
+						Number.isFinite(expiresAt) &&
+						expiresAt > 0
+					) {
+						this.directUrls.set(cacheKey, directUrl, expiresAt);
 					}
-					return direct.url;
+					return directUrl;
 				}
 				return null;
 			} catch (e) {

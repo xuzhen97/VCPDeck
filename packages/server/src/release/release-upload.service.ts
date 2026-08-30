@@ -6,7 +6,6 @@ import {
 	parseReleaseUploadCreateInput,
 	parseReleaseUploadPartRefresh,
 	type ActorContext,
-	type ReleaseArchiveInfo,
 	type ReleaseInfo,
 	type ReleaseUploadCreateInput,
 	type ReleaseUploadPart,
@@ -14,7 +13,12 @@ import {
 } from "@vcpdeck/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { StorageService } from "../storage/storage.service.js";
-import { ReleaseError, ReleaseService } from "./release.service.js";
+import {
+	ReleaseError,
+	ReleaseService,
+	toPublicReleaseInfo,
+	type ServerReleaseArchiveInfo,
+} from "./release.service.js";
 import { ReleaseOrchestrator } from "./release.orchestrator.js";
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -118,10 +122,12 @@ export class ReleaseUploadService {
 		const existingArchive = existingRelease?.archives[platform];
 		if (existingArchive) {
 			if (
+				existingArchive.availability !== "deleting" &&
+				existingArchive.availability !== "cleaned" &&
 				existingArchive.sha256 === input.sha256 &&
 				existingArchive.size === input.size
 			) {
-				return { mode: "existing", release: existingRelease };
+				return { mode: "existing", release: existingRelease as ReleaseInfo };
 			}
 			throw new ReleaseError(
 				"RELEASE_ARCHIVE_EXISTS",
@@ -148,16 +154,21 @@ export class ReleaseUploadService {
 					"同版本平台已有不同构件的上传会话",
 				);
 			}
-			if (existing.status === "completed") {
+			if (
+				existing.status === "completed" ||
+				existing.status === "provider_completed"
+			) {
 				throw new ReleaseUploadError(
 					ReleaseUploadErrorCode.SESSION_CONFLICT,
-					"上传会话已经完成",
+					existing.status === "completed"
+						? "上传会话已经完成"
+						: "上传会话已完成 Provider 合并，请继续完成登记",
 				);
 			}
 			if (existing.expiresAt.getTime() > Date.now()) {
 				return this.resumeSession(existing);
 			}
-			await this.storage.delete(existing.providerKey).catch(() => undefined);
+			await this.providerCall(() => this.storage.delete(existing.providerKey));
 			await this.uploadSessions.delete({ where: { id: existing.id } });
 		}
 
@@ -236,13 +247,19 @@ export class ReleaseUploadService {
 				"上传字节数与创建会话时声明值不一致",
 			);
 		}
-		const already = await this.releases.findByVersion(row.version);
+		const already = await this.releases.findByVersionWithStorage(row.version);
 		const platform = row.platform as "win-x64" | "linux-x64";
 		const registered = already?.archives[platform];
 		if (row.status === "completed" || registered) {
+			if (!already || !registered) {
+				throw new ReleaseUploadError(
+					ReleaseUploadErrorCode.SESSION_CONFLICT,
+					"上传会话与已登记 Release 构件不一致",
+				);
+			}
 			if (
-				!already ||
-				!registered ||
+				registered.availability === "deleting" ||
+				registered.availability === "cleaned" ||
 				registered.sha256 !== row.sha256 ||
 				registered.size !== row.size ||
 				registered.storage?.key !== row.providerKey
@@ -253,36 +270,42 @@ export class ReleaseUploadService {
 				);
 			}
 			if (row.status !== "completed") {
-				await this.markCompleted(row.id, already);
+				await this.markCompleted(row.id, toPublicReleaseInfo(already));
 			}
-			return { release: already };
+			return { release: toPublicReleaseInfo(already) };
 		}
-		this.assertNotExpired(row.expiresAt);
+		if (row.status !== "provider_completed") {
+			this.assertNotExpired(row.expiresAt);
 
-		// Provider 创建上传任务时已固定总大小；CLI 完成上报也必须与会话大小一致。
-		// 构件内容完整性由 Launcher 下载后的独立 SHA-256 复核兜底。
-		await this.providerCall(() =>
-			this.storage.completeReleaseDirectUpload(
-				row.providerKey,
-				row.providerUploadId,
-			),
-		);
-		const archive: ReleaseArchiveInfo = {
+			// Provider 创建上传任务时已固定总大小；CLI 完成上报也必须与会话大小一致。
+			// 构件内容完整性由 Launcher 下载后的独立 SHA-256 复核兜底。
+			await this.providerCall(() =>
+				this.storage.completeReleaseDirectUpload(
+					row.providerKey,
+					row.providerUploadId,
+				),
+			);
+			await this.markProviderCompleted(row.id);
+		}
+		const archive: ServerReleaseArchiveInfo = {
 			sha256: row.sha256,
 			size: row.size,
 			fileName: this.fileName(row.version, platform),
+			availability: "available",
 			storage: {
 				provider: row.provider,
 				key: row.providerKey,
 				mode: "direct",
 			},
 		};
-		const current = await this.releases.findByVersion(row.version);
+		const current = await this.releases.findByVersionWithStorage(row.version);
 		let release: ReleaseInfo;
 		if (current?.archives[platform]) {
 			const stored = current.archives[platform];
 			if (
-				stored?.sha256 !== archive.sha256 ||
+				stored.availability === "deleting" ||
+				stored.availability === "cleaned" ||
+				stored.sha256 !== archive.sha256 ||
 				stored.size !== archive.size ||
 				stored.storage?.key !== archive.storage?.key
 			) {
@@ -291,7 +314,7 @@ export class ReleaseUploadService {
 					"Release 已登记不同构件",
 				);
 			}
-			release = current;
+			release = toPublicReleaseInfo(current);
 		} else {
 			release = current
 				? await this.releases.addArchive(row.version, platform, archive)
@@ -358,6 +381,13 @@ export class ReleaseUploadService {
 		}
 		this.assertNotExpired(row.expiresAt);
 		return row;
+	}
+
+	private async markProviderCompleted(sessionId: string): Promise<void> {
+		await this.uploadSessions.update({
+			where: { id: sessionId },
+			data: { status: "provider_completed" },
+		});
 	}
 
 	private async markCompleted(

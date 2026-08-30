@@ -13,6 +13,7 @@ const path = require("node:path");
 const os = require("node:os");
 const {
 	createIntegrationTestDb,
+	initializeIntegrationTestDb,
 	cleanupIntegrationTestDb,
 } = require("./integration-test-db.cjs");
 
@@ -1133,11 +1134,10 @@ async function main() {
 	killPort();
 	await sleep(1000);
 
-	// 1. Start server
+	// 1. 初始化隔离数据库，然后直接启动 Server 构建产物。
 	console.log("[setup] Starting server...");
-	const serverCommand = isWin ? process.env.ComSpec || "cmd.exe" : "pnpm";
-	const serverArgs = isWin ? ["/d", "/s", "/c", "pnpm start"] : ["start"];
-	_serverProcess = spawn(serverCommand, serverArgs, {
+	initializeIntegrationTestDb(testDatabase, serverDir);
+	_serverProcess = spawn(process.execPath, ["dist/main.js"], {
 		cwd: serverDir,
 		stdio: ["ignore", "pipe", "pipe"],
 		env: {

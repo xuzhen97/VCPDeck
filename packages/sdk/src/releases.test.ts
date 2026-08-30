@@ -45,6 +45,39 @@ describe("releases", () => {
 		]);
 	});
 
+	it("调用清理预览和按策略执行 API", async () => {
+		const request = vi
+			.fn()
+			.mockResolvedValueOnce({
+				policy: {
+					successfulReleaseCount: 3,
+					minimumAgeDays: 30,
+					uploadSessionGraceHours: 24,
+				},
+				candidates: [],
+				expiredUploadSessions: { count: 0, bytes: 0 },
+				estimatedReclaimableBytes: 0,
+			})
+			.mockResolvedValueOnce({ cleanedItems: 0 });
+		const api = createReleasesApi({ request, requestRaw: vi.fn() } as never);
+
+		await api.cleanupPreview();
+		await api.cleanupRun();
+
+		expect(request.mock.calls).toContainEqual([
+			"GET",
+			"/api/releases/cleanup/preview",
+			undefined,
+			undefined,
+		]);
+		expect(request.mock.calls).toContainEqual([
+			"POST",
+			"/api/releases/cleanup/run",
+			undefined,
+			undefined,
+		]);
+	});
+
 	it("通过原始 body 上传按平台归档并返回 Release", async () => {
 		const release = {
 			version: "1.2.3",

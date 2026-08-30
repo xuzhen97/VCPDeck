@@ -67,7 +67,17 @@ function fixture(options: { backend?: "local" | "alibaba"; row?: any } = {}) {
 	};
 	const releases = {
 		findByVersion: vi.fn(async () => null as any),
-		create: vi.fn(async ({ archives }: any) => release(archives) as any),
+		findByVersionWithStorage: vi.fn(async () => null as any),
+		create: vi.fn(async ({ archives }: any) => {
+			const publicArchives = Object.fromEntries(
+				Object.entries(archives).map(([platform, archive]: [string, any]) => {
+					if (!archive.storage) return [platform, archive];
+					const { key: _key, ...storage } = archive.storage;
+					return [platform, { ...archive, storage }];
+				}),
+			);
+			return release(publicArchives) as any;
+		}),
 		addArchive: vi.fn(
 			async (_version: string, platform: string, archive: any) =>
 				release({ [platform]: archive }) as any,
@@ -157,6 +167,7 @@ describe("ReleaseUploadService", () => {
 		releases.findByVersion.mockResolvedValueOnce(
 			release({ "win-x64": { sha256: "b".repeat(64), size: 100 } }),
 		);
+		releases.findByVersionWithStorage.mockResolvedValueOnce(null);
 		await expect(service.createSession(input)).rejects.toMatchObject({
 			code: "RELEASE_ARCHIVE_EXISTS",
 		});
@@ -200,13 +211,14 @@ describe("ReleaseUploadService", () => {
 			data: { status: "completed" },
 		});
 		expect(result.release.version).toBe("0.2.1");
+		expect(JSON.stringify(result.release)).not.toContain("provider-file");
 	});
 
 	it("Release 已登记但会话未完成时修复状态且不重复 complete", async () => {
 		const { service, releases, storage, delegate } = fixture({
 			row: pendingRow(),
 		});
-		releases.findByVersion.mockResolvedValue(
+		releases.findByVersionWithStorage.mockResolvedValue(
 			release({
 				"win-x64": {
 					sha256: SHA,
@@ -227,6 +239,45 @@ describe("ReleaseUploadService", () => {
 		await vi.waitFor(() =>
 			expect(orchestrator.startRelease).toHaveBeenCalledWith("0.2.1"),
 		);
+	});
+
+	it("cleaned archive 仍占用版本，不作为幂等已有构件", async () => {
+		const { service, releases, storage } = fixture();
+		releases.findByVersion.mockResolvedValueOnce(
+			release({
+				"win-x64": {
+					sha256: SHA,
+					size: 100,
+					fileName: "win.zip",
+					availability: "cleaned",
+					cleanedAt: "2026-08-29T00:00:00.000Z",
+					cleanupReason: "retention_policy",
+				},
+			}),
+		);
+		await expect(service.createSession(input)).rejects.toMatchObject({
+			code: "RELEASE_ARCHIVE_EXISTS",
+		});
+		expect(storage.createReleaseDirectUpload).not.toHaveBeenCalled();
+	});
+
+	it("Provider 合并后登记失败时持久化 provider_completed，重试不重复合并", async () => {
+		const { service, storage, releases, delegate } = fixture({
+			row: pendingRow(),
+		});
+		releases.create.mockRejectedValueOnce(new Error("登记暂时失败"));
+		await expect(service.completeSession("session-1", 100)).rejects.toThrow(
+			"登记暂时失败",
+		);
+		expect(storage.completeReleaseDirectUpload).toHaveBeenCalledOnce();
+		expect(delegate.update).toHaveBeenCalledWith({
+			where: { id: "session-1" },
+			data: { status: "provider_completed" },
+		});
+
+		const result = await service.completeSession("session-1", 100);
+		expect(storage.completeReleaseDirectUpload).toHaveBeenCalledOnce();
+		expect(result.release.version).toBe("0.2.1");
 	});
 
 	it("Provider 原始失败归一化为安全稳定错误", async () => {

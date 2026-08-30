@@ -3,10 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Inject, Injectable } from "@nestjs/common";
 import {
-	type ActorContext,
-	type ReleasePlatform,
 	ReleaseStatus,
 	VERSION,
+	isReleaseArchiveAvailable,
+	type ActorContext,
+	type ReleasePlatform,
 } from "@vcpdeck/shared";
 import { ClientService } from "../client/client.service.js";
 import { clientPsk } from "../client/client-psk.js";
@@ -14,6 +15,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { ReleaseService } from "../release/release.service.js";
 
 const CONFIG_ID = "default";
+
 const ClientInstallerErrorCode = {
 	DISABLED: "CLIENT_INSTALLER_DISABLED",
 	RELEASE_NOT_READY: "CLIENT_INSTALLER_RELEASE_NOT_READY",
@@ -99,8 +101,14 @@ export class ClientInstallerService {
 			serverVersion: VERSION,
 			releaseReady,
 			platforms: {
-				"win-x64": this.platformStatus(releaseReady, Boolean(release?.archives["win-x64"])),
-				"linux-x64": this.platformStatus(releaseReady, Boolean(release?.archives["linux-x64"])),
+				"win-x64": this.platformStatus(
+					releaseReady,
+					isReleaseArchiveAvailable(release?.archives["win-x64"]),
+				),
+				"linux-x64": this.platformStatus(
+					releaseReady,
+					isReleaseArchiveAvailable(release?.archives["linux-x64"]),
+				),
 			},
 		};
 	}
@@ -124,7 +132,13 @@ export class ClientInstallerService {
 		const releasePlatform: ReleasePlatform = platform;
 		const release = await this.requireReadyRelease(releasePlatform);
 		const archive = release.archives[releasePlatform];
-		if (!archive) throw new Error(`当前 Release 缺少 ${releasePlatform} 构件`);
+		if (!archive || !isReleaseArchiveAvailable(archive)) {
+			throw new ClientInstallerError(
+				ClientInstallerErrorCode.ARCHIVE_MISSING,
+				`当前 Release 缺少可用的 ${releasePlatform} 构件`,
+				409,
+			);
+		}
 		const installer = this.readAsset("install-client.cjs");
 		const lowLevelInstaller = this.readAsset("install.cjs");
 		return {
@@ -146,7 +160,13 @@ export class ClientInstallerService {
 		const releasePlatform: ReleasePlatform = platform;
 		const release = await this.requireReadyRelease(releasePlatform);
 		const archive = release.archives[releasePlatform];
-		if (!archive) throw new Error(`当前 Release 缺少 ${releasePlatform} 构件`);
+		if (!archive || !isReleaseArchiveAvailable(archive)) {
+			throw new ClientInstallerError(
+				ClientInstallerErrorCode.ARCHIVE_MISSING,
+				`当前 Release 缺少可用的 ${releasePlatform} 构件`,
+				409,
+			);
+		}
 		return {
 			serverVersion: VERSION,
 			releaseVersion: release.version,
@@ -202,10 +222,10 @@ export class ClientInstallerService {
 				409,
 			);
 		}
-		if (!release.archives[platform]) {
+		if (!isReleaseArchiveAvailable(release.archives[platform])) {
 			throw new ClientInstallerError(
 				ClientInstallerErrorCode.ARCHIVE_MISSING,
-				`当前 Release 缺少 ${platform} 构件`,
+				`当前 Release 缺少可用的 ${platform} 构件`,
 				409,
 			);
 		}

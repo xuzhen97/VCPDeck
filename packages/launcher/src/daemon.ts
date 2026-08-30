@@ -16,6 +16,7 @@ import { ensureNodeRuntime } from "./ensure-node.js";
 import { VersionStore } from "./versions.js";
 import { Updater } from "./updater.js";
 import { createControlServer, runPreStart } from "./control.js";
+import { VersionRetention, type RetentionCleanupResult } from "./version-retention.js";
 
 export interface DaemonConfig {
 	/** launcher 应用目录（默认 ~/.vcpdeck/launcher） */
@@ -25,6 +26,14 @@ export interface DaemonConfig {
 	/** server 探活 URL（默认 http://127.0.0.1:3001/api/status） */
 	probeUrl?: string;
 	log?: (msg: string) => void;
+	/** 测试或宿主注入的本地版本保留器 */
+	retention?: VersionRetentionLike;
+}
+
+export interface VersionRetentionLike {
+	initialize(): Promise<void>;
+	recordSuccessful(version: string): Promise<boolean>;
+	cleanup(protectedVersions?: ReadonlySet<string>): Promise<RetentionCleanupResult>;
 }
 
 const MAX_CRASH_RETRIES = 5;
@@ -33,6 +42,7 @@ const STABLE_WINDOW_MS = 30_000;
 const CLIENT_PROBE_STABLE_MS = 3000;
 const DOWNLOAD_ATTEMPTS = 3;
 const DOWNLOAD_RETRY_DELAYS_MS = [500, 1000];
+const RETENTION_STARTUP_DELAY_MS = STABLE_WINDOW_MS;
 
 function isTransientDownloadStatus(status: number): boolean {
 	return status === 502 || status === 503 || status === 504;
@@ -127,6 +137,8 @@ export class Daemon {
 	private readonly probeUrl: string;
 	private readonly log: (msg: string) => void;
 	private readonly versions: VersionStore;
+	private readonly retention: VersionRetentionLike;
+	private retentionTimer: ReturnType<typeof setTimeout> | null = null;
 	private child: ChildProcess | null = null;
 	private childStartedAt = 0;
 	private updating = false;
@@ -146,6 +158,12 @@ export class Daemon {
 		this.versions = new VersionStore({
 			appsDir: join(this.appDir, "apps"),
 		});
+		this.retention =
+			config.retention ??
+			new VersionRetention({
+				appsDir: join(this.appDir, "apps"),
+				versions: this.versions,
+			});
 	}
 
 	async start(): Promise<void> {
@@ -165,8 +183,11 @@ export class Daemon {
 				prepare: (input) => {
 					// 立即受理：下载/校验/解压可能耗时数分钟，先行返回 200，
 					// 避免请求方 fetch 默认超时在下载完成前切断连接。
-					this.prepareTask = this.updater.prepare(input).then(() => {
-						this.pendingVersion = input.version;
+					// 从受理开始就保护目标，避免启动补扫删除正在解压的目录。
+					this.pendingVersion = input.version;
+					this.prepareTask = this.updater.prepare(input).catch((error) => {
+						if (this.pendingVersion === input.version) this.pendingVersion = null;
+						throw error;
 					});
 					this.prepareTask.catch(() => undefined);
 					return Promise.resolve();
@@ -182,12 +203,15 @@ export class Daemon {
 		});
 
 		await this.startCurrent(control.port, control.token);
+		await this.initializeRetention();
+		this.scheduleRetentionStartupCleanup();
 		this.log(`守护中: ${this.artifact} (control port ${control.port})`);
 	}
 
 	/** 优雅停机：置停机标志并停掉被守护进程 */
 	private async shutdown(): Promise<void> {
 		this.stopping = true;
+		this.cancelRetentionStartupCleanup();
 		this.log("收到停机信号，停止被守护进程");
 		await this.stopChild();
 		process.exit(0);
@@ -195,20 +219,23 @@ export class Daemon {
 
 	/** 更新流程：preStart 钩子 → stop/switch/start/probe/回退 */
 	private async applyUpdate(version: string): Promise<void> {
-		this.pendingVersion = null;
+		// apply 全程保留 pendingVersion，避免启动补扫删除正在切换的目标。
 		const versionDir = join(this.appDir, "apps", version);
 		const manifest = readManifest(versionDir);
 		const artifact = manifest?.artifacts[this.artifact];
-		// preStart 仅 server 构件支持（如 prisma db push）
-		const preStart =
-			this.artifact === "server"
-				? manifest?.artifacts.server?.preStart
-				: undefined;
-		if (artifact && preStart) {
-			await runPreStart(preStart, join(versionDir, artifact.dir));
+		try {
+			// preStart 仅 server 构件支持（如 prisma db push）
+			const preStart =
+				this.artifact === "server"
+					? manifest?.artifacts.server?.preStart
+					: undefined;
+			if (artifact && preStart) {
+				await runPreStart(preStart, join(versionDir, artifact.dir));
+			}
+			await this.updater.apply(version);
+		} finally {
+			if (this.pendingVersion === version) this.pendingVersion = null;
 		}
-		await this.updater.apply(version);
-		this.pendingVersion = null;
 	}
 
 	/** 启动 current 版本进程（含 ensure-node） */
@@ -323,6 +350,56 @@ export class Daemon {
 		);
 	}
 
+	private async initializeRetention(): Promise<void> {
+		try {
+			await this.retention.initialize();
+		} catch {
+			this.log("版本保留状态初始化失败，已跳过自动清理");
+		}
+	}
+
+	private scheduleRetentionStartupCleanup(): void {
+		this.cancelRetentionStartupCleanup();
+		this.retentionTimer = setTimeout(() => {
+			this.retentionTimer = null;
+			if (this.stopping) return;
+			const protectedVersions = this.pendingVersion
+				? new Set([this.pendingVersion])
+				: undefined;
+			void this.runRetentionCleanup(protectedVersions);
+		}, RETENTION_STARTUP_DELAY_MS);
+	}
+
+	private cancelRetentionStartupCleanup(): void {
+		if (this.retentionTimer === null) return;
+		clearTimeout(this.retentionTimer);
+		this.retentionTimer = null;
+	}
+
+	private async runRetentionCleanup(
+		protectedVersions?: ReadonlySet<string>,
+	): Promise<void> {
+		try {
+			const result = await this.retention.cleanup(protectedVersions);
+			this.log(
+				`版本清理完成: 删除 ${result.removed.length} 项，失败 ${result.failed.length} 项`,
+			);
+		} catch {
+			this.log("版本清理失败，保留本地版本目录供人工处理");
+		}
+	}
+
+	private async onSuccessfulApply(
+		version: string,
+		previous: string | null,
+	): Promise<void> {
+		const recorded = await this.retention.recordSuccessful(version);
+		if (!recorded) return;
+		const protectedVersions = new Set<string>([version]);
+		if (previous) protectedVersions.add(previous);
+		await this.runRetentionCleanup(protectedVersions);
+	}
+
 	private buildUpdater(): Updater {
 		return new Updater({
 			versions: this.versions,
@@ -351,6 +428,8 @@ export class Daemon {
 				this.updating = false;
 			},
 			probe: (version) => this.probe(version),
+			onSuccessfulApply: (version, previous) =>
+				this.onSuccessfulApply(version, previous),
 		});
 	}
 }

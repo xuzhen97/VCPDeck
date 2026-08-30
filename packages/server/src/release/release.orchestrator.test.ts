@@ -71,6 +71,7 @@ type OrchestratorDeps = {
 	channel: ReturnType<typeof mockChannel>;
 	launcher: ReturnType<typeof mockLauncher>;
 	drain: ReturnType<typeof mockDrain>;
+	cleanup: { runAutomatic: ReturnType<typeof vi.fn> };
 };
 
 function createOrchestrator(deps: OrchestratorDeps, opts = {}) {
@@ -83,6 +84,8 @@ function createOrchestrator(deps: OrchestratorDeps, opts = {}) {
 		deps.launcher as any,
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		deps.drain as any,
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		deps.cleanup as any,
 		{ serverVersion: "1.2.1", clientTimeoutMs: 60_000, ...opts },
 	);
 }
@@ -104,6 +107,7 @@ describe("ReleaseOrchestrator", () => {
 			channel: mockChannel(),
 			launcher: mockLauncher(),
 			drain: mockDrain(),
+			cleanup: { runAutomatic: vi.fn().mockResolvedValue(undefined) },
 		};
 		orchestrator = createOrchestrator(deps);
 	});

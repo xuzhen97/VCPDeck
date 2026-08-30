@@ -10,17 +10,30 @@ import { ClientModule } from "../client/client.module.js";
 import { StorageModule } from "../storage/storage.module.js";
 import { ReleaseUploadController } from "./release-upload.controller.js";
 import { ReleaseUploadService } from "./release-upload.service.js";
+import { ReleaseCleanupController } from "./release-cleanup.controller.js";
+import { ReleaseCleanupService } from "./release-cleanup.service.js";
 
 @Module({
 	imports: [JobModule, ClientModule, StorageModule],
-	controllers: [ReleaseController, ReleaseUploadController, StatusController],
+	controllers: [
+		ReleaseController,
+		ReleaseUploadController,
+		ReleaseCleanupController,
+		StatusController,
+	],
 	providers: [
 		ReleaseService,
 		ReleaseUploadService,
+		ReleaseCleanupService,
 		ReleaseOrchestrator,
 		GatewayUpdateChannel,
 		LauncherHttpClient,
 	],
-	exports: [ReleaseService, ReleaseOrchestrator, GatewayUpdateChannel],
+	exports: [
+		ReleaseService,
+		ReleaseCleanupService,
+		ReleaseOrchestrator,
+		GatewayUpdateChannel,
+	],
 })
 export class ReleaseModule {}

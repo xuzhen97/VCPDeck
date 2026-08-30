@@ -97,6 +97,28 @@ function makeClient(releases: ReleaseInfo[]) {
 				serverVersion: "1.2.1",
 				activeRelease: null,
 			})),
+			cleanupPreview: vi.fn(async () => ({
+				policy: {
+					successfulReleaseCount: 3,
+					minimumAgeDays: 30,
+					uploadSessionGraceHours: 24,
+				},
+				candidates: [],
+				expiredUploadSessions: { count: 0, bytes: 0 },
+				estimatedReclaimableBytes: 0,
+			})),
+			cleanupRun: vi.fn(async () => ({
+				startedAt: "2026-08-29T00:00:00.000Z",
+				finishedAt: "2026-08-29T00:00:00.000Z",
+				cleanedItems: 0,
+				cleanedBytes: 0,
+				alreadyMissing: 0,
+				failed: 0,
+				skipped: 0,
+				providerUnavailable: 0,
+				retryable: false,
+				issues: [],
+			})),
 		},
 	} as unknown as VcpDeckClient;
 }

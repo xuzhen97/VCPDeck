@@ -332,9 +332,7 @@ describe("FrpService createMapping", () => {
 		const result = await service.deleteMapping("fm_1", 45);
 
 		expect(result?.mapping.status).toBe("deleting");
-		expect((result?.mapping as { operationJobId?: string }).operationJobId).toBe(
-			result?.dispatch.jobId,
-		);
+		expect(result?.mapping.operationJobId).toBe(result?.dispatch.jobId);
 		expect(prisma.frpMapping.delete).not.toHaveBeenCalled();
 		expect(prisma.$transaction).toHaveBeenCalledOnce();
 		expect(prisma.job.create).toHaveBeenCalledWith({

@@ -63,8 +63,18 @@ export type {
 } from "./pi.js";
 // update.ts 类型显式 re-export（同上：部分工具链不解析 export * 通配转发）
 export type {
+	ReleaseArchiveAvailableInfo,
+	ReleaseArchiveDeletingInfo,
 	ReleaseArchiveInfo,
 	ReleaseArchiveStorage,
+	ReleaseArchiveStorageSummary,
+	ReleaseArchiveAvailability,
+	ReleaseCleanupArchiveCandidate,
+	ReleaseCleanupIssue,
+	ReleaseCleanupPolicy,
+	ReleaseCleanupPreview,
+	ReleaseCleanupReason,
+	ReleaseCleanupRunResult,
 	ReleaseClientEntry,
 	ReleaseInfo,
 	ReleasePlatform,
@@ -85,6 +95,7 @@ export {
 	parseReleaseUploadCreateInput,
 	parseReleaseUploadPartRefresh,
 	platformFromOs,
+	isReleaseArchiveAvailable,
 } from "./update.js";
 export {
 	PI_ERROR_CODES,

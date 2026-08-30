@@ -214,24 +214,121 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
 	);
 }
 
-/** 单个平台的发布构件信息（校验值与体积） */
-export interface ReleaseArchiveInfo {
+/** 可用发布构件（旧记录允许缺失 availability）。 */
+export type ReleaseArchiveAvailableInfo = ReleaseArchiveBase & {
+	/** 旧 Release JSON 缺失该字段时按 available 兼容解析。 */
+	availability?: "available";
+	/** 外部存储直连信息（ADR-0019；Local 后端无此字段） */
+	storage?: ReleaseArchiveStorage;
+};
+
+/** 正在清理的发布构件。 */
+export type ReleaseArchiveDeletingInfo = ReleaseArchiveBase & {
+	availability: "deleting";
+	/** 对外仅保留后端摘要；Server 内部记录另行保留定位信息用于重启恢复。 */
+	storage?: ReleaseArchiveStorage;
+};
+
+/** 单个平台的发布构件信息（校验值、体积与生命周期）。 */
+export type ReleaseArchiveInfo =
+	| ReleaseArchiveAvailableInfo
+	| ReleaseArchiveDeletingInfo
+	| (ReleaseArchiveBase & {
+			availability: "cleaned";
+			/** 清理态禁止保留实际对象定位信息。 */
+			storage?: never;
+			/** 清理后保留的非敏感存储摘要，不包含对象 key。 */
+			storageSummary?: ReleaseArchiveStorageSummary;
+			cleanedAt: string;
+			cleanupReason: ReleaseCleanupReason;
+		  });
+
+interface ReleaseArchiveBase {
 	sha256: string;
 	size: number;
 	fileName: string;
-	/** 外部存储直连信息（ADR-0019；Local 后端无此字段） */
-	storage?: ReleaseArchiveStorage;
 }
 
-/** 发布构件存储信息（ADR-0019：外部存储上传/下载双向直连）
- *  Local 后端无此字段；目标机经统一入口 302 直连存储下载。 */
+/** 发布构件存储信息（ADR-0019：外部存储上传/下载双向直连）。
+ * Local 后端无此字段；目标机经统一入口 302 直连存储下载。 */
 export interface ReleaseArchiveStorage {
-	/** 存储后端 kind（local / alibaba 等） */
+	/** 存储后端 kind（local / alibaba 等）；不包含 Provider 对象 key */
 	provider: string;
-	/** 后端内对象 key（阿里云盘为 fileId） */
-	key: string;
 	/** 分发模式：direct = 目标机经统一入口 302 直连存储 */
 	mode: "direct";
+}
+
+/** 清理后保留的发布构件存储摘要。 */
+export interface ReleaseArchiveStorageSummary {
+	/** 原存储后端 kind */
+	provider: string;
+	/** 原分发模式 */
+	mode: "direct";
+}
+
+/** 发布构件生命周期状态。 */
+export type ReleaseArchiveAvailability = "available" | "deleting" | "cleaned";
+
+/** 发布构件清理原因。 */
+export type ReleaseCleanupReason = "retention_policy";
+
+/** 只有正文仍可用的构件才可参与下载、编排、安装和补更。 */
+export function isReleaseArchiveAvailable(
+	archive: ReleaseArchiveInfo | undefined,
+): archive is ReleaseArchiveAvailableInfo {
+	return Boolean(
+		archive &&
+		(archive.availability === undefined || archive.availability === "available"),
+	);
+}
+
+/** Release 清理固定策略。 */
+export interface ReleaseCleanupPolicy {
+	successfulReleaseCount: 3;
+	minimumAgeDays: 30;
+	uploadSessionGraceHours: 24;
+}
+
+/** Release 清理预览中的归档候选。 */
+export interface ReleaseCleanupArchiveCandidate {
+	version: string;
+	status: ReleaseStatus;
+	archives: Array<{
+		platform: ReleasePlatform;
+		bytes: number;
+		providerState: "ready" | "provider_unavailable";
+	}>;
+	bytes: number;
+	reason: "retention_policy";
+}
+
+/** Release 清理预览结果。 */
+export interface ReleaseCleanupPreview {
+	policy: ReleaseCleanupPolicy;
+	candidates: ReleaseCleanupArchiveCandidate[];
+	expiredUploadSessions: { count: number; bytes: number };
+	estimatedReclaimableBytes: number;
+}
+
+/** Release 清理执行中的安全问题摘要。 */
+export interface ReleaseCleanupIssue {
+	version?: string;
+	platform?: ReleasePlatform;
+	code: string;
+}
+
+/** Release 清理执行结果。 */
+export interface ReleaseCleanupRunResult {
+	startedAt: string;
+	finishedAt: string;
+	cleanedItems: number;
+	cleanedBytes: number;
+	alreadyMissing: number;
+	failed: number;
+	skipped: number;
+	providerUnavailable: number;
+	retryable: boolean;
+	issues: ReleaseCleanupIssue[];
 }
 
 /** 由客户端注册的 os 字符串（如 "win32 10.0.26200"）映射到发布平台，未知平台返回 null */

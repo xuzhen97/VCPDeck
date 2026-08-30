@@ -123,11 +123,11 @@ describe("StorageService", () => {
 				filename: "nginx-1.18.0.zip",
 			});
 
-			expect(
-				await service.resolveFilename("6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1"),
-			).toBe("nginx-1.18.0.zip");
+			expect(await service.resolveFilename("file-key-1")).toBe(
+				"nginx-1.18.0.zip",
+			);
 			expect(prisma.file.findFirst).toHaveBeenCalledWith({
-				where: { key: "6a6da3a2cbc85401786349bf8253c4d8b6cbc2a1" },
+				where: { key: "file-key-1" },
 				select: { filename: true },
 			});
 		});

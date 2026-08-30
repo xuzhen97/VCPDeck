@@ -159,8 +159,77 @@ describe("ReleaseService", () => {
 			expect(service.hasAllArchives(info as never)).toBe(true);
 		});
 
+		it("cleaned 平台不算可用构件", () => {
+			const base = { sha256: "a", size: 1, fileName: "x.zip" };
+			expect(
+				service.hasAllArchives({
+					archives: {
+						"win-x64": { ...base, availability: "available" },
+						"linux-x64": {
+							...base,
+							availability: "cleaned",
+							cleanedAt: "2026-08-29T00:00:00.000Z",
+							cleanupReason: "retention_policy",
+						},
+					},
+				} as never),
+			).toBe(false);
+		});
+
 		it("缺平台返回 false", () => {
 			expect(service.hasAllArchives({ archives: {} } as never)).toBe(false);
+		});
+	});
+
+	describe("archive cleanup CAS", () => {
+		it("旧记录归一化为 available", async () => {
+			prisma.release.findUnique.mockResolvedValue(dbRow());
+			const info = await service.findByVersion("1.2.1");
+			expect(info?.archives["win-x64"]?.availability).toBe("available");
+		});
+
+		it("claim 只在原始 archive JSON 未变化时进入 deleting", async () => {
+			const row = dbRow();
+			prisma.release.findUnique
+				.mockResolvedValueOnce(row)
+				.mockResolvedValueOnce(row);
+			prisma.release.updateMany.mockResolvedValue({ count: 1 });
+
+			const claimed = await service.claimArchiveForCleanup("1.2.1", "win-x64");
+
+			expect(claimed?.availability).toBe("deleting");
+			expect(prisma.release.updateMany).toHaveBeenCalledWith({
+				where: { version: "1.2.1", archives: row.archives },
+				data: { archives: expect.stringContaining('"availability":"deleting"') },
+			});
+		});
+
+		it("完成清理后保留审计摘要并移除存储 key", async () => {
+			const row = dbRow({
+				archives: JSON.stringify({
+					"win-x64": {
+						sha256: "abc",
+						size: 1024,
+						fileName: "w.zip",
+						availability: "deleting",
+						storage: { provider: "alibaba", key: "secret-key", mode: "direct" },
+					},
+				}),
+			});
+			prisma.release.findUnique.mockResolvedValue(row);
+			prisma.release.updateMany.mockResolvedValue({ count: 1 });
+
+			await expect(
+				service.finishArchiveCleanup(
+					"1.2.1",
+					"win-x64",
+					"2026-08-29T00:00:00.000Z",
+				),
+			).resolves.toBe(true);
+			const args = prisma.release.updateMany.mock.calls[0]![0] as any;
+			expect(args.where).toEqual({ version: "1.2.1", archives: row.archives });
+			expect(args.data.archives).not.toContain("secret-key");
+			expect(args.data.archives).toContain('"availability":"cleaned"');
 		});
 	});
 
@@ -293,23 +362,88 @@ describe("ReleaseService", () => {
 		});
 	});
 
-	describe("getLatestActiveTarget", () => {
-		it("返回最近一条 updating_clients/done 状态的 release", async () => {
-			prisma.release.findFirst.mockResolvedValue(
-				dbRow({ status: "updating_clients" }),
-			);
+		describe("getLatestActiveTarget", () => {
+		it("返回最近一条具有双平台可用构件的 release", async () => {
+			prisma.release.findMany.mockResolvedValue([
+				dbRow({
+					status: "updating_clients",
+					archives: JSON.stringify({
+						"win-x64": {
+							sha256: "abc",
+							size: 1024,
+							fileName: "w.zip",
+						},
+						"linux-x64": {
+							sha256: "def",
+							size: 2048,
+							fileName: "l.zip",
+						},
+					}),
+				}),
+			]);
 
 			const target = await service.getLatestActiveTarget();
 
 			expect(target?.status).toBe(ReleaseStatus.UPDATING_CLIENTS);
-			expect(prisma.release.findFirst).toHaveBeenCalledWith({
+			expect(prisma.release.findMany).toHaveBeenCalledWith({
+				where: { status: { in: ["updating_clients", "done"] } },
+				orderBy: { createdAt: "desc" },
+			});
+		});
+
+		it("最新 done 构件已清理时回退到最近的可用目标", async () => {
+			prisma.release.findMany.mockResolvedValue([
+				dbRow({
+					version: "1.2.2",
+					status: "done",
+					archives: JSON.stringify({
+						"win-x64": {
+							sha256: "a",
+							size: 1,
+							fileName: "w.zip",
+							availability: "cleaned",
+							cleanedAt: "2026-08-29T00:00:00.000Z",
+							cleanupReason: "retention_policy",
+						},
+						"linux-x64": {
+							sha256: "b",
+							size: 1,
+							fileName: "l.zip",
+							availability: "cleaned",
+							cleanedAt: "2026-08-29T00:00:00.000Z",
+							cleanupReason: "retention_policy",
+						},
+					}),
+				}),
+				dbRow({
+					version: "1.2.1",
+					status: "done",
+					archives: JSON.stringify({
+						"win-x64": {
+							sha256: "abc",
+							size: 1024,
+							fileName: "w.zip",
+						},
+						"linux-x64": {
+							sha256: "def",
+							size: 2048,
+							fileName: "l.zip",
+						},
+					}),
+				}),
+			]);
+
+			const target = await service.getLatestActiveTarget();
+
+			expect(target?.version).toBe("1.2.1");
+			expect(prisma.release.findMany).toHaveBeenCalledWith({
 				where: { status: { in: ["updating_clients", "done"] } },
 				orderBy: { createdAt: "desc" },
 			});
 		});
 
 		it("无活动 release 时返回 null", async () => {
-			prisma.release.findFirst.mockResolvedValue(null);
+			prisma.release.findMany.mockResolvedValue([]);
 			await expect(service.getLatestActiveTarget()).resolves.toBeNull();
 		});
 	});
@@ -349,29 +483,38 @@ describe("ReleaseService", () => {
 	});
 
 	describe("toReleaseInfo 存储信息透传（ADR-0016）", () => {
-		it("完整 storage 字段透传到 archives", async () => {
-			prisma.release.findUnique.mockResolvedValue(
-				dbRow({
-					archives: JSON.stringify({
-						"win-x64": {
-							sha256: "abc",
-							size: 1024,
-							fileName: "vcpdeck-1.2.1-win-x64.zip",
-							storage: { provider: "alibaba", key: "file-1", mode: "direct" },
-						},
-					}),
+		it("公开 Release 隐藏 Provider key，内部读取仍保留 key", async () => {
+			const row = dbRow({
+				archives: JSON.stringify({
+					"win-x64": {
+						sha256: "abc",
+						size: 1024,
+						fileName: "vcpdeck-1.2.1-win-x64.zip",
+						storage: { provider: "alibaba", key: "file-1", mode: "direct" },
+					},
 				}),
-			);
+			});
+			prisma.release.findUnique.mockResolvedValue(row);
 
 			const info = await service.findByVersion("1.2.1");
-			expect(info?.archives["win-x64"]?.storage).toEqual({
+			const archive = info?.archives["win-x64"];
+			expect(archive && "storage" in archive ? archive.storage : undefined).toEqual({
+				provider: "alibaba",
+				mode: "direct",
+			});
+			expect(JSON.stringify(info)).not.toContain("file-1");
+
+			prisma.release.findUnique.mockResolvedValue(row);
+			const internal = await service.findByVersionWithStorage("1.2.1");
+			const internalArchive = internal?.archives["win-x64"];
+			expect(internalArchive && "storage" in internalArchive ? internalArchive.storage : undefined).toEqual({
 				provider: "alibaba",
 				key: "file-1",
 				mode: "direct",
 			});
 		});
 
-		it("storage 字段不完整时忽略（不落到 archives）", async () => {
+		it("storage 字段不完整时 fail closed，不把 archive 猜成 Local", async () => {
 			prisma.release.findUnique.mockResolvedValue(
 				dbRow({
 					archives: JSON.stringify({
@@ -386,18 +529,45 @@ describe("ReleaseService", () => {
 			);
 
 			const info = await service.findByVersion("1.2.1");
-			expect(info?.archives["win-x64"]?.storage).toBeUndefined();
-			expect(info?.archives["win-x64"]).toMatchObject({ sha256: "abc" });
+			expect(info?.archives["win-x64"]).toBeUndefined();
+		});
+
+		it("非法 cleanedAt 或 storageSummary 时不暴露清理状态", async () => {
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({
+					archives: JSON.stringify({
+						"win-x64": {
+							sha256: "abc",
+							size: 1024,
+							fileName: "w.zip",
+							availability: "cleaned",
+							cleanedAt: "not-a-date",
+							cleanupReason: "retention_policy",
+						},
+						"linux-x64": {
+							sha256: "def",
+							size: 1024,
+							fileName: "l.zip",
+							availability: "cleaned",
+							cleanedAt: "2026-08-29T00:00:00.000Z",
+							cleanupReason: "retention_policy",
+							storageSummary: { provider: "alibaba", mode: "proxy" },
+						},
+					}),
+			}),
+			);
+
+			const info = await service.findByVersion("1.2.1");
+			expect(info?.archives).toEqual({});
 		});
 
 		it("无 storage 字段的旧记录不受影响", async () => {
 			prisma.release.findUnique.mockResolvedValue(dbRow());
 
 			const info = await service.findByVersion("1.2.1");
-			expect(info?.archives["win-x64"]?.storage).toBeUndefined();
-			expect(info?.archives["win-x64"]?.fileName).toBe(
-				"vcpdeck-1.2.1-win-x64.zip",
-			);
+			const archive = info?.archives["win-x64"];
+			expect(archive && "storage" in archive ? archive.storage : undefined).toBeUndefined();
+			expect(archive?.fileName).toBe("vcpdeck-1.2.1-win-x64.zip");
 		});
 	});
 });

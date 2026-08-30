@@ -1,5 +1,7 @@
 import type {
 	PaginatedResult,
+	ReleaseCleanupPreview,
+	ReleaseCleanupRunResult,
 	ReleaseInfo,
 	ReleasePlatform,
 	ReleaseUploadCreateInput,
@@ -98,6 +100,20 @@ export function createReleasesApi(
 			);
 			return result.data;
 		},
+		cleanupPreview: (signal?: AbortSignal) =>
+			client.request<ReleaseCleanupPreview>(
+				"GET",
+				"/api/releases/cleanup/preview",
+				undefined,
+				signal,
+			),
+		cleanupRun: (signal?: AbortSignal) =>
+			client.request<ReleaseCleanupRunResult>(
+				"POST",
+				"/api/releases/cleanup/run",
+				undefined,
+				signal,
+			),
 		status: (signal?: AbortSignal) =>
 			client.request<ServerStatus>("GET", "/api/status", undefined, signal),
 	};

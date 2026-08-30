@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-29｜适用版本：`0.6.11` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-29｜适用版本：`0.6.13` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目尚未提供容器镜像或 systemd/Windows Service 安装器；发布 zip 含 Launcher，并由安装脚本自动部署，生产常驻由 Launcher 或外部服务管理器负责。
 
@@ -208,8 +208,8 @@ Bazzite 缺少 `curl`、`unzip`、`tar`、`xz` 或系统 CA 证书时，安装�
 - SQLite 文件及其同目录数据库文件；
 - `data/storage`（使用 Local Provider 时；相对 baseDir 自动锚定到 `<VCPDECK_APP_DIR>/data/storage`，见 ADR-0014）；
 - `data/job-outputs`（Job stdout/stderr spool；相对路径同样锚定 `<VCPDECK_APP_DIR>`，完整保留不封顶、无自动清理，可能含敏感输出，备份与访问权限应与 Storage 同级对待）；
-- `data/releases` 或 `VCPDECK_RELEASES_DIR`；
-- Launcher `VCPDECK_APP_DIR`；
+- `data/releases` 或 `VCPDECK_RELEASES_DIR`；Release 清理只删除归档正文，不删除 Release 审计行和 `clientStates`；
+- Launcher `VCPDECK_APP_DIR`；其中 `apps/retention.json` 记录成功切换历史，状态损坏时 Launcher 会暂停本地旧版本自动删除；
 - Client `~/.vcpdeck/client-id`；
 - 远程用户的 Pi 配置和 Session 目录；
 - frpc 工作目录（需要恢复映射运行信息时）。
@@ -295,7 +295,7 @@ location / {
 2. 确认 `VCPDECK_RELEASES_DIR` 为版本目录外**绝对路径**（`install.cjs` 引导默认如此）；Local Storage 相对 `baseDir` 已锚定到 `VCPDECK_APP_DIR`，若曾在旧版本目录内写过 storage 文件，先按 [ADR-0014](./adr/0014-storage-basedir-anchor.md) 搬迁；
 3. 确认目标 Linux 机器已安装 `unzip`（自动更新解压依赖）；
 4. 确认版本号从未用过：同一版本重复上传会被拒绝（`RELEASE_DUPLICATE_VERSION`），且失败后不能“重试同一版本”，只能发布新版本号；
-5. 若发布依赖新 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 串行升级全部 Client Launcher，再单独升级 Server Launcher；每台完成 SHA-256、守护进程、控制端口和业务版本核验后才能继续。
+5. 若发布依赖新 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 串行升级全部 Client Launcher，再单独升级 Server Launcher；每台完成 SHA-256、守护进程、控制端口和业务版本核验后才能继续；本次版本保留能力不通过业务 Release 自动远程升级旧 Launcher。
 
 ### 9.2 构建并上传
 
@@ -365,7 +365,8 @@ node packages/cli/dist/index.js release wait x.y.z --env=prod --timeout=1800
 - Release `failed`：查 `errorMessage` 定位阶段（prepare 下载/校验、drain 超时、launcher 回退等），修复后**发布新版本号**重新触发，不支持对同一版本重试；
 - 单台 Client `failed`（`clientStates` 里有 reason）：修复该机器后，发布新版本会重新覆盖它；`done` 的 Release 不会自动重试已 failed 的 Client；
 - Server drain 超时后派发闸门不会自动解除：核对活跃 Job，通常重启 Server 恢复派发；
-- 新 Server 探活失败时 Launcher 已自动回退上一版本，Release 会被恢复编排标记为 failed（“版本不符”）。
+- 新 Server 探活失败时 Launcher 已自动回退上一版本，Release 会被恢复编排标记为 failed（“版本不符”）；
+- Release archive 进入 `deleting` 时下载、编排和一键安装会 fail closed，进入 `cleaned` 后只可查看审计信息，不能继续使用正文。
 
 ### 9.7 手动回滚
 
@@ -383,14 +384,26 @@ Launcher 随发布包分发但**不随业务版本自动更新**（[ADR-0015](./
 
 #### 一键升级（推荐，Client 机）
 
-业务版本更新完成后，目标机 `apps/<V>/client/installer/upgrade-launcher.cjs` 已随包就位（材料零下载，直接取本机已解压版本的 launcher payload）。从操作机一条远程 Job 完成：
+业务版本更新完成后，目标机 `apps/<V>/client/installer/upgrade-launcher.cjs` 已随包就位（材料零下载，直接取本机已解压版本的 launcher payload）。从操作机一条远程 Job 完成 Client Launcher 迁移：
 
 ```bash
 node "<vcpdeck-cli>" jobs run <client> --wait -- \
-  node "$HOME/.vcpdeck/launcher-client/apps/<V>/client/installer/upgrade-launcher.cjs" --version=<V>
+  node "<client-app>/apps/<V>/client/installer/upgrade-launcher.cjs" \
+  --app-dir="<client-app>" \
+  --source="<client-app>/apps/<V>/launcher/dist/main.js" \
+  --pm2-name="<client-launcher-pm2-name>"
 ```
 
-脚本行为：停 PM2 守护 `vcpdeck-client-launcher` → 备份并覆盖 `<app-dir>/dist/main.js` → 按名 `pm2 restart` 重启（名称未知时才回退 `startOrRestart ecosystem.config.cjs`，兼容无该文件的旧版/手动安装，如自定义目录部署）→ 校验在线；失败自动还原备份并重启旧版；已安装 sha256 与目标一致时幂等跳过。建议先加 `--dry-run` 核对源/目标。首次引入该脚本前目标机上尚无此文件，可先用 `files upload` 上传一次。默认 `<app-dir>` 为 `~/.vcpdeck/launcher-client`；脚本从自身位置自动推导 app-dir，也可 `--app-dir=` 显式指定。Server 侧 Launcher 仍按下方手动流程处理。
+同机 Server Launcher 迁移使用同一份脚本和同一套备份/替换/重启/失败还原流程；在 Server 主机执行时，将 `--app-dir` 改为 Server Launcher 目录、`--source` 指向同机已解压 Release 的 `launcher/dist/main.js`，并将 `--pm2-name` 改为 Server Launcher 的 PM2 名称（例如 `vcpdeck-server-launcher`）：
+
+```bash
+node "<client-app>/apps/<V>/client/installer/upgrade-launcher.cjs" \
+  --app-dir="<server-launcher-app-dir>" \
+  --source="<client-app>/apps/<V>/launcher/dist/main.js" \
+  --pm2-name="<server-launcher-pm2-name>"
+```
+
+脚本行为：停 PM2 守护 → 备份并覆盖 `<app-dir>/dist/main.js` → 按显式 `--pm2-name` 重启（重启失败才回退 `startOrRestart ecosystem.config.cjs`，兼容无该文件的旧版/手动安装）→ 校验在线；失败自动还原备份并重启旧版；已安装 sha256 与目标一致时幂等跳过。建议先用 `--dry-run` 核对源文件、目标 app-dir 和 PM2 名。首次引入该脚本前目标机上尚无此文件，可先用 `files upload` 上传一次。默认 `<app-dir>` 为 `~/.vcpdeck/launcher-client`；脚本从自身位置自动推导 app-dir，也可 `--app-dir=` 显式指定。PM2 名称只接受安全标识符，默认 `vcpdeck-client-launcher`；同机 Server Launcher 使用同一脚本时必须显式传入 Server 的 app-dir、源文件和 PM2 名。
 
 #### 手动升级（回退方案）
 
@@ -402,7 +415,15 @@ node "<vcpdeck-cli>" jobs run <client> --wait -- \
 - Launcher 负责应用版本回退，但不会自动回退数据库；
 - 发布前必须备份；
 - Frontend 随 Server 构件同版本分发，无需单独部署对齐；自定义跨源托管时需与 Server 同版本部署；
-- 当前 `launcherMinVersion` 尚未强制，依赖新 Launcher 的版本必须先人工升级 Launcher。
+- 当前 `launcherMinVersion` 尚未强制，依赖新 Launcher 的版本必须先人工升级 Launcher；旧 Launcher 不会通过业务 Release 自动获得本地版本清理能力。
+
+### 9.9 Release archive 与 Launcher 本地版本清理
+
+Server 启动时、Release 完成后和每日定时任务会按固定策略清理 Release 正文；也可在 `/releases` 页面预览并执行，或调用认证接口 `GET /api/releases/cleanup/preview`、`POST /api/releases/cleanup/run`。策略不可配置也不能指定版本：最近 3 个成功 Release 始终保留，成功/失败/不完整 Release 均至少保留 30 天；过期直传会话在到期后再宽限 24 小时。当前 Server、活动 Release 和最新有效安装/补更目标始终保护。
+
+清理只删除 Local 文件、当前 Provider 对象和符合条件的上传会话正文，不删除 Release 行、SHA-256、大小、文件名或 `clientStates`。执行前会把 archive 标为 `deleting`；删除失败恢复为可重试状态，Server 重启会继续处理遗留状态。Provider 后端不匹配或凭据不可用时不会猜测删除，预览/结果会标记 `provider_unavailable`。
+
+Launcher 独立保留本机 `apps/`：current、最近 2 个成功历史版本、previous 和 prepare/apply 目标受保护；`retention.json` 缺失时只建立当前版本基线，损坏时暂停自动删除。该机制不清理 Node 缓存、Server Release archive 或其他机器上的目录。
 
 ## 10. 当前非目标
 

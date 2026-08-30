@@ -18,6 +18,7 @@ interface MockedDeps {
 	stopProcess: MockFn;
 	startProcess: MockFn;
 	probe: MockFn;
+	onSuccessfulApply: MockFn;
 	artifact: "server" | "client";
 	probeRetries: number;
 	probeIntervalMs: number;
@@ -39,6 +40,7 @@ function makeDeps(overrides: Partial<MockedDeps> = {}): MockedDeps {
 		stopProcess: vi.fn(),
 		startProcess: vi.fn(),
 		probe: vi.fn(),
+		onSuccessfulApply: vi.fn(async () => undefined),
 		probeRetries: 3,
 		artifact: "server",
 		probeIntervalMs: 100,
@@ -198,7 +200,19 @@ describe("Updater", () => {
 			expect(deps.startProcess).toHaveBeenCalledTimes(1);
 		});
 
-		it("探活失败 → 回退旧版本并重启", async () => {
+		it("探活成功后通知成功切换版本和 previous", async () => {
+			const deps = makeDeps();
+			deps.versions.currentVersion.mockResolvedValue("1.1.0");
+			deps.probe.mockResolvedValue(true);
+			const updater = new Updater(deps as unknown as UpdaterDeps);
+
+			await updater.apply("1.2.1");
+
+			expect(deps.onSuccessfulApply).toHaveBeenCalledOnce();
+			expect(deps.onSuccessfulApply).toHaveBeenCalledWith("1.2.1", "1.1.0");
+		});
+
+		it("探活失败 → 回退旧版本并重启，且不通知成功切换", async () => {
 			const deps = makeDeps();
 			deps.versions.currentVersion.mockResolvedValue("1.1.0");
 			deps.probe.mockResolvedValue(false);
@@ -209,6 +223,20 @@ describe("Updater", () => {
 			expect(deps.versions.switchTo).toHaveBeenNthCalledWith(1, "1.2.1");
 			expect(deps.versions.switchTo).toHaveBeenNthCalledWith(2, "1.1.0");
 			expect(deps.startProcess).toHaveBeenCalledTimes(2);
+			expect(deps.onSuccessfulApply).not.toHaveBeenCalled();
+		});
+
+		it("保留回调失败只警告，不影响已健康切换的结果", async () => {
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+			const deps = makeDeps();
+			deps.versions.currentVersion.mockResolvedValue("1.1.0");
+			deps.probe.mockResolvedValue(true);
+			deps.onSuccessfulApply.mockRejectedValue(new Error("retention unavailable"));
+			const updater = new Updater(deps as unknown as UpdaterDeps);
+
+			await expect(updater.apply("1.2.1")).resolves.toBeUndefined();
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("版本保留记录失败"));
+			warn.mockRestore();
 		});
 
 		it("无旧版本（首装）→ 不回退", async () => {

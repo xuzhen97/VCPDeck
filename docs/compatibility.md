@@ -1,6 +1,6 @@
 # VCPDeck 兼容性与升级策略
 
-> 状态：Current｜维护责任：发布维护者｜最后核验：2026-08-20｜适用版本：当前 `main`
+> 状态：Current｜维护责任：发布维护者｜最后核验：2026-08-29｜适用版本：`0.6.13` / 当前 `main`
 
 ## 1. 当前结论
 
@@ -17,7 +17,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI �
 | SDK ↔ Server | REST DTO 和错误 | SDK/Shared 可从同一 Git Tag 子目录安装；只支持与 Server 同版本的标准组合 |
 | CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | Pi 用户级 Git package 安装；升级必须显式切换 Tag；`0.2.1+` CLI 支持 Alibaba Release 分片直传 |
 | CLI 配置 | 用户级/项目级 JSON `version=1`（ADR-0017） | `--token-env` 成为推荐入口但仍写入既有 Bearer 结构；0.1.0 password/Bearer 配置与 `--auth=bearer` 保持兼容；`--server` 直连保持兼容 |
-| Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry | `launcherMinVersion` 字段存在，但当前 Launcher 未执行校验 |
+| Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry、`apps/retention.json` | 新安装使用带本地版本保留能力的 Launcher；旧 Launcher 不会因业务 Release 自动升级，存量机器需执行一次性迁移脚本；`launcherMinVersion` 字段仍未执行校验 |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
 | Node.js | release manifest 默认 `>=24` | Launcher 可选择系统或缓存 Node；Client 一键安装优先复用合格 x64 Node，否则安装用户私有 Node；开发环境也应使用 Node 24+ |
 | FRP | 打包的 frpc/frps + Shared FRP DTO | 构件应成对验证；Dashboard 确认状态机、operationJobId、稳定错误码和单 Client 单 FrpsInstance 约束要求 Shared/Server/Client/SDK/CLI/Frontend 同步发布 |
@@ -60,6 +60,7 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 
 - REST 响应新增可选字段；
 - Release `archives[platform]` 的可选 `storage` 字段（外部存储直连信息；缺失即 Local，新旧记录互读）；
+- Release archive 的可选 `availability` 字段（旧记录缺失时按 `available` 读取）；新记录可为 `available`、`deleting` 或 `cleaned`，下载/编排/安装消费者会对清理态 fail closed；
 - `0.2.1+` 新增独立 Release 上传会话 API；新 CLI 对旧 Server 的 404 会回退 legacy raw，引导升级兼容；
 - Client 新增 capability；
 - Socket payload 新增接收方明确忽略的可选字段；
@@ -115,13 +116,13 @@ FRP 当前 Server 可保存多实例，但 Client 只有单 frpc runtime，Serve
 
 ## 7. Launcher 兼容缺口
 
-manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身版本比较和拒绝逻辑，打包脚本写入 `0.0.0`。Launcher 随发布 zip 提供，首次安装后位于 `<app-dir>/dist/main.js`；已有 Launcher 默认保留，不随业务版本自动覆盖。在最低版本校验缺口修复前：
+manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身版本比较和拒绝逻辑，打包脚本写入 `0.0.0`。Launcher 随发布 zip 提供，首次安装后位于 `<app-dir>/dist/main.js`；已有 Launcher 默认保留，不随业务版本自动覆盖。新安装的 Launcher 会在稳定启动后维护 `apps/retention.json` 并清理不受保护的本地旧版本；旧 Launcher 没有该能力。在最低版本校验缺口修复前：
 
 - Launcher 协议或目录结构不得做隐式破坏性变更；
-- 如必须升级 Launcher，应先使用明确的 Launcher 升级流程替换 `<app-dir>/dist/main.js`，再发布依赖它的业务构件；
+- 如必须升级 Launcher，应先使用明确的 Launcher 升级流程替换 `<app-dir>/dist/main.js`，再发布依赖它的业务构件；存量迁移可使用随 Client Release 分发的 `upgrade-launcher.cjs`，通过 `--app-dir`、`--source` 和 `--pm2-name` 显式指定目标，不建立长期自动升级状态机；
 - 发布说明必须写明最低 Launcher 要求和人工步骤；
 - 不得声称系统已自动强制最低 Launcher 版本；
-- 发布脚本当前统一生成 `.zip`；Server/Launcher 按 `.zip` 保存和解压，Linux 目标机需要 `unzip`。
+- 发布脚本当前统一生成 `.zip`；Server/Launcher 按 `.zip` 保存和解压，Linux 目标机需要 `unzip`；Launcher 本地清理状态损坏时必须停用自动删除并人工恢复，不能按目录时间猜测历史。
 
 ## 8. 发布兼容门禁
 
@@ -133,9 +134,11 @@ manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身�
 - Pi 协议版本、锁定 SDK 版本、Session 打开/迁移和 Worker 重连；Terminal capability、真实 PTY、snapshot/seq、控制权和重连；
 - 数据库从上一支持版本升级；
 - Launcher 正常更新和失败回退（含瞬时下载失败的最多三次有界重试）；
+- Release archive `available/deleting/cleaned` 消费分流、Server 清理 CAS/Provider 恢复、上传会话宽限和 Launcher `retention.json` 损坏保护；
 - Frontend 与新 Server 的 REST/Socket.IO/SSE；
 - 离线 Client 补更；
-- CHANGELOG 包含兼容性、迁移和回滚限制。
+- CHANGELOG 包含兼容性、迁移和回滚限制；
+- 预发布环境先执行 cleanup preview，确认候选和 Provider 状态后再在生产启动/发布。
 
 ## 9. 建议的后续增强
 

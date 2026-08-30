@@ -1,5 +1,6 @@
 import type {
 	ClientInstallerConfigInfo,
+	ReleaseArchiveInfo,
 	ReleaseClientEntry,
 	ReleaseClientState,
 	ReleaseInfo,
@@ -14,15 +15,34 @@ import { StatusChip } from "@/components/status-chip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Drawer } from "@/components/ui/drawer";
+import { ReleaseCleanupCard } from "./release-cleanup-card.js";
 
 function releaseSizeSummary(release: ReleaseInfo): string {
 	const entries = Object.entries(release.archives);
 	if (entries.length === 0) return "—";
 	const total = entries.reduce((sum, [, a]) => sum + (a?.size ?? 0), 0);
-	if (entries.length === 1) return formatSize(total);
-	return entries
-		.map(([platform, a]) => `${platform} ${formatSize(a?.size ?? 0)}`)
-		.join(" · ");
+	const summary =
+		entries.length === 1
+			? formatSize(total)
+			: entries
+					.map(([platform, a]) => `${platform} ${formatSize(a?.size ?? 0)}`)
+					.join(" · ");
+	return entries.some(([, archive]) => archive?.availability === "cleaned")
+		? `${summary} · 归档已清理`
+		: summary;
+}
+
+function archiveStatus(archive: ReleaseArchiveInfo): {
+	label: string;
+	tone: "success" | "warning" | "danger" | "neutral";
+} {
+	if (archive.availability === "deleting") {
+		return { label: "正在清理", tone: "warning" };
+	}
+	if (archive.availability === "cleaned") {
+		return { label: "已清理", tone: "neutral" };
+	}
+	return { label: "可下载", tone: "success" };
 }
 
 function releaseStatusLabel(status: ReleaseStatus): string {
@@ -232,6 +252,7 @@ export function ReleasesPage() {
 				windowsUninstallCommand={windowsUninstallCommand}
 				onToggle={setInstallerEnabled}
 			/>
+			<ReleaseCleanupCard api={sdk.releases} />
 			<Card>
 				<CardHeader>
 					<CardTitle>发版记录</CardTitle>
@@ -498,12 +519,25 @@ function ReleaseDetails({ release }: { release: ReleaseInfo }) {
 						{Object.entries(release.archives).map(([platform, archive]) => (
 							<div key={platform}>
 								<p className="font-mono text-xs font-medium">{platform}</p>
+								{archive && (
+									<div className="mb-1">
+										<StatusChip
+											label={archiveStatus(archive).label}
+											tone={archiveStatus(archive).tone}
+										/>
+									</div>
+								)}
 								<p className="break-all font-mono text-xs text-muted-foreground">
 									{formatSize(archive?.size ?? 0)} · {archive?.fileName}
 								</p>
 								<p className="break-all font-mono text-xs text-muted-foreground">
 									sha256 {archive?.sha256}
 								</p>
+								{archive?.availability === "cleaned" && (
+									<p className="text-xs text-muted-foreground">
+										清理时间：{formatTime(archive.cleanedAt)}
+									</p>
+								)}
 							</div>
 						))}
 					</div>

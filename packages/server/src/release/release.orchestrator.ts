@@ -12,6 +12,7 @@ import {
 	ReleaseStatus,
 	VERSION,
 	platformFromOs,
+	isReleaseArchiveAvailable,
 	type ReleaseInfo,
 	type ServerShutdownNotice,
 	type UpdateRequest,
@@ -20,6 +21,7 @@ import { ReleaseError, ReleaseService } from "./release.service.js";
 import { GatewayUpdateChannel } from "./update-channel.js";
 import { LauncherHttpClient } from "./launcher-client.js";
 import { ServerDrain } from "../job/server-drain.js";
+import { ReleaseCleanupService } from "./release-cleanup.service.js";
 
 /** 向客户端发送更新事件与查询在线客户端（由网关适配器实现） */
 export interface ClientUpdateChannel {
@@ -79,6 +81,9 @@ export class ReleaseOrchestrator {
 		private readonly channel: ClientUpdateChannel,
 		@Inject(LauncherHttpClient) private readonly launcher: LauncherClient,
 		@Inject(ServerDrain) private readonly drain: DrainCoordinator,
+		@Optional()
+		@Inject(ReleaseCleanupService)
+		private readonly cleanup?: ReleaseCleanupService,
 		// 可调参数不是 DI 依赖
 		@Optional() options: ReleaseOrchestratorOptions = {},
 	) {
@@ -104,7 +109,10 @@ export class ReleaseOrchestrator {
 			);
 		}
 		const serverPlatform = platformFromOs(process.platform);
-		if (!serverPlatform || !release.archives[serverPlatform]) {
+		const serverArchive = serverPlatform
+			? release.archives[serverPlatform]
+			: undefined;
+		if (!serverPlatform || !isReleaseArchiveAvailable(serverArchive)) {
 			await this.releases.markFailed(
 				version,
 				`缺少 ${serverPlatform ?? "未知平台"} 构件，无法更新服务端`,
@@ -116,7 +124,7 @@ export class ReleaseOrchestrator {
 			await this.launcher.prepareUpdate({
 				version,
 				url: `/api/releases/${version}/file?platform=${serverPlatform}`,
-				sha256: release.archives[serverPlatform].sha256,
+				sha256: serverArchive.sha256,
 			});
 			await this.drain.drain();
 			this.channel.broadcastShutdown({ expectedVersion: version });
@@ -265,6 +273,7 @@ export class ReleaseOrchestrator {
 						version,
 						ReleaseStatus.DONE,
 					);
+					void this.cleanup?.runAutomatic("release_done");
 				}
 				return;
 			}
@@ -282,7 +291,8 @@ export class ReleaseOrchestrator {
 	): Promise<void> {
 		if (!release) return;
 		const platform = platformFromOs(client.os);
-		if (!platform || !release.archives[platform]) {
+		const clientArchive = platform ? release.archives[platform] : undefined;
+		if (!platform || !isReleaseArchiveAvailable(clientArchive)) {
 			await this.releases.markClientState(
 				version,
 				client.clientId,
@@ -299,7 +309,7 @@ export class ReleaseOrchestrator {
 		const request: UpdateRequest = {
 			releaseVersion: version,
 			url: `/api/releases/${version}/file?platform=${platform}`,
-			sha256: release.archives[platform].sha256,
+			sha256: clientArchive.sha256,
 			timeoutMs: this.clientTimeoutMs,
 		};
 		const outcomePromise = this.waitClientOutcome(

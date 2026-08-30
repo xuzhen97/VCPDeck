@@ -1,6 +1,6 @@
 # VCPDeck 运维手册
 
-> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-08-29｜适用版本：`0.6.11` / 当前 `main`
+> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-08-29｜适用版本：`0.6.13` / 当前 `main`
 
 ## 1. 运行基线
 
@@ -112,7 +112,8 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 ### 每周
 
 - 验证备份成功并抽查可读性；
-- 清理过期 Release、旧 Launcher 版本和日志前确认保留策略；
+- 在预发布环境查看 Release 清理预览，确认候选、Provider 状态和预计回收空间；
+- 不直接手工删除 Release archive 或 Launcher 版本目录；按固定保留策略执行清理，异常时先保留现场；
 - 检查长期 disconnected Job、interrupted Terminal 和 failed Client update；
 - 复核 Credential、禁用身份、不再使用的 Token、过期/撤销 Session，以及是否仍有可用 admin；
 - 在非生产目标机执行最小 Job、文件、终端和 Pi 回归。
@@ -121,6 +122,7 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 
 - 恢复演练；
 - Launcher 正常更新与失败回退冒烟；
+- 生产发布前完成 SQLite、Storage、Release archive 和 Launcher `apps/` 备份；先在预发布环境执行 cleanup preview，确认无误后再允许生产启动/发布触发自动清理；
 - 依赖和 CVE 检查；
 - PSK/Token/外部存储凭据轮换评估；
 - 文档与当前环境变量、端口、目录核对。
@@ -312,19 +314,52 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - 删除后仍可达时在 FRPS Dashboard 查孤儿 proxy；Server 当前先删 DB 再清理 Client；
 - 详细边界见 [`design/frp.md`](./design/frp.md)。
 
-## 9. 容量与清理
+## 9. Release 与容量清理
 
-当前自动清理只每 10 分钟删除 `expiresAt` 已到期的 File。它不负责：
+### 9.1 固定策略和入口
 
-- Release 历史；
+Server 会在启动时、每次 Release 完成后以及每日 24 小时兜底扫描时，按固定策略清理 Release archive 正文和上传会话。策略不可配置、不能指定版本、不能强制删除：
+
+- 最近 3 个成功 Release 始终保留；成功 Release 至少保留 30 天；
+- `failed` 和不完整 `uploaded` Release 至少保留 30 天；
+- 未完成直传会话在 `expiresAt` 后再宽限 24 小时；`provider_completed` 不按 pending 会话过期规则删除；
+- 当前 Server、活动 Release 和最新有效安装/补更目标受保护；Release 行、SHA-256、文件名、大小和 `clientStates` 长期保留；
+- Launcher 在每台机器独立保留 current、最近 2 个成功历史版本、previous 及 prepare/apply 目标，不由 Server 远程清理。
+
+Frontend `/releases` 的“存储清理”卡片只提供固定策略 preview 和确认后的 run。等价认证 REST 接口为：
+
+```text
+GET  /api/releases/cleanup/preview
+POST /api/releases/cleanup/run
+```
+
+Preview 只读，不会 claim 或删除对象；run 会重新计算候选并执行，不能使用旧预览强行删除。清理进行中再次 run 返回 `RELEASE_CLEANUP_BUSY`（HTTP 409），等待当前任务结束后重新 preview。
+
+### 9.2 archive 状态、Provider 和恢复
+
+Release archive 状态为：
+
+- `available`：正文可下载，可参与编排、安装和补更；
+- `deleting`：已被清理任务 claim，停止新的下载/目标选择；Server 重启后会继续处理；
+- `cleaned`：正文已删除或确认不存在，只能查看审计字段，不能下载、编排或安装。
+
+清理先以 CAS 将 archive 置为 `deleting`，再删除 Local 文件或当前 Provider 对象，最后写入 `cleaned`。删除失败恢复为 `available`，结果中的 `retryable` 和安全 issue code 用于后续重试。遗留 `deleting` 会在下一次启动/定时/手动 run 中恢复；不要直接修改数据库 JSON。Provider 后端不匹配、授权失效或不可达时标记 `provider_unavailable`，不会猜测 key、切换后端删除或伪造 `cleaned`；恢复原 Provider 配置后重新 run。
+
+上传会话清理严格先删 Provider 临时对象，再删数据库会话。Provider 删除失败时保留会话和可重试现场；已完成会话只有对应 archive 已 `cleaned` 后才删除元数据。清理结果、日志和工单不得包含 Provider key、签名 URL、Token 或外部原始响应。
+
+Launcher 的 `apps/retention.json` 损坏时会停用本机自动删除；保留所有版本目录并人工恢复可信状态，不按目录时间或猜测顺序批量删除。Launcher 清理失败只影响空间回收，不影响已健康运行的 current 或自动回退。
+
+### 9.3 其他容量对象
+
+File 到期对象仍由现有每 10 分钟任务处理。Release 清理不负责：
+
 - Job 历史；
 - Terminal 审计和长期 `starting/interrupted` 会话记录；
-- Launcher 版本和 Node 缓存；
+- Launcher Node 缓存；
 - 日志；
-- 外部 Provider 孤儿对象；
 - 目标机器上的 `.vcpdeck-tmp-*` 残留。
 
-上线前应定义各类数据保留周期，并以可审计脚本清理。删除前先做元数据/正文一致性检查和备份；清理目标机器临时文件前还要确认没有仍在运行但 Server 已失联的 import/write Job。
+删除前先做元数据/正文一致性检查和备份；清理目标机器临时文件前还要确认没有仍在运行但 Server 已失联的 import/write Job。
 
 ## 10. 事件响应
 

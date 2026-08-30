@@ -13,8 +13,8 @@
  *   稍后用 --status 核验结果。
  *
  * 用法：
- *   node upgrade-launcher.cjs [--dry-run] [--version=<x.y.z>] [--app-dir=<dir>]
- *   node upgrade-launcher.cjs --status [--version=<x.y.z>] [--app-dir=<dir>]
+ *   node upgrade-launcher.cjs [--dry-run] [--version=<x.y.z>] [--app-dir=<dir>] [--pm2-name=<name>]
+ *   node upgrade-launcher.cjs --status [--version=<x.y.z>] [--app-dir=<dir>] [--pm2-name=<name>]
  *
  * 幂等：已安装文件 sha256 与目标一致时直接跳过。
  */
@@ -36,6 +36,13 @@ const PM2_NAME = "vcpdeck-client-launcher";
 const LAUNCHER_REL = join("launcher", "dist", "main.js");
 const INSTALLED_REL = join("dist", "main.js");
 
+function validatePm2Name(name) {
+	if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) {
+		throw new Error(`PM2 名无效: ${name || "(空)"}`);
+	}
+	return name;
+}
+
 function parseArgs(argv) {
 	const opts = {
 		dryRun: false,
@@ -44,6 +51,7 @@ function parseArgs(argv) {
 		version: undefined,
 		appDir: undefined,
 		source: undefined,
+		pm2Name: PM2_NAME,
 	};
 	for (const arg of argv) {
 		if (arg === "--dry-run") opts.dryRun = true;
@@ -55,6 +63,8 @@ function parseArgs(argv) {
 			opts.appDir = arg.slice("--app-dir=".length);
 		else if (arg.startsWith("--source="))
 			opts.source = arg.slice("--source=".length);
+		else if (arg.startsWith("--pm2-name="))
+			opts.pm2Name = validatePm2Name(arg.slice("--pm2-name=".length));
 		else throw new Error(`未知参数: ${arg}`);
 	}
 	return opts;
@@ -141,18 +151,18 @@ function runPm2(pm, args) {
  * 重启已注册守护：优先按名 restart（兼容无 ecosystem.config.cjs 的旧版/
  * 手动安装——该文件仅新增装法写入；再失败才回退 startOrRestart 文件）。
  */
-function restartGuard(pm, appDir) {
-	const byName = runPm2(pm, ["restart", PM2_NAME]);
+function restartGuard(pm, appDir, pm2Name = PM2_NAME, runImpl = runPm2) {
+	const byName = runImpl(pm, ["restart", pm2Name]);
 	if (byName.status === 0) return byName;
-	return runPm2(pm, ["startOrRestart", join(appDir, "ecosystem.config.cjs")]);
+	return runImpl(pm, ["startOrRestart", join(appDir, "ecosystem.config.cjs")]);
 }
 
 /** 守护进程是否在线（读 pm2 jlist 权威状态） */
-function pm2Online(pm) {
-	const result = runPm2(pm, ["jlist"]);
+function pm2Online(pm, pm2Name = PM2_NAME, runImpl = runPm2) {
+	const result = runImpl(pm, ["jlist"]);
 	try {
 		const list = JSON.parse(result.stdout || "[]");
-		const app = list.find((x) => x.name === PM2_NAME);
+		const app = list.find((x) => x.name === pm2Name);
 		return Boolean(app && app.pm2_env && app.pm2_env.status === "online");
 	} catch {
 		return false;
@@ -164,9 +174,12 @@ function sleepSync(ms) {
 }
 
 /** 危险阶段：停守护 → 覆盖 → 重启 → 等在线；失败还原备份并重启旧版。 */
-function applyDetached(appDir, sourceMain) {
+function applyDetached(appDir, sourceMain, pm2Name = PM2_NAME, runImpl = runPm2) {
 	const log = (...a) => console.log("[launcher-upgrade]", ...a);
 	const installedMain = join(appDir, INSTALLED_REL);
+	if (!existsSync(sourceMain)) {
+		throw new Error(`源 Launcher 不存在: ${sourceMain}`);
+	}
 	const backup = `${installedMain}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 	const pm = resolvePm2(); // 先解析 pm2，失败则什么都没动过
 	log(`使用 pm2: ${pm.kind} (${pm.command})`);
@@ -175,7 +188,7 @@ function applyDetached(appDir, sourceMain) {
 		copyFileSync(installedMain, backup);
 		log(`已备份: ${backup}`);
 
-		const stopped = runPm2(pm, ["stop", PM2_NAME]);
+		const stopped = runImpl(pm, ["stop", pm2Name]);
 		if (stopped.status !== 0) {
 			log(`pm2 stop 未成功（进程可能不存在，继续）: ${(stopped.stderr || "").trim()}`);
 		} else {
@@ -185,14 +198,14 @@ function applyDetached(appDir, sourceMain) {
 		copyFileSync(sourceMain, installedMain);
 		log("已覆盖 dist/main.js，重启守护…");
 
-		const started = restartGuard(pm, appDir);
+		const started = restartGuard(pm, appDir, pm2Name, runImpl);
 		if (started.status !== 0) {
 			throw new Error(`重启守护失败: ${(started.stderr || "").trim()}`);
 		}
 
 		const deadline = Date.now() + 30_000;
 		for (;;) {
-			if (pm2Online(pm)) break;
+			if (pm2Online(pm, pm2Name, runImpl)) break;
 			if (Date.now() > deadline) {
 				throw new Error("重启后 30 秒内守护进程未恢复 online");
 			}
@@ -203,7 +216,7 @@ function applyDetached(appDir, sourceMain) {
 		if (existsSync(backup)) {
 			log("还原备份并重启旧版…");
 			copyFileSync(backup, installedMain);
-			restartGuard(pm, appDir);
+			restartGuard(pm, appDir, pm2Name, runImpl);
 		}
 		return 1;
 	}
@@ -212,13 +225,24 @@ function applyDetached(appDir, sourceMain) {
 	return 0;
 }
 
+/** 构造 detached 子进程参数，保持显式目标和 PM2 名称不丢失。 */
+function buildDetachedArgv(scriptPath, appDir, sourceMain, pm2Name = PM2_NAME) {
+	return [
+		scriptPath,
+		"--apply-detached",
+		`--app-dir=${appDir}`,
+		`--source=${sourceMain}`,
+		`--pm2-name=${pm2Name}`,
+	];
+}
+
 /** 以 detached 子进程执行危险阶段，返回日志文件路径 */
-function spawnDetachedApply(scriptPath, appDir, sourceMain) {
+function spawnDetachedApply(scriptPath, appDir, sourceMain, pm2Name = PM2_NAME) {
 	const logPath = join(appDir, "launcher-upgrade.log");
 	const out = openSync(logPath, "a");
 	const child = spawn(
 		process.execPath,
-		[scriptPath, "--apply-detached", `--app-dir=${appDir}`, `--source=${sourceMain}`],
+		buildDetachedArgv(scriptPath, appDir, sourceMain, pm2Name),
 		{ detached: true, stdio: ["ignore", out, out], windowsHide: true },
 	);
 	child.unref();
@@ -227,7 +251,13 @@ function spawnDetachedApply(scriptPath, appDir, sourceMain) {
 }
 
 /** 核验：已安装与源一致 + 守护在线（pm2 不可用时降级为仅比对文件并提示） */
-function statusMode(appDir, sourceMain) {
+function statusMode(
+	appDir,
+	sourceMain,
+	pm2Name = PM2_NAME,
+	resolvePm2Impl = resolvePm2,
+	runImpl = runPm2,
+) {
 	const installedMain = join(appDir, INSTALLED_REL);
 	const srcSha = sha256File(sourceMain);
 	const installedSha = existsSync(installedMain) ? sha256File(installedMain) : null;
@@ -239,8 +269,8 @@ function statusMode(appDir, sourceMain) {
 	}
 	let pmLine = "（pm2 不可用，跳过在线检查）";
 	try {
-		const pm = resolvePm2();
-		pmLine = pm2Online(pm) ? "守护在线" : "守护不在线！";
+		const pm = resolvePm2Impl();
+		pmLine = pm2Online(pm, pm2Name, runImpl) ? "守护在线" : "守护不在线！";
 	} catch {
 		/* 忽略 */
 	}
@@ -253,22 +283,25 @@ function main(argv = process.argv.slice(2)) {
 	const selfFile = __filename;
 	const appDir = expandHome(opts.appDir ?? deriveAppDir(selfFile));
 	const appsRoot = join(appDir, "apps");
-	const versionDir = findVersionDir(appsRoot, opts.version);
-	const sourceMain = join(versionDir, LAUNCHER_REL);
+	const sourceMain = opts.source
+		? expandHome(opts.source)
+		: join(findVersionDir(appsRoot, opts.version), LAUNCHER_REL);
+	if (!existsSync(sourceMain)) {
+		throw new Error(`源 Launcher 不存在: ${sourceMain}`);
+	}
 	const installedMain = join(appDir, INSTALLED_REL);
 
-	console.log(`[launcher-upgrade] 版本 payload: ${versionDir}`);
+	console.log(`[launcher-upgrade] 源文件:      ${sourceMain}`);
+	console.log(`[launcher-upgrade] 目标 app-dir: ${appDir}`);
 	console.log(`[launcher-upgrade] 目标:        ${installedMain}`);
+	console.log(`[launcher-upgrade] PM2 名称:    ${opts.pm2Name}`);
 
 	if (opts.applyDetached) {
-		const src = opts.source
-			? expandHome(opts.source)
-			: join(findVersionDir(appsRoot, opts.version), LAUNCHER_REL);
-		return applyDetached(appDir, src);
+		return applyDetached(appDir, sourceMain, opts.pm2Name);
 	}
 
 	if (opts.status) {
-		return statusMode(appDir, sourceMain);
+		return statusMode(appDir, sourceMain, opts.pm2Name);
 	}
 
 	if (opts.dryRun) {
@@ -289,7 +322,7 @@ function main(argv = process.argv.slice(2)) {
 	}
 
 	// 常规路径：父进程只做规划，危险阶段交给 detached 子进程（避免随业务 Client 一起被停杀）
-	const logPath = spawnDetachedApply(selfFile, appDir, sourceMain);
+	const logPath = spawnDetachedApply(selfFile, appDir, sourceMain, opts.pm2Name);
 	console.log(`[launcher-upgrade] 已在后台分离执行危险阶段，日志: ${logPath}`);
 	console.log("[launcher-upgrade] 约 30 秒后用 --status 核验结果");
 	return 0;
@@ -304,6 +337,11 @@ module.exports = {
 	findVersionDir,
 	sha256File,
 	main,
+	validatePm2Name,
+	buildDetachedArgv,
+	restartGuard,
+	pm2Online,
+	statusMode,
 };
 
 if (require.main === module) {

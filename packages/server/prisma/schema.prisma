@@ -86,7 +86,7 @@ model ReleaseUploadSession {
   providerKey         String
   providerUploadId    String
   partSize            Int
-  status              String   @default("pending") // pending | completed
+  status              String   @default("pending") // pending | provider_completed | completed
   createdByIdentityId String?
   createdByName       String?
   createdVia          String?

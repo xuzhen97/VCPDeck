@@ -111,6 +111,32 @@ describe("ClientInstallerService", () => {
 		});
 	});
 
+	it("cleaned archive 不再被视为可安装构件", async () => {
+		const { prisma, releases, clients } = mocks(true);
+		const service = new ClientInstallerService(
+			prisma as never,
+			releases as never,
+			clients as never,
+		);
+		releases.findByVersion.mockResolvedValueOnce({
+			...release(),
+			archives: {
+				...release().archives,
+				"win-x64": {
+					sha256: "a".repeat(64),
+					size: 10,
+					fileName: "win.zip",
+					availability: "cleaned",
+					cleanedAt: "2026-08-29T00:00:00.000Z",
+					cleanupReason: "retention_policy",
+				},
+			},
+		});
+		await expect(service.bootstrap("win-x64")).rejects.toMatchObject({
+			code: "CLIENT_INSTALLER_ARCHIVE_MISSING",
+		});
+	});
+
 	it("公开 Shell 安装资产统一使用 LF", () => {
 		const { prisma, releases, clients } = mocks(true);
 		const service = new ClientInstallerService(

@@ -26,6 +26,7 @@ const path = require("node:path");
 const os = require("node:os");
 const {
 	createIntegrationTestDb,
+	initializeIntegrationTestDb,
 	cleanupIntegrationTestDb,
 } = require("./integration-test-db.cjs");
 
@@ -843,13 +844,10 @@ async function main() {
 	killPort();
 	await sleep(1000);
 
-	// 1. 启动 Server（隔离 DB）
+	// 1. 初始化隔离数据库，然后直接启动 Server 构建产物。
 	console.log("[setup] Starting server...");
-	const serverCommand = isWin ? process.env.ComSpec || "cmd.exe" : "pnpm";
-	const serverArgs = isWin
-		? ["/d", "/s", "/c", "pnpm start"]
-		: ["start"];
-	_serverProcess = spawn(serverCommand, serverArgs, {
+	initializeIntegrationTestDb(testDatabase, serverDir);
+	_serverProcess = spawn(process.execPath, ["dist/main.js"], {
 		cwd: serverDir,
 		stdio: ["ignore", "pipe", "pipe"],
 		env: {
@@ -857,13 +855,6 @@ async function main() {
 			VCPDECK_ADMIN_PASSWORD: ADMIN_PASSWORD,
 			VCPDECK_FRONTEND_ORIGIN: "http://localhost:5173",
 			DATABASE_URL: testDatabase.databaseUrl,
-			// Prisma 对 AI Agent 运行 migrate 的防护：需操作者明确同意后透传
-			...(process.env.PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION
-				? {
-						PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION:
-							process.env.PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION,
-					}
-				: {}),
 		},
 	});
 	let serverOutput = "";

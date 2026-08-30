@@ -43,7 +43,7 @@
 | Launcher control server | 绑定 loopback，提供带随机 Token 的 `/prepare`、`/apply` |
 | Launcher `Updater` | 下载、SHA-256 校验、解压、current 切换、探活和失败回退 |
 | Launcher `Daemon` | 启动/停止业务进程、崩溃退避、Node 运行时、preStart 和探活策略 |
-| `VersionStore` | Linux symlink 或 Windows state 文件形式的 current 指针 |
+| `VersionStore` | Linux symlink 或 Windows state 文件形式的 current 指针，并提供版本目录枚举/删除 |
 
 Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由安装脚本首次部署到 `<app-dir>/dist/main.js`，但不随业务版本自动覆盖。Server 负责全局控制面，Client 只负责本机更新配合；任何一方都不能在没有 Launcher 的情况下可靠完成自替换和失败回退。
 
@@ -55,12 +55,14 @@ Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由
 | --- | --- | --- |
 | Release 元数据和阶段 | SQLite `Release` | Server 重启后恢复编排的依据 |
 | 单 Client 更新结果 | `Release.clientStates` JSON | `clientId → {state,reason?,at}` |
-| Release archive | Local 后端：`VCPDECK_RELEASES_DIR`，默认 `./data/releases`；外部存储后端：Provider 对象（key 记录于 `Release.archives[platform].storage`） | 必须位于应用版本目录之外；外部后端上传/下载数据面直连（ADR-0019） |
+| Release archive | Local 后端：`VCPDECK_RELEASES_DIR`，默认 `./data/releases`；外部存储后端：Provider 对象（key 仅由 Server 内部从 `Release.archives[platform].storage` 读取） | 必须位于应用版本目录之外；外部后端上传/下载数据面直连（ADR-0019）；Release API 投影不返回 Provider key |
 | 当前应用版本 | Launcher `apps/current` 或 `apps/state.json` | Linux 使用 symlink；Windows 使用 state 文件 |
 | 已准备目标版本 | Launcher 进程内 `pendingVersion` | Launcher 重启后不保留 |
 | 运行中的业务进程 | Launcher `Daemon` | Server 数据库不能证明进程仍健康 |
 | Server/Client 构建版本 | `@vcpdeck/shared` 的 `VERSION` | `pnpm release --version=x.y.z` 同步并保留，提交与同版本 Git Tag 后成为正式发布 |
 | archive SHA-256 | CLI 上传声明、`Release.archives[platform].sha256`、`UpdateRequest.sha256` | 当前 manifest 内的 `sha256` 留空；Local 由 Server 上传时复核，Alibaba 直传由 Launcher 下载后复核 |
+| Release archive 生命周期 | `Release.archives[platform].availability` | `available` 可下载/更新，`deleting` 停止新使用并等待清理，`cleaned` 只保留审计摘要；旧 JSON 缺失字段按 `available` 兼容读取 |
+| Release 清理策略 | Server `ReleaseCleanupService` | 最近 3 个成功 Release 始终保留；成功、失败和不完整 Release 均有 30 天保底；过期上传会话在到期后再宽限 24 小时 |
 
 业务数据、数据库、Storage 和 Release archive 必须存放在 Launcher `apps/<version>/` 之外。current 切换只改变应用构件，不迁移或恢复持久数据。
 
@@ -123,6 +125,7 @@ client/
 - `preStart` 是受信任构件携带的 shell 命令，当前仅 Server 使用；以显式 node_modules 相对路径调用 prisma CLI（Launcher 不保证 PATH 含 `.bin`），Windows/Linux 行为一致；
 - Launcher 首次安装从 `launcher/` 复制到 `<app-dir>/dist/main.js`，已有 Launcher 默认保留，不随业务版本自动覆盖；
 - Frontend 已随 Server 构件放入 `server/public/`，由 Server 同源托管；
+- `available`、`deleting`、`cleaned` 只描述 Release 正文生命周期，不删除 Release 行或 `clientStates`；
 
 ### 4.1 跨平台 archive 与打包机要求
 
@@ -215,7 +218,7 @@ sequenceDiagram
 
 Server/Client 在 `/apply` 返回后不再把「本进程未被接管」立即落库/上报失败：连接被 Launcher 掐断与进程存活无法可靠区分，终局以新进程重启后的版本对账与 Client 重连注册为准；明确的 Launcher HTTP 错误仍会标记失败。
 
-下载入口统一为 `GET /api/releases/:version/file?platform=`（ADR-0019）：Local 后端直接 `sendFile`；外部存储后端由 Server 持凭证换取临时直链并 **302** 到直链（目标机 `fetch` 自动跟随，字节流直连存储不占 Server 带宽）；直链短时缓存、过期重新换取，短 TTL 不暴露给目标机与协议。Server 换取 Alibaba 直链遇到网络错误或 HTTP `500/502/503/504` 时最多尝试 3 次；Launcher 从该更新入口下载时，遇到网络错误或 HTTP `502/503/504` 也最多尝试 3 次，每次重新请求更新入口以换取新的临时直链。确定性 `4xx`、URL 校验、SHA-256、解压、切换和探活失败不重试，系统没有无限后台重试。
+下载入口统一为 `GET /api/releases/:version/file?platform=`（ADR-0019）：Local 后端直接 `sendFile`；外部存储后端由 Server 持凭证换取临时直链并 **302** 到直链（目标机 `fetch` 自动跟随，字节流直连存储不占 Server 带宽）；直链短时缓存、过期重新换取，短 TTL 不暴露给目标机与协议。archive 进入 `deleting` 后下载返回清理中的稳定错误，进入 `cleaned` 后返回正文已清理错误；两种状态均不会再参与编排、安装或补更。Server 换取 Alibaba 直链遇到网络错误或 HTTP `500/502/503/504` 时最多尝试 3 次；Launcher 从该更新入口下载时，遇到网络错误或 HTTP `502/503/504` 也最多尝试 3 次，每次重新请求更新入口以换取新的临时直链。确定性 `4xx`、URL 校验、SHA-256、解压、切换和探活失败不重试，系统没有无限后台重试。
 
 当前 `preStart` 在停止旧 Server 之前执行。默认 `prisma db push` 可能与旧 Server 同时访问数据库，且其 schema 变化不会在应用回退时自动逆转；生产发布不能把该默认钩子当作安全迁移策略。
 
@@ -274,7 +277,7 @@ Client Launcher 的健康判定是新 Client 进程连续存活约 3 秒，不�
 
 Launcher 首次启动前必须已经存在可启动的 current 版本。通用 `install.cjs` 会从 zip 准备 Launcher 和初始业务版本，但不自动安装 systemd 或 Windows Service；Client 一键安装器在其上增加 PM2 守护，Linux 配置 PM2 systemd startup，Windows 配置当前用户登录计划任务。
 
-Launcher 也没有自动旧版本保留/清理策略。失败回退只有在上一版本目录仍存在且可启动时才有效；运维清理不得删除 current 或预期回退版本。
+Launcher 使用 `retention.json` 记录已确认健康切换成功的版本。每台机器保留 current、除 current 外最近 2 个成功历史版本，以及 prepare/apply 目标和 previous；启动后会在稳定窗口后补扫旧版本目录。缺少或损坏 `retention.json` 时暂停自动删除，不猜测未知 legacy 目录；单个目录删除失败不阻止其他候选继续处理。失败回退只有在上一版本目录仍存在且可启动时才有效。
 
 ### 8.2 本地控制通道
 
@@ -305,14 +308,16 @@ Launcher 启动时：
 
 当前约束解析只支持类似 `>=24` 的主版本下限，不是完整 SemVer range 实现。下载的 Node archive 当前没有独立发布者签名校验。复用当前运行时只在其版本满足 manifest 约束时发生；旧 Launcher 运行时不会绕过约束启动新业务版本。
 
-### 8.4 守护与回退
+### 8.4 守护、回退与本地版本清理
 
 - 业务进程异常退出后按指数退避重启，连续超过上限则等待人工处理或新版本；
 - Server 通过公开 `/api/status` 探活并校验版本；
 - Client 通过短稳定窗口判断是否秒退；
 - 新版本探活失败时切回 previous current 并重新启动；
 - 如果没有 previous current，只能报告失败；
-- 回退不还原数据库、Storage、Release 状态或外部副作用。
+- 回退不还原数据库、Storage、Release 状态或外部副作用；
+- Launcher 健康切换成功后原子记录成功历史并尝试清理不受保护的 `apps/<version>/`；本地清理失败只记录安全摘要，不影响已健康运行的版本；
+- Server 与 Launcher 各自清理自己的权威边界：Server 不远程删除目标机器版本目录，Launcher 不删除 Server Release archive。
 
 ## 9. 完整性、安全和信任边界
 
@@ -342,7 +347,17 @@ Launcher 的回退单位是应用版本目录，不是整个系统状态。涉�
 - 若旧 Server 已不能读取新 schema，必须恢复与旧应用匹配的数据备份，而不是只切 current；
 - 回滚后核对 Job、Release、File 和外部 Provider 状态，避免把窗口内副作用重复执行。
 
-## 11. 故障与恢复边界
+## 11. Release archive 与 Launcher 版本保留
+
+Server 启动时、每次 Release 完成后以及每日定时兜底会按固定策略执行清理；同一 Server 进程内清理互斥。`GET /api/releases/cleanup/preview` 只返回候选版本、平台、预计空间和过期上传会话数量，`POST /api/releases/cleanup/run` 重新计算并执行同一策略，页面不能指定版本或绕过保护集合。
+
+Server 清理流程先通过原始 `archives` JSON 的 CAS 将 archive 标为 `deleting`，再删除 Local 文件或当前 Storage Provider 对象，确认删除或对象已不存在后写入 `cleaned`。删除失败会恢复为 `available` 并保留可重试状态；Server 重启后会恢复遗留 `deleting`。`cleaned` 仍保留文件名、SHA-256、大小、平台和清理时间等审计字段，但不保留 Provider key，Release 行和 `clientStates` 不删除。
+
+未完成直传会话在 `expiresAt` 后再宽限 24 小时，清理时先删除 Provider 临时对象，再删除会话元数据；Provider 操作失败时保留会话。`provider_completed` 会话不会按 pending 过期规则删除，只有其对应 archive 已清理后才会删除完成会话元数据。
+
+Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node 缓存、Server archive 或其他机器。`retention.json` 状态损坏时自动清理停用，运维应保留目录并人工修复/恢复状态；不得用猜测的历史顺序批量删除。
+
+## 12. 故障与恢复边界
 
 | 故障 | 当前结果 | 恢复方式 |
 | --- | --- | --- |
@@ -363,7 +378,7 @@ Launcher 的回退单位是应用版本目录，不是整个系统状态。涉�
 
 故障恢复必须以 SQLite Release 状态、Launcher current、实际进程版本和 archive SHA 四者共同核对，不能只看单一日志或 HTTP 成功响应。
 
-## 12. 测试与发布门禁
+## 13. 测试与发布门禁
 
 最低覆盖：
 
@@ -382,7 +397,7 @@ Launcher 的回退单位是应用版本目录，不是整个系统状态。涉�
 
 详细命令和发布验收见 [`testing.md`](../testing.md)。当前 `scripts/smoke-launcher.cjs` 只证明 Launcher 局部流程，不替代真实 Server/Client 和数据库升级演练。
 
-## 13. 扩展规则与已知缺口
+## 14. 扩展规则与已知缺口
 
 以下变化会改变长期边界，应先评估 ADR、兼容和迁移：
 
