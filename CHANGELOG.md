@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.14] - 2026-08-30
+
 ### Added
 
 - Release archive 与 Launcher 本地版本清理：Server 按最近 3 个成功 Release + 30 天保底策略清理 Local/Provider 正文和过期上传会话，`/releases` 页面支持预览与确认执行；Release 审计行和 `clientStates` 保留不删。
