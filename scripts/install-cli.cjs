@@ -6,13 +6,13 @@
  *
  * 用法（目标机器只需有 Node 18+ 和外网访问）：
  *   Linux / Git Bash（单命令，含三次重试与正确退出码）：
- *     node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.4.0
+ *     node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=<版本>
  *   Windows PowerShell（单行；JS 全单引号 + 外层双引号，避开 PS 5.1 吞内嵌双引号的问题，已实测；勿改写引号形式）：
  *     node -e "const u='https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs';const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error('安装失败:',String(e));process.exit(1)})" -- --tag=<版本>
  *
  * 两步等价形式（先把脚本落盘再执行）：
- *   curl -fsSL <脚本URL> -o install-cli.cjs && node install-cli.cjs --tag=v0.4.0
- *   irm  <脚本URL> -OutFile install-cli.cjs ; node install-cli.cjs --tag=v0.4.0
+ *   curl -fsSL <脚本URL> -o install-cli.cjs && node install-cli.cjs --tag=<版本>
+ *   irm  <脚本URL> -OutFile install-cli.cjs ; node install-cli.cjs --tag=<版本>
  *
  * 注意 node -e 后接额外参数必须先写 "--" 分隔符，否则被当作 Node 自身选项。
  *
