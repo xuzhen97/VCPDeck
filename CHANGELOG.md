@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.15] - 2026-09-01
+
 ### Added
 
 - FRP 映射恢复对账：Client 重连（或首次连接）后 Server 按 SQLite 期望集合做三方比较（SQLite × Client 快照 × FRPS Dashboard），自动派发内部 `frp.reconcile` Job 重建 frpc 并恢复映射；通过 capability `frp.reconcileProtocolVersion=1` 协商，新 Server + 旧 Client 不自动恢复、新 Client + 旧 Server 不读取残留配置，标准组合仍为同版本发布。
