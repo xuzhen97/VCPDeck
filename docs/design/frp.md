@@ -1,6 +1,6 @@
 # VCPDeck FRP 设计
 
-> 状态：Current｜维护责任：FRP/Client 维护者｜最后核验：2026-08-24｜适用版本：当前 `main`
+> 状态：Current｜维护责任：FRP/Client 维护者｜最后核验：2026-09-01｜适用版本：当前 `main`
 >
 > 事实来源：`packages/shared/src/index.ts`、`packages/server/src/frp/`、`packages/server/src/events/client.gateway.ts`、`packages/client/src/frpc-daemon.ts`、`packages/sdk/src/frp.ts`、Frontend FRP 页面、Prisma schema
 

@@ -1,10 +1,10 @@
 # Release 与自更新子系统设计
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-29｜适用版本：`0.6.14` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-01｜适用版本：`0.6.15` / 当前 `main`
 
 本文描述当前已经落地的 Release、Server/Client 更新和 Launcher 进程守护模型。长期决策理由见 [ADR-0003](../adr/0003-separate-launcher-for-updates.md)；构件生成、首次部署和回滚操作见 [`deployment.md`](../deployment.md)；兼容要求见 [`compatibility.md`](../compatibility.md)；故障处置见 [`operations.md`](../operations.md)。
 
-当前核心实现已经落地，Launcher smoke 已覆盖 prepare/apply、探活和失败回退；`0.6.14` 已通过 Alibaba 双平台直传完成 Server → Launcher → 7 台 Windows/Linux Client 的生产发布验收，`0.6.13` 已在 Bazzite x64 上完成无系统 Node 的首次安装现场验证与修复。后续版本仍必须重复执行发布门禁，不能以历史验收替代本次构件验证。
+当前核心实现已经落地，Launcher smoke 已覆盖 prepare/apply、探活和失败回退；`0.6.15`（FRP 映射恢复对账与有限自愈）已通过 Alibaba 双平台直传完成 Server → Launcher → 10 台 Client 的生产发布验收，`0.6.14` 已通过 Alibaba 双平台直传完成 Server → Launcher → 7 台 Windows/Linux Client 的生产发布验收，`0.6.13` 已在 Bazzite x64 上完成无系统 Node 的首次安装现场验证与修复。后续版本仍必须重复执行发布门禁，不能以历史验收替代本次构件验证。
 
 ## 1. 目标与非目标
 
