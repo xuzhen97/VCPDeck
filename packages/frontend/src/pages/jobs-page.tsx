@@ -474,6 +474,7 @@ function jobTypeLabel(type: string): string {
 			"frp.create": "创建映射",
 			"frp.delete": "删除映射",
 			"frp.list": "读取映射",
+			"frp.reconcile": "恢复 FRP 映射",
 			"agent.run": "Pi 运行",
 			"agent.session": "Pi 会话",
 		}[type] ?? type

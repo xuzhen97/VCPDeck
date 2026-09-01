@@ -317,6 +317,18 @@ async function runCancelJob(
 	);
 }
 
+/** Job 类型显示文案（frp.reconcile → 恢复 FRP 映射；未知类型原样）。 */
+function jobTypeLabel(type: string): string {
+	return (
+		{
+			"frp.create": "创建映射",
+			"frp.delete": "删除映射",
+			"frp.list": "读取映射",
+			"frp.reconcile": "恢复 FRP 映射",
+		}[type] ?? type
+	);
+}
+
 /** 人类可读的 Job 列表：进行中优先，其余按创建时间倒序展示分页页内容。 */
 function formatJobsList(result: PaginatedResult<JobInfo>): string {
 	const sorted = [...result.data].sort((a, b) => {
@@ -333,7 +345,7 @@ function formatJobsList(result: PaginatedResult<JobInfo>): string {
 	const rows = sorted.map((job) => ({
 		jobId: job.jobId,
 		client: job.clientName ?? job.clientId,
-		type: job.type,
+		type: jobTypeLabel(job.type),
 		status: job.status,
 		error: job.errorCode ?? "-",
 		created: job.createdAt,
@@ -362,7 +374,7 @@ function formatJobDetail(job: JobInfo, output: string | null): string {
 	const lines = [
 		`Job: ${job.jobId}`,
 		`Client: ${job.clientName ?? job.clientId}`,
-		`Type: ${job.type}`,
+		`Type: ${jobTypeLabel(job.type)}`,
 		`Status: ${job.status}`,
 	];
 	if (job.errorCode || job.errorMessage) {

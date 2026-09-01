@@ -225,7 +225,7 @@ describe("FrpsInstancesService", () => {
 			const fetcher = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
 				const type = String(input).split("/").at(-1);
 				return Response.json({
-					proxies: [{ name: `${type}-proxy`, conf: { remotePort: 20100 } }],
+					proxies: [{ name: `${type}-proxy`, status: "online", conf: { remotePort: 20100 } }],
 				});
 			});
 			vi.stubGlobal("fetch", fetcher);
@@ -233,9 +233,9 @@ describe("FrpsInstancesService", () => {
 			const result = await service.listDashboardProxies(instance);
 
 			expect(result.list).toEqual([
-				{ name: "tcp-proxy", proxyType: "tcp", remotePort: 20100 },
-				{ name: "http-proxy", proxyType: "http", remotePort: 20100 },
-				{ name: "https-proxy", proxyType: "https", remotePort: 20100 },
+				{ name: "tcp-proxy", proxyType: "tcp", status: "online", remotePort: 20100 },
+				{ name: "http-proxy", proxyType: "http", status: "online", remotePort: 20100 },
+				{ name: "https-proxy", proxyType: "https", status: "online", remotePort: 20100 },
 			]);
 			expect(fetcher.mock.calls[0]?.[1]?.headers).toEqual({
 				Authorization: `Basic ${Buffer.from("operator:secret").toString("base64")}`,

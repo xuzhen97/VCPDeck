@@ -1,4 +1,4 @@
-import { Inject, forwardRef, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
+import { Inject, Optional, forwardRef, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -11,6 +11,7 @@ import { ClientService } from "../client/client.service.js";
 import { JobService } from "../job/job.service.js";
 import { FileService } from "../file/file.service.js";
 import { FrpService } from "../frp/frp.service.js";
+import { FrpReconciliationService } from "../frp/frp-reconciliation.service.js";
 import { PiRequestBroker } from "../pi/pi-request-broker.js";
 import { PiEventBroker } from "../pi/pi-event-broker.js";
 import { PiRunService } from "../pi/pi-run.service.js";
@@ -50,6 +51,7 @@ import type {
   TerminalStateReport,
   UpdateReady,
   UpdateFailed,
+  FrpRuntimeStateAck,
 } from "@vcpdeck/shared";
 import { clientPsk } from "../client/client-psk.js";
 
@@ -75,8 +77,12 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   	@Inject(forwardRef(() => ReleaseOrchestrator))
     private readonly orchestrator: ReleaseOrchestrator,
     // 更新事件发送通道（bindEmitters 模式，避免 provider 循环）
-    @Inject(forwardRef(() => GatewayUpdateChannel))
+	@Inject(forwardRef(() => GatewayUpdateChannel))
     private readonly updateChannel: GatewayUpdateChannel,
+    // FRP 恢复编排（可选注入：旧测试两参构造时跳过）
+    @Optional()
+    @Inject(FrpReconciliationService)
+    private readonly frpReconciliation?: FrpReconciliationService,
   ) {}
 
   onModuleInit() {
@@ -94,6 +100,9 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
 
   // ── Pi request 发送通道（避免与 PiModule 循环依赖） ──
   afterInit() {
+    this.frpReconciliation?.bindDispatcher((socketId, dispatch) =>
+      this.sendReconcileDispatch(socketId, dispatch),
+    );
     this.piRequests.bindEmitter((socketId, request) => {
       this.server.to(socketId).emit(Events.PI_REQUEST, request);
     });
@@ -147,6 +156,8 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
     this.piRequests.disconnect(socketId);
     this.terminalBroker.disconnect(socketId);
+    // FRP 恢复周期只回收匹配 socket 的租约（service 内部判断）。
+    void this.frpReconciliation?.disconnect(clientId, socketId);
     if (await this.piRuns.disconnectGeneration(clientId, socketId)) {
       await this.jobService.markDisconnected(clientId);
       await this.frpService.markInactiveByClientId(clientId);
@@ -164,11 +175,47 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     client.data.clientId = data.clientId;
     client.join(data.clientId);
     await this.piRuns.markReconcilePending(data.clientId, client.id);
-		await this.terminalService.handleClientRegistered(data.clientId, client.id);
-		this.orchestrator.onClientRegistered(data.clientId, data.clientVersion);
-		client.emit("ack", { event: Events.REGISTER });
-		console.log(`[ws] registered: ${data.clientId} (${data.hostname})`);
-		return { ok: true };
+    await this.terminalService.handleClientRegistered(data.clientId, client.id);
+    this.orchestrator.onClientRegistered(data.clientId, data.clientVersion);
+    client.emit("ack", { event: Events.REGISTER });
+    console.log(`[ws] registered: ${data.clientId} (${data.hostname})`);
+    return { ok: true };
+  }
+
+	// ── FRP runtime 状态上报（socket lease 信任边界；严格解析在 service 内） ──
+	@SubscribeMessage(Events.FRP_STATE)
+	async handleFrpState(
+		@ConnectedSocket() client: Socket,
+		@MessageBody() data: unknown,
+	): Promise<FrpRuntimeStateAck> {
+		const clientId = client.data.clientId as string | undefined;
+		if (typeof clientId !== "string" || !this.frpReconciliation) {
+			// 未注册 socket 或 service 缺失：失败关闭，不触发任何恢复。
+			return {
+				connectionGeneration: "",
+				accepted: false,
+				action: "stale",
+			};
+		}
+		const ack = await this.frpReconciliation.handleState(clientId, client.id, data);
+		// 兼容无 callback 的桥接：同步广播 ack 事件（Client 只接受本代 ack）。
+		client.emit(Events.FRP_STATE_ACK, ack);
+		return ack;
+	}
+
+	/** reconcile 派发：精确发往 socketId（lease 信任边界），并广播 Job 更新。 */
+	private sendReconcileDispatch(socketId: string, d: DispatchPayload) {
+		this.server.to(socketId).emit(Events.JOB_DISPATCH, {
+			jobId: d.jobId,
+			type: d.type,
+			payload: d.payload,
+			timeout: d.timeout,
+		} satisfies JobDispatch);
+		this.server.emit(Events.JOB_UPDATE, {
+			jobId: d.jobId,
+			type: d.type,
+			status: JobStatus.RUNNING,
+		} satisfies JobUpdate);
 	}
 
 	// ── 自更新事件 ──
@@ -368,6 +415,19 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   async handleJobDone(@MessageBody() data: JobDone) {
     const raw = data as any;
     const type: string = raw.type;
+
+    // ── FRP reconcile：system Job 由 reconciliation service 直接终结，不走 create/delete 收敛 ──
+    if (type === "frp.reconcile") {
+      if (raw.error) {
+        await this.frpReconciliation?.handleLocalFailure(
+          data.jobId,
+          typeof raw.error.code === "string" ? raw.error.code : "FRP_RECONCILE_FAILED",
+        );
+      } else {
+        await this.frpReconciliation?.handleLocalResult(data.jobId, raw.result);
+      }
+      return;
+    }
 
     if (type === "exec") {
       // ── Exec error 终态（基础设施失败） ──

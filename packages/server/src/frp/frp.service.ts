@@ -1,6 +1,6 @@
 /** @file FRP 映射服务 — 持久化、端口分配与 Dashboard 收敛 */
 
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type {
 	DispatchPayload,
@@ -33,6 +33,7 @@ type FrpSettlement =
 	  };
 import { PrismaService } from "../prisma/prisma.service.js";
 import { FrpsInstancesService } from "./frp-instances.service.js";
+import { FrpReconciliationService } from "./frp-reconciliation.service.js";
 import { PortAllocator } from "./port-allocator.js";
 
 /** FRP 映射操作稳定失败。 */
@@ -66,6 +67,9 @@ export class FrpService {
 		@Inject(PrismaService) private readonly prisma: PrismaService,
 		@Inject(FrpsInstancesService)
 		private readonly instancesService: FrpsInstancesService,
+		/** 恢复周期互斥守卫；未注入时（旧测试直接两参构造）跳过检查。 */
+		@Optional() @Inject(FrpReconciliationService)
+		private readonly reconciliation?: FrpReconciliationService,
 	) {
 		this.allocator = new PortAllocator(prisma);
 	}
@@ -73,11 +77,21 @@ export class FrpService {
 	async createMapping(
 		dto: FrpMappingCreateInput,
 	): Promise<{ mapping: FrpMappingView; dispatch: DispatchPayload }> {
+		// 恢复周期内拒绝写操作（稳定 FRP_RECONCILE_BUSY / 409）。
+		this.reconciliation?.assertWritable(dto.clientId);
 		const client = await this.prisma.client.findUnique({
 			where: { id: dto.clientId },
 		});
-		if (!client) throw new Error(`Client "${dto.clientId}" 不存在`);
-		if (!client.online) throw new Error(`Client "${dto.clientId}" 不在线`);
+		if (!client) {
+			const e = new Error(`Client "${dto.clientId}" 不存在`);
+			(e as { code?: string }).code = "FRP_CLIENT_NOT_FOUND";
+			throw e;
+		}
+		if (!client.online) {
+			const e = new Error(`Client "${dto.clientId}" 不在线`);
+			(e as { code?: string }).code = "FRP_CLIENT_OFFLINE";
+			throw e;
+		}
 		let capabilities: string[] = [];
 		try {
 			capabilities = JSON.parse(client.capabilities) as string[];
@@ -85,7 +99,9 @@ export class FrpService {
 			capabilities = [];
 		}
 		if (!capabilities.includes("frp")) {
-			throw new Error(`Client "${dto.clientId}" 未启用 FRP 能力`);
+			const e = new Error(`Client "${dto.clientId}" 未启用 FRP 能力`);
+			(e as { code?: string }).code = "FRP_CLIENT_NO_FRP_CAPABILITY";
+			throw e;
 		}
 
 		const instance = dto.frpsInstanceId
@@ -196,12 +212,16 @@ export class FrpService {
 	): Promise<{ mapping: FrpMappingInfo; dispatch: DispatchPayload } | null> {
 		const mapping = await this.prisma.frpMapping.findUnique({ where: { id } });
 		if (!mapping) return null;
+		// 恢复周期内拒绝写操作（稳定 FRP_RECONCILE_BUSY / 409）。
+		this.reconciliation?.assertWritable(mapping.clientId);
 		const client = await this.prisma.client.findUnique({
 			where: { id: mapping.clientId },
 			select: { online: true },
 		});
 		if (!client?.online) {
-			throw new Error(`Client "${mapping.clientId}" 不在线`);
+			const e = new Error(`Client "${mapping.clientId}" 不在线`);
+			(e as { code?: string }).code = "FRP_CLIENT_OFFLINE";
+			throw e;
 		}
 		const payload: FrpDeletePayload = { mappingId: id, name: mapping.name };
 		const jobId = randomUUID();
@@ -574,12 +594,16 @@ export class FrpService {
 		timeoutSeconds: number,
 	): Promise<boolean> {
 		const deadline = Date.now() + timeoutSeconds * 1000;
-		while (Date.now() <= deadline) {
-			const proxies = await this.instancesService.listDashboardProxies(instance);
-			const exists = proxies.list.some(
-				(proxy) => proxy.proxyType === proxyType && proxy.name === name,
-			);
-			if (exists === shouldExist) return true;
+			while (Date.now() <= deadline) {
+				const proxies = await this.instancesService.listDashboardProxies(instance);
+				// 二次确认只认 online：offline 残留条目（frpc 已断开）视为不存在。
+				const online = proxies.list.some(
+					(proxy) =>
+						proxy.proxyType === proxyType &&
+						proxy.name === name &&
+						proxy.status === "online",
+				);
+				if (online === shouldExist) return true;
 			if (Date.now() >= deadline) break;
 			await new Promise((resolve) => setTimeout(resolve, 500));
 		}

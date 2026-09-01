@@ -365,6 +365,7 @@ export class FrpsInstancesService {
 						proxies?: Array<{
 							name?: string;
 							remotePort?: number;
+							status?: string;
 							conf?: { remotePort?: number };
 						}>;
 					};
@@ -373,6 +374,8 @@ export class FrpsInstancesService {
 						.map((proxy) => ({
 							name: proxy.name!,
 							proxyType,
+							// frps 会把已断开 frpc 的 proxy 以 offline 残留于列表；只有 online 才算真实在线。
+							status: (proxy.status === "online" ? "online" : "offline") as "online" | "offline",
 							remotePort:
 								proxy.remotePort ?? proxy.conf?.remotePort ?? null,
 						}));
@@ -387,9 +390,11 @@ export class FrpsInstancesService {
 					https: list.filter((proxy) => proxy.proxyType === "https").length,
 				},
 				list,
+				// 仅统计在线 proxy 占用的端口（offline 残留条目的端口已被 FRPS 释放）。
 				usedPorts: [
 					...new Set(
 						list
+							.filter((proxy) => proxy.status === "online")
 							.map((proxy) => proxy.remotePort)
 							.filter((port): port is number => port !== null)
 							.sort((a, b) => a - b),

@@ -27,6 +27,7 @@ export * from "./pi.js";
 export * from "./terminal.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { PiCapabilityStatus } from "./pi.js";
+import type { FrpCapabilityStatus } from "./frp-runtime.js";
 // 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
 export type {
 	PiAgentState,
@@ -147,6 +148,8 @@ export const Events = {
 	UPDATE_READY: "update:ready",
 	UPDATE_FAILED: "update:failed",
 	SERVER_SHUTDOWN: "server:shutdown",
+	FRP_STATE: "frp:state",
+	FRP_STATE_ACK: "frp:state-ack",
 } as const;
 
 // ── Job type ──
@@ -166,6 +169,7 @@ export enum JobType {
 	FRP_CREATE = "frp.create",
 	FRP_DELETE = "frp.delete",
 	FRP_LIST = "frp.list",
+	FRP_RECONCILE = "frp.reconcile",
 	FILE_ROOTS = "file.roots",
 }
 
@@ -194,6 +198,7 @@ export interface MachineRegister {
 	capabilityDetails?: {
 		pi?: PiCapabilityStatus;
 		terminal?: TerminalCapabilityStatus;
+		frp?: FrpCapabilityStatus;
 	};
 }
 
@@ -340,10 +345,11 @@ export interface ClientInfo {
 	totalMemMB: number;
 	clientVersion: string;
 	capabilities: string[];
-	/** 解析后的能力摘要（pi/terminal；无探测/损坏时为 {}） */
+	/** 解析后的能力摘要（pi/terminal/frp；无探测/损坏时为 {}） */
 	capabilityDetails: {
 		pi?: PiCapabilityStatus;
 		terminal?: TerminalCapabilityStatus;
+		frp?: FrpCapabilityStatus;
 	};
 	online: boolean;
 	cpuPercent: number | null;
@@ -623,6 +629,7 @@ export const FRP_MAPPING_STATUSES = [
 	"inactive",
 	"deleting",
 	"error",
+	"reconciling",
 ] as const;
 export type FrpMappingStatus = (typeof FRP_MAPPING_STATUSES)[number];
 
@@ -638,6 +645,14 @@ export const FRP_ERROR_CODES = [
 	"FRPC_NOT_FOUND",
 	"FRPC_START_FAILED",
 	"FRPC_STOP_FAILED",
+	"FRP_RECONCILE_BUSY",
+	"FRP_RECONCILE_FAILED",
+	"FRP_RUNTIME_GENERATION_STALE",
+	"FRP_RUNTIME_STATE_INVALID",
+	"FRP_RECONCILE_TIMEOUT",
+	"FRP_CLIENT_NOT_FOUND",
+	"FRP_CLIENT_OFFLINE",
+	"FRP_CLIENT_NO_FRP_CAPABILITY",
 ] as const;
 export type FrpErrorCode = (typeof FRP_ERROR_CODES)[number];
 
@@ -653,6 +668,7 @@ export const FrpJobType = {
 	FRP_CREATE: "frp.create",
 	FRP_DELETE: "frp.delete",
 	FRP_LIST: "frp.list",
+	FRP_RECONCILE: "frp.reconcile",
 } as const;
 export type FrpJobType = (typeof FrpJobType)[keyof typeof FrpJobType];
 
@@ -925,7 +941,28 @@ export interface ProbeResult {
 	proxies: {
 		total: number;
 		byType: { tcp: number; http: number; https: number };
-		list: { name: string; proxyType: string; remotePort: number | null }[];
+		/** status: online = FRPS 已建立隧道；offline = 残留条目（frpc 已断开，尚未从列表移除） */
+		list: { name: string; proxyType: string; remotePort: number | null; status: "online" | "offline" }[];
 		usedPorts: number[];
 	} | null;
 }
+
+// ── FRP Runtime Reconciliation Protocol v1 ──
+export {
+	FRP_RECONCILE_PROTOCOL_VERSION,
+	parseFrpCapabilityStatus,
+	parseFrpReconcilePayload,
+	parseFrpReconcileResult,
+	parseFrpRuntimeStateAck,
+	parseFrpRuntimeStateReport,
+} from "./frp-runtime.js";
+export type {
+	FrpCapabilityStatus,
+	FrpReconcilePayload,
+	FrpReconcileResult,
+	FrpRecoveryOwner,
+	FrpRuntimeMappingSnapshot,
+	FrpRuntimeStateAck,
+	FrpRuntimeStateReport,
+	FrpRuntimeStatus,
+} from "./frp-runtime.js";

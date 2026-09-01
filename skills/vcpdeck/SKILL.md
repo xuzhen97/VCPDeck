@@ -366,7 +366,9 @@ node "<vcpdeck-cli>" storage status [--env=<name>] [--json]
 
 ### 功能语义与敏感字段红线
 
-`frp instances` 列出 FRP 服务实例（名称、服务器地址端口、Dashboard 地址、是否默认）；`frp mappings` 列出映射（名称、机器、类型、本地地址、远程端口、状态、公网 URL），支持 `--client` 名称/ID 过滤。**实例信息中的 authToken 与 dashboard 密码属于凭据，CLI 输出已做安全投影，Agent 不得尝试从其他渠道获取或展示这些字段**。`storage status` 显示当前激活的存储后端类型（local/alibaba）与配置更新时间。
+`frp instances` 列出 FRP 服务实例（名称、服务器地址端口、Dashboard 地址、是否默认）；`frp mappings` 列出映射（名称、机器、类型、本地地址、远程端口、状态、公网 URL），支持 `--client` 名称/ID 过滤。映射状态除 `provisioning/active/inactive/deleting/error` 外还可能出现 `reconciling`：Client 重连后 Server 正在自动恢复该映射，正常应在数分钟内收敛为 active 或 inactive，期间向用户说明“恢复进行中”而不是立即处置。**实例信息中的 authToken 与 dashboard 密码属于凭据，CLI 输出已做安全投影，Agent 不得尝试从其他渠道获取或展示这些字段**。`storage status` 显示当前激活的存储后端类型（local/alibaba）与配置更新时间。
+
+状态解读红线：Client 在线不等于映射 active（断线/重启后映射先回 inactive，需等 Client 重连触发自动 reconcile 且 FRPS Dashboard 确认通过）；`active` 也不等于公网可达。最终 `inactive` 且 `FRP_RECONCILE_FAILED` 表示有限重试耗尽，处置顺序：确认 Client 在线 → 确认 FRPS/Dashboard 可达（`frp instances` + 必要时人工 probe）→ 恢复后重启 Client 或经用户确认后删除重建映射；不能把该状态当作 create/delete 本身失败。恢复周期进行中 create/delete 会返回 409 `FRP_RECONCILE_BUSY`：这不是错误配置，等待 `reconciling` 收敛后（或用户确认后）有限重试即可，不要把 busy 当永久失败报告。
 
 ### 写操作语义与确认门
 

@@ -1,0 +1,5 @@
+{
+	"ignore": [
+		"skills/vcpdeck/vcpdeck.cjs"
+	]
+}

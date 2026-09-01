@@ -173,6 +173,49 @@ describe("jobs command", () => {
 		).rejects.toThrow('未找到 Client "ghost"');
 	});
 
+	it("list 把 frp.reconcile 显示为「恢复 FRP 映射」，不泄露 raw payload 敏感字段", async () => {
+		const { port } = await listen((_request, response) => {
+			response.setHeader("content-type", "application/json");
+			response.end(
+				JSON.stringify({
+					data: [
+						jobInfo({
+							jobId: "reconcile-1",
+							type: "frp.reconcile",
+							status: JobStatus.DONE,
+							createdVia: "system:frp-reconcile",
+							createdByIdentityId: null,
+							createdByName: null,
+							payload: {
+								attempt: 1,
+								mappingCount: 2,
+								connectionGeneration: "conn-1",
+								expectedRuntimeGeneration: 4,
+							},
+							result: {
+								status: "running",
+								runtimeGeneration: 4,
+								loadedMappingIds: ["fm_1", "fm_2"],
+							},
+						}),
+					],
+					total: 1,
+					page: 1,
+					pageSize: 20,
+					totalPages: 1,
+				}),
+			);
+		});
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runJobsCommand("list", [], { paths, processEnv, log: (m) => lines.push(m) });
+		const output = lines.join("\n");
+		expect(output).toContain("恢复 FRP 映射");
+		expect(output).toContain("reconcile-1");
+		// 输出不出现 authToken 等敏感正文
+		expect(output).not.toContain("SUPER_SECRET");
+	});
+
 	it("get 展示失败现场：错误摘要与 stdout/stderr spool 全文", async () => {
 		const requests: string[] = [];
 		const failed = jobInfo({

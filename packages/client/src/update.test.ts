@@ -101,6 +101,34 @@ describe("客户端优雅停机（update.ts）", () => {
 		expect(launcher.applyUpdate).toHaveBeenCalledTimes(1);
 	});
 
+	it("beforeApply 顺序：prepare → drain → update:ready → beforeApply → apply", async () => {
+		const order: string[] = [];
+		launcher.prepareUpdate.mockImplementation(async () => {
+			order.push("prepare");
+		});
+		launcher.applyUpdate.mockImplementation(async () => {
+			order.push("apply");
+		});
+		// 重新 attach（Map 覆盖旧注册），注入 beforeApply 钩子。
+		attachUpdateHandler({
+			socket: socket as never,
+			launcher: launcher as never,
+			serverBase: "http://localhost:3001",
+			getRunningJobIds: () => [],
+			beforeApply: async () => {
+				order.push(`ready=${String(lastEmit(socket, Events.UPDATE_READY) !== undefined)}`);
+				order.push("beforeApply");
+			},
+		});
+
+		fireUpdateRequest(socket);
+		await vi.waitFor(() => {
+			expect(launcher.applyUpdate).toHaveBeenCalledTimes(1);
+		});
+
+		expect(order).toEqual(["prepare", "ready=true", "beforeApply", "apply"]);
+	});
+
 	it("prepare 失败 → UPDATE_FAILED 且不发 READY", async () => {
 		launcher.prepareUpdate.mockRejectedValue(new Error("校验失败"));
 

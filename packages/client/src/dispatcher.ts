@@ -8,6 +8,7 @@ import {
 	handleFrpCreate,
 	handleFrpDelete,
 	handleFrpList,
+	handleFrpReconcile,
 } from "./frpc-daemon.js";
 
 export function dispatch(job: JobDispatch, socket: Socket) {
@@ -102,6 +103,11 @@ export function dispatch(job: JobDispatch, socket: Socket) {
 			);
 		case "frp.list":
 			return handleFrpList({ _jobId: job.jobId }, socket);
+		case "frp.reconcile":
+			return handleFrpReconcile(
+				{ ...(job as any).payload, _jobId: job.jobId },
+				socket,
+			);
 		case "agent.run":
 			throw new Error(`Job type "${job.type}" not yet implemented`);
 		default:

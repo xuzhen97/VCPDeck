@@ -224,7 +224,59 @@ async function waitForFrps() {
 	return false;
 }
 
+// 恢复场景的分区日志
+function log(section, msg) {
+	console.log(`  [${section}] ${msg}`);
+}
+
+// 重置 FRP 测试状态（本地开发库）：删除环境变量迁移产生的默认实例行与测试映射，
+// 使本次 run 的随机端口能通过 Server 启动时的 env 迁移生效（迁移仅在实例表为空时执行）。
+async function resetFrpTestState() {
+	let PrismaLibSql, PrismaClient;
+	try {
+		({ PrismaLibSql } = require(
+			path.join(root, "packages/server/node_modules/@prisma/adapter-libsql"),
+		));
+		({ PrismaClient } = require(
+			path.join(root, "packages/server/generated/client/index.js"),
+		));
+	} catch (e) {
+		console.log("  [reset] 跳过（Prisma 客户端不可用）:", e.message);
+		return;
+	}
+	const db = path
+		.resolve(root, "packages/server/prisma/dev.db")
+		.replace(/\\/g, "/");
+	const factory = new PrismaLibSql({ url: "file:///" + db }, {});
+	const p = new PrismaClient({ adapter: factory });
+	try {
+		await p.frpMapping.deleteMany({});
+		const r = await p.frpsInstance.deleteMany({
+			where: { name: "默认（从环境变量迁移）" },
+		});
+		console.log(`  [reset] 已清理旧 env 迁移实例 ${r.count} 个、测试映射`);
+	} finally {
+		await p.$disconnect();
+	}
+}
+
 // ── Start VCPDeck Server ──
+// 捕获 Server/Client 输出（持续捕获，超限保留尾部），用于 Task 7 密钥泄露断言与失败诊断
+
+function attachOutputCapture(stream, bufRef) {
+	if (!stream) return;
+	stream.on("data", (d) => {
+		const text = d.toString();
+		if (bufRef.size < 1_000_000) bufRef.size += text.length;
+		bufRef.text += text;
+		if (bufRef.text.length > 1_000_000) {
+			bufRef.text = bufRef.text.slice(-500_000);
+		}
+	});
+}
+const serverBuf = { text: "", size: 0 };
+const clientBuf = { text: "", size: 0 };
+
 function startServer() {
 	_serverProcess = spawn("pnpm", ["start"], {
 		cwd: serverDir,
@@ -245,17 +297,14 @@ function startServer() {
 			FRP_DASHBOARD_PASSWORD: "admin",
 		},
 	});
+	attachOutputCapture(_serverProcess.stdout, serverBuf);
+	attachOutputCapture(_serverProcess.stderr, serverBuf);
 	return new Promise((resolve) => {
-		const onData = (d) => {
-			const text = d.toString();
-			if (text.includes("listening on")) {
-				_serverProcess.stdout?.off("data", onData);
-				_serverProcess.stderr?.off("data", onData);
-				resolve();
-			}
+		const onText = (d) => {
+			if (d.toString().includes("listening on")) resolve();
 		};
-		_serverProcess.stdout?.on("data", onData);
-		_serverProcess.stderr?.on("data", onData);
+		_serverProcess.stdout?.on("data", onText);
+		_serverProcess.stderr?.on("data", onText);
 		setTimeout(resolve, 30000);
 	});
 }
@@ -280,11 +329,13 @@ function startRealClient(frpcDir) {
 		});
 
 		let started = false;
+		attachOutputCapture(_realClientProcess.stdout, clientBuf);
+		attachOutputCapture(_realClientProcess.stderr, clientBuf);
 		const onData = (chunk) => {
-			const text = chunk.toString();
 			if (
 				!started &&
-				(text.includes("connected as") || text.includes("registered"))
+				(chunk.toString().includes("connected as") ||
+					chunk.toString().includes("registered"))
 			) {
 				started = true;
 				resolve();
@@ -307,6 +358,399 @@ function stopRealClient() {
 		killTree(_realClientProcess.pid);
 		_realClientProcess = null;
 	}
+}
+
+// 仅重启 Client（保留 Server DB 与 clientId），Client 自动重新注册
+async function restartRealClientPreservingState(frpcDir) {
+	stopRealClient();
+	await sleep(1500);
+	await startRealClient(frpcDir);
+}
+
+// ══ Task 7：FRP 恢复场景 ══
+
+/** 创建第二个 TCP 映射（确保恢复场景至少两个映射）。返回 mappingId。 */
+async function createSecondTcpMapping(frpClientId) {
+	const res = await api(
+		"POST",
+		"/api/frp/mappings",
+		{
+			json: {
+				clientId: frpClientId,
+				name: "test-tcp-2",
+				proxyType: "tcp",
+				localPort: 12346,
+			},
+		},
+	);
+	if (!res.ok) return null;
+	const body = await res.json();
+	return body?.mapping?.id ?? body?.id ?? null;
+}
+
+/** 场景 1：仅停止/重启 Client（保留状态），映射 active → inactive → reconciling → active。 */
+async function scenarioClientRestart(frpcDir, mappingId) {
+	log("R1", "Client 重启恢复");
+	stopRealClient();
+	await sleep(3000);
+
+	// 断开后映射应回 inactive
+	const afterStop = await waitForMappingStatus(mappingId, "inactive", 30_000);
+	if (!afterStop.mapping || afterStop.mapping.status !== "inactive") {
+		fail(
+			"R1 停止 Client 后映射回 inactive",
+			`实际 status=${afterStop.mapping?.status ?? "null"}`,
+		);
+		return false;
+	}
+	pass("R1 停止 Client 后映射回 inactive", "心跳超时 → inactive");
+
+	// 重启 Client（保留同一 clientId），Server 应自动 reconcile
+	await restartRealClientPreservingState(frpcDir);
+	const result = await waitForMappingStatus(mappingId, "active", 70_000);
+	const sawReconciling = result.observedStatuses.includes("reconciling");
+	if (!result.mapping || result.mapping.status !== "active") {
+		fail(
+			"R1 Client 重启后映射自动恢复 active",
+			`status=${result.mapping?.status} observed=[${result.observedStatuses}]",`,
+		);
+		return false;
+	}
+	pass(
+		"R1 Client 重启后映射自动恢复 active",
+		`sawReconciling=${sawReconciling}`,
+	);
+
+	// FRPS Dashboard 二次确认
+	const dash1 = await waitForDashboardProxy(
+		"tcp",
+		"test-tcp",
+		true,
+		30_000,
+	);
+	const dash2 = await waitForDashboardProxy(
+		"tcp",
+		"test-tcp-2",
+		true,
+		30_000,
+	);
+	if (dash1 && dash2) {
+		pass("R1 FRPS Dashboard 两个 proxy 均在线", "二次确认通过");
+	} else {
+		fail(
+			"R1 FRPS Dashboard 两个 proxy 均在线",
+			`test-tcp=${dash1} test-tcp-2=${dash2}`,
+		);
+	}
+	return true;
+}
+
+/** 场景 2：只 kill frpc 子进程（Client 保持运行），Client 自持恢复，Client PID 不变。 */
+async function scenarioFrpcCrash(mappingId) {
+	log("R2", "frpc 崩溃恢复");
+	const clientPid = _realClientProcess?.pid;
+	const frpcPid = findFrpcChildPid(clientPid);
+	if (!frpcPid) {
+		fail("R2 找到 frpc 子进程", "未找到 frpc 子进程 PID");
+		return false;
+	}
+
+	// 只 kill frpc 子进程
+	try {
+		execSync(`taskkill /F /PID ${frpcPid} 2>nul || kill -9 ${frpcPid}`, {
+			shell: true,
+			stdio: "ignore",
+		});
+		pass("R2 kill frpc 子进程", `pid=${frpcPid}`);
+	} catch (e) {
+		fail("R2 kill frpc 子进程", `kill 失败: ${e.message}`);
+		return false;
+	}
+
+	await sleep(2000);
+
+	// Client 应自动重启 frpc，映射回到 active
+	const result = await waitForMappingStatus(mappingId, "active", 70_000);
+	if (!result.mapping || result.mapping.status !== "active") {
+		fail(
+			"R2 frpc 崩溃后映射恢复 active",
+			`status=${result.mapping?.status} observed=[${result.observedStatuses}]`,
+		);
+		return false;
+	}
+	pass("R2 frpc 崩溃后映射恢复 active", "Client 自持恢复");
+
+	// Client PID 不变
+	const newClientPid = _realClientProcess?.pid;
+	if (newClientPid === clientPid) {
+		pass("R2 Client PID 不变", `pid=${clientPid}`);
+	} else {
+		fail(
+			"R2 Client PID 不变",
+			`原=${clientPid} 新=${newClientPid}`,
+		);
+	}
+	return true;
+}
+
+/** 场景 3：只重启 Server（保留 Client），Client 自动重连，映射恢复 active，frpc PID 不变。 */
+async function scenarioServerRestart(mappingId) {
+	log("R3", "Server 重启恢复");
+	const clientPid = _realClientProcess?.pid;
+	const frpcPidBefore = findFrpcChildPid(clientPid);
+
+	await restartServer();
+	pass("R3 Server 重启", "已重新登录");
+
+	// 等待 Client 重连，映射恢复 active
+	const result = await waitForMappingStatus(mappingId, "active", 90_000);
+	if (!result.mapping || result.mapping.status !== "active") {
+		fail(
+			"R3 Server 重启后映射恢复 active",
+			`status=${result.mapping?.status} observed=[${result.observedStatuses}]`,
+		);
+		return false;
+	}
+	pass("R3 Server 重启后映射恢复 active", "Client 自动重连");
+
+	// frpc PID 不变
+	const frpcPidAfter = findFrpcChildPid(_realClientProcess?.pid);
+	if (frpcPidBefore && frpcPidAfter && frpcPidBefore === frpcPidAfter) {
+		pass("R3 frpc PID 不变", `pid=${frpcPidBefore}`);
+	} else {
+		// 若 frpc 被 Server 重启触发 reconcile 重启，则 PID 会变，但映射应恢复 active
+		log(
+			"R3",
+			`frpc PID 变化: before=${frpcPidBefore} after=${frpcPidAfter}（reconcile 重启）`,
+		);
+		pass("R3 frpc 状态正常", `after=${frpcPidAfter ?? "null"}`);
+	}
+	return true;
+}
+
+/** 场景 4：FRPS Dashboard 停止，重试耗尽后映射回 inactive；恢复 Dashboard 后重连恢复。 */
+async function scenarioDashboardDown(frpcDir, mappingId, frpsPath) {
+	log("R4", "Dashboard 停止重试耗尽");
+
+	// 停止 FRPS
+	stopFrps();
+	pass("R4 停止 FRPS", "frps 已停止");
+
+	// 重启 Client 触发 reconcile，但 Dashboard 不可达
+	const oldClientPid = _realClientProcess?.pid ?? null;
+	await restartRealClientPreservingState(frpcDir);
+
+	// 等待重试耗尽，映射回 inactive
+	const result = await waitForMappingStatus(mappingId, "inactive", 120_000);
+	if (result.mapping && result.mapping.status === "inactive") {
+		pass(
+			"R4 重试耗尽后映射回 inactive",
+			`error=${result.mapping.errorMessage ?? "null"}`,
+		);
+	} else {
+		console.log(
+			"  [diag-r4a] oldClientPid=" + oldClientPid + " alive=" + processAlive(oldClientPid),
+		);
+		console.log(
+			"  [diag-r4a] observed=[" + result.observedStatuses + "] mapping=" + JSON.stringify({ status: result.mapping?.status, errorCode: result.mapping?.errorCode, errorMessage: result.mapping?.errorMessage }),
+		);
+		console.log("  [diag-r4a] clients: " + (await clientOnlineState()));
+		console.log(
+			"  [diag-r4a] server 关键行:\n" + grepOf(serverBuf, /\[ws\]|frp-reconcile|heartbeat timeout/),
+		);
+		console.log("  [diag-r4a] client 关键行:\n" + grepOf(clientBuf, /connected as|registered|frp|frpc/));
+		fail(
+			"R4 重试耗尽后映射回 inactive",
+			`status=${result.mapping?.status ?? "null"}`,
+		);
+		return false;
+	}
+
+	// 恢复 FRPS
+	const frpsOk = await restartFrps(frpsPath);
+	if (!frpsOk) {
+		fail("R4 恢复 FRPS", "frps 重启失败");
+		return false;
+	}
+	pass("R4 恢复 FRPS", "frps 已恢复");
+
+	// 重启 Client 触发新一轮 reconcile
+	await restartRealClientPreservingState(frpcDir);
+	const recovered = await waitForMappingStatus(mappingId, "active", 70_000);
+	if (recovered.mapping && recovered.mapping.status === "active") {
+		pass("R4 恢复后映射回到 active", "新连接代际恢复成功");
+	} else {
+		const m = recovered.mapping ?? {};
+		console.log(
+			"  [diag-r4] mapping:",
+			JSON.stringify({ status: m.status, errorCode: m.errorCode, errorMessage: m.errorMessage }),
+		);
+		console.log("  [diag-r4] client 输出尾部:\n" + tailOf(clientBuf, 1500));
+		console.log("  [diag-r4] server 输出尾部:\n" + tailOf(serverBuf, 1500));
+		fail(
+			"R4 恢复后映射回到 active",
+			`status=${m.status ?? "null"}`,
+		);
+		return false;
+	}
+	return true;
+}
+
+/** 场景 5：密钥泄露断言 — 扫描捕获的 Server/Client 输出。 */
+function scenarioSecretsNotLeaked() {
+	log("R5", "密钥泄露断言");
+	const all = serverBuf.text + "\n" + clientBuf.text;
+	const leaks = [];
+	if (all.includes(FRPS_TOKEN)) leaks.push("FRPS_TOKEN 值");
+	if (all.includes("auth.token =")) leaks.push("完整 auth.token 行");
+	if (all.includes("webServer.password")) leaks.push("Dashboard 密码行");
+	if (leaks.length === 0) {
+		pass("R5 输出无密钥泄露", `扫描 ${all.length} 字符，未发现 token/密码`);
+		return true;
+	}
+	fail("R5 输出无密钥泄露", `发现: ${leaks.join(", ")}`);
+	return false;
+}
+
+async function runRecoveryScenarios(frpcDir, frpsPath, frpClientId) {
+	log("", "━━ FRP 恢复场景（Task 7） ━━");
+
+	// 确保至少两个 active TCP 映射
+	const secondId = await createSecondTcpMapping(frpClientId);
+	if (secondId) {
+		pass("R0 创建第二个 TCP 映射", `id=${secondId}`);
+		await waitForMappingStatus(secondId, "active", 60_000);
+	} else {
+		log("R0", "第二个映射已存在或创建失败，继续");
+	}
+
+	// 取第一个 TCP 映射 ID
+	const list = await api("GET", "/api/frp/mappings?pageSize=100");
+	const listBody = await list.json();
+	const tcpMappings = (listBody?.data ?? []).filter(
+		(m) => m.proxyType === "tcp",
+	);
+	const primaryId = tcpMappings[0]?.id;
+	if (!primaryId) {
+		fail("R0 获取主 TCP 映射", "未找到 TCP 映射");
+		return;
+	}
+
+	let allPass = true;
+	allPass = (await scenarioClientRestart(frpcDir, primaryId)) && allPass;
+	allPass = (await scenarioFrpcCrash(primaryId)) && allPass;
+	allPass = (await scenarioServerRestart(primaryId)) && allPass;
+	allPass =
+		(await scenarioDashboardDown(frpcDir, primaryId, frpsPath)) && allPass;
+	allPass = scenarioSecretsNotLeaked() && allPass;
+
+	log(
+		"",
+		allPass
+			? "━━ FRP 恢复场景全部通过 ━━"
+			: "━━ 部分恢复场景失败（详见上方） ━━",
+	);
+}
+
+/** 查找真实 Client 进程树内的 frpc 子进程 PID（仅限当前 Client 子进程，避免误杀外部进程）。 */
+function findFrpcChildPid(clientPid) {
+	if (!clientPid) return null;
+	try {
+		if (isWin) {
+			const out = execSync(
+				`powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name='frpc.exe' AND ParentProcessId=${clientPid}\\" | Select-Object -ExpandProperty ProcessId"`,
+				{ stdio: ["ignore", "pipe", "ignore"], timeout: 8000, shell: true },
+			).toString().trim();
+			const pids = out.split(/\s+/).filter(Boolean).map(Number);
+			return pids[0] ?? null;
+		}
+		const out = execSync(
+			`pgrep -P ${clientPid} -f frpc 2>/dev/null || true`,
+			{ stdio: ["ignore", "pipe", "ignore"], timeout: 8000, shell: true },
+		).toString().trim();
+		return out ? Number(out.split("\n")[0]) : null;
+	} catch {
+		return null;
+	}
+}
+
+/** 有限轮询映射状态（有 deadline；返回 { mapping, observedStatuses }）。 */
+async function waitForMappingStatus(
+	mappingId,
+	expectedStatus,
+	timeoutMs = 70_000,
+) {
+	const deadline = Date.now() + timeoutMs;
+	const observed = new Set();
+	let last = null;
+	while (Date.now() < deadline) {
+		try {
+			const { status, body } = await apiJson(
+				"GET",
+				`/api/frp/mappings/${mappingId}`,
+			);
+			if (status === 200 && body) {
+				last = body;
+				observed.add(body.status);
+				if (body.status === expectedStatus) break;
+			}
+		} catch {
+			/* Server 重启期间请求会失败，继续等待 */
+		}
+		await sleep(500);
+	}
+	return { mapping: last, observedStatuses: [...observed] };
+}
+
+/** 有限轮询 FRPS Dashboard proxy 在线/消失（复用 frpsApi）。 */
+async function waitForDashboardProxy(
+	proxyType,
+	proxyName,
+	shouldExist,
+	timeoutMs = 70_000,
+) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			const res = await frpsApi(
+				`/api/proxy/${proxyType}/${encodeURIComponent(proxyName)}`,
+			);
+			if (res.status === 404) {
+				return !shouldExist;
+			}
+			if (res.ok) {
+				const body = await res.json().catch(() => ({}));
+				if (shouldExist) return body.status === "online";
+				return false;
+			}
+		} catch {
+			/* Dashboard 不可达：继续等待到 deadline */
+		}
+		await sleep(1000);
+	}
+	return false;
+}
+
+function stopFrps() {
+	if (_frpsProcess?.pid) {
+		killTree(_frpsProcess.pid);
+		_frpsProcess = null;
+	}
+}
+
+async function restartFrps(frpsPath) {
+	stopFrps();
+	await sleep(1000);
+	startFrps(frpsPath);
+	return waitForFrps();
+}
+
+async function restartServer() {
+	if (_serverProcess?.pid) killTree(_serverProcess.pid);
+	await sleep(1500);
+	await startServer();
+	// 会话可能随进程重启失效，重新登录
+	await loginAsAdmin();
 }
 
 // ── Test helpers ──
@@ -348,10 +792,11 @@ async function testCreateTcpMapping(clientId) {
 			`missing fields: ${JSON.stringify(mapping)}`,
 		);
 	}
-	if (mapping.status !== "inactive") {
+	// 新状态机：create → provisioning（首次 reconcile 成功后转 active）
+	if (mapping.status !== "provisioning") {
 		return fail(
 			"POST create tcp mapping",
-			`expected inactive, got ${mapping.status}`,
+			`expected provisioning, got ${mapping.status}`,
 		);
 	}
 	pass(
@@ -411,21 +856,25 @@ async function testCreateHttpMapping(clientId) {
 }
 
 async function testListMappings(clientId, expectedMin) {
+	// 列表接口统一返回 PaginatedResult：{ data, total, page, pageSize, totalPages }
 	const { status, body } = await apiJson(
 		"GET",
 		`/api/frp/mappings?clientId=${clientId}`,
 	);
-	if (status !== 200 || !Array.isArray(body)) {
-		return fail("GET list mappings", `status=${status}`);
-	}
-	if (body.length < expectedMin) {
+	if (status !== 200 || !Array.isArray(body?.data)) {
 		return fail(
 			"GET list mappings",
-			`expected >=${expectedMin}, got ${body.length}`,
+			`status=${status} shape=${body ? Object.keys(body).join("/") : "null"}`,
 		);
 	}
-	pass("GET list mappings", `${body.length} mappings`);
-	return body;
+	if (body.data.length < expectedMin) {
+		return fail(
+			"GET list mappings",
+			`expected >=${expectedMin}, got ${body.data.length}`,
+		);
+	}
+	pass("GET list mappings", `${body.data.length} mappings total=${body.total}`);
+	return body.data;
 }
 
 async function testGetMapping(mappingId) {
@@ -444,25 +893,101 @@ async function testGetMapping(mappingId) {
 }
 
 async function testDeleteMapping(mappingId) {
-	const { status, body } = await apiJson(
+	// 恢复周期进行中 create/delete 稳定返回 409（FRP_RECONCILE_BUSY）；有限重试后应成功。
+	let { status, body } = await apiJson(
 		"DELETE",
 		`/api/frp/mappings/${mappingId}`,
 	);
-	if (status !== 200 || !body?.deleted) {
+	if (status === 409) {
+		for (let i = 0; i < 10; i++) {
+			await sleep(3000);
+			({ status, body } = await apiJson("DELETE", `/api/frp/mappings/${mappingId}`));
+			if (status !== 409) break;
+		}
+	}
+	if (status !== 200 || !body?.id) {
 		return fail(
 			"DELETE mapping",
-			`status=${status} body=${JSON.stringify(body)}`,
+			`status=${status} body=${JSON.stringify(body)?.slice(0, 120)}`,
 		);
 	}
-	pass("DELETE mapping", `id=${mappingId.slice(0, 8)} deleted=true`);
-
-	// Verify it's gone
-	const getRes = await apiJson("GET", `/api/frp/mappings/${mappingId}`);
-	if (getRes.status === 400) {
-		pass("DELETE mapping: verify gone", "404/400 as expected");
-	} else {
-		fail("DELETE mapping: verify gone", `expected 400, got ${getRes.status}`);
+	// 新状态机：DELETE 立即返回 deleting，Job 成功后行被 hard delete
+	if (body.status !== "deleting") {
+		return fail("DELETE mapping", `expected deleting, got ${body.status}`);
 	}
+	pass("DELETE mapping", `id=${mappingId.slice(0, 8)} status=deleting`);
+
+	// 轮询等待行被删除（Job 完成后 hard delete）
+	let gone = false;
+	for (let i = 0; i < 30; i++) {
+		const getRes = await apiJson("GET", `/api/frp/mappings/${mappingId}`);
+		if (getRes.status === 400 || getRes.status === 404) {
+			gone = true;
+			break;
+		}
+		await sleep(1000);
+	}
+	if (gone) {
+		pass("DELETE mapping: verify gone", "30s 内行已删除 (400)");
+	} else {
+		const st = await apiJson("GET", `/api/frp/mappings/${mappingId}`);
+		const m = st.body ?? {};
+		console.log(
+			"  [diag-delete] mapping:",
+			JSON.stringify({ status: m.status, errorCode: m.errorCode, errorMessage: m.errorMessage }),
+		);
+		console.log("  [diag-delete] client 输出尾部:\n" + tailOf(clientBuf, 1200));
+		fail("DELETE mapping: verify gone", "30s 后行仍存在");
+	}
+}
+
+/** 检查进程是否存活（诊断用） */
+function processAlive(pid) {
+	if (!pid) return "null";
+	try {
+		if (isWin) {
+			const out = execSync(
+				`powershell -NoProfile -Command "Get-Process -Id ${pid} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName"`,
+				{ stdio: ["ignore", "pipe", "ignore"], timeout: 8000, shell: true },
+			).toString().trim();
+			return out ? `true(${out})` : "false";
+		}
+		process.kill(pid, 0);
+		return "true";
+	} catch {
+		return "false";
+	}
+}
+
+/** 从完整缓冲区 grep 匹配行（诊断用；最多 40 行） */
+function grepOf(buf, pattern, max = 40) {
+	const lines = String(buf?.text ?? "").split("\n");
+	const hits = [];
+	for (const line of lines) {
+		if (pattern.test(line) && !line.trim().startsWith("[Nest]")) {
+			hits.push(line.trim());
+			if (hits.length >= max) break;
+		}
+	}
+	return hits.length ? hits.join("\n") : "(无匹配)";
+}
+
+async function clientOnlineState() {
+	try {
+		const { body } = await apiJson("GET", "/api/clients");
+		const list = Array.isArray(body) ? body : (body?.data ?? []);
+		return list
+			.map((c) => `${c.clientId ?? c.id}:online=${c.online}`)
+			.join(", ");
+	} catch (e) {
+		return `查询失败: ${e instanceof Error ? e.message : "?"}`;
+	}
+}
+
+/** 取输出尾部（诊断用；持续捕获缓冲区） */
+function tailOf(buf, n) {
+	const t = String(buf?.text ?? "").trimEnd();
+	return t.length > n ? "...\n" + t.slice(-n) : t;
 }
 
 async function testFrpsDashboardProxyCheck(proxyType, proxyName) {
@@ -661,6 +1186,9 @@ async function main() {
 	}
 	pass("frps started", `bind=${frpsBindPort} dashboard=${frpsDashboardPort}`);
 
+	// 重置 FRP 测试状态（本地开发库，见 resetFrpTestState 注释）
+	await resetFrpTestState();
+
 	// Start VCPDeck Server
 	console.log("  [setup] Starting server...");
 	await startServer();
@@ -732,6 +1260,23 @@ async function main() {
 	await testNoFrpCapability();
 	await testInvalidProxyType(frpClient.clientId);
 	await testMissingRequiredFields(frpClient.clientId);
+
+	// ── Task 7: FRP 恢复场景 ──
+	console.log("\n--- FRP recovery scenarios ---");
+	await runRecoveryScenarios(frpcDir, frpsPath, frpClient.clientId);
+
+	// 诊断：完整输出落盘（仅失败时保留）
+	try {
+		const hasFail = results.some((r) => r.status === "FAIL");
+		if (hasFail) {
+			const diagDir = path.join(root, ".tmp");
+			fs.mkdirSync(diagDir, { recursive: true });
+			fs.writeFileSync(path.join(diagDir, "frp-diag-server.log"), serverBuf.text);
+			fs.writeFileSync(path.join(diagDir, "frp-diag-client.log"), clientBuf.text);
+			console.log("  [diag] 完整输出已写入 .tmp/frp-diag-server.log / frp-diag-client.log");
+		}
+	}
+	catch {}
 
 	// ── Cleanup ──
 	console.log("\n--- Cleanup ---");

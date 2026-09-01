@@ -21,3 +21,7 @@ packages/server/data/
 .playwright-mcp/
 .vscode/
 frps.log
+.pnpm-store/
+.dsh/
+.graphflow-cache/
+graphflow-out/

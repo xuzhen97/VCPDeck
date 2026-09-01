@@ -629,6 +629,29 @@ export class JobService {
   }
 }
 
+/** Job payload 安全投影：reconcile 仅公开 allowlist 字段；frp.create 剥离 frpsInfo.authToken。 */
+function projectPublicPayload(type: string, rawPayload: unknown): Record<string, unknown> {
+	const payload = (rawPayload ?? {}) as Record<string, unknown>;
+	if (type === "frp.reconcile") {
+		const projection: Record<string, unknown> = {};
+		if (typeof payload.attempt === "number") projection.attempt = payload.attempt;
+		if (Array.isArray(payload.mappings)) projection.mappingCount = payload.mappings.length;
+		if (typeof payload.connectionGeneration === "string")
+			projection.connectionGeneration = payload.connectionGeneration;
+		if (typeof payload.expectedRuntimeGeneration === "number")
+			projection.expectedRuntimeGeneration = payload.expectedRuntimeGeneration;
+		return projection;
+	}
+	if (type === "frp.create" || type === "frp.delete") {
+		const frpsInfo = payload.frpsInfo;
+		if (frpsInfo && typeof frpsInfo === "object" && !Array.isArray(frpsInfo)) {
+			const { authToken: _removed, ...rest } = frpsInfo as Record<string, unknown>;
+			return { ...payload, frpsInfo: rest };
+		}
+	}
+	return payload;
+}
+
 function toJobInfo(j: {
   id: string;
   clientId: string;
@@ -654,7 +677,7 @@ function toJobInfo(j: {
     clientName: j.client?.name ?? j.client?.hostname ?? null,
     type: j.type,
     status: j.status as JobStatus,
-    payload: safeJsonParse(j.payload, {}),
+    payload: projectPublicPayload(j.type, safeJsonParse(j.payload, {})),
     result: j.result ? safeJsonParse(j.result, null) : null,
     progress: parseProgress(j.progress),
     timeout: j.timeout,

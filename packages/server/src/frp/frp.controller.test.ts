@@ -72,4 +72,75 @@ describe("FrpController write boundary", () => {
 			BadRequestException,
 		);
 	});
+
+	it("busy 时 create 返回稳定 HTTP 409", async () => {
+		const { controller, frpService } = fixture();
+		frpService.createMapping.mockRejectedValue(
+			Object.assign(new Error("FRP 映射正在恢复"), {
+				code: "FRP_RECONCILE_BUSY",
+				statusCode: 409,
+			}),
+		);
+		await expect(
+			controller.create({ clientId: "c1", proxyType: "tcp", localPort: 1919 }),
+		).rejects.toMatchObject({
+			status: 409,
+			response: { code: "FRP_RECONCILE_BUSY", message: "FRP 映射正在恢复" },
+		});
+	});
+
+	it("busy 时 delete 返回稳定 HTTP 409", async () => {
+		const { controller, frpService } = fixture();
+		frpService.deleteMapping.mockRejectedValue(
+			Object.assign(new Error("FRP 映射正在恢复"), {
+				code: "FRP_RECONCILE_BUSY",
+				statusCode: 409,
+			}),
+		);
+		await expect(controller.delete("fm_1")).rejects.toMatchObject({
+			status: 409,
+			response: { code: "FRP_RECONCILE_BUSY" },
+		});
+	});
+
+	it("Dashboard 不可达返回 503 稳定 code", async () => {
+		const { controller, frpService } = fixture();
+		frpService.createMapping.mockRejectedValue(
+			Object.assign(new Error("FRPS Dashboard 不可达"), {
+				code: "FRPS_DASHBOARD_UNREACHABLE",
+			}),
+		);
+		await expect(
+			controller.create({ clientId: "c1", proxyType: "tcp", localPort: 1919 }),
+		).rejects.toMatchObject({
+			status: 503,
+			response: { code: "FRPS_DASHBOARD_UNREACHABLE" },
+		});
+	});
+
+	it("未知错误返回固定 500 安全文案，不透传内部 message", async () => {
+		const { controller, frpService } = fixture();
+		frpService.createMapping.mockRejectedValue(
+			new Error("token SUPER_SECRET stack..."),
+		);
+		await expect(
+			controller.create({ clientId: "c1", proxyType: "tcp", localPort: 1919 }),
+		).rejects.toMatchObject({
+			status: 500,
+			response: { code: "FRP_OPERATION_FAILED", message: "FRP 操作失败" },
+		});
+	});
+
+	it("已知 FRP 协议错误保持 400", async () => {
+		const { controller, frpService } = fixture();
+		frpService.createMapping.mockRejectedValue(
+			Object.assign(new Error("超时"), { code: "FRP_PROXY_CONFIRM_TIMEOUT" }),
+		);
+		await expect(
+			controller.create({ clientId: "c1", proxyType: "tcp", localPort: 1919 }),
+		).rejects.toMatchObject({
+			status: 400,
+			response: { code: "FRP_PROXY_CONFIRM_TIMEOUT" },
+		});
+	});
 });

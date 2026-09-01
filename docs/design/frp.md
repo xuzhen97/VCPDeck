@@ -15,10 +15,12 @@
 - FRPS TCP/Dashboard probe 和 proxy 摘要；
 - 每个实例的端口范围；
 - FrpMapping 创建、分页查询、详情和删除；
-- `provisioning/active/inactive/deleting/error` 状态与 FRPS Dashboard 完成确认；
-- `frp.create/delete/list` Typed Job；
+- `provisioning/active/inactive/reconciling/deleting/error` 状态与 FRPS Dashboard 完成确认；
+- `frp.create/delete/list` 与内部 `frp.reconcile` Typed Job；
 - Client 按平台发现 frpc，并生成合并 TOML、启动/重启单个 frpc；
 - Client 断线时 Server 把 active mapping 标为 inactive；
+- Client 重连后 Server 按 SQLite 期望集合自动 reconcile（三方比较、有限重试、单一重试所有者）；
+- frpc 崩溃后 Client 侧有限自愈（立即/5s/30s 三次，耗尽置 failed）；
 - SDK 与 Frontend 的实例和映射管理。
 
 当前不提供：
@@ -26,8 +28,7 @@
 - VCPDeck 自身控制通道经 FRP 建立；
 - FRPS 的安装、升级、HA、证书签发或用户管理；
 - 每 Client 多个独立 frpc runtime；
-- Client 重启后按 SQLite 自动重建全部映射；
-- frpc 进程持续健康监督（创建/删除时会确认 FRPS 注册状态，但不持续巡检）；
+- frpc 进程持续健康监督（reconcile 与创建/删除时会确认 FRPS 注册状态，但不持续巡检）；
 - 按 Identity/Client 隔离 FRPS 凭据；
 - FRPS Token 加密存储或 API 脱敏；
 - UDP、STCP、XTCP、SUDP 等代理类型；
@@ -171,16 +172,18 @@ Client 发现顺序：
 
 当前内置候选覆盖 win32-x64、linux-x64 和 linux-arm64。工作目录默认 `~/.vcpdeck/frp`，可由 `VCPDECK_FRPC_WORK_DIR` 覆盖。
 
-Client 使用单组进程级状态：
+Client 使用单组进程级状态（`frp-runtime-manager` 单例）：
 
 ```text
 proxies[]
-daemonProcess
-lastFrpsInfo
+currentChild（唯一 frpc 进程）
+frpsInfo（当前实例）
+runtimeGeneration / connectionGeneration
+status（stopped/starting/running/retrying/failed）
 frpc-combined.toml
 ```
 
-每次 create/delete 都重写整份 TOML并重启唯一 frpc。TOML 包含 serverAddr/serverPort/authToken 和所有内存 proxy。
+每次 create/delete/reconcile 都重写整份 TOML 并重启唯一 frpc。TOML 包含 serverAddr/serverPort/authToken 和所有内存 proxy。`connectionGeneration` 每次 Socket 连接换新（UUID），旧代次的上报/结果/Job 一律拒绝；`runtimeGeneration` 每次计划内重启递增，Client 崩溃自愈由 Client 独占，Server 派发由 Server 独占，单一重试所有者避免双重重启。Client 本地快照中的孤儿映射（Server 未知）保留在 Client 本地并上报，不自动导入也不自动删除。
 
 ### 8.1 多实例关键偏移
 
@@ -221,7 +224,7 @@ Client Socket 断开时，Server 把该 Client 当前 active mapping 标为 inac
 
 ### 9.3 Client 重启
 
-Client proxy registry 只在内存中，重启后为空；当前没有读取 SQLite FrpMapping 并重新派发/重建 frpc 的自动恢复。Server 记录可保留但映射不会自行恢复，需人工删除/重建或单独实现 reconciliation。
+Client proxy registry 只在内存中，重启后为空。新连接代次首次 FRP 状态上报后，Server 做三方比较（SQLite 期望集合 × Client 快照 × FRPS Dashboard），对可恢复状态（active/inactive/reconciling）的映射派发内部 `frp.reconcile` Job，Client 据此重建 TOML 并重启 frpc；Dashboard 二次确认通过才回 active。重试为有限槽位（5s/30s），耗尽回 `inactive + FRP_RECONCILE_FAILED`。provisioning/deleting/error 不参与自动恢复；Client 完全不上报时 Server 启动恢复把遗留 `reconciling` 归位 `inactive`。active 表示操作时已双重确认，不保证端到端持续健康。
 
 ## 10. Typed Job 与取消
 
@@ -298,8 +301,9 @@ DELETE /api/frp/mappings/:id
 故障排查：
 
 - `active` 但不可达：查 frpc stderr、FRPS Dashboard、local service、防火墙和域名；
-- mapping inactive：区分 Client 控制 Socket 断线与 frpc 实际停止；
-- Client 重启：不要期待映射自动恢复；
+- mapping inactive：区分 Client 控制 Socket 断线、frpc 实际停止与 `FRP_RECONCILE_FAILED`（重试耗尽）；
+- mapping 长期 `reconciling`：Client 在线时应在下一次上报/槽位内收敛；Client 离线则等重连自动 reconcile，Server 重启后遗留 reconciling 由启动恢复归位 inactive；
+- Client 重启：映射先回 inactive，Client 重连后自动 reconcile 回 active；若最终 inactive 且 `FRP_RECONCILE_FAILED`，查 Dashboard 可达性、frpc 与 frps 凭据后删除/重建或恢复 FRPS；
 - 删除后仍可达：按 FRPS Dashboard 查孤儿 proxy，保留证据后人工清理；
 - 多实例切换后旧映射异常：检查单 frpc/lastFrpsInfo 偏移；
 - 端口“在另一实例空闲但无法分配”：当前 DB 端口集合跨实例全局占用；
@@ -348,12 +352,12 @@ DELETE /api/frp/mappings/:id
 4. 环境迁移有 `test-frp-token`、admin/admin 开发默认；
 5. 默认实例无数据库约束或事务，可能出现零个/竞态；
 6. 端口占用查询跨所有实例，不能在不同 FRPS 复用端口；
-7. frpc 后续退出不更新 Server mapping status；
-8. Client 重启不自动恢复映射；
+7. frpc 崩溃由 Client 侧有限自愈覆盖，但重试耗尽后置 failed 且无持续巡检，不保证端到端健康；
+8. Client 重连 reconcile 依赖 Dashboard 在线确认；FRPS 不可达时重试耗尽回 inactive，不自动区分 frps 故障与凭据故障；
 9. Client 断线置 inactive 但 frpc 可能仍工作；
 10. FRP 内部 Job 未保存 Actor，FRP Job 取消不可靠；
 11. Dashboard http 默认无传输加密，probe error 缺稳定安全 allowlist；
-12. 创建/删除收敛依赖 Dashboard，Server 在确认循环中重启时目前没有自动恢复该循环；Client 派发后完全不回报时也没有 FRP Job 后台超时监控。
+12. 创建/删除/恢复收敛依赖 Dashboard 在线确认；Client 派发后完全不回报时靠 5s/30s 槽位把在途 Job 结算为超时，没有更细粒度的 Job 后台超时监控。
 
 这些缺口进入 [`roadmap.md`](../roadmap.md) 或 Issue；多实例长期 runtime 方案仍需单独 ADR。映射操作完成门见 [`ADR-0021`](../adr/0021-frp-dashboard-confirmed-mapping-lifecycle.md)。
 

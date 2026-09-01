@@ -104,7 +104,7 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - `/api/status` 是否存在长时间 activeRelease；
 - Client 在线率、最后心跳、版本和 capability；
 - 磁盘空间：数据库、Storage、Release、Launcher apps；
-- FRP 映射是否异常 inactive；
+- FRP 映射是否异常 inactive 或长期 `reconciling`（正常应在 Client 重连后数分钟内收敛为 active/inactive）；
 - 最近 Job error/disconnected 是否增加；
 - 是否有长期 `waiting_input/disconnected` 文件 Job、pending File 或目标目录中的 `.vcpdeck-tmp-*` 残留；
 - Storage/阿里云授权是否过期或不可达。
@@ -308,10 +308,13 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - 检查 Client frpc 进程、stderr、`frpc-combined.toml` 权限和本地服务；
 - 同一 Client 当前只有单个 frpc/lastFrpsInfo，不要跨多个 FrpsInstance 创建活动映射；
 - 核对 remotePort/customDomain、防火墙和 DNS；不同实例的端口当前也按全局 DB 集合占用；
-- `active` 表示 Client 本地 frpc 动作完成且 FRPS Dashboard 已确认 proxy 注册；它仍不证明本地服务、公网、DNS 或 TLS 可达，frpc 后续退出也不会立即更新 Server；
-- Client 断线会令映射状态 inactive，但控制连接和 FRP 是独立链路，frpc 可能仍工作；
-- Client 重启后 proxy 内存不会从 SQLite 自动恢复；
-- 删除后仍可达时在 FRPS Dashboard 查孤儿 proxy；Server 当前先删 DB 再清理 Client；
+- `active` 表示 Client 本地 frpc 动作完成且 FRPS Dashboard 已确认 proxy 注册；它仍不证明本地服务、公网、DNS 或 TLS 可达；
+- frpc 进程崩溃由 Client 侧有限自愈（立即/5s/30s 三次）覆盖，Client 重启后进程 PID 不变；重试耗尽会置 `failed` 且 mapping 回 `inactive + FRP_RECONCILE_FAILED`，需要人工检查 frpc/frps 后触发恢复（重启 Client 或删除重建）；
+- Client 断线会令映射状态 inactive，但控制连接和 FRP 是独立链路，frpc 可能仍工作；Client 重连后 Server 自动 reconcile 把期望集合恢复回 active（需 FRPS Dashboard 可达且确认通过）；
+- mapping 长期 `reconciling`：确认 Client 在线（在线应在下一次上报或 5s/30s 槽位内收敛）；Client 离线则等重连；Server 刚重启时遗留 reconciling 已由启动恢复归位 inactive；
+- FRPS/Dashboard 不可达时重试耗尽统一表现为 `inactive + FRP_RECONCILE_FAILED`，不能仅凭该状态区分 frps 故障与凭据故障；恢复 FRPS 后重启 Client 或等待重连触发 reconcile；
+- 删除后仍可达时在 FRPS Dashboard 查孤儿 proxy；Server 当前先删 DB 再清理 Client；Client 快照中的孤儿映射（Server 已删除但 FRPS 仍注册）会保留并上报，不自动导入/删除；
+- 自动恢复只覆盖控制通道在线的场景；Client 的 PM2/Launcher 进程丢失或机器离线仍需按本节“Client PM2 进程丢失/无法连接”独立恢复，不依赖 FRP reconcile；
 - 详细边界见 [`design/frp.md`](./design/frp.md)。
 
 ## 9. Release 与容量清理

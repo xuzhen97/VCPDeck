@@ -4,11 +4,12 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
+	FrpCapabilityStatus,
 	MachineRegister,
 	PiCapabilityStatus,
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
-import { VERSION } from "@vcpdeck/shared";
+import { FRP_RECONCILE_PROTOCOL_VERSION, VERSION } from "@vcpdeck/shared";
 import { isFrpAvailable } from "./frpc-daemon.js";
 
 const CLIENT_ID_DIR = path.join(os.homedir(), ".vcpdeck");
@@ -46,6 +47,11 @@ export function getRegisterInfo(
 	const capabilityDetails: MachineRegister["capabilityDetails"] = {};
 	if (piStatus !== undefined) capabilityDetails.pi = piStatus;
 	if (terminalStatus !== undefined) capabilityDetails.terminal = terminalStatus;
+	// FRP 能力：按 frpc 可探测性声明；协商固定为 protocol v1（不按应用版本猜测）。
+	const frpStatus: FrpCapabilityStatus = isFrpAvailable()
+		? { available: true, reconcileProtocolVersion: FRP_RECONCILE_PROTOCOL_VERSION }
+		: { available: false, code: "FRPC_NOT_FOUND" };
+	capabilityDetails.frp = frpStatus;
 	return {
 		clientId: CLIENT_ID,
 		hostname: os.hostname(),

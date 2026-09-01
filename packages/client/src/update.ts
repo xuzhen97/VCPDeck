@@ -29,6 +29,8 @@ export interface ClientUpdateDeps {
 	getRunningJobIds?: () => string[];
 	pollIntervalMs?: number;
 	log?: (msg: string) => void;
+	/** 就绪回执后、apply 前释放本地实时资源（如 frpc 计划内停机；失败不阻断更新）。 */
+	beforeApply?: () => Promise<void>;
 }
 
 const DEFAULT_JOB_TIMEOUT_MS = 10 * 60 * 1000;
@@ -84,11 +86,16 @@ async function handleUpdateRequest(
 			await sleep(deps.pollIntervalMs ?? 500);
 		}
 
-		// 3) 就绪回执 → launcher 接管
+		// 3) 就绪回执 → 本地实时资源计划内释放 → launcher 接管
 		deps.socket.emit(Events.UPDATE_READY, {
 			clientId: CLIENT_ID,
 			releaseVersion,
 		} satisfies UpdateReady);
+		try {
+			await deps.beforeApply?.();
+		} catch {
+			log("beforeApply 释放失败（不阻断更新）");
+		}
 		await deps.launcher.applyUpdate();
 		// apply 后本进程应被 launcher 停止；连接被掐断与「进程仍存活」无法
 		// 可靠区分，不在此上报失败——终局以重连注册版本为准。

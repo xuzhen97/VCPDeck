@@ -521,3 +521,83 @@ describe("JobService.list()", () => {
 		);
 	});
 });
+
+function jobRow(overrides: Record<string, unknown> = {}) {
+	return {
+		id: "reconcile-1",
+		clientId: "c1",
+		type: "frp.reconcile",
+		status: "done",
+		payload: JSON.stringify({
+			connectionGeneration: "conn-1",
+			expectedRuntimeGeneration: 4,
+			attempt: 1,
+			timeoutSeconds: 30,
+			frpsInfo: { serverAddr: "frps.example.com", serverPort: 7000, authToken: "SUPER_SECRET" },
+			mappings: [{ mappingId: "fm_1", name: "tcp-one" }, { mappingId: "fm_2", name: "tcp-two" }],
+			preservedMappings: [{ mappingId: "fm_orphan", name: "orphan-9999" }],
+		}),
+		result: null,
+		progress: null,
+		timeout: 30,
+		errorCode: null,
+		errorMessage: null,
+		createdAt: new Date("2026-08-30T00:00:00.000Z"),
+		startedAt: new Date("2026-08-30T00:00:00.000Z"),
+		finishedAt: new Date("2026-08-30T00:00:30.000Z"),
+		createdByIdentityId: null,
+		createdByName: null,
+		createdVia: "system:frp-reconcile",
+		client: { hostname: "host", name: "host" },
+		...overrides,
+	} as Record<string, unknown>;
+}
+
+describe("JobService 安全 payload 投影", () => {
+	it("frp.reconcile Job 对 REST 隐藏 frpsInfo 和 preserved mapping 正文", async () => {
+		const prisma = mockPrisma([jobRow()]) as any;
+		prisma.job.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
+			jobRow({ id: where.id }),
+		);
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
+
+		const job = await svc.findById("reconcile-1");
+
+		expect(job?.payload).toEqual({
+			attempt: 1,
+			mappingCount: 2,
+			connectionGeneration: "conn-1",
+			expectedRuntimeGeneration: 4,
+		});
+		expect(JSON.stringify(job)).not.toContain("SUPER_SECRET");
+		expect(JSON.stringify(job)).not.toContain("fm_orphan");
+	});
+
+	it("frp.create Job 公开 payload 时移除 frpsInfo.authToken", async () => {
+		const row = jobRow({
+			id: "create-1",
+			type: "frp.create",
+			payload: JSON.stringify({
+				mappingId: "fm_1",
+				name: "tcp-1919",
+				frpsInfo: { serverAddr: "frps.example.com", serverPort: 7000, authToken: "TOP_SECRET" },
+			}),
+		});
+		const prisma = mockPrisma([row]) as any;
+		prisma.job.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
+			jobRow({ id: where.id, type: "frp.create" }) as never,
+		);
+		const svc = new JobService(prisma, mockScheduler(), mockFileService(), {
+			getBackendConfig: vi.fn().mockResolvedValue({ kind: "local" }),
+		} as never);
+
+		// list 路径同样经过 toJobInfo
+		const page = await svc.list({ clientId: "c1", page: 1, pageSize: 20 });
+		const info = page.data[0] as { payload: Record<string, unknown> };
+		const frpsInfo = info.payload.frpsInfo as Record<string, unknown> | undefined;
+		expect(frpsInfo).toEqual({ serverAddr: "frps.example.com", serverPort: 7000 });
+		expect(JSON.stringify(page)).not.toContain("TOP_SECRET");
+	});
+});

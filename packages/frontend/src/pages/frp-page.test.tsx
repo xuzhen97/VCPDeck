@@ -441,3 +441,69 @@ describe("FrpPanel", () => {
 		expect(await screen.findByText("映射已从 Client 与 FRPS 删除")).toBeVisible();
 	});
 });
+
+describe("FrpPanel reconciling", () => {
+	function renderReconcilingPanel() {
+		return renderPanel({
+			list: vi.fn().mockResolvedValue({
+				data: [
+					{
+						...mapping("reconciling"),
+						errorCode: "FRP_RECONCILE_FAILED",
+						errorMessage: "FRP 映射恢复未通过双重确认",
+					},
+				],
+				total: 1,
+				page: 1,
+				pageSize: 20,
+				totalPages: 1,
+			}),
+			create: vi.fn(),
+			createAndWait: vi.fn(),
+			get: vi.fn(),
+			delete: vi.fn(),
+			deleteAndWait: vi.fn(),
+		});
+	}
+
+	it("reconciling 映射显示「恢复中」与安全 errorMessage，删除入口禁用", async () => {
+		renderReconcilingPanel();
+
+		const chips = await screen.findAllByText("恢复中");
+		expect(chips.length).toBeGreaterThan(0);
+		expect(chips[0]).toBeVisible();
+		const messages = await screen.findAllByText("FRP 映射恢复未通过双重确认");
+		expect(messages.length).toBeGreaterThan(0);
+		await userEvent.click((await screen.findAllByRole("button", { name: "更多操作" }))[0]!);
+		const deleteItem = await screen.findByRole("button", { name: "删除映射" });
+		expect(deleteItem).toBeDisabled();
+	});
+
+	it("存在 reconciling 映射时新增按钮禁用并带说明", async () => {
+		renderReconcilingPanel();
+
+		const addButton = await screen.findByRole("button", { name: "新增映射" });
+		expect(addButton).toBeDisabled();
+		expect(
+			await screen.findByText("映射正在自动恢复，完成前暂不可新增"),
+		).toBeVisible();
+	});
+
+	it("无 reconciling 映射时新增按钮可用", async () => {
+		renderPanel({
+			list: vi.fn().mockResolvedValue({
+				data: [mapping("active")],
+				total: 1,
+				page: 1,
+				pageSize: 20,
+				totalPages: 1,
+			}),
+			create: vi.fn(),
+			get: vi.fn(),
+			delete: vi.fn(),
+		});
+
+		const addButton = await screen.findByRole("button", { name: "新增映射" });
+		expect(addButton).toBeEnabled();
+	});
+});

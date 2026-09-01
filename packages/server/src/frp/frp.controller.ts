@@ -9,15 +9,50 @@ import {
   Query,
   Body,
   BadRequestException,
+  HttpException,
   Inject,
 } from "@nestjs/common";
 import { FrpService } from "./frp.service.js";
 import { ClientGateway } from "../events/client.gateway.js";
 import {
+  FRP_ERROR_CODES,
   FrpProtocolError,
   parseFrpMappingCreateRequest,
   parseFrpOperationTimeout,
 } from "@vcpdeck/shared";
+
+/** Dashboard 侧错误统一 503（服务端配置/可达性问题，不是请求错误）。 */
+const FRP_DASHBOARD_ERROR_CODES: readonly string[] = [
+  "FRPS_DASHBOARD_REQUIRED",
+  "FRPS_DASHBOARD_UNREACHABLE",
+  "FRPS_DASHBOARD_AUTH_FAILED",
+];
+
+/** FRP 错误码 → HTTP 状态码：busy 409、Dashboard 503、已知协议 400、未知 500。 */
+function frpHttpError(
+  error: unknown,
+  fallbackMessage: string,
+): HttpException | BadRequestException {
+  const failure = error as { code?: string; message?: string };
+  const code = failure.code;
+  if (code === "FRP_RECONCILE_BUSY") {
+    return new HttpException(
+      { code, message: failure.message ?? fallbackMessage },
+      409,
+    );
+  }
+  if (code && FRP_DASHBOARD_ERROR_CODES.includes(code)) {
+    return new HttpException(
+      { code, message: failure.message ?? fallbackMessage },
+      503,
+    );
+  }
+  if (code && (FRP_ERROR_CODES as readonly string[]).includes(code)) {
+    return new BadRequestException({ code, message: failure.message ?? fallbackMessage });
+  }
+  // 未知错误：固定安全文案，不透传内部 message。
+  return new HttpException({ code: "FRP_OPERATION_FAILED", message: "FRP 操作失败" }, 500);
+}
 
 @Controller("api/frp")
 export class FrpController {
@@ -40,11 +75,7 @@ export class FrpController {
           message: error.message,
         });
       }
-      const failure = error as { code?: string; message?: string };
-      throw new BadRequestException({
-        code: failure.code ?? "FRP_OPERATION_FAILED",
-        message: failure.message ?? "FRP 映射创建失败",
-      });
+      throw frpHttpError(error, "FRP 映射创建失败");
     }
   }
 
@@ -92,11 +123,7 @@ export class FrpController {
           message: error.message,
         });
       }
-      const failure = error as { code?: string; message?: string };
-      throw new BadRequestException({
-        code: failure.code ?? "FRP_OPERATION_FAILED",
-        message: failure.message ?? "FRP 映射删除失败",
-      });
+      throw frpHttpError(error, "FRP 映射删除失败");
     }
   }
 }

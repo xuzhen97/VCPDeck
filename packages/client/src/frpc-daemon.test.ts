@@ -39,11 +39,14 @@ beforeEach(async () => {
 	writeFileSync(executable, "test");
 	process.env.VCPDECK_FRPC_PATH = executable;
 	process.env.VCPDECK_FRPC_WORK_DIR = root;
+	// 固定 CLIENT_ID，避免 register 模块在测试中读写 ~/.vcpdeck/client-id。
+	process.env.VCPDECK_CLIENT_ID = "test-client";
 });
 
 afterEach(() => {
 	delete process.env.VCPDECK_FRPC_PATH;
 	delete process.env.VCPDECK_FRPC_WORK_DIR;
+	delete process.env.VCPDECK_CLIENT_ID;
 	rmSync(root, { recursive: true, force: true });
 });
 
@@ -186,6 +189,113 @@ describe("frpc daemon 原子更新", () => {
 					]),
 				},
 			}),
+		);
+	});
+
+	it("reconcile 成功回报安全 result，不含 authToken", async () => {
+		const { handleFrpReconcile } = await import("./frpc-daemon.js");
+		const target = socket();
+		const promise = handleFrpReconcile(
+			{
+				_jobId: "reconcile-1",
+				connectionGeneration: "conn-1",
+				expectedRuntimeGeneration: 1,
+				attempt: 0,
+				timeoutSeconds: 30,
+				frpsInfo,
+				mappings: [
+					{
+						mappingId: "fm_1",
+						name: "tcp-1919",
+						proxyType: "tcp",
+						localIp: "127.0.0.1",
+						localPort: 1919,
+						remotePort: 20000,
+						customDomain: null,
+					},
+				],
+				preservedMappings: [],
+			},
+			target,
+		);
+		spawned.at(-1)?.emit("spawn");
+		await promise;
+
+		const done = target.emit.mock.calls.find(
+			(call) => call[0] === "job:done",
+		)?.[1] as { result?: Record<string, unknown> };
+		expect(done.result).toMatchObject({
+			status: "running",
+			loadedMappingIds: ["fm_1"],
+		});
+		expect(JSON.stringify(done.result)).not.toContain("token");
+		expect(JSON.stringify(done.result)).not.toContain("authToken");
+	});
+
+	it("reconcile payload 含未知字段时回报 FRP_RUNTIME_STATE_INVALID", async () => {
+		const { handleFrpReconcile } = await import("./frpc-daemon.js");
+		const target = socket();
+		await handleFrpReconcile(
+			{
+				_jobId: "reconcile-2",
+				connectionGeneration: "conn-1",
+				expectedRuntimeGeneration: 1,
+				attempt: 0,
+				timeoutSeconds: 30,
+				frpsInfo,
+				mappings: [],
+				preservedMappings: [],
+				extraField: "nope",
+			},
+			target,
+		);
+		expect(target.emit).toHaveBeenCalledWith(
+			"job:done",
+			expect.objectContaining({
+				error: expect.objectContaining({ code: "FRP_RUNTIME_STATE_INVALID" }),
+			}),
+		);
+	});
+
+	it("旧 connection generation 的 reconcile 被 FRP_RUNTIME_GENERATION_STALE 拒绝", async () => {
+		const { handleFrpReconcile, setFrpConnectionGeneration } = await import(
+			"./frpc-daemon.js"
+		);
+		setFrpConnectionGeneration("conn-1");
+		const mapping = {
+			mappingId: "fm_1",
+			name: "tcp-1919",
+			proxyType: "tcp" as const,
+			localIp: "127.0.0.1",
+			localPort: 1919,
+			remotePort: 20000,
+			customDomain: null,
+		};
+		const base = {
+			expectedRuntimeGeneration: 1,
+			attempt: 0,
+			timeoutSeconds: 30,
+			frpsInfo,
+			mappings: [mapping],
+			preservedMappings: [],
+		};
+		const first = socket();
+		const firstDone = handleFrpReconcile({ _jobId: "r-1", connectionGeneration: "conn-1", ...base }, first);
+		spawned.at(-1)?.emit("spawn");
+		await firstDone;
+
+		const stale = socket();
+		const staleDone = handleFrpReconcile({ _jobId: "r-2", connectionGeneration: "conn-old", ...base }, stale);
+		await staleDone;
+		expect(stale.emit).toHaveBeenCalledWith(
+			"job:done",
+			expect.objectContaining({
+				error: expect.objectContaining({ code: "FRP_RUNTIME_GENERATION_STALE" }),
+			}),
+		);
+		expect(first.emit).toHaveBeenCalledWith(
+			"job:done",
+			expect.objectContaining({ result: expect.objectContaining({ status: "running" }) }),
 		);
 	});
 });

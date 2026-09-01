@@ -20,7 +20,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI �
 | Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry、`apps/retention.json` | 新安装使用带本地版本保留能力的 Launcher；旧 Launcher 不会因业务 Release 自动升级，存量机器需执行一次性迁移脚本；`launcherMinVersion` 字段仍未执行校验 |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
 | Node.js | release manifest 默认 `>=24` | Launcher 可选择系统或缓存 Node；Client 一键安装优先复用合格 x64 Node，否则安装用户私有 Node；开发环境也应使用 Node 24+ |
-| FRP | 打包的 frpc/frps + Shared FRP DTO | 构件应成对验证；Dashboard 确认状态机、operationJobId、稳定错误码和单 Client 单 FrpsInstance 约束要求 Shared/Server/Client/SDK/CLI/Frontend 同步发布 |
+| FRP | 打包的 frpc/frps + Shared FRP DTO；capability `frp.reconcileProtocolVersion=1` 协商恢复对账 | 构件应成对验证；Dashboard 确认状态机、operationJobId、稳定错误码和单 Client 单 FrpsInstance 约束要求 Shared/Server/Client/SDK/CLI/Frontend 同步发布；恢复对账只在新 Client + 新 Server 组合生效，混合版本降级为“不自动恢复”而不是错误执行 |
 
 ## 3. 支持矩阵
 
@@ -98,6 +98,8 @@ Terminal 当前没有独立协议版本，且 snapshotSeq/网络 output seq、ge
 认证当前使用服务端 opaque Session/Credential。Cookie/token/Actor 变化必须同时评估现有 Session 和 Credential 的失效/迁移、Frontend/SDK/CLI、`/app` handshake 和回滚；不能在无明确迁移时改为 JWT 或新摘要语义。
 
 FRP 当前 Server 可保存多实例，但 Client 只有单 frpc runtime，Server 已强制同一 Client 的映射使用同一 FrpsInstance。改为每实例独立 frpc、取消 Dashboard 完成门或更改 mapping 状态/删除收敛仍属于需要新 ADR、数据迁移、整套发布和真实 FRPS E2E 的破坏性变更。
+
+FRP 恢复对账通过 capability `frp.reconcileProtocolVersion=1` 协商：新 Server + 旧 Client（不声明该 capability）不会触发自动恢复，行为保持“断线置 inactive、人工处理”；新 Client + 旧 Server 的 `frp:state` 上报被忽略，旧 Server 不读取 Client 残留 frpc TOML、不派发 `frp.reconcile` Job。标准组合仍是整套同版本发布；单独升级 Client 或 Server 不改变 FRP 操作语义，只改变是否有自动恢复。
 
 ### 5.4 Release 上传兼容窗口
 

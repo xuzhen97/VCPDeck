@@ -1,11 +1,14 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
-import type {
-	MachineRegister,
-	Heartbeat,
-	ClientInfo,
-	DiskInfo,
-	PiCapabilityStatus,
+import {
+	parseFrpCapabilityStatus,
+	type MachineRegister,
+	type Heartbeat,
+	type ClientInfo,
+	type DiskInfo,
+	type FrpCapabilityStatus,
+	type PiCapabilityStatus,
+	type TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
 
 /** 别名已被其他客户端占用（409） */
@@ -238,13 +241,32 @@ export class ClientService {
     } catch {
       // ponytail: stored as JSON, fallback to empty on corruption
     }
-    let capabilityDetails: { pi?: PiCapabilityStatus } = {};
+    let capabilityDetails: {
+      pi?: PiCapabilityStatus;
+      terminal?: TerminalCapabilityStatus;
+      frp?: FrpCapabilityStatus;
+    } = {};
     try {
-      capabilityDetails = JSON.parse(c.capabilityDetails) as {
-        pi?: PiCapabilityStatus;
-      };
+      const raw: unknown = JSON.parse(c.capabilityDetails);
+      // SAFETY: 仅在确认是对象后访问字段；解析结果按结构投影，不直接透传任意对象。
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        const record = raw as Record<string, unknown>;
+        if (record.pi !== undefined) {
+          capabilityDetails.pi = record.pi as PiCapabilityStatus;
+        }
+        if (record.terminal !== undefined) {
+          capabilityDetails.terminal = record.terminal as TerminalCapabilityStatus;
+        }
+        if (record.frp !== undefined) {
+          try {
+            capabilityDetails.frp = parseFrpCapabilityStatus(record.frp);
+          } catch {
+            // frp 详情损坏：省略该字段，不宽松猜测（旧 Client 缺省时无此字段）。
+          }
+        }
+      }
     } catch {
-      // ponytail: stored as JSON, fallback to empty on corruption
+      // 整体损坏：回退为空能力详情，不宽松猜测。
     }
     return {
       clientId: c.id,

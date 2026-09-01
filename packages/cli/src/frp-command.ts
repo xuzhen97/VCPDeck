@@ -1,3 +1,4 @@
+import { VcpDeckApiError } from "@vcpdeck/sdk";
 import type { FrpsInstanceInfo } from "@vcpdeck/shared";
 import { createAuthenticatedClient } from "./authenticated-client.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
@@ -13,6 +14,20 @@ export interface FrpCommandContext {
 	log?: (message: string) => void;
 	/** Job 轮询间隔；测试可缩短。 */
 	pollIntervalMs?: number;
+}
+
+/** 映射状态显示文案（reconciling → 恢复中）。 */
+function mappingStatusLabel(status: string): string {
+	return (
+		{
+			active: "运行中",
+			inactive: "未确认",
+			provisioning: "创建中",
+			deleting: "删除中",
+			reconciling: "恢复中",
+			error: "异常",
+		}[status] ?? status
+	);
 }
 
 /**
@@ -175,7 +190,9 @@ async function runCreateMapping(
 		context.processEnv,
 		client,
 	);
-	const mapping = await client.frp.createAndWait(
+	let mapping;
+	try {
+		mapping = await client.frp.createAndWait(
 		{
 			clientId,
 			proxyType: proxyType as "tcp" | "http" | "https",
@@ -192,7 +209,14 @@ async function runCreateMapping(
 			timeoutSeconds,
 		},
 		{ delays: [context.pollIntervalMs ?? 1000] },
-	);
+		);
+	} catch (error) {
+		// 恢复周期 busy（409）：转安全指引，不自动重试，引导稍后查询。
+		if (error instanceof VcpDeckApiError && error.code === "FRP_RECONCILE_BUSY") {
+			throw new Error("映射正在自动恢复，请稍后运行 frp mappings 查看进度");
+		}
+		throw error;
+	}
 	const log = context.log ?? console.log;
 	if (options.json === true) {
 		log(JSON.stringify(mapping, null, 2));
@@ -218,10 +242,19 @@ async function runDeleteMapping(
 		processEnv: context.processEnv,
 	});
 	const client = await createAuthenticatedClient(environment);
-	const result = await client.frp.deleteAndWait(positionals[0], {
-		timeoutSeconds,
-		delays: [context.pollIntervalMs ?? 1000],
-	});
+	let result;
+	try {
+		result = await client.frp.deleteAndWait(positionals[0], {
+			timeoutSeconds,
+			delays: [context.pollIntervalMs ?? 1000],
+		});
+	} catch (error) {
+		// 恢复周期 busy（409）：转安全指引，不自动重试，引导稍后查询。
+		if (error instanceof VcpDeckApiError && error.code === "FRP_RECONCILE_BUSY") {
+			throw new Error("映射正在自动恢复，请稍后运行 frp mappings 查看进度");
+		}
+		throw error;
+	}
 	const log = context.log ?? console.log;
 	if (options.json === true) {
 		log(JSON.stringify(result, null, 2));
@@ -278,7 +311,7 @@ async function runMappings(
 				type: mapping.proxyType,
 				local: `${mapping.localIp}:${mapping.localPort}`,
 				remote: mapping.remotePort === null ? "-" : String(mapping.remotePort),
-				status: mapping.status,
+				status: mappingStatusLabel(mapping.status),
 				url: mapping.publicUrl ?? "-",
 			})),
 			["name", "client", "type", "local", "remote", "status", "url"],

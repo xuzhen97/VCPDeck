@@ -1317,6 +1317,218 @@ var require_terminal = __commonJS({
   }
 });
 
+// ../shared/dist/frp-runtime.js
+var require_frp_runtime = __commonJS({
+  "../shared/dist/frp-runtime.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.FRP_RECONCILE_PROTOCOL_VERSION = void 0;
+    exports2.parseFrpCapabilityStatus = parseFrpCapabilityStatus;
+    exports2.parseFrpRuntimeStateReport = parseFrpRuntimeStateReport;
+    exports2.parseFrpReconcilePayload = parseFrpReconcilePayload;
+    exports2.parseFrpRuntimeStateAck = parseFrpRuntimeStateAck;
+    exports2.parseFrpReconcileResult = parseFrpReconcileResult;
+    exports2.FRP_RECONCILE_PROTOCOL_VERSION = 1;
+    function rtString(value2, field, maxLength) {
+      if (typeof value2 !== "string" || value2.length < 1 || value2.length > maxLength) {
+        throw new Error(`${field} \u683C\u5F0F\u65E0\u6548`);
+      }
+      return value2;
+    }
+    function rtPort(value2, field) {
+      if (!Number.isInteger(value2) || value2 < 1 || value2 > 65535) {
+        throw new Error(`${field} \u5FC5\u987B\u662F 1\u201365535 \u7684\u6574\u6570`);
+      }
+      return value2;
+    }
+    function rtNonNegativeInt(value2, field) {
+      if (!Number.isInteger(value2) || value2 < 0) {
+        throw new Error(`${field} \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570`);
+      }
+      return value2;
+    }
+    function rtAttempt(value2, field) {
+      if (value2 !== 0 && value2 !== 1 && value2 !== 2) {
+        throw new Error(`${field} \u5FC5\u987B\u662F 0\u30011 \u6216 2`);
+      }
+      return value2;
+    }
+    function rtBoolean(value2, field) {
+      if (typeof value2 !== "boolean") {
+        throw new Error(`${field} \u5FC5\u987B\u662F\u5E03\u5C14\u503C`);
+      }
+      return value2;
+    }
+    function rtRecord(value2, field) {
+      if (!value2 || typeof value2 !== "object" || Array.isArray(value2)) {
+        throw new Error(`${field} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+      }
+      return value2;
+    }
+    function rtExactKeys(input, allowed, field) {
+      for (const key of Object.keys(input)) {
+        if (!allowed.includes(key)) {
+          throw new Error(`${field} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function rtParseMapping(value2, field) {
+      const input = rtRecord(value2, field);
+      rtExactKeys(input, ["mappingId", "name", "proxyType", "localIp", "localPort", "remotePort", "customDomain"], field);
+      const proxyType = input.proxyType;
+      if (proxyType !== "tcp" && proxyType !== "http" && proxyType !== "https") {
+        throw new Error(`${field}.proxyType \u5FC5\u987B\u662F tcp\u3001http \u6216 https`);
+      }
+      return {
+        mappingId: rtString(input.mappingId, `${field}.mappingId`, 128),
+        name: rtString(input.name, `${field}.name`, 128),
+        proxyType,
+        localIp: rtString(input.localIp, `${field}.localIp`, 255),
+        localPort: rtPort(input.localPort, `${field}.localPort`),
+        remotePort: input.remotePort === null || input.remotePort === void 0 ? null : rtPort(input.remotePort, `${field}.remotePort`),
+        customDomain: input.customDomain === null || input.customDomain === void 0 ? null : rtString(input.customDomain, `${field}.customDomain`, 253)
+      };
+    }
+    function rtParseMappings(value2, field) {
+      if (!Array.isArray(value2)) {
+        throw new Error(`${field} \u5FC5\u987B\u662F\u6570\u7EC4`);
+      }
+      return value2.map((item, i) => rtParseMapping(item, `${field}[${i}]`));
+    }
+    function rtParseEndpoint(value2, field) {
+      if (value2 === null || value2 === void 0)
+        return null;
+      const input = rtRecord(value2, field);
+      rtExactKeys(input, ["serverAddr", "serverPort"], field);
+      return {
+        serverAddr: rtString(input.serverAddr, `${field}.serverAddr`, 255),
+        serverPort: rtPort(input.serverPort, `${field}.serverPort`)
+      };
+    }
+    function parseFrpCapabilityStatus(value2) {
+      const input = rtRecord(value2, "frp capability");
+      rtExactKeys(input, ["available", "reconcileProtocolVersion", "code", "message"], "frp capability");
+      const available = rtBoolean(input.available, "available");
+      const result = { available };
+      if (input.reconcileProtocolVersion !== void 0) {
+        if (input.reconcileProtocolVersion !== exports2.FRP_RECONCILE_PROTOCOL_VERSION) {
+          throw new Error("reconcileProtocolVersion \u5FC5\u987B\u662F 1");
+        }
+        result.reconcileProtocolVersion = exports2.FRP_RECONCILE_PROTOCOL_VERSION;
+      }
+      if (input.code !== void 0) {
+        if (input.code !== "FRPC_NOT_FOUND") {
+          throw new Error("code \u5FC5\u987B\u662F FRPC_NOT_FOUND");
+        }
+        result.code = "FRPC_NOT_FOUND";
+      }
+      if (input.message !== void 0) {
+        result.message = rtString(input.message, "message", 255);
+      }
+      return result;
+    }
+    function parseFrpRuntimeStateReport(value2) {
+      const input = rtRecord(value2, "frp runtime state");
+      rtExactKeys(input, [
+        "clientId",
+        "connectionGeneration",
+        "runtimeGeneration",
+        "status",
+        "processRunning",
+        "recoveryOwner",
+        "attempt",
+        "frpsEndpoint",
+        "mappings",
+        "errorCode",
+        "errorMessage"
+      ], "frp runtime state");
+      const status = input.status;
+      if (status !== "stopped" && status !== "starting" && status !== "running" && status !== "retrying" && status !== "failed") {
+        throw new Error("status \u5FC5\u987B\u662F stopped\u3001starting\u3001running\u3001retrying \u6216 failed");
+      }
+      const recoveryOwner = input.recoveryOwner;
+      if (recoveryOwner !== null && recoveryOwner !== "client" && recoveryOwner !== "server") {
+        throw new Error("recoveryOwner \u5FC5\u987B\u662F null\u3001client \u6216 server");
+      }
+      const result = {
+        clientId: rtString(input.clientId, "clientId", 128),
+        connectionGeneration: rtString(input.connectionGeneration, "connectionGeneration", 128),
+        runtimeGeneration: rtNonNegativeInt(input.runtimeGeneration, "runtimeGeneration"),
+        status,
+        processRunning: rtBoolean(input.processRunning, "processRunning"),
+        recoveryOwner,
+        attempt: rtAttempt(input.attempt, "attempt"),
+        frpsEndpoint: rtParseEndpoint(input.frpsEndpoint, "frpsEndpoint"),
+        mappings: rtParseMappings(input.mappings, "mappings")
+      };
+      if (input.errorCode !== void 0) {
+        result.errorCode = rtString(input.errorCode, "errorCode", 128);
+      }
+      if (input.errorMessage !== void 0) {
+        result.errorMessage = rtString(input.errorMessage, "errorMessage", 255);
+      }
+      return result;
+    }
+    function parseFrpReconcilePayload(value2) {
+      const input = rtRecord(value2, "frp reconcile payload");
+      rtExactKeys(input, [
+        "connectionGeneration",
+        "expectedRuntimeGeneration",
+        "attempt",
+        "timeoutSeconds",
+        "frpsInfo",
+        "mappings",
+        "preservedMappings"
+      ], "frp reconcile payload");
+      const frpsInfo = rtRecord(input.frpsInfo, "frpsInfo");
+      rtExactKeys(frpsInfo, ["serverAddr", "serverPort", "authToken"], "frpsInfo");
+      return {
+        connectionGeneration: rtString(input.connectionGeneration, "connectionGeneration", 128),
+        expectedRuntimeGeneration: rtNonNegativeInt(input.expectedRuntimeGeneration, "expectedRuntimeGeneration"),
+        attempt: rtAttempt(input.attempt, "attempt"),
+        timeoutSeconds: rtPort(input.timeoutSeconds, "timeoutSeconds"),
+        frpsInfo: {
+          serverAddr: rtString(frpsInfo.serverAddr, "frpsInfo.serverAddr", 255),
+          serverPort: rtPort(frpsInfo.serverPort, "frpsInfo.serverPort"),
+          authToken: rtString(frpsInfo.authToken, "frpsInfo.authToken", 255)
+        },
+        mappings: rtParseMappings(input.mappings, "mappings"),
+        preservedMappings: rtParseMappings(input.preservedMappings, "preservedMappings")
+      };
+    }
+    function parseFrpRuntimeStateAck(value2) {
+      const input = rtRecord(value2, "frp state ack");
+      rtExactKeys(input, ["connectionGeneration", "accepted", "action"], "frp state ack");
+      const action = input.action;
+      if (action !== "none" && action !== "client-retrying" && action !== "server-reconciling" && action !== "stale") {
+        throw new Error("action \u5FC5\u987B\u662F none\u3001client-retrying\u3001server-reconciling \u6216 stale");
+      }
+      return {
+        connectionGeneration: rtString(input.connectionGeneration, "connectionGeneration", 128),
+        accepted: rtBoolean(input.accepted, "accepted"),
+        action
+      };
+    }
+    function parseFrpReconcileResult(value2) {
+      const input = rtRecord(value2, "frp reconcile result");
+      rtExactKeys(input, ["connectionGeneration", "runtimeGeneration", "status", "loadedMappingIds"], "frp reconcile result");
+      const status = input.status;
+      if (status !== "running" && status !== "failed") {
+        throw new Error("status \u5FC5\u987B\u662F running \u6216 failed");
+      }
+      if (!Array.isArray(input.loadedMappingIds) || input.loadedMappingIds.some((id) => typeof id !== "string")) {
+        throw new Error("loadedMappingIds \u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6570\u7EC4");
+      }
+      return {
+        connectionGeneration: rtString(input.connectionGeneration, "connectionGeneration", 128),
+        runtimeGeneration: rtNonNegativeInt(input.runtimeGeneration, "runtimeGeneration"),
+        status,
+        loadedMappingIds: input.loadedMappingIds
+      };
+    }
+  }
+});
+
 // ../shared/dist/index.js
 var require_dist = __commonJS({
   "../shared/dist/index.js"(exports2) {
@@ -1338,7 +1550,7 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -1446,7 +1658,9 @@ var require_dist = __commonJS({
       UPDATE_REQUEST: "update:request",
       UPDATE_READY: "update:ready",
       UPDATE_FAILED: "update:failed",
-      SERVER_SHUTDOWN: "server:shutdown"
+      SERVER_SHUTDOWN: "server:shutdown",
+      FRP_STATE: "frp:state",
+      FRP_STATE_ACK: "frp:state-ack"
     };
     var JobType;
     (function(JobType2) {
@@ -1465,6 +1679,7 @@ var require_dist = __commonJS({
       JobType2["FRP_CREATE"] = "frp.create";
       JobType2["FRP_DELETE"] = "frp.delete";
       JobType2["FRP_LIST"] = "frp.list";
+      JobType2["FRP_RECONCILE"] = "frp.reconcile";
       JobType2["FILE_ROOTS"] = "file.roots";
     })(JobType || (exports2.JobType = JobType = {}));
     var JobStatus4;
@@ -1502,7 +1717,8 @@ var require_dist = __commonJS({
       "active",
       "inactive",
       "deleting",
-      "error"
+      "error",
+      "reconciling"
     ];
     exports2.FRP_ERROR_CODES = [
       "FRPS_DASHBOARD_REQUIRED",
@@ -1514,7 +1730,15 @@ var require_dist = __commonJS({
       "FRP_ROLLBACK_FAILED",
       "FRPC_NOT_FOUND",
       "FRPC_START_FAILED",
-      "FRPC_STOP_FAILED"
+      "FRPC_STOP_FAILED",
+      "FRP_RECONCILE_BUSY",
+      "FRP_RECONCILE_FAILED",
+      "FRP_RUNTIME_GENERATION_STALE",
+      "FRP_RUNTIME_STATE_INVALID",
+      "FRP_RECONCILE_TIMEOUT",
+      "FRP_CLIENT_NOT_FOUND",
+      "FRP_CLIENT_OFFLINE",
+      "FRP_CLIENT_NO_FRP_CAPABILITY"
     ];
     var FrpProtocolError = class extends Error {
       constructor(message) {
@@ -1526,7 +1750,8 @@ var require_dist = __commonJS({
     exports2.FrpJobType = {
       FRP_CREATE: "frp.create",
       FRP_DELETE: "frp.delete",
-      FRP_LIST: "frp.list"
+      FRP_LIST: "frp.list",
+      FRP_RECONCILE: "frp.reconcile"
     };
     function parseFrpOperationTimeout(value2) {
       const parsed = value2 === void 0 ? 30 : Number(value2);
@@ -1602,6 +1827,25 @@ var require_dist = __commonJS({
       }
       return value2;
     }
+    var frp_runtime_js_1 = require_frp_runtime();
+    Object.defineProperty(exports2, "FRP_RECONCILE_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return frp_runtime_js_1.FRP_RECONCILE_PROTOCOL_VERSION;
+    } });
+    Object.defineProperty(exports2, "parseFrpCapabilityStatus", { enumerable: true, get: function() {
+      return frp_runtime_js_1.parseFrpCapabilityStatus;
+    } });
+    Object.defineProperty(exports2, "parseFrpReconcilePayload", { enumerable: true, get: function() {
+      return frp_runtime_js_1.parseFrpReconcilePayload;
+    } });
+    Object.defineProperty(exports2, "parseFrpReconcileResult", { enumerable: true, get: function() {
+      return frp_runtime_js_1.parseFrpReconcileResult;
+    } });
+    Object.defineProperty(exports2, "parseFrpRuntimeStateAck", { enumerable: true, get: function() {
+      return frp_runtime_js_1.parseFrpRuntimeStateAck;
+    } });
+    Object.defineProperty(exports2, "parseFrpRuntimeStateReport", { enumerable: true, get: function() {
+      return frp_runtime_js_1.parseFrpRuntimeStateReport;
+    } });
   }
 });
 
@@ -12374,6 +12618,14 @@ async function runCancelJob(argv, context) {
   log(formatEnvironmentSummary(environment));
   log(`[vcpdeck] Job ${result.jobId} \u53D6\u6D88\u8BF7\u6C42\u5DF2\u63D0\u4EA4\uFF0C\u5F53\u524D\u72B6\u6001: ${result.status}${result.status === "cancelling" ? "\uFF08\u7B49\u5F85 Client \u786E\u8BA4\uFF0C\u7EC8\u6001\u7528 jobs get \u6838\u5BF9\uFF09" : ""}`);
 }
+function jobTypeLabel(type) {
+  return {
+    "frp.create": "\u521B\u5EFA\u6620\u5C04",
+    "frp.delete": "\u5220\u9664\u6620\u5C04",
+    "frp.list": "\u8BFB\u53D6\u6620\u5C04",
+    "frp.reconcile": "\u6062\u590D FRP \u6620\u5C04"
+  }[type] ?? type;
+}
 function formatJobsList(result) {
   const sorted = [...result.data].sort((a, b) => {
     const active = (job) => job.status === import_shared3.JobStatus.RUNNING || job.status === import_shared3.JobStatus.PENDING || job.status === import_shared3.JobStatus.WAITING_INPUT ? 0 : 1;
@@ -12385,7 +12637,7 @@ function formatJobsList(result) {
   const rows = sorted.map((job) => ({
     jobId: job.jobId,
     client: job.clientName ?? job.clientId,
-    type: job.type,
+    type: jobTypeLabel(job.type),
     status: job.status,
     error: job.errorCode ?? "-",
     created: job.createdAt
@@ -12409,7 +12661,7 @@ function formatJobDetail(job, output) {
   const lines = [
     `Job: ${job.jobId}`,
     `Client: ${job.clientName ?? job.clientId}`,
-    `Type: ${job.type}`,
+    `Type: ${jobTypeLabel(job.type)}`,
     `Status: ${job.status}`
   ];
   if (job.errorCode || job.errorMessage) {
@@ -13390,11 +13642,22 @@ async function runAttachRepl(argv, context) {
 }
 
 // dist/frp-command.js
+init_dist();
 init_authenticated_client();
 init_arguments();
 init_client_resolver();
 init_environment();
 init_table();
+function mappingStatusLabel(status) {
+  return {
+    active: "\u8FD0\u884C\u4E2D",
+    inactive: "\u672A\u786E\u8BA4",
+    provisioning: "\u521B\u5EFA\u4E2D",
+    deleting: "\u5220\u9664\u4E2D",
+    reconciling: "\u6062\u590D\u4E2D",
+    error: "\u5F02\u5E38"
+  }[status] ?? status;
+}
 function safeInstance(instance) {
   return {
     name: instance.name,
@@ -13515,17 +13778,25 @@ async function runCreateMapping(argv, context) {
   });
   const client = await createAuthenticatedClient(environment);
   const clientId = await resolveClientId(positionals[0], context.paths, context.processEnv, client);
-  const mapping = await client.frp.createAndWait({
-    clientId,
-    proxyType,
-    localIp: stringOption(options, "local-ip") ?? "127.0.0.1",
-    localPort,
-    ...remotePort === void 0 ? {} : { remotePort },
-    ...customDomain ? { customDomain } : {},
-    ...stringOption(options, "name") ? { name: stringOption(options, "name") } : {},
-    ...stringOption(options, "instance") ? { frpsInstanceId: stringOption(options, "instance") } : {},
-    timeoutSeconds
-  }, { delays: [context.pollIntervalMs ?? 1e3] });
+  let mapping;
+  try {
+    mapping = await client.frp.createAndWait({
+      clientId,
+      proxyType,
+      localIp: stringOption(options, "local-ip") ?? "127.0.0.1",
+      localPort,
+      ...remotePort === void 0 ? {} : { remotePort },
+      ...customDomain ? { customDomain } : {},
+      ...stringOption(options, "name") ? { name: stringOption(options, "name") } : {},
+      ...stringOption(options, "instance") ? { frpsInstanceId: stringOption(options, "instance") } : {},
+      timeoutSeconds
+    }, { delays: [context.pollIntervalMs ?? 1e3] });
+  } catch (error) {
+    if (error instanceof VcpDeckApiError && error.code === "FRP_RECONCILE_BUSY") {
+      throw new Error("\u6620\u5C04\u6B63\u5728\u81EA\u52A8\u6062\u590D\uFF0C\u8BF7\u7A0D\u540E\u8FD0\u884C frp mappings \u67E5\u770B\u8FDB\u5EA6");
+    }
+    throw error;
+  }
   const log = context.log ?? console.log;
   if (options.json === true) {
     log(JSON.stringify(mapping, null, 2));
@@ -13548,10 +13819,18 @@ async function runDeleteMapping(argv, context) {
     processEnv: context.processEnv
   });
   const client = await createAuthenticatedClient(environment);
-  const result = await client.frp.deleteAndWait(positionals[0], {
-    timeoutSeconds,
-    delays: [context.pollIntervalMs ?? 1e3]
-  });
+  let result;
+  try {
+    result = await client.frp.deleteAndWait(positionals[0], {
+      timeoutSeconds,
+      delays: [context.pollIntervalMs ?? 1e3]
+    });
+  } catch (error) {
+    if (error instanceof VcpDeckApiError && error.code === "FRP_RECONCILE_BUSY") {
+      throw new Error("\u6620\u5C04\u6B63\u5728\u81EA\u52A8\u6062\u590D\uFF0C\u8BF7\u7A0D\u540E\u8FD0\u884C frp mappings \u67E5\u770B\u8FDB\u5EA6");
+    }
+    throw error;
+  }
   const log = context.log ?? console.log;
   if (options.json === true) {
     log(JSON.stringify(result, null, 2));
@@ -13596,7 +13875,7 @@ async function runMappings(argv, context) {
     type: mapping.proxyType,
     local: `${mapping.localIp}:${mapping.localPort}`,
     remote: mapping.remotePort === null ? "-" : String(mapping.remotePort),
-    status: mapping.status,
+    status: mappingStatusLabel(mapping.status),
     url: mapping.publicUrl ?? "-"
   })), ["name", "client", "type", "local", "remote", "status", "url"]));
 }

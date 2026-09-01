@@ -6,6 +6,7 @@ import { AppModule } from "./app.module.js";
 import cookieParser from "cookie-parser";
 import { PrismaService } from "./prisma/prisma.service.js";
 import { FrpsInstancesService } from "./frp/frp-instances.service.js";
+import { FrpReconciliationService } from "./frp/frp-reconciliation.service.js";
 import { ReleaseOrchestrator } from "./release/release.orchestrator.js";
 import { randomUUID } from "node:crypto";
 import * as bcrypt from "bcryptjs";
@@ -84,6 +85,14 @@ async function bootstrap() {
 
 	// FRP 配置自动迁移（从环境变量到 DB）
 	await app.get(FrpsInstancesService).migrateFromEnvIfNeeded();
+
+	// FRP 恢复启动恢复：中断遗留的 reconciling 映射回 inactive（不对外暴露为永久 busy）
+	await app
+		.get(FrpReconciliationService)
+		.recoverInterrupted()
+		.catch((e: unknown) => {
+			console.error("[frp-reconcile] 启动恢复失败", e);
+		});
 
 	const storageCount = await prisma.storageBackendConfig.count();
 	if (storageCount === 0) {

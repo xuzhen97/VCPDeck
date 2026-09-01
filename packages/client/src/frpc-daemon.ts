@@ -1,34 +1,25 @@
-/** @file frpc 守护进程 — 管理单个 frpc 进程，合并所有映射配置 */
+/** @file frpc 守护进程 — 单例适配器：把 FrpRuntimeManager 结果映射为 JOB_DONE，管理真实 frpc spawn 与原子 TOML 替换 */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import {
 	Events,
+	parseFrpReconcilePayload,
 	type FrpCreatePayload,
 	type FrpDeletePayload,
+	type FrpListResult,
+	type FrpReconcilePayload,
+	type FrpReconcileResult,
+	type FrpRuntimeStateReport,
 } from "@vcpdeck/shared";
-
-interface FrpcProxy {
-	mappingId: string;
-	name: string;
-	type: "tcp" | "http" | "https";
-	localIP: string;
-	localPort: number;
-	remotePort?: number;
-	customDomain?: string;
-}
-
-interface FrpsInfo {
-	serverAddr: string;
-	serverPort: number;
-	authToken: string;
-}
-
-let daemonProcess: ChildProcess | null = null;
-const proxies: FrpcProxy[] = [];
-let lastFrpsInfo: FrpsInfo | null = null;
+import {
+	createFrpRuntimeManager,
+	type FrpRuntimeManager,
+} from "./frp-runtime-manager.js";
+// 调用期访问 CLIENT_ID（模块求值期避免与 register 的循环依赖）。
+import { CLIENT_ID } from "./register.js";
 
 type SocketLike = {
 	emit: (event: string, data: unknown) => void;
@@ -71,82 +62,82 @@ function getWorkDir(): string {
 	);
 }
 
-/** 生成合并的 frpc-combined.toml */
-function writeCombinedConfig(frps: FrpsInfo): string {
+/** 原子写合并 TOML：tmp-<generation> 写入后 rename 到正式文件；权限沿用运行账户，内容不落日志。 */
+function writeCombinedConfigAtomically(content: string): string {
 	const workDir = getWorkDir();
 	fs.mkdirSync(workDir, { recursive: true });
-
-	const proxyBlocks = proxies.map((p) => {
-		const lines = [
-			"[[proxies]]",
-			`name = "${p.name}"`,
-			`type = "${p.type}"`,
-			`localIP = "${p.localIP}"`,
-			`localPort = ${p.localPort}`,
-		];
-		if (typeof p.remotePort === "number" && p.type === "tcp") {
-			lines.push(`remotePort = ${p.remotePort}`);
-		}
-		if (p.customDomain) {
-			lines.push(`customDomains = ["${p.customDomain}"]`);
-		}
-		return lines.join("\n");
-	});
-
-	const content =
-		[
-			`serverAddr = "${frps.serverAddr}"`,
-			`serverPort = ${frps.serverPort}`,
-			"",
-			`auth.method = "token"`,
-			`auth.token = "${frps.authToken}"`,
-			"",
-			...proxyBlocks,
-		].join("\n") + "\n";
-
 	const configPath = path.join(workDir, "frpc-combined.toml");
-	fs.writeFileSync(configPath, content);
+	const tmpPath = path.join(
+		workDir,
+		`frpc-combined.toml.tmp-${Date.now().toString(36)}`,
+	);
+	fs.writeFileSync(tmpPath, content);
+	fs.renameSync(tmpPath, configPath);
 	return configPath;
 }
 
-/** 停止当前 frpc 进程 */
-function stopFrpc(): void {
-	if (!daemonProcess) return;
-	try {
-		daemonProcess.kill("SIGTERM");
-	} catch {
-		// 进程已退出或无权限，无需处理
+let manager: FrpRuntimeManager | null = null;
+
+/** 懒加载单例 manager（真实 spawn/FS；clientId 取本机持久化 ID）。 */
+function getManager(): FrpRuntimeManager {
+	if (!manager) {
+		manager = createFrpRuntimeManager({
+			resolveExecutable: () => resolveFrpcPath(),
+			workDir: getWorkDir(),
+			spawn: (cmd, args, opts) => {
+				const child = spawn(cmd, args, opts as never) as never;
+				return child;
+			},
+			writeConfigAtomically: (content) => {
+				writeCombinedConfigAtomically(content);
+			},
+			// 在线崩溃有限重启：立即 / 5s / 30s，共三次。
+			delays: [0, 5_000, 30_000],
+			clientId: CLIENT_ID,
+			onState: () => {
+				// 上报由 socket 桥订阅（subscribeFrpRuntimeState）驱动，这里无需副作用。
+			},
+			log: (msg) => console.log(msg),
+		});
 	}
-	daemonProcess = null;
+	return manager;
 }
 
-/** 启动（或重启）frpc；spawn 事件后才算本地启动成功。 */
-function startFrpc(frps: FrpsInfo): Promise<void> {
-	stopFrpc();
-	const frpcPath = resolveFrpcPath();
-	if (!frpcPath) return Promise.reject(new Error("frpc 二进制不存在"));
-	const configPath = writeCombinedConfig(frps);
-	const workDir = getWorkDir();
-	const child = spawn(frpcPath, ["-c", configPath], {
-		cwd: workDir,
-		stdio: "pipe",
-		windowsHide: true,
-	});
-	daemonProcess = child;
-	child.stderr?.on("data", (data: Buffer) => {
-		console.log(`[frpc] ${data.toString().trim()}`);
-	});
-	child.on("exit", (code) => {
-		console.log(`[frpc] 已退出 (code ${code})`);
-		if (daemonProcess === child) daemonProcess = null;
-	});
-	return new Promise((resolve, reject) => {
-		child.once("spawn", resolve);
-		child.once("error", () => {
-			if (daemonProcess === child) daemonProcess = null;
-			reject(new Error("frpc 启动失败"));
-		});
-	});
+/** 获取 FRP 运行时单例（socket 桥接线用）。 */
+export function getFrpRuntimeManager(): FrpRuntimeManager {
+	return getManager();
+}
+
+/** 当前 FRP 运行时安全状态快照（不含 Token/TOML/stderr）。 */
+export function getFrpRuntimeState(clientId: string): FrpRuntimeStateReport {
+	return getManager().getStateReport(clientId);
+}
+
+/** 设置当前 socket 连接代次（每次 REGISTER 生成新 UUID 后调用）。 */
+export function setFrpConnectionGeneration(value: string): void {
+	getManager().setConnectionGeneration(value);
+}
+
+/** 订阅 FRP 运行时状态变化；返回退订函数。 */
+export function subscribeFrpRuntimeState(
+	listener: (report: FrpRuntimeStateReport) => void,
+): () => void {
+	return getManager().subscribe(listener);
+}
+
+/** 计划内停机：取消有限重启 timer 并停止 frpc（更新/退出前调用，防误判 crash）。 */
+export async function shutdownFrpRuntime(): Promise<void> {
+	await getManager().shutdown();
+}
+
+function reconcileErrorCode(err: unknown): string {
+	const code = (err as { code?: string } | null)?.code;
+	if (code === "FRP_RUNTIME_GENERATION_STALE") return code;
+	if (code === "FRP_RUNTIME_STATE_INVALID") return code;
+	const msg = err instanceof Error ? err.message : "";
+	if (msg.includes("frpc 二进制不存在")) return "FRPC_NOT_FOUND";
+	if (msg.includes("frpc 启动失败")) return "FRPC_START_FAILED";
+	return "FRP_RECONCILE_FAILED";
 }
 
 /** 收到 frp.create Job */
@@ -166,55 +157,29 @@ export async function handleFrpCreate(
 		return;
 	}
 
-	if (proxies.find((p) => p.mappingId === payload.mappingId)) {
+	try {
+		const result = await getManager().create(payload);
+		socket.emit(Events.JOB_DONE, {
+			jobId: payload._jobId,
+			type: "frp.create",
+			result,
+		});
+	} catch (err) {
+		const message = err instanceof Error ? err.message : "";
+		const code =
+			message.includes("MAPPING_EXISTS") ? "MAPPING_EXISTS" : "FRPC_START_FAILED";
 		socket.emit(Events.JOB_DONE, {
 			jobId: payload._jobId,
 			type: "frp.create",
 			error: {
-				code: "MAPPING_EXISTS",
-				message: `映射 ${payload.mappingId} 已存在`,
+				code,
+				message:
+					code === "MAPPING_EXISTS"
+						? `映射 ${payload.mappingId} 已存在`
+						: "frpc 启动失败",
 			},
 		});
-		return;
 	}
-
-	const proxy: FrpcProxy = {
-		mappingId: payload.mappingId,
-		name: payload.name,
-		type: payload.proxyType,
-		localIP: payload.localIp,
-		localPort: payload.localPort,
-		remotePort: payload.remotePort,
-		customDomain: payload.customDomain,
-	};
-	proxies.push(proxy);
-	const previousFrpsInfo = lastFrpsInfo;
-	lastFrpsInfo = payload.frpsInfo;
-	try {
-		await startFrpc(payload.frpsInfo);
-	} catch {
-		proxies.splice(proxies.indexOf(proxy), 1);
-		lastFrpsInfo = previousFrpsInfo;
-		if (previousFrpsInfo && proxies.length > 0) {
-			try {
-				await startFrpc(previousFrpsInfo);
-			} catch {
-				// 旧配置恢复失败仍由本次 Job 报错；Server 保留映射状态供排查。
-			}
-		}
-		socket.emit(Events.JOB_DONE, {
-			jobId: payload._jobId,
-			type: "frp.create",
-			error: { code: "FRPC_START_FAILED", message: "frpc 启动失败" },
-		});
-		return;
-	}
-
-	socket.emit(Events.JOB_DONE, {
-		jobId: payload._jobId,
-		type: "frp.create",
-		result: { mappingId: payload.mappingId, status: "active" },
-	});
 }
 
 /** 收到 frp.delete Job */
@@ -222,35 +187,58 @@ export async function handleFrpDelete(
 	payload: FrpDeletePayload & { _jobId: string },
 	socket: SocketLike,
 ): Promise<void> {
-	const index = proxies.findIndex((proxy) => proxy.mappingId === payload.mappingId);
-	const removed = index === -1 ? undefined : proxies.splice(index, 1)[0];
 	try {
-		if (proxies.length === 0) {
-			stopFrpc();
-		} else if (lastFrpsInfo) {
-			await startFrpc(lastFrpsInfo);
-		}
+		const result = await getManager().delete(payload);
+		socket.emit(Events.JOB_DONE, {
+			jobId: payload._jobId,
+			type: "frp.delete",
+			result,
+		});
 	} catch {
-		if (removed) proxies.splice(index, 0, removed);
-		if (lastFrpsInfo) {
-			try {
-				await startFrpc(lastFrpsInfo);
-			} catch {
-				// 原配置恢复失败仍由本次 Job 报错；Server 保留 error 映射供排查。
-			}
-		}
 		socket.emit(Events.JOB_DONE, {
 			jobId: payload._jobId,
 			type: "frp.delete",
 			error: { code: "FRPC_START_FAILED", message: "frpc 启动失败" },
 		});
+	}
+}
+
+/** 收到 frp.reconcile Job（严格解析 payload；Client 不在 Job 内重试） */
+export async function handleFrpReconcile(
+	payload: { _jobId: string } & Record<string, unknown>,
+	socket: SocketLike,
+): Promise<void> {
+	const jobId = payload._jobId;
+	let parsed: FrpReconcilePayload;
+	try {
+		// 去掉 _jobId 后严格解析（未知字段拒绝）。
+		const { _jobId: _omitted, ...rest } = payload;
+		parsed = parseFrpReconcilePayload(rest);
+	} catch {
+		socket.emit(Events.JOB_DONE, {
+			jobId,
+			type: "frp.reconcile",
+			error: {
+				code: "FRP_RUNTIME_STATE_INVALID",
+				message: "frp reconcile 协议无效",
+			},
+		});
 		return;
 	}
-	 socket.emit(Events.JOB_DONE, {
-		jobId: payload._jobId,
-		type: "frp.delete",
-		result: { mappingId: payload.mappingId, deleted: true },
-	});
+
+	try {
+		const result: FrpReconcileResult = await getManager().reconcile(parsed);
+		socket.emit(Events.JOB_DONE, { jobId, type: "frp.reconcile", result });
+	} catch (err) {
+		socket.emit(Events.JOB_DONE, {
+			jobId,
+			type: "frp.reconcile",
+			error: {
+				code: reconcileErrorCode(err),
+				message: "frp reconcile 失败",
+			},
+		});
+	}
 }
 
 /** 收到 frp.list Job */
@@ -258,18 +246,10 @@ export function handleFrpList(
 	payload: { _jobId: string },
 	socket: SocketLike,
 ): void {
+	const result: FrpListResult = getManager().list();
 	socket.emit(Events.JOB_DONE, {
 		jobId: payload._jobId,
 		type: "frp.list",
-		result: {
-			mappings: proxies.map((p) => ({
-				id: p.mappingId,
-				name: p.name,
-				proxyType: p.type,
-				localPort: p.localPort,
-				remotePort: p.remotePort ?? null,
-				status: daemonProcess ? "active" : "inactive",
-			})),
-		},
+		result,
 	});
 }

@@ -283,4 +283,41 @@ describe("ClientService listOnline", () => {
 		const [client] = await service.listOnline();
 		expect(client?.capabilityDetails).toEqual({});
 	});
+
+	it("listOnline 安全投影 frp capability 详情（protocol v1）", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			{
+				...clientRow,
+				capabilityDetails: JSON.stringify({
+					frp: { available: true, reconcileProtocolVersion: 1 },
+				}),
+			},
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+
+		const [client] = await service.listOnline();
+		expect(client?.capabilityDetails.frp).toEqual({
+			available: true,
+			reconcileProtocolVersion: 1,
+		});
+	});
+
+	it("frp 能力详情损坏时省略 frp 字段但保留其余详情", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			{
+				...clientRow,
+				capabilityDetails: JSON.stringify({
+					pi: { available: true, sdkVersion: "0.84.0" },
+					frp: { available: "yes" },
+				}),
+			},
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+
+		const [client] = await service.listOnline();
+		expect(client?.capabilityDetails.pi).toMatchObject({ available: true });
+		expect(client?.capabilityDetails.frp).toBeUndefined();
+	});
 });

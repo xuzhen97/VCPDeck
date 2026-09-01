@@ -329,6 +329,118 @@ describe("frp command", () => {
 		expect(output).toContain("nas-web");
 		expect(output).toContain("https://nas.example.com");
 	});
+
+	it("mappings 人类输出把 reconciling 显示为恢复中", async () => {
+		const { port } = await listen((request, response) => {
+			response.setHeader("content-type", "application/json");
+			if ((request.url ?? "").startsWith("/api/frp/mappings")) {
+				response.end(
+					JSON.stringify({
+						data: [
+							{
+								id: "m1",
+								clientId: "c1",
+								name: "tcp-1919",
+								proxyType: "tcp",
+								localIp: "127.0.0.1",
+								localPort: 1919,
+								remotePort: 20000,
+								customDomain: null,
+								status: "reconciling",
+								publicUrl: "frps.example.com:20000",
+								createdAt: "2026-08-01T00:00:00Z",
+								updatedAt: "2026-08-22T00:00:00Z",
+							},
+						],
+						total: 1,
+						page: 1,
+						pageSize: 20,
+						totalPages: 1,
+					}),
+				);
+				return;
+			}
+			response.end(JSON.stringify({}));
+		});
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runFrpCommand("mappings", [], {
+			paths,
+			processEnv,
+			log: (m) => lines.push(m),
+		});
+		const output = lines.join("\n");
+		expect(output).toContain("恢复中");
+		expect(output).not.toContain("reconciling");
+	});
+
+	it("mapping create 遇到 busy 只提示稍后查询，且不重试 POST", async () => {
+		const requested: string[] = [];
+		const { port } = await listen((request, response) => {
+			const url = request.url ?? "";
+			requested.push(`${request.method ?? "GET"} ${url}`);
+			response.setHeader("content-type", "application/json");
+			if (url === "/api/clients") {
+				response.end(JSON.stringify([{ clientId: "c1", name: "nas", online: true }]));
+				return;
+			}
+			if (request.method === "POST" && url === "/api/frp/mappings") {
+				response.statusCode = 409;
+				response.end(
+					JSON.stringify({
+						statusCode: 409,
+						code: "FRP_RECONCILE_BUSY",
+						message: "FRP 映射正在恢复",
+					}),
+				);
+				return;
+			}
+			response.end(JSON.stringify({}));
+		});
+		const { paths, processEnv } = await fixture(port);
+		await expect(
+			runFrpCommand("mapping", ["create", "nas", "--local-port=1919"], {
+				paths,
+				processEnv,
+				pollIntervalMs: 1,
+			}),
+		).rejects.toThrow("映射正在自动恢复，请稍后运行 frp mappings 查看进度");
+		// 仅一次 POST，不重试
+		expect(requested.filter((u) => u.startsWith("POST ")).length).toBe(1);
+	});
+
+	it("mapping delete 遇到 busy 只提示稍后查询，且不重试 DELETE", async () => {
+		const requested: string[] = [];
+		const { port } = await listen((request, response) => {
+			const url = request.url ?? "";
+			requested.push(`${request.method ?? "GET"} ${url}`);
+			response.setHeader("content-type", "application/json");
+			if (
+				request.method === "DELETE" &&
+				url.startsWith("/api/frp/mappings/fm_1")
+			) {
+				response.statusCode = 409;
+				response.end(
+					JSON.stringify({
+						statusCode: 409,
+						code: "FRP_RECONCILE_BUSY",
+						message: "FRP 映射正在恢复",
+					}),
+				);
+				return;
+			}
+			response.end(JSON.stringify({}));
+		});
+		const { paths, processEnv } = await fixture(port);
+		await expect(
+			runFrpCommand("mapping", ["delete", "fm_1"], {
+				paths,
+				processEnv,
+				pollIntervalMs: 1,
+			}),
+		).rejects.toThrow("映射正在自动恢复，请稍后运行 frp mappings 查看进度");
+		expect(requested.filter((u) => u.startsWith("DELETE ")).length).toBe(1);
+	});
 });
 
 function url0(request: IncomingMessage): string {

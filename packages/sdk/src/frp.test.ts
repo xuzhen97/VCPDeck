@@ -1,5 +1,6 @@
 import { JobStatus } from "@vcpdeck/shared";
 import { describe, expect, it, vi } from "vitest";
+import { VcpDeckApiError } from "./client.js";
 import { createFrpApi } from "./frp.js";
 
 const mapping = {
@@ -113,5 +114,52 @@ describe("frp sdk", () => {
 			undefined,
 		);
 		expect(jobs.wait).toHaveBeenCalledWith("delete-job", expect.any(Object));
+	});
+
+	it("create 遇到 busy 时 VcpDeckApiError 原样透传（status 409 / code），不自动重试", async () => {
+		const request = vi.fn().mockRejectedValue(
+			new VcpDeckApiError("FRP 映射正在恢复", 409, "FRP_RECONCILE_BUSY"),
+		);
+		const api = createFrpApi({ request } as never);
+
+		await expect(
+			api.create({ clientId: "client-1", proxyType: "tcp", localPort: 1919 }),
+		).rejects.toMatchObject({ status: 409, code: "FRP_RECONCILE_BUSY" });
+		expect(request).toHaveBeenCalledTimes(1);
+	});
+
+	it("delete 遇到 busy 时不重试，只透传一次 DELETE", async () => {
+		const request = vi.fn().mockRejectedValue(
+			new VcpDeckApiError("FRP 映射正在恢复", 409, "FRP_RECONCILE_BUSY"),
+		);
+		const api = createFrpApi({ request } as never);
+
+		await expect(api.delete("fm_1")).rejects.toMatchObject({
+			status: 409,
+			code: "FRP_RECONCILE_BUSY",
+		});
+		expect(request).toHaveBeenCalledTimes(1);
+	});
+
+	it("list 返回 reconciling 状态映射（类型贯通）", async () => {
+		const request = vi.fn().mockResolvedValue({
+			data: [
+				{
+					...mapping,
+					status: "reconciling" as const,
+					errorCode: "FRP_RECONCILE_FAILED",
+					errorMessage: "FRP 映射恢复未通过双重确认",
+				},
+			],
+			total: 1,
+			page: 1,
+			pageSize: 20,
+			totalPages: 1,
+		});
+		const api = createFrpApi({ request } as never);
+
+		const page = await api.list({ clientId: "client-1" });
+
+		expect(page.data[0]).toMatchObject({ status: "reconciling" });
 	});
 });

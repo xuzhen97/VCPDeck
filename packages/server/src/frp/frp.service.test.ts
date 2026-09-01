@@ -108,7 +108,7 @@ describe("FrpService createMapping", () => {
 		instances.listDashboardProxies.mockResolvedValue({
 			total: 1,
 			byType: { tcp: 1, http: 0, https: 0 },
-			list: [{ name: "tcp-1919", proxyType: "tcp", remotePort: 20000 }],
+			list: [{ name: "tcp-1919", proxyType: "tcp", status: "online", remotePort: 20000 }],
 			usedPorts: [20000],
 		});
 		let nameChecks = 0;
@@ -203,7 +203,7 @@ describe("FrpService createMapping", () => {
 		instances.listDashboardProxies.mockResolvedValue({
 			total: 1,
 			byType: { tcp: 1, http: 0, https: 0 },
-			list: [{ name: "tcp-1919", proxyType: "tcp", remotePort: 20000 }],
+			list: [{ name: "tcp-1919", proxyType: "tcp", status: "online", remotePort: 20000 }],
 			usedPorts: [20000],
 		});
 
@@ -428,7 +428,7 @@ describe("FrpService createMapping", () => {
 		instances.listDashboardProxies.mockResolvedValue({
 			total: 1,
 			byType: { tcp: 1, http: 0, https: 0 },
-			list: [{ name: "tcp-1919", proxyType: "tcp", remotePort: 20000 }],
+			list: [{ name: "tcp-1919", proxyType: "tcp", status: "online", remotePort: 20000 }],
 			usedPorts: [20000],
 		});
 
@@ -523,7 +523,7 @@ describe("FrpService createMapping", () => {
 		instances.listDashboardProxies.mockResolvedValue({
 			total: 1,
 			byType: { tcp: 1, http: 0, https: 0 },
-			list: [{ name: "tcp-1919", proxyType: "tcp", remotePort: 20000 }],
+			list: [{ name: "tcp-1919", proxyType: "tcp", status: "online", remotePort: 20000 }],
 			usedPorts: [20000],
 		});
 
@@ -547,5 +547,115 @@ describe("FrpService createMapping", () => {
 				errorCode: "FRP_ROLLBACK_FAILED",
 			}),
 		});
+	});
+});
+
+describe("FrpService 恢复周期写互斥", () => {
+	function mockPrisma() {
+		const prisma = {
+			client: { findUnique: vi.fn() },
+			frpMapping: {
+				findFirst: vi.fn(),
+				findUnique: vi.fn(),
+				findMany: vi.fn().mockResolvedValue([]),
+				count: vi.fn(),
+				create: vi.fn(),
+				update: vi.fn(),
+				updateMany: vi.fn(),
+				delete: vi.fn(),
+			},
+			job: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+		} as any;
+		prisma.$transaction = vi.fn(async (work: (tx: typeof prisma) => unknown) =>
+			work(prisma),
+		);
+		return prisma;
+	}
+
+	function busyGuard() {
+		const assertWritable = vi.fn(() => {
+			const error = Object.assign(new Error("FRP 映射正在恢复"), {
+				code: "FRP_RECONCILE_BUSY",
+				statusCode: 409,
+			});
+			throw error;
+		});
+		return { assertWritable };
+	}
+
+	it("createMapping 在恢复周期内抛 FRP_RECONCILE_BUSY / 409", async () => {
+		const prisma = mockPrisma();
+		const instances = {
+			getDefault: vi.fn(),
+			getById: vi.fn(),
+			listDashboardProxies: vi.fn(),
+		} as any;
+		const service = new FrpService(prisma, instances, busyGuard() as any);
+
+		await expect(
+			service.createMapping({
+				clientId: "client-1",
+				proxyType: "tcp",
+				localIp: "127.0.0.1",
+				localPort: 1919,
+			} as any),
+		).rejects.toMatchObject({ code: "FRP_RECONCILE_BUSY", statusCode: 409 });
+		expect(prisma.job.create).not.toHaveBeenCalled();
+	});
+
+	it("deleteMapping 在恢复周期内抛 FRP_RECONCILE_BUSY / 409", async () => {
+		const prisma = mockPrisma();
+		prisma.frpMapping.findUnique.mockResolvedValue({
+			id: "fm_1",
+			clientId: "client-1",
+			name: "tcp-1919",
+			status: "active",
+		});
+		const instances = {
+			getDefault: vi.fn(),
+			getById: vi.fn(),
+			listDashboardProxies: vi.fn(),
+		} as any;
+		const service = new FrpService(prisma, instances, busyGuard() as any);
+
+		await expect(service.deleteMapping("fm_1")).rejects.toMatchObject({
+			code: "FRP_RECONCILE_BUSY",
+			statusCode: 409,
+		});
+		expect(prisma.job.create).not.toHaveBeenCalled();
+	});
+
+	it("未注入 reconciliation service 时行为不变（兼容旧构造）", async () => {
+		const prisma = mockPrisma();
+		prisma.client.findUnique.mockResolvedValue({
+			id: "client-1",
+			online: true,
+			capabilities: '["frp"]',
+		});
+		const instances = {
+			getDefault: vi.fn().mockResolvedValue(instance),
+			getById: vi.fn().mockResolvedValue(instance),
+			listDashboardProxies: vi.fn().mockResolvedValue({
+				total: 0,
+				byType: { tcp: 0, http: 0, https: 0 },
+				list: [],
+				usedPorts: [],
+			}),
+		} as any;
+		prisma.frpMapping.create.mockImplementation(async ({ data }: { data: any }) => ({
+			...data,
+			createdAt: new Date("2026-08-24T00:00:00.000Z"),
+			updatedAt: new Date("2026-08-24T00:00:00.000Z"),
+		}));
+		const service = new FrpService(prisma, instances);
+
+		await expect(
+			service.createMapping({
+				clientId: "client-1",
+				proxyType: "tcp",
+				localIp: "127.0.0.1",
+				localPort: 1919,
+			} as any),
+		).resolves.toMatchObject({ dispatch: { type: "frp.create" } });
 	});
 });

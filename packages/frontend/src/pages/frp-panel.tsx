@@ -84,6 +84,11 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		controller.current?.abort();
 		const next = new AbortController();
 		controller.current = next;
+		// 恢复周期内提交：稳定 busy 时给出安全指引，不自动重试。
+		const busyMessage = (error: unknown): string | null =>
+			(error as { code?: string })?.code === "FRP_RECONCILE_BUSY"
+				? "映射正在自动恢复，请稍后刷新"
+				: null;
 		try {
 			const mapping = await sdk.frp.createAndWait(
 				{
@@ -109,7 +114,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		} catch (error) {
 			if (!next.signal.aborted) {
 				setCreating(false);
-				setCreateError(error instanceof Error ? error.message : "创建映射失败");
+				setCreateError(busyMessage(error) ?? (error instanceof Error ? error.message : "创建映射失败"));
 			}
 		}
 	}
@@ -177,6 +182,11 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		clients.map((client) => [client.clientId, client.name ?? client.hostname]),
 	);
 
+	// 目标 Client 存在恢复中映射：新增入口禁用（写互斥），恢复结束后自动可用。
+	const hasReconciling = (resource.data?.data ?? []).some(
+		(m) => m.status === "reconciling" && (!clientId || m.clientId === clientId),
+	);
+
 	if (resource.loading) return <LoadingState label="正在加载映射…" />;
 	if (resource.error)
 		return <ErrorState message="无法加载映射" onRetry={resource.reload} />;
@@ -184,13 +194,20 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 		<>
 			<Card>
 				<CardHeader>
-					<div className="flex items-center justify-between">
-						<CardTitle>{clientId ? "机器映射" : "全部映射"}</CardTitle>
-						<Button size="sm" onClick={openDrawer}>
-							<Plus className="mr-1 size-4" />
-							新增映射
-						</Button>
-					</div>
+						<div className="flex items-center justify-between">
+							<CardTitle>{clientId ? "机器映射" : "全部映射"}</CardTitle>
+							<div className="flex items-center gap-2">
+								{hasReconciling && (
+									<span className="text-xs text-amber-400">
+										映射正在自动恢复，完成前暂不可新增
+									</span>
+								)}
+								<Button size="sm" onClick={openDrawer} disabled={hasReconciling}>
+									<Plus className="mr-1 size-4" />
+									新增映射
+								</Button>
+							</div>
+						</div>
 				</CardHeader>
 				<CardContent>
 					{notice && (
@@ -248,30 +265,36 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 															label={mapping.proxyType.toUpperCase()}
 														/>
 													</div>
-													<div>
-														<StatusChip
-															label={statusLabel(mapping.status)}
-															tone={statusTone(mapping.status)}
-														/>
-													</div>
-													<code className="text-sm">{localEndpoint}</code>
+											<div>
+												<StatusChip
+													label={statusLabel(mapping.status)}
+													tone={statusTone(mapping.status)}
+												/>
+												{mapping.errorMessage && (
+													<p className="mt-1 text-xs text-red-400">
+														{mapping.errorMessage}
+													</p>
+												)}
+											</div>
+											<code className="text-sm">{localEndpoint}</code>
 													<code className="text-sm">{publicEndpoint}</code>
-													<FrpActionMenu
-														items={[
-															{
-																label: "复制公网地址",
-																disabled: !mapping.publicUrl,
-																onSelect: () => copyPublicUrl(mapping),
-															},
-															{
-																label: "删除映射",
-																tone: "danger",
-																onSelect: () => setDeleting(mapping),
-															},
-														]}
-													/>
-												</div>
-												<div className="space-y-3 md:hidden">
+										<FrpActionMenu
+											items={[
+												{
+													label: "复制公网地址",
+													disabled: !mapping.publicUrl,
+													onSelect: () => copyPublicUrl(mapping),
+												},
+												{
+													label: "删除映射",
+													tone: "danger",
+													disabled: mapping.status === "reconciling",
+													onSelect: () => setDeleting(mapping),
+												},
+											]}
+										/>
+										</div>
+										<div className="space-y-3 md:hidden">
 													<div className="flex items-start justify-between gap-3">
 														<div>
 															<div className="flex items-center gap-2">
@@ -281,6 +304,11 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 																	tone={statusTone(mapping.status)}
 																/>
 															</div>
+															{mapping.errorMessage && (
+																<p className="mt-1 text-xs text-red-400">
+																	{mapping.errorMessage}
+																</p>
+															)}
 															<p className="mt-1 text-sm text-muted-foreground">
 																{displayName} ·{" "}
 																{mapping.proxyType.toUpperCase()}
@@ -289,22 +317,23 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 																{shortId(mapping.clientId)}
 															</p>
 														</div>
-														<FrpActionMenu
-															items={[
-																{
-																	label: "复制公网地址",
-																	disabled: !mapping.publicUrl,
-																	onSelect: () => copyPublicUrl(mapping),
-																},
-																{
-																	label: "删除映射",
-																	tone: "danger",
-																	onSelect: () => setDeleting(mapping),
-																},
-															]}
-														/>
-													</div>
-													<div className="flex flex-wrap gap-2">
+											<FrpActionMenu
+												items={[
+													{
+														label: "复制公网地址",
+														disabled: !mapping.publicUrl,
+														onSelect: () => copyPublicUrl(mapping),
+													},
+													{
+														label: "删除映射",
+														tone: "danger",
+														disabled: mapping.status === "reconciling",
+														onSelect: () => setDeleting(mapping),
+													},
+												]}
+											/>
+											</div>
+											<div className="flex flex-wrap gap-2">
 														<StatusChip
 															label={mapping.proxyType.toUpperCase()}
 														/>
@@ -554,9 +583,11 @@ function statusLabel(status: string) {
 			? "创建中"
 			: status === "deleting"
 				? "删除中"
+				: status === "reconciling"
+					? "恢复中"
 				: status === "error"
-					? "异常"
-					: "未确认";
+				? "异常"
+				: "未确认";
 }
 
 function statusTone(status: string): "success" | "warning" | "danger" {

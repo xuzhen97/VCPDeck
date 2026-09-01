@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- FRP 映射恢复对账：Client 重连（或首次连接）后 Server 按 SQLite 期望集合做三方比较（SQLite × Client 快照 × FRPS Dashboard），自动派发内部 `frp.reconcile` Job 重建 frpc 并恢复映射；通过 capability `frp.reconcileProtocolVersion=1` 协商，新 Server + 旧 Client 不自动恢复、新 Client + 旧 Server 不读取残留配置，标准组合仍为同版本发布。
+- FRP 映射新增 `reconciling` 状态与 5s/30s 有限重试槽位：Client 在线时重连即收敛；重试耗尽回 `inactive + FRP_RECONCILE_FAILED`；Server 重启后遗留 `reconciling` 由启动恢复归位 `inactive`。
+- frpc 进程崩溃 Client 侧有限自愈：立即/5s/30s 三次重启，耗尽置 `failed` 并回报安全状态；Client PID 保持不变，无需 PM2 重启。
+
+### Changed
+
+- FRP 恢复周期进行中的 create/delete 返回 409 `FRP_RECONCILE_BUSY`（可有限重试）；映射断线置 inactive 的语义保持不变。
+- FRP Job 与 `frp:state` 上报采用 Shared 严格 parser 与安全投影：Job 结果、ack 与事件不携带 FRPS Token、TOML 或 frpc stdout/stderr；FRPS Dashboard 二次确认只认 online 状态，offline 残留条目不再误判为已恢复。
+
 ## [0.6.14] - 2026-08-30
 
 ### Added

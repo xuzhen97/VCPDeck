@@ -36,6 +36,11 @@ import {
 } from "./terminal/protocol-bridge.js";
 import { killProcessTree } from "./terminal/process-tree.js";
 import { attachUpdateHandler } from "./update.js";
+import {
+	getFrpRuntimeManager,
+	shutdownFrpRuntime,
+} from "./frpc-daemon.js";
+import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge.js";
 import { ClientLauncher } from "./launcher-control.js";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -206,12 +211,35 @@ export function connect(): Socket {
 		reconnectionDelayMax: 10_000,
 	});
 
-	// 自更新：有界 drain + 本机 Launcher 两阶段更新
+	// 自更新：有界 drain + 本机 Launcher 两阶段更新；apply 前计划内释放 frpc。
 	attachUpdateHandler({
 		socket,
 		launcher: new ClientLauncher(),
 		serverBase: SERVER_BASE,
+		beforeApply: () => shutdownFrpRuntime(),
 	});
+
+	// FRP socket 桥：注册确认后上报安全 runtime 快照（每次连接新代次）。
+	const frpBridge: FrpSocketBridge = attachFrpSocketBridge(socket, {
+		clientId: CLIENT_ID,
+		manager: getFrpRuntimeManager(),
+	});
+
+	// 进程级停机（SIGTERM/SIGINT 各一次）：
+	// 先 dispose 桥（关闭本代次上报资格）→ 计划内停 frpc（防版本切换误判 crash）→ exit(0)。
+	let frpShuttingDown = false;
+	for (const signal of ["SIGTERM", "SIGINT"] as const) {
+		process.on(signal, () => {
+			if (frpShuttingDown) return;
+			frpShuttingDown = true;
+			frpBridge.dispose();
+			void shutdownFrpRuntime()
+				.catch(() => {
+					console.error("[frp] 停机释放失败（忽略）");
+				})
+				.finally(() => process.exit(0));
+		});
+	}
 
 	const supervisor = createPiSupervisor({
 		clientId: CLIENT_ID,
@@ -240,8 +268,8 @@ export function connect(): Socket {
 	function ensureTerminalReady(): Promise<void> {
 		if (!terminalReady) {
 			terminalReady = (async () => {
-				const status = await probeTerminalCapability();
-				if (!status.available) return;
+				const status = await probeWithTimeout(probeTerminalCapability).catch(() => undefined);
+				if (!status?.available) return;
 				const shells = await discoverShells(createShellDiscoveryEnv());
 				terminalManager.setShells(shells);
 			})();
@@ -249,11 +277,37 @@ export function connect(): Socket {
 		return terminalReady;
 	}
 
+	// 能力探测统一 3s 上限：原生后端加载异常慢时不得阻塞 REGISTER（超时/失败按不可用降级，由桥内 .catch 兜底）。
+	function probeWithTimeout<T>(probe: () => Promise<T>): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			let settled = false;
+			const timer = setTimeout(() => {
+				if (settled) return;
+				settled = true;
+				reject(new Error("capability probe timeout"));
+			}, 3000);
+			(timer as { unref?: () => void }).unref?.();
+			probe()
+				.then((value) => {
+					if (settled) return;
+					settled = true;
+					clearTimeout(timer);
+					resolve(value);
+				})
+				.catch((err) => {
+					if (settled) return;
+					settled = true;
+					clearTimeout(timer);
+					reject(err);
+				});
+		});
+	}
+
 	const bridge = attachPiBridge(socket, {
 		clientId: CLIENT_ID,
 		supervisor,
-		getPiStatus: () => probePiCapability(),
-		getTerminalStatus: () => probeTerminalCapability(),
+		getPiStatus: () => probeWithTimeout(probePiCapability),
+		getTerminalStatus: () => probeWithTimeout(probeTerminalCapability),
 		getRegister: (piStatus, terminalStatus) =>
 			getRegisterInfo(piStatus, terminalStatus),
 		getStatusReport: () => ({
@@ -264,6 +318,8 @@ export function connect(): Socket {
 
 	socket.on("connect", () => {
 		console.log(`[vcpdeck] connected as ${CLIENT_ID}`);
+		// FRP 桥同步进入新连接代次（不立即恢复；REGISTER ack 后才上报状态）。
+		frpBridge.onConnected();
 		void (async () => {
 			await ensureTerminalReady();
 			await bridge.onConnected();

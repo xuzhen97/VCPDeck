@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
 	FRP_ERROR_CODES,
 	FRP_MAPPING_STATUSES,
+	FrpJobType,
 	FrpProtocolError,
+	JobType,
 	parseFrpMappingCreateRequest,
 	parseFrpOperationTimeout,
 } from "./index.js";
@@ -15,10 +17,21 @@ describe("FRP shared contract", () => {
 			"inactive",
 			"deleting",
 			"error",
+			"reconciling",
 		]);
 		expect(FRP_ERROR_CODES).toContain("FRPS_DASHBOARD_REQUIRED");
 		expect(FRP_ERROR_CODES).toContain("FRP_PROXY_CONFIRM_TIMEOUT");
 		expect(FRP_ERROR_CODES).toContain("FRP_ROLLBACK_FAILED");
+		expect(FRP_ERROR_CODES).toContain("FRP_RECONCILE_BUSY");
+		expect(FRP_ERROR_CODES).toContain("FRP_RECONCILE_FAILED");
+		expect(FRP_ERROR_CODES).toContain("FRP_RUNTIME_GENERATION_STALE");
+		expect(FRP_ERROR_CODES).toContain("FRP_RUNTIME_STATE_INVALID");
+		expect(FRP_ERROR_CODES).toContain("FRP_RECONCILE_TIMEOUT");
+	});
+
+	it("两个 Job type 集合均包含 frp.reconcile", () => {
+		expect(JobType.FRP_RECONCILE).toBe("frp.reconcile");
+		expect(FrpJobType.FRP_RECONCILE).toBe("frp.reconcile");
 	});
 
 	it("解析 TCP 请求并补齐默认值，name 可省略", () => {

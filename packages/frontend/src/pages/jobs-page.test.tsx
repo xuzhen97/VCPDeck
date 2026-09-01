@@ -78,6 +78,46 @@ it("shows Session Job labels and supports the idle filter", async () => {
 	);
 });
 
+it("frp.reconcile Job 显示「恢复 FRP 映射」标签，详情不渲染 raw payload 敏感字段", async () => {
+const list = vi.fn().mockResolvedValue({
+	data: [
+		job({
+			type: "frp.reconcile",
+			status: "done" as JobInfo["status"],
+			// 安全投影后的 payload（Server 已剥离 frpsInfo/preservedMappings 正文）
+			payload: {
+attempt: 1,
+mappingCount: 2,
+connectionGeneration: "conn-1",
+expectedRuntimeGeneration: 4,
+			},
+		}),
+	],
+	total: 1,
+	page: 1,
+	pageSize: 20,
+	totalPages: 1,
+});
+const client = {
+	auth: { me: async () => identity },
+	jobs: { list },
+} as unknown as VcpDeckClient;
+render(
+	<MemoryRouter>
+		<SdkProvider client={client}>
+			<AuthProvider>
+<JobsPage />
+			</AuthProvider>
+		</SdkProvider>
+	</MemoryRouter>,
+);
+const labels = await screen.findAllByText("恢复 FRP 映射");
+expect(labels.length).toBeGreaterThan(0);
+expect(labels[0]).toBeVisible();
+// 页面不出现 authToken 等敏感正文
+expect(document.body.textContent).not.toContain("SUPER_SECRET");
+});
+
 it("shows the global jobs table and filters status through the paginated API", async () => {
 	const list = vi.fn().mockResolvedValue({
 		data: [

@@ -180,6 +180,8 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 | `update:request` | Server → Client | 请求准备目标版本 |
 | `update:ready/failed` | Client → Server | 更新停机准备或失败摘要 |
 | `server:shutdown` | Server → Client | Server 即将更新重启 |
+| `frp:state` | Client → Server | FRP runtime 安全快照（状态、generation、proxy 摘要）；REGISTER 确认后立即首报，之后每次状态变化上报 |
+| `frp:state-ack` | Server → Client | 严格确认（accepted + action）；Client 只接受当前 connection generation 的 ack |
 
 所有跨信任边界 payload 长期必须先通过 Shared parse 函数或等价严格校验，再进入领域服务。Pi/Terminal 当前已采用严格 parser；exec 和文件 Job 的双端校验仍有本文件所列实现偏移。
 
@@ -400,11 +402,15 @@ DELETE /api/frp/mappings/:id
 
 创建确认失败自动派发 `frp.delete` 回滚；回滚成功后删除 mapping，回滚失败保留 `error`。删除先把 mapping 置为 `deleting` 并返回含新 `operationJobId` 的映射，只有 Client 清理且 Dashboard 确认 proxy 消失后才删除记录；失败保留 `errorCode/errorMessage` 并允许再次 DELETE 重试。Client 断线仍只把 active 标为 inactive，独立 frpc 可能继续工作。
 
+恢复对账（capability `frp.reconcileProtocolVersion=1` 的 Client）：Client 重连后按 SQLite 期望集合做三方比较（SQLite × Client 快照 × Dashboard），可恢复状态（active/inactive/reconciling）的映射进入 `reconcile` 周期：Server 创建内部 `frp.reconcile` system Job 并精确派发到当前 socket，Client 重建 TOML 并重启 frpc；Job 结果只含 connectionGeneration/runtimeGeneration/status/loadedMappingIds 安全投影，Server 再按 Dashboard 有界复检，确认通过回 active。重试为 5s/30s 有限槽位，耗尽回 `inactive + FRP_RECONCILE_FAILED`。Client 侧 frpc 崩溃自愈（retrying/failed 上报）由 Client 独占，不派发 Server 重试。恢复周期进行中 create/delete 返回 409 `FRP_RECONCILE_BUSY`（调用方可有限重试）；provisioning/deleting/error 不参与自动恢复。frpc 崩溃自愈与 Job 结果均不向 Server 上报 TOML、stdout/stderr 或凭据。
+
 ### 7.3 Job payload 与多实例偏移
 
 - `frp.create` payload 含完整 frps serverAddr/serverPort/authToken，并进入 Job/SQLite；
 - `frp.delete` 含 mappingId/name；
+- `frp.reconcile` payload 含本轮期望集合（完整 proxy 配置）与 frps 实例信息（含 authToken，仅进入 Job/SQLite）；Job 结果与安全 ack 只含 generation/status/mappingId 投影，不含 Token/TOML/stderr；
 - `frp.list` 返回 Client 进程内 registry；
+- `frp:state` 报告由 Shared 严格 parser 校验（未知字段、未知状态、代次不匹配均拒绝）；capability 协商失败或旧 Server 不触发恢复；
 - FRP 创建 REST 输入由 Shared 严格 parser 拒绝未知字段和类型冲突，写操作错误使用稳定安全 code；内部 Job 仍未保存完整 Actor；
 - Client 只有单个 frpc/lastFrpsInfo；Server 当前拒绝同一 Client 跨 FrpsInstance 创建映射。
 
