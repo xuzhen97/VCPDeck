@@ -43,6 +43,16 @@ import type {
 
 const SIGN_UPLOAD_PREFIX = "upload";
 const SIGN_DOWNLOAD_PREFIX = "download";
+const EXPIRED_ALIBABA_DOWNLOAD_HOST = "dl1-v6.aliyundrive.cloud";
+const ALIBABA_DOWNLOAD_HOST = "cn-beijing-data.aliyundrive.net";
+
+/** 将阿里云盘当前过期证书域名替换为可用下载域名，保留完整签名 URL。 */
+function rewriteAlibabaDownloadUrl(url: string): string {
+	const prefix = `https://${EXPIRED_ALIBABA_DOWNLOAD_HOST}`;
+	return url.startsWith(`${prefix}/`)
+		? `https://${ALIBABA_DOWNLOAD_HOST}${url.slice(prefix.length)}`
+		: url;
+}
 
 /** 刷新后需要持久化的 token 字段 */
 export interface TokenPersistence {
@@ -274,7 +284,7 @@ export class AlibabaStorageProvider implements StorageProvider {
 		if (!url) throw new Error("阿里云盘未返回下载 URL");
 		const raw = result.expire_time ?? result.expiresAt ?? 0;
 		const expiresAt = typeof raw === "string" ? Date.parse(raw) : Number(raw);
-		return { url, expiresAt };
+		return { url: rewriteAlibabaDownloadUrl(url), expiresAt };
 	}
 
 	/** StorageProvider 直连下载 URL（ADR-0016：目标机直连网盘下载） */
@@ -454,7 +464,7 @@ export class AlibabaStorageProvider implements StorageProvider {
 			throw new Error("阿里云盘未返回下载 URL");
 		}
 
-		const response = await fetch(downloadUrl);
+		const response = await fetch(rewriteAlibabaDownloadUrl(downloadUrl));
 		if (!response.ok || !response.body) {
 			throw new Error(`阿里云盘下载失败: HTTP ${response.status}`);
 		}

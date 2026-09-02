@@ -209,6 +209,25 @@ describe("AlibabaStorageProvider 直传会话", () => {
 		});
 	});
 
+	it("将阿里云盘过期证书下载域名替换为有效域名并保留签名参数", async () => {
+		const provider = new AlibabaStorageProvider({
+			...baseConfig,
+			driveId: "drive-1",
+		} as never);
+		vi.stubGlobal(
+			"fetch",
+			openapiOk({
+				url: "https://dl1-v6.aliyundrive.cloud/object/path?x-oss-signature=test",
+				expire_time: 1760000000000,
+			}),
+		);
+
+		await expect(provider.getExternalDownloadUrl("file-1")).resolves.toEqual({
+			url: "https://cn-beijing-data.aliyundrive.net/object/path?x-oss-signature=test",
+			expiresAt: 1760000000000,
+		});
+	});
+
 	it("getDirectDownloadUrl（ADR-0016）委托外部下载 URL", async () => {
 		const provider = new AlibabaStorageProvider({
 			...baseConfig,
