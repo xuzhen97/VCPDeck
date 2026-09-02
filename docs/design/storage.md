@@ -150,6 +150,8 @@ sequenceDiagram
 
 ### 6.2 Browser 上传后导入远程机器
 
+阿里云盘返回的 `dl1-v6.aliyundrive.cloud` 下载域名当前存在证书过期兼容问题，Provider 会将该精确域名替换为 `cn-beijing-data.aliyundrive.net`，保留路径和全部签名查询参数；不关闭 TLS 校验，也不改写其他域名。
+
 ```mermaid
 sequenceDiagram
     participant Browser

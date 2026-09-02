@@ -1,5 +1,11 @@
 # 更新日志
 
+## Unreleased
+
+### Fixed
+
+- 兼容阿里云盘 `dl1-v6.aliyundrive.cloud` 下载域名证书过期：改用 `cn-beijing-data.aliyundrive.net`，保留签名参数并继续执行 TLS 校验。
+
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
 ## [0.6.11] - 2026-08-28
