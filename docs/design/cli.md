@@ -1,6 +1,6 @@
 # CLI 与多环境配置设计
 
-> 状态：Current｜维护责任：CLI/SDK 维护者｜最后核验：2026-08-28｜适用版本：`0.6.15` / 当前 `main`
+> 状态：Current｜维护责任：CLI/SDK 维护者｜最后核验：2026-09-02｜适用版本：`0.6.17` / 当前 `main`
 
 本文描述当前 VCPDeck CLI 的职责、环境配置、安全边界和已落地命令。长期取舍见 [ADR-0017](../adr/0017-cli-multi-environment-configuration.md)；REST 与认证语义见 [`protocols.md`](../protocols.md) 和 [`design/identity-and-authentication.md`](./identity-and-authentication.md)。
 
