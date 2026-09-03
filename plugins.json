@@ -8,7 +8,7 @@
       "author": "xuzhen97",
       "category": "system-integration",
       "icon": "server",
-      "path": "Plugin/VCPDeckBridge",
+      "path": "plugins/vcpdeck",
       "downloadUrl": "https://ghproxy.net/https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/dist/VCPDeckBridge.zip"
     }
   ]
