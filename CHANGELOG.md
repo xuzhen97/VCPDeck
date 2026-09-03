@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.20] - 2026-09-03
+
+### Fixed
+
+- 修复 `VCPDeckBridge` 插件清单中 `entryPoint.command` 定义缺失目标执行脚本导致 Node.js 触发 REPL 语法解析异常的问题（规范为 `node index.cjs`）。
+
 ## [0.6.19] - 2026-09-03
 
 ### Added
