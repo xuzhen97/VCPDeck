@@ -1,5 +1,6 @@
 node_modules/
-dist/
+dist/*
+!dist/VCPDeckBridge.zip
 *.tsbuildinfo
 packages/server/generated/
 packages/server/prisma/dev.db
