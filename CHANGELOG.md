@@ -2,6 +2,13 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.19] - 2026-09-03
+
+### Added
+
+- 新增 VCP 插件生态桥接包 `@vcpdeck/vcp-plugin` 与 `plugins/vcpdeck/`：基于 `synchronous` + `stdio` 协议，提供 21 项远程运维管理工具（机器巡检、Shell Job 与日志诊断、全量文件操作、FRP 穿透状态与版本查询）。
+- 支持单文件自包含分发（`plugins/vcpdeck/index.cjs`），支持机器名与 ID 智能解析、文件授权根自动探测，供 VCP 插件商店通过 GitHub URL 直接拉取即装即用。
+
 ## [0.6.18] - 2026-09-03
 
 ### Added

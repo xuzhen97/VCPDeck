@@ -1,0 +1,408 @@
+{
+  "manifestVersion": "2.0.0",
+  "name": "VCPDeckBridge",
+  "displayName": "VCPDeck 个人 AI 驾驶台连接桥",
+  "version": "0.6.19",
+  "description": "连接 VCPDeck 控制面：远程机器管理、Shell 命令执行与日志诊断、远程文件读写与元数据、FRP 端口映射与版本管理。",
+  "author": "Ryan",
+  "pluginType": "synchronous",
+  "entryPoint": {
+    "type": "nodejs",
+    "command": "node",
+    "script": "index.cjs"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 30000
+  },
+  "configSchema": {
+    "SERVER_URL": {
+      "type": "string",
+      "description": "VCPDeck Server 的基础 URL 地址 (如 http://127.0.0.1:3000 或 https://deck.yourdomain.com)",
+      "default": "http://127.0.0.1:3000"
+    },
+    "API_TOKEN": {
+      "type": "string",
+      "description": "VCPDeck API Bearer Token (在 VCPDeck 前端 /settings/tokens 页面创建)",
+      "default": ""
+    },
+    "REQUEST_TIMEOUT_MS": {
+      "type": "number",
+      "description": "请求超时时间 (毫秒)",
+      "default": 30000
+    }
+  },
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "ListClients",
+        "description": "获取所有已注册的 VCPDeck 客户端机器列表、平台架构及在线状态。",
+        "example": "command:「始」ListClients「末」",
+        "parameters": {}
+      },
+      {
+        "commandIdentifier": "ListJobs",
+        "description": "分页查询历史与当前正在运行的 Job 任务列表，支持按机器或状态过滤。",
+        "example": "command:「始」ListJobs「末」, clientId:「始」client-uuid「末」, status:「始」error「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "可选，按目标机器 Client ID 过滤",
+            "required": false
+          },
+          "status": {
+            "type": "string",
+            "description": "可选，按状态过滤 (pending/running/done/error/cancelled)",
+            "required": false
+          },
+          "page": {
+            "type": "number",
+            "description": "页码，默认 1",
+            "required": false
+          },
+          "pageSize": {
+            "type": "number",
+            "description": "每页数量 (1-100)",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "GetJob",
+        "description": "查询指定 Job 的状态、运行进度与结果详情。",
+        "example": "command:「始」GetJob「末」, jobId:「始」job-uuid「末」",
+        "parameters": {
+          "jobId": {
+            "type": "string",
+            "description": "要查询的 Job ID",
+            "required": true
+          }
+        }
+      },
+      {
+        "commandIdentifier": "GetJobOutput",
+        "description": "获取指定 Job 产生的所有 stdout/stderr 日志全文输出，常用于诊断任务失败的原因。",
+        "example": "command:「始」GetJobOutput「末」, jobId:「始」job-uuid「末」",
+        "parameters": {
+          "jobId": {
+            "type": "string",
+            "description": "目标 Job ID",
+            "required": true
+          }
+        }
+      },
+      {
+        "commandIdentifier": "RunShellJob",
+        "description": "在指定的远程机器上执行 Shell 命令并异步生成 Job。",
+        "example": "command:「始」RunShellJob「末」, clientId:「始」client-uuid「末」, command:「始」df -h「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          },
+          "command": {
+            "type": "string",
+            "description": "要执行的 Shell 命令行",
+            "required": true
+          },
+          "timeout": {
+            "type": "number",
+            "description": "命令超时时间 (秒)",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "CancelJob",
+        "description": "取消正在排队或执行中的 Job。",
+        "example": "command:「始」CancelJob「末」, jobId:「始」job-uuid「末」",
+        "parameters": {
+          "jobId": {
+            "type": "string",
+            "description": "要取消的 Job ID",
+            "required": true
+          }
+        }
+      },
+      {
+        "commandIdentifier": "ListRoots",
+        "description": "获取远程机器授权允许访问的文件系统根目录列表（如 Linux 的 / 或 Windows 的各盘符）。",
+        "example": "command:「始」ListRoots「末」, clientId:「始」client-uuid「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          }
+        }
+      },
+      {
+        "commandIdentifier": "ListDirectory",
+        "description": "列出远程机器指定目录下的文件与子目录清单。",
+        "example": "command:「始」ListDirectory「末」, clientId:「始」client-uuid「末」, path:「始」/var/log「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "description": "目标目录路径",
+            "required": true
+          },
+          "rootDir": {
+            "type": "string",
+            "description": "授权根目录，默认 /",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "StatFile",
+        "description": "查看远程机器指定文件或目录的元数据（文件大小、类型、修改时间等）。",
+        "example": "command:「始」StatFile「末」, clientId:「始」client-uuid「末」, path:「始」/etc/nginx.conf「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "description": "文件或目录路径",
+            "required": true
+          },
+          "rootDir": {
+            "type": "string",
+            "description": "授权根目录，默认 /",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "ReadFile",
+        "description": "读取远程机器上的文本文件内容（默认上限 256KB）。",
+        "example": "command:「始」ReadFile「末」, clientId:「始」client-uuid「末」, path:「始」/var/log/syslog「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "description": "文件绝对路径",
+            "required": true
+          },
+          "rootDir": {
+            "type": "string",
+            "description": "授权根目录，默认 /",
+            "required": false
+          },
+          "limit": {
+            "type": "number",
+            "description": "最大读取字节数",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "WriteFile",
+        "description": "向远程机器上的文件写入或覆盖文本内容。",
+        "example": "command:「始」WriteFile「末」, clientId:「始」client-uuid「末」, path:「始」/tmp/config.json「末」, content:「始」{\"active\": true}「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "description": "目标文件路径",
+            "required": true
+          },
+          "content": {
+            "type": "string",
+            "description": "要写入的文本内容",
+            "required": true
+          },
+          "rootDir": {
+            "type": "string",
+            "description": "授权根目录，默认 /",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "MakeDirectory",
+        "description": "在远程机器上递归创建文件夹目录。",
+        "example": "command:「始」MakeDirectory「末」, clientId:「始」client-uuid「末」, path:「始」/opt/myapp/data「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "description": "要创建的目录路径",
+            "required": true
+          },
+          "rootDir": {
+            "type": "string",
+            "description": "授权根目录，默认 /",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "DeleteFile",
+        "description": "删除远程机器上的指定文件或目录。",
+        "example": "command:「始」DeleteFile「末」, clientId:「始」client-uuid「末」, path:「始」/tmp/old.log「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "description": "要删除的文件或目录路径",
+            "required": true
+          },
+          "rootDir": {
+            "type": "string",
+            "description": "授权根目录，默认 /",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "MoveFile",
+        "description": "在远程机器上移动或重命名文件/目录。",
+        "example": "command:「始」MoveFile「末」, clientId:「始」client-uuid「末」, source:「始」/tmp/a.txt「末」, target:「始」/tmp/b.txt「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          },
+          "source": {
+            "type": "string",
+            "description": "源文件路径",
+            "required": true
+          },
+          "target": {
+            "type": "string",
+            "description": "目标文件路径",
+            "required": true
+          },
+          "rootDir": {
+            "type": "string",
+            "description": "授权根目录，默认 /",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "ListFrpInstances",
+        "description": "查询当前所有已配置的 FRPS 服务端实例。",
+        "example": "command:「始」ListFrpInstances「末」",
+        "parameters": {
+          "page": {
+            "type": "number",
+            "description": "页码",
+            "required": false
+          },
+          "pageSize": {
+            "type": "number",
+            "description": "每页数量",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "ListFrpMappings",
+        "description": "查询当前所有 FRP 客户端的端口映射列表及其穿透状态。",
+        "example": "command:「始」ListFrpMappings「末」",
+        "parameters": {}
+      },
+      {
+        "commandIdentifier": "GetFrpMapping",
+        "description": "查询单条 FRP 端口映射的详细信息。",
+        "example": "command:「始」GetFrpMapping「末」, mappingId:「始」mapping-uuid「末」",
+        "parameters": {
+          "mappingId": {
+            "type": "string",
+            "description": "映射 ID",
+            "required": true
+          }
+        }
+      },
+      {
+        "commandIdentifier": "CreateFrpMapping",
+        "description": "在指定机器上创建 FRP 端口映射。",
+        "example": "command:「始」CreateFrpMapping「末」, clientId:「始」client-uuid「末」, localPort:「始」8080「末」, remotePort:「始」18080「末」, type:「始」tcp「末」",
+        "parameters": {
+          "clientId": {
+            "type": "string",
+            "description": "目标机器 Client ID",
+            "required": true
+          },
+          "localPort": {
+            "type": "number",
+            "description": "本地机器服务端口",
+            "required": true
+          },
+          "remotePort": {
+            "type": "number",
+            "description": "服务端公网暴露端口",
+            "required": false
+          },
+          "type": {
+            "type": "string",
+            "description": "协议类型 (tcp / http / https)",
+            "required": false
+          }
+        }
+      },
+      {
+        "commandIdentifier": "DeleteFrpMapping",
+        "description": "销毁指定的 FRP 端口映射。",
+        "example": "command:「始」DeleteFrpMapping「末」, mappingId:「始」mapping-uuid「末」",
+        "parameters": {
+          "mappingId": {
+            "type": "string",
+            "description": "要销毁的映射 ID",
+            "required": true
+          }
+        }
+      },
+      {
+        "commandIdentifier": "GetStorageStatus",
+        "description": "获取当前 VCPDeck Server 的存储后端状态 (如 local 或 alibaba-oss)。",
+        "example": "command:「始」GetStorageStatus「末」",
+        "parameters": {}
+      },
+      {
+        "commandIdentifier": "ListReleases",
+        "description": "查询 VCPDeck 的历史发版与自更新记录。",
+        "example": "command:「始」ListReleases「末」",
+        "parameters": {
+          "page": {
+            "type": "number",
+            "description": "页码",
+            "required": false
+          },
+          "pageSize": {
+            "type": "number",
+            "description": "每页数量",
+            "required": false
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@vcpdeck/vcp-plugin",
+  "version": "0.6.19",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc && node scripts/bundle.cjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vcpdeck/sdk": "workspace:*",
+    "@vcpdeck/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "vitest": "^3.2.0"
+  }
+}
