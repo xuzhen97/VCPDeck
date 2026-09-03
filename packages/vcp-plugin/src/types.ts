@@ -16,8 +16,13 @@ export interface VcpContentItem {
 
 export interface VcpResponse {
 	status: "success" | "error";
-	content: VcpContentItem[];
-	messageForAI: string;
+	result?: {
+		content: VcpContentItem[];
+		messageForAI?: string;
+	};
+	content?: VcpContentItem[];
+	messageForAI?: string;
+	error?: string;
 }
 
 export interface PluginConfig {

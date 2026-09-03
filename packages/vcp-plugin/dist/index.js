@@ -5,7 +5,16 @@ import { dispatchCommand } from "./dispatcher.js";
  * 安全输出 JSON 到 stdout
  */
 function sendResponse(response) {
-    process.stdout.write(JSON.stringify(response));
+    // 对齐 VCP 标准 synchronous stdio 协议：{ status: "success", result: { content: [...] }, messageForAI }
+    const payload = {
+        status: response.status,
+        result: {
+            content: response.content || response.result?.content || [],
+        },
+        messageForAI: response.messageForAI,
+        content: response.content || response.result?.content || [],
+    };
+    process.stdout.write(JSON.stringify(payload));
 }
 /**
  * 格式化错误并输出
@@ -14,15 +23,18 @@ function sendError(err) {
     const message = err instanceof Error ? err.message : String(err);
     const response = {
         status: "error",
-        content: [
-            {
-                type: "text",
-                text: message,
-            },
-        ],
+        error: message,
+        result: {
+            content: [
+                {
+                    type: "text",
+                    text: message,
+                },
+            ],
+        },
         messageForAI: `执行失败: ${message}`,
     };
-    sendResponse(response);
+    process.stdout.write(JSON.stringify(response));
 }
 /**
  * 读取 stdin 输入

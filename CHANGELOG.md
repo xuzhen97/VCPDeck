@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.21] - 2026-09-03
+
+### Fixed
+
+- 修复 `VCPDeckBridge` 插件标准输出未嵌套 `result: { content: [...] }` 导致 VCPToolBox 框架解包后丢失响应正文（仅剩 `MaidName` 与 `timestamp` 元数据）的问题。
+
 ## [0.6.20] - 2026-09-03
 
 ### Fixed

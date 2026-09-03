@@ -7,7 +7,16 @@ import type { VcpRequest, VcpResponse } from "./types.js";
  * 安全输出 JSON 到 stdout
  */
 function sendResponse(response: VcpResponse) {
-	process.stdout.write(JSON.stringify(response));
+	// 对齐 VCP 标准 synchronous stdio 协议：{ status: "success", result: { content: [...] }, messageForAI }
+	const payload = {
+		status: response.status,
+		result: {
+			content: response.content || response.result?.content || [],
+		},
+		messageForAI: response.messageForAI,
+		content: response.content || response.result?.content || [],
+	};
+	process.stdout.write(JSON.stringify(payload));
 }
 
 /**
@@ -15,17 +24,20 @@ function sendResponse(response: VcpResponse) {
  */
 function sendError(err: unknown) {
 	const message = err instanceof Error ? err.message : String(err);
-	const response: VcpResponse = {
+	const response = {
 		status: "error",
-		content: [
-			{
-				type: "text",
-				text: message,
-			},
-		],
+		error: message,
+		result: {
+			content: [
+				{
+					type: "text" as const,
+					text: message,
+				},
+			],
+		},
 		messageForAI: `执行失败: ${message}`,
 	};
-	sendResponse(response);
+	process.stdout.write(JSON.stringify(response));
 }
 
 /**
