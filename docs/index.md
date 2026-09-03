@@ -25,6 +25,7 @@
 | [`operations.md`](./operations.md) | 启停、健康检查、备份恢复、巡检和故障处置 |
 | [`security.md`](./security.md) | 信任边界、凭据、敏感数据、威胁与响应 |
 | [`testing.md`](./testing.md) | 测试层次、命令、环境和发布门禁 |
+| [`verification/2026-09-03-linux-a2-and-release-integration.md`](./verification/2026-09-03-linux-a2-and-release-integration.md) | 0.6.18 Linux A2、虚拟机/真机集成验收与 Release 结果 |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | 开发流程、变更要求和提交规范 |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | 用户可感知的版本变更 |
 
