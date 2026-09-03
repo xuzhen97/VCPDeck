@@ -83,7 +83,21 @@ function parseArgs(argv) {
 	const args = { appDirExplicit: false };
 	for (const raw of argv) {
 		const eq = raw.indexOf("=");
-		if (eq <= 0) continue;
+		if (eq <= 0) {
+			if (raw === "--no-env") {
+				args.noEnv = true;
+				continue;
+			}
+			if (raw === "--skip-db") {
+				args.skipDb = true;
+				continue;
+			}
+			if (raw === "--force") {
+				args.force = true;
+				continue;
+			}
+			fail(`未知参数: ${raw}`);
+		}
 		const key = raw.slice(0, eq);
 		const value = raw.slice(eq + 1);
 		switch (key) {
@@ -137,15 +151,6 @@ function parseArgs(argv) {
 				args.port = port;
 				break;
 			}
-			case "--no-env":
-				args.noEnv = true;
-				break;
-			case "--skip-db":
-				args.skipDb = true;
-				break;
-			case "--force":
-				args.force = true;
-				break;
 			default:
 				fail(`未知参数: ${raw}`);
 		}
@@ -338,6 +343,14 @@ function installFromStaging(stagingDir, { artifact, version, appDir, force }) {
 	mkdirSync(target, { recursive: true });
 	cpSync(join(stagingDir, "manifest.json"), join(target, "manifest.json"));
 	cpSync(artifactDir, join(target, artifact), { recursive: true });
+	// 版本目录内保留经 staging 验证的 Launcher 构件（systemd 自升级的受控来源）；
+	// 稳定 <app-dir>/dist/main.js 独立于版本切换，不被覆盖。
+	const launcherSrc = resolveContainedPath(
+		stagingDir,
+		manifest.launcher.dir,
+		"manifest.launcher.dir",
+	);
+	cpSync(launcherSrc, join(target, manifest.launcher.dir), { recursive: true });
 
 	// Linux 兜底：frpc/frps 若 zip 未携带可执行位则补齐
 	if (!isWin) {

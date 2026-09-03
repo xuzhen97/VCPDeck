@@ -67,9 +67,15 @@ export interface ClientInstallerClientStatus {
 	name: string | null;
 	hostname: string | null;
 	capabilitiesReported: boolean;
+	/** 安装模式（旧 Client 未报告时为 null） */
+	installationMode: MachineInstallationMode | null;
+	/** 非交互 sudo 是否可用（旧 Client 未报告时为 null） */
+	nonInteractiveSudo: boolean | null;
 	connectedAt: string | null;
 	lastHeartbeatAt: string | null;
 }
+
+import type { MachineInstallationMode } from "./machine-register.js";
 
 /** 严格解析安装平台。 */
 export function parseClientInstallerPlatform(

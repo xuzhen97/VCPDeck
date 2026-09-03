@@ -53,10 +53,12 @@ const ASSET_CONTENT_TYPES: Record<string, string> = {
 	"install-client-bootstrap.sh": "text/x-shellscript; charset=utf-8",
 	"install-client-bootstrap.ps1": "text/plain; charset=utf-8",
 	"install-client.cjs": "text/javascript; charset=utf-8",
+	"install-client-linux.cjs": "text/javascript; charset=utf-8",
 	"install.cjs": "text/javascript; charset=utf-8",
 	"uninstall-client-bootstrap.sh": "text/x-shellscript; charset=utf-8",
 	"uninstall-client-bootstrap.ps1": "text/plain; charset=utf-8",
 	"uninstall-client.cjs": "text/javascript; charset=utf-8",
+	"uninstall-client-linux.cjs": "text/javascript; charset=utf-8",
 };
 
 /** Client 一键安装配置、脚本、bootstrap 与上线验收 API。 */
@@ -124,6 +126,7 @@ export class ClientInstallerController {
 							| "install-client-bootstrap.sh"
 							| "install-client-bootstrap.ps1"
 							| "install-client.cjs"
+							| "install-client-linux.cjs"
 							| "install.cjs"
 							| "uninstall-client-bootstrap.sh"
 							| "uninstall-client-bootstrap.ps1"

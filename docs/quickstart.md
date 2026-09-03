@@ -1,6 +1,6 @@
 # VCPDeck 快速开始：构建 → 部署 → Server/Client 通讯
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-08-17｜适用版本：当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
 
 本文是从零到"Server 与 Client 双向通讯"的最小可验证路径，所有命令均经过 Windows（Git Bash）端到端演练。完整边界、配置表和升级细节见 [`deployment.md`](./deployment.md)；构件打包决策见 [`ADR-0012`](./adr/0012-bundled-release-artifacts.md)；更新协议见 [`design/release-and-update.md`](./design/release-and-update.md)。
 
@@ -179,9 +179,9 @@ pm2 save
 
 ## 5. 目标机（Client）部署与启动
 
-推荐登录驾驶台 `/releases`，确认当前 Server 同版本 Release 已完成，启用“Client 一键安装”，再复制对应平台固定命令。安装器会准备 Node.js、Client、Launcher、PM2、自启并等待 Server 验收；显示名称和安装目录可直接回车使用默认值。
+推荐登录驾驶台 `/releases`，确认当前 Server 同版本 Release 已完成，启用“Client 一键安装”，再复制对应平台固定命令。Linux 新安装使用 A2 systemd 系统级部署；Windows 安装器准备用户私有 Node.js、Client、Launcher、PM2 和登录自启，并等待 Server 验收。Linux 存量 PM2 安装必须显式使用 `--migrate` 迁移；显示名称和安装目录等 Windows 选项可直接回车使用默认值。
 
-一键安装当前只支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ x64 + glibc + systemd。入口默认关闭；启用后任何可访问 Server 的机器都能取得共享 PSK。
+一键安装当前只支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd。Linux A2 安装要求 root 或可用 sudo；入口默认关闭，启用后任何可访问 Server 的机器都能取得共享 PSK。
 
 需要手工安装或排障时仍可使用第 3.1 节 `install.cjs`（Client 默认使用 `~/.vcpdeck/launcher-client`，Launcher 自动安装到 `<app-dir>/dist/main.js`）：
 

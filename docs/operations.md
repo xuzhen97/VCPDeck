@@ -1,6 +1,6 @@
 # VCPDeck 运维手册
 
-> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-02｜适用版本：`0.6.17` / 当前 `main`
+> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
 
 ## 1. 运行基线
 
@@ -66,6 +66,13 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 ```
 
 若 `pm2-resurrect.cmd` 和私有 PM2 路径都不存在，说明安装未完整保留 PM2 现场；不要删除 `~/.vcpdeck/client-id`，应重跑 `/releases` 页面生成的同一条 Client 安装命令。
+
+### Linux A2 Client 运维（systemd）
+
+- **无人值守开机自启**：`vcpdeck-client.service` 为 `enabled` + `Restart=always`，开机由 systemd 拉起，无需用户登录/linger。验证链：`systemctl status vcpdeck-client.service`（active）→ Server 控制面 `online=true` 且版本/能力齐备。
+- **迁移（M1）**：存量 PM2 安装用 `--migrate` 迁到 A2（保留 `client-id`、无关 PM2 应用）。两阶段：verify-only 验证身份/版本/特权 → 原子切稳态；稳态全能力注册为回滚边界，之前失败自动恢复旧 PM2，之后记 `manual-recovery-required`。迁移前若源指向不同 Server、`client-id` 非法、PM2 未 online 或有进行中 Release，安装器直接拒绝。
+- **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。非 systemd 单元会被拒绝（走 PM2 卸载）。
+- **root 等价风险**：该 Client 可执行任意 root 命令；Job/Terminal/Pi 操作前确认在可信运维域内（Server 仅记录控制面/Job/Session 审计，见 [`security.md`](./security.md) §4.5）。
 
 ## 3. 健康与就绪检查
 
@@ -202,9 +209,9 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - `CLIENT_INSTALLER_RELEASE_NOT_READY`：确认当前 Server 版本存在状态为 `done` 的同版本 Release；
 - `CLIENT_INSTALLER_ARCHIVE_MISSING`：补齐目标平台 Release archive；
 - 平台检查失败：核对 x64、受支持发行版、glibc/systemd，WSL/容器/ARM64/musl 不在范围；当前仅额外支持 Bazzite x64，不自动支持其他 Fedora Atomic 发行版；
-- Bazzite 基础依赖失败：安装器只对缺失的 `curl`、`unzip`、`tar`、`xz` 或 CA 证书调用 `sudo rpm-ostree`，不应改用 `dnf install`；先执行 `rpm-ostree status` 检查 pending deployment、网络和 sudo 权限。若提示依赖将在重启后生效，手工重启 Bazzite 后重跑同一条安装命令；安装器不会自动重启；
-- Node/PM2 下载失败：检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源。Linux 系统无需预装 Node；若 PM2 安装错误包含 `env: “node”: 没有那个文件或目录`，说明 Server 仍在提供未把私有 Node `bin` 注入 npm 子进程 `PATH` 的旧安装器，应先更新 Server 后重跑同一固定命令。若 Node 输出的探测表达式丢失 `"x64"` 或 `"."` 引号，则是旧版 Windows PowerShell 5.1 引导脚本，同样先更新 Server；
-- PM2 显示 Launcher `online`，但 120 秒后仍报 `registered:false`：检查 Launcher error log；若反复出现 `The operation was aborted due to timeout` 且系统没有 Node，说明旧 ecosystem 没有把私有 Node `bin` 注入 Launcher `PATH`，Launcher 正在尝试下载第二份运行时。更新 Server 后重跑同一固定命令；紧急恢复可将私有 Node `bin` 前置到 ecosystem 的 `env.PATH`，以 `--update-env` 重启 Launcher 并 `pm2 save`；
+- Bazzite 基础依赖失败：安装器只对缺失的 `curl`、`unzip`、`tar`、`xz` 或 CA 证书调用 `sudo rpm-ostree`，不应改用 `dnf install`；先执行 `rpm-ostree status` 检查 pending deployment、网络和 sudo 权限。若提示依赖将在重启后生效，手工重启 Bazzite 后重跑同一条安装命令；安装器不会自动重启。A2 安装完成后运行时位于 `/opt/vcpdeck/client/node`，由 `vcpdeck-client.service` 管理；
+- Node/PM2 下载失败：Windows 或旧 Linux PM2 安装时检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源。Linux A2 不使用 PM2，Node 运行时直接安装到 `/opt/vcpdeck/client/node`。若旧 PM2 安装错误包含 `env: “node”: 没有那个文件或目录`，说明 Server 仍在提供未把私有 Node `bin` 注入 npm 子进程 `PATH` 的旧安装器，应先更新 Server 后重跑同一固定命令。若 Node 输出的探测表达式丢失 `"x64"` 或 `"."` 引号，则是旧版 Windows PowerShell 5.1 引导脚本，同样先更新 Server；
+- 旧 PM2 Launcher 显示 `online`，但 120 秒后仍报 `registered:false`：检查 Launcher error log；若反复出现 `The operation was aborted due to timeout` 且系统没有 Node，说明旧 ecosystem 没有把私有 Node `bin` 注入 Launcher `PATH`，Launcher 正在尝试下载第二份运行时。更新 Server 后重跑同一固定命令；紧急恢复可将私有 Node `bin` 前置到 ecosystem 的 `env.PATH`，以 `--update-env` 重启 Launcher 并 `pm2 save`。A2 systemd 部署则检查 `systemctl status vcpdeck-client.service`、`journalctl -u vcpdeck-client.service` 和 `/etc/vcpdeck/client.env` 权限；
 - Linux 安装末尾出现 `TMP_DIR: 未绑定的变量`：这是旧 bootstrap 的 EXIT trap 在函数返回后展开局部变量所致，不会删除已安装文件；更新 Server 后重跑同一固定命令完成幂等修复；
 - PM2 同名路径冲突：运行 `pm2 describe vcpdeck-client-launcher`，不要自动覆盖指向其他 app-dir 的进程；
 - Launcher online 但验收超时：运行 `pm2 logs vcpdeck-client-launcher --lines 100`，核对 `launcher.env`、Server 可达性、PSK 和 `/client` WebSocket；

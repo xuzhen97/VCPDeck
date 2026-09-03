@@ -58,6 +58,23 @@ test("parseArgs 解析合法参数", () => {
 	assert.equal(args.force, undefined);
 });
 
+test("parseArgs 解析无值布尔参数，避免低层安装器进入 TTY 交互", () => {
+	const args = install.parseArgs([
+		"--artifact=client",
+		"--zip=a.zip",
+		"--version=1.2.3",
+		"--no-env",
+		"--force",
+	]);
+	assert.equal(args.noEnv, true);
+	assert.equal(args.force, true);
+	assert.equal(args.skipDb, undefined);
+	assert.throws(
+		() => install.parseArgs(["--artifact=client", "--zip=a.zip", "--unknown"]),
+		/未知参数/,
+	);
+});
+
 test("parseArgs 按构件选择默认 app-dir，同机 Server/Client 隔离", () => {
 	assert.equal(
 		install.parseArgs(["--artifact=server", "--zip=a.zip"]).appDir,
@@ -392,6 +409,33 @@ test("installFromStaging 缺少 Launcher 时拒绝安装", () => {
 		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("installFromStaging 每个版本目录保留已验证 Launcher 构件（供 systemd 升级），稳定 dist 不随版本切换", () => {
+	const root = mkdtempSync(join(tmpdir(), "vcpdeck-install-"));
+	const staging = join(root, "staging");
+	const appDir = join(root, "app");
+	makeStaging(staging);
+	try {
+		install.installFromStaging(staging, {
+			artifact: "client",
+			version: "1.2.3",
+			appDir,
+			force: true,
+		});
+		// 版本内保留经 staging 验证的 Launcher 构件（systemd 自升级源）。
+		const versionLauncher = join(appDir, "apps", "1.2.3", "launcher", "dist", "main.js");
+		assert.ok(existsSync(versionLauncher), "版本目录缺少 launcher 构件");
+		assert.equal(readFileSync(versionLauncher, "utf8"), "// launcher");
+		// 稳定 Launcher 仍安装在 appDir/dist/main.js（不在版本目录内）。
+		const stable = join(appDir, "dist", "main.js");
+		assert.ok(existsSync(stable));
+		assert.equal(readFileSync(stable, "utf8"), "// launcher");
+		// 版本目录不应包含稳定 dist 路径（两者独立）。
+		assert.ok(!existsSync(join(appDir, "apps", "1.2.3", "dist")));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
 	}
 });
 

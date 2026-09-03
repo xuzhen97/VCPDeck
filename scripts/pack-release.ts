@@ -282,10 +282,12 @@ async function stagePackage(
 			"install-client-bootstrap.sh",
 			"install-client-bootstrap.ps1",
 			"install-client.cjs",
+			"install-client-linux.cjs",
 			"install.cjs",
 			"uninstall-client-bootstrap.sh",
 			"uninstall-client-bootstrap.ps1",
 			"uninstall-client.cjs",
+			"uninstall-client-linux.cjs",
 		]) {
 			copyInstallerAsset(join(ROOT, "scripts", name), join(installerDir, name));
 		}
@@ -298,6 +300,11 @@ async function stagePackage(
 		cpSync(
 			join(ROOT, "scripts", "upgrade-launcher.cjs"),
 			join(installerDir, "upgrade-launcher.cjs"),
+			);
+		// A2 systemd 部署的 Launcher 自升级脚本（脱离 Client cgroup，ADR-0023 §5）。
+		cpSync(
+			join(ROOT, "scripts", "upgrade-launcher-systemd.cjs"),
+			join(installerDir, "upgrade-launcher-systemd.cjs"),
 			);
 	}
 

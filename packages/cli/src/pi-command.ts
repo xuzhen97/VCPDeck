@@ -4,7 +4,12 @@ import { stdin as nodeStdin, stdout as nodeStdout } from "node:process";
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import { createAuthenticatedClient } from "./authenticated-client.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
-import { fetchClientRoots, resolveClientId } from "./client-resolver.js";
+import {
+	findClientByClientId,
+	fetchClientRoots,
+	resolveClientId,
+} from "./client-resolver.js";
+import { rootEquivalentWarning } from "./privileged-capability.js";
 import type { ConfigPaths } from "./config.js";
 import { formatEnvironmentSummary, resolveEnvironment } from "./environment.js";
 
@@ -13,6 +18,8 @@ export interface PiCommandContext {
 	paths?: ConfigPaths;
 	processEnv?: NodeJS.ProcessEnv;
 	log?: (message: string) => void;
+	/** 警告/错误输出；测试可注入（默认 console.error）。 */
+	error?: (message: string) => void;
 	/** 运行状态轮询间隔；测试可缩短。 */
 	pollIntervalMs?: number;
 	/** REPL 输入流；测试可注入（默认 process.stdin）。 */
@@ -277,10 +284,15 @@ async function runRun(argv: string[], context: PiCommandContext): Promise<void> 
 	const client = await createAuthenticatedClient(environment);
 	const clientId = await resolveClientIdOrThrow(clientFilter, context);
 	const cwdRef = await resolveCwdRef(client, clientId, options);
+	// ADR-0023：root 等价 Client 执行前风险提示（仅非 JSON 输出时打印）。
+	const piTargetClient = await findClientByClientId(client, clientId);
+	const piRootWarning = rootEquivalentWarning(piTargetClient);
 	const log = context.log ?? console.log;
+	const error = context.error ?? console.error;
 	const progressLog = options.json === true ? () => {} : log;
 	if (options.json !== true) {
 		log(formatEnvironmentSummary(environment));
+		if (piRootWarning) error(piRootWarning);
 		log(
 			`[vcpdeck] Pi 子任务 → ${clientFilter}:${cwdRef.relativePath}（${waitTimeout}s 超时）`,
 		);

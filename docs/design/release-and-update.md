@@ -1,10 +1,10 @@
 # Release 与自更新子系统设计
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-02｜适用版本：`0.6.17` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
 
 本文描述当前已经落地的 Release、Server/Client 更新和 Launcher 进程守护模型。长期决策理由见 [ADR-0003](../adr/0003-separate-launcher-for-updates.md)；构件生成、首次部署和回滚操作见 [`deployment.md`](../deployment.md)；兼容要求见 [`compatibility.md`](../compatibility.md)；故障处置见 [`operations.md`](../operations.md)。
 
-当前核心实现已经落地，Launcher smoke 已覆盖 prepare/apply、探活和失败回退；`0.6.15`（FRP 映射恢复对账与有限自愈）已通过 Alibaba 双平台直传完成 Server → Launcher → 10 台 Client 的生产发布验收，`0.6.14` 已通过 Alibaba 双平台直传完成 Server → Launcher → 7 台 Windows/Linux Client 的生产发布验收，`0.6.13` 已在 Bazzite x64 上完成无系统 Node 的首次安装现场验证与修复。后续版本仍必须重复执行发布门禁，不能以历史验收替代本次构件验证。
+当前核心实现已经落地，Launcher smoke 已覆盖 prepare/apply、探活和失败回退；`0.6.15`（FRP 映射恢复对账与有限自愈）已通过 Alibaba 双平台直传完成 Server → Launcher → 10 台 Client 的生产发布验收，`0.6.14` 已通过 Alibaba 双平台直传完成 Server → Launcher → 7 台 Windows/Linux Client 的生产发布验收，`0.6.18` 已完成 Ubuntu 22.04 与 Bazzite x64 的 Linux A2 安装、SELinux、冷重启和无人登录自动启动验收。Debian 12、Rocky Linux 9、AlmaLinux 9 以及同 Server 的真实 M1 正向迁移仍未完成，不能扩大已验证范围。后续版本仍必须重复执行发布门禁，不能以历史验收替代本次构件验证。
 
 ## 1. 目标与非目标
 
@@ -26,7 +26,7 @@
 - Frontend 静态资源的独立自动部署（当前随 Server 构件分发）；
 - 数据库 schema 自动回滚；
 - 发布者数字签名；
-- 自动安装 Windows Service；Client 一键安装当前强制使用 PM2（Windows 为当前用户登录计划任务，Linux 为 systemd startup）；Server 仍不自动服务化；
+- 自动安装 Windows Service；Windows Client 一键安装继续使用 PM2/当前用户登录计划任务；Linux Client 新安装使用 A2 systemd，Server 系统服务仍由运维准备；
 - 对任意历史 Server/Client 版本提供兼容承诺。
 
 ## 2. 组件与职责
@@ -47,7 +47,7 @@
 
 Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由安装脚本首次部署到 `<app-dir>/dist/main.js`，但不随业务版本自动覆盖。Server 负责全局控制面，Client 只负责本机更新配合；任何一方都不能在没有 Launcher 的情况下可靠完成自替换和失败回退。
 
-`/releases` 还提供默认关闭、持久化的 Client 一键安装入口（ADR-0018）和 Client 一键卸载入口。启用后，固定 Windows/Linux 命令会动态选择与运行中 Server 完全同版本且状态为 `done` 的 Release，准备用户私有 Node.js、安装 Client/Launcher，并由 PM2 只守护 Launcher。禁用只阻止新的安装请求，不影响已有 Client。卸载命令在目标机本地读取 `~/.vcpdeck/client-install.json`，删除该 Client 的 PM2 Launcher、自启配置和安装目录，保留 `client-id`、通用缓存、其他 PM2 应用以及 Server 侧数据；缺少或不一致的安装状态会安全失败，不猜测目录。
+`/releases` 还提供默认关闭、持久化的 Client 一键安装入口（ADR-0018）和 Client 一键卸载入口。启用后，固定 Windows/Linux 命令会动态选择与运行中 Server 完全同版本且状态为 `done` 的 Release；Linux 新安装部署到 A2 systemd，Windows 仍准备用户私有 Node.js、PM2 并注册登录自启。禁用只阻止新的安装请求，不影响已有 Client。Linux 卸载命令在目标机删除 A2 的 systemd、账户和固定目录；Windows 卸载继续读取 `~/.vcpdeck/client-install.json` 删除对应 PM2 Launcher、自启配置和安装目录。
 
 ## 3. 数据与状态权威
 
@@ -275,7 +275,7 @@ Client Launcher 的健康判定是新 Client 进程连续存活约 3 秒，不�
     └── <previous-version>/
 ```
 
-Launcher 首次启动前必须已经存在可启动的 current 版本。通用 `install.cjs` 会从 zip 准备 Launcher 和初始业务版本，但不自动安装 systemd 或 Windows Service；Client 一键安装器在其上增加 PM2 守护，Linux 配置 PM2 systemd startup，Windows 配置当前用户登录计划任务。
+Launcher 首次启动前必须已经存在可启动的 current 版本。通用 `install.cjs` 会从 zip 准备 Launcher 和初始业务版本；Linux Client A2 安装器在其上配置系统级 `vcpdeck-client.service`，Windows Client 安装器继续使用 PM2 和当前用户登录计划任务，通用 Server 安装仍不自动安装 systemd 或 Windows Service。
 
 Launcher 使用 `retention.json` 记录已确认健康切换成功的版本。每台机器保留 current、除 current 外最近 2 个成功历史版本，以及 prepare/apply 目标和 previous；启动后会在稳定窗口后补扫旧版本目录。缺少或损坏 `retention.json` 时暂停自动删除，不猜测未知 legacy 目录；单个目录删除失败不阻止其他候选继续处理。失败回退只有在上一版本目录仍存在且可启动时才有效。
 

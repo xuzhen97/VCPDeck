@@ -243,6 +243,140 @@ describe("ClientService heartbeat liveness", () => {
 	});
 });
 
+describe("ClientService ADR-0023 安装/特权摘要", () => {
+	const a2Register = {
+		...registerDto,
+		capabilityDetails: {
+			privileged: {
+				available: true,
+				mode: "sudo-all",
+				nonInteractive: true,
+				runAsUser: "vcpdeck",
+			},
+		},
+		installation: { mode: "systemd-root-equivalent" },
+	};
+
+	it("注册时持久化 privileged 与 installation 到 capabilityDetails 存储", async () => {
+		const prisma = prismaMock() as never;
+		const service = new ClientService(prisma);
+
+		await service.register(a2Register as never, "socket-1");
+
+		const upsert = (prisma as { client: { upsert: ReturnType<typeof vi.fn> } })
+			.client.upsert;
+		expect(upsert).toHaveBeenCalledWith(
+			expect.objectContaining({
+				create: expect.objectContaining({
+					capabilityDetails: expect.stringContaining('"runAsUser":"vcpdeck"'),
+				}),
+			}),
+		);
+		const blob = JSON.parse(
+			(upsert.mock.calls[0][0] as { create: { capabilityDetails: string } }).create
+				.capabilityDetails,
+		);
+		expect(blob.installation).toEqual({ mode: "systemd-root-equivalent" });
+	});
+
+	it("listOnline 严格投影 privileged 与 installation", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			{
+				...clientRow,
+				capabilityDetails: JSON.stringify({
+					privileged: {
+						available: true,
+						mode: "sudo-all",
+						nonInteractive: true,
+						runAsUser: "vcpdeck",
+					},
+					installation: { mode: "systemd-root-equivalent" },
+				}),
+			},
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+
+		const [client] = await service.listOnline();
+		expect(client?.capabilityDetails.privileged).toEqual({
+			available: true,
+			mode: "sudo-all",
+			nonInteractive: true,
+			runAsUser: "vcpdeck",
+		});
+		expect(client?.installation).toEqual({ mode: "systemd-root-equivalent" });
+	});
+
+	it("旧 Client 未报告时省略 installation 与 privileged（不推断）", async () => {
+		const prisma = prismaMock() as never;
+		const service = new ClientService(prisma);
+
+		const [client] = await service.listOnline();
+		expect(client?.installation).toBeUndefined();
+		expect(client?.capabilityDetails.privileged).toBeUndefined();
+	});
+
+	it("privileged 摘要损坏时省略该字段但保留其余详情", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			{
+				...clientRow,
+				capabilityDetails: JSON.stringify({
+					privileged: { available: "yes" },
+					installation: { mode: "pm2" },
+				}),
+			},
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+
+		const [client] = await service.listOnline();
+		expect(client?.capabilityDetails.privileged).toBeUndefined();
+		expect(client?.installation).toBeUndefined();
+	});
+
+	it("getInstallerStatus 投影 installationMode 与 nonInteractiveSudo", async () => {
+		const findUnique = vi.fn().mockResolvedValue({
+			...clientRow,
+			name: "nas",
+			capabilityDetails: JSON.stringify({
+				privileged: {
+					available: true,
+					mode: "sudo-all",
+					nonInteractive: true,
+					runAsUser: "vcpdeck",
+				},
+				installation: { mode: "systemd-root-equivalent" },
+			}),
+		});
+		const prisma = prismaMock({ findUnique }) as never;
+		const service = new ClientService(prisma);
+
+		const status = await service.getInstallerStatus("c1");
+		expect(status.installationMode).toBe("systemd-root-equivalent");
+		expect(status.nonInteractiveSudo).toBe(true);
+	});
+
+	it("getInstallerStatus 对未报告的旧 Client 返回 null 摘要", async () => {
+		const findUnique = vi.fn().mockResolvedValue({ ...clientRow, name: "nas" });
+		const prisma = prismaMock({ findUnique }) as never;
+		const service = new ClientService(prisma);
+
+		const status = await service.getInstallerStatus("c1");
+		expect(status.installationMode).toBeNull();
+		expect(status.nonInteractiveSudo).toBeNull();
+	});
+
+	it("getInstallerStatus 对未注册 Client 返回未注册且 null 摘要", async () => {
+		const prisma = prismaMock() as never;
+		const service = new ClientService(prisma);
+
+		const status = await service.getInstallerStatus("ghost");
+		expect(status.registered).toBe(false);
+		expect(status.installationMode).toBeNull();
+		expect(status.nonInteractiveSudo).toBeNull();
+	});
+});
+
 describe("ClientService listOnline", () => {
 	it("name 为 null 时回退 hostname", async () => {
 		const findMany = vi

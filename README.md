@@ -57,13 +57,13 @@ VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server�
 一条命令安装为全局 `vcpdeck`。**Linux / Git Bash**（含三次重试）：
 
 ```bash
-node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.6.15
+node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs";const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error("安装失败:",String(e));process.exit(1)})' -- --tag=v0.6.18
 ```
 
 **Windows PowerShell** 单行形式（JS 全单引号 + 外层双引号，避开 PS 5.1 吞内嵌双引号的问题；勿改写引号形式）：
 
 ```powershell
-node -e "const u='https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs';const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error('安装失败:',String(e));process.exit(1)})" -- --tag=v0.6.15
+node -e "const u='https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs';const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error('安装失败:',String(e));process.exit(1)})" -- --tag=v0.6.18
 ```
 
 脚本从 GitHub raw 下载随 Tag 提交的单文件包（零 npm 依赖），写入 `~/.vcpdeck/bin`、生成双垫片（CMD/PowerShell 与 Git Bash）、自动配置 PATH 并自验收。开新终端后配置环境：
@@ -81,13 +81,13 @@ Tab 补全：`vcpdeck completions bash` 追加到 `~/.bashrc`，或 `vcpdeck com
 Node.js 24+ 环境中按稳定 Tag 用户级安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.6.15
+pi install git:github.com/xuzhen97/VCPDeck@v0.6.18
 ```
 
 Pi 会克隆整个仓库并发现 `skills/vcpdeck/SKILL.md`；同目录 `vcpdeck.cjs` 已随 Tag 提交，无需在安装机编译。升级或回滚需显式切换 Tag，例如：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.6.15
+pi install git:github.com/xuzhen97/VCPDeck@v0.6.18
 ```
 
 Skill 与 CLI 用户级只安装一份，但执行时保留当前项目 cwd，因此每个项目都可以用自己的 `.vcpdeck.json` 选择用户级已注册环境。
@@ -115,8 +115,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.6.15&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.6.15&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.6.18&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.6.18&path:/packages/shared"
 ```
 
 两个包必须使用同一 Tag。pnpm 会在 Git 获取阶段构建未提交的 `dist`，并把实际 commit 与构建许可记录到目标项目。SDK 不读取 CLI 环境配置；调用方显式提供 Server 和认证：
@@ -209,7 +209,7 @@ pnpm dev:all
 
 访问前端：<http://localhost:5173>。Server API 默认监听 <http://localhost:3001>。
 
-正式发布并完成 Server 自更新后，可在驾驶台 `/releases` 启用 Client 一键安装，复制 Windows PowerShell 或 Linux Bash 固定命令。安装器会自动准备用户私有 Node.js（需要时）、Client、Launcher、PM2 和自启，并等待 Client 以当前 Server 版本完成能力上报。当前支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ x64 + glibc + systemd；入口默认关闭，安全边界见 [`docs/security.md`](docs/security.md)。
+正式发布并完成 Server 自更新后，可在驾驶台 `/releases` 启用 Client 一键安装，复制 Windows PowerShell 或 Linux Bash 固定命令。Linux 新安装使用 A2 systemd 系统级部署；Windows 保留用户私有 Node.js/PM2 与登录自启模型。安装器会等待 Client 以当前 Server 版本完成能力上报。当前支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd；入口默认关闭，安全边界见 [`docs/security.md`](docs/security.md)。
 
 ### 启动本地 FRPS 测试实例
 

@@ -61,11 +61,18 @@ const INSTALLER_ASSETS = [
 	"install-client-bootstrap.sh",
 	"install-client-bootstrap.ps1",
 	"install-client.cjs",
+	"install-client-linux.cjs",
 	"install.cjs",
 	"uninstall-client-bootstrap.sh",
 	"uninstall-client-bootstrap.ps1",
 	"uninstall-client.cjs",
+	"uninstall-client-linux.cjs",
 ] as const;
+
+/** 按平台选择安装器资产：linux-x64 走 A2 系统安装器，win-x64 保持 PM2 安装器。 */
+function installerAssetName(platform: ClientInstallerPlatform): string {
+	return platform === "linux-x64" ? "install-client-linux.cjs" : "install-client.cjs";
+}
 
 /** Client 安装领域错误。 */
 export class ClientInstallerError extends Error {
@@ -139,14 +146,17 @@ export class ClientInstallerService {
 				409,
 			);
 		}
-		const installer = this.readAsset("install-client.cjs");
+		const installerName = installerAssetName(platform);
+		const installer = this.readAsset(
+			installerName as (typeof INSTALLER_ASSETS)[number],
+		);
 		const lowLevelInstaller = this.readAsset("install.cjs");
 		return {
 			serverVersion: VERSION,
 			releaseVersion: release.version,
 			platform,
 			archiveSize: archive.size,
-			installerUrl: "/api/client-installer/assets/install-client.cjs",
+			installerUrl: `/api/client-installer/assets/${installerName}`,
 			installerSha256: sha256(installer),
 			lowLevelInstallerUrl: "/api/client-installer/assets/install.cjs",
 			lowLevelInstallerSha256: sha256(lowLevelInstaller),

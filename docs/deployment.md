@@ -1,8 +1,8 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-02｜适用版本：`0.6.17` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
 
-本文描述当前可验证的部署边界。项目尚未提供容器镜像或 systemd/Windows Service 安装器；发布 zip 含 Launcher，并由安装脚本自动部署，生产常驻由 Launcher 或外部服务管理器负责。
+本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 仍由 PM2/用户登录模型管理，Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 
 > 首次部署的端到端演练（构建 → 解压 → 配置 → 启动 → 验证通讯）见 [`quickstart.md`](./quickstart.md)。
 
@@ -117,7 +117,7 @@ Client 使用运行账户的权限执行命令、文件、PTY 和 Pi。应为其
 | `VCPDECK_ARTIFACT` | 必填 | `server` 或 `client` |
 | `VCPDECK_PROBE_URL` | `http://127.0.0.1:3001/api/status` | Server 探活地址 |
 
-Launcher 首次启动要求 `apps/current` 已指向可用初始版本。发布 zip 同时包含 `launcher/`、`server/`、`client/`；快速安装/卸载脚本（`install.cjs` / `uninstall.cjs`）与 zip 平级于 `dist-release/` 目录，仓库内为 `scripts/`，见 [`quickstart.md`](./quickstart.md) §3.1–3.2。安装后 Launcher 位于 `<app-dir>/dist/main.js`；安装脚本默认使用 Server `~/.vcpdeck/launcher`、Client `~/.vcpdeck/launcher-client`，显式 `--app-dir` 时可覆盖。Client 还可从 `/releases` 启用一键安装，由平台引导脚本补齐 Node.js、PM2 和自启；Server 系统服务仍由运维准备。
+Launcher 首次启动要求 `apps/current` 已指向可用初始版本。发布 zip 同时包含 `launcher/`、`server/`、`client/`；快速安装/卸载脚本（`install.cjs` / `uninstall.cjs`）与 zip 平级于 `dist-release/` 目录，仓库内为 `scripts/`，见 [`quickstart.md`](./quickstart.md) §3.1–3.2。安装后 Launcher 位于 `<app-dir>/dist/main.js`；通用安装脚本默认使用 Server `~/.vcpdeck/launcher`、Client `~/.vcpdeck/launcher-client`，显式 `--app-dir` 时可覆盖。Client 还可从 `/releases` 启用一键安装：Linux 新安装由 A2 systemd 部署，Windows 由平台引导脚本补齐 Node.js、PM2 和登录自启；Server 系统服务仍由运维准备。
 
 ### 4.5 FRPS 迁移配置
 
@@ -135,7 +135,7 @@ FRPS Token 和 Dashboard 密码当前明文存入 SQLite、通过实例 REST 返
 
 ### 4.6 使用 PM2 托管 Launcher（可选）
 
-项目不提供 systemd/Windows Service 安装器。除手工 `node` 运行外，可用 PM2 等外部进程管理器守护 **Launcher** 进程；业务进程（Server/Client）仍由 Launcher 拉起、切换与回退，不要把业务进程交给 PM2。
+除 Linux Client A2 systemd 部署外，项目不提供通用 Server systemd/Windows Service 安装器。手工部署时可用 PM2 等外部进程管理器守护 **Launcher** 进程；业务进程（Server/Client）仍由 Launcher 拉起、切换与回退，不要把业务进程交给 PM2。
 
 基本约束：
 
@@ -180,7 +180,7 @@ pm2 logs vcpdeck-server-launcher --lines 100
 
 Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt/vcpdeck/launcher` 即可；`pm2 startup` 会生成 systemd 自启脚本。
 
-开机自启：手工部署时 Linux 运行 `pm2 startup` 并按提示执行输出的命令。Client 一键安装会自动为 Linux 注册 PM2 systemd startup；Windows 不依赖第三方 `pm2-windows-startup`，而是创建当前用户登录触发的计划任务执行 `pm2 resurrect`，因此无人登录时不保证 Client 在线。
+开机自启：手工部署的 Launcher 可在 Linux 运行 `pm2 startup` 并按提示执行输出的命令。Linux Client 一键安装的新部署使用 A2 `vcpdeck-client.service`，不使用 PM2/linger/登录脚本；旧 Linux 安装迁移前仍按旧 PM2 规则处理。Windows 不依赖第三方 `pm2-windows-startup`，而是创建当前用户登录触发的计划任务执行 `pm2 resurrect`，因此无人登录时不保证 Client 在线。
 
 注意事项：
 
@@ -193,13 +193,30 @@ Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt
 
 任意已登录操作者可在发版页启用或禁用入口。入口默认关闭，状态保存在 SQLite；启用后页面按当前 Origin 显示固定 Windows PowerShell 和 Linux Bash 命令。命令每次动态选择与 Server 版本完全一致、状态为 `done` 且含对应平台 archive 的 Release。
 
-安装器会询问显示名称和安装目录（均有默认值），然后：检测平台、复用合格 Node.js 24+ x64 或安装用户私有 Node、下载并校验 Release、保留 `~/.vcpdeck/client-id`、写入 `launcher.env`、复用/私装 PM2、只托管 `vcpdeck-client-launcher`、注册自启并等待 Server 确认在线/版本/能力。私有 Node 的 `bin` 会显式注入 npm 安装子进程、PM2 Launcher 进程和 systemd startup 环境，不要求系统预装 Node 或把私有运行时写入用户全局 `PATH`；ecosystem 只持久化该安全 `PATH`，不复制安装器的其他环境变量。失败保留现场，重跑同一命令继续修复。若已有配置指向其他 Server 则拒绝。Bazzite 依赖分层若提示重启，必须先重启系统，再重跑同一命令。
+Linux 新安装器会校验 root/可用 sudo、下载并校验 Release 与 Client archive，部署到 `/opt/vcpdeck/client`，创建锁定密码的 `vcpdeck` 专用账户、`/etc/vcpdeck/client.env`、sudoers 和 `vcpdeck-client.service`，然后等待 Server 确认在线/版本/能力；Windows 仍询问显示名称和安装目录，复用或安装用户私有 Node/PM2 并注册登录自启。Linux 存量 PM2 安装必须显式使用 `--migrate` 执行 M1 迁移，不能与新旧 Client 并发运行。失败保留现场，重跑同一命令继续修复。若已有配置指向其他 Server 则拒绝。Bazzite 依赖分层若提示重启，必须先重启系统，再重跑同一命令。
 
 支持范围：Windows 10/11 x64、Windows Server 2019+ x64；Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd。不支持 ARM64、Alpine/musl、CentOS 7、WSL、容器、无 systemd Linux 及其他未经逐项验收的 Fedora Atomic 发行版。Node 和 PM2 下载优先国内镜像，失败回退官方源。
 
-Bazzite 缺少 `curl`、`unzip`、`tar`、`xz` 或系统 CA 证书时，安装器只对实际缺少的固定 RPM 请求 sudo，并优先执行 `rpm-ostree install -y --apply-live`。实时应用未能使依赖可用时，会创建下一次启动使用的 deployment，提示手工重启并重跑同一条安装命令，然后安全退出；安装器不会自动重启。Node.js 和 PM2 仍安装在 `~/.vcpdeck` 用户私有目录，不进入 Bazzite 基础镜像。Bazzite 的 package layering 可能延长或阻塞系统更新，使用前应确认可接受该运维影响。
+Bazzite 缺少 `curl`、`unzip`、`tar`、`xz` 或系统 CA 证书时，安装器只对实际缺少的固定 RPM 请求 sudo，并优先执行 `rpm-ostree install -y --apply-live`。实时应用未能使依赖可用时，会创建下一次启动使用的 deployment，提示手工重启并重跑同一条安装命令，然后安全退出；安装器不会自动重启。A2 安装把 Node.js 运行时放在 `/opt/vcpdeck/client/node`，不写入 Bazzite 基础镜像，也不使用 PM2。Bazzite 的 package layering 可能延长或阻塞系统更新，使用前应确认可接受该运维影响。
 
 启用入口意味着任何能访问 Server 的机器都可取得共享 PSK；禁用只阻止新安装，不影响或撤销已有 Client。完整信任边界见 ADR-0018 和 [`security.md`](./security.md)。
+
+### 4.8 Linux A2 系统级 Client 部署（systemd）
+
+Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 PM2/用户登录模型不同，也不同于旧版 Linux 用户私有 PM2 安装：
+
+- **权限前提**：安装必须 root 或可用 sudo；无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，**无 PM2/用户服务/linger/cron 回退**。
+- **布局**（均在版本目录之外）：
+  - `/opt/vcpdeck/client`：系统应用 + 各版本 `apps/<version>/`（Launcher 保留在版本目录内供未来升级）；
+  - `/var/lib/vcpdeck-client`：持久身份 `client-id`、迁移状态与运行时状态；
+  - `/var/lib/vcpdeck-client/home`：专用账户 HOME（独立，不复制旧用户 `.pi`/`.ssh`/`.gitconfig`/shell 配置）；
+  - `/etc/vcpdeck/client.env`：敏感环境（含 PSK，权限 `0640 root:vcpdeck`）；
+  - `/etc/sudoers.d/vcpdeck-client`：`vcpdeck ALL=(ALL:ALL) NOPASSWD: ALL`；
+  - `/etc/systemd/system/vcpdeck-client.service`：systemd 单元，`User=vcpdeck`、`Restart=always`，开机自启。
+- **专用账户**：`vcpdeck`，锁定密码、`/bin/bash`、独立 HOME；安装器不创建任何直接登录凭据。该账户是 **root 等价** Client：Job、Terminal、Pi 可显式 `sudo -n` 调用任意 root 命令。
+- **Launcher 边界**：systemd 只守护稳定 Launcher；Launcher 继续负责业务版本切换与回退。Launcher 自升级用受限 transient `systemd-run`（脱 Client cgroup、`Timeout`、`KillMode=process`、无 `PrivateNetwork`/`NewerCredentials`），单元内不直接替换自身可执行文件。
+- **M1 迁移**：存量 PM2 安装可用 `--migrate` 迁移到 A2，保留 `client-id`、保留无关 PM2 应用；迁移分两阶段（verify-only 验证身份/版本/特权 → 原子切稳态），稳态全能力注册是回滚边界，之前失败自动恢复旧 PM2，之后失败记 `manual-recovery-required`。
+- **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。
 
 ## 5. 持久化目录
 
@@ -210,7 +227,7 @@ Bazzite 缺少 `curl`、`unzip`、`tar`、`xz` 或系统 CA 证书时，安装�
 - `data/job-outputs`（Job stdout/stderr spool；相对路径同样锚定 `<VCPDECK_APP_DIR>`，完整保留不封顶、无自动清理，可能含敏感输出，备份与访问权限应与 Storage 同级对待）；
 - `data/releases` 或 `VCPDECK_RELEASES_DIR`；Release 清理只删除归档正文，不删除 Release 审计行和 `clientStates`；
 - Launcher `VCPDECK_APP_DIR`；其中 `apps/retention.json` 记录成功切换历史，状态损坏时 Launcher 会暂停本地旧版本自动删除；
-- Client `~/.vcpdeck/client-id`；
+- Client 身份：Windows/旧版 Linux 在 `~/.vcpdeck/client-id`；**Linux A2** 在 `/var/lib/vcpdeck-client/client-id`（迁移时从旧目录保留）；Linux A2 专用账户 HOME 在 `/var/lib/vcpdeck-client/home`；
 - 远程用户的 Pi 配置和 Session 目录；
 - frpc 工作目录（需要恢复映射运行信息时）。
 

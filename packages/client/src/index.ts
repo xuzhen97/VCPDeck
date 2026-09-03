@@ -20,6 +20,11 @@ import {
 } from "./pi/supervisor.js";
 import type { PiWorkerRequestMessage } from "./pi/worker-protocol.js";
 import { probePiCapability } from "./pi/capability.js";
+import {
+	detectInstallationInfo,
+	probePrivilegedCapability,
+	type RuntimeSecurityInfo,
+} from "./privileged-capability.js";
 import { probeTerminalCapability } from "./terminal/capability.js";
 import {
 	discoverShells,
@@ -50,6 +55,16 @@ import { join } from "node:path";
 const SERVER_BASE = process.env.VCPDECK_SERVER || "http://localhost:3001";
 const SERVER_URL = SERVER_BASE + "/client";
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
+
+/**
+ * M1 迁移验证专用模式（仅 Linux A2 迁移由安装器设置，全新安装/稳态永不进入）：
+ * Client 仍执行 REGISTER 与心跳供 Server 验证身份/版本/安装/特权，
+ * 但不挂载任何 operational 处理器（Job dispatch/cancel、Files、Terminal、Pi、FRP），
+ * 使迁移失败回退前不产生任何业务副作用。
+ */
+export function isMigrationVerifyOnly(env: NodeJS.ProcessEnv = process.env): boolean {
+	return env.VCPDECK_MIGRATION_VERIFY_ONLY === "1";
+}
 
 function main() {
 	connect();
@@ -84,9 +99,12 @@ export interface PiBridgeDeps {
 	supervisor: PiSupervisor;
 	getPiStatus: () => Promise<PiCapabilityStatus>;
 	getTerminalStatus: () => Promise<TerminalCapabilityStatus>;
+	/** 运行时安全摘要：非交互特权探测 + 安装模式；每次连接探测一次，失败降级为未报告。 */
+	getRuntimeSecurity: () => Promise<RuntimeSecurityInfo | undefined>;
 	getRegister: (
 		piStatus: PiCapabilityStatus | undefined,
 		terminalStatus: TerminalCapabilityStatus | undefined,
+		runtimeSecurity: RuntimeSecurityInfo | undefined,
 	) => MachineRegister;
 	getStatusReport: () => StatusReport;
 }
@@ -100,36 +118,44 @@ export interface PiBridge {
  * 绑定 Pi Socket 桥：PI_REQUEST 响应、PI_EVENT 转发、注册后状态上报。
  * Server 完成 register 后通过 ack callback 或现有 "ack" event 通知。
  */
-export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
-	// 请求响应（信任边界：先 parse 再交给 supervisor）
-	socket.on(Events.PI_REQUEST, (raw: unknown) => {
-		try {
-			const request = parsePiRequest(raw);
-			void deps.supervisor.request(request).then((response) => {
-				if (socket.connected) socket.emit(Events.PI_RESPONSE, response);
-			});
-		} catch {
-			const requestId =
-				typeof raw === "object" &&
-				raw !== null &&
-				"requestId" in raw &&
-				typeof (raw as { requestId: unknown }).requestId === "string"
-					? (raw as { requestId: string }).requestId
-					: "";
-			if (socket.connected) {
-				socket.emit(Events.PI_RESPONSE, {
-					requestId,
-					ok: false,
-					error: { code: "PI_PROTOCOL_INVALID", message: "Invalid request" },
+export function attachPiBridge(
+	socket: Socket,
+	deps: PiBridgeDeps,
+	opts: { verifyOnly?: boolean } = {},
+): PiBridge {
+	const verifyOnly = opts.verifyOnly === true;
+	// 迁移验证模式：不挂载任何 Pi 工作处理器（不下发、不响应、不转发事件）。
+	if (!verifyOnly) {
+		// 请求响应（信任边界：先 parse 再交给 supervisor）
+		socket.on(Events.PI_REQUEST, (raw: unknown) => {
+			try {
+				const request = parsePiRequest(raw);
+				void deps.supervisor.request(request).then((response) => {
+					if (socket.connected) socket.emit(Events.PI_RESPONSE, response);
 				});
+			} catch {
+				const requestId =
+					typeof raw === "object" &&
+					raw !== null &&
+					"requestId" in raw &&
+					typeof (raw as { requestId: unknown }).requestId === "string"
+						? (raw as { requestId: string }).requestId
+						: "";
+				if (socket.connected) {
+					socket.emit(Events.PI_RESPONSE, {
+						requestId,
+						ok: false,
+						error: { code: "PI_PROTOCOL_INVALID", message: "Invalid request" },
+					});
+				}
 			}
-		}
-	});
+		});
 
-	// supervisor 事件转发（断线期间不发送；Worker 继续运行）
-	deps.supervisor.onEvent((event: PiEvent) => {
-		if (socket.connected) socket.emit(Events.PI_EVENT, event);
-	});
+		// supervisor 事件转发（断线期间不发送；Worker 继续运行）
+		deps.supervisor.onEvent((event: PiEvent) => {
+			if (socket.connected) socket.emit(Events.PI_EVENT, event);
+		});
+	}
 
 	let connectionGeneration = 0;
 	let currentRegistered: (() => void) | null = null;
@@ -181,6 +207,8 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 			const onRegistered = () => {
 				if (generation !== connectionGeneration || reported) return;
 				reported = true;
+				// 迁移验证模式：只做身份/安全验证，不下发任何工作状态。
+				if (verifyOnly) return;
 				socket.emit(Events.STATUS_REPORT, deps.getStatusReport());
 				reportState(generation);
 			};
@@ -193,10 +221,12 @@ export function attachPiBridge(socket: Socket, deps: PiBridgeDeps): PiBridge {
 				),
 			]).catch(() => undefined);
 			const terminalStatus = await deps.getTerminalStatus().catch(() => undefined);
+			// 运行时安全摘要：探测超时/失败降级为未报告（deps 内部已包 3s 超时），不阻塞注册。
+			const runtimeSecurity = await deps.getRuntimeSecurity().catch(() => undefined);
 			if (generation === connectionGeneration)
 				socket.emit(
 					Events.REGISTER,
-					deps.getRegister(piStatus, terminalStatus),
+					deps.getRegister(piStatus, terminalStatus, runtimeSecurity),
 					onRegistered,
 				);
 		},
@@ -210,6 +240,9 @@ export function connect(): Socket {
 		reconnectionDelay: 1_000,
 		reconnectionDelayMax: 10_000,
 	});
+
+	// M1 迁移验证模式：仍注册/心跳，但不挂载任何 operational 处理器。
+	const verifyOnly = isMigrationVerifyOnly();
 
 	// 自更新：有界 drain + 本机 Launcher 两阶段更新；apply 前计划内释放 frpc。
 	attachUpdateHandler({
@@ -303,25 +336,43 @@ export function connect(): Socket {
 		});
 	}
 
-	const bridge = attachPiBridge(socket, {
+	const bridge = attachPiBridge(
+		socket,
+		{
 		clientId: CLIENT_ID,
 		supervisor,
 		getPiStatus: () => probeWithTimeout(probePiCapability),
 		getTerminalStatus: () => probeWithTimeout(probeTerminalCapability),
-		getRegister: (piStatus, terminalStatus) =>
-			getRegisterInfo(piStatus, terminalStatus),
+		// 特权探测仅 Linux；非 Linux 两项均为 undefined → 整体未报告（保持 Windows 原语义）。
+		// sudo 探测包统一 3s 超时：超时可视为非交互 sudo 不可用，失败关闭且不阻塞 REGISTER。
+		getRuntimeSecurity: () =>
+			probeWithTimeout(async (): Promise<RuntimeSecurityInfo | undefined> => {
+				const privileged = await probePrivilegedCapability();
+				const installation = detectInstallationInfo();
+				if (privileged === undefined && installation === undefined) return undefined;
+				const info: RuntimeSecurityInfo = {};
+				if (privileged !== undefined) info.privileged = privileged;
+				if (installation !== undefined) info.installation = installation;
+				return info;
+			}),
+		getRegister: (piStatus, terminalStatus, runtimeSecurity) =>
+			getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, process.env),
 		getStatusReport: () => ({
 			clientId: CLIENT_ID,
 			jobs: getStatusReport(),
 		}),
-	});
+	},
+		{ verifyOnly },
+	);
 
 	socket.on("connect", () => {
-		console.log(`[vcpdeck] connected as ${CLIENT_ID}`);
-		// FRP 桥同步进入新连接代次（不立即恢复；REGISTER ack 后才上报状态）。
-		frpBridge.onConnected();
+		console.log(`[vcpdeck] connected as ${CLIENT_ID}${verifyOnly ? "（迁移验证模式）" : ""}`);
+		if (!verifyOnly) {
+			// FRP 桥同步进入新连接代次（不立即恢复；REGISTER ack 后才上报状态）。
+			frpBridge.onConnected();
+		}
 		void (async () => {
-			await ensureTerminalReady();
+			if (!verifyOnly) await ensureTerminalReady();
 			await bridge.onConnected();
 		})();
 	});
@@ -332,15 +383,17 @@ export function connect(): Socket {
 		}
 	}, 5_000);
 
-	socket.on(Events.JOB_DISPATCH, (data: any) => {
-		console.log(`[vcpdeck] job dispatch: ${data.jobId} — ${data.type}`);
-		dispatch(data, socket);
-	});
+	if (!verifyOnly) {
+		socket.on(Events.JOB_DISPATCH, (data: any) => {
+			console.log(`[vcpdeck] job dispatch: ${data.jobId} — ${data.type}`);
+			dispatch(data, socket);
+		});
 
-	socket.on(Events.JOB_CANCEL, (data: { jobId: string }) => {
-		console.log(`[vcpdeck] job cancel: ${data.jobId}`);
-		killJob(data.jobId, socket);
-	});
+		socket.on(Events.JOB_CANCEL, (data: { jobId: string }) => {
+			console.log(`[vcpdeck] job cancel: ${data.jobId}`);
+			killJob(data.jobId, socket);
+		});
+	}
 
 	socket.on("disconnect", (reason) => {
 		console.log(`[vcpdeck] disconnected: ${reason}`);

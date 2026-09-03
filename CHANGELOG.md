@@ -1,14 +1,25 @@
 # 更新日志
 
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
+
+## [0.6.18] - 2026-09-03
+
+### Added
+
+- Linux Client 全新安装改为 A2 系统级部署（systemd，ADR-0023）：`/opt/vcpdeck/client` 系统应用 + `/var/lib/vcpdeck-client` 身份/状态 + `/etc/vcpdeck/client.env`（0640）+ `vcpdeck` 专用账户 + `vcpdeck-client.service`；安装要求 root/可用 sudo，否则 `LINUX_SUDO_AUTH_FAILED` 失败关闭，无 PM2/用户服务回退。
+- Linux A2 专用账户为 root 等价 Client（`sudo -n` 可执行任意 root 命令）；Client 注册上报 `capabilityDetails.privileged` 与顶层 `installation` 摘要（旧 Client 缺省表示“未报告”，不推断）。
+- Frontend 机器卡片与 CLI `clients list` 展示 root 等价特权（root 等价 / 不可用 / 未报告）与安装模式（系统级部署 / 旧版 PM2 / 未报告）；CLI `jobs run` 与 `pi run` 对 root 等价目标机在执行前打印风险提示（Server 仅记录控制面/Job/Session 审计）。
+- Linux A2 存量 PM2 迁移（`--migrate`，保留 `client-id` 与无关 PM2 应用）：verify-only 两阶段验证 → 原子切稳态；稳态全能力注册为回滚边界，之前失败自动恢复旧 PM2，之后记 `manual-recovery-required`；卸载 `uninstall-client-linux.cjs` 支持 `--purge`。
+
+### Changed
+
+- Linux 全新安装不再依赖用户私有 PM2/linger/登录自启；systemd 只守护稳定 Launcher，Launcher 自升级改用受限 transient `systemd-run`（脱 Client cgroup）。Windows 安装行为保持不变。
+
 ## [0.6.17] - 2026-09-02
 
 ### Fixed
 
 - 兼容阿里云盘 `dl1-v6.aliyundrive.cloud` 下载域名证书过期：改用 `cn-beijing-data.aliyundrive.net`，保留签名参数并继续执行 TLS 校验。
-
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
-
-## [Unreleased]
 
 ## [0.6.15] - 2026-09-01
 

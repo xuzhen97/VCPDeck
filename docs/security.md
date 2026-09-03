@@ -1,6 +1,6 @@
 # VCPDeck 安全模型与维护要求
 
-> 状态：Current｜维护责任：安全负责人/模块维护者｜最后核验：2026-08-15
+> 状态：Current｜维护责任：安全负责人/模块维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
 
 ## 1. 安全结论
 
@@ -70,6 +70,14 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 ### 4.4 授权缺口
 
 当前任意有效业务身份可访问所有 Client/Job/Storage/FRP/Pi/Terminal。Frontend 隐藏按钮和“确认操作”不是授权边界。若增加非完全可信用户，必须先设计资源级授权和审计，不能只增加 UI 角色。
+
+### 4.5 root 等价 Client（Linux A2，ADR-0023）
+
+Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 等价** Client：Job、Terminal、Pi 可显式 `sudo -n` 执行任意 root 命令，不受沙箱限制，继承目标机 OS 账户的全部权限。
+
+- **审计边界**：Server 只记录控制面、Job 输出与 Session 生命周期；**不**声称完整的主机级 root-shell 审计，也不防目标机本地篡改。需要强审计/隔离的目标机不应作为 root 等价 Client。
+- **上报与展示**：Client 注册上报 `capabilityDetails.privileged`（`sudo-all`/`unavailable`）；Frontend 与 CLI 显式展示 root 等价风险，`jobs run`/`pi run` 执行前提示“Server 仅记录控制面/Job/Session 审计”。旧 Client 未上报时按“未报告”展示，不推断为任何能力。
+- **环境隔离（E1）**：专用账户 HOME 独立，安装器不复制旧用户 `.pi`/`.ssh`/`.gitconfig`/shell 配置或个人凭据。
 
 ## 5. 输入与执行安全
 

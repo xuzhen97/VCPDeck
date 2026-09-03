@@ -186,21 +186,28 @@ export enum JobStatus {
 }
 
 // ── Register / Heartbeat ──
-export interface MachineRegister {
-	clientId: string;
-	hostname: string;
-	os: string;
-	cpuModel: string;
-	totalMemMB: number;
-	clientVersion: string;
-	capabilities: string[];
-	/** 可选：Client Pi 能力探测结果摘要（旧 Client 缺省） */
-	capabilityDetails?: {
-		pi?: PiCapabilityStatus;
-		terminal?: TerminalCapabilityStatus;
-		frp?: FrpCapabilityStatus;
-	};
-}
+import {
+	MachineInstallationMode,
+	PrivilegedCapabilityMode,
+	parseMachineInstallation,
+	parseMachineRegister,
+	parsePrivilegedCapabilityStatus,
+} from "./machine-register.js";
+import type {
+	MachineInstallationStatus,
+	MachineRegister,
+	PrivilegedCapabilityStatus,
+} from "./machine-register.js";
+export {
+	MachineInstallationMode,
+	PrivilegedCapabilityMode,
+	parseMachineInstallation,
+	parseMachineRegister,
+	parsePrivilegedCapabilityStatus,
+	type MachineInstallationStatus,
+	type MachineRegister,
+	type PrivilegedCapabilityStatus,
+};
 
 /** 单盘容量与占用率（容量与使用率来自同一次 statfs） */
 export interface DiskInfo {
@@ -345,12 +352,16 @@ export interface ClientInfo {
 	totalMemMB: number;
 	clientVersion: string;
 	capabilities: string[];
-	/** 解析后的能力摘要（pi/terminal/frp；无探测/损坏时为 {}） */
+	/** 解析后的能力摘要（pi/terminal/frp/privileged；无探测/损坏时为 {}） */
 	capabilityDetails: {
 		pi?: PiCapabilityStatus;
 		terminal?: TerminalCapabilityStatus;
 		frp?: FrpCapabilityStatus;
+		/** 可选：非交互特权能力摘要（旧 Client 缺省） */
+		privileged?: PrivilegedCapabilityStatus;
 	};
+	/** 可选：安装模式摘要（旧 Client 缺省表示未报告，不推断为任何模式） */
+	installation?: MachineInstallationStatus;
 	online: boolean;
 	cpuPercent: number | null;
 	memPercent: number | null;

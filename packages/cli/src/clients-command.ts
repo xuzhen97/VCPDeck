@@ -6,6 +6,7 @@ import {
 	formatEnvironmentSummary,
 	resolveEnvironment,
 } from "./environment.js";
+import { formatPrivilegeSummary } from "./privileged-capability.js";
 
 /** Clients 命令运行时依赖，测试可注入。 */
 export interface ClientsCommandContext {
@@ -87,6 +88,7 @@ function formatClientsSummary(clients: ClientInfo[]): string {
 		cpu: formatPercent(client.cpuPercent),
 		mem: formatPercent(client.memPercent),
 		version: client.clientVersion,
+		privilege: formatPrivilegeSummary(client),
 	}));
 	const onlineCount = clients.filter((client) => client.online).length;
 	return [
@@ -99,6 +101,7 @@ function formatClientsSummary(clients: ClientInfo[]): string {
 			"cpu",
 			"mem",
 			"version",
+			"privilege",
 		]),
 	].join("\n");
 }

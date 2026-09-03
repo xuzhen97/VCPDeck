@@ -119,6 +119,119 @@ describe("getRegisterInfo", () => {
 		expect(info.capabilityDetails?.terminal).toBeUndefined();
 	});
 
+	it("A2 运行时安全摘要序列化：privileged + installation 上报，无路径或凭据", () => {
+		const info = getRegisterInfo(
+			undefined,
+			undefined,
+			{
+				privileged: {
+					available: true,
+					mode: "sudo-all",
+					nonInteractive: true,
+					runAsUser: "vcpdeck",
+				},
+				installation: { mode: "systemd-root-equivalent" },
+			},
+		);
+		expect(info.capabilityDetails?.privileged).toEqual({
+			available: true,
+			mode: "sudo-all",
+				nonInteractive: true,
+				runAsUser: "vcpdeck",
+			});
+		expect(info.installation).toEqual({ mode: "systemd-root-equivalent" });
+		// 不新增可执行 capability 字符串。
+		expect(info.capabilities).toEqual(["exec", "file.read", "file.write", "frp"]);
+		const json = JSON.stringify(info);
+		expect(json).not.toContain("C:\\");
+		expect(json).not.toContain("/home/");
+		expect(json).not.toContain("VCPDECK_PSK");
+	});
+
+	it("无运行时安全摘要时不报告 privileged 与 installation（旧 Client 语义）", () => {
+		const info = getRegisterInfo();
+		expect(info.capabilityDetails?.privileged).toBeUndefined();
+		expect(info.installation).toBeUndefined();
+	});
+
+	it("仅 sudo 不可用（legacy Linux）时只报告 privileged=unavailable + legacy-pm2", () => {
+		const info = getRegisterInfo(
+			undefined,
+			undefined,
+			{
+				privileged: {
+					available: false,
+					mode: "unavailable",
+					nonInteractive: false,
+					runAsUser: "xuzhen97",
+				},
+				installation: { mode: "legacy-pm2" },
+			},
+		);
+		expect(info.capabilityDetails?.privileged).toMatchObject({ available: false });
+		expect(info.installation).toEqual({ mode: "legacy-pm2" });
+	});
+
+	describe("M1 迁移验证模式（VCPDECK_MIGRATION_VERIFY_ONLY=1）", () => {
+		const a2Security = {
+			privileged: {
+				available: true,
+				mode: "sudo-all" as const,
+				nonInteractive: true,
+				runAsUser: "vcpdeck",
+			},
+			installation: { mode: "systemd-root-equivalent" } as const,
+		};
+
+		it("verify-only：不发布任何 operational 能力，但保留身份/版本/安装/特权", () => {
+			const info = getRegisterInfo(undefined, undefined, a2Security, {
+				...process.env,
+				VCPDECK_MIGRATION_VERIFY_ONLY: "1",
+			});
+			// 无 operational 能力字符串。
+			expect(info.capabilities).toEqual([]);
+			expect(info.capabilityDetails).not.toHaveProperty("pi");
+			expect(info.capabilityDetails).not.toHaveProperty("terminal");
+			expect(info.capabilityDetails).not.toHaveProperty("frp");
+			// 保留身份/版本/安装/特权（身份非空且稳定；具体值由模块导入期 CLIENT_ID 决定）。
+			expect(typeof info.clientId).toBe("string");
+			expect(info.clientId.length).toBeGreaterThan(0);
+			expect(info.clientVersion).toBe(VERSION);
+			expect(info.installation).toEqual({ mode: "systemd-root-equivalent" });
+			expect(info.capabilityDetails?.privileged).toMatchObject({
+				available: true,
+				mode: "sudo-all",
+			});
+		});
+
+		it("verify-only 即使探测到 Pi/Terminal/FRP 可用也不声明", () => {
+			const piStatus: PiCapabilityStatus = {
+				available: true,
+				sdkVersion: "0.84.0",
+				nodeVersion: "22.19.0",
+				shellKind: "git-bash",
+			};
+			const terminalStatus: TerminalCapabilityStatus = {
+				available: true,
+				backend: "conpty",
+			};
+			const info = getRegisterInfo(piStatus, terminalStatus, a2Security, {
+				...process.env,
+				VCPDECK_MIGRATION_VERIFY_ONLY: "1",
+			});
+			expect(info.capabilities).toEqual([]);
+			expect(info.capabilityDetails).not.toHaveProperty("pi");
+			expect(info.capabilityDetails).not.toHaveProperty("terminal");
+			expect(info.capabilityDetails).not.toHaveProperty("frp");
+		});
+
+		it("稳态（无 verify-only）照常发布 operational 能力", () => {
+			const info = getRegisterInfo(undefined, undefined, a2Security);
+			expect(info.capabilities).toContain("exec");
+			expect(info.capabilityDetails).toHaveProperty("frp");
+		});
+	});
+
 	it("序列化结果不包含本地路径或凭据", () => {
 		const status: PiCapabilityStatus = {
 			available: true,

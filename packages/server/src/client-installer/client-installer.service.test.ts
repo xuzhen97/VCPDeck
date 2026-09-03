@@ -152,6 +152,30 @@ describe("ClientInstallerService", () => {
 		}
 	});
 
+	it("preflight 按平台路由安装器资产：linux-x64 走 A2 系统安装器，win-x64 保持 PM2 安装器", async () => {
+		const { prisma, releases, clients } = mocks(true);
+		const service = new ClientInstallerService(
+			prisma as never,
+			releases as never,
+			clients as never,
+		);
+		const linux = await service.preflight("linux-x64");
+		expect(linux.installerUrl).toBe(
+			"/api/client-installer/assets/install-client-linux.cjs",
+		);
+		const win = await service.preflight("win-x64");
+		expect(win.installerUrl).toBe(
+			"/api/client-installer/assets/install-client.cjs",
+		);
+		// 低层安装器两平台一致。
+		expect(linux.lowLevelInstallerUrl).toBe(
+			"/api/client-installer/assets/install.cjs",
+		);
+		expect(win.lowLevelInstallerUrl).toBe(
+			"/api/client-installer/assets/install.cjs",
+		);
+	});
+
 	it("验收接口要求正确共享 PSK", () => {
 		const { prisma, releases, clients } = mocks(true);
 		const service = new ClientInstallerService(

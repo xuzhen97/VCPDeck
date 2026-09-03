@@ -109,21 +109,29 @@ async function makeDeps(overrides: Partial<PiBridgeDeps> = {}) {
 			clientId: "c1",
 			supervisor,
 			getPiStatus: async () => status,
-			getTerminalStatus: async () => ({
-				available: false,
-				code: "TERMINAL_NATIVE_BACKEND_UNAVAILABLE",
-			}),
-			getRegister: (piStatus, terminalStatus) =>
-				({
-					clientId: "c1",
-					hostname: "host",
-					os: "win32",
-					cpuModel: "cpu",
-					totalMemMB: 1,
-					clientVersion: "1",
-					capabilities: piStatus?.available ? ["agent.pi"] : [],
-					...(piStatus ? { capabilityDetails: { pi: piStatus } } : {}),
-				}) as MachineRegister,
+				getTerminalStatus: async () => ({
+					available: false,
+					code: "TERMINAL_NATIVE_BACKEND_UNAVAILABLE",
+				}),
+				// Windows 夹具：不报告运行时安全摘要（未报告，不推断）。
+				getRuntimeSecurity: async () => undefined,
+				getRegister: (piStatus, terminalStatus, runtimeSecurity) =>
+					({
+						clientId: "c1",
+						hostname: "host",
+						os: "win32",
+						cpuModel: "cpu",
+						totalMemMB: 1,
+						clientVersion: "1",
+						capabilities: piStatus?.available ? ["agent.pi"] : [],
+						...(piStatus ? { capabilityDetails: { pi: piStatus } } : {}),
+						...(runtimeSecurity?.privileged
+							? { capabilityDetails: { privileged: runtimeSecurity.privileged } }
+							: {}),
+						...(runtimeSecurity?.installation
+							? { installation: runtimeSecurity.installation }
+							: {}),
+					}) as MachineRegister,
 			getStatusReport: () => ({ clientId: "c1", jobs: [] }),
 			...overrides,
 		} as PiBridgeDeps,

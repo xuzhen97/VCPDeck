@@ -20,6 +20,25 @@ import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
 import { MACHINE_TABS, capabilitiesLabel } from "@/lib/utils";
 
+/**
+ * 非交互特权能力展示（ADR-0023）：
+ * sudo-all → root 等价风险；unavailable → 无 root 等价；缺省 → 未报告（不推断）。
+ */
+function privilegedLabel(client: ClientInfo): string {
+	const p = client.capabilityDetails?.privileged;
+	if (!p) return "特权未报告";
+	if (p.available && p.mode === "sudo-all" && p.nonInteractive) return "root 等价特权";
+	return "root 等价特权不可用";
+}
+
+/** 安装模式展示：systemd-root-equivalent → 系统级；legacy-pm2 → 旧版 PM2；缺省 → 未报告。 */
+function installationLabel(client: ClientInfo): string {
+	const m = client.installation?.mode;
+	if (m === "systemd-root-equivalent") return "系统级部署";
+	if (m === "legacy-pm2") return "旧版 PM2";
+	return "安装模式未报告";
+}
+
 /** 详情页 tab → 卡片快捷跳转图标 */
 const tabIcons: Record<string, LucideIcon> = {
 	overview: LayoutDashboard,
@@ -111,6 +130,17 @@ function MachineCard({ client }: { client: ClientInfo }) {
 					{capabilitiesLabel(client.capabilities).map((item) => (
 						<StatusChip key={item} label={item} />
 					))}
+				</div>
+				<div className="mt-2 flex flex-wrap gap-2">
+					<StatusChip
+						label={privilegedLabel(client)}
+						tone={
+							client.capabilityDetails?.privileged?.mode === "sudo-all"
+								? "warning"
+								: "neutral"
+						}
+					/>
+					<StatusChip label={installationLabel(client)} />
 				</div>
 				<div className="mt-5 flex flex-wrap gap-3 border-t border-border/60 pt-4 text-sm">
 					{MACHINE_TABS.map(([key, label]) => {

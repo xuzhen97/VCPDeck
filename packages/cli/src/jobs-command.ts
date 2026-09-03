@@ -3,7 +3,8 @@ import { JobStatus } from "@vcpdeck/shared";
 import { VcpDeckApiError, type VcpDeckClient } from "@vcpdeck/sdk";
 import { createAuthenticatedClient } from "./authenticated-client.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
-import { resolveClientId } from "./client-resolver.js";
+import { findClientByClientId, resolveClientId } from "./client-resolver.js";
+import { rootEquivalentWarning } from "./privileged-capability.js";
 import type { ConfigPaths } from "./config.js";
 import { formatEnvironmentSummary, resolveEnvironment } from "./environment.js";
 
@@ -191,6 +192,10 @@ async function runExecJob(
 		context.processEnv,
 	);
 
+	// ADR-0023：root 等价 Client 执行前风险提示（仅非 JSON 输出时打印）。
+	const targetClient = await findClientByClientId(client, clientId);
+	const rootWarning = rootEquivalentWarning(targetClient);
+
 	// command 模式：token 以空格连接后由目标机 shell 执行（Windows 下自动 chcp 65001）
 	const payload: Record<string, unknown> = {
 		mode: "command",
@@ -209,6 +214,7 @@ async function runExecJob(
 
 	if (options.json !== true) {
 		log(formatEnvironmentSummary(environment));
+		if (rootWarning) error(rootWarning);
 		log(`[vcpdeck] 在 ${clientFilter} 上执行: ${payload.command as string}`);
 	}
 	const created = await client.jobs.create({

@@ -28,6 +28,7 @@ import {
   parseTerminalClientResponse,
   parseTerminalExitReport,
   parseTerminalOutputChunk,
+  parseMachineRegister,
   parseTerminalStateReport,
   type JobProgress,
 } from "@vcpdeck/shared";
@@ -169,16 +170,25 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   @SubscribeMessage(Events.REGISTER)
   async handleRegister(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: MachineRegister,
+    @MessageBody() data: unknown,
   ) {
-    await this.clientService.register(data, client.id);
-    client.data.clientId = data.clientId;
-    client.join(data.clientId);
-    await this.piRuns.markReconcilePending(data.clientId, client.id);
-    await this.terminalService.handleClientRegistered(data.clientId, client.id);
-    this.orchestrator.onClientRegistered(data.clientId, data.clientVersion);
+    let register: MachineRegister;
+    try {
+      // 信任边界：跨信任边界输入必须运行时校验；非法消息不持久化、不进入任何状态机。
+      register = parseMachineRegister(data);
+    } catch {
+      client.emit("error", "invalid register");
+      client.disconnect();
+      return { ok: false };
+    }
+    await this.clientService.register(register, client.id);
+    client.data.clientId = register.clientId;
+    client.join(register.clientId);
+    await this.piRuns.markReconcilePending(register.clientId, client.id);
+    await this.terminalService.handleClientRegistered(register.clientId, client.id);
+    this.orchestrator.onClientRegistered(register.clientId, register.clientVersion);
     client.emit("ack", { event: Events.REGISTER });
-    console.log(`[ws] registered: ${data.clientId} (${data.hostname})`);
+    console.log(`[ws] registered: ${register.clientId} (${register.hostname})`);
     return { ok: true };
   }
 

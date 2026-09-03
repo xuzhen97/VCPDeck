@@ -2,7 +2,11 @@ import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
 	parseFrpCapabilityStatus,
+	parseMachineInstallation,
+	parsePrivilegedCapabilityStatus,
+	type MachineInstallationStatus,
 	type MachineRegister,
+	type PrivilegedCapabilityStatus,
 	type Heartbeat,
 	type ClientInfo,
 	type DiskInfo,
@@ -51,7 +55,13 @@ export class ClientService {
   ) {}
 
   async register(dto: MachineRegister, socketId: string) {
-    const capabilityDetails = JSON.stringify(dto.capabilityDetails ?? {});
+    // 持久化契约：capabilityDetails JSON 列同时承载 pi/terminal/frp/privileged 探测摘要
+    // 与 installation 安装模式摘要（旧 Client 无 installation 字段时不写入，不推断）。
+    const storedDetails: Record<string, unknown> = { ...(dto.capabilityDetails ?? {}) };
+    if (dto.installation !== undefined) {
+      storedDetails.installation = dto.installation;
+    }
+    const capabilityDetails = JSON.stringify(storedDetails);
     const common = {
       hostname: dto.hostname,
       os: dto.os,
@@ -206,6 +216,8 @@ export class ClientService {
         name: null,
         hostname: null,
         capabilitiesReported: false,
+        installationMode: null,
+        nonInteractiveSudo: null,
         connectedAt: null,
         lastHeartbeatAt: null,
       };
@@ -216,6 +228,9 @@ export class ClientService {
     } catch {
       // 损坏数据按未完成能力上报处理。
     }
+    const stored = client.capabilityDetails
+      ? this.parseStoredDetails(client.capabilityDetails)
+      : { details: {} as Record<string, never>, installation: null };
     return {
       registered: true,
       online: client.online,
@@ -223,6 +238,8 @@ export class ClientService {
       name: client.name ?? client.hostname,
       hostname: client.hostname,
       capabilitiesReported: Array.isArray(capabilities) && capabilities.length > 0,
+      installationMode: stored.installation?.mode ?? null,
+      nonInteractiveSudo: stored.details.privileged?.nonInteractive ?? null,
       connectedAt: client.connectedAt?.toISOString() ?? null,
       lastHeartbeatAt: client.lastHeartbeatAt?.toISOString() ?? null,
     };
@@ -241,34 +258,9 @@ export class ClientService {
     } catch {
       // ponytail: stored as JSON, fallback to empty on corruption
     }
-    let capabilityDetails: {
-      pi?: PiCapabilityStatus;
-      terminal?: TerminalCapabilityStatus;
-      frp?: FrpCapabilityStatus;
-    } = {};
-    try {
-      const raw: unknown = JSON.parse(c.capabilityDetails);
-      // SAFETY: 仅在确认是对象后访问字段；解析结果按结构投影，不直接透传任意对象。
-      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-        const record = raw as Record<string, unknown>;
-        if (record.pi !== undefined) {
-          capabilityDetails.pi = record.pi as PiCapabilityStatus;
-        }
-        if (record.terminal !== undefined) {
-          capabilityDetails.terminal = record.terminal as TerminalCapabilityStatus;
-        }
-        if (record.frp !== undefined) {
-          try {
-            capabilityDetails.frp = parseFrpCapabilityStatus(record.frp);
-          } catch {
-            // frp 详情损坏：省略该字段，不宽松猜测（旧 Client 缺省时无此字段）。
-          }
-        }
-      }
-    } catch {
-      // 整体损坏：回退为空能力详情，不宽松猜测。
-    }
-    return {
+    const { details: capabilityDetails, installation } =
+      this.parseStoredDetails(c.capabilityDetails);
+    const info: ClientInfo = {
       clientId: c.id,
       name: c.name ?? c.hostname,
       hostname: c.hostname,
@@ -284,5 +276,73 @@ export class ClientService {
       disks,
       lastHeartbeatAt: c.lastHeartbeatAt?.toISOString() ?? null,
     };
+    if (installation !== null) {
+      info.installation = installation;
+    }
+    return info;
+  }
+
+  /**
+   * 严格解析持久化的 capabilityDetails JSON 列。
+   * 逐字段投影；损坏/未知字段省略，不宽松猜测（缺失 = 未报告，不推断为任何模式）。
+   */
+  private parseStoredDetails(
+    json: string,
+  ): {
+    details: {
+      pi?: PiCapabilityStatus;
+      terminal?: TerminalCapabilityStatus;
+      frp?: FrpCapabilityStatus;
+      privileged?: PrivilegedCapabilityStatus;
+    };
+    installation: MachineInstallationStatus | null;
+  } {
+    const result: {
+      details: {
+        pi?: PiCapabilityStatus;
+        terminal?: TerminalCapabilityStatus;
+        frp?: FrpCapabilityStatus;
+        privileged?: PrivilegedCapabilityStatus;
+      };
+      installation: MachineInstallationStatus | null;
+    } = { details: {}, installation: null };
+    let raw: unknown;
+    try {
+      raw = JSON.parse(json);
+    } catch {
+      // 整体损坏：回退为空能力详情，不宽松猜测。
+      return result;
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return result;
+    const record = raw as Record<string, unknown>;
+    if (record.pi !== undefined) {
+      // 沿用既有行为：pi 摘要透传（与 ADR-0023 前的投影一致，不放宽也不新增加严）。
+      result.details.pi = record.pi as PiCapabilityStatus;
+    }
+    if (record.terminal !== undefined) {
+      result.details.terminal = record.terminal as TerminalCapabilityStatus;
+    }
+    if (record.frp !== undefined) {
+      try {
+        result.details.frp = parseFrpCapabilityStatus(record.frp);
+      } catch {
+        // frp 详情损坏：省略该字段，不宽松猜测（旧 Client 缺省时无此字段）。
+      }
+    }
+    if (record.privileged !== undefined) {
+      try {
+        result.details.privileged = parsePrivilegedCapabilityStatus(record.privileged);
+      } catch {
+        // privileged 摘要损坏：省略，UI 显示“未报告”，不推断为 root 等价。
+      }
+    }
+    if (record.installation !== undefined) {
+      try {
+        result.installation = parseMachineInstallation(record.installation);
+      } catch {
+        // installation 摘要损坏：省略，不宽松猜测。
+      }
+    }
+    return result;
   }
 }

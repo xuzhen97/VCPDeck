@@ -100,6 +100,11 @@ function importJob(overwrite = false, direct = false) {
 
 describe("handleTransfer file.export", () => {
 	beforeEach(() => {
+		// 每个用例恢复流 mock，避免上一个用例的分片读取实现污染整文件哈希。
+		vi.mocked(createReadStream).mockReset();
+		vi.mocked(createReadStream).mockImplementation(
+			() => Readable.from([Buffer.from("hello")]) as never,
+		);
 		// mock fetch 必须消费 body，否则上传流（webStream）不会流动，
 		// sha256/进度逻辑都不会执行
 		vi.stubGlobal(

@@ -1,6 +1,6 @@
 # VCPDeck 兼容性与升级策略
 
-> 状态：Current｜维护责任：发布维护者｜最后核验：2026-09-02｜适用版本：`0.6.17` / 当前 `main`
+> 状态：Current｜维护责任：发布维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
 
 ## 1. 当前结论
 
@@ -36,7 +36,9 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI �
 
 “支持”表示进入发布验收矩阵，不表示所有历史版本永久兼容。
 
-Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 的 x64 + glibc + systemd 组合。ARM64、Alpine/musl、CentOS 7、WSL、容器和无 systemd Linux 会在下载大构件前明确拒绝；Node.js 自身支持某架构不代表 FRP、PTY 和 Release 原生依赖已支持。
+Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd 组合。ARM64、Alpine/musl、CentOS 7、WSL、容器和无 systemd Linux 会在下载大构件前明确拒绝；Node.js 自身支持某架构不代表 FRP、PTY 和 Release 原生依赖已支持。
+
+**Linux A2 额外前提**：全新安装要求 root 或可用 sudo（安装器 `sudo -v` 验证），无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，不回退 PM2/用户服务；安装后的 `vcpdeck` 账户是 root 等价 Client（见 [`security.md`](./security.md) §4.5）。Windows 安装行为不变（用户登录触发，无 systemd）。
 
 ## 4. 升级顺序
 

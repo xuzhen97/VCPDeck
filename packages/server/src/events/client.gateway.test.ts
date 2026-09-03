@@ -241,6 +241,66 @@ describe("ClientGateway Pi generation routing", () => {
 		expect(order).toEqual(["pending"]);
 	});
 
+	it("REGISTER 含新字段（privileged + installation）时正常持久化", async () => {
+		const { gateway, clientService } = makeGateway();
+		const socket = makeSocket();
+		await gateway.handleRegister(socket, {
+			clientId: "c1",
+			hostname: "host",
+			os: "linux 6.11.0",
+			cpuModel: "cpu",
+			totalMemMB: 1024,
+			clientVersion: "1",
+			capabilities: ["exec"],
+			capabilityDetails: {
+				privileged: {
+					available: true,
+					mode: "sudo-all",
+					nonInteractive: true,
+					runAsUser: "vcpdeck",
+				},
+			},
+			installation: { mode: "systemd-root-equivalent" },
+		});
+		expect(clientService.register).toHaveBeenCalledWith(
+			expect.objectContaining({
+				installation: { mode: "systemd-root-equivalent" },
+			}),
+			"socket-1",
+		);
+	});
+
+	it("非法 REGISTER（缺 hostname / 非法 privileged mode）不持久化并断开", async () => {
+		const { gateway, clientService } = makeGateway();
+		const socket = makeSocket();
+		socket.disconnect = vi.fn();
+		await gateway.handleRegister(socket, {
+			clientId: "c1",
+			os: "win32",
+			cpuModel: "cpu",
+			totalMemMB: 1024,
+			clientVersion: "1",
+			capabilities: ["exec"],
+		});
+		expect(clientService.register).not.toHaveBeenCalled();
+		expect(socket.data.clientId).toBeUndefined();
+		expect(socket.disconnect).toHaveBeenCalled();
+
+		const socket2 = makeSocket("socket-2");
+		socket2.disconnect = vi.fn();
+		await gateway.handleRegister(socket2, {
+			clientId: "c1",
+			hostname: "host",
+			os: "win32",
+			cpuModel: "cpu",
+			totalMemMB: 1024,
+			clientVersion: "1",
+			capabilities: ["exec"],
+			capabilityDetails: { privileged: { available: true, mode: "root" } },
+		});
+		expect(socket2.disconnect).toHaveBeenCalled();
+	});
+
 	it("PI_STATE 只经 reconcileGeneration 并原样 ack", async () => {
 		const { gateway, piRuns, piEvents } = makeGateway();
 		const socket = makeSocket();

@@ -27,6 +27,22 @@ export async function resolveClientId(
 	return matched.clientId;
 }
 
+/**
+ * 通过在线 Client 列表定位目标 Client（SDK 无单个 get）；未找到返回 null。
+ * 供执行前 root 等价风险提示读取 capabilityDetails（ADR-0023）。
+ */
+export async function findClientByClientId(
+	client: VcpDeckClient,
+	clientId: string,
+): Promise<import("@vcpdeck/shared").ClientInfo | null> {
+	try {
+		const all = await client.clients.list();
+		return all.find((entry) => entry.clientId === clientId) ?? null;
+	} catch {
+		return null;
+	}
+}
+
 /** 探测目标机可用授权根（file.roots）。 */
 export async function fetchClientRoots(
 	client: VcpDeckClient,
