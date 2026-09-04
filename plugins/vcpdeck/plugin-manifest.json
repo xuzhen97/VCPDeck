@@ -2,7 +2,7 @@
   "manifestVersion": "2.0.0",
   "name": "VCPDeckBridge",
   "displayName": "VCPDeck 个人 AI 驾驶台连接桥",
-  "version": "0.6.21",
+  "version": "0.6.22",
   "description": "连接 VCPDeck 控制面：远程机器管理、Shell 命令执行与日志诊断、远程文件读写与元数据、FRP 端口映射与版本管理。",
   "author": "Ryan",
   "pluginType": "synchronous",
