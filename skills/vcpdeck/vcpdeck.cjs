@@ -40,7 +40,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.6.18";
+    exports2.VERSION = "0.6.24";
   }
 });
 
@@ -1673,7 +1673,7 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -1891,6 +1891,12 @@ var require_dist = __commonJS({
       FRP_DELETE: "frp.delete",
       FRP_LIST: "frp.list",
       FRP_RECONCILE: "frp.reconcile"
+    };
+    exports2.StorageShareErrorCode = {
+      FILE_NOT_SHAREABLE: "FILE_NOT_SHAREABLE",
+      STORAGE_PROVIDER_MISMATCH: "STORAGE_PROVIDER_MISMATCH",
+      STORAGE_SHARE_NOT_FOUND: "STORAGE_SHARE_NOT_FOUND",
+      FILE_HAS_ACTIVE_SHARES: "FILE_HAS_ACTIVE_SHARES"
     };
     function parseFrpOperationTimeout(value2) {
       const parsed = value2 === void 0 ? 30 : Number(value2);
@@ -2441,6 +2447,33 @@ var init_storage = __esm({
   }
 });
 
+// ../sdk/dist/storage-shares.js
+function createStorageSharesApi(client) {
+  return {
+    create: (input, signal) => client.request("POST", "/api/storage/shares", input, signal),
+    list: (options = {}, signal) => {
+      const params = new URLSearchParams();
+      if (options.fileId)
+        params.set("fileId", options.fileId);
+      if (options.status)
+        params.set("status", options.status);
+      if (options.page)
+        params.set("page", String(options.page));
+      if (options.pageSize)
+        params.set("pageSize", String(options.pageSize));
+      const query = params.toString();
+      return client.request("GET", `/api/storage/shares${query ? `?${query}` : ""}`, void 0, signal);
+    },
+    get: (id, signal) => client.request("GET", `/api/storage/shares/${encodeURIComponent(id)}`, void 0, signal),
+    revoke: (id, signal) => client.request("DELETE", `/api/storage/shares/${encodeURIComponent(id)}`, void 0, signal)
+  };
+}
+var init_storage_shares = __esm({
+  "../sdk/dist/storage-shares.js"() {
+    "use strict";
+  }
+});
+
 // ../sdk/dist/terminal.js
 function createTerminalsApi(client) {
   const base = (clientId) => `/api/clients/${encodeURIComponent(clientId)}/terminals`;
@@ -2507,6 +2540,7 @@ var init_client = __esm({
     init_pi();
     init_releases();
     init_storage();
+    init_storage_shares();
     init_terminal();
     VcpDeckApiError = class extends Error {
       status;
@@ -2531,6 +2565,7 @@ var init_client = __esm({
       clients;
       clientInstaller;
       storage;
+      storageShares;
       aliyundrive;
       frp;
       pi;
@@ -2550,6 +2585,7 @@ var init_client = __esm({
         this.clients = createClientsApi(this);
         this.clientInstaller = createClientInstallerApi(this);
         this.storage = createStorageApi(this);
+        this.storageShares = createStorageSharesApi(this);
         this.aliyundrive = createAliyunDriveApi(this);
         this.frp = createFrpApi(this, this.jobs);
         this.pi = createPiApi(this);
@@ -2617,6 +2653,7 @@ var init_dist = __esm({
     init_pi();
     init_releases();
     init_storage();
+    init_storage_shares();
     init_terminal();
   }
 });
