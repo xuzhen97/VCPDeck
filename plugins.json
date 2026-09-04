@@ -3,8 +3,8 @@
     {
       "name": "VCPDeckBridge",
       "displayName": "VCPDeck 个人 AI 驾驶台连接桥",
-      "description": "连接 VCPDeck 控制面：远程机器管理、Shell 命令执行与日志诊断、全量文件读写与元数据、FRP 端口映射与版本管理。synchronous/stdio 架构，零 npm 依赖。",
-      "version": "0.6.22",
+      "description": "连接 VCPDeck 控制面：远程机器管理、Shell 命令执行与日志诊断、全量文件读写与元数据、公开 Storage 分享、FRP 端口映射与版本管理。synchronous/stdio 架构，零 npm 依赖。",
+      "version": "0.6.24",
       "author": "xuzhen97",
       "category": "system-integration",
       "icon": "server",

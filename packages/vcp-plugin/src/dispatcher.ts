@@ -27,8 +27,9 @@ import {
 } from "./handlers/frp.js";
 import { handleGetStorageStatus } from "./handlers/storage.js";
 import { handleListReleases } from "./handlers/releases.js";
+import { handleDownloadFile } from "./handlers/download.js";
 
-/** 21 个动作标识符的唯一清单（导出，供 manifest 测试引用） */
+/** 22 个动作标识符的唯一清单（导出，供 manifest 测试引用） */
 export const VCP_COMMANDS = [
 	"ListClients",
 	"ListJobs",
@@ -51,6 +52,7 @@ export const VCP_COMMANDS = [
 	"DeleteFrpMapping",
 	"GetStorageStatus",
 	"ListReleases",
+	"DownloadFile",
 ] as const;
 
 /**
@@ -59,6 +61,7 @@ export const VCP_COMMANDS = [
 export async function dispatchCommand(
 	client: VcpDeckClient,
 	req: VcpRequest,
+	publicShareBaseUrl?: string,
 ): Promise<VcpResponse> {
 	const { command, params: _nested, maid: _maid, ...flat } = req as Record<string, unknown>;
 	const params: Record<string, unknown> = { ...flat, ...((_nested as Record<string, unknown>) ?? {}) };
@@ -111,6 +114,10 @@ export async function dispatchCommand(
 
 		case "ListReleases":
 			return handleListReleases(client, params);
+
+		case "DownloadFile":
+			if (!publicShareBaseUrl) throw new Error("PUBLIC_SHARE_BASE_URL is required for DownloadFile");
+			return handleDownloadFile(client, params, publicShareBaseUrl);
 
 		default:
 			throw new Error(`Unknown command identifier: "${command}"`);

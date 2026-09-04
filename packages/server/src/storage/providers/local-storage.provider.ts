@@ -5,10 +5,11 @@ import { resolve, dirname } from "node:path";
 import { randomUUID, createHmac } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
-import type {
-	StorageProvider,
-	FileMeta,
-	FileEntry,
+import {
+	StorageObjectNotFoundError,
+	type StorageProvider,
+	type FileMeta,
+	type FileEntry,
 } from "./storage-provider.interface.js";
 
 const SIGN_UPLOAD_PREFIX = "upload";
@@ -59,7 +60,15 @@ export class LocalStorageProvider implements StorageProvider {
 
 	async download(key: string): Promise<{ stream: Readable; meta: FileEntry }> {
 		const filePath = resolve(this.baseDir, key);
-		const st = await stat(filePath);
+		let st;
+		try {
+			st = await stat(filePath);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				throw new StorageObjectNotFoundError();
+			}
+			throw error;
+		}
 		const filename = key.split("/").pop() || key;
 		return {
 			stream: createReadStream(filePath),

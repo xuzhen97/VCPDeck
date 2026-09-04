@@ -1,6 +1,6 @@
 {
   "name": "@vcpdeck/shared",
-  "version": "0.6.18",
+  "version": "0.6.24",
   "private": true,
   "files": [
     "dist"

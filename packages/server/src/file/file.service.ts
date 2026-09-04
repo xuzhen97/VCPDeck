@@ -87,23 +87,60 @@ export class FileService {
 		return { downloadUrl: url, size: file.size, sha256: file.sha256 };
 	}
 
-	/** 查询已过期文件 */
+	/** 查询已过期且未被有效分享保护的文件。 */
 	async getExpiredFiles(): Promise<{ id: string; key: string }[]> {
-		const files = await this.prisma.file.findMany({
-			where: { expiresAt: { lte: new Date() } },
+		return this.prisma.file.findMany({
+			where: {
+				expiresAt: { lte: new Date() },
+				shares: { none: { revokedAt: null, invalidatedAt: null } },
+			},
 			select: { id: true, key: true },
 		});
-		return files;
 	}
 
-	/** 删除 File 记录 + Storage 对象 */
+	/** 删除 File 记录和 Storage 对象，先通过 deleting 状态认领。 */
 	async delete(fileId: string): Promise<void> {
-		const file = await this.prisma.file.findUnique({
-			where: { id: fileId },
+		const claimed = await this.prisma.$transaction(async (tx) => {
+			const file = await tx.file.findUnique({ where: { id: fileId } });
+			if (!file) return null;
+			const activeShares = await tx.storageShare.count({
+				where: { fileId, revokedAt: null, invalidatedAt: null },
+			});
+			if (activeShares > 0) {
+				throw Object.assign(new Error("File has active storage shares"), {
+					code: "FILE_HAS_ACTIVE_SHARES",
+					statusCode: 409,
+				});
+			}
+			const result = await tx.file.updateMany({
+				where: { id: fileId, status: file.status },
+				data: { status: "deleting" },
+			});
+			if (result.count !== undefined && result.count !== 1) {
+				throw Object.assign(new Error("File deletion state changed"), {
+					code: "FILE_DELETE_CONFLICT",
+					statusCode: 409,
+				});
+			}
+			return { id: file.id, key: file.key, status: file.status };
 		});
-		if (!file) return;
-		await this.storage.delete(file.key);
-		await this.prisma.file.delete({ where: { id: fileId } });
+		if (!claimed) return;
+
+		try {
+			await this.storage.delete(claimed.key);
+			await this.prisma.file.delete({ where: { id: claimed.id } });
+		} catch (error) {
+			await this.prisma.file.updateMany({
+				where: { id: claimed.id, status: "deleting" },
+				data: { status: claimed.status },
+			});
+			throw error;
+		}
+	}
+
+	/** 按 Storage key 查询已登记 File。 */
+	async findByKey(key: string) {
+		return this.prisma.file.findUnique({ where: { key } });
 	}
 
 	/** 按 ID 查询 */

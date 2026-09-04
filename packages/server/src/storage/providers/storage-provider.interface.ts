@@ -1,5 +1,13 @@
 import type { Readable } from "node:stream";
 
+/** Provider 明确确认对象不存在时使用的错误。 */
+export class StorageObjectNotFoundError extends Error {
+	constructor() {
+		super("Storage object not found");
+		this.name = "StorageObjectNotFoundError";
+	}
+}
+
 /** 文件元数据（上传时提供） */
 export interface FileMeta {
 	/** 关联 Job；Pi 临时附件在 Job 创建前上传，可为空 */

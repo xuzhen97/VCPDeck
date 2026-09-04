@@ -1,6 +1,6 @@
 # VCPDeck 领域与数据模型
 
-> 状态：Current｜维护责任：Server/Shared 维护者｜最后核验：2026-08-15｜事实来源：`packages/shared/src/`、`packages/server/prisma/schema.prisma`
+> 状态：Current｜维护责任：Server/Shared 维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`｜事实来源：`packages/shared/src/`、`packages/server/prisma/schema.prisma`
 
 本文解释核心领域概念、状态和数据权威；字段级定义以 Shared 类型和 Prisma schema 为准。
 
@@ -29,6 +29,7 @@ TODO、工作流、聊天和 VCPToolBox 桥接目前没有落地数据模型，�
 | Client | `id` / `clientId` | SQLite + 在线 Socket | 持久属性在 DB；在线 lease 由当前 socket 决定 |
 | Job | `id` / `jobId` | SQLite | 远程操作的统一调度和审计信封 |
 | File | `id` | SQLite；正文在 Storage | 文件元数据和生命周期 |
+| StorageShare | `id` / `tokenHash` | SQLite；正文仍在 Storage | 长期公开只读分享、撤销审计和 File 保留关系；只保存 Token 哈希 |
 | StorageBackendConfig | 单行配置 | SQLite | 当前 Storage Provider 及配置 JSON |
 | FrpsInstance | `id` | SQLite | FRPS 连接、Dashboard 和端口范围配置 |
 | FrpMapping | `id` | SQLite；实际进程在 Client | 目标服务到 FRPS 的映射 |
@@ -138,7 +139,7 @@ stateDiagram-v2
 
 File 记录只保存 Storage 对象元数据；import/export 正文由当前 Storage Provider 保存。轻量文件 Job 是另一条数据路径：`file.writeText` 的完整 content 进入 Job payload，`file.readText` 的完整 content 进入 Job result，并随 SQLite 一起持久化和备份。
 
-典型 File 状态为 `pending` → `completed`，并可通过 `expiresAt` 进入清理范围。`purpose` 区分普通 Job 文件、Pi 临时附件等用途。
+典型 File 状态为 `pending` → `completed`，删除时短暂进入 `deleting`，Provider 删除失败恢复原状态；并可通过 `expiresAt` 进入清理范围。`purpose` 区分普通 Job 文件、Pi 临时附件等用途。Storage Share 状态不单独存储：撤销优先，其次是底层对象已确认失效或 File 已删除，否则为 active。
 
 不变量：
 
@@ -148,7 +149,8 @@ File 记录只保存 Storage 对象元数据；import/export 正文由当前 Sto
 - Client import 当前只验证读取字节数，不计算或比较 SHA-256；Shared 的 `SHA256_MISMATCH` 尚未在该路径使用；
 - Shared `FileTransferResult.sha256` 是必填，但 Alibaba export 和当前 import 的实际结果不总是提供该字段，属于类型与运行行为偏移；
 - `rootDir` 当前由调用方提交，未绑定 Client 发现的 root；现有 symlink/不存在目标父链检查也不完整；
-- 切换 Storage Provider 不自动迁移旧对象；
+- 切换 Storage Provider 不自动迁移旧对象；Storage Share 创建和公开读取都要求当前 Provider 与 File.storageKind 匹配，不匹配仅暂时不可用，不会自动失效；
+- active Storage Share 是 File 保留锁，显式删除和到期清理必须跳过/拒绝受保护 File；撤销后才允许删除，File 删除后分享审计保留并因 fileId 为空失效；
 - Local Provider 的签名 secret 在配置缺失时生成并持久化到 `StorageBackendConfig.config`；正常重启不会自动轮换，密钥丢失或被替换时旧签名 URL 失效。
 
 远程文件操作与路径不变量见 [`design/remote-files.md`](./design/remote-files.md)，Provider 和 File 生命周期见 [`design/storage.md`](./design/storage.md)。

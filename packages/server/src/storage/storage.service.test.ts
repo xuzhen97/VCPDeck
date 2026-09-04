@@ -117,6 +117,20 @@ describe("StorageService", () => {
 		});
 	});
 
+	describe("当前 Provider 下载", () => {
+		it("暴露当前后端种类并委托服务端下载流", async () => {
+			const download = vi.fn().mockResolvedValue({
+				stream: Readable.from(["data"]),
+				meta: { key: "k", filename: "a.txt", size: 4, clientId: "", storageKind: "local", createdAt: new Date() },
+			});
+			vi.spyOn(service, "getProvider").mockReturnValue({ download } as never);
+
+			expect(service.currentKind()).toBe("local");
+			await expect(service.openDownload("k")).resolves.toMatchObject({ meta: { key: "k" } });
+			expect(download).toHaveBeenCalledWith("k");
+		});
+	});
+
 	describe("resolveFilename", () => {
 		it("从 File 记录返回真实文件名（阿里云盘 key 为 fileId）", async () => {
 			prisma.file.findFirst.mockResolvedValue({

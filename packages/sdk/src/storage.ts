@@ -61,7 +61,7 @@ export function createStorageApi(client: Pick<VcpDeckClient, "request">) {
 		delete: (key: string, signal?: AbortSignal) =>
 			client.request<{ ok: true }>(
 				"DELETE",
-				`/api/storage/${encodeURIComponent(key)}`,
+				`/api/storage/raw/${encodeURIComponent(key)}`,
 				undefined,
 				signal,
 			),

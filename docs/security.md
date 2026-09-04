@@ -1,6 +1,6 @@
 # VCPDeck 安全模型与维护要求
 
-> 状态：Current｜维护责任：安全负责人/模块维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
+> 状态：Current｜维护责任：安全负责人/模块维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`
 
 ## 1. 安全结论
 
@@ -16,6 +16,7 @@ VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可
 - Client PSK、Launcher Token、FRPS Token；
 - 阿里云 clientSecret/accessToken/refreshToken；
 - Storage 签名 URL；
+- Storage Share 的长期公开 URL（Token 是 bearer capability；数据库仅保存其 SHA-256 哈希）；
 - 命令、脚本、环境变量、路径、终端正文、Pi prompt/响应和文件内容；
 - Release 构件、上传分片 URL及下载路径；
 - Client 一键安装 bootstrap 响应和目标机 `launcher.env`；
@@ -27,6 +28,7 @@ VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可
 
 ```text
 Browser / SDK / CLI ──身份认证──> Server
+外部消费者 ──长期 opaque Token──> Server 公开 Storage Share
 Client ──PSK──> Server /client
 Server/Client ──本机随机 Token──> Launcher
 Browser/Client ──短期签名──> Storage
@@ -108,6 +110,9 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 - Local Provider 使用随机 signSecret，并在缺失时持久化到 Storage 配置；该字段必须按密钥保护，轮换会使旧 URL 失效；
 - Storage Provider 配置可能含 OAuth Token，API 只能返回安全摘要；
 - Provider 切换不自动迁移/删除旧数据，应避免产生失控副本；
+- Storage Share 默认长期有效，撤销后公开读取返回 410；有效分享锁定 File，必须先撤销再删除；Token 只在创建响应返回一次，泄露后只能撤销；
+- 公开分享管理响应不含 Token、sharePath、Storage key 或 Provider URL；公开错误不透传 File ID、Provider 错误或签名 URL；
+- 图片按扩展名固定 MIME 并由 Server 代理，SVG 使用 sandbox CSP 和 `nosniff`；普通文件只返回不可缓存 302；
 - Content-Disposition 文件名需要安全编码，浏览器不得执行上传内容；
 - running 文件 Job 的 cancel/timeout 当前不会可靠中止 fs、HTTP 或分片操作，断线终局也没有持久补报；结果不明时不得自动重试写、移、删或 import；
 - 文件 Job payload 和 Gateway progress/done/cancelled 仍缺严格双端 parser 与当前 Socket/Job Client 再绑定校验。
@@ -179,6 +184,7 @@ PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 
 ## 12. 安全测试门禁
 
 - 未认证/非 admin/禁用身份、最后 admin、自禁用和管理面恢复；
+- Storage Share Token 格式、哈希持久化、管理面脱敏、公开 404/410/503、撤销、File 删除锁、Provider 永久缺失与临时故障分类；
 - Session/Credential 撤销、过期、重新启用、密码修改、既有 `/app` Socket、strict parser 和登录限速；
 - PSK 错误连接；
 - FRP secret 脱敏、默认凭据、同 Client 多实例拒绝/隔离、端口、frpc 退出、Client 重启和删除孤儿；

@@ -30,6 +30,10 @@ describe("VCPDeckBridge Dispatcher", () => {
 		files: {
 			roots: vi.fn().mockResolvedValue(["/"]),
 			readText: vi.fn().mockResolvedValue("file content"),
+			export: vi.fn().mockResolvedValue({ fileId: "file-1", key: "secret-key", size: 3, sha256: "hash" }),
+		},
+		storageShares: {
+			create: vi.fn().mockResolvedValue({ filename: "photo.png", previewable: true, sharePath: "/api/public/storage-shares/token" }),
 		},
 	};
 
@@ -71,6 +75,24 @@ describe("VCPDeckBridge Dispatcher", () => {
 		});
 		expect(res.status).toBe("success");
 		expect(mockClient.files.readText).toHaveBeenCalledWith("c1", "/", "/etc/hosts", undefined);
+	});
+
+	it("routes DownloadFile to export and create a public share", async () => {
+		const res = await dispatchCommand(mockClient, {
+			command: "DownloadFile",
+			client: "node-1",
+			path: "/tmp/photo.png",
+		}, "https://deck.example");
+		expect(res.status).toBe("success");
+		expect(mockClient.files.export).toHaveBeenCalledWith("c1", { rootDir: "/", path: "/tmp/photo.png" });
+		expect(mockClient.storageShares.create).toHaveBeenCalledWith({ fileId: "file-1" });
+		expect(res.content?.[0]?.text).toContain("https://deck.example/api/public/storage-shares/token");
+		expect(res.content?.[1]).toEqual({ type: "image_url", image_url: { url: "https://deck.example/api/public/storage-shares/token" } });
+	});
+
+	it("should reject DownloadFile without an HTTP(S) public share base", async () => {
+		await expect(dispatchCommand(mockClient, { command: "DownloadFile", client: "node-1", path: "a.txt" }, "ftp://deck.example"))
+			.rejects.toThrow("PUBLIC_SHARE_BASE_URL");
 	});
 
 	it("should throw on unknown command", async () => {
@@ -132,6 +154,7 @@ describe("VCPDeckBridge Dispatcher Matrix", () => {
 			},
 			files: {
 				roots: vi.fn().mockResolvedValue(["/"]),
+				export: vi.fn().mockResolvedValue({ fileId: "file-1", key: "key", size: 1, sha256: "hash" }),
 				list: vi.fn().mockResolvedValue({ files: [] }),
 				stat: vi.fn().mockResolvedValue({ path: "/tmp/a", size: 100 }),
 				readText: vi.fn().mockResolvedValue("file content"),
@@ -151,6 +174,9 @@ describe("VCPDeckBridge Dispatcher Matrix", () => {
 			},
 			storage: {
 				getBackendConfig: vi.fn().mockResolvedValue({ type: "local" }),
+			},
+			storageShares: {
+				create: vi.fn().mockResolvedValue({ filename: "file.txt", previewable: false, sharePath: "/api/public/storage-shares/token" }),
 			},
 			releases: {
 				list: vi.fn().mockResolvedValue({ total: 1, page: 1, totalPages: 1, data: [] }),
@@ -180,6 +206,7 @@ describe("VCPDeckBridge Dispatcher Matrix", () => {
 		{ command: "DeleteFrpMapping", args: { mappingId: "mapping-1" }, spy: () => mockClient.frp.delete },
 		{ command: "GetStorageStatus", args: {}, spy: () => mockClient.storage.getBackendConfig },
 		{ command: "ListReleases", args: { page: "1", pageSize: "10" }, spy: () => mockClient.releases.list },
+		{ command: "DownloadFile", args: { client: "node-1", path: "/tmp/file.txt" }, spy: () => mockClient.files.export },
 	];
 
 	it("VCP_COMMANDS matches matrix command set", () => {
@@ -188,7 +215,7 @@ describe("VCPDeckBridge Dispatcher Matrix", () => {
 
 	for (const { command, args, spy } of cases) {
 		it(`routes ${command}`, async () => {
-			const res = await dispatchCommand(mockClient as any, { command, ...args });
+			const res = await dispatchCommand(mockClient as any, { command, ...args }, "https://deck.example");
 			expect(res.status).toBe("success");
 			expect(spy()).toHaveBeenCalled();
 		});

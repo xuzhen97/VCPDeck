@@ -1,6 +1,6 @@
 # VCPDeck Storage 子系统设计
 
-> 状态：Current｜维护责任：Server/Storage 维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
+> 状态：Current｜维护责任：Server/Storage 维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`
 >
 > 事实来源：`packages/server/src/storage/`、`packages/server/src/file/`、`packages/server/src/job/`、`packages/shared/src/`、`packages/sdk/src/storage.ts`、`packages/sdk/src/aliyundrive.ts`
 
@@ -19,7 +19,7 @@
 
 ### 非目标
 
-- 不提供通用对象存储产品或公开永久链接；
+- 不提供通用对象存储产品；公开 Storage Share 提供默认长期、可撤销的只读分享，但不提供公开上传、目录分享、自动到期、密码或访问次数限制；
 - 不在 Provider 切换时自动迁移、复制或删除旧对象；
 - 不把 Storage 作为远程路径权限边界，最终路径安全仍由 Client 校验；
 - 不承诺 Server 重启后恢复尚未完成的外部直传会话；
@@ -32,7 +32,7 @@ flowchart LR
     Browser[Browser] -->|认证 REST：创建/完成/配置| Server[Server 控制面]
     Client[Client] -->|Socket.IO：Job 状态| Server
 
-    Server --> FileDB[(SQLite\nFile / Job / StorageBackendConfig)]
+    Server --> FileDB[(SQLite\nFile / StorageShare / Job / StorageBackendConfig)]
     Server --> StorageService[StorageService]
     StorageService --> Local[LocalStorageProvider]
     StorageService --> Alibaba[AlibabaStorageProvider]
@@ -66,6 +66,7 @@ flowchart LR
 | --- | --- | --- |
 | 当前激活 Provider 和配置 | SQLite `StorageBackendConfig` | 持久化 |
 | File 标识、key、名称、大小、状态、Provider | SQLite `File` | 持久化 |
+| Storage Share 状态、审计和 File 关系 | SQLite `StorageShare` | 持久化；只保存 Token 哈希，不保存公开 URL |
 | 远程操作生命周期 | SQLite `Job` | 持久化 |
 | Local 文件正文 | Server `baseDir` | 文件系统持久化 |
 | Alibaba 文件正文 | 阿里云盘对象 | 外部持久化 |
@@ -133,7 +134,7 @@ sequenceDiagram
 - `GET /api/storage/download/:key` 验证签名后流式返回正文；
 - 响应文件名优先从 File 元数据解析，而不是从 Storage key 推断。
 
-稳定入口用于 Browser 下载，避免页面长期缓存已经过期的临时 URL；它不是永久公开链接。
+稳定入口用于 Browser 下载，避免页面长期缓存已经过期的临时 URL；它要求认证，不是公开分享。公开分享入口 `GET /api/public/storage-shares/:token` 使用哈希 Token，无需认证：普通文件 302 到当前 Provider 的短期 URL，白名单图片由 Server 代理。公开响应使用 `private, no-store` 和 `no-referrer`；SVG 额外使用 `sandbox; default-src 'none'; img-src data:`。
 
 ## 6. Alibaba Provider 数据流
 
@@ -146,7 +147,7 @@ sequenceDiagram
 5. Provider 在 Token 临近过期时刷新，并通过持久化回调写回数据库；
 6. `verify` 使用远端 API 判断授权是否有效，但网络错误不会自动清空已保存配置。
 
-配置和状态 API 只返回安全摘要，不返回 access token、refresh token、clientSecret 或完整配置 JSON。PKCE 会话只在内存中，Server 重启后必须重新开始 OAuth。
+配置和状态 API 只返回安全摘要，不返回 access token、refresh token、clientSecret 或完整配置 JSON。Storage Share 管理 API 不返回 Token、sharePath、Storage key 或 Provider URL；公开访问不写逐次审计，反向代理访问日志必须脱敏 Token。PKCE 会话只在内存中，Server 重启后必须重新开始 OAuth。
 
 ### 6.2 Browser 上传后导入远程机器
 
@@ -189,7 +190,7 @@ sequenceDiagram
 
 Alibaba 直传以声明大小和 Provider 完成响应收敛，`File.sha256` 由 Client 在上传完成后顺序读源文件计算并随结果上报、Server 回填；Server 不读取正文，因此是 Client 端哈希，不提供与 Local 路径相同的 Server 端字节哈希保证。Client 导出控制端点以共享 PSK（`x-vcpdeck-psk`）认证，PSK 不发送到 Provider 分片 URL；既有 `/api/files/export-sessions*` 保留给携带用户 Cookie/Bearer 的 SDK 调用。
 
-## 7. File 与传输状态
+## 7. File、Storage Share 与传输状态
 
 ```mermaid
 stateDiagram-v2
@@ -206,7 +207,7 @@ File 当前只有约定式的 `pending/completed` 状态；没有独立 `failed`
 - 网络超时不证明 complete 未执行，应重新查询 Job/File；
 - `File.key` 是 Provider 对象标识，Alibaba 使用 `fileId`，不能假设总是路径；
 - import/export 对象正文不进入 Job payload/result，Job 只引用 FileRef、对象 key、大小、摘要等元数据；轻量 `readText/writeText` 的文本留痕由远程文件协议单独治理；
-- 过期清理必须同时处理对象和 File 元数据，避免只删一侧。
+- 过期清理必须同时处理对象和 File 元数据，避免只删一侧；仍有 active Storage Share 的 File 不进入清理。active 分享必须先撤销才能删除 File，删除阶段使用 `deleting` 认领；File 删除后分享记录保留审计并因 `fileId=null` 失效。
 
 ## 8. API 与协议边界
 
@@ -219,7 +220,7 @@ File 当前只有约定式的 `pending/completed` 状态；没有独立 `failed`
 
 Storage API 分为三类：
 
-1. **认证控制端点**：配置、Token、传输会话、complete、进度和 URL 续期；Client 导出控制使用 `/api/files/client-export-sessions*`，以 `x-vcpdeck-psk` 认证（Public 路由绕过用户 AuthGuard 后在 Controller 内校验）；Browser/SDK 继续使用用户 Cookie/Bearer，包括既有 `/api/files/export-sessions*`；
+1. **认证控制端点**：配置、Token、传输会话、complete、进度、URL 续期和 Storage Share 管理；Client 导出控制使用 `/api/files/client-export-sessions*`，以 `x-vcpdeck-psk` 认证（Public 路由绕过用户 AuthGuard 后在 Controller 内校验）；Browser/SDK 继续使用用户 Cookie/Bearer，包括既有 `/api/files/export-sessions*`；
 2. **短期能力端点**：Local 签名 PUT/GET；
 3. **Provider 外部 URL**：Alibaba 分片 PUT 和临时 GET。
 
@@ -264,6 +265,7 @@ Storage API 分为三类：
 ## 12. 相关文档
 
 - [`ADR-0006`](../adr/0006-file-control-and-data-plane-separation.md) — 控制面与数据面分离的决策理由；
+- [`ADR-0024`](../adr/0024-public-storage-share-capabilities.md) — 长期 opaque capability 公开 Storage 分享；
 - [`../architecture.md`](../architecture.md) — Storage 在系统中的位置；
 - [`../domain-model.md`](../domain-model.md) — File 和 StorageBackendConfig 不变量；
 - [`../protocols.md`](../protocols.md) — REST、签名 URL、直传和完成语义；

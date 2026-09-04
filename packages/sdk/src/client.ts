@@ -8,6 +8,7 @@ import { createJobsApi } from "./jobs.js";
 import { createPiApi } from "./pi.js";
 import { createReleasesApi } from "./releases.js";
 import { createStorageApi } from "./storage.js";
+import { createStorageSharesApi } from "./storage-shares.js";
 import { createTerminalsApi } from "./terminal.js";
 
 /** SDK 认证模式；显式 cookie 仅用于不会自动维护 Cookie 的 Node.js 调用方。 */
@@ -61,6 +62,7 @@ export class VcpDeckClient {
 	readonly clients;
 	readonly clientInstaller;
 	readonly storage;
+	readonly storageShares;
 	readonly aliyundrive;
 	readonly frp;
 	readonly pi;
@@ -81,6 +83,7 @@ export class VcpDeckClient {
 		this.clients = createClientsApi(this);
 		this.clientInstaller = createClientInstallerApi(this);
 		this.storage = createStorageApi(this);
+		this.storageShares = createStorageSharesApi(this);
 		this.aliyundrive = createAliyunDriveApi(this);
 		this.frp = createFrpApi(this, this.jobs);
 		this.pi = createPiApi(this);

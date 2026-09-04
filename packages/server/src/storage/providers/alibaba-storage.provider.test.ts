@@ -190,6 +190,30 @@ describe("AlibabaStorageProvider 直传会话", () => {
 		expect(body).toMatchObject({ file_id: "file-1", upload_id: "upload-1" });
 	});
 
+	it("对象不存在时只将明确的 OpenAPI 404 分类为永久缺失", async () => {
+		const provider = new AlibabaStorageProvider({
+			...baseConfig,
+			driveId: "drive-1",
+		} as never);
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("missing", { status: 404 })));
+
+		await expect(provider.download("file-missing")).rejects.toMatchObject({
+			name: "StorageObjectNotFoundError",
+		});
+	});
+
+	it("授权或临时 OpenAPI 错误不分类为永久缺失", async () => {
+		const provider = new AlibabaStorageProvider({
+			...baseConfig,
+			driveId: "drive-1",
+		} as never);
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("down", { status: 503 })));
+
+		await expect(provider.download("file-temporary-failure")).rejects.not.toMatchObject({
+			name: "StorageObjectNotFoundError",
+		});
+	});
+
 	it("getExternalDownloadUrl 返回外部 URL", async () => {
 		const provider = new AlibabaStorageProvider({
 			...baseConfig,

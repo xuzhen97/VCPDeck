@@ -1,6 +1,6 @@
 # VCPDeck 测试策略
 
-> 状态：Current｜维护责任：各包维护者/发布维护者｜最后核验：2026-09-03｜适用版本：`0.6.22` / 当前 `main`
+> 状态：Current｜维护责任：各包维护者/发布维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`
 
 ## 1. 目标
 
@@ -19,7 +19,7 @@
 | 包内集成测试 | `*.integration.test.ts` | Server Gateway/Broker、Client Pi Worker、Terminal |
 | 项目 E2E | `scripts/test.cjs` | 真实 Server + mock/真实 Client + REST/WS |
 | CLI 能力 E2E | `scripts/test-cli-capabilities.cjs` | 真实 Server + Client 上驱动 CLI 构建产物，逐域验证 clients/jobs/files/frp/storage/terminal/pi 与错误路径（临时物全部隔离在 `.tmp/cli-e2e/`） |
-| VCP 插件 E2E | `scripts/test-vcp-plugin.cjs` | 真实 VCPToolBox `ToolCallParser` 解析工具块 + 隔离 Server/Client/FRPS；21 个动作全量验证（临时物隔离在 `.tmp/vcp-plugin-e2e/`） |
+| VCP 插件 E2E | `scripts/test-vcp-plugin.cjs` | 真实 VCPToolBox `ToolCallParser` 解析工具块 + 隔离 Server/Client/FRPS；22 个动作及公开 Storage Share 下载、图片预览、撤销删除锁验证（临时物隔离在 `.tmp/vcp-plugin-e2e/`） |
 | FRP E2E | `scripts/test-frp.cjs` | 真实 frps/frpc、TCP/HTTP 映射 |
 | Launcher 冒烟 | `scripts/smoke-launcher.cjs` | prepare/apply、探活、失败回退 |
 | 手工/环境验收 | `docs/verification/` | Windows PTY、外部存储、真实网络和发布演练 |
@@ -85,7 +85,7 @@ AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明�
 | 远程文件/路径 | 双端 parser、Windows/Linux 认证 root、UNC/盘符、symlink/junction、不存在目标父链、文本上限、覆盖/临时文件、大小/SHA、取消、断流、失败后下一 Job 派发、重连和 Socket/Job 归属 |
 | Terminal | 协议 parser、operator/viewer/token、snapshot/output 同序列、上游 gap/resync、UTF-8 上限、持续输入速率、generation、SQLite 状态、首次/重复 attach-detach TTL、expired 上报、真实 PTY 和进程树 |
 | Pi | capability/协议 parser、Owner/Observer、runId/CAS、cwd/projectKey、Session 树、交互/非阻塞 Extension 投影与 Trust、图片、SSE、重连/重启、隐私和真实模型 smoke |
-| Storage Provider | 签名篡改/过期、上传下载、Provider 故障、孤儿清理 |
+| Storage Provider | 签名篡改/过期、上传下载、Provider 故障、对象永久缺失分类、公开分享和 File 保留锁 |
 | Storage 阿里云盘真环境验收 | `node scripts/test-release-alibaba.cjs`（ADR-0019 一键端到端）：脚本自建同一临时 DB、Server/Client Launcher，按会话把两个 Release 分片直接 PUT Provider，验证 Server 本地无目标 zip、下载 302、更新与清理；仅首次输入 clientId、浏览器 OAuth code 或 3001 端口冲突时需人工介入 |
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |
 | Auth/Security | 密码/Cookie/Bearer、禁用/启用、撤销/过期、修改密码、既有 Socket、最后 admin、parser/限速、Actor、防泄漏 |

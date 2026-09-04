@@ -1968,7 +1968,7 @@ async function main() {
 
 	// 52. DELETE with admin auth → ok
 	if (testKey) {
-		const { status } = await apiJson("DELETE", `/api/storage/${testKey}`);
+		const { status } = await apiJson("DELETE", `/api/storage/raw/${testKey}`);
 		if (status === 200) {
 			pass("Storage delete", "200");
 		} else {
@@ -2003,7 +2003,7 @@ async function main() {
 
 	// 54. DELETE without auth → 401
 	{
-		const { status } = await apiJson("DELETE", `/api/storage/some-key`, {
+		const { status } = await apiJson("DELETE", `/api/storage/raw/some-key`, {
 			noCookie: true,
 		});
 		if (status === 401) {

@@ -3,7 +3,6 @@ import {
 	Post,
 	Get,
 	Put,
-	Delete,
 	Body,
 	Param,
 	Query,
@@ -127,13 +126,6 @@ export class StorageController {
 			res.destroy();
 		});
 		stream.pipe(res);
-	}
-
-	/** 删除文件 */
-	@Delete(":key(*)")
-	async delete(@Param("key") key: string) {
-		await this.storageService.delete(key);
-		return { ok: true };
 	}
 
 	/** 查看当前存储后端配置 */

@@ -1,6 +1,6 @@
 # VCPDeck API 与通信协议
 
-> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-08-15｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
+> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
 
 本文维护协议语义和兼容规则，不复制全部 DTO。字段级事实以 `@vcpdeck/shared` 导出、SDK 和 Controller 实现为准。
 
@@ -34,7 +34,9 @@
 - `GET /api/health`
 - `GET /api/status`
 - `GET /api/releases/:version/file`
-- `GET /api/client-installer/scripts/:platform`、`assets/:name`、`preflight`、`POST /api/client-installer/bootstrap`（仅开关启用且当前 Release 就绪时返回安装信息）
+- `GET /api/client-installer/scripts/:platform`
+- `GET /api/public/storage-shares/:token`（长期 opaque Token；普通文件 302，白名单图片由 Server 代理）
+- `GET /api/client-installer/assets/:name`、`preflight`、`POST /api/client-installer/bootstrap`（仅开关启用且当前 Release 就绪时返回安装信息）
 - `GET/PUT /api/client-installer/clients/:clientId/...`（Public 路由，但必须携带当前共享 `x-vcpdeck-psk`）
 - 带有效签名的 `PUT /api/storage/upload/:key`
 - 带有效签名的 `GET /api/storage/download/:key`
@@ -50,7 +52,7 @@
 | `/api/clients` | 在线 Client、别名、终端和 Pi 子资源 |
 | `/api/jobs` | Job 创建、分页查询、详情和取消 |
 | `/api/files` | 文件上传/导出会话及进度 |
-| `/api/storage` | 签名能力、文件流和 Provider 配置 |
+| `/api/storage` | 签名能力、文件流、Provider 配置和 Storage Share 管理 |
 | `/api/aliyundrive` | 阿里云盘配置、OAuth 和授权验证 |
 | `/api/frp` | FRPS 实例和映射 |
 | `/api/releases` | 发布上传、列表和构件下载 |
@@ -296,6 +298,8 @@ Pi 使用精确协议版本 `PI_SESSION_JOB_PROTOCOL_VERSION = 1`。不匹配时
 | `/api/files/client-export-sessions*` | Client 导出直传：创建、分片续期和完成；Public 路由但必须携带 `x-vcpdeck-psk` |
 | `/api/storage/upload-token`、`download-token` | 签发 Local 或 Provider 下载能力 |
 | `/api/storage/download-redirect/:key` | 认证稳定下载入口；每次请求实时取得临时下载 URL并 302 |
+| `/api/storage/raw/:key` | 认证受控删除入口；已登记 File 必须经过 FileService 保留锁 |
+| `/api/storage/shares`、`/api/storage/shares/:id` | 认证创建、查询、列表和撤销长期分享；管理响应不返回 Token 或 sharePath |
 | `/api/storage/config` | 查询安全后端摘要或切换当前后端 |
 | `/api/aliyundrive/*` | 阿里云配置、OAuth、状态、验证和撤销 |
 
@@ -304,6 +308,8 @@ Pi 使用精确协议版本 `PI_SESSION_JOB_PROTOCOL_VERSION = 1`。不匹配时
 - Local：带有效 HMAC 的 `PUT /api/storage/upload/:key` 和 `GET /api/storage/download/:key`；
 - Alibaba：Browser/Client 直接使用短期分片 PUT URL 和临时下载 URL；
 - 短期 URL 持有者具备其约束范围内的能力，因此数据端点不再要求 Cookie/Bearer。
+- Storage Share 公开端点只接受 43 字符 Base64URL Token；未知 Token 返回 404，撤销/失效返回 410，Provider 暂时不可用返回 503；Token 哈希查询和错误投影不泄露 File ID、Storage key 或 Provider URL。
+- 图片仅按文件名扩展名固定映射 MIME，SVG 添加 `sandbox; default-src 'none'; img-src data:`；普通文件响应为不可缓存 302。
 
 字段级事实以 Shared 的 `FileRef`/`UploadTarget`、SDK 的 `files`/`storage`/`aliyundrive` 和当前 Controller 为准，本文不复制全部 DTO。
 

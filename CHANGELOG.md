@@ -2,6 +2,23 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.24] - 2026-09-04
+
+### Added
+
+- 新增通用公开 Storage Share：认证操作者可创建、查询和撤销长期下载链接；公开读取不需要登录，Token 仅保存哈希且只在创建时返回。
+- VCPDeckBridge 新增 `DownloadFile`：导出远程文件并返回公开 Markdown 下载链接；白名单图片额外返回 `image_url` 预览。
+- 有效公开分享为 File 保留锁，显式删除和到期清理会阻止删除；Provider 明确确认对象永久缺失时分享返回 410 并失效。
+- 对齐 VCPToolBox 平铺 stdin 参数和 `invocationCommands[].command` manifest 契约，VCPDeckBridge 提供 22 个命令。
+
+### Changed
+
+- 统一 Server、Client、Shared、SDK、CLI 与 VCPDeckBridge 发布版本为 `0.6.24`；VCPDeckBridge stdio timeout 为 300000ms。
+
+### Security
+
+- 公开图片由 Server 代理并固定 MIME；SVG 使用 sandbox CSP。公开链接是 bearer capability，泄露后需撤销分享；反向代理和访问日志必须脱敏分享 Token。
+
 ## [0.6.22] - 2026-09-04
 
 ### Fixed

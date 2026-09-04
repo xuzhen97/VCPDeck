@@ -58,7 +58,7 @@ export function loadConfig(searchDir?: string): PluginConfig {
 	const timeoutStr =
 		envFromFile.REQUEST_TIMEOUT_MS ||
 		process.env.REQUEST_TIMEOUT_MS ||
-		"30000";
+		"300000";
 
 	if (!serverUrl) {
 		throw new Error(
@@ -71,9 +71,23 @@ export function loadConfig(searchDir?: string): PluginConfig {
 		);
 	}
 
+	const normalizedServerUrl = serverUrl.replace(/\/+$/, "");
+	const publicShareBaseUrl = (
+		envFromFile.PUBLIC_SHARE_BASE_URL ||
+		process.env.PUBLIC_SHARE_BASE_URL ||
+		normalizedServerUrl
+	).replace(/\/+$/, "");
+	try {
+		const parsed = new URL(publicShareBaseUrl);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
+	} catch {
+		throw new Error("PUBLIC_SHARE_BASE_URL must be a valid HTTP(S) URL");
+	}
+
 	return {
-		serverUrl: serverUrl.replace(/\/+$/, ""),
+		serverUrl: normalizedServerUrl,
 		apiToken,
-		requestTimeoutMs: Number.parseInt(timeoutStr, 10) || 30000,
+		publicShareBaseUrl,
+		requestTimeoutMs: Number.parseInt(timeoutStr, 10) || 300000,
 	};
 }

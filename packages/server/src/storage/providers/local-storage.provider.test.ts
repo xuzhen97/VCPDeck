@@ -69,4 +69,10 @@ describe("LocalStorageProvider download signature", () => {
 			vi.useRealTimers();
 		}
 	});
+
+	it("对象不存在时抛出可识别的永久缺失错误", async () => {
+		await expect(provider.download("missing/file.txt")).rejects.toMatchObject({
+			name: "StorageObjectNotFoundError",
+		});
+	});
 });

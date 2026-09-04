@@ -10,6 +10,16 @@
  * 参考：https://www.yuque.com/aliyundrive/zpfszx
  */
 
+export class AlibabaOpenApiError extends Error {
+	constructor(
+		readonly status: number,
+		message: string,
+	) {
+		super(message);
+		this.name = "AlibabaOpenApiError";
+	}
+}
+
 export interface AlibabaOpenApiClientOptions {
 	openapiBase: string;
 	accessToken: string;
@@ -38,7 +48,8 @@ export class AlibabaOpenApiClient {
 		});
 		if (!response.ok) {
 			const text = await response.text().catch(() => "");
-			throw new Error(
+			throw new AlibabaOpenApiError(
+				response.status,
 				`Aliyun OpenAPI failed: HTTP ${response.status} ${text.slice(0, 200)}`,
 			);
 		}

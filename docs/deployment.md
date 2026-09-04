@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 仍由 PM2/用户登录模型管理，Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 
@@ -73,6 +73,7 @@ pnpm release --version=x.y.z
 | `VCPDECK_PSK` | `vcpdeck-dev-psk` | `/client` PSK，生产必须随机替换 |
 | `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | `/client` Gateway CORS Origin |
 | `VCPDECK_PORT` | `3001` | Server 监听端口（1–65535 整数）；改端口时必须同步配置 Client `VCPDECK_SERVER` 与 Server Launcher `VCPDECK_PROBE_URL` |
+| `PUBLIC_SHARE_BASE_URL` | 空（回退 `SERVER_URL`） | VCPDeckBridge 公开分享链接基地址；只接受 HTTP(S)，反向代理部署时应配置为外部公开地址 |
 
 **已知配置不一致：** 根目录和 `packages/server/.env.example` 目前写的是 `VCPDECK_CLIENT_PSK`，但 Server 与 Client 实际代码都读取 `VCPDECK_PSK`；`VCPDECK_CLIENT_PSK_FILE` 当前也未实现。部署必须设置 `VCPDECK_PSK`，不要依赖示例中的旧变量。
 
@@ -224,6 +225,7 @@ Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 PM
 
 - SQLite 文件及其同目录数据库文件；
 - `data/storage`（使用 Local Provider 时；相对 baseDir 自动锚定到 `<VCPDECK_APP_DIR>/data/storage`，见 ADR-0014）；
+- Storage Share 元数据位于 SQLite；公开分享 Token 明文和完整 share URL不进入数据库；
 - `data/job-outputs`（Job stdout/stderr spool；相对路径同样锚定 `<VCPDECK_APP_DIR>`，完整保留不封顶、无自动清理，可能含敏感输出，备份与访问权限应与 Storage 同级对待）；
 - `data/releases` 或 `VCPDECK_RELEASES_DIR`；Release 清理只删除归档正文，不删除 Release 审计行和 `clientStates`；
 - Launcher `VCPDECK_APP_DIR`；其中 `apps/retention.json` 记录成功切换历史，状态损坏时 Launcher 会暂停本地旧版本自动删除；
@@ -264,7 +266,7 @@ pnpm --filter @vcpdeck/frontend build
 
 跨源部署（不随包或单独托管）时，Server 静态托管不生效，需自备静态 SPA 托管并配置未知路由回退到 `index.html`。反向代理至少应转发：
 
-- `/api/*` → Server `3001`
+- `/api/*` → Server `3001`；公开 Storage Share 路径中的 Token 必须在访问日志中脱敏
 - `/socket.io/*` → Server `3001`，启用 WebSocket upgrade
 
 SSE 需要关闭不必要的代理缓冲并允许长连接。若跨 Origin，必须同步设置 `VCPDECK_FRONTEND_ORIGIN`，且 Cookie Secure 需要 HTTPS。
@@ -312,7 +314,9 @@ location / {
 2. 确认 `VCPDECK_RELEASES_DIR` 为版本目录外**绝对路径**（`install.cjs` 引导默认如此）；Local Storage 相对 `baseDir` 已锚定到 `VCPDECK_APP_DIR`，若曾在旧版本目录内写过 storage 文件，先按 [ADR-0014](./adr/0014-storage-basedir-anchor.md) 搬迁；
 3. 确认目标 Linux 机器已安装 `unzip`（自动更新解压依赖）；
 4. 确认版本号从未用过：同一版本重复上传会被拒绝（`RELEASE_DUPLICATE_VERSION`），且失败后不能“重试同一版本”，只能发布新版本号；
-5. 若发布依赖新 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 串行升级全部 Client Launcher，再单独升级 Server Launcher；每台完成 SHA-256、守护进程、控制端口和业务版本核验后才能继续；本次版本保留能力不通过业务 Release 自动远程升级旧 Launcher。
+5. 若启用 VCPDeckBridge 公开分享，配置插件 `PUBLIC_SHARE_BASE_URL` 为反向代理对外 HTTP(S) 地址；未配置时仅回退插件的 `SERVER_URL`，不能依赖转发头自动猜测；
+6. 反向代理必须对 `/api/public/storage-shares/<token>` 的访问日志脱敏，并允许公开端点的无认证请求；
+7. 若发布依赖新 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 串行升级全部 Client Launcher，再单独升级 Server Launcher；每台完成 SHA-256、守护进程、控制端口和业务版本核验后才能继续；本次版本保留能力不通过业务 Release 自动远程升级旧 Launcher。
 
 ### 9.2 构建并上传
 

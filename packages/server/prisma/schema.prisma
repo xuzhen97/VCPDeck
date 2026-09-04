@@ -198,6 +198,27 @@ model File {
   expiresAt   DateTime?
   createdAt   DateTime  @default(now())
   purpose     String    @default("job")
+  shares      StorageShare[]
+}
+
+model StorageShare {
+  id                    String    @id
+  tokenHash             String    @unique
+  fileId                String?
+  file                  File?     @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  filename              String
+  mimeType              String?
+  storageKind           String
+  createdByIdentityId   String?
+  createdByName         String?
+  createdVia            String?
+  createdAt             DateTime  @default(now())
+  revokedAt             DateTime?
+  revokedByIdentityId   String?
+  invalidatedAt         DateTime?
+  invalidReason         String?
+
+  @@index([fileId])
 }
 
 // ── 交互式终端会话（只存元数据；终端正文/快照/token 不入库） ──

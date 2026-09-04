@@ -9,4 +9,5 @@ export * from "./jobs.js";
 export * from "./pi.js";
 export * from "./releases.js";
 export * from "./storage.js";
+export * from "./storage-shares.js";
 export * from "./terminal.js";

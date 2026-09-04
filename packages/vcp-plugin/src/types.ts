@@ -9,10 +9,15 @@ export interface VcpRequest {
 	[key: string]: unknown;
 }
 
-export interface VcpContentItem {
-	type: "text";
-	text: string;
-}
+export type VcpContentItem =
+	| {
+			type: "text";
+			text: string;
+	  }
+	| {
+			type: "image_url";
+			image_url: { url: string };
+	  };
 
 export interface VcpResponse {
 	status: "success" | "error";
@@ -28,5 +33,6 @@ export interface VcpResponse {
 export interface PluginConfig {
 	serverUrl: string;
 	apiToken: string;
+	publicShareBaseUrl: string;
 	requestTimeoutMs?: number;
 }

@@ -144,6 +144,16 @@ export class StorageService implements OnModuleInit {
 		await this.requireDirectProvider().completeDirectUpload(fileId, uploadId);
 	}
 
+	/** 返回当前激活 Provider 的稳定标识。 */
+	currentKind(): "local" | "alibaba" {
+		return this.getProvider() instanceof AlibabaStorageProvider ? "alibaba" : "local";
+	}
+
+	/** 服务端主动取得文件流。 */
+	async openDownload(key: string): Promise<{ stream: Readable; meta: FileEntry }> {
+		return this.getProvider().download(key);
+	}
+
 	/** 是否支持目标机直连下载（ADR-0016：字节不经过 Server） */
 	supportsDirectDownload(): boolean {
 		const p = this.getProvider();

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * VCPDeckBridge VCPToolBox 集成 E2E 测试
- * 在完全隔离环境中验证全部 21 个插件动作 + 错误矩阵
+ * 在完全隔离环境中验证全部 22 个插件动作、分享生命周期 + 错误矩阵
  */
 'use strict';
 
@@ -34,6 +34,7 @@ const isWin = os.platform() === "win32";
 const frpDir = isWin ? "win-x64" : "linux-x64";
 const frpsExe = isWin ? "frps.exe" : "frps";
 const frpcExe = isWin ? "frpc.exe" : "frpc";
+const PLUGIN_TIMEOUT_MS = 300000;
 
 // ── 状态 ──
 let _serverProc, _clientProc, _frpsProc, _echoServer;
@@ -105,7 +106,7 @@ let BASE = "";
 let _adminCookie = "";
 
 async function apiJson(method, apiPath, body) {
-	const opts = { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${_token.value}` } };
+	const opts = { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${_token.value}`, Cookie: _adminCookie } };
 	if (body) opts.body = JSON.stringify(body);
 	const res = await fetch(`${BASE}${apiPath}`, opts);
 	return { status: res.status, body: await res.json().catch(() => null) };
@@ -270,14 +271,15 @@ function spawnPlugin(args) {
 			...(manifest.pluginSpecificEnvConfig || {}),
 			SERVER_URL: `http://localhost:${SERVER_PORT}`,
 			API_TOKEN: _token.value || "",
-			REQUEST_TIMEOUT_MS: "30000",
+			REQUEST_TIMEOUT_MS: String(PLUGIN_TIMEOUT_MS),
+			PUBLIC_SHARE_BASE_URL: "",
 		};
 
 		const child = spawn(spawnCmd, spawnArgs, {
 			cwd: _sandboxPluginDir,
 			env,
 			stdio: ["pipe", "pipe", "pipe"],
-			timeout: 35000,
+			timeout: PLUGIN_TIMEOUT_MS,
 		});
 
 		let stdout = "";
@@ -288,8 +290,8 @@ function spawnPlugin(args) {
 
 		const timer = setTimeout(() => {
 			child.kill();
-			reject(new Error("Plugin process timeout (35s)"));
-		}, 35000);
+			reject(new Error(`Plugin process timeout (${PLUGIN_TIMEOUT_MS}ms)`));
+		}, PLUGIN_TIMEOUT_MS);
 
 		child.on("error", (err) => { clearTimeout(timer); reject(err); });
 		child.on("close", (code) => {
@@ -404,8 +406,8 @@ async function main() {
 	const echoPort = _echoServer.address().port;
 	pass("echo server started", `port=${echoPort}`);
 
-	// ── 21 动作 E2E ──
-	console.log("\n--- 21 Actions E2E ---");
+	// ── 22 个插件命令 + 分享生命周期 E2E ──
+	console.log("\n--- 22 Plugin Commands + Share Lifecycle E2E ---");
 	let jobId = null, longJobId = null, mappingId = null;
 	const ROOT_DIR = "D:\\"; // Client 工作目录在 D:\
 	const relDir = `.tmp/vcp-plugin-e2e/${runId}`;
@@ -521,22 +523,84 @@ async function main() {
 		try { await invoke("DeleteFile", { clientId: CLIENT_ID, rootDir: ROOT_DIR, path: mvTarget }); pass("16. DeleteFile", mvTarget); }
 		catch (e) { fail("16. DeleteFile", e.message); }
 
-		// 17. GetStorageStatus
-		try { await invoke("GetStorageStatus"); pass("17. GetStorageStatus"); }
-		catch (e) { fail("17. GetStorageStatus", e.message); }
+		// 17. DownloadFile + 18. public text download + 19. public PNG preview + 20. public SVG preview
+		const downloadFilePath = `${relDir}/download.txt`;
+		const downloadContent = `vcp-plugin-download-${runId}`;
+		let downloadShareUrl = "";
+		try {
+			await invoke("WriteFile", { clientId: CLIENT_ID, rootDir: ROOT_DIR, path: downloadFilePath, content: downloadContent });
+			const r = await invoke("DownloadFile", { clientId: CLIENT_ID, rootDir: ROOT_DIR, path: downloadFilePath });
+			const text = r.result?.content?.[0]?.text ?? r.content?.[0]?.text ?? "";
+			downloadShareUrl = text.match(/<((?:https?:\/\/)[^>]+)>/)?.[1] || "";
+			if (!downloadShareUrl) throw new Error(`missing share URL: ${text.slice(0, 120)}`);
+			pass("17. DownloadFile", "share created");
 
-		// 18. ListReleases
-		try { await invoke("ListReleases"); pass("18. ListReleases"); }
-		catch (e) { fail("18. ListReleases", e.message); }
+			const publicResponse = await fetch(downloadShareUrl, { redirect: "manual" });
+			const location = publicResponse.headers.get("location");
+			if (publicResponse.status !== 302 || !location) throw new Error(`expected 302, got ${publicResponse.status}`);
+			const downloaded = await fetch(new URL(location, downloadShareUrl));
+			const body = await downloaded.text();
+			if (!downloaded.ok || body !== downloadContent) throw new Error(`download body mismatch: ${body.slice(0, 80)}`);
+			if (publicResponse.headers.get("cache-control") !== "private, no-store" || publicResponse.headers.get("referrer-policy") !== "no-referrer") {
+				throw new Error("public redirect security headers missing");
+			}
+			pass("18. public text download", "302 followed without auth");
+		} catch (e) { fail("17-18. DownloadFile/public text", e.message); }
 
-		// 19. ListFrpInstances
+		const pngPath = `${relDir}/preview.png`;
+		const pngContent = `synthetic-png-${runId}`;
+		try {
+			await invoke("WriteFile", { clientId: CLIENT_ID, rootDir: ROOT_DIR, path: pngPath, content: pngContent });
+			const r = await invoke("DownloadFile", { clientId: CLIENT_ID, rootDir: ROOT_DIR, path: pngPath });
+			const text = r.result?.content?.[0]?.text ?? r.content?.[0]?.text ?? "";
+			const url = text.match(/<((?:https?:\/\/)[^>]+)>/)?.[1] || "";
+			const response = await fetch(url);
+			const body = await response.text();
+			if (!response.ok || response.headers.get("content-type") !== "image/png" || !response.headers.get("content-disposition")?.startsWith("inline;") || response.headers.get("x-content-type-options") !== "nosniff" || body !== pngContent) {
+				throw new Error(`PNG response mismatch: ${response.status} ${response.headers.get("content-type")}`);
+			}
+			pass("19. public PNG preview", "fixed MIME and inline response");
+		} catch (e) { fail("19. public PNG preview", e.message); }
+
+		const svgPath = `${relDir}/preview.svg`;
+		const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="16"><text x="1" y="12">${runId}</text></svg>`;
+		try {
+			await invoke("WriteFile", { clientId: CLIENT_ID, rootDir: ROOT_DIR, path: svgPath, content: svgContent });
+			const r = await invoke("DownloadFile", { clientId: CLIENT_ID, rootDir: ROOT_DIR, path: svgPath });
+			const items = r.result?.content ?? r.content ?? [];
+			const text = items[0]?.text ?? "";
+			const url = text.match(/<((?:https?:\/\/)[^>]+)>/)?.[1] || "";
+			const response = await fetch(url);
+			const body = await response.text();
+			const expectedCsp = "sandbox; default-src 'none'; img-src data:";
+			if (!response.ok || response.headers.get("content-type") !== "image/svg+xml" || response.headers.get("content-disposition")?.startsWith("inline;") !== true || response.headers.get("content-security-policy") !== expectedCsp || !items.some((item) => item.type === "image_url" && item.image_url?.url === url) || body !== svgContent) {
+				throw new Error(`SVG response mismatch: ${response.status} ${response.headers.get("content-type")}`);
+			}
+			pass("20. public SVG preview", "image_url and sandbox CSP");
+		} catch (e) { fail("20. public SVG preview", e.message); }
+
+		// 21. GetStorageStatus
+		try { await invoke("GetStorageStatus"); pass("21. GetStorageStatus"); }
+		catch (e) { fail("21. GetStorageStatus", e.message); }
+
+		// 22. ListReleases
+		try { await invoke("ListReleases"); pass("22. ListReleases"); }
+		catch (e) { fail("22. ListReleases", e.message); }
+
+		// 23-27. FRP actions are included in VCP_COMMANDS and exercised here.
 		try {
 			const r = await invoke("ListFrpInstances");
 			const total = JSON.parse(r.result?.content?.[0]?.text ?? r.content?.[0]?.text).total;
-			pass("19. ListFrpInstances", `total=${total}`);
-		} catch (e) { fail("19. ListFrpInstances", e.message); }
+			pass("23. ListFrpInstances", `total=${total}`);
+		} catch (e) { fail("23. ListFrpInstances", e.message); }
 
-		// 20. CreateFrpMapping
+		try {
+			const r = await invoke("ListFrpMappings", { clientId: CLIENT_ID });
+			const mappings = JSON.parse(r.result?.content?.[0]?.text ?? r.content?.[0]?.text);
+			if (!Array.isArray(mappings.data)) throw new Error("mapping list payload missing data");
+			pass("24. ListFrpMappings", `total=${mappings.total}`);
+		} catch (e) { fail("24. ListFrpMappings", e.message); }
+
 		try {
 			const r = await invoke("CreateFrpMapping", {
 				clientId: CLIENT_ID,
@@ -546,10 +610,9 @@ async function main() {
 			});
 			const m = JSON.parse(r.result?.content?.[0]?.text ?? r.content?.[0]?.text);
 			mappingId = m.id || m.mappingId;
-			pass("20. CreateFrpMapping", `id=${mappingId} status=${m.status}`);
-		} catch (e) { fail("20. CreateFrpMapping", e.message); }
+			pass("25. CreateFrpMapping", `id=${mappingId} status=${m.status}`);
+		} catch (e) { fail("25. CreateFrpMapping", e.message); }
 
-		// Wait for mapping
 		if (mappingId) {
 			let gotResp2 = false, mStatus = "";
 			for (let i = 0; i < 60; i++) {
@@ -563,12 +626,38 @@ async function main() {
 				} catch { /* */ }
 				await sleep(1000);
 			}
-			if (gotResp2) pass("21. GetFrpMapping", `status=${mStatus}`);
-			else fail("21. GetFrpMapping", "no response after 60s");
+			if (gotResp2) pass("26. GetFrpMapping", `status=${mStatus}`);
+			else fail("26. GetFrpMapping", "no response after 60s");
 
-			// DeleteFrpMapping
-			try { await invoke("DeleteFrpMapping", { mappingId }); pass("cleanup. DeleteFrpMapping", mappingId); }
-			catch (e) { fail("cleanup. DeleteFrpMapping", e.message); }
+			try { await invoke("DeleteFrpMapping", { mappingId }); pass("27. DeleteFrpMapping", mappingId); }
+			catch (e) { fail("27. DeleteFrpMapping", e.message); }
+		}
+
+		// Share lifecycle: management output stays metadata-only, active shares block raw-key deletion.
+		if (downloadShareUrl) {
+			try {
+				const shares = await apiJson("GET", "/api/storage/shares?page=1&pageSize=100");
+				const shareBody = JSON.stringify(shares.body || {});
+				if (shareBody.includes("tokenHash") || shareBody.includes("sharePath")) throw new Error("share metadata leaks token material");
+				const share = shares.body?.data?.find((item) => item.filename === "download.txt" && item.status === "active");
+				if (!share?.id || !share.fileId) throw new Error("active download share not found");
+				const jobs = await apiJson("GET", `/api/jobs?clientId=${encodeURIComponent(CLIENT_ID)}&page=1&pageSize=100`);
+				const exportJob = jobs.body?.data?.find((job) => job.type === "file.export" && job.result?.fileId === share.fileId);
+				const key = exportJob?.result?.key;
+				if (typeof key !== "string" || !key) throw new Error("export storage key not found for deletion check");
+				const rawKeyPath = key.split("/").map(encodeURIComponent).join("/");
+				const blocked = await apiJson("DELETE", `/api/storage/raw/${rawKeyPath}`);
+				if (blocked.status !== 409 || blocked.body?.code !== "FILE_HAS_ACTIVE_SHARES") throw new Error(`expected active-share deletion lock, got ${blocked.status} ${JSON.stringify(blocked.body)}`);
+				pass("28. active share deletion lock", "409 FILE_HAS_ACTIVE_SHARES");
+
+				const revoked = await apiJson("DELETE", `/api/storage/shares/${encodeURIComponent(share.id)}`);
+				if (revoked.status !== 200 || revoked.body?.status !== "revoked") throw new Error(`revoke failed: ${revoked.status} ${JSON.stringify(revoked.body)}`);
+				const unavailable = await fetch(downloadShareUrl, { redirect: "manual" });
+				if (unavailable.status !== 410) throw new Error(`expected revoked share 410, got ${unavailable.status}`);
+				const deleted = await apiJson("DELETE", `/api/storage/raw/${rawKeyPath}`);
+				if (deleted.status !== 200) throw new Error(`delete after revoke failed: ${deleted.status}`);
+				pass("29. revoke then delete", "public access 410 and File deleted");
+			} catch (e) { fail("28-29. share lifecycle", e.message); }
 		}
 
 		// ── 错误矩阵 ──

@@ -1,6 +1,6 @@
 # VCPDeck 运维手册
 
-> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
+> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`
 
 ## 1. 运行基线
 
@@ -82,7 +82,7 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 | 版本/更新状态 | `GET /api/status` | 返回 `serverVersion` 和 activeRelease |
 | 登录与 DB | 登录 + `GET /api/auth/me` | 间接验证认证表和 Cookie |
 | Client 在线 | `GET /api/clients` | 只列在线 Client |
-| Storage | 配置页/签名上传下载小文件 | 验证 Provider 和正文路径 |
+| Storage | 配置页/签名上传下载小文件、公开分享抽查 | 验证 Provider、正文路径和公开分享状态 |
 | FRPS | 实例 probe + Dashboard | 验证 Dashboard/连接配置 |
 | Launcher | `control.json`、进程和日志 | 检查守护与本机控制通道 |
 | Terminal/Pi | capability + 小型真实操作 | 浅健康不会验证这些能力 |
@@ -288,13 +288,21 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - Server 重启后等待 Client PI_STATE 重建项目锁和活动 Run；
 - Session 正文不在 SQLite，恢复历史需要目标机器 Pi Session 备份。
 
-### Storage 下载失效
+### Storage 分享与下载失效
+
+- 公开分享地址是长期 bearer capability，丢失或泄露时不能从列表恢复 Token；泄露后立即撤销对应分享并按需创建新分享；
+- `GET /api/public/storage-shares/<token>` 不需要 Cookie/Bearer；未知 Token 应为 404，撤销/底层确认失效应为 410，Provider 切换或临时故障应为 503/502 且不自动失效；
+- active 分享会阻止 File 显式删除和到期清理；先调用认证的 `DELETE /api/storage/shares/:id` 撤销，再删除 File；File 删除后分享审计保留但状态为 invalid；
+- 反向代理访问日志必须脱敏公开路径 Token，不记录 Provider URL、Storage key 或原始外部错误；
+- 图片按文件名扩展名固定 MIME；SVG 必须带 sandbox CSP，公开图片由 Server 代理且使用 `nosniff`。
+
 
 - 签名或外部临时 URL 是否过期，过期时重新签发；
 - `StorageBackendConfig.config` 中的 Local signSecret 是否丢失、被覆盖或轮换；
 - Provider 是否已切换，旧对象是否仍在原后端；
 - File 元数据和正文是否一致；
-- 检查磁盘空间、权限和外部存储授权。
+- 检查磁盘空间、权限和外部存储授权；公开分享若仅因 Provider 切换暂时不可用，不要撤销，切回原 Provider 后重试。
+
 - `file.export` 以 `Export session failed: HTTP 401` 立即失败时，核对 Server/Client 的 `VCPDECK_PSK` 是否一致，并确认两端均已升级到包含 `client-export-sessions*` 认证的版本；不得把 PSK 写入日志或工单。
 
 ### Release 卡住或失败
@@ -367,7 +375,8 @@ File 到期对象仍由现有每 10 分钟任务处理。Release 清理不负责
 - Terminal 审计和长期 `starting/interrupted` 会话记录；
 - Launcher Node 缓存；
 - 日志；
-- 目标机器上的 `.vcpdeck-tmp-*` 残留。
+- 目标机器上的 `.vcpdeck-tmp-*` 残留；
+- Storage Share 默认长期有效，需定期检查 active 分享；撤销后再删除对应 File，不能绕过 FileService 删除受保护对象。
 
 删除前先做元数据/正文一致性检查和备份；清理目标机器临时文件前还要确认没有仍在运行但 Server 已失联的 import/write Job。
 

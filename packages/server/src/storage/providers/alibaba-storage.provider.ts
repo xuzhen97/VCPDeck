@@ -24,7 +24,10 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { AlibabaOpenApiClient } from "./alibaba-openapi.client.js";
+import {
+	AlibabaOpenApiClient,
+	AlibabaOpenApiError,
+} from "./alibaba-openapi.client.js";
 import {
 	DEFAULT_OPENAPI_BASE,
 	DEFAULT_TRANSFER_FOLDER,
@@ -35,10 +38,11 @@ import type { AlibabaStorageConfig } from "./alibaba-types.js";
 
 /** 直传分片大小（与现有 uploadToKey 的分片逻辑一致） */
 export const ALIBABA_PART_SIZE = DEFAULT_PART_SIZE;
-import type {
-	StorageProvider,
-	FileMeta,
-	FileEntry,
+import {
+	StorageObjectNotFoundError,
+	type StorageProvider,
+	type FileMeta,
+	type FileEntry,
 } from "./storage-provider.interface.js";
 
 const SIGN_UPLOAD_PREFIX = "upload";
@@ -453,10 +457,18 @@ export class AlibabaStorageProvider implements StorageProvider {
 		const rt = await this.ensureReady();
 		const client = this.makeClient();
 
-		const result = await client.getDownloadUrl({
-			driveId: rt.driveId,
-			fileId: key,
-		});
+		let result;
+		try {
+			result = await client.getDownloadUrl({
+				driveId: rt.driveId,
+				fileId: key,
+			});
+		} catch (error) {
+			if (error instanceof AlibabaOpenApiError && error.status === 404) {
+				throw new StorageObjectNotFoundError();
+			}
+			throw error;
+		}
 		const downloadUrl = String(
 			result.url ?? result.download_url ?? result.downloadUrl ?? "",
 		);
@@ -466,6 +478,7 @@ export class AlibabaStorageProvider implements StorageProvider {
 
 		const response = await fetch(rewriteAlibabaDownloadUrl(downloadUrl));
 		if (!response.ok || !response.body) {
+			if (response.status === 404) throw new StorageObjectNotFoundError();
 			throw new Error(`阿里云盘下载失败: HTTP ${response.status}`);
 		}
 

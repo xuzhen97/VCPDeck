@@ -19,7 +19,7 @@ function makeResponse() {
 	};
 }
 
-describe("StorageController download redirect", () => {
+describe("StorageController", () => {
 	it("每次请求都签发 fresh URL 并返回不可缓存的 302", async () => {
 		const { controller, storageService } = makeController();
 		storageService.createDownloadToken

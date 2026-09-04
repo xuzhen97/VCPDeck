@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.6.18";
+    exports2.VERSION = "0.6.24";
   }
 });
 
@@ -1665,7 +1665,7 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -1883,6 +1883,12 @@ var require_dist = __commonJS({
       FRP_DELETE: "frp.delete",
       FRP_LIST: "frp.list",
       FRP_RECONCILE: "frp.reconcile"
+    };
+    exports2.StorageShareErrorCode = {
+      FILE_NOT_SHAREABLE: "FILE_NOT_SHAREABLE",
+      STORAGE_PROVIDER_MISMATCH: "STORAGE_PROVIDER_MISMATCH",
+      STORAGE_SHARE_NOT_FOUND: "STORAGE_SHARE_NOT_FOUND",
+      FILE_HAS_ACTIVE_SHARES: "FILE_HAS_ACTIVE_SHARES"
     };
     function parseFrpOperationTimeout(value) {
       const parsed = value === void 0 ? 30 : Number(value);
@@ -2375,8 +2381,30 @@ function createStorageApi(client) {
     /** 构造受鉴权的稳定下载地址；不提前签发临时 URL。 */
     downloadUrl: (key) => `/api/storage/download-redirect/${encodeURIComponent(key)}`,
     createDownloadToken: (input, signal) => client.request("POST", "/api/storage/download-token", input, signal),
-    delete: (key, signal) => client.request("DELETE", `/api/storage/${encodeURIComponent(key)}`, void 0, signal),
+    delete: (key, signal) => client.request("DELETE", `/api/storage/raw/${encodeURIComponent(key)}`, void 0, signal),
     setBackend: (input, signal) => client.request("PUT", "/api/storage/config", input, signal)
+  };
+}
+
+// ../sdk/dist/storage-shares.js
+function createStorageSharesApi(client) {
+  return {
+    create: (input, signal) => client.request("POST", "/api/storage/shares", input, signal),
+    list: (options = {}, signal) => {
+      const params = new URLSearchParams();
+      if (options.fileId)
+        params.set("fileId", options.fileId);
+      if (options.status)
+        params.set("status", options.status);
+      if (options.page)
+        params.set("page", String(options.page));
+      if (options.pageSize)
+        params.set("pageSize", String(options.pageSize));
+      const query = params.toString();
+      return client.request("GET", `/api/storage/shares${query ? `?${query}` : ""}`, void 0, signal);
+    },
+    get: (id, signal) => client.request("GET", `/api/storage/shares/${encodeURIComponent(id)}`, void 0, signal),
+    revoke: (id, signal) => client.request("DELETE", `/api/storage/shares/${encodeURIComponent(id)}`, void 0, signal)
   };
 }
 
@@ -2440,6 +2468,7 @@ var VcpDeckClient = class {
   clients;
   clientInstaller;
   storage;
+  storageShares;
   aliyundrive;
   frp;
   pi;
@@ -2459,6 +2488,7 @@ var VcpDeckClient = class {
     this.clients = createClientsApi(this);
     this.clientInstaller = createClientInstallerApi(this);
     this.storage = createStorageApi(this);
+    this.storageShares = createStorageSharesApi(this);
     this.aliyundrive = createAliyunDriveApi(this);
     this.frp = createFrpApi(this, this.jobs);
     this.pi = createPiApi(this);
@@ -2556,17 +2586,27 @@ function loadConfig(searchDir) {
   }
   const serverUrl = envFromFile.SERVER_URL || process.env.VCPDECK_SERVER_URL || process.env.SERVER_URL || "";
   const apiToken = envFromFile.API_TOKEN || process.env.VCPDECK_API_TOKEN || process.env.API_TOKEN || "";
-  const timeoutStr = envFromFile.REQUEST_TIMEOUT_MS || process.env.REQUEST_TIMEOUT_MS || "30000";
+  const timeoutStr = envFromFile.REQUEST_TIMEOUT_MS || process.env.REQUEST_TIMEOUT_MS || "300000";
   if (!serverUrl) {
     throw new Error("Missing SERVER_URL in config.env or environment variables");
   }
   if (!apiToken) {
     throw new Error("Missing API_TOKEN in config.env or environment variables");
   }
+  const normalizedServerUrl = serverUrl.replace(/\/+$/, "");
+  const publicShareBaseUrl = (envFromFile.PUBLIC_SHARE_BASE_URL || process.env.PUBLIC_SHARE_BASE_URL || normalizedServerUrl).replace(/\/+$/, "");
+  try {
+    const parsed = new URL(publicShareBaseUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      throw new Error();
+  } catch {
+    throw new Error("PUBLIC_SHARE_BASE_URL must be a valid HTTP(S) URL");
+  }
   return {
-    serverUrl: serverUrl.replace(/\/+$/, ""),
+    serverUrl: normalizedServerUrl,
     apiToken,
-    requestTimeoutMs: Number.parseInt(timeoutStr, 10) || 3e4
+    publicShareBaseUrl,
+    requestTimeoutMs: Number.parseInt(timeoutStr, 10) || 3e5
   };
 }
 
@@ -3005,8 +3045,44 @@ async function handleListReleases(client, params) {
   };
 }
 
+// dist/handlers/download.js
+function publicUrl(base, sharePath) {
+  let parsed;
+  try {
+    parsed = new URL(base);
+  } catch {
+    throw new Error("PUBLIC_SHARE_BASE_URL must be a valid HTTP(S) URL");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("PUBLIC_SHARE_BASE_URL must be a valid HTTP(S) URL");
+  }
+  return new URL(sharePath, `${parsed.toString().replace(/\/$/, "")}/`).toString();
+}
+async function handleDownloadFile(client, params, baseUrl) {
+  const clientFilter = String(params.clientId || params.clientName || params.client || "");
+  const filePath = String(params.path || "");
+  if (!clientFilter || !filePath) {
+    throw new Error("Missing required parameters: clientId (or client), path");
+  }
+  const clientId = await resolveClientId(client, clientFilter);
+  const rootDir = await resolveRootDir(client, clientId, params.rootDir ? String(params.rootDir) : void 0);
+  const exported = await client.files.export(clientId, { rootDir, path: filePath });
+  const share = await client.storageShares.create({ fileId: exported.fileId });
+  const url = publicUrl(baseUrl, share.sharePath);
+  const content = [
+    { type: "text", text: `[\u4E0B\u8F7D ${share.filename}](<${url}>)` }
+  ];
+  if (share.previewable)
+    content.push({ type: "image_url", image_url: { url } });
+  return {
+    status: "success",
+    content,
+    messageForAI: `\u6587\u4EF6 ${share.filename} \u5DF2\u5BFC\u51FA\u5E76\u521B\u5EFA\u516C\u5F00\u4E0B\u8F7D\u94FE\u63A5\u3002`
+  };
+}
+
 // dist/dispatcher.js
-async function dispatchCommand(client, req) {
+async function dispatchCommand(client, req, publicShareBaseUrl) {
   const { command, params: _nested, maid: _maid, ...flat } = req;
   const params = { ...flat, ..._nested ?? {} };
   switch (command) {
@@ -3052,6 +3128,10 @@ async function dispatchCommand(client, req) {
       return handleGetStorageStatus(client);
     case "ListReleases":
       return handleListReleases(client, params);
+    case "DownloadFile":
+      if (!publicShareBaseUrl)
+        throw new Error("PUBLIC_SHARE_BASE_URL is required for DownloadFile");
+      return handleDownloadFile(client, params, publicShareBaseUrl);
     default:
       throw new Error(`Unknown command identifier: "${command}"`);
   }
@@ -3122,7 +3202,7 @@ async function main() {
         token: config.apiToken
       }
     });
-    const res = await dispatchCommand(client, req);
+    const res = await dispatchCommand(client, req, config.publicShareBaseUrl);
     sendResponse(res);
   } catch (err) {
     process.stderr.write(`[VCPDeck] Error: ${err}

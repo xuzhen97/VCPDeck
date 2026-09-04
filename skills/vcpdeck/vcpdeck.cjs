@@ -2431,7 +2431,7 @@ function createStorageApi(client) {
     /** 构造受鉴权的稳定下载地址；不提前签发临时 URL。 */
     downloadUrl: (key) => `/api/storage/download-redirect/${encodeURIComponent(key)}`,
     createDownloadToken: (input, signal) => client.request("POST", "/api/storage/download-token", input, signal),
-    delete: (key, signal) => client.request("DELETE", `/api/storage/${encodeURIComponent(key)}`, void 0, signal),
+    delete: (key, signal) => client.request("DELETE", `/api/storage/raw/${encodeURIComponent(key)}`, void 0, signal),
     setBackend: (input, signal) => client.request("PUT", "/api/storage/config", input, signal)
   };
 }
@@ -3941,7 +3941,7 @@ var require_cjs = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/globals.node.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/globals.node.js
 function createCookieJar() {
   return new CookieJar();
 }
@@ -3986,7 +3986,7 @@ function parse2(setCookieString) {
 }
 var nextTick, globalThisShim, defaultBinaryType, CookieJar;
 var init_globals_node = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/globals.node.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/globals.node.js"() {
     nextTick = process.nextTick;
     globalThisShim = global;
     defaultBinaryType = "nodebuffer";
@@ -4034,7 +4034,7 @@ var init_globals_node = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/util.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/util.js
 function pick(obj, ...attr) {
   return attr.reduce((acc, k) => {
     if (obj.hasOwnProperty(k)) {
@@ -4080,7 +4080,7 @@ function randomString() {
 }
 var NATIVE_SET_TIMEOUT, NATIVE_CLEAR_TIMEOUT, BASE64_OVERHEAD;
 var init_util = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/util.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/util.js"() {
     init_globals_node();
     NATIVE_SET_TIMEOUT = globalThisShim.setTimeout;
     NATIVE_CLEAR_TIMEOUT = globalThisShim.clearTimeout;
@@ -4088,7 +4088,7 @@ var init_util = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/parseqs.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/parseqs.js
 function encode(obj) {
   let str = "";
   for (let i in obj) {
@@ -4110,7 +4110,7 @@ function decode(qs) {
   return qry;
 }
 var init_parseqs = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/parseqs.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/parseqs.js"() {
   }
 });
 
@@ -4230,9 +4230,9 @@ var require_ms = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/common.js
+// ../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/common.js
 var require_common = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/common.js"(exports2, module2) {
+  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/common.js"(exports2, module2) {
     function setup(env) {
       createDebug.debug = createDebug;
       createDebug.default = createDebug;
@@ -4407,9 +4407,9 @@ var require_common = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/browser.js
+// ../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/browser.js
 var require_browser = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/browser.js"(exports2, module2) {
+  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/browser.js"(exports2, module2) {
     exports2.formatArgs = formatArgs;
     exports2.save = save;
     exports2.load = load;
@@ -4692,9 +4692,9 @@ var require_supports_color = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/node.js
+// ../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/node.js
 var require_node = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/node.js"(exports2, module2) {
+  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/node.js"(exports2, module2) {
     var tty = require("tty");
     var util = require("util");
     exports2.init = init;
@@ -4866,9 +4866,9 @@ var require_node = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/index.js
+// ../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/index.js
 var require_src = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3_supports-color@7.2.0/node_modules/debug/src/index.js"(exports2, module2) {
+  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/index.js"(exports2, module2) {
     if (typeof process === "undefined" || process.type === "renderer" || process.browser === true || process.__nwjs) {
       module2.exports = require_browser();
     } else {
@@ -4877,10 +4877,10 @@ var require_src = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transport.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transport.js
 var import_component_emitter, import_debug, debug, TransportError, Transport;
 var init_transport = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transport.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transport.js"() {
     init_esm();
     import_component_emitter = __toESM(require_cjs(), 1);
     init_util();
@@ -5020,10 +5020,10 @@ var init_transport = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling.js
 var import_debug2, debug2, Polling;
 var init_polling = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling.js"() {
     init_transport();
     init_util();
     init_esm();
@@ -5173,10 +5173,10 @@ var init_polling = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/has-cors.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/has-cors.js
 var value, hasCORS;
 var init_has_cors = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/has-cors.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/has-cors.js"() {
     value = false;
     try {
       value = typeof XMLHttpRequest !== "undefined" && "withCredentials" in new XMLHttpRequest();
@@ -5186,7 +5186,7 @@ var init_has_cors = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.js
 function empty() {
 }
 function unloadHandler() {
@@ -5213,7 +5213,7 @@ function newRequest(opts) {
 }
 var import_component_emitter2, import_debug3, debug3, BaseXHR, Request, hasXHR2;
 var init_polling_xhr = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.js"() {
     init_polling();
     import_component_emitter2 = __toESM(require_cjs(), 1);
     init_util();
@@ -5431,10 +5431,10 @@ var init_polling_xhr = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.node.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.node.js
 var XMLHttpRequestModule, XMLHttpRequest2, XHR;
 var init_polling_xhr_node = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.node.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-xhr.node.js"() {
     XMLHttpRequestModule = __toESM(require_XMLHttpRequest(), 1);
     init_polling_xhr();
     XMLHttpRequest2 = XMLHttpRequestModule.default || XMLHttpRequestModule;
@@ -9133,10 +9133,10 @@ var init_wrapper = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/websocket.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/websocket.js
 var import_debug4, debug4, isReactNative, BaseWS, WebSocketCtor;
 var init_websocket = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/websocket.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/websocket.js"() {
     init_transport();
     init_util();
     init_esm();
@@ -9231,10 +9231,10 @@ var init_websocket = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/websocket.node.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/websocket.node.js
 var WS;
 var init_websocket_node = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/websocket.node.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/websocket.node.js"() {
     init_wrapper();
     init_websocket();
     WS = class extends BaseWS {
@@ -9269,10 +9269,10 @@ var init_websocket_node = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/webtransport.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/webtransport.js
 var import_debug5, debug5, WT;
 var init_webtransport = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/webtransport.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/webtransport.js"() {
     init_transport();
     init_globals_node();
     init_esm();
@@ -9347,10 +9347,10 @@ var init_webtransport = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/index.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/index.js
 var transports;
 var init_transports = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/index.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/index.js"() {
     init_polling_xhr_node();
     init_websocket_node();
     init_webtransport();
@@ -9362,7 +9362,7 @@ var init_transports = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/parseuri.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/parseuri.js
 function parse3(str) {
   if (str.length > 8e3) {
     throw "URI too long";
@@ -9406,7 +9406,7 @@ function queryKey(uri, query) {
 }
 var re, parts;
 var init_parseuri = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/contrib/parseuri.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/contrib/parseuri.js"() {
     re = /^(?:(?![^:@\/?#]+:[^:@\/]*@)(http|https|ws|wss):\/\/)?((?:(([^:@\/?#]*)(?::([^:@\/?#]*))?)?@)?((?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}|[^:\/?#]*)(?::(\d*))?)(((\/(?:[^?#](?![^?#\/]*\.[^?#\/.]+(?:[?#]|$)))*\/?)?([^?#\/]*))(?:\?([^#]*))?(?:#(.*))?)/;
     parts = [
       "source",
@@ -9427,10 +9427,10 @@ var init_parseuri = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/socket.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/socket.js
 var import_component_emitter3, import_debug6, debug6, withEventListeners, OFFLINE_EVENT_LISTENERS, SocketWithoutUpgrade, SocketWithUpgrade, Socket;
 var init_socket = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/socket.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/socket.js"() {
     init_transports();
     init_util();
     init_parseqs();
@@ -10036,17 +10036,17 @@ var init_socket = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-fetch.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-fetch.js
 var init_polling_fetch = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/transports/polling-fetch.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/transports/polling-fetch.js"() {
     init_polling();
   }
 });
 
-// ../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/index.js
+// ../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/index.js
 var protocol2;
 var init_esm_debug = __esm({
-  "../../node_modules/.pnpm/engine.io-client@6.6.6_supports-color@7.2.0/node_modules/engine.io-client/build/esm-debug/index.js"() {
+  "../../node_modules/.pnpm/engine.io-client@6.6.6/node_modules/engine.io-client/build/esm-debug/index.js"() {
     init_socket();
     init_socket();
     init_transport();
@@ -10064,7 +10064,7 @@ var init_esm_debug = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/url.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/url.js
 function url(uri, path = "", loc) {
   let obj = uri;
   loc = loc || typeof location !== "undefined" && location;
@@ -10105,14 +10105,14 @@ function url(uri, path = "", loc) {
 }
 var import_debug7, debug7;
 var init_url = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/url.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/url.js"() {
     init_esm_debug();
     import_debug7 = __toESM(require_src(), 1);
     debug7 = (0, import_debug7.default)("socket.io-client:url");
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/is-binary.js
+// ../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/is-binary.js
 function isBinary(obj) {
   return withNativeArrayBuffer && (obj instanceof ArrayBuffer || isView(obj)) || withNativeBlob && obj instanceof Blob || withNativeFile && obj instanceof File;
 }
@@ -10143,7 +10143,7 @@ function hasBinary(obj, toJSON) {
 }
 var withNativeArrayBuffer, isView, toString, withNativeBlob, withNativeFile;
 var init_is_binary = __esm({
-  "../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/is-binary.js"() {
+  "../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/is-binary.js"() {
     withNativeArrayBuffer = typeof ArrayBuffer === "function";
     isView = (obj) => {
       return typeof ArrayBuffer.isView === "function" ? ArrayBuffer.isView(obj) : obj.buffer instanceof ArrayBuffer;
@@ -10154,7 +10154,7 @@ var init_is_binary = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/binary.js
+// ../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/binary.js
 function deconstructPacket(packet) {
   const buffers = [];
   const packetData = packet.data;
@@ -10219,12 +10219,12 @@ function _reconstructPacket(data, buffers) {
   return data;
 }
 var init_binary = __esm({
-  "../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/binary.js"() {
+  "../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/binary.js"() {
     init_is_binary();
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/index.js
+// ../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/index.js
 var esm_debug_exports = {};
 __export(esm_debug_exports, {
   Decoder: () => Decoder,
@@ -10263,7 +10263,7 @@ function isPacketValid(packet) {
 }
 var import_component_emitter4, import_debug8, debug8, RESERVED_EVENTS, protocol3, PacketType, Encoder, Decoder, BinaryReconstructor, isInteger;
 var init_esm_debug2 = __esm({
-  "../../node_modules/.pnpm/socket.io-parser@4.2.7_supports-color@7.2.0/node_modules/socket.io-parser/build/esm-debug/index.js"() {
+  "../../node_modules/.pnpm/socket.io-parser@4.2.7/node_modules/socket.io-parser/build/esm-debug/index.js"() {
     import_component_emitter4 = __toESM(require_cjs(), 1);
     init_binary();
     init_is_binary();
@@ -10537,7 +10537,7 @@ var init_esm_debug2 = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/on.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/on.js
 function on(obj, ev, fn) {
   obj.on(ev, fn);
   return function subDestroy() {
@@ -10545,14 +10545,14 @@ function on(obj, ev, fn) {
   };
 }
 var init_on = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/on.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/on.js"() {
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/socket.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/socket.js
 var import_component_emitter5, import_debug9, debug9, RESERVED_EVENTS2, Socket2;
 var init_socket2 = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/socket.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/socket.js"() {
     init_esm_debug2();
     init_on();
     import_component_emitter5 = __toESM(require_cjs(), 1);
@@ -11352,7 +11352,7 @@ var init_socket2 = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/contrib/backo2.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/contrib/backo2.js
 function Backoff(opts) {
   opts = opts || {};
   this.ms = opts.min || 100;
@@ -11362,7 +11362,7 @@ function Backoff(opts) {
   this.attempts = 0;
 }
 var init_backo2 = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/contrib/backo2.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/contrib/backo2.js"() {
     Backoff.prototype.duration = function() {
       var ms = this.ms * Math.pow(this.factor, this.attempts++);
       if (this.jitter) {
@@ -11387,10 +11387,10 @@ var init_backo2 = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/manager.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/manager.js
 var import_component_emitter6, import_debug10, debug10, Manager;
 var init_manager = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/manager.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/manager.js"() {
     init_esm_debug();
     init_socket2();
     init_esm_debug2();
@@ -11767,7 +11767,7 @@ var init_manager = __esm({
   }
 });
 
-// ../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/index.js
+// ../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/index.js
 function lookup(uri, opts) {
   if (typeof uri === "object") {
     opts = uri;
@@ -11798,7 +11798,7 @@ function lookup(uri, opts) {
 }
 var import_debug11, debug11, cache;
 var init_esm_debug3 = __esm({
-  "../../node_modules/.pnpm/socket.io-client@4.8.3_supports-color@7.2.0/node_modules/socket.io-client/build/esm-debug/index.js"() {
+  "../../node_modules/.pnpm/socket.io-client@4.8.3/node_modules/socket.io-client/build/esm-debug/index.js"() {
     init_url();
     init_manager();
     init_socket2();

@@ -759,6 +759,48 @@ export interface PaginatedResult<T> {
 	totalPages: number;
 }
 
+/** Storage 分享状态。 */
+export type StorageShareStatus = "active" | "revoked" | "invalid";
+
+/** Storage 分享管理信息；不包含 Token 或 Provider URL。 */
+export interface StorageShareInfo {
+	id: string;
+	fileId: string | null;
+	filename: string;
+	mimeType: string | null;
+	storageKind: string;
+	status: StorageShareStatus;
+	previewable: boolean;
+	createdByIdentityId: string | null;
+	createdByName: string | null;
+	createdVia: string | null;
+	createdAt: string;
+	revokedAt: string | null;
+	revokedByIdentityId: string | null;
+	invalidatedAt: string | null;
+	invalidReason: string | null;
+}
+
+/** 创建 Storage 分享请求。 */
+export interface CreateStorageShareRequest {
+	fileId: string;
+}
+
+/** 创建 Storage 分享结果；sharePath 只在创建响应返回。 */
+export interface CreateStorageShareResult extends StorageShareInfo {
+	sharePath: string;
+}
+
+/** Storage 分享相关稳定错误码。 */
+export const StorageShareErrorCode = {
+	FILE_NOT_SHAREABLE: "FILE_NOT_SHAREABLE",
+	STORAGE_PROVIDER_MISMATCH: "STORAGE_PROVIDER_MISMATCH",
+	STORAGE_SHARE_NOT_FOUND: "STORAGE_SHARE_NOT_FOUND",
+	FILE_HAS_ACTIVE_SHARES: "FILE_HAS_ACTIVE_SHARES",
+} as const;
+export type StorageShareErrorCode =
+	(typeof StorageShareErrorCode)[keyof typeof StorageShareErrorCode];
+
 /** 创建映射 REST 请求体。 */
 export interface FrpMappingCreateRequest {
 	clientId: string;
