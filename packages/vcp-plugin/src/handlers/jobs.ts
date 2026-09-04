@@ -62,11 +62,11 @@ export async function handleRunShellJob(
 	const clientFilter = String(
 		params.clientId || params.clientName || params.client || "",
 	);
-	const command = String(params.command || "");
+	const shellCommand = String(params.shellCommand || params.command || "");
 	const timeout = params.timeout ? Number(params.timeout) : undefined;
 
-	if (!clientFilter || !command) {
-		throw new Error("Missing required parameters: clientId (or client), command");
+	if (!clientFilter || !shellCommand) {
+		throw new Error("Missing required parameters: clientId (or client), shellCommand");
 	}
 
 	const clientId = await resolveClientId(client, clientFilter);
@@ -75,7 +75,7 @@ export async function handleRunShellJob(
 		clientId,
 		type: "exec",
 		payload: {
-			command,
+			command: shellCommand,
 			timeout,
 		},
 	});

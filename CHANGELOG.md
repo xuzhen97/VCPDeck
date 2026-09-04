@@ -2,6 +2,17 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.22] - 2026-09-04
+
+### Fixed
+
+- 对齐 VCPToolBox 平铺 stdin 参数：`dispatchCommand` 同时支持 `{ command, params }` 和 `{ command, ...flat }`；`RunShellJob` 改用 `shellCommand` 字段，避免重复 `command` 覆盖动作名。
+- VCPToolBox manifest 改用 `invocationCommands[].command` 和完整 `<<<[TOOL_REQUEST]>>>` 示例，防止模型将 Shell 内容写入动作字段。
+
+### Added
+
+- 新增 `pnpm test:vcp-plugin`：真实 VCPToolBox `ToolCallParser` 解析 + 隔离 Server/Client/FRPS 全量 21 动作 E2E。
+
 ## [0.6.21] - 2026-09-03
 
 ### Fixed

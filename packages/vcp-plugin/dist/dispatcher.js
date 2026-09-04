@@ -4,12 +4,36 @@ import { handleListRoots, handleListDirectory, handleStatFile, handleReadFile, h
 import { handleListFrpInstances, handleListFrpMappings, handleGetFrpMapping, handleCreateFrpMapping, handleDeleteFrpMapping, } from "./handlers/frp.js";
 import { handleGetStorageStatus } from "./handlers/storage.js";
 import { handleListReleases } from "./handlers/releases.js";
+/** 21 个动作标识符的唯一清单（导出，供 manifest 测试引用） */
+export const VCP_COMMANDS = [
+    "ListClients",
+    "ListJobs",
+    "GetJob",
+    "GetJobOutput",
+    "RunShellJob",
+    "CancelJob",
+    "ListRoots",
+    "ListDirectory",
+    "StatFile",
+    "ReadFile",
+    "WriteFile",
+    "MakeDirectory",
+    "DeleteFile",
+    "MoveFile",
+    "ListFrpInstances",
+    "ListFrpMappings",
+    "GetFrpMapping",
+    "CreateFrpMapping",
+    "DeleteFrpMapping",
+    "GetStorageStatus",
+    "ListReleases",
+];
 /**
  * 分发执行 VCP 指令
  */
 export async function dispatchCommand(client, req) {
-    const command = req.command;
-    const params = req.params || {};
+    const { command, params: _nested, maid: _maid, ...flat } = req;
+    const params = { ...flat, ...(_nested ?? {}) };
     switch (command) {
         case "ListClients":
             return handleListClients(client);

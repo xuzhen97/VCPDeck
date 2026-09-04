@@ -28,6 +28,31 @@ import {
 import { handleGetStorageStatus } from "./handlers/storage.js";
 import { handleListReleases } from "./handlers/releases.js";
 
+/** 21 个动作标识符的唯一清单（导出，供 manifest 测试引用） */
+export const VCP_COMMANDS = [
+	"ListClients",
+	"ListJobs",
+	"GetJob",
+	"GetJobOutput",
+	"RunShellJob",
+	"CancelJob",
+	"ListRoots",
+	"ListDirectory",
+	"StatFile",
+	"ReadFile",
+	"WriteFile",
+	"MakeDirectory",
+	"DeleteFile",
+	"MoveFile",
+	"ListFrpInstances",
+	"ListFrpMappings",
+	"GetFrpMapping",
+	"CreateFrpMapping",
+	"DeleteFrpMapping",
+	"GetStorageStatus",
+	"ListReleases",
+] as const;
+
 /**
  * 分发执行 VCP 指令
  */
@@ -35,8 +60,8 @@ export async function dispatchCommand(
 	client: VcpDeckClient,
 	req: VcpRequest,
 ): Promise<VcpResponse> {
-	const command = req.command;
-	const params = req.params || {};
+	const { command, params: _nested, maid: _maid, ...flat } = req as Record<string, unknown>;
+	const params: Record<string, unknown> = { ...flat, ...((_nested as Record<string, unknown>) ?? {}) };
 
 	switch (command) {
 		case "ListClients":

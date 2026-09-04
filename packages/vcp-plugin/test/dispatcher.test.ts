@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { dispatchCommand } from "../src/dispatcher.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { dispatchCommand, VCP_COMMANDS } from "../src/dispatcher.js";
 import { parseEnvFile } from "../src/config.js";
 
 describe("VCPDeckBridge Config Parser", () => {
@@ -80,4 +80,117 @@ describe("VCPDeckBridge Dispatcher", () => {
 			}),
 		).rejects.toThrow('Unknown command identifier: "NonExistentCommand"');
 	});
+
+	it("routes flat VCPToolBox arguments and keeps command as the action", async () => {
+		await dispatchCommand(mockClient, {
+			command: "RunShellJob",
+			client: "node-1",
+			shellCommand: "node -e \"console.log('marker')\"",
+		});
+
+		expect(mockClient.jobs.create).toHaveBeenCalledWith({
+			clientId: "c1",
+			type: "exec",
+			payload: {
+				command: "node -e \"console.log('marker')\"",
+				timeout: undefined,
+			},
+		});
+	});
+
+	it("lets explicit params override flat fields", async () => {
+		await dispatchCommand(mockClient, {
+			command: "ReadFile",
+			client: "wrong-flat-client",
+			path: "/wrong",
+			params: { client: "node-1", path: "/etc/hosts" },
+		});
+
+		expect(mockClient.files.readText).toHaveBeenCalledWith(
+			"c1",
+			"/",
+			"/etc/hosts",
+			undefined,
+		);
+	});
+});
+
+describe("VCPDeckBridge Dispatcher Matrix", () => {
+	let mockClient: any;
+
+	beforeEach(() => {
+		mockClient = {
+			clients: {
+				list: vi.fn().mockResolvedValue([{ clientId: "c1", name: "node-1" }]),
+			},
+			jobs: {
+				create: vi.fn().mockResolvedValue({ jobId: "job-1", status: "pending" }),
+				list: vi.fn().mockResolvedValue({ total: 1, page: 1, totalPages: 1, data: [] }),
+				get: vi.fn().mockResolvedValue({ jobId: "job-1", status: "done" }),
+				output: vi.fn().mockResolvedValue({ jobId: "job-1", output: "stdout" }),
+				cancel: vi.fn().mockResolvedValue({ jobId: "job-1", status: "cancelled" }),
+			},
+			files: {
+				roots: vi.fn().mockResolvedValue(["/"]),
+				list: vi.fn().mockResolvedValue({ files: [] }),
+				stat: vi.fn().mockResolvedValue({ path: "/tmp/a", size: 100 }),
+				readText: vi.fn().mockResolvedValue("file content"),
+				writeText: vi.fn().mockResolvedValue({ path: "/tmp/a", bytesWritten: 10 }),
+				mkdir: vi.fn().mockResolvedValue({ path: "/tmp/d" }),
+				delete: vi.fn().mockResolvedValue({ path: "/tmp/a" }),
+				move: vi.fn().mockResolvedValue({ source: "/tmp/a", target: "/tmp/b" }),
+			},
+			frp: {
+				instances: {
+					list: vi.fn().mockResolvedValue({ total: 1, page: 1, totalPages: 1, data: [] }),
+				},
+				list: vi.fn().mockResolvedValue({ total: 1, page: 1, totalPages: 1, data: [] }),
+				get: vi.fn().mockResolvedValue({ mappingId: "mapping-1", status: "active" }),
+				create: vi.fn().mockResolvedValue({ mappingId: "mapping-1", status: "provisioning" }),
+				delete: vi.fn().mockResolvedValue({ mappingId: "mapping-1", status: "deleting" }),
+			},
+			storage: {
+				getBackendConfig: vi.fn().mockResolvedValue({ type: "local" }),
+			},
+			releases: {
+				list: vi.fn().mockResolvedValue({ total: 1, page: 1, totalPages: 1, data: [] }),
+			},
+		};
+	});
+
+	const cases: { command: string; args: Record<string, unknown>; spy: () => ReturnType<typeof vi.fn> }[] = [
+		{ command: "ListClients", args: {}, spy: () => mockClient.clients.list },
+		{ command: "ListJobs", args: { client: "node-1", status: "error", page: "1", pageSize: "10" }, spy: () => mockClient.jobs.list },
+		{ command: "GetJob", args: { jobId: "job-1" }, spy: () => mockClient.jobs.get },
+		{ command: "GetJobOutput", args: { jobId: "job-1" }, spy: () => mockClient.jobs.output },
+		{ command: "RunShellJob", args: { client: "node-1", shellCommand: "node --version", timeout: "10" }, spy: () => mockClient.jobs.create },
+		{ command: "CancelJob", args: { jobId: "job-1" }, spy: () => mockClient.jobs.cancel },
+		{ command: "ListRoots", args: { client: "node-1" }, spy: () => mockClient.files.roots },
+		{ command: "ListDirectory", args: { client: "node-1", path: "/tmp" }, spy: () => mockClient.files.list },
+		{ command: "StatFile", args: { client: "node-1", path: "/tmp/a" }, spy: () => mockClient.files.stat },
+		{ command: "ReadFile", args: { client: "node-1", path: "/tmp/a", limit: "64" }, spy: () => mockClient.files.readText },
+		{ command: "WriteFile", args: { client: "node-1", path: "/tmp/a", content: "x" }, spy: () => mockClient.files.writeText },
+		{ command: "MakeDirectory", args: { client: "node-1", path: "/tmp/d" }, spy: () => mockClient.files.mkdir },
+		{ command: "DeleteFile", args: { client: "node-1", path: "/tmp/a" }, spy: () => mockClient.files.delete },
+		{ command: "MoveFile", args: { client: "node-1", source: "/tmp/a", target: "/tmp/b" }, spy: () => mockClient.files.move },
+		{ command: "ListFrpInstances", args: { page: "1", pageSize: "10" }, spy: () => mockClient.frp.instances.list },
+		{ command: "ListFrpMappings", args: { client: "node-1" }, spy: () => mockClient.frp.list },
+		{ command: "GetFrpMapping", args: { mappingId: "mapping-1" }, spy: () => mockClient.frp.get },
+		{ command: "CreateFrpMapping", args: { client: "node-1", localPort: "8080", remotePort: "18080", type: "tcp" }, spy: () => mockClient.frp.create },
+		{ command: "DeleteFrpMapping", args: { mappingId: "mapping-1" }, spy: () => mockClient.frp.delete },
+		{ command: "GetStorageStatus", args: {}, spy: () => mockClient.storage.getBackendConfig },
+		{ command: "ListReleases", args: { page: "1", pageSize: "10" }, spy: () => mockClient.releases.list },
+	];
+
+	it("VCP_COMMANDS matches matrix command set", () => {
+		expect([...VCP_COMMANDS].sort()).toEqual(cases.map((c) => c.command).sort());
+	});
+
+	for (const { command, args, spy } of cases) {
+		it(`routes ${command}`, async () => {
+			const res = await dispatchCommand(mockClient as any, { command, ...args });
+			expect(res.status).toBe("success");
+			expect(spy()).toHaveBeenCalled();
+		});
+	}
 });

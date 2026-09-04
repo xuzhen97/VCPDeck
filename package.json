@@ -12,6 +12,7 @@
     "download:frp": "npx tsx scripts/download-frp.ts",
     "test:frp": "node scripts/test-frp.cjs",
     "test:cli": "node scripts/test-cli-capabilities.cjs",
+    "test:vcp-plugin": "node scripts/test-vcp-plugin.cjs",
     "vcpdeck:link": "node scripts/link-cli.cjs"
   },
   "devDependencies": {

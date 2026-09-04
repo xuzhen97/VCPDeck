@@ -2652,17 +2652,17 @@ async function handleGetJobOutput(client, params) {
 }
 async function handleRunShellJob(client, params) {
   const clientFilter = String(params.clientId || params.clientName || params.client || "");
-  const command = String(params.command || "");
+  const shellCommand = String(params.shellCommand || params.command || "");
   const timeout = params.timeout ? Number(params.timeout) : void 0;
-  if (!clientFilter || !command) {
-    throw new Error("Missing required parameters: clientId (or client), command");
+  if (!clientFilter || !shellCommand) {
+    throw new Error("Missing required parameters: clientId (or client), shellCommand");
   }
   const clientId = await resolveClientId(client, clientFilter);
   const job = await client.jobs.create({
     clientId,
     type: "exec",
     payload: {
-      command,
+      command: shellCommand,
       timeout
     }
   });
@@ -3007,8 +3007,8 @@ async function handleListReleases(client, params) {
 
 // dist/dispatcher.js
 async function dispatchCommand(client, req) {
-  const command = req.command;
-  const params = req.params || {};
+  const { command, params: _nested, maid: _maid, ...flat } = req;
+  const params = { ...flat, ..._nested ?? {} };
   switch (command) {
     case "ListClients":
       return handleListClients(client);
@@ -3059,21 +3059,32 @@ async function dispatchCommand(client, req) {
 
 // dist/index.js
 function sendResponse(response) {
-  process.stdout.write(JSON.stringify(response));
+  const payload = {
+    status: response.status,
+    result: {
+      content: response.content || response.result?.content || []
+    },
+    messageForAI: response.messageForAI,
+    content: response.content || response.result?.content || []
+  };
+  process.stdout.write(JSON.stringify(payload));
 }
 function sendError(err) {
   const message = err instanceof Error ? err.message : String(err);
   const response = {
     status: "error",
-    content: [
-      {
-        type: "text",
-        text: message
-      }
-    ],
+    error: message,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: message
+        }
+      ]
+    },
     messageForAI: `\u6267\u884C\u5931\u8D25: ${message}`
   };
-  sendResponse(response);
+  process.stdout.write(JSON.stringify(response));
 }
 async function readStdin() {
   return new Promise((resolve, reject) => {

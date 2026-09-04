@@ -34,373 +34,109 @@
   "capabilities": {
     "invocationCommands": [
       {
-        "commandIdentifier": "ListClients",
-        "description": "获取所有已注册的 VCPDeck 客户端机器列表、平台架构及在线状态。",
-        "example": "command:「始」ListClients「末」",
-        "parameters": {}
+        "command": "ListClients",
+        "description": "功能: 获取所有已注册机器及在线状态。\n`command` 固定为 `ListClients`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ListClients「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "ListJobs",
-        "description": "分页查询历史与当前正在运行的 Job 任务列表，支持按机器或状态过滤。",
-        "example": "command:「始」ListJobs「末」, clientId:「始」client-uuid「末」, status:「始」error「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "可选，按目标机器 Client ID 过滤",
-            "required": false
-          },
-          "status": {
-            "type": "string",
-            "description": "可选，按状态过滤 (pending/running/done/error/cancelled)",
-            "required": false
-          },
-          "page": {
-            "type": "number",
-            "description": "页码，默认 1",
-            "required": false
-          },
-          "pageSize": {
-            "type": "number",
-            "description": "每页数量 (1-100)",
-            "required": false
-          }
-        }
+        "command": "ListJobs",
+        "description": "功能: 按 Client 查询 Job 历史，支持 status、page、pageSize 筛选。\n`command` 固定为 `ListJobs`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ListJobs「末」,\nclientId:「始」client-uuid「末」,\nstatus:「始」error「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "GetJob",
-        "description": "查询指定 Job 的状态、运行进度与结果详情。",
-        "example": "command:「始」GetJob「末」, jobId:「始」job-uuid「末」",
-        "parameters": {
-          "jobId": {
-            "type": "string",
-            "description": "要查询的 Job ID",
-            "required": true
-          }
-        }
+        "command": "GetJob",
+        "description": "功能: 查看单个 Job 的状态、类型、起止时间和错误信息。\n`command` 固定为 `GetJob`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」GetJob「末」,\njobId:「始」job-uuid「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "GetJobOutput",
-        "description": "获取指定 Job 产生的所有 stdout/stderr 日志全文输出，常用于诊断任务失败的原因。",
-        "example": "command:「始」GetJobOutput「末」, jobId:「始」job-uuid「末」",
-        "parameters": {
-          "jobId": {
-            "type": "string",
-            "description": "目标 Job ID",
-            "required": true
-          }
-        }
+        "command": "GetJobOutput",
+        "description": "功能: 获取指定 Job 的完整 stdout/stderr 输出。\n`command` 固定为 `GetJobOutput`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」GetJobOutput「末」,\njobId:「始」job-uuid「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "RunShellJob",
-        "description": "在指定的远程机器上执行 Shell 命令并异步生成 Job。",
-        "example": "command:「始」RunShellJob「末」, clientId:「始」client-uuid「末」, command:「始」df -h「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          },
-          "command": {
-            "type": "string",
-            "description": "要执行的 Shell 命令行",
-            "required": true
-          },
-          "timeout": {
-            "type": "number",
-            "description": "命令超时时间 (秒)",
-            "required": false
-          }
-        }
+        "command": "RunShellJob",
+        "description": "功能: 在指定 Client 机器上运行 Shell 命令（副作用）。shellCommand 为实际 Shell 命令正文，不得写入 command 字段。\n`command` 固定为 `RunShellJob`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」RunShellJob「末」,\nclientId:「始」client-uuid「末」,\nshellCommand:「始」node --version「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "CancelJob",
-        "description": "取消正在排队或执行中的 Job。",
-        "example": "command:「始」CancelJob「末」, jobId:「始」job-uuid「末」",
-        "parameters": {
-          "jobId": {
-            "type": "string",
-            "description": "要取消的 Job ID",
-            "required": true
-          }
-        }
+        "command": "CancelJob",
+        "description": "功能: 取消运行中的 Job。\n`command` 固定为 `CancelJob`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」CancelJob「末」,\njobId:「始」job-uuid「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "ListRoots",
-        "description": "获取远程机器授权允许访问的文件系统根目录列表（如 Linux 的 / 或 Windows 的各盘符）。",
-        "example": "command:「始」ListRoots「末」, clientId:「始」client-uuid「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          }
-        }
+        "command": "ListRoots",
+        "description": "功能: 列出 Client 上授权的文件根路径。\n`command` 固定为 `ListRoots`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ListRoots「末」,\nclientId:「始」client-uuid「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "ListDirectory",
-        "description": "列出远程机器指定目录下的文件与子目录清单。",
-        "example": "command:「始」ListDirectory「末」, clientId:「始」client-uuid「末」, path:「始」/var/log「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          },
-          "path": {
-            "type": "string",
-            "description": "目标目录路径",
-            "required": true
-          },
-          "rootDir": {
-            "type": "string",
-            "description": "授权根目录，默认 /",
-            "required": false
-          }
-        }
+        "command": "ListDirectory",
+        "description": "功能: 列出 Client 指定目录下的文件和子目录。\n`command` 固定为 `ListDirectory`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ListDirectory「末」,\nclientId:「始」client-uuid「末」,\npath:「始」/path/to/dir「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "StatFile",
-        "description": "查看远程机器指定文件或目录的元数据（文件大小、类型、修改时间等）。",
-        "example": "command:「始」StatFile「末」, clientId:「始」client-uuid「末」, path:「始」/etc/nginx.conf「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          },
-          "path": {
-            "type": "string",
-            "description": "文件或目录路径",
-            "required": true
-          },
-          "rootDir": {
-            "type": "string",
-            "description": "授权根目录，默认 /",
-            "required": false
-          }
-        }
+        "command": "StatFile",
+        "description": "功能: 获取 Client 上文件的大小、权限和修改时间。\n`command` 固定为 `StatFile`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」StatFile「末」,\nclientId:「始」client-uuid「末」,\npath:「始」/path/to/file「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "ReadFile",
-        "description": "读取远程机器上的文本文件内容（默认上限 256KB）。",
-        "example": "command:「始」ReadFile「末」, clientId:「始」client-uuid「末」, path:「始」/var/log/syslog「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          },
-          "path": {
-            "type": "string",
-            "description": "文件绝对路径",
-            "required": true
-          },
-          "rootDir": {
-            "type": "string",
-            "description": "授权根目录，默认 /",
-            "required": false
-          },
-          "limit": {
-            "type": "number",
-            "description": "最大读取字节数",
-            "required": false
-          }
-        }
+        "command": "ReadFile",
+        "description": "功能: 读取 Client 上的文本文件，limit 限制最大字节数。\n`command` 固定为 `ReadFile`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ReadFile「末」,\nclientId:「始」client-uuid「末」,\npath:「始」/path/to/file「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "WriteFile",
-        "description": "向远程机器上的文件写入或覆盖文本内容。",
-        "example": "command:「始」WriteFile「末」, clientId:「始」client-uuid「末」, path:「始」/tmp/config.json「末」, content:「始」{\"active\": true}「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          },
-          "path": {
-            "type": "string",
-            "description": "目标文件路径",
-            "required": true
-          },
-          "content": {
-            "type": "string",
-            "description": "要写入的文本内容",
-            "required": true
-          },
-          "rootDir": {
-            "type": "string",
-            "description": "授权根目录，默认 /",
-            "required": false
-          }
-        }
+        "command": "WriteFile",
+        "description": "功能: 写入文本到 Client 上的文件（副作用：覆盖或创建）。\n`command` 固定为 `WriteFile`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」WriteFile「末」,\nclientId:「始」client-uuid「末」,\npath:「始」/path/to/file「末」,\ncontent:「始」file content「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "MakeDirectory",
-        "description": "在远程机器上递归创建文件夹目录。",
-        "example": "command:「始」MakeDirectory「末」, clientId:「始」client-uuid「末」, path:「始」/opt/myapp/data「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          },
-          "path": {
-            "type": "string",
-            "description": "要创建的目录路径",
-            "required": true
-          },
-          "rootDir": {
-            "type": "string",
-            "description": "授权根目录，默认 /",
-            "required": false
-          }
-        }
+        "command": "MakeDirectory",
+        "description": "功能: 在 Client 上创建目录（副作用）。\n`command` 固定为 `MakeDirectory`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」MakeDirectory「末」,\nclientId:「始」client-uuid「末」,\npath:「始」/path/to/dir「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "DeleteFile",
-        "description": "删除远程机器上的指定文件或目录。",
-        "example": "command:「始」DeleteFile「末」, clientId:「始」client-uuid「末」, path:「始」/tmp/old.log「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          },
-          "path": {
-            "type": "string",
-            "description": "要删除的文件或目录路径",
-            "required": true
-          },
-          "rootDir": {
-            "type": "string",
-            "description": "授权根目录，默认 /",
-            "required": false
-          }
-        }
+        "command": "DeleteFile",
+        "description": "功能: 删除 Client 上的文件或目录（副作用）。\n`command` 固定为 `DeleteFile`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」DeleteFile「末」,\nclientId:「始」client-uuid「末」,\npath:「始」/path/to/file「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "MoveFile",
-        "description": "在远程机器上移动或重命名文件/目录。",
-        "example": "command:「始」MoveFile「末」, clientId:「始」client-uuid「末」, source:「始」/tmp/a.txt「末」, target:「始」/tmp/b.txt「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          },
-          "source": {
-            "type": "string",
-            "description": "源文件路径",
-            "required": true
-          },
-          "target": {
-            "type": "string",
-            "description": "目标文件路径",
-            "required": true
-          },
-          "rootDir": {
-            "type": "string",
-            "description": "授权根目录，默认 /",
-            "required": false
-          }
-        }
+        "command": "MoveFile",
+        "description": "功能: 移动 Client 上的文件或目录（副作用）。\n`command` 固定为 `MoveFile`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」MoveFile「末」,\nclientId:「始」client-uuid「末」,\nsource:「始」/path/from「末」,\ntarget:「始」/path/to「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "ListFrpInstances",
-        "description": "查询当前所有已配置的 FRPS 服务端实例。",
-        "example": "command:「始」ListFrpInstances「末」",
-        "parameters": {
-          "page": {
-            "type": "number",
-            "description": "页码",
-            "required": false
-          },
-          "pageSize": {
-            "type": "number",
-            "description": "每页数量",
-            "required": false
-          }
-        }
+        "command": "ListFrpInstances",
+        "description": "功能: 列出所有 frps 实例配置。\n`command` 固定为 `ListFrpInstances`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ListFrpInstances「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "ListFrpMappings",
-        "description": "查询当前所有 FRP 客户端的端口映射列表及其穿透状态。",
-        "example": "command:「始」ListFrpMappings「末」",
-        "parameters": {}
+        "command": "ListFrpMappings",
+        "description": "功能: 列出 FRP 端口映射，可按 clientId 过滤。\n`command` 固定为 `ListFrpMappings`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ListFrpMappings「末」,\nclientId:「始」client-uuid「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "GetFrpMapping",
-        "description": "查询单条 FRP 端口映射的详细信息。",
-        "example": "command:「始」GetFrpMapping「末」, mappingId:「始」mapping-uuid「末」",
-        "parameters": {
-          "mappingId": {
-            "type": "string",
-            "description": "映射 ID",
-            "required": true
-          }
-        }
+        "command": "GetFrpMapping",
+        "description": "功能: 查看单个 FRP 映射详情。\n`command` 固定为 `GetFrpMapping`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」GetFrpMapping「末」,\nmappingId:「始」mapping-uuid「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "CreateFrpMapping",
-        "description": "在指定机器上创建 FRP 端口映射。",
-        "example": "command:「始」CreateFrpMapping「末」, clientId:「始」client-uuid「末」, localPort:「始」8080「末」, remotePort:「始」18080「末」, type:「始」tcp「末」",
-        "parameters": {
-          "clientId": {
-            "type": "string",
-            "description": "目标机器 Client ID",
-            "required": true
-          },
-          "localPort": {
-            "type": "number",
-            "description": "本地机器服务端口",
-            "required": true
-          },
-          "remotePort": {
-            "type": "number",
-            "description": "服务端公网暴露端口",
-            "required": false
-          },
-          "type": {
-            "type": "string",
-            "description": "协议类型 (tcp / http / https)",
-            "required": false
-          }
-        }
+        "command": "CreateFrpMapping",
+        "description": "功能: 创建 FRP 端口映射（副作用），type 支持 tcp/http/https。\n`command` 固定为 `CreateFrpMapping`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」CreateFrpMapping「末」,\nclientId:「始」client-uuid「末」,\nlocalPort:「始」8080「末」,\nremotePort:「始」18080「末」,\ntype:「始」tcp「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "DeleteFrpMapping",
-        "description": "销毁指定的 FRP 端口映射。",
-        "example": "command:「始」DeleteFrpMapping「末」, mappingId:「始」mapping-uuid「末」",
-        "parameters": {
-          "mappingId": {
-            "type": "string",
-            "description": "要销毁的映射 ID",
-            "required": true
-          }
-        }
+        "command": "DeleteFrpMapping",
+        "description": "功能: 删除 FRP 端口映射（副作用）。\n`command` 固定为 `DeleteFrpMapping`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」DeleteFrpMapping「末」,\nmappingId:「始」mapping-uuid「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "GetStorageStatus",
-        "description": "获取当前 VCPDeck Server 的存储后端状态 (如 local 或 alibaba-oss)。",
-        "example": "command:「始」GetStorageStatus「末」",
-        "parameters": {}
+        "command": "GetStorageStatus",
+        "description": "功能: 查询 Storage 后端类型及可用状态。\n`command` 固定为 `GetStorageStatus`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」GetStorageStatus「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
-        "commandIdentifier": "ListReleases",
-        "description": "查询 VCPDeck 的历史发版与自更新记录。",
-        "example": "command:「始」ListReleases「末」",
-        "parameters": {
-          "page": {
-            "type": "number",
-            "description": "页码",
-            "required": false
-          },
-          "pageSize": {
-            "type": "number",
-            "description": "每页数量",
-            "required": false
-          }
-        }
+        "command": "ListReleases",
+        "description": "功能: 列出已发布的 Release 版本列表。\n`command` 固定为 `ListReleases`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ListReleases「末」\n<<<[END_TOOL_REQUEST]>>>"
       }
     ]
   }

@@ -1,6 +1,6 @@
 # VCPDeck 测试策略
 
-> 状态：Current｜维护责任：各包维护者/发布维护者｜最后核验：2026-09-03｜适用版本：`0.6.18` / 当前 `main`
+> 状态：Current｜维护责任：各包维护者/发布维护者｜最后核验：2026-09-03｜适用版本：`0.6.22` / 当前 `main`
 
 ## 1. 目标
 
@@ -19,6 +19,7 @@
 | 包内集成测试 | `*.integration.test.ts` | Server Gateway/Broker、Client Pi Worker、Terminal |
 | 项目 E2E | `scripts/test.cjs` | 真实 Server + mock/真实 Client + REST/WS |
 | CLI 能力 E2E | `scripts/test-cli-capabilities.cjs` | 真实 Server + Client 上驱动 CLI 构建产物，逐域验证 clients/jobs/files/frp/storage/terminal/pi 与错误路径（临时物全部隔离在 `.tmp/cli-e2e/`） |
+| VCP 插件 E2E | `scripts/test-vcp-plugin.cjs` | 真实 VCPToolBox `ToolCallParser` 解析工具块 + 隔离 Server/Client/FRPS；21 个动作全量验证（临时物隔离在 `.tmp/vcp-plugin-e2e/`） |
 | FRP E2E | `scripts/test-frp.cjs` | 真实 frps/frpc、TCP/HTTP 映射 |
 | Launcher 冒烟 | `scripts/smoke-launcher.cjs` | prepare/apply、探活、失败回退 |
 | 手工/环境验收 | `docs/verification/` | Windows PTY、外部存储、真实网络和发布演练 |
