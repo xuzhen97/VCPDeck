@@ -1,6 +1,6 @@
 # VCPDeck Storage 子系统设计
 
-> 状态：Current｜维护责任：Server/Storage 维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`
+> 状态：Current｜维护责任：Server/Storage 维护者｜最后核验：2026-09-05｜适用版本：`0.6.26` / 当前 `main`
 >
 > 事实来源：`packages/server/src/storage/`、`packages/server/src/file/`、`packages/server/src/job/`、`packages/shared/src/`、`packages/sdk/src/storage.ts`、`packages/sdk/src/aliyundrive.ts`
 
@@ -134,7 +134,7 @@ sequenceDiagram
 - `GET /api/storage/download/:key` 验证签名后流式返回正文；
 - 响应文件名优先从 File 元数据解析，而不是从 Storage key 推断。
 
-稳定入口用于 Browser 下载，避免页面长期缓存已经过期的临时 URL；它要求认证，不是公开分享。公开分享入口 `GET /api/public/storage-shares/:token` 使用哈希 Token，无需认证：普通文件 302 到当前 Provider 的短期 URL，白名单图片由 Server 代理。公开响应使用 `private, no-store` 和 `no-referrer`；SVG 额外使用 `sandbox; default-src 'none'; img-src data:`。
+稳定入口用于 Browser 下载，避免页面长期缓存已经过期的临时 URL；它要求认证，不是公开分享。公开分享入口 `GET /api/public/storage-shares/:token` 使用哈希 Token，无需认证；所有文件统一返回不可缓存的 302 到当前 Provider 短期 URL，并使用 `no-referrer`。Alibaba 等外部 Provider 由调用方直连，正文不经过 Server；Local 的目标仍是 Server 签名下载端点，因为 Server 本身就是 Local Provider 的数据面。图片 MIME、附件下载、缓存和内联行为由 Provider 响应决定。
 
 ## 6. Alibaba Provider 数据流
 

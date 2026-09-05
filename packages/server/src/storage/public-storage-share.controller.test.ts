@@ -49,36 +49,23 @@ describe("PublicStorageShareController", () => {
 		expect(response.end).toHaveBeenCalledOnce();
 	});
 
-	it("图片由 Server 代理并设置固定 MIME、安全 disposition 和 SVG CSP", async () => {
-		const stream = {
-			on: vi.fn(),
-			pipe: vi.fn(),
-		};
+	it("图片同样 302 到当前 Provider，不由公开入口代理", async () => {
 		const service = makeService();
 		const storage = {
 			currentKind: vi.fn().mockReturnValue("local"),
-			openDownload: vi.fn().mockResolvedValue({ stream, meta: { size: 7 } }),
+			createDownloadToken: vi.fn().mockResolvedValue({ url: "https://provider.example/image", expiresAt: 1 }),
+			openDownload: vi.fn(),
 		};
 		const controller = new PublicStorageShareController(service as never, storage as never);
 		const response = makeResponse();
-		const pipe = vi.spyOn(stream, "pipe");
 
 		await controller.download("B".repeat(43), response as never);
 
-		expect(storage.openDownload).toHaveBeenCalledWith("secret/storage-key");
-		expect(response.setHeader).toHaveBeenCalledWith("Content-Type", "image/svg+xml");
-		expect(response.setHeader).toHaveBeenCalledWith(
-		"Content-Disposition",
-		"inline; filename*=UTF-8''photo.SVG",
-	);
-		expect(response.setHeader).toHaveBeenCalledWith("X-Content-Type-Options", "nosniff");
-		expect(response.setHeader).toHaveBeenCalledWith("Referrer-Policy", "no-referrer");
-		expect(response.setHeader).toHaveBeenCalledWith("Cache-Control", "private, no-store");
-		expect(response.setHeader).toHaveBeenCalledWith(
-		"Content-Security-Policy",
-		"sandbox; default-src 'none'; img-src data:",
-	);
-		expect(pipe).toHaveBeenCalledWith(response);
+		expect(storage.createDownloadToken).toHaveBeenCalledWith("secret/storage-key");
+		expect(storage.openDownload).not.toHaveBeenCalled();
+		expect(response.status).toHaveBeenCalledWith(302);
+		expect(response.setHeader).toHaveBeenCalledWith("Location", "https://provider.example/image");
+		expect(response.end).toHaveBeenCalledOnce();
 	});
 
 	it("Token 无效返回安全 404，Provider 明确缺失时标记分享并返回 410", async () => {
@@ -92,7 +79,7 @@ describe("PublicStorageShareController", () => {
 		});
 		const storage = {
 			currentKind: vi.fn().mockReturnValue("local"),
-			openDownload: vi.fn().mockRejectedValue(new StorageObjectNotFoundError()),
+			createDownloadToken: vi.fn().mockRejectedValue(new StorageObjectNotFoundError()),
 		};
 		const missingController = new PublicStorageShareController(missing as never, storage as never);
 		await expect(missingController.download("C".repeat(43), makeResponse() as never)).rejects.toMatchObject({ status: 410 });

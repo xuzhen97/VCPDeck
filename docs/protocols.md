@@ -1,6 +1,6 @@
 # VCPDeck API 与通信协议
 
-> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
+> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-09-05｜适用版本：`0.6.26` / 当前 `main`｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
 
 本文维护协议语义和兼容规则，不复制全部 DTO。字段级事实以 `@vcpdeck/shared` 导出、SDK 和 Controller 实现为准。
 
@@ -35,7 +35,7 @@
 - `GET /api/status`
 - `GET /api/releases/:version/file`
 - `GET /api/client-installer/scripts/:platform`
-- `GET /api/public/storage-shares/:token`（长期 opaque Token；普通文件 302，白名单图片由 Server 代理）
+- `GET /api/public/storage-shares/:token`（长期 opaque Token；所有文件统一 302 到当前 Provider 短期 URL）
 - `GET /api/client-installer/assets/:name`、`preflight`、`POST /api/client-installer/bootstrap`（仅开关启用且当前 Release 就绪时返回安装信息）
 - `GET/PUT /api/client-installer/clients/:clientId/...`（Public 路由，但必须携带当前共享 `x-vcpdeck-psk`）
 - 带有效签名的 `PUT /api/storage/upload/:key`
@@ -309,7 +309,7 @@ Pi 使用精确协议版本 `PI_SESSION_JOB_PROTOCOL_VERSION = 1`。不匹配时
 - Alibaba：Browser/Client 直接使用短期分片 PUT URL 和临时下载 URL；
 - 短期 URL 持有者具备其约束范围内的能力，因此数据端点不再要求 Cookie/Bearer。
 - Storage Share 公开端点只接受 43 字符 Base64URL Token；未知 Token 返回 404，撤销/失效返回 410，Provider 暂时不可用返回 503；Token 哈希查询和错误投影不泄露 File ID、Storage key 或 Provider URL。
-- 图片仅按文件名扩展名固定映射 MIME，SVG 添加 `sandbox; default-src 'none'; img-src data:`；普通文件响应为不可缓存 302。
+- Storage Share 对图片和普通文件统一返回不可缓存 302；Alibaba 等外部 Provider 由调用方直连，Local 重定向到 Server 的签名下载端点。MIME、附件下载、缓存和内联行为由 Provider 响应决定。
 
 字段级事实以 Shared 的 `FileRef`/`UploadTarget`、SDK 的 `files`/`storage`/`aliyundrive` 和当前 Controller 为准，本文不复制全部 DTO。
 

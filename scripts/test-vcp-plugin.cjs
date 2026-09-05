@@ -523,7 +523,7 @@ async function main() {
 		try { await invoke("DeleteFile", { clientId: CLIENT_ID, rootDir: ROOT_DIR, path: mvTarget }); pass("16. DeleteFile", mvTarget); }
 		catch (e) { fail("16. DeleteFile", e.message); }
 
-		// 17. DownloadFile + 18. public text download + 19. public PNG preview + 20. public SVG preview
+		// 17. DownloadFile + 18. public text download + 19-20. public image redirects
 		const downloadFilePath = `${relDir}/download.txt`;
 		const downloadContent = `vcp-plugin-download-${runId}`;
 		let downloadShareUrl = "";
@@ -554,12 +554,15 @@ async function main() {
 			const r = await invoke("DownloadFile", { clientId: CLIENT_ID, rootDir: ROOT_DIR, path: pngPath });
 			const text = r.result?.content?.[0]?.text ?? r.content?.[0]?.text ?? "";
 			const url = text.match(/<((?:https?:\/\/)[^>]+)>/)?.[1] || "";
-			const response = await fetch(url);
-			const body = await response.text();
-			if (!response.ok || response.headers.get("content-type") !== "image/png" || !response.headers.get("content-disposition")?.startsWith("inline;") || response.headers.get("x-content-type-options") !== "nosniff" || body !== pngContent) {
-				throw new Error(`PNG response mismatch: ${response.status} ${response.headers.get("content-type")}`);
+			const response = await fetch(url, { redirect: "manual" });
+			const location = response.headers.get("location");
+			if (response.status !== 302 || !location) throw new Error(`expected 302, got ${response.status}`);
+			const downloaded = await fetch(new URL(location, url));
+			const body = await downloaded.text();
+			if (!downloaded.ok || body !== pngContent) {
+				throw new Error(`PNG response mismatch: ${downloaded.status} ${downloaded.headers.get("content-type")}`);
 			}
-			pass("19. public PNG preview", "fixed MIME and inline response");
+			pass("19. public PNG preview", "302 followed to current provider");
 		} catch (e) { fail("19. public PNG preview", e.message); }
 
 		const svgPath = `${relDir}/preview.svg`;
@@ -570,13 +573,15 @@ async function main() {
 			const items = r.result?.content ?? r.content ?? [];
 			const text = items[0]?.text ?? "";
 			const url = text.match(/<((?:https?:\/\/)[^>]+)>/)?.[1] || "";
-			const response = await fetch(url);
-			const body = await response.text();
-			const expectedCsp = "sandbox; default-src 'none'; img-src data:";
-			if (!response.ok || response.headers.get("content-type") !== "image/svg+xml" || response.headers.get("content-disposition")?.startsWith("inline;") !== true || response.headers.get("content-security-policy") !== expectedCsp || !items.some((item) => item.type === "image_url" && item.image_url?.url === url) || body !== svgContent) {
-				throw new Error(`SVG response mismatch: ${response.status} ${response.headers.get("content-type")}`);
+			const response = await fetch(url, { redirect: "manual" });
+			const location = response.headers.get("location");
+			if (response.status !== 302 || !location || !items.some((item) => item.type === "image_url" && item.image_url?.url === url)) {
+				throw new Error(`SVG redirect mismatch: ${response.status}`);
 			}
-			pass("20. public SVG preview", "image_url and sandbox CSP");
+			const downloaded = await fetch(new URL(location, url));
+			const body = await downloaded.text();
+			if (!downloaded.ok || body !== svgContent) throw new Error(`SVG response mismatch: ${downloaded.status}`);
+			pass("20. public SVG preview", "image_url and 302 to current provider");
 		} catch (e) { fail("20. public SVG preview", e.message); }
 
 		// 21. GetStorageStatus

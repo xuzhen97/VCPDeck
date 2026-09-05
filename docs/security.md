@@ -1,6 +1,6 @@
 # VCPDeck 安全模型与维护要求
 
-> 状态：Current｜维护责任：安全负责人/模块维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`
+> 状态：Current｜维护责任：安全负责人/模块维护者｜最后核验：2026-09-05｜适用版本：`0.6.26` / 当前 `main`
 
 ## 1. 安全结论
 
@@ -112,8 +112,8 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 - Provider 切换不自动迁移/删除旧数据，应避免产生失控副本；
 - Storage Share 默认长期有效，撤销后公开读取返回 410；有效分享锁定 File，必须先撤销再删除；Token 只在创建响应返回一次，泄露后只能撤销；
 - 公开分享管理响应不含 Token、sharePath、Storage key 或 Provider URL；公开错误不透传 File ID、Provider 错误或签名 URL；
-- 图片按扩展名固定 MIME 并由 Server 代理，SVG 使用 sandbox CSP 和 `nosniff`；普通文件只返回不可缓存 302；
-- Content-Disposition 文件名需要安全编码，浏览器不得执行上传内容；
+- 公开分享对图片和普通文件统一返回不可缓存 302；Alibaba 等外部 Provider 的正文不经过 Server，Local 正文仍由 Server Storage 数据端点提供；
+- 图片 MIME、`Content-Disposition`、缓存和内联行为由 Provider 响应决定，外部 Provider 响应不由 VCPDeck 注入 SVG CSP 或 `nosniff`；调用方不得假设分享一定内联展示，浏览器也不得执行不可信上传内容；
 - running 文件 Job 的 cancel/timeout 当前不会可靠中止 fs、HTTP 或分片操作，断线终局也没有持久补报；结果不明时不得自动重试写、移、删或 import；
 - 文件 Job payload 和 Gateway progress/done/cancelled 仍缺严格双端 parser 与当前 Socket/Job Client 再绑定校验。
 

@@ -1,6 +1,6 @@
 # VCPDeck 快速开始：构建 → 部署 → Server/Client 通讯
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-05｜适用版本：`0.6.26` / 当前 `main`
 
 本文是从零到"Server 与 Client 双向通讯"的最小可验证路径，所有命令均经过 Windows（Git Bash）端到端演练。完整边界、配置表和升级细节见 [`deployment.md`](./deployment.md)；构件打包决策见 [`ADR-0012`](./adr/0012-bundled-release-artifacts.md)；更新协议见 [`design/release-and-update.md`](./design/release-and-update.md)。
 

@@ -13,18 +13,10 @@ import {
 import type { Response } from "express";
 import { Public } from "../auth/public.decorator.js";
 import { StorageObjectNotFoundError } from "./providers/storage-provider.interface.js";
-import { previewMime, StorageShareService } from "./storage-share.service.js";
+import { StorageShareService } from "./storage-share.service.js";
 import { StorageService } from "./storage.service.js";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
-
-function safeFilename(value: string): string {
-	return value.replace(/[\r\n]/g, "").replace(/\\/g, "_").replace(/"/g, "'");
-}
-
-function disposition(filename: string): string {
-	return `inline; filename*=UTF-8''${encodeURIComponent(safeFilename(filename))}`;
-}
 
 function publicError(status: number, message: string): HttpException {
 	if (status === 404) return new NotFoundException({ code: "NOT_FOUND", message });
@@ -64,25 +56,7 @@ export class PublicStorageShareController {
 			throw publicError(503, "Storage is temporarily unavailable");
 		}
 
-		const filename = resolved.filename ?? file.filename;
-		const mime = previewMime(filename);
 		try {
-			if (mime) {
-				const { stream, meta } = await this.storage.openDownload(file.key);
-				response.setHeader("Content-Type", mime);
-				response.setHeader("Content-Disposition", disposition(filename));
-				response.setHeader("X-Content-Type-Options", "nosniff");
-				response.setHeader("Referrer-Policy", "no-referrer");
-				response.setHeader("Cache-Control", "private, no-store");
-				if (mime === "image/svg+xml") {
-					response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'; img-src data:");
-				}
-				if (Number.isFinite(meta.size) && meta.size > 0) response.setHeader("Content-Length", meta.size);
-				stream.on("error", () => response.destroy());
-				stream.pipe(response);
-				return;
-			}
-
 			const ref = await this.storage.createDownloadToken(file.key);
 			response.status(302);
 			response.setHeader("Location", ref.url);

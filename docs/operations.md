@@ -1,6 +1,6 @@
 # VCPDeck 运维手册
 
-> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`
+> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-05｜适用版本：`0.6.26` / 当前 `main`
 
 ## 1. 运行基线
 
@@ -294,8 +294,7 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 - `GET /api/public/storage-shares/<token>` 不需要 Cookie/Bearer；未知 Token 应为 404，撤销/底层确认失效应为 410，Provider 切换或临时故障应为 503/502 且不自动失效；
 - active 分享会阻止 File 显式删除和到期清理；先调用认证的 `DELETE /api/storage/shares/:id` 撤销，再删除 File；File 删除后分享审计保留但状态为 invalid；
 - 反向代理访问日志必须脱敏公开路径 Token，不记录 Provider URL、Storage key 或原始外部错误；
-- 图片按文件名扩展名固定 MIME；SVG 必须带 sandbox CSP，公开图片由 Server 代理且使用 `nosniff`。
-
+- 图片和普通文件都应先返回 302：Alibaba 等外部 Provider 的 Location 指向外部存储，正文不经过 Server；Local 的 Location 指向 Server 签名下载端点。图片能否内联及其 MIME、安全头由 Provider 响应决定。
 
 - 签名或外部临时 URL 是否过期，过期时重新签发；
 - `StorageBackendConfig.config` 中的 Local signSecret 是否丢失、被覆盖或轮换；

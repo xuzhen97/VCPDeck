@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.26] - 2026-09-05
+
+### Changed
+
+- 公开 Storage Share 对图片和普通文件统一 302 到当前 Provider 的短期下载 URL；Alibaba 等外部存储由调用方直连，避免图片正文占用 VCPDeck Server 带宽，Local 仍使用 Server 本地 Storage 数据面。
+
 ## [0.6.25] - 2026-09-05
 
 ### Changed
