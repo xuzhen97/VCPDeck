@@ -1,6 +1,6 @@
 # VCPDeck API 与通信协议
 
-> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
+> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
 
 本文维护协议语义和兼容规则，不复制全部 DTO。字段级事实以 `@vcpdeck/shared` 导出、SDK 和 Controller 实现为准。
 

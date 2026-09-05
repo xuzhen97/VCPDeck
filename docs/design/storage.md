@@ -1,6 +1,6 @@
 # VCPDeck Storage 子系统设计
 
-> 状态：Current｜维护责任：Server/Storage 维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`
+> 状态：Current｜维护责任：Server/Storage 维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`
 >
 > 事实来源：`packages/server/src/storage/`、`packages/server/src/file/`、`packages/server/src/job/`、`packages/shared/src/`、`packages/sdk/src/storage.ts`、`packages/sdk/src/aliyundrive.ts`
 

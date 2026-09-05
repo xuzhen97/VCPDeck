@@ -1,6 +1,6 @@
 # VCPDeck 领域与数据模型
 
-> 状态：Current｜维护责任：Server/Shared 维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`｜事实来源：`packages/shared/src/`、`packages/server/prisma/schema.prisma`
+> 状态：Current｜维护责任：Server/Shared 维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`｜事实来源：`packages/shared/src/`、`packages/server/prisma/schema.prisma`
 
 本文解释核心领域概念、状态和数据权威；字段级定义以 Shared 类型和 Prisma schema 为准。
 

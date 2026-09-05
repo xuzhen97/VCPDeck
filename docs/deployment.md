@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 仍由 PM2/用户登录模型管理，Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 
@@ -53,6 +53,7 @@ pnpm release --version=x.y.z
 ```
 
 - `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`：对应平台构件（均含 `launcher/`、`server/`、`client/`），既供手动分发，也供自动更新上传（两个平台各上传一次）；首次安装时 Launcher 放入 `<app-dir>/dist/main.js`，已有 Launcher 默认保留；
+- `dist/VCPDeckBridge.zip`：VCPToolBox 插件商店下载构件；`pnpm release` 会同步版本并重建，必须与源码、manifest 和 `plugins.json` 一起提交，不能按普通 `dist` 忽略；
 - 业务代码为 esbuild 单文件，仅原生/引擎/SDK 依赖保留为 node_modules。Linux 目标机自动更新依赖系统 `unzip` 命令（手动分发无此要求）。发布前应完成发布验收冒烟（Server 启动与 `/api/status`、Client 注册与能力上报、终端与 Pi 探测），不建议将工作区源码目录直接当作长期版本目录。
 
 ## 4. 配置
@@ -324,7 +325,7 @@ location / {
 pnpm release --version=x.y.z
 ```
 
-产出 `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`，并打印各自的 sha256。推荐统一使用 CLI：Alibaba 后端会协商分片并把构件直接 PUT 到 Provider，Server 只处理认证、会话和登记；Local 后端由 CLI 自动选择 Server raw stream。
+产出 `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`，并打印各自的 sha256；同时重建必须提交的插件商店构件 `dist/VCPDeckBridge.zip`。推荐统一使用 CLI：Alibaba 后端会协商分片并把构件直接 PUT 到 Provider，Server 只处理认证、会话和登记；Local 后端由 CLI 自动选择 Server raw stream。
 
 #### 方式一：CLI（推荐命名环境；第二个平台齐备即自动开始更新）
 

@@ -1,10 +1,10 @@
 # VCPDeck 兼容性与升级策略
 
-> 状态：Current｜维护责任：发布维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`
+> 状态：Current｜维护责任：发布维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`
 
 ## 1. 当前结论
 
-VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI 与 Skill 在正式发布中使用同一个 `x.y.z` 版本，推荐始终整套升级。`pnpm release --version=x.y.z` 会保留该版本到 Shared 源码、三个 package manifest 和 Skill CLI 构件，提交后再创建同版本 Git Tag；普通开发构建可能仍显示最近准备的发布版本，不能据此判断工作区提交是否已经正式发布。
+VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、Skill 与 VCPDeckBridge 在正式发布中使用同一个 `x.y.z` 版本，推荐始终整套升级。`pnpm release --version=x.y.z` 会保留该版本到 Shared 源码、相关 package manifest、Skill CLI 构件、插件 manifest 和 `dist/VCPDeckBridge.zip`；提交后再创建同版本 Git Tag。普通开发构建可能仍显示最近准备的发布版本，不能据此判断工作区提交是否已经正式发布。
 
 ## 2. 兼容维度
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 更新发布版本：同步 Shared 运行时版本与 SDK/Shared/CLI 包版本。
+ * 更新发布版本：同步 Shared 运行时版本、包版本与 VCPDeckBridge 元数据。
  * 由 pack-release（pnpm release）在构建前调用。
  *
  * 用法:
@@ -18,7 +18,7 @@ if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
 }
 
 try {
-	const packageNames = ["shared", "sdk", "cli"];
+	const packageNames = ["shared", "sdk", "cli", "vcp-plugin"];
 	for (const name of packageNames) {
 		const target = path.resolve(__dirname, `../packages/${name}/package.json`);
 		const manifest = JSON.parse(fs.readFileSync(target, "utf8"));
@@ -26,6 +26,24 @@ try {
 		if (name === "sdk") manifest.peerDependencies["@vcpdeck/shared"] = version;
 		fs.writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`);
 	}
+
+	const pluginManifestPath = path.resolve(
+		__dirname,
+		"../plugins/vcpdeck/plugin-manifest.json",
+	);
+	const pluginManifest = JSON.parse(fs.readFileSync(pluginManifestPath, "utf8"));
+	pluginManifest.version = version;
+	fs.writeFileSync(
+		pluginManifestPath,
+		`${JSON.stringify(pluginManifest, null, 2)}\n`,
+	);
+
+	const pluginIndexPath = path.resolve(__dirname, "../plugins.json");
+	const pluginIndex = JSON.parse(fs.readFileSync(pluginIndexPath, "utf8"));
+	for (const plugin of pluginIndex.plugins ?? []) {
+		if (plugin.name === "VCPDeckBridge") plugin.version = version;
+	}
+	fs.writeFileSync(pluginIndexPath, `${JSON.stringify(pluginIndex, null, 2)}\n`);
 
 	const target = path.resolve(__dirname, "../packages/shared/src/version.ts");
 	const content = `/**

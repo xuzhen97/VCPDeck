@@ -3,8 +3,8 @@
  *   pnpm release --version=1.2.1 [--output=dist-release/] [--node-constraint=">=24"]
  *
  * 步骤：
- *   1. 同步 SDK/Shared/CLI 版本与 Shared 运行时版本 → 全量构建
- *      （shared/sdk/cli/server/client/launcher/frontend）→ 多平台 frp 下载
+ *   1. 同步 SDK/Shared/CLI/VCPDeckBridge 版本与 Shared 运行时版本 → 全量构建
+ *      （shared/sdk/cli/vcp-plugin/server/client/launcher/frontend）→ 多平台 frp 下载
  *   2. esbuild 将业务代码 + 纯 JS 依赖打成少量单文件（原生模块、Prisma 运行时、
  *      Pi SDK 等外部保留，staging 只安装这部分依赖）
  *   3. staging 组装：launcher/、server/ 与 client/（Launcher 单文件 + 业务构件与精简依赖）
@@ -458,7 +458,12 @@ async function main(): Promise<void> {
 		"packages/shared/package.json",
 		"packages/sdk/package.json",
 		"packages/cli/package.json",
+		"packages/vcp-plugin/package.json",
 		"packages/shared/src/version.ts",
+		"plugins.json",
+		"plugins/vcpdeck/plugin-manifest.json",
+		"plugins/vcpdeck/index.cjs",
+		"dist/VCPDeckBridge.zip",
 		"pnpm-lock.yaml",
 		"skills/vcpdeck/vcpdeck.cjs",
 	].map((path) => join(ROOT, path));
@@ -484,6 +489,10 @@ async function main(): Promise<void> {
 		run(["pnpm", "--filter", "@vcpdeck/sdk", "build"], "SDK 构建");
 		run(["pnpm", "--filter", "@vcpdeck/cli", "build"], "CLI/Skill 构建");
 		run(["node", "skills/vcpdeck/vcpdeck.cjs", "--help"], "CLI/Skill 冒烟");
+		run(
+			["pnpm", "--filter", "@vcpdeck/vcp-plugin", "build"],
+			"VCPDeckBridge 商店构件",
+		);
 		run(["pnpm", "--filter", "@vcpdeck/server", "build"], "server 构建");
 		run(["pnpm", "--filter", "@vcpdeck/client", "build"], "client 构建");
 		run(["pnpm", "--filter", "@vcpdeck/launcher", "build"], "Launcher 构建");

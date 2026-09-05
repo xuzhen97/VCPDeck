@@ -1,6 +1,6 @@
 # Release 与自更新子系统设计
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-04｜适用版本：`0.6.24` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-05｜适用版本：`0.6.25` / 当前 `main`
 
 本文描述当前已经落地的 Release、Server/Client 更新和 Launcher 进程守护模型。长期决策理由见 [ADR-0003](../adr/0003-separate-launcher-for-updates.md)；构件生成、首次部署和回滚操作见 [`deployment.md`](../deployment.md)；兼容要求见 [`compatibility.md`](../compatibility.md)；故障处置见 [`operations.md`](../operations.md)。
 
@@ -33,7 +33,7 @@
 
 | 组件 | 当前职责 |
 | --- | --- |
-| `scripts/pack-release.ts` | 同步 Shared/SDK/CLI 与运行时版本、构建 Shared/SDK/CLI/Server/Client/Frontend/Launcher、生成并验证 `skills/vcpdeck/vcpdeck.cjs`、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
+| `scripts/pack-release.ts` | 同步 Shared/SDK/CLI/VCPDeckBridge 与运行时版本、构建 Shared/SDK/CLI/VCPDeckBridge/Server/Client/Frontend/Launcher、生成并验证 `skills/vcpdeck/vcpdeck.cjs`、重建插件商店 `dist/VCPDeckBridge.zip`、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
 | CLI `release upload/status/wait` | 解析命名/项目环境（ADR-0017）、参数与文件名，读取本地 archive、计算 SHA-256 和输出安全进度；Alibaba 模式按 Server 签发的分片 URL 直接 PUT 到 Provider，Local/旧 Server 引导使用 raw stream；`wait` 仅重试安全 GET，并同时验收 Server 版本、Release 与 Client 明细 |
 | `ReleaseController` / `ReleaseUploadController` | Release 列表、Local raw 上传、外部直传会话创建/刷新/完成、构件下载和自动触发编排 |
 | `ReleaseUploadService` / `ReleaseService` | 持久化上传会话与 Release、登记 Provider 元数据、状态转换和 Client 更新明细 |
@@ -59,7 +59,7 @@ Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由
 | 当前应用版本 | Launcher `apps/current` 或 `apps/state.json` | Linux 使用 symlink；Windows 使用 state 文件 |
 | 已准备目标版本 | Launcher 进程内 `pendingVersion` | Launcher 重启后不保留 |
 | 运行中的业务进程 | Launcher `Daemon` | Server 数据库不能证明进程仍健康 |
-| Server/Client 构建版本 | `@vcpdeck/shared` 的 `VERSION` | `pnpm release --version=x.y.z` 同步并保留，提交与同版本 Git Tag 后成为正式发布 |
+| Server/Client/VCPDeckBridge 构建版本 | `@vcpdeck/shared` 的 `VERSION` 与插件 manifest | `pnpm release --version=x.y.z` 同步并保留；提交源码、`skills/vcpdeck/vcpdeck.cjs` 和 `dist/VCPDeckBridge.zip` 后，GitHub Tag/`main` 分别成为正式版本与插件商店来源 |
 | archive SHA-256 | CLI 上传声明、`Release.archives[platform].sha256`、`UpdateRequest.sha256` | 当前 manifest 内的 `sha256` 留空；Local 由 Server 上传时复核，Alibaba 直传由 Launcher 下载后复核 |
 | Release archive 生命周期 | `Release.archives[platform].availability` | `available` 可下载/更新，`deleting` 停止新使用并等待清理，`cleaned` 只保留审计摘要；旧 JSON 缺失字段按 `available` 兼容读取 |
 | Release 清理策略 | Server `ReleaseCleanupService` | 最近 3 个成功 Release 始终保留；成功、失败和不完整 Release 均有 30 天保底；过期上传会话在到期后再宽限 24 小时 |

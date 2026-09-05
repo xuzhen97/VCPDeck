@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.25] - 2026-09-05
+
+### Changed
+
+- 发布流程同步 VCPDeckBridge 版本并重新生成 `dist/VCPDeckBridge.zip`；该商店构件必须与源码和 manifest 一起提交，避免 VCPToolBox 继续下载旧命令清单。
+
 ## [0.6.24] - 2026-09-04
 
 ### Added
