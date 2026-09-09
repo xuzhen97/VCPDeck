@@ -28,7 +28,7 @@ pnpm --filter @vcpdeck/client start
 
 ### Windows Client 重启
 
-Windows 一键安装器可能把 PM2 安装到当前用户的私有目录，因此新开的 PowerShell 中直接执行 `pm2` 可能提示“找不到命令”。必须使用**安装 Client 的同一个 Windows 用户**，并只重启 PM2 管理的 Launcher：
+Windows 一键安装器可能把 PM2 安装到当前用户的私有目录，因此新开的 PowerShell 中直接执行 `pm2` 可能提示“找不到命令”。必须使用**安装 Client 的同一个 Windows 用户**，并只重启 PM2 管理的 Launcher。安装器创建的登录任务使用 `RunLevel=Highest`；若当前 PM2 daemon 是旧版 Limited 任务启动的，重跑安装器修复任务后还需结束旧 daemon，并从 `VCPDeck PM2 Startup` 任务重新启动，已运行进程不会原地提权。
 
 ```powershell
 # 若 pm2.cmd 已在 PATH 中，直接执行：

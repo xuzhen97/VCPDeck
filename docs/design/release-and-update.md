@@ -26,7 +26,7 @@
 - Frontend 静态资源的独立自动部署（当前随 Server 构件分发）；
 - 数据库 schema 自动回滚；
 - 发布者数字签名；
-- 自动安装 Windows Service；Windows Client 一键安装继续使用 PM2/当前用户登录计划任务；Linux Client 新安装使用 A2 systemd，Server 系统服务仍由运维准备；
+- 自动安装 Windows Service；Windows Client 一键安装继续使用 PM2/当前用户最高权限登录计划任务；Linux Client 新安装使用 A2 systemd，Server 系统服务仍由运维准备；
 - 对任意历史 Server/Client 版本提供兼容承诺。
 
 ## 2. 组件与职责
@@ -275,7 +275,7 @@ Client Launcher 的健康判定是新 Client 进程连续存活约 3 秒，不�
     └── <previous-version>/
 ```
 
-Launcher 首次启动前必须已经存在可启动的 current 版本。通用 `install.cjs` 会从 zip 准备 Launcher 和初始业务版本；Linux Client A2 安装器在其上配置系统级 `vcpdeck-client.service`，Windows Client 安装器继续使用 PM2 和当前用户登录计划任务，通用 Server 安装仍不自动安装 systemd 或 Windows Service。
+Launcher 首次启动前必须已经存在可启动的 current 版本。通用 `install.cjs` 会从 zip 准备 Launcher 和初始业务版本；Linux Client A2 安装器在其上配置系统级 `vcpdeck-client.service`，Windows Client 安装器继续使用 PM2 和当前用户最高权限登录计划任务，通用 Server 安装仍不自动安装 systemd 或 Windows Service。
 
 Launcher 使用 `retention.json` 记录已确认健康切换成功的版本。每台机器保留 current、除 current 外最近 2 个成功历史版本，以及 prepare/apply 目标和 previous；启动后会在稳定窗口后补扫旧版本目录。缺少或损坏 `retention.json` 时暂停自动删除，不猜测未知 legacy 目录；单个目录删除失败不阻止其他候选继续处理。失败回退只有在上一版本目录仍存在且可启动时才有效。
 

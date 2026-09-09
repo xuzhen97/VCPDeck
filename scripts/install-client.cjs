@@ -350,7 +350,18 @@ function writeEcosystem(appDir, nodePath, envPath) {
 	return path;
 }
 
-/** 注册 Windows 开机自启任务；非管理员无法创建根目录任务时降级为警告，不视为安装失败。
+/** 判断既有 Windows 登录任务是否可复用、需要提权修复或与其他命令冲突。 */
+function classifyWindowsStartupTask(xml, wrapper) {
+	const normalizedXml = String(xml).replace(/\\/g, "/").toLowerCase();
+	const normalizedWrapper = wrapper.replace(/\\/g, "/").toLowerCase();
+	if (!normalizedXml.includes(normalizedWrapper)) return "conflict";
+	return /<runlevel>\s*highestavailable\s*<\/runlevel>/i.test(xml) &&
+		/<logontype>\s*interactivetoken\s*<\/logontype>/i.test(xml)
+		? "configured"
+		: "repair";
+}
+
+/** 注册 Windows 最高权限登录自启任务；权限不足时降级为警告，不视为安装失败。
  * exec 与 warn 可注入以便测试。 */
 function registerStartupTask(
 	taskName,
@@ -369,8 +380,9 @@ function registerStartupTask(
 				taskName,
 				"/TR",
 				`"${wrapper}"`,
+				"/IT",
 				"/RL",
-				"LIMITED",
+				"HIGHEST",
 				"/F",
 			],
 			{ stdio: "inherit" },
@@ -404,7 +416,7 @@ function retryStartupTaskAsAdmin(
 		spawnSync("powershell.exe", args, { encoding: "utf8", windowsHide: true }),
 	warn = console.error,
 ) {
-	const createCommand = `schtasks.exe /Create /SC ONLOGON /TN "${taskName}" /TR "${wrapper}" /RL LIMITED /F`;
+	const createCommand = `schtasks.exe /Create /SC ONLOGON /TN "${taskName}" /TR "${wrapper}" /IT /RL HIGHEST /F`;
 	const payload =
 		`${createCommand}\r\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
 	const encoded = Buffer.from(payload, "utf16le").toString("base64");
@@ -435,24 +447,22 @@ function configureStartup(pm2, nodePath, appDir) {
 		const taskName = "VCPDeck PM2 Startup";
 		const existing = spawnSync(
 			"schtasks.exe",
-			["/Query", "/TN", taskName, "/V", "/FO", "LIST"],
-			{ encoding: "utf8" },
+			["/Query", "/TN", taskName, "/XML"],
+			{ encoding: "utf16le" },
 		);
 		if (existing.status === 0) {
-			const normalizedOutput = existing.stdout.replace(/\\/g, "/").toLowerCase();
-			const normalizedWrapper = wrapper.replace(/\\/g, "/").toLowerCase();
-			if (!normalizedOutput.includes(normalizedWrapper)) {
+			const state = classifyWindowsStartupTask(existing.stdout, wrapper);
+			if (state === "conflict") {
 				throw new Error(`Windows 计划任务 ${taskName} 已存在但指向其他命令`);
 			}
-		} else {
-			const outcome = registerStartupTask(taskName, wrapper);
-			if (outcome === "not-configured") {
-				// 非管理员：自动弹 UAC 提权补注册，取消/失败再降级并给出可执行命令
-				return retryStartupTaskAsAdmin(taskName, wrapper);
-			}
-			return outcome;
+			if (state === "configured") return "windows-logon-task";
 		}
-		return "windows-logon-task";
+		const outcome = registerStartupTask(taskName, wrapper);
+		if (outcome === "not-configured") {
+			// 非管理员：自动弹 UAC 提权创建或修复，取消/失败再降级并给出可执行命令
+			return retryStartupTaskAsAdmin(taskName, wrapper);
+		}
+		return outcome;
 	}
 	const username = userInfo().username;
 	const service = `pm2-${username}.service`;
@@ -742,6 +752,7 @@ module.exports = {
 	buildNodeRuntimeEnv,
 	npmPath,
 	writeEcosystem,
+	classifyWindowsStartupTask,
 	registerStartupTask,
 	retryStartupTaskAsAdmin,
 };

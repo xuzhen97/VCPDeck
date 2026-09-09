@@ -83,3 +83,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0022](./0022-release-artifact-and-launcher-retention.md) | Accepted | Release 审计与归档正文分离生命周期，Server 与 Launcher 按各自权威独立清理 |
 | [0023](./0023-linux-system-client-and-root-equivalent-account.md) | Accepted | Linux Client 使用 systemd 系统部署与 root 等价专用账户，存量 PM2 安装通过 M1 迁移 |
 | [0024](./0024-public-storage-share-capabilities.md) | Accepted | 使用长期 opaque capability 提供公开 Storage 分享，并以有效分享保护底层 File |
+| [0025](./0025-windows-client-highest-privilege-logon-task.md) | Accepted | Windows Client 保留当前用户 + PM2 + 登录任务模型，并以最高可用权限恢复 Launcher |

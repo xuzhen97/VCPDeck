@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [Unreleased]
+
+### Changed
+
+- Windows Client 一键安装的用户登录计划任务改为 `RunLevel=Highest`；管理员账户登录后，PM2、Launcher 与 Client 使用提升令牌运行。重跑安装器会修复指向当前恢复脚本的旧 Limited 任务，仍拒绝覆盖指向其他命令的同名任务。
+
 ## [0.6.26] - 2026-09-05
 
 ### Changed

@@ -73,7 +73,9 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 
 当前任意有效业务身份可访问所有 Client/Job/Storage/FRP/Pi/Terminal。Frontend 隐藏按钮和“确认操作”不是授权边界。若增加非完全可信用户，必须先设计资源级授权和审计，不能只增加 UI 角色。
 
-### 4.5 root 等价 Client（Linux A2，ADR-0023）
+### 4.5 提升权限 Client
+
+Windows 一键安装通过当前管理员用户的 `RunLevel=Highest` 登录计划任务恢复 PM2，因此 Launcher、Client、Job、Terminal、Files 和 Pi 继承该用户的提升令牌。它不是 LocalSystem 或 Windows Service，不改变账户身份与 HOME，也不保证无人登录时在线；标准用户不会因此获得管理员身份。Windows 当前不通过 `installation.mode` 或 `capabilityDetails.privileged` 上报该状态，控制面不得把“未报告”推断为低权限。
 
 Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 等价** Client：Job、Terminal、Pi 可显式 `sudo -n` 执行任意 root 命令，不受沙箱限制，继承目标机 OS 账户的全部权限。
 
