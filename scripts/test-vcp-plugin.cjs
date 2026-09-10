@@ -575,13 +575,13 @@ async function main() {
 			const url = text.match(/<((?:https?:\/\/)[^>]+)>/)?.[1] || "";
 			const response = await fetch(url, { redirect: "manual" });
 			const location = response.headers.get("location");
-			if (response.status !== 302 || !location || !items.some((item) => item.type === "image_url" && item.image_url?.url === url)) {
+			if (response.status !== 302 || !location) {
 				throw new Error(`SVG redirect mismatch: ${response.status}`);
 			}
 			const downloaded = await fetch(new URL(location, url));
 			const body = await downloaded.text();
 			if (!downloaded.ok || body !== svgContent) throw new Error(`SVG response mismatch: ${downloaded.status}`);
-			pass("20. public SVG preview", "image_url and 302 to current provider");
+			pass("20. public SVG preview", "302 followed to current provider");
 		} catch (e) { fail("20. public SVG preview", e.message); }
 
 		// 21. GetStorageStatus

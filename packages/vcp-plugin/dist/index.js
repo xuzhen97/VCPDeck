@@ -79,7 +79,7 @@ async function main() {
                 token: config.apiToken,
             },
         });
-        const res = await dispatchCommand(client, req);
+        const res = await dispatchCommand(client, req, config.publicShareBaseUrl);
         sendResponse(res);
     }
     catch (err) {

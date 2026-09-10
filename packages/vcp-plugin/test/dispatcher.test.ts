@@ -86,8 +86,8 @@ describe("VCPDeckBridge Dispatcher", () => {
 		expect(res.status).toBe("success");
 		expect(mockClient.files.export).toHaveBeenCalledWith("c1", { rootDir: "/", path: "/tmp/photo.png" });
 		expect(mockClient.storageShares.create).toHaveBeenCalledWith({ fileId: "file-1" });
+		expect(res.content).toHaveLength(1);
 		expect(res.content?.[0]?.text).toContain("https://deck.example/api/public/storage-shares/token");
-		expect(res.content?.[1]).toEqual({ type: "image_url", image_url: { url: "https://deck.example/api/public/storage-shares/token" } });
 	});
 
 	it("should reject DownloadFile without an HTTP(S) public share base", async () => {

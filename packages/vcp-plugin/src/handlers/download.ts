@@ -15,7 +15,7 @@ function publicUrl(base: string, sharePath: string): string {
 	return new URL(sharePath, `${parsed.toString().replace(/\/$/, "")}/`).toString();
 }
 
-/** 导出远程文件并返回公开分享链接；图片额外返回 VCP 图片内容。 */
+/** 导出远程文件并返回公开下载链接（纯文本形式）。 */
 export async function handleDownloadFile(
 	client: VcpDeckClient,
 	params: Record<string, unknown>,
@@ -34,7 +34,6 @@ export async function handleDownloadFile(
 	const content: VcpContentItem[] = [
 		{ type: "text", text: `[下载 ${share.filename}](<${url}>)` },
 	];
-	if (share.previewable) content.push({ type: "image_url", image_url: { url } });
 	return {
 		status: "success",
 		content,
