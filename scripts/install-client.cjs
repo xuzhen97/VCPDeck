@@ -350,91 +350,99 @@ function writeEcosystem(appDir, nodePath, envPath) {
 	return path;
 }
 
-/** 判断既有 Windows 登录任务是否可复用、需要提权修复或与其他命令冲突。 */
-function classifyWindowsStartupTask(xml, wrapper) {
-	const normalizedXml = String(xml).replace(/\\/g, "/").toLowerCase();
-	const normalizedWrapper = wrapper.replace(/\\/g, "/").toLowerCase();
-	if (!normalizedXml.includes(normalizedWrapper)) return "conflict";
-	return /<runlevel>\s*highestavailable\s*<\/runlevel>/i.test(xml) &&
-		/<logontype>\s*interactivetoken\s*<\/logontype>/i.test(xml)
+function powershellQuote(value) {
+	return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+/** 生成稳定的 Windows 登录任务：直接运行 Node，避免 `.cmd` Action 的引号歧义。 */
+function buildWindowsStartupTaskScript(definition) {
+	const args = `--require="${definition.probePath}" "${definition.pm2Path}" resurrect`;
+	return [
+		`$action = New-ScheduledTaskAction -Execute ${powershellQuote(definition.nodePath)} -Argument ${powershellQuote(args)} -WorkingDirectory ${powershellQuote(definition.appDir)}`,
+		`$trigger = New-ScheduledTaskTrigger -AtLogOn -User ${powershellQuote(definition.userSid)}`,
+		"$trigger.Delay = 'PT10S'",
+		`$principal = New-ScheduledTaskPrincipal -UserId ${powershellQuote(definition.userSid)} -LogonType Interactive -RunLevel Highest`,
+		"$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew",
+		`Register-ScheduledTask -TaskName ${powershellQuote(definition.taskName)} -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null`,
+	].join("\r\n");
+}
+
+/** 判断既有任务是否属于当前安装，以及是否完全满足最高权限登录恢复约束。 */
+function classifyWindowsStartupTask(xml, expected) {
+	const source = String(xml);
+	const normalized = source.replace(/\\/g, "/").toLowerCase();
+	const appDir = expected.appDir.replace(/\\/g, "/").toLowerCase();
+	const workingDirectory = source.match(/<WorkingDirectory>([\s\S]*?)<\/WorkingDirectory>/i)?.[1]
+		?.replace(/\\/g, "/")
+		.toLowerCase();
+	const legacyCommand = source.match(/<Command>\s*&?quot;?([^<]*pm2-resurrect\.cmd)&?quot;?\s*<\/Command>/i)?.[1]
+		?.replace(/\\/g, "/")
+		.toLowerCase();
+	if ((workingDirectory && workingDirectory !== appDir) || (legacyCommand && !legacyCommand.startsWith(`${appDir}/`))) {
+		return "conflict";
+	}
+	if (!normalized.includes(appDir)) return "conflict";
+	const required = [
+		expected.nodePath,
+		expected.pm2Path,
+		expected.appDir,
+		expected.userSid,
+		expected.probePath,
+	].map((value) => value.replace(/\\/g, "/").toLowerCase());
+	return required.every((value) => normalized.includes(value)) &&
+		/<runlevel>\s*highestavailable\s*<\/runlevel>/i.test(xml) &&
+		/<logontype>\s*interactivetoken\s*<\/logontype>/i.test(xml) &&
+		/<delay>\s*pt10s\s*<\/delay>/i.test(xml) &&
+		/<disallowstartifonbatteries>\s*false\s*<\/disallowstartifonbatteries>/i.test(xml) &&
+		/<stopifgoingonbatteries>\s*false\s*<\/stopifgoingonbatteries>/i.test(xml) &&
+		/<startwhenavailable>\s*true\s*<\/startwhenavailable>/i.test(xml)
 		? "configured"
 		: "repair";
 }
 
-/** 注册 Windows 最高权限登录自启任务；权限不足时降级为警告，不视为安装失败。
- * exec 与 warn 可注入以便测试。 */
+/** 通过一次 UAC 注册最高权限计划任务；取消或失败即安装失败。 */
 function registerStartupTask(
-	taskName,
-	wrapper,
-	exec = execFileSync,
-	warn = console.error,
-) {
-	try {
-		exec(
-			"schtasks.exe",
-			[
-				"/Create",
-				"/SC",
-				"ONLOGON",
-				"/TN",
-				taskName,
-				"/TR",
-				`"${wrapper}"`,
-				"/IT",
-				"/RL",
-				"HIGHEST",
-				"/F",
-			],
-			{ stdio: "inherit" },
-		);
-		return "windows-logon-task";
-	} catch (error) {
-		if (
-			/(access.*denied|拒绝访问|eacces)/i.test(String(error?.message ?? error))
-		) {
-			warn(
-				`[vcpdeck] 未能注册开机自启：创建计划任务需要管理员权限（当前非管理员）。` +
-					`Client 已在线，但重启后不会自动恢复；请以管理员身份重跑安装命令以补上自启。`,
-			);
-			return "not-configured";
-		}
-		throw error;
-	}
-}
-
-/**
- * 权限被拒时自动弹 UAC 提权补注册开机自启：
- * - payload 完全自包含（UTF-16LE base64 → -EncodedCommand），适配一次性下载执行；
- * - 提权子进程执行 schtasks 后 `exit $LASTEXITCODE`，父进程 Start-Process -Wait -PassThru 透传；
- * - 成功返回 `windows-logon-task(via-uac)`；取消/失败降级 `not-configured` 并打印可复制兜底命令。
- * startPwsh / warn 可注入以便测试（测试内绝不弹真实 UAC）。
- */
-function retryStartupTaskAsAdmin(
-	taskName,
-	wrapper,
+	definition,
 	startPwsh = (args) =>
 		spawnSync("powershell.exe", args, { encoding: "utf8", windowsHide: true }),
-	warn = console.error,
 ) {
-	const createCommand = `schtasks.exe /Create /SC ONLOGON /TN "${taskName}" /TR "${wrapper}" /IT /RL HIGHEST /F`;
-	const payload =
-		`${createCommand}\r\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
+	const payload = buildWindowsStartupTaskScript(definition);
 	const encoded = Buffer.from(payload, "utf16le").toString("base64");
 	const parentCommand =
 		`$p = Start-Process powershell -Verb RunAs -Wait -PassThru ` +
-		`-ArgumentList '-NoProfile','-EncodedCommand','${encoded}'; exit $p.ExitCode`;
-	const result = startPwsh(["-NoProfile", "-Command", parentCommand]);
-	if (result.status === 0) {
-		console.log(
-			`[vcpdeck] 已通过 UAC 提权补注册开机自启（计划任务 ${taskName}）`,
-		);
-		return "windows-logon-task(via-uac)";
+		`-ArgumentList '-NoProfile','-NonInteractive','-EncodedCommand','${encoded}'; exit $p.ExitCode`;
+	const result = startPwsh(["-NoProfile", "-NonInteractive", "-Command", parentCommand]);
+	if (result.status !== 0) {
+		throw new Error("Windows 自启动任务注册失败或 UAC 被取消");
 	}
-	warn(
-		`[vcpdeck] 未能注册开机自启：UAC 提权被取消或失败。可手动以管理员身份运行：` +
-			`\n  ${createCommand.replace("schtasks.exe", "schtasks")}`,
-	);
-	return "not-configured";
+	console.log(`[vcpdeck] 已通过 UAC 注册最高权限登录自启动（${definition.taskName}）`);
+	return "windows-logon-task(via-uac)";
+}
+
+function windowsIdentity() {
+	const whoami = join(process.env.SystemRoot || "C:\\Windows", "System32", "whoami.exe");
+	const user = spawnSync(whoami, ["/user", "/fo", "csv", "/nh"], { encoding: "utf8" });
+	const groups = spawnSync(whoami, ["/groups", "/fo", "csv", "/nh"], { encoding: "utf8" });
+	const sid = user.stdout?.match(/S-1-5-[\d-]+/i)?.[0];
+	if (user.status !== 0 || groups.status !== 0 || !sid) {
+		throw new Error("无法读取当前 Windows 用户 SID 与管理员组信息");
+	}
+	if (!/S-1-5-32-544/i.test(groups.stdout)) {
+		throw new Error("Windows Client 必须由本机 Administrators 组成员安装");
+	}
+	return { sid, whoami };
+}
+
+function writeWindowsStartupProbe(appDir, whoamiPath) {
+	const path = join(appDir, "startup-probe.cjs");
+	const statusPath = join(appDir, "startup-status.json");
+	const logPath = join(appDir, "startup.log");
+	writeFileSync(path, `const { appendFileSync, writeFileSync } = require("node:fs");\nconst { spawnSync } = require("node:child_process");\nconst statusPath = ${JSON.stringify(statusPath)};\nconst logPath = ${JSON.stringify(logPath)};\nconst result = spawnSync(${JSON.stringify(whoamiPath)}, ["/groups", "/fo", "csv", "/nh"], { encoding: "utf8" });\nconst highIntegrity = /S-1-16-(12288|16384)/i.test(result.stdout || "");\nconst write = (success, exitCode) => {\n  const status = { at: new Date().toISOString(), highIntegrity, success, exitCode };\n  writeFileSync(statusPath, JSON.stringify(status));\n  appendFileSync(logPath, JSON.stringify(status) + "\\n");\n};\nwrite(false, null);\nif (!highIntegrity) { write(false, 1); throw new Error("VCPDeck startup requires a high-integrity administrator token"); }\nprocess.once("exit", (code) => write(code === 0, code));\n`);
+	return { path, statusPath };
+}
+
+function sleepSync(ms) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function configureStartup(pm2, nodePath, appDir) {
@@ -444,25 +452,65 @@ function configureStartup(pm2, nodePath, appDir) {
 			wrapper,
 			`@echo off\r\n"${pm2.command}" ${pm2.argsPrefix.map((v) => `"${v}"`).join(" ")} resurrect\r\n`,
 		);
-		const taskName = "VCPDeck PM2 Startup";
+		const pm2Path = pm2.argsPrefix[0];
+		if (pm2.command !== nodePath || !pm2Path) {
+			throw new Error("Windows 自启动要求可由安装器 Node 直接执行的 PM2 CLI");
+		}
+		const identity = windowsIdentity();
+		const probe = writeWindowsStartupProbe(appDir, identity.whoami);
+		const definition = {
+			taskName: "VCPDeck PM2 Startup",
+			nodePath,
+			pm2Path,
+			appDir,
+			userSid: identity.sid,
+			probePath: probe.path,
+		};
 		const existing = spawnSync(
 			"schtasks.exe",
-			["/Query", "/TN", taskName, "/XML"],
+			["/Query", "/TN", definition.taskName, "/XML"],
 			{ encoding: "utf16le" },
 		);
 		if (existing.status === 0) {
-			const state = classifyWindowsStartupTask(existing.stdout, wrapper);
+			const state = classifyWindowsStartupTask(existing.stdout, definition);
 			if (state === "conflict") {
-				throw new Error(`Windows 计划任务 ${taskName} 已存在但指向其他命令`);
+				throw new Error(`Windows 计划任务 ${definition.taskName} 已存在但指向其他安装目录`);
 			}
-			if (state === "configured") return "windows-logon-task";
+			if (state === "repair") registerStartupTask(definition);
+		} else registerStartupTask(definition);
+
+		const verified = spawnSync(
+			"schtasks.exe",
+			["/Query", "/TN", definition.taskName, "/XML"],
+			{ encoding: "utf16le" },
+		);
+		if (verified.status !== 0 || classifyWindowsStartupTask(verified.stdout, definition) !== "configured") {
+			throw new Error("Windows 自启动任务定义验收失败");
 		}
-		const outcome = registerStartupTask(taskName, wrapper);
-		if (outcome === "not-configured") {
-			// 非管理员：自动弹 UAC 提权创建或修复，取消/失败再降级并给出可执行命令
-			return retryStartupTaskAsAdmin(taskName, wrapper);
+		const processes = JSON.parse(runPm2(pm2, ["jlist"], { capture: true }));
+		if (processes.some((entry) => entry.name !== PM2_NAME)) {
+			throw new Error("当前 PM2 daemon 还管理其他应用，拒绝为提权而重启");
 		}
-		return outcome;
+		runPm2(pm2, ["kill"]);
+		rmSync(probe.statusPath, { force: true });
+		execFileSync("schtasks.exe", ["/Run", "/TN", definition.taskName], { stdio: "inherit" });
+		const deadline = Date.now() + 30_000;
+		let status;
+		while (Date.now() < deadline) {
+			try {
+				status = JSON.parse(readFileSync(probe.statusPath, "utf8"));
+			} catch {}
+			if (status?.success && status.highIntegrity) break;
+			sleepSync(500);
+		}
+		if (!status?.success || !status.highIntegrity) {
+			throw new Error("Windows 自启动任务未能以高完整性令牌恢复 PM2");
+		}
+		const launcher = pm2Process(pm2);
+		if (launcher?.pm2_env?.status !== "online") {
+			throw new Error("Windows 自启动任务未能恢复 PM2 Launcher");
+		}
+		return "windows-logon-task";
 	}
 	const username = userInfo().username;
 	const service = `pm2-${username}.service`;
@@ -546,6 +594,7 @@ async function waitForClient(origin, clientId, psk, version, name, timeoutMs) {
 
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
+	if (platform() === "win32") windowsIdentity();
 	const defaultDir = join(homedir(), ".vcpdeck", "launcher-client");
 	const priorStatePath = join(homedir(), ".vcpdeck", "client-install.json");
 	let priorState = {};
@@ -706,15 +755,16 @@ async function main() {
 		bootstrap.verificationTimeoutMs || 120_000,
 	);
 
-	// 开机自启属于最后一步最佳努力：失败（如非管理员）只降级为警告并给出修复指引
-	let startup = "not-configured";
-	try {
-		startup = configureStartup(pm2, args.nodePath, config.appDir);
-	} catch (error) {
-		console.error(
-			`[vcpdeck] 未能配置开机自启: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	}
+	// Windows 安装必须真实验证最高权限登录任务；不得以当前会话在线掩盖自启动失败。
+	const startup = configureStartup(pm2, args.nodePath, config.appDir);
+	await waitForClient(
+		args.serverOrigin,
+		clientId,
+		bootstrap.psk,
+		bootstrap.releaseVersion,
+		config.name,
+		bootstrap.verificationTimeoutMs || 120_000,
+	);
 	saveState("done", {
 		releaseVersion: bootstrap.releaseVersion,
 		startup,
@@ -724,11 +774,6 @@ async function main() {
 	console.log(`  版本: ${bootstrap.releaseVersion}`);
 	console.log(`  PM2: ${PM2_NAME}`);
 	console.log(`  自启: ${startup}`);
-	if (startup === "not-configured") {
-		console.log(
-			`  提示: 未注册开机自启；请以管理员身份重跑同一条安装命令以补齐。`,
-		);
-	}
 }
 
 if (require.main === module) {
@@ -752,7 +797,7 @@ module.exports = {
 	buildNodeRuntimeEnv,
 	npmPath,
 	writeEcosystem,
+	buildWindowsStartupTaskScript,
 	classifyWindowsStartupTask,
 	registerStartupTask,
-	retryStartupTaskAsAdmin,
 };

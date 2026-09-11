@@ -1,0 +1,200 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const promises_1 = require("node:fs/promises");
+const node_os_1 = require("node:os");
+const node_path_1 = require("node:path");
+const vitest_1 = require("vitest");
+const versions_js_1 = require("./versions.js");
+/** 测试辅助：带错误包装的 mkdir（满足静态检查的防御性要求） */
+async function ensureDir(p) {
+    try {
+        await (0, promises_1.mkdir)(p, { recursive: true });
+    }
+    catch (e) {
+        throw new Error(`创建测试目录失败 ${p}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
+/** 测试辅助：带错误包装的写文件 */
+async function writeTextFile(p, content) {
+    try {
+        await (0, promises_1.writeFile)(p, content);
+    }
+    catch (e) {
+        throw new Error(`写测试文件失败 ${p}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
+/** 测试辅助：带错误包装的读 JSON 文件 */
+async function readJsonFile(p) {
+    try {
+        return JSON.parse(await (0, promises_1.readFile)(p, "utf-8"));
+    }
+    catch (e) {
+        throw new Error(`读测试 JSON 失败 ${p}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
+/** 内存 fake fs：模拟 symlink 语义（Windows 开发机上无法真实创建 symlink） */
+function makeFakeFs(dirs) {
+    const links = new Map();
+    const files = new Map();
+    return {
+        readFile: async (p) => {
+            const v = files.get(p);
+            if (v === undefined)
+                throw new Error("ENOENT");
+            return v;
+        },
+        writeFile: async (p, d) => {
+            files.set(p, d);
+        },
+        readdir: async () => dirs,
+        readlink: async (p) => {
+            const v = links.get(p);
+            if (v === undefined)
+                throw new Error("ENOENT");
+            return v;
+        },
+        symlinkSync: (t, p) => {
+            links.set(p, t);
+        },
+        renameSync: (o, n) => {
+            if (links.has(o)) {
+                links.set(n, links.get(o));
+                links.delete(o);
+            }
+            else if (files.has(o)) {
+                files.set(n, files.get(o));
+                files.delete(o);
+            }
+        },
+        unlinkSync: (p) => {
+            links.delete(p);
+            files.delete(p);
+        },
+        existsSync: () => true,
+        rm: async () => undefined,
+    };
+}
+(0, vitest_1.describe)("VersionStore", () => {
+    let dir;
+    let appsDir;
+    (0, vitest_1.beforeEach)(async () => {
+        dir = await (0, promises_1.mkdtemp)((0, node_path_1.join)((0, node_os_1.tmpdir)(), "versions-"));
+        appsDir = (0, node_path_1.join)(dir, "apps");
+        await ensureDir(appsDir);
+    });
+    (0, vitest_1.afterEach)(async () => {
+        await (0, promises_1.rm)(dir, { recursive: true, force: true });
+    });
+    (0, vitest_1.describe)("Linux（symlink 切换，fake fs）", () => {
+        (0, vitest_1.it)("switchTo 创建 current 符号链接，currentVersion 可解析", async () => {
+            const store = new versions_js_1.VersionStore({
+                appsDir,
+                platform: "linux",
+                fs: makeFakeFs([]),
+            });
+            await store.switchTo("1.2.0");
+            (0, vitest_1.expect)(await store.currentVersion()).toBe("1.2.0");
+        });
+        (0, vitest_1.it)("重复切换覆盖旧链接", async () => {
+            const store = new versions_js_1.VersionStore({
+                appsDir,
+                platform: "linux",
+                fs: makeFakeFs([]),
+            });
+            await store.switchTo("1.1.0");
+            await store.switchTo("1.2.0");
+            (0, vitest_1.expect)(await store.currentVersion()).toBe("1.2.0");
+        });
+        (0, vitest_1.it)("未切换时 currentVersion 为 null", async () => {
+            const store = new versions_js_1.VersionStore({
+                appsDir,
+                platform: "linux",
+                fs: makeFakeFs([]),
+            });
+            await (0, vitest_1.expect)(store.currentVersion()).resolves.toBeNull();
+        });
+    });
+    (0, vitest_1.describe)("Windows（state.json 指针，真实 fs）", () => {
+        (0, vitest_1.it)("switchTo 原子写入 state.json，currentVersion 可解析", async () => {
+            const store = new versions_js_1.VersionStore({ appsDir, platform: "win32" });
+            await ensureDir((0, node_path_1.join)(appsDir, "1.2.0"));
+            await store.switchTo("1.2.0");
+            (0, vitest_1.expect)(await store.currentVersion()).toBe("1.2.0");
+            const state = await readJsonFile((0, node_path_1.join)(appsDir, "state.json"));
+            (0, vitest_1.expect)(state).toEqual({ current: "1.2.0" });
+        });
+        (0, vitest_1.it)("写入不留临时文件（tmp+rename）", async () => {
+            const store = new versions_js_1.VersionStore({ appsDir, platform: "win32" });
+            await store.switchTo("1.2.0");
+            const entries = await import("node:fs/promises").then((fs) => fs.readdir(appsDir));
+            (0, vitest_1.expect)(entries.filter((n) => n.includes("tmp"))).toEqual([]);
+        });
+        (0, vitest_1.it)("未切换时 currentVersion 为 null", async () => {
+            const store = new versions_js_1.VersionStore({ appsDir, platform: "win32" });
+            await (0, vitest_1.expect)(store.currentVersion()).resolves.toBeNull();
+        });
+    });
+    (0, vitest_1.describe)("isPrepared", () => {
+        const version = "1.2.3";
+        const manifest = {
+            version,
+            nodeVersion: ">=24",
+            launcherMinVersion: "0.0.0",
+            sha256: "",
+            artifacts: {
+                server: { dir: "server", entry: "dist/main.js" },
+                client: { dir: "client", entry: "dist/index.js" },
+            },
+        };
+        async function writeManifest() {
+            await writeTextFile((0, node_path_1.join)(appsDir, version, "manifest.json"), JSON.stringify(manifest));
+        }
+        (0, vitest_1.it)("仅有 Launcher payload 的目录不视为已准备", async () => {
+            await ensureDir((0, node_path_1.join)(appsDir, version, "launcher", "dist"));
+            await writeTextFile((0, node_path_1.join)(appsDir, version, "launcher", "dist", "main.js"), "launcher");
+            const store = new versions_js_1.VersionStore({ appsDir });
+            (0, vitest_1.expect)(await store.isPrepared(version, "server")).toBe(false);
+            (0, vitest_1.expect)(await store.isPrepared(version, "client")).toBe(false);
+        });
+        (0, vitest_1.it)("manifest 损坏、版本不符或业务入口缺失均不视为已准备", async () => {
+            await ensureDir((0, node_path_1.join)(appsDir, version));
+            const store = new versions_js_1.VersionStore({ appsDir });
+            await writeTextFile((0, node_path_1.join)(appsDir, version, "manifest.json"), "{");
+            (0, vitest_1.expect)(await store.isPrepared(version, "server")).toBe(false);
+            await writeTextFile((0, node_path_1.join)(appsDir, version, "manifest.json"), JSON.stringify({ ...manifest, version: "9.9.9" }));
+            (0, vitest_1.expect)(await store.isPrepared(version, "server")).toBe(false);
+            await writeTextFile((0, node_path_1.join)(appsDir, version, "manifest.json"), JSON.stringify(manifest));
+            (0, vitest_1.expect)(await store.isPrepared(version, "server")).toBe(false);
+        });
+        (0, vitest_1.it)("完整 Server 和 Client 目录视为已准备", async () => {
+            await ensureDir((0, node_path_1.join)(appsDir, version, "server", "dist"));
+            await ensureDir((0, node_path_1.join)(appsDir, version, "client", "dist"));
+            await writeManifest();
+            await writeTextFile((0, node_path_1.join)(appsDir, version, "server", "dist", "main.js"), "server");
+            await writeTextFile((0, node_path_1.join)(appsDir, version, "client", "dist", "index.js"), "client");
+            const store = new versions_js_1.VersionStore({ appsDir });
+            (0, vitest_1.expect)(await store.isPrepared(version, "server")).toBe(true);
+            (0, vitest_1.expect)(await store.isPrepared(version, "client")).toBe(true);
+        });
+    });
+    (0, vitest_1.describe)("removeVersion", () => {
+        (0, vitest_1.it)("递归删除版本目录", async () => {
+            const versionDir = (0, node_path_1.join)(appsDir, "1.2.3", "launcher", "dist");
+            await ensureDir(versionDir);
+            await writeTextFile((0, node_path_1.join)(versionDir, "main.js"), "partial");
+            const store = new versions_js_1.VersionStore({ appsDir });
+            await store.removeVersion("1.2.3");
+            (0, vitest_1.expect)((await import("node:fs")).existsSync((0, node_path_1.join)(appsDir, "1.2.3"))).toBe(false);
+        });
+    });
+    (0, vitest_1.describe)("listVersions", () => {
+        (0, vitest_1.it)("列出全部版本目录", async () => {
+            const store = new versions_js_1.VersionStore({ appsDir, platform: "linux" });
+            await ensureDir((0, node_path_1.join)(appsDir, "1.1.0"));
+            await ensureDir((0, node_path_1.join)(appsDir, "1.2.0"));
+            await writeTextFile((0, node_path_1.join)(appsDir, "unrelated.txt"), "x");
+            const versions = await store.listVersions();
+            (0, vitest_1.expect)(versions).toEqual(["1.1.0", "1.2.0"]);
+        });
+    });
+});

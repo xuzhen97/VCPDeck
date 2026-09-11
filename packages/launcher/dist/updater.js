@@ -1,0 +1,103 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Updater = void 0;
+/**
+ * Launcher 两阶段更新执行器（详见 docs/design/release-and-update.md）。
+ * - prepare：下载 → sha256 校验 → 解压到 apps/<version>/（服务进程仍在运行）
+ * - apply：停旧进程 → 切换 current → 启动 → 探活 → 失败自动回退旧版本
+ */
+const promises_1 = require("node:fs/promises");
+const node_path_1 = require("node:path");
+const node_os_1 = require("node:os");
+const DEFAULT_PROBE_RETRIES = 3;
+const DEFAULT_PROBE_INTERVAL_MS = 2000;
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+/** 距给定起点经过的秒数（一位小数） */
+function secs(from) {
+    return `${((Date.now() - from) / 1000).toFixed(1)}s`;
+}
+/** zip 体积（MB，一位小数）；不可得时返回 null */
+async function fileSizeMB(path) {
+    try {
+        const s = await (0, promises_1.stat)(path);
+        return (s.size / 1024 / 1024).toFixed(1);
+    }
+    catch {
+        return null;
+    }
+}
+class Updater {
+    deps;
+    constructor(deps) {
+        this.deps = deps;
+    }
+    /** 第一阶段：准备新版本（完整版本目录幂等跳过） */
+    async prepare(input) {
+        if (await this.deps.versions.isPrepared(input.version, this.deps.artifact)) {
+            return;
+        }
+        await this.deps.versions.removeVersion(input.version);
+        const zipPath = (0, node_path_1.join)((0, node_os_1.tmpdir)(), `vcpdeck-${input.version}.zip`);
+        const startedAt = Date.now();
+        try {
+            let phaseStart = Date.now();
+            await this.deps.downloadZip(input.url, zipPath);
+            const sizeMB = await fileSizeMB(zipPath);
+            console.log(`[launcher] prepare ${input.version} 下载完成: ${secs(phaseStart)}${sizeMB ? `，${sizeMB}MB` : ""}`);
+            phaseStart = Date.now();
+            const ok = await this.deps.verifySha256(zipPath, input.sha256);
+            if (!ok) {
+                throw new Error(`sha256 校验失败: ${input.version}`);
+            }
+            console.log(`[launcher] prepare ${input.version} 校验通过: ${secs(phaseStart)}`);
+            phaseStart = Date.now();
+            await this.deps.extractZip(zipPath, this.deps.versions.versionDir(input.version));
+            console.log(`[launcher] prepare ${input.version} 解压完成: ${secs(phaseStart)}`);
+            console.log(`[launcher] prepare ${input.version} 总耗时: ${secs(startedAt)}`);
+        }
+        finally {
+            await (0, promises_1.rm)(zipPath, { force: true }).catch(() => undefined);
+        }
+    }
+    /** 第二阶段：切换并启动新版本；探活失败自动回退 */
+    async apply(version) {
+        const previous = await this.deps.versions.currentVersion();
+        await this.deps.stopProcess();
+        await this.deps.versions.switchTo(version);
+        await this.deps.startProcess();
+        const healthy = await this.probeWithRetry(version);
+        if (healthy) {
+            if (this.deps.onSuccessfulApply) {
+                try {
+                    await this.deps.onSuccessfulApply(version, previous);
+                }
+                catch {
+                    console.warn("[launcher] 版本保留记录失败，继续使用已切换版本");
+                }
+            }
+            return;
+        }
+        if (previous) {
+            await this.deps.stopProcess();
+            await this.deps.versions.switchTo(previous);
+            await this.deps.startProcess();
+        }
+        throw new Error(previous
+            ? `版本 ${version} 健康检查失败，已回退 ${previous}`
+            : `版本 ${version} 健康检查失败`);
+    }
+    async probeWithRetry(version) {
+        const retries = this.deps.probeRetries ?? DEFAULT_PROBE_RETRIES;
+        const interval = this.deps.probeIntervalMs ?? DEFAULT_PROBE_INTERVAL_MS;
+        for (let i = 0; i < retries; i++) {
+            if (await this.deps.probe(version))
+                return true;
+            if (i < retries - 1)
+                await sleep(interval);
+        }
+        return false;
+    }
+}
+exports.Updater = Updater;

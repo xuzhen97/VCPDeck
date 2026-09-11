@@ -151,13 +151,21 @@ function removeWindowsStartupTask(
 	exec = execFileSync,
 	query = spawnSync,
 ) {
-	const result = query("schtasks.exe", ["/Query", "/TN", STARTUP_TASK, "/V", "/FO", "LIST"], {
-		encoding: "utf8",
+	const result = query("schtasks.exe", ["/Query", "/TN", STARTUP_TASK, "/XML"], {
+		encoding: "utf16le",
 	});
-	if (result.status !== 0) return "not-found";
+	if (result.status !== 0) {
+		const fallback = query("schtasks.exe", ["/Query", "/TN", STARTUP_TASK, "/V", "/FO", "LIST"], {
+			encoding: "utf8",
+		});
+		if (fallback.status !== 0) return "not-found";
+	}
 	const output = String(result.stdout || "").replace(/\\/g, "/").toLowerCase();
+	const normalizedAppDir = appDir.replace(/\\/g, "/").toLowerCase();
 	const wrapper = join(appDir, "pm2-resurrect.cmd").replace(/\\/g, "/").toLowerCase();
-	if (!output.includes(wrapper)) {
+	const probe = join(appDir, "startup-probe.cjs").replace(/\\/g, "/").toLowerCase();
+	const matchesCurrent = output.includes(normalizedAppDir) || output.includes(wrapper) || output.includes(probe);
+	if (!matchesCurrent) {
 		fail(`Windows 计划任务 ${STARTUP_TASK} 已存在但指向其他命令`);
 	}
 	exec("schtasks.exe", ["/Delete", "/TN", STARTUP_TASK, "/F"], {

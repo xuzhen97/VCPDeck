@@ -1,6 +1,6 @@
 # VCPDeck 运维手册
 
-> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-05｜适用版本：`0.6.27` / 当前 `main`
+> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-11｜适用版本：`0.6.28` / 当前 `main`
 
 ## 1. 运行基线
 
@@ -28,7 +28,7 @@ pnpm --filter @vcpdeck/client start
 
 ### Windows Client 重启
 
-Windows 一键安装器可能把 PM2 安装到当前用户的私有目录，因此新开的 PowerShell 中直接执行 `pm2` 可能提示“找不到命令”。必须使用**安装 Client 的同一个 Windows 用户**，并只重启 PM2 管理的 Launcher。安装器创建的登录任务使用 `RunLevel=Highest`；若当前 PM2 daemon 是旧版 Limited 任务启动的，重跑安装器修复任务后还需结束旧 daemon，并从 `VCPDeck PM2 Startup` 任务重新启动，已运行进程不会原地提权。
+Windows 一键安装器可能把 PM2 安装到当前用户的私有目录，因此新开的 PowerShell 中直接执行 `pm2` 可能提示“找不到命令”。必须使用**安装 Client 的同一个 Windows 用户**，并只重启 PM2 管理的 Launcher。安装器创建的登录任务绑定安装用户 SID，使用 `RunLevel=Highest`、`InteractiveToken`，在登录 10 秒后执行并允许电池供电运行；若当前 PM2 daemon 是旧版 Limited 任务启动的，重跑安装器会自动重启 daemon 并由最高权限任务恢复，新开进程与 Client 均持有 High Mandatory Level。
 
 ```powershell
 # 若 pm2.cmd 已在 PATH 中，直接执行：
@@ -53,13 +53,20 @@ if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
 & $Node $Pm2Cli status
 ```
 
-电脑重启后若 PM2 进程列表没有恢复，可执行安装器生成的恢复脚本；它内含安装时使用的 Node.js 和 PM2 的绝对路径，不依赖 PATH：
+电脑重启并登录该用户后，若 PM2 进程列表没有自动恢复，先排查任务执行状态与现场日志：
+
+```powershell
+schtasks.exe /Query /TN "VCPDeck PM2 Startup" /V /FO LIST
+Get-Content "$HOME\.vcpdeck\launcher-client\startup.log" -Tail 50 -ErrorAction SilentlyContinue
+```
+
+也可手动执行安装器生成的恢复脚本（内含绝对路径 Node/PM2，不依赖 PATH）：
 
 ```powershell
 & "$HOME\.vcpdeck\launcher-client\pm2-resurrect.cmd"
 ```
 
-然后再次执行上面的 `restart` 命令。排查日志时：
+然后再次执行上面的 `restart` 命令。排查 Launcher 日志时：
 
 ```powershell
 & $Node $Pm2Cli logs vcpdeck-client-launcher --lines 100

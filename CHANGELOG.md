@@ -2,11 +2,15 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
-## [Unreleased]
+## [0.6.28] - 2026-09-11
 
-### Changed
+### Fixed
 
-- Windows Client 一键安装的用户登录计划任务改为 `RunLevel=Highest`；管理员账户登录后，PM2、Launcher 与 Client 使用提升令牌运行。重跑安装器会修复指向当前恢复脚本的旧 Limited 任务，仍拒绝覆盖指向其他命令的同名任务。
+- **Windows Client 登录自启动与最高权限闭环（ADR-0025）**：
+  - Windows 一键安装改为由本机 Administrators 成员执行，通过一次 UAC 注册以该用户 SID 登录触发、`RunLevel=Highest`、`InteractiveToken` 的计划任务，后续登录恢复不再弹 UAC。
+  - 自启动 Action 直接执行安装器 Node.js 绝对路径调用 PM2 `resurrect`（附带高完整性启动探针），移除 Task Scheduler 对 `.cmd` 路径的引号歧义。
+  - 任务设置显式启用电池供电允许启动/继续运行、`StartWhenAvailable` 与 10 秒登录延迟，消除笔记本电池模式与启动期未就绪导致的自启丢失。
+  - 重复安装与卸载全面收敛：自动检测并修复历史 Limited、异常引号、错误账户/目录与电池限制任务；安全停止未提升的单应用 PM2 daemon 并由最高权限任务恢复；安装结束必须真实执行任务并验收高完整性令牌，失败 fail closed，不再误报假成功。
 
 ## [0.6.27] - 2026-09-05
 

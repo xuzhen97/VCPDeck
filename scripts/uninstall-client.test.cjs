@@ -124,20 +124,28 @@ test("Linux 自启通过 sudo 调用 PM2 unstartup", () => {
 	]);
 });
 
-test("Windows 自启任务只删除指向目标 Client 的任务", () => {
+test("Windows 自启任务只删除指向目标 Client 的新旧任务", () => {
 	const appDir = tempDir("vcpdeck-uninstall-task-");
-	const calls = [];
 	try {
-		const wrapper = join(appDir, "pm2-resurrect.cmd");
-		const result = uninstall.removeWindowsStartupTask(
-			appDir,
-			(command, args) => calls.push([command, args]),
-			() => ({ status: 0, stdout: `TaskName: ${wrapper}` }),
+		for (const xml of [
+			`<Exec><Command>${join(appDir, "pm2-resurrect.cmd")}</Command></Exec>`,
+			`<Exec><Command>C:\\node.exe</Command><Arguments>--require=\"${join(appDir, "startup-probe.cjs")}\"</Arguments><WorkingDirectory>${appDir}</WorkingDirectory></Exec>`,
+		]) {
+			const calls = [];
+			const result = uninstall.removeWindowsStartupTask(
+				appDir,
+				(command, args) => calls.push([command, args]),
+				() => ({ status: 0, stdout: xml }),
+			);
+			assert.equal(result, "removed");
+			assert.deepEqual(calls, [
+				["schtasks.exe", ["/Delete", "/TN", "VCPDeck PM2 Startup", "/F"]],
+			]);
+		}
+		assert.throws(
+			() => uninstall.removeWindowsStartupTask(appDir, () => {}, () => ({ status: 0, stdout: "<WorkingDirectory>C:\\other</WorkingDirectory>" })),
+			/指向其他命令/,
 		);
-		assert.equal(result, "removed");
-		assert.deepEqual(calls, [
-			["schtasks.exe", ["/Delete", "/TN", "VCPDeck PM2 Startup", "/F"]],
-		]);
 	} finally {
 		rmSync(appDir, { recursive: true, force: true });
 	}

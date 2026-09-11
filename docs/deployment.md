@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-05｜适用版本：`0.6.27` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-11｜适用版本：`0.6.28` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 仍由 PM2/用户登录模型管理，Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 
@@ -182,7 +182,7 @@ pm2 logs vcpdeck-server-launcher --lines 100
 
 Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt/vcpdeck/launcher` 即可；`pm2 startup` 会生成 systemd 自启脚本。
 
-开机自启：手工部署的 Launcher 可在 Linux 运行 `pm2 startup` 并按提示执行输出的命令。Linux Client 一键安装的新部署使用 A2 `vcpdeck-client.service`，不使用 PM2/linger/登录脚本；旧 Linux 安装迁移前仍按旧 PM2 规则处理。Windows 不依赖第三方 `pm2-windows-startup`，而是创建当前用户登录触发、`RunLevel=Highest` 的计划任务执行 `pm2 resurrect`；管理员账户因此以提升令牌运行 Launcher/Client，标准用户不会因 Highest 自动获得管理员身份，无人登录时仍不保证 Client 在线。
+开机自启：手工部署的 Launcher 可在 Linux 运行 `pm2 startup` 并按提示执行输出的命令。Linux Client 一键安装的新部署使用 A2 `vcpdeck-client.service`，不使用 PM2/linger/登录脚本；旧 Linux 安装迁移前仍按旧 PM2 规则处理。Windows 不依赖第三方 `pm2-windows-startup`，而是在安装/修复时通过一次 UAC 注册绑定安装用户 SID 的登录计划任务；任务直接以 Node 绝对路径执行 PM2 `resurrect`，配置 `RunLevel=Highest`、`InteractiveToken`、不受电池状态限制、`StartWhenAvailable` 并带 10 秒登录延迟；管理员账户登录后无需再次确认 UAC 即可恢复高完整性 Launcher/Client，无人登录时仍不保证 Client 在线。
 
 注意事项：
 
@@ -195,7 +195,7 @@ Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt
 
 任意已登录操作者可在发版页启用或禁用入口。入口默认关闭，状态保存在 SQLite；启用后页面按当前 Origin 显示固定 Windows PowerShell 和 Linux Bash 命令。命令每次动态选择与 Server 版本完全一致、状态为 `done` 且含对应平台 archive 的 Release。
 
-Linux 新安装器会校验 root/可用 sudo、下载并校验 Release 与 Client archive，部署到 `/opt/vcpdeck/client`，创建锁定密码的 `vcpdeck` 专用账户、`/etc/vcpdeck/client.env`、sudoers 和 `vcpdeck-client.service`，然后等待 Server 确认在线/版本/能力；Windows 仍询问显示名称和安装目录，复用或安装用户私有 Node/PM2，并注册当前用户登录触发的最高权限任务。Windows 任务使用交互式登录令牌，不保存用户密码；注册或修复任务需要 UAC，管理员账户运行的 Client 继承提升令牌。Linux 存量 PM2 安装必须显式使用 `--migrate` 执行 M1 迁移，不能与新旧 Client 并发运行。失败保留现场，重跑同一命令继续修复。若已有配置指向其他 Server 则拒绝。Bazzite 依赖分层若提示重启，必须先重启系统，再重跑同一命令。
+Linux 新安装器会校验 root/可用 sudo、下载并校验 Release 与 Client archive，部署到 `/opt/vcpdeck/client`，创建锁定密码的 `vcpdeck` 专用账户、`/etc/vcpdeck/client.env`、sudoers 和 `vcpdeck-client.service`，然后等待 Server 确认在线/版本/能力；Windows 仍询问显示名称和安装目录，校验安装者属于本机 Administrators，复用或安装用户私有 Node/PM2，通过一次 UAC 注册并验证当前用户登录触发的最高权限任务，重跑同一命令会自动修复旧的 Limited/电池限制任务并安全切换 PM2 daemon。Windows 任务使用交互式登录令牌，不保存用户密码；注册或修复任务需要 UAC，管理员账户运行的 Client 继承提升令牌。Linux 存量 PM2 安装必须显式使用 `--migrate` 执行 M1 迁移，不能与新旧 Client 并发运行。失败保留现场，重跑同一命令继续修复。若已有配置指向其他 Server 则拒绝。Bazzite 依赖分层若提示重启，必须先重启系统，再重跑同一命令。
 
 支持范围：Windows 10/11 x64、Windows Server 2019+ x64；Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd。不支持 ARM64、Alpine/musl、CentOS 7、WSL、容器、无 systemd Linux 及其他未经逐项验收的 Fedora Atomic 发行版。Node 和 PM2 下载优先国内镜像，失败回退官方源。
 

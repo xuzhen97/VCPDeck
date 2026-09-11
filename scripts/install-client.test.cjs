@@ -219,115 +219,79 @@ test("installPm2Retry 全部失败时保留最近真实错误", () => {
 	assert.match(result.lastError, /npm ERR! 404/);
 });
 
-test("registerStartupTask 非管理员被拒时降级为 not-configured 并警示", () => {
-	const warnings = [];
-	const outcome = installer.registerStartupTask(
-		"VCPDeck PM2 Startup",
-		"C:\\Users\\xuzhe\\.vcpdeck\\launcher-client\\pm2-resurrect.cmd",
-		() => {
-			const error = new Error("spawn schtasks.exe 拒绝访问。\r\n");
-			throw error;
-		},
-		(message) => warnings.push(message),
-	);
-	assert.equal(outcome, "not-configured");
-	assert.equal(warnings.length, 1);
-	assert.match(warnings[0], /管理员/);
+test("Windows 自启动任务直接执行 Node，并固定最高权限和电池策略", () => {
+	const definition = {
+		taskName: "VCPDeck PM2 Startup",
+		nodePath: "C:\\Users\\x\\.vcpdeck\\runtime\\node\\node.exe",
+		pm2Path: "C:\\Users\\x\\.vcpdeck\\tools\\pm2\\bin\\pm2",
+		appDir: "C:\\Users\\x\\.vcpdeck\\launcher-client",
+		userSid: "S-1-5-21-1-1001",
+		probePath: "C:\\Users\\x\\.vcpdeck\\launcher-client\\startup-probe.cjs",
+	};
+	const script = installer.buildWindowsStartupTaskScript(definition);
+	assert.match(script, /New-ScheduledTaskAction/);
+	assert.ok(script.includes(definition.nodePath));
+	assert.ok(script.includes(definition.pm2Path));
+	assert.ok(script.includes("-WorkingDirectory 'C:\\Users\\x\\.vcpdeck\\launcher-client'"));
+	assert.match(script, /New-ScheduledTaskTrigger -AtLogOn -User 'S-1-5-21-1-1001'/);
+	assert.match(script, /\.Delay = 'PT10S'/);
+	assert.match(script, /-LogonType Interactive -RunLevel Highest/);
+	assert.match(script, /-AllowStartIfOnBatteries/);
+	assert.match(script, /-DontStopIfGoingOnBatteries/);
+	assert.match(script, /-StartWhenAvailable/);
+	assert.match(script, /-MultipleInstances IgnoreNew/);
+	assert.doesNotMatch(script, /pm2-resurrect\.cmd/);
 });
 
-test("registerStartupTask 英文 Access is denied 同样降级", () => {
-	const outcome = installer.registerStartupTask(
-		"T",
-		"C:\\x\\pm2-resurrect.cmd",
-		() => {
-			throw new Error("Access is denied.");
-		},
-		() => {},
-	);
-	assert.equal(outcome, "not-configured");
+test("重复安装会修复 syc 异常引号任务、Limited 和电池限制", () => {
+	const expected = {
+		nodePath: "C:\\Users\\20338\\.vcpdeck\\runtime\\node\\node.exe",
+		pm2Path: "C:\\Users\\20338\\.vcpdeck\\tools\\pm2\\bin\\pm2",
+		appDir: "C:\\Users\\20338\\.vcpdeck\\launcher-client",
+		userSid: "S-1-5-21-1-1003",
+		probePath: "C:\\Users\\20338\\.vcpdeck\\launcher-client\\startup-probe.cjs",
+	};
+	const sycXml = `<Task><Principals><Principal><UserId>${expected.userSid}</UserId><LogonType>InteractiveToken</LogonType></Principal></Principals><Settings><DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>true</StopIfGoingOnBatteries></Settings><Triggers><LogonTrigger /></Triggers><Actions><Exec><Command>\"${expected.appDir}\\pm2-resurrect.cmd\"</Command></Exec></Actions></Task>`;
+	assert.equal(installer.classifyWindowsStartupTask(sycXml, expected), "repair");
 });
 
-test("registerStartupTask 非权限错误仍抛出", () => {
-	assert.throws(() =>
-		installer.registerStartupTask("T", "C:\\x", () => {
-			throw new Error("schtasks 已存在但指向其他命令");
-		}),
-	);
+test("完全符合定义的 Windows 自启动任务可复用，其他安装目录仍冲突", () => {
+	const expected = {
+		nodePath: "C:\\Users\\x\\node.exe",
+		pm2Path: "C:\\Users\\x\\pm2",
+		appDir: "C:\\Users\\x\\.vcpdeck\\launcher-client",
+		userSid: "S-1-5-21-1-1001",
+		probePath: "C:\\Users\\x\\.vcpdeck\\launcher-client\\startup-probe.cjs",
+	};
+	const xml = (command, appDir = expected.appDir) => `<Task><Principals><Principal><UserId>${expected.userSid}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals><Settings><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable></Settings><Triggers><LogonTrigger><UserId>${expected.userSid}</UserId><Delay>PT10S</Delay></LogonTrigger></Triggers><Actions><Exec><Command>${command}</Command><Arguments>--require=\"${expected.probePath}\" \"${expected.pm2Path}\" resurrect</Arguments><WorkingDirectory>${appDir}</WorkingDirectory></Exec></Actions></Task>`;
+	assert.equal(installer.classifyWindowsStartupTask(xml(expected.nodePath), expected), "configured");
+	assert.equal(installer.classifyWindowsStartupTask(xml("C:\\other\\node.exe", "C:\\other"), expected), "conflict");
 });
 
-test("registerStartupTask 以当前登录用户最高权限创建任务", () => {
+test("管理员注册经 UAC 执行自包含 ScheduledTasks payload，失败时 fail closed", () => {
+	const definition = {
+		taskName: "VCPDeck PM2 Startup",
+		nodePath: "C:\\x\\node.exe",
+		pm2Path: "C:\\x\\pm2",
+		appDir: "C:\\x",
+		userSid: "S-1-5-21-1-1001",
+		probePath: "C:\\x\\startup-probe.cjs",
+	};
 	const calls = [];
-	const outcome = installer.registerStartupTask(
-		"T",
-		"C:\\x\\pm2-resurrect.cmd",
-		(file, args) => calls.push([file, args]),
-	);
-	assert.equal(outcome, "windows-logon-task");
-	assert.equal(calls[0][0], "schtasks.exe");
-	assert.deepEqual(calls[0][1].slice(-4), ["/IT", "/RL", "HIGHEST", "/F"]);
-	assert.ok(!calls[0][1].includes("/RP"), "不得要求或保存用户密码");
-});
-
-test("classifyWindowsStartupTask 识别最高权限任务并要求修复 LIMITED 任务", () => {
-	const wrapper = "C:\\Users\\x\\.vcpdeck\\launcher-client\\pm2-resurrect.cmd";
-	const xml = (runLevel, command = wrapper, logonType = "InteractiveToken") =>
-		`<Task><Principals><Principal><LogonType>${logonType}</LogonType>` +
-		`<RunLevel>${runLevel}</RunLevel></Principal></Principals>` +
-		`<Actions><Exec><Command>${command}</Command></Exec></Actions></Task>`;
 	assert.equal(
-		installer.classifyWindowsStartupTask(xml("HighestAvailable"), wrapper),
-		"configured",
-	);
-	assert.equal(
-		installer.classifyWindowsStartupTask(xml("LeastPrivilege"), wrapper),
-		"repair",
-	);
-	assert.equal(
-		installer.classifyWindowsStartupTask(
-			xml("HighestAvailable", wrapper, "Password"),
-			wrapper,
-		),
-		"repair",
-	);
-	assert.equal(
-		installer.classifyWindowsStartupTask(xml("HighestAvailable", "C:\\other.cmd"), wrapper),
-		"conflict",
-	);
-});
-
-test("retryStartupTaskAsAdmin 发起 UAC 提权重试且 payload 可解码验证", () => {
-	const calls = [];
-	const outcome = installer.retryStartupTaskAsAdmin(
-		"VCPDeck PM2 Startup",
-		"C:\\Users\\xuzhe\\.vcpdeck\\launcher-client\\pm2-resurrect.cmd",
-		(args) => {
+		installer.registerStartupTask(definition, (args) => {
 			calls.push(args.join(" "));
-			return { status: 0, stdout: "" };
-		},
+			return { status: 0 };
+		}),
+		"windows-logon-task(via-uac)",
 	);
-	assert.equal(outcome, "windows-logon-task(via-uac)");
-	assert.equal(calls.length, 1);
-	assert.match(calls[0], /-Verb RunAs -Wait -PassThru/);
-	const m = calls[0].match(/-EncodedCommand','([^']+)'/);
-	assert.ok(m, "应包含 EncodedCommand payload");
-	const payload = Buffer.from(m[1], "base64").toString("utf16le");
-	assert.match(payload, /\/Create/);
-	assert.match(payload, /\/IT \/RL HIGHEST/);
-	assert.ok(payload.includes("VCPDeck PM2 Startup"));
-	assert.ok(payload.includes("pm2-resurrect.cmd"));
-	assert.doesNotMatch(payload, /\/RP/);
-});
-
-test("retryStartupTaskAsAdmin 提权失败也降级并打印可复制兜底命令", () => {
-const warns = [];
-const outcome = installer.retryStartupTaskAsAdmin(
-"VCPDeck PM2 Startup",
-"C:\\x\\pm2-resurrect.cmd",
-() => ({ status: 1, stdout: "" }),
-(message) => warns.push(message),
-);
-assert.equal(outcome, "not-configured");
-assert.equal(warns.length, 1);
-assert.match(warns[0], /schtasks \/Create/);
-assert.ok(warns[0].includes("VCPDeck PM2 Startup"));
+	const match = calls[0].match(/-EncodedCommand','([^']+)'/);
+	assert.ok(match);
+	const payload = Buffer.from(match[1], "base64").toString("utf16le");
+	assert.match(payload, /Register-ScheduledTask/);
+	assert.match(payload, /RunLevel Highest/);
+	assert.throws(
+		() => installer.registerStartupTask(definition, () => ({ status: 1 })),
+		/UAC|注册失败/,
+	);
 });
