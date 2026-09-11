@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.29] - 2026-09-11
+
+### Fixed
+
+- **Windows 重复安装不再误报“任务已存在但指向其他安装目录”**：`schtasks /XML` 会在 XML 声明 `encoding="UTF-16"` 的同时按控制台代码页输出单字节文本，安装器与卸载器却按 `utf16le` 解码，导致任务路径全是乱码、任何已存在的 `VCPDeck PM2 Startup` 任务都被判为冲突，无法修复历史 Limited / 异常引号 / 电池限制任务。现改为 PowerShell `Export-ScheduledTask` 并以 base64 回传 UTF-8，彻底脱离代码页依赖；卸载器读不到任务定义时先探存在性，任务仍在则拒绝静默跳过。
+
 ## [0.6.28] - 2026-09-11
 
 ### Fixed

@@ -146,21 +146,52 @@ function assertLauncherProcess(entry, appDir) {
 	}
 }
 
+/**
+ * 读取计划任务定义 XML。
+ * `schtasks /XML` 声明 UTF-16 但实际按控制台代码页输出单字节，Node 按 utf16le 解码必然乱码；
+ * 改用 PowerShell 的 Export-ScheduledTask 并以 base64 回传，避免任何代码页歧义。
+ */
+function readWindowsTaskXml(taskName, spawn = spawnSync) {
+	const quoted = `'${String(taskName).replace(/'/g, "''")}'`;
+	const script =
+		"$ErrorActionPreference='Stop';" +
+		`$xml = Export-ScheduledTask -TaskName ${quoted};` +
+		"[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($xml))";
+	const result = spawn(
+		join(
+			process.env.SystemRoot || "C:\\Windows",
+			"System32",
+			"WindowsPowerShell",
+			"v1.0",
+			"powershell.exe",
+		),
+		["-NoProfile", "-NonInteractive", "-Command", script],
+		{ encoding: "utf8", windowsHide: true },
+	);
+	const encoded = String(result.stdout || "").trim();
+	if (result.status !== 0 || !encoded) return null;
+	return Buffer.from(encoded, "base64").toString("utf8");
+}
+
 function removeWindowsStartupTask(
 	appDir,
 	exec = execFileSync,
+	readTaskXml = readWindowsTaskXml,
 	query = spawnSync,
 ) {
-	const result = query("schtasks.exe", ["/Query", "/TN", STARTUP_TASK, "/XML"], {
-		encoding: "utf16le",
-	});
-	if (result.status !== 0) {
-		const fallback = query("schtasks.exe", ["/Query", "/TN", STARTUP_TASK, "/V", "/FO", "LIST"], {
+	const xml = readTaskXml(STARTUP_TASK);
+	if (xml === null) {
+		// 读不到定义时只在任务确实不存在才跳过，否则拒绝静默留下指向旧目录的自启任务。
+		const existing = query("schtasks.exe", ["/Query", "/TN", STARTUP_TASK], {
 			encoding: "utf8",
+			windowsHide: true,
 		});
-		if (fallback.status !== 0) return "not-found";
+		if (existing.status === 0) {
+			fail(`无法读取 Windows 计划任务 ${STARTUP_TASK}，请以安装时同一用户重跑卸载`);
+		}
+		return "not-found";
 	}
-	const output = String(result.stdout || "").replace(/\\/g, "/").toLowerCase();
+	const output = xml.replace(/\\/g, "/").toLowerCase();
 	const normalizedAppDir = appDir.replace(/\\/g, "/").toLowerCase();
 	const wrapper = join(appDir, "pm2-resurrect.cmd").replace(/\\/g, "/").toLowerCase();
 	const probe = join(appDir, "startup-probe.cjs").replace(/\\/g, "/").toLowerCase();
@@ -290,6 +321,7 @@ module.exports = {
 	resolvePm2,
 	pm2List,
 	assertLauncherProcess,
+	readWindowsTaskXml,
 	removeWindowsStartupTask,
 	removeStartup,
 	uninstallClient,

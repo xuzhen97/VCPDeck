@@ -135,7 +135,7 @@ test("Windows 自启任务只删除指向目标 Client 的新旧任务", () => {
 			const result = uninstall.removeWindowsStartupTask(
 				appDir,
 				(command, args) => calls.push([command, args]),
-				() => ({ status: 0, stdout: xml }),
+				() => xml,
 			);
 			assert.equal(result, "removed");
 			assert.deepEqual(calls, [
@@ -143,12 +143,56 @@ test("Windows 自启任务只删除指向目标 Client 的新旧任务", () => {
 			]);
 		}
 		assert.throws(
-			() => uninstall.removeWindowsStartupTask(appDir, () => {}, () => ({ status: 0, stdout: "<WorkingDirectory>C:\\other</WorkingDirectory>" })),
+			() =>
+				uninstall.removeWindowsStartupTask(
+					appDir,
+					() => {},
+					() => "<WorkingDirectory>C:\\other</WorkingDirectory>",
+				),
 			/指向其他命令/,
+		);
+		// 读不到定义且任务真实存在时 fail closed，避免静默留下指向旧目录的自启任务。
+		assert.throws(
+			() =>
+				uninstall.removeWindowsStartupTask(
+					appDir,
+					() => {},
+					() => null,
+					() => ({ status: 0 }),
+				),
+			/无法读取/,
+		);
+		assert.equal(
+			uninstall.removeWindowsStartupTask(
+				appDir,
+				() => {},
+				() => null,
+				() => ({ status: 1 }),
+			),
+			"not-found",
 		);
 	} finally {
 		rmSync(appDir, { recursive: true, force: true });
 	}
+});
+
+test("Windows 计划任务 XML 经 UTF-8 base64 回传，不受控制台代码页影响", () => {
+	const xml = `<Task><Actions><Exec><Command>"C:\\Users\\20338\\.vcpdeck\\launcher-client\\pm2-resurrect.cmd"</Command></Exec></Actions></Task>`;
+	const calls = [];
+	const decoded = uninstall.readWindowsTaskXml("VCPDeck PM2 Startup", (command, args) => {
+		calls.push([command, args]);
+		return {
+			status: 0,
+			stdout: Buffer.from(xml, "utf8").toString("base64") + "\r\n",
+		};
+	});
+	assert.equal(decoded, xml);
+	assert.match(calls[0][0], /powershell\.exe$/i);
+	assert.match(calls[0][1].join(" "), /Export-ScheduledTask -TaskName 'VCPDeck PM2 Startup'/);
+	assert.equal(
+		uninstall.readWindowsTaskXml("VCPDeck PM2 Startup", () => ({ status: 1, stdout: "" })),
+		null,
+	);
 });
 
 test("非 Client 安装目录拒绝卸载", () => {

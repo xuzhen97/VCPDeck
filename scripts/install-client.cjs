@@ -354,6 +354,32 @@ function powershellQuote(value) {
 	return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+/**
+ * 读取计划任务定义 XML。
+ * `schtasks /XML` 声明 UTF-16 但实际按控制台代码页输出单字节，Node 按 utf16le 解码必然乱码；
+ * 改用 PowerShell 的 Export-ScheduledTask 并以 base64 回传，避免任何代码页歧义。
+ */
+function readWindowsTaskXml(taskName, spawn = spawnSync) {
+	const script =
+		"$ErrorActionPreference='Stop';" +
+		`$xml = Export-ScheduledTask -TaskName ${powershellQuote(taskName)};` +
+		"[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($xml))";
+	const result = spawn(
+		join(
+			process.env.SystemRoot || "C:\\Windows",
+			"System32",
+			"WindowsPowerShell",
+			"v1.0",
+			"powershell.exe",
+		),
+		["-NoProfile", "-NonInteractive", "-Command", script],
+		{ encoding: "utf8", windowsHide: true },
+	);
+	const encoded = String(result.stdout || "").trim();
+	if (result.status !== 0 || !encoded) return null;
+	return Buffer.from(encoded, "base64").toString("utf8");
+}
+
 /** 生成稳定的 Windows 登录任务：直接运行 Node，避免 `.cmd` Action 的引号歧义。 */
 function buildWindowsStartupTaskScript(definition) {
 	const args = `--require="${definition.probePath}" "${definition.pm2Path}" resurrect`;
@@ -375,10 +401,16 @@ function classifyWindowsStartupTask(xml, expected) {
 	const workingDirectory = source.match(/<WorkingDirectory>([\s\S]*?)<\/WorkingDirectory>/i)?.[1]
 		?.replace(/\\/g, "/")
 		.toLowerCase();
-	const legacyCommand = source.match(/<Command>\s*&?quot;?([^<]*pm2-resurrect\.cmd)&?quot;?\s*<\/Command>/i)?.[1]
-		?.replace(/\\/g, "/")
+	const legacyCommand = source
+		.match(/<Command>([\s\S]*?)<\/Command>/i)?.[1]
+		?.replace(/&quot;|"/gi, "")
+		.replace(/\\/g, "/")
+		.trim()
 		.toLowerCase();
-	if ((workingDirectory && workingDirectory !== appDir) || (legacyCommand && !legacyCommand.startsWith(`${appDir}/`))) {
+	if (
+		(workingDirectory && workingDirectory !== appDir) ||
+		(legacyCommand?.endsWith("pm2-resurrect.cmd") && !legacyCommand.startsWith(`${appDir}/`))
+	) {
 		return "conflict";
 	}
 	if (!normalized.includes(appDir)) return "conflict";
@@ -466,25 +498,18 @@ function configureStartup(pm2, nodePath, appDir) {
 			userSid: identity.sid,
 			probePath: probe.path,
 		};
-		const existing = spawnSync(
-			"schtasks.exe",
-			["/Query", "/TN", definition.taskName, "/XML"],
-			{ encoding: "utf16le" },
-		);
-		if (existing.status === 0) {
-			const state = classifyWindowsStartupTask(existing.stdout, definition);
+		const existing = readWindowsTaskXml(definition.taskName);
+		if (existing === null) registerStartupTask(definition);
+		else {
+			const state = classifyWindowsStartupTask(existing, definition);
 			if (state === "conflict") {
 				throw new Error(`Windows 计划任务 ${definition.taskName} 已存在但指向其他安装目录`);
 			}
 			if (state === "repair") registerStartupTask(definition);
-		} else registerStartupTask(definition);
+		}
 
-		const verified = spawnSync(
-			"schtasks.exe",
-			["/Query", "/TN", definition.taskName, "/XML"],
-			{ encoding: "utf16le" },
-		);
-		if (verified.status !== 0 || classifyWindowsStartupTask(verified.stdout, definition) !== "configured") {
+		const verified = readWindowsTaskXml(definition.taskName);
+		if (verified === null || classifyWindowsStartupTask(verified, definition) !== "configured") {
 			throw new Error("Windows 自启动任务定义验收失败");
 		}
 		const processes = JSON.parse(runPm2(pm2, ["jlist"], { capture: true }));
@@ -800,4 +825,5 @@ module.exports = {
 	buildWindowsStartupTaskScript,
 	classifyWindowsStartupTask,
 	registerStartupTask,
+	readWindowsTaskXml,
 };

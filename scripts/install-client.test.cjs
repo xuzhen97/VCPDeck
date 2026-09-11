@@ -253,6 +253,29 @@ test("重复安装会修复 syc 异常引号任务、Limited 和电池限制", (
 	};
 	const sycXml = `<Task><Principals><Principal><UserId>${expected.userSid}</UserId><LogonType>InteractiveToken</LogonType></Principal></Principals><Settings><DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>true</StopIfGoingOnBatteries></Settings><Triggers><LogonTrigger /></Triggers><Actions><Exec><Command>\"${expected.appDir}\\pm2-resurrect.cmd\"</Command></Exec></Actions></Task>`;
 	assert.equal(installer.classifyWindowsStartupTask(sycXml, expected), "repair");
+	assert.equal(
+		installer.classifyWindowsStartupTask(
+			sycXml.replace(/launcher-client/g, "other-client"),
+			expected,
+		),
+		"conflict",
+	);
+});
+
+test("Windows 计划任务 XML 经 UTF-8 base64 回传，不受控制台代码页影响", () => {
+	const xml = `<Task><Actions><Exec><Command>"C:\\Users\\20338\\.vcpdeck\\launcher-client\\pm2-resurrect.cmd"</Command></Exec></Actions></Task>`;
+	const calls = [];
+	const decoded = installer.readWindowsTaskXml("VCPDeck PM2 Startup", (command, args) => {
+		calls.push([command, args]);
+		return { status: 0, stdout: Buffer.from(xml, "utf8").toString("base64") };
+	});
+	assert.equal(decoded, xml);
+	assert.match(calls[0][0], /powershell\.exe$/i);
+	assert.match(calls[0][1].join(" "), /Export-ScheduledTask -TaskName 'VCPDeck PM2 Startup'/);
+	assert.equal(
+		installer.readWindowsTaskXml("VCPDeck PM2 Startup", () => ({ status: 1, stdout: "" })),
+		null,
+	);
 });
 
 test("完全符合定义的 Windows 自启动任务可复用，其他安装目录仍冲突", () => {
