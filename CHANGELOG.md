@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.6.30] - 2026-09-11
+
+### Fixed
+
+- **Windows 自启动任务 UAC 提权使用绝对路径 PowerShell 并捕获真实错误日志**：`registerStartupTask` 改用绝对路径 `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` 调用 `Start-Process -FilePath`，避免环境变量缺少 `WindowsPowerShell` 目录导致启动失败；提权子进程错误直接落盘并在失败时原样透出，杜绝黑盒。
+
 ## [0.6.29] - 2026-09-11
 
 ### Fixed

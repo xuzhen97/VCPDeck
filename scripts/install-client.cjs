@@ -354,6 +354,16 @@ function powershellQuote(value) {
 	return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+function defaultPowerShellPath() {
+	return join(
+		process.env.SystemRoot || "C:\\Windows",
+		"System32",
+		"WindowsPowerShell",
+		"v1.0",
+		"powershell.exe",
+	);
+}
+
 /**
  * 读取计划任务定义 XML。
  * `schtasks /XML` 声明 UTF-16 但实际按控制台代码页输出单字节，Node 按 utf16le 解码必然乱码；
@@ -365,13 +375,7 @@ function readWindowsTaskXml(taskName, spawn = spawnSync) {
 		`$xml = Export-ScheduledTask -TaskName ${powershellQuote(taskName)};` +
 		"[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($xml))";
 	const result = spawn(
-		join(
-			process.env.SystemRoot || "C:\\Windows",
-			"System32",
-			"WindowsPowerShell",
-			"v1.0",
-			"powershell.exe",
-		),
+		defaultPowerShellPath(),
 		["-NoProfile", "-NonInteractive", "-Command", script],
 		{ encoding: "utf8", windowsHide: true },
 	);
@@ -432,20 +436,42 @@ function classifyWindowsStartupTask(xml, expected) {
 		: "repair";
 }
 
-/** 通过一次 UAC 注册最高权限计划任务；取消或失败即安装失败。 */
+/** 通过一次 UAC 注册最高权限计划任务；取消或失败即安装失败。捕获子进程真实错误日志以供诊断。 */
 function registerStartupTask(
 	definition,
 	startPwsh = (args) =>
-		spawnSync("powershell.exe", args, { encoding: "utf8", windowsHide: true }),
+		spawnSync(defaultPowerShellPath(), args, { encoding: "utf8", windowsHide: true }),
 ) {
-	const payload = buildWindowsStartupTaskScript(definition);
-	const encoded = Buffer.from(payload, "utf16le").toString("base64");
+	const pwshExe = defaultPowerShellPath();
+	const errLog = join(definition.appDir, "startup-task-error.log");
+	rmSync(errLog, { force: true });
+	const rawPayload = [
+		"$ErrorActionPreference = 'Stop'",
+		"try {",
+		`  ${buildWindowsStartupTaskScript(definition).split("\r\n").join("\r\n  ")}`,
+		"} catch {",
+		"  $err = \"$($_.Exception.Message)`n$($_.ScriptStackTrace)\"",
+		`  [System.IO.File]::WriteAllText(${powershellQuote(errLog)}, $err, [System.Text.Encoding]::UTF8)`,
+		"  exit 1",
+		"}",
+	].join("\r\n");
+	const encoded = Buffer.from(rawPayload, "utf16le").toString("base64");
 	const parentCommand =
-		`$p = Start-Process powershell -Verb RunAs -Wait -PassThru ` +
-		`-ArgumentList '-NoProfile','-NonInteractive','-EncodedCommand','${encoded}'; exit $p.ExitCode`;
+		`try { ` +
+		`$p = Start-Process -FilePath ${powershellQuote(pwshExe)} -Verb RunAs -Wait -PassThru ` +
+		`-ArgumentList '-NoProfile','-NonInteractive','-EncodedCommand','${encoded}'; exit $p.ExitCode ` +
+		`} catch { ` +
+		`[System.IO.File]::WriteAllText(${powershellQuote(errLog)}, $_.Exception.Message, [System.Text.Encoding]::UTF8); exit 1 ` +
+		`}`;
 	const result = startPwsh(["-NoProfile", "-NonInteractive", "-Command", parentCommand]);
 	if (result.status !== 0) {
-		throw new Error("Windows 自启动任务注册失败或 UAC 被取消");
+		let detail = "";
+		try {
+			detail = readFileSync(errLog, "utf8").trim();
+		} catch {}
+		throw new Error(
+			`Windows 自启动任务注册失败或 UAC 被取消${detail ? `：${detail}` : ""}`,
+		);
 	}
 	console.log(`[vcpdeck] 已通过 UAC 注册最高权限登录自启动（${definition.taskName}）`);
 	return "windows-logon-task(via-uac)";
