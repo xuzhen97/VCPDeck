@@ -1,0 +1,46 @@
+---
+# VCPDeck 自托管 STUN-only coturn。
+#
+# 该 compose 文件只暴露 STUN 监听端口，不映射 TURN 中继端口范围，
+# 并且不配置任何 relay 地址，因此即使 coturn 被误配置也无法分配中继：
+# VCPDeck 的媒体必须走 Browser ↔ Desktop Host 的 P2P 路径。
+#
+# 用法（在仓库根目录执行）：
+#   export VCPDECK_STUN_PUBLIC_IP=<公网IP>
+#   docker compose -f deploy/coturn/docker-compose.yml up -d
+# 校验：
+#   node scripts/test-coturn.cjs --assert-stun --assert-no-relay
+
+services:
+  coturn:
+    image: coturn/coturn:4.6.3-r0
+    container_name: vcpdeck-coturn
+    restart: unless-stopped
+    command:
+      - --listening-port=3478
+      - --listening-ip=0.0.0.0
+      # no-auth 即 STUN-only：TURN 强制要求鉴权，关闭后 Allocate 一律被拒。
+      - --no-auth
+      # 不转发任何中继流量；也不配置 relay-ip，避免重新打开中继。
+      - --no-tcp-relay
+      - --no-udp-relay
+      - --no-cli
+      - --simple-log
+      - --log-file=stdout
+      - --stale-nonce=600
+      - --external-ip=${VCPDECK_STUN_PUBLIC_IP:?必须显式设置公网IP}
+    ports:
+      # 只映射 STUN 监听端口；不映射 49152-65535 中继端口范围。
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    read_only: true
+    tmpfs:
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "turnutils_stunclient -p 3478 127.0.0.1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

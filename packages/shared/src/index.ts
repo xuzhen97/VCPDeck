@@ -20,11 +20,106 @@ export type {
 // ── 自更新协议 ──
 export * from "./update.js";
 
+// ── 发布声明与签名校验（纯逻辑；Ed25519 在 Launcher 侧） ──
+export {
+	assertArchiveEntriesAllowed,
+	assertArtifactMatches,
+	assertLauncherVersionSatisfies,
+	canonicalizeReleaseDeclaration,
+	compareVersions,
+	parseReleaseDeclaration,
+	RELEASE_DECLARATION_VERSION,
+	releaseDeclarationBytes,
+	ReleaseDeclarationError,
+} from "./release-signature.js";
+export type {
+	ArchiveEntry,
+	ReleaseArtifactRole,
+	ReleaseDeclaration,
+	ReleaseDeclarationArtifact,
+} from "./release-signature.js";
+
 // ── 远程 Pi 协议 ──
 export * from "./pi.js";
 
 // ── 交互式终端协议 ──
 export * from "./terminal.js";
+
+// ── 浏览器远程桌面协议 ──
+export * from "./remote-desktop.js";
+// ── 远程桌面 ICE 部署配置 ──
+export {
+	buildRemoteDesktopIceConfig,
+	parseIceUrl,
+	parseRemoteDesktopIceDeployment,
+	RemoteDesktopIceLimits,
+} from "./ice-config.js";
+export type {
+	RemoteDesktopIceDeployment,
+	RemoteDesktopTurnCredentials,
+} from "./ice-config.js";
+// 显式 re-export 控制面请求/响应（部分工具链不解析 export * 通配转发）
+export {
+	REMOTE_DESKTOP_AUDIT_EVENTS,
+	REMOTE_DESKTOP_ERROR_CODES,
+	REMOTE_DESKTOP_SESSION_STATUSES,
+	REMOTE_DESKTOP_ATTACHMENT_STATUSES,
+	RemoteDesktopLimits,
+	REMOTE_DESKTOP_PROTOCOL_VERSION,
+	isRemoteDesktopAuditEventName,
+	isRemoteDesktopErrorCode,
+	isRemoteDesktopSessionStatus,
+	parseRemoteDesktopBrowserAttach,
+	parseRemoteDesktopBrowserAttached,
+	parseRemoteDesktopBrowserDetach,
+	parseRemoteDesktopBrowserSignal,
+	parseRemoteDesktopBrowserTakeover,
+	parseRemoteDesktopCapabilityStatus,
+	parseRemoteDesktopControlMessage,
+	parseRemoteDesktopHostControlMessage,
+	parseRemoteDesktopClipboardMessage,
+	parseRemoteDesktopClientResponse,
+	parseRemoteDesktopSessionCreateRequest,
+	parseRemoteDesktopStateReport,
+	parseRemoteDesktopSignal,
+	safeRemoteDesktopErrorMessage,
+} from "./remote-desktop.js";
+export type {
+	RemoteDesktopAttachmentInfo,
+	RemoteDesktopAuditEventName,
+	RemoteDesktopAuditInfo,
+	RemoteDesktopBackend,
+	RemoteDesktopBrowserAttach,
+	RemoteDesktopBrowserAttached,
+	RemoteDesktopBrowserDetach,
+	RemoteDesktopBrowserSignal,
+	RemoteDesktopBrowserTakeover,
+	RemoteDesktopControlInput,
+	RemoteDesktopControlMessage,
+	RemoteDesktopHostControlMessage,
+	RemoteDesktopControlState,
+	RemoteDesktopAck,
+	RemoteDesktopCapabilityStatus,
+	RemoteDesktopClientRequest,
+	RemoteDesktopClientResponse,
+	RemoteDesktopClipboardMessage,
+	RemoteDesktopClipboardMode,
+	RemoteDesktopCodec,
+	RemoteDesktopDisplayInfo,
+	RemoteDesktopError,
+	RemoteDesktopErrorCode,
+	RemoteDesktopIceConfig,
+	RemoteDesktopIcePolicy,
+	RemoteDesktopIceServer,
+	RemoteDesktopQualityProfile,
+	RemoteDesktopRole,
+	RemoteDesktopSessionCreateRequest,
+	RemoteDesktopSessionInfo,
+	RemoteDesktopSessionStatus,
+	RemoteDesktopSignal,
+	RemoteDesktopStateAck,
+	RemoteDesktopStateReport,
+} from "./remote-desktop.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { PiCapabilityStatus } from "./pi.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
@@ -150,6 +245,15 @@ export const Events = {
 	SERVER_SHUTDOWN: "server:shutdown",
 	FRP_STATE: "frp:state",
 	FRP_STATE_ACK: "frp:state-ack",
+	REMOTE_DESKTOP_REQUEST: "remote-desktop:request",
+	REMOTE_DESKTOP_RESPONSE: "remote-desktop:response",
+	REMOTE_DESKTOP_STATE: "remote-desktop:state",
+	REMOTE_DESKTOP_ATTACH: "remote-desktop:attach",
+	REMOTE_DESKTOP_ATTACHED: "remote-desktop:attached",
+	REMOTE_DESKTOP_DETACH: "remote-desktop:detach",
+	REMOTE_DESKTOP_SIGNAL: "remote-desktop:signal",
+	REMOTE_DESKTOP_TAKEOVER: "remote-desktop:takeover",
+	REMOTE_DESKTOP_ERROR: "remote-desktop:error",
 } as const;
 
 // ── Job type ──
@@ -357,6 +461,8 @@ export interface ClientInfo {
 		pi?: PiCapabilityStatus;
 		terminal?: TerminalCapabilityStatus;
 		frp?: FrpCapabilityStatus;
+		/** Desktop Host 运行时探测摘要（旧 Client 缺省）。 */
+		remoteDesktop?: import("./remote-desktop.js").RemoteDesktopCapabilityStatus;
 		/** 可选：非交互特权能力摘要（旧 Client 缺省） */
 		privileged?: PrivilegedCapabilityStatus;
 	};

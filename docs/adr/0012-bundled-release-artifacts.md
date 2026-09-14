@@ -1,6 +1,6 @@
 # ADR-0012：发布构件采用 esbuild 打包与最小外部依赖
 
-- 状态：Accepted
+- 状态：Accepted（不引入发布者数字签名的范围由 ADR-0029 取代）
 - 日期：2026-08-16
 - 决策者：项目维护者
 - 关联：[`docs/design/release-and-update.md`](../design/release-and-update.md)、[`docs/deployment.md`](../deployment.md)、[`ADR-0003`](./0003-separate-launcher-for-updates.md)
@@ -84,8 +84,12 @@
 
 - 不把 Pi SDK、Prisma CLI 栈打进 bundle（动态加载与体积风险大于收益）；
 - 不裁剪 prisma CLI 的 studio 等传递依赖（脆弱，收益有限，留作后续优化）；
-- 不引入发布者数字签名（仍是 ADR-0003/当前文档已声明的非目标）；
+- 历史决策：本阶段不引入发布者数字签名；该范围已由 ADR-0029 取代，特权组件和 Supervisor 更新必须验证 Ed25519 发布者签名；
 - 不改变 manifest 结构、Launcher 解压与 Node 运行时选择逻辑；Launcher 作为首次安装构件随包提供，但不随业务版本自动覆盖。
+
+## 后续取代
+
+ADR-0029 已取代本决策中“不引入发布者数字签名”的范围。SHA-256 完整性校验、平台构件拆分、esbuild 打包和最小外部依赖等其余决策继续有效。
 
 ## 后果
 

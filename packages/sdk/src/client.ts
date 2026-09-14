@@ -10,6 +10,7 @@ import { createReleasesApi } from "./releases.js";
 import { createStorageApi } from "./storage.js";
 import { createStorageSharesApi } from "./storage-shares.js";
 import { createTerminalsApi } from "./terminal.js";
+import { createRemoteDesktopApi } from "./remote-desktop.js";
 
 /** SDK 认证模式；显式 cookie 仅用于不会自动维护 Cookie 的 Node.js 调用方。 */
 export type AuthMode =
@@ -68,6 +69,7 @@ export class VcpDeckClient {
 	readonly pi;
 	readonly releases;
 	readonly terminals;
+	readonly remoteDesktop;
 	readonly health = {
 		get: (signal?: AbortSignal) =>
 			this.request<{ ok: true }>("GET", "/api/health", undefined, signal),
@@ -89,6 +91,7 @@ export class VcpDeckClient {
 		this.pi = createPiApi(this);
 		this.releases = createReleasesApi(this);
 		this.terminals = createTerminalsApi(this);
+		this.remoteDesktop = createRemoteDesktopApi(this);
 	}
 
 	/** 发起 JSON REST 请求并归一化失败响应。 */

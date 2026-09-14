@@ -4,6 +4,10 @@ import {
 } from "./frp-runtime.js";
 import type { PiCapabilityStatus } from "./pi.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
+import {
+	parseRemoteDesktopCapabilityStatus,
+	type RemoteDesktopCapabilityStatus,
+} from "./remote-desktop.js";
 
 // ── 严格边界：字段长度上限（防御异常注册消息撑爆存储与 UI） ──
 const MAX_CLIENT_ID = 128;
@@ -18,6 +22,7 @@ const MAX_RUN_AS_USER = 256;
 
 /** Client 安装模式（ADR-0023：Linux A2 专用账户 + systemd 系统服务；legacy-pm2 为待迁移旧安装）。 */
 export const MachineInstallationMode = {
+	SYSTEM_SUPERVISOR: "system-supervisor",
 	SYSTEMD_ROOT_EQUIVALENT: "systemd-root-equivalent",
 	LEGACY_PM2: "legacy-pm2",
 } as const;
@@ -65,6 +70,8 @@ export interface MachineRegister {
 		pi?: PiCapabilityStatus;
 		terminal?: TerminalCapabilityStatus;
 		frp?: FrpCapabilityStatus;
+		/** 可选：Desktop Host 运行时探测摘要。 */
+		remoteDesktop?: RemoteDesktopCapabilityStatus;
 		/** 可选：非交互特权能力摘要（ADR-0023 新 Client） */
 		privileged?: PrivilegedCapabilityStatus;
 	};
@@ -94,7 +101,11 @@ export function parseMachineInstallation(
 	if (!isRecord(value) || Object.keys(value).length !== 1) {
 		throw new Error("installation 必须为仅含 mode 的对象");
 	}
-	const valid = [MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT, MachineInstallationMode.LEGACY_PM2];
+	const valid = [
+		MachineInstallationMode.SYSTEM_SUPERVISOR,
+		MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT,
+		MachineInstallationMode.LEGACY_PM2,
+	];
 	if (!valid.includes(value.mode as MachineInstallationMode)) {
 		throw new Error(`installation.mode 必须为 ${valid.join(" 或 ")}`);
 	}
@@ -168,7 +179,7 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 	if (value.capabilityDetails !== undefined) {
 		const details = value.capabilityDetails;
 		if (!isRecord(details)) throw new Error("capabilityDetails 必须为对象");
-		const known = ["pi", "terminal", "frp", "privileged"] as const;
+		const known = ["pi", "terminal", "frp", "remoteDesktop", "privileged"] as const;
 		for (const key of Object.keys(details)) {
 			if (!known.includes(key as (typeof known)[number])) {
 				throw new Error(`capabilityDetails 含未知字段 ${key}`);
@@ -182,6 +193,9 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 		}
 		if (details.frp !== undefined) {
 			parsedDetails.frp = parseFrpCapabilityStatus(details.frp);
+		}
+		if (details.remoteDesktop !== undefined) {
+			parsedDetails.remoteDesktop = parseRemoteDesktopCapabilityStatus(details.remoteDesktop);
 		}
 		if (details.privileged !== undefined) {
 			parsedDetails.privileged = parsePrivilegedCapabilityStatus(details.privileged);

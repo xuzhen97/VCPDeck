@@ -31,7 +31,13 @@ function makeReconciliation(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function makeGateway(reconciliation = makeReconciliation()) {
+function makeGateway(
+	reconciliation = makeReconciliation(),
+	options: {
+		remoteDesktopService?: Record<string, unknown>;
+		remoteDesktopBroker?: Record<string, unknown>;
+	} = {},
+) {
 	const clientService = {
 		register: vi.fn(async () => {}),
 		getClientIdBySocketId: vi.fn(async () => "c1"),
@@ -112,6 +118,15 @@ function makeGateway(reconciliation = makeReconciliation()) {
 	const updateChannel = {
 		bindEmitters: vi.fn(),
 	};
+	const remoteDesktopService = options.remoteDesktopService ?? {
+		handleClientDisconnect: vi.fn(async () => {}),
+		handleClientState: vi.fn(async () => ({ accepted: true, action: "none" })),
+	};
+	const remoteDesktopBroker = options.remoteDesktopBroker ?? {
+		bindEmitter: vi.fn(),
+		resolve: vi.fn(),
+		disconnect: vi.fn(),
+	};
 	const gateway = new ClientGateway(
 		clientService as never,
 		jobService as never,
@@ -125,6 +140,8 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		orchestrator as never,
 		updateChannel as never,
 		reconciliation as never,
+		remoteDesktopService as never,
+		remoteDesktopBroker as never,
 	);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
@@ -143,6 +160,8 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		orchestrator,
 		updateChannel,
 		reconciliation,
+		remoteDesktopService,
+		remoteDesktopBroker,
 		emit,
 		to,
 	};
@@ -358,6 +377,124 @@ describe("ClientGateway Pi generation routing", () => {
 		expect(piRequests.disconnect).toHaveBeenCalledWith("socket-1");
 		expect(piRuns.disconnectGeneration).toHaveBeenCalledWith("c1", "socket-1");
 		expect(order).toEqual(["request-disconnected", "generation-disconnected"]);
+	});
+});
+
+describe("ClientGateway Remote Desktop routing", () => {
+	it("afterInit binds the Remote Desktop broker to the exact Client socket", () => {
+		const { gateway, remoteDesktopBroker, to, emit } = makeGateway();
+		gateway.afterInit();
+		const binder = (remoteDesktopBroker.bindEmitter as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+		expect(typeof binder).toBe("function");
+
+		binder("socket-remote", {
+			requestId: "rdc-1",
+			protocolVersion: 1,
+			hostGeneration: "host-1",
+			action: "session.state",
+			sessionId: "capability-probe",
+		});
+
+		expect(to).toHaveBeenCalledWith("socket-remote");
+		expect(emit).toHaveBeenCalledWith(
+			"remote-desktop:request",
+			expect.objectContaining({ requestId: "rdc-1", action: "session.state" }),
+		);
+	});
+
+	it("resolves a valid Remote Desktop response only for a registered socket", async () => {
+		const { gateway, remoteDesktopBroker } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		const response = {
+			requestId: "rdc-1",
+			protocolVersion: 1,
+			hostGeneration: "host-1",
+			ok: true,
+			result: { ready: true },
+		};
+
+		await gateway.handleRemoteDesktopResponse(socket, response);
+
+		expect(remoteDesktopBroker.resolve).toHaveBeenCalledWith("socket-1", response);
+	});
+
+	it("ignores invalid or unregistered Remote Desktop responses", async () => {
+		const { gateway, remoteDesktopBroker } = makeGateway();
+		const unregistered = makeSocket("unregistered");
+		const response = {
+			requestId: "rdc-1",
+			protocolVersion: 1,
+			hostGeneration: "host-1",
+			ok: true,
+			result: {},
+		};
+
+		await gateway.handleRemoteDesktopResponse(unregistered, response);
+		await gateway.handleRemoteDesktopResponse(
+			Object.assign(makeSocket("registered"), { data: { clientId: "c1" } }) as Socket,
+			{ ...response, forged: true },
+		);
+
+		expect(remoteDesktopBroker.resolve).not.toHaveBeenCalled();
+	});
+
+	it("routes a valid Host state report through the current Client socket lease", async () => {
+		const { gateway, remoteDesktopService } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		const report = {
+			protocolVersion: 1,
+			hostGeneration: "host-1",
+			sessionId: null,
+			status: "idle",
+		} as const;
+		(remoteDesktopService.handleClientState as ReturnType<typeof vi.fn>).mockResolvedValue({ accepted: true, action: "reconcile" });
+
+		await expect(gateway.handleRemoteDesktopState(socket, report)).resolves.toEqual({
+			accepted: true,
+			action: "reconcile",
+		});
+		expect(remoteDesktopService.handleClientState).toHaveBeenCalledWith(
+			"c1",
+			"socket-1",
+			report,
+		);
+	});
+
+	it("rejects malformed or unregistered Host state reports without calling the service", async () => {
+		const { gateway, remoteDesktopService } = makeGateway();
+		const unregistered = makeSocket("unregistered");
+		const validReport = {
+			protocolVersion: 1,
+			hostGeneration: "host-1",
+			sessionId: null,
+			status: "idle",
+		};
+
+		await expect(gateway.handleRemoteDesktopState(unregistered, validReport)).resolves.toEqual({
+			accepted: false,
+			action: "none",
+		});
+		const registered = makeSocket("registered");
+		registered.data.clientId = "c1";
+		await expect(gateway.handleRemoteDesktopState(registered, { ...validReport, forged: true })).resolves.toEqual({
+			accepted: false,
+			action: "none",
+		});
+
+		expect(remoteDesktopService.handleClientState).not.toHaveBeenCalled();
+	});
+
+	it("disconnects Remote Desktop broker requests and reconciles Host state", async () => {
+		const { gateway, remoteDesktopBroker, remoteDesktopService } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+
+		await gateway.handleDisconnect(socket);
+
+		expect(remoteDesktopBroker.disconnect).toHaveBeenCalledWith("socket-1");
+		expect(remoteDesktopService.handleClientDisconnect).toHaveBeenCalledWith("c1", "socket-1");
 	});
 });
 
@@ -724,7 +861,7 @@ describe("ClientGateway FRP reconciliation", () => {
 	});
 
 	it("reconcile dispatch 精确发往 socketId，不使用 clientId room", () => {
-		const { gateway, reconciliation, to, emit } = makeGateway();
+		const { gateway, reconciliation } = makeGateway();
 		gateway.afterInit();
 		const dispatcher = reconciliation.bindDispatcher.mock.calls[0]?.[0];
 		expect(typeof dispatcher).toBe("function");

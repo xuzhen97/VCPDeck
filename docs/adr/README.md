@@ -64,7 +64,7 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | --- | --- | --- |
 | [0001](./0001-control-plane-and-outbound-clients.md) | Accepted | Server 中心控制面，Client 主动出站连接 |
 | [0002](./0002-sqlite-prisma-control-plane.md) | Accepted | 当前控制面使用 SQLite + Prisma |
-| [0003](./0003-separate-launcher-for-updates.md) | Accepted | 使用独立 Launcher 守护和回退业务进程 |
+| [0003](./0003-separate-launcher-for-updates.md) | Accepted（部分由 ADR-0028 取代） | 使用独立 Launcher 守护和回退业务进程 |
 | [0004](./0004-typed-job-kernel.md) | Accepted | Typed Job 作为可持久化远程操作内核 |
 | [0005](./0005-shared-contracts-and-communication-channels.md) | Accepted | Shared 统一治理协议并按职责划分通信通道 |
 | [0006](./0006-file-control-and-data-plane-separation.md) | Accepted | 文件传输的控制面与数据面分离 |
@@ -73,14 +73,20 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0009](./0009-trusted-operator-security-domain.md) | Accepted | 当前采用可信操作者单信任域 |
 | [0010](./0010-client-owned-script-runtime-registry.md) | Accepted | 脚本执行迁移到 Client 持有的受控运行时注册表 |
 | [0011](./0011-server-side-opaque-authentication-and-actor-context.md) | Accepted | 使用服务端 opaque Session/Credential 与可信 ActorContext |
-| [0015](./0015-launcher-distributed-with-release.md) | Accepted | Launcher 随发布包分发，安装到 app-dir 外部稳定路径，不随业务版本覆盖 |
+| [0012](./0012-bundled-release-artifacts.md) | Accepted（签名范围由 ADR-0029 取代） | 发布构件使用 esbuild 打包、平台 zip 与最小外部依赖 |
+| [0015](./0015-launcher-distributed-with-release.md) | Accepted（部分由 ADR-0028 取代） | Launcher 位于业务版本之外的稳定路径；更新模型由 ADR-0028 演进 |
 | [0016](./0016-release-archive-storage-provider.md) | Superseded by ADR-0019 | 历史方案：外部存储下载直连，但上传由 Server 转存 |
 | [0017](./0017-cli-multi-environment-configuration.md) | Accepted | CLI 使用用户级环境注册表，项目配置只选择环境；严格优先级与 fail-closed 解析 |
-| [0018](./0018-public-client-installer-and-pm2-supervision.md) | Accepted（Linux 部分由 ADR-0023 取代） | 提供公开可控的 Client 一键安装入口；Windows 继续由 PM2 只守护 Launcher |
+| [0018](./0018-public-client-installer-and-pm2-supervision.md) | Accepted（进程模型部分由 ADR-0023/0028 取代） | 提供公开可控的 Client 一键安装入口；新进程模型见 ADR-0028 |
 | [0019](./0019-direct-release-upload-to-external-storage.md) | Accepted | 外部 Storage Provider 的 Release 上传与下载数据面均直连，Server 只控制权限、会话、元数据和编排 |
 | [0020](./0020-cli-dataplane-namespace.md) | Accepted | CLI 复用 `/app` 数据面命名空间接入终端与 Pi 交互 |
 | [0021](./0021-frp-dashboard-confirmed-mapping-lifecycle.md) | Accepted | FRP 映射以 Client 动作和 FRPS Dashboard 双重确认收敛 |
 | [0022](./0022-release-artifact-and-launcher-retention.md) | Accepted | Release 审计与归档正文分离生命周期，Server 与 Launcher 按各自权威独立清理 |
-| [0023](./0023-linux-system-client-and-root-equivalent-account.md) | Accepted | Linux Client 使用 systemd 系统部署与 root 等价专用账户，存量 PM2 安装通过 M1 迁移 |
+| [0023](./0023-linux-system-client-and-root-equivalent-account.md) | Accepted（部分由 ADR-0028 取代） | Linux 系统安装基础继续有效；守护与 root 等价业务账户模型由 ADR-0028 演进 |
 | [0024](./0024-public-storage-share-capabilities.md) | Accepted | 使用长期 opaque capability 提供公开 Storage 分享，并以有效分享保护底层 File |
-| [0025](./0025-windows-client-highest-privilege-logon-task.md) | Accepted | Windows Client 保留当前用户 + PM2 + 登录任务模型，并以最高可用权限恢复 Launcher |
+| [0025](./0025-windows-client-highest-privilege-logon-task.md) | Superseded by ADR-0028 | 历史 Windows PM2 + 最高权限登录计划任务模型 |
+| [0026](./0026-browser-client-webrtc-remote-desktop-dataplane.md) | Accepted | Server 授权后由 Browser 与 Desktop Host 建立 WebRTC 远程桌面数据面 |
+| [0027](./0027-privileged-rust-remote-desktop-host.md) | Accepted | 使用独立特权 Rust Desktop Host 承载系统桌面、输入、编码和虚拟显示 |
+| [0028](./0028-system-supervisor-and-transactional-client-migration.md) | Accepted | Launcher 演进为系统级 Supervisor，存量 Client 事务迁移且成功后移除旧守护 |
+| [0029](./0029-signed-privileged-release-artifacts.md) | Accepted | 使用 Ed25519 发布者签名保护特权组件和 Supervisor 更新 |
+| [0030](./0030-managed-coturn-stun-sidecar.md) | Accepted | 使用受管 coturn sidecar 提供 STUN，默认不启用媒体中继 |

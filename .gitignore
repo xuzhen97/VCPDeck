@@ -2,6 +2,7 @@ node_modules/
 dist/*
 !dist/VCPDeckBridge.zip
 *.tsbuildinfo
+native/remote-desktop/target/
 packages/server/generated/
 packages/server/prisma/dev.db
 packages/server/prisma/dev.db-journal
@@ -16,6 +17,7 @@ CLAUDE.md
 # Build artifacts
 .tmp/
 dist-release/
+packages/*/dist/
 # Storage files
 packages/server/data/
 .superpowers/
@@ -26,3 +28,4 @@ frps.log
 .dsh/
 .graphflow-cache/
 graphflow-out/
+nul

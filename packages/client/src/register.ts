@@ -12,6 +12,7 @@ import type {
 import { FRP_RECONCILE_PROTOCOL_VERSION, VERSION } from "@vcpdeck/shared";
 import { isFrpAvailable } from "./frpc-daemon.js";
 import type { RuntimeSecurityInfo } from "./privileged-capability.js";
+import type { RemoteDesktopCapabilityStatus } from "@vcpdeck/shared";
 
 const CLIENT_ID_DIR = path.join(os.homedir(), ".vcpdeck");
 const CLIENT_ID_FILE = path.join(CLIENT_ID_DIR, "client-id");
@@ -52,6 +53,7 @@ export function getRegisterInfo(
 	terminalStatus?: TerminalCapabilityStatus,
 	runtimeSecurity?: RuntimeSecurityInfo,
 	env: NodeJS.ProcessEnv = process.env,
+	remoteDesktop?: RemoteDesktopCapabilityStatus,
 ): MachineRegister {
 	const verifyOnly = isMigrationVerifyOnly(env);
 	const cpus = os.cpus();
@@ -70,6 +72,10 @@ export function getRegisterInfo(
 	}
 	const capabilityDetails: MachineRegister["capabilityDetails"] = {};
 	if (!verifyOnly) {
+		if (remoteDesktop !== undefined) {
+			capabilityDetails.remoteDesktop = remoteDesktop;
+		}
+		if (remoteDesktop?.available) caps.push("remote-desktop");
 		if (piStatus !== undefined) capabilityDetails.pi = piStatus;
 		if (terminalStatus !== undefined) capabilityDetails.terminal = terminalStatus;
 		// FRP 能力：按 frpc 可探测性声明；协商固定为 protocol v1（不按应用版本猜测）。

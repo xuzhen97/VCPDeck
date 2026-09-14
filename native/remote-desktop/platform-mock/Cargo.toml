@@ -1,0 +1,9 @@
+[package]
+name = "platform-mock"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+desktop-core = { path = "../desktop-core" }
+serde_json = "1"

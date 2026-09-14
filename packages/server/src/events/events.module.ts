@@ -11,6 +11,7 @@ import { StorageModule } from "../storage/storage.module.js";
 import { PiModule } from "../pi/pi.module.js";
 import { TerminalModule } from "../terminal/terminal.module.js";
 import { ReleaseModule } from "../release/release.module.js";
+import { RemoteDesktopModule } from "../remote-desktop/remote-desktop.module.js";
 
 @Module({
 	imports: [
@@ -23,6 +24,7 @@ import { ReleaseModule } from "../release/release.module.js";
 		forwardRef(() => ReleaseModule),
 		PiModule,
 		TerminalModule,
+		RemoteDesktopModule,
 	],
 	providers: [ClientGateway, AppGateway],
 	exports: [ClientGateway],

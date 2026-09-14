@@ -5,6 +5,7 @@ import {
 	History,
 	LayoutDashboard,
 	Network,
+	MonitorUp,
 	SquareTerminal,
 	TerminalSquare,
 	type LucideIcon,
@@ -48,6 +49,7 @@ const tabIcons: Record<string, LucideIcon> = {
 	jobs: History,
 	pi: BrainCircuit,
 	terminal: SquareTerminal,
+	desktop: MonitorUp,
 };
 
 export function MachinesPage() {

@@ -25,6 +25,7 @@ import { FrpPanel } from "@/pages/frp-panel";
 import { JobsPage } from "@/pages/jobs-page";
 import { PiPanel } from "@/pages/pi-panel";
 import { TerminalPanel } from "@/pages/terminal-panel";
+import { RemoteDesktopPanel } from "../remote-desktop/remote-desktop-panel";
 
 export function MachineWorkspace() {
 	const sdk = useSdk();
@@ -241,6 +242,7 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				{tab === "jobs" && <JobsPage clientId={client.clientId} />}
 				{tab === "pi" && <PiPanel client={client} />}
 				{tab === "terminal" && <TerminalPanel clientId={client.clientId} />}
+				{tab === "desktop" && <RemoteDesktopPanel client={client} />}
 				{![
 					"overview",
 					"execute",
@@ -249,6 +251,7 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 					"jobs",
 					"pi",
 					"terminal",
+					"desktop",
 				].includes(tab) && (
 					<Card>
 						<CardContent className="pt-6 text-sm text-muted-foreground">

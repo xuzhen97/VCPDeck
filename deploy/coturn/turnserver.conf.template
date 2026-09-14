@@ -1,0 +1,33 @@
+# VCPDeck 自托管 STUN-only coturn 模板
+#
+# 该模板只提供 STUN 绑定服务，明确禁止 TURN 中继：
+# VCPDeck 的媒体必须走 Browser ↔ Desktop Host 的 P2P 路径，不得回落到 Server 侧中继。
+#
+# 需要中继时请部署独立的 TURN 服务，并通过 VCPDECK_ICE_POLICY=relay-allowed
+# 与 VCPDECK_TURN_* 环境变量显式启用。不要修改本模板去开放中继。
+
+listening-port=3478
+# 仅 IPv4 监听，避免在未配置 IPv6 地址的主机上启动失败。
+listening-ip=0.0.0.0
+
+# ── STUN-only ──
+# no-auth 是 coturn 的 STUN-only 开关：TURN 强制要求鉴权，
+# 关闭鉴权后任何 Allocate 请求都会被拒绝，因此中继不可能被启用。
+# 这也是本模板不配置 relay-ip / min-port / max-port 的原因：
+# 一旦补齐这些字段就等于重新打开了中继。
+no-auth
+
+# 不转发任何中继流量。
+no-tcp-relay
+no-udp-relay
+
+# ── 限流与防护 ──
+stale-nonce=600
+# 禁用管理 CLI；日志走 stdout，且不做逐请求记录，避免写入对端地址。
+no-cli
+simple-log
+log-file=stdout
+
+# ── 公网地址 ──
+# 部署时必须显式声明对外可达地址，否则 STUN 返回的内网地址对 Browser 无意义。
+# external-ip=<公网IP>

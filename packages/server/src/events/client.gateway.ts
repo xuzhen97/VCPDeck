@@ -17,6 +17,8 @@ import { PiEventBroker } from "../pi/pi-event-broker.js";
 import { PiRunService } from "../pi/pi-run.service.js";
 import { TerminalService } from "../terminal/terminal.service.js";
 import { TerminalRequestBroker } from "../terminal/terminal-request-broker.js";
+import { RemoteDesktopService } from "../remote-desktop/remote-desktop.service.js";
+import { RemoteDesktopRequestBroker } from "../remote-desktop/remote-desktop-request-broker.js";
 import { ReleaseOrchestrator } from "../release/release.orchestrator.js";
 import { GatewayUpdateChannel } from "../release/update-channel.js";
 import {
@@ -30,6 +32,8 @@ import {
   parseTerminalOutputChunk,
   parseMachineRegister,
   parseTerminalStateReport,
+  parseRemoteDesktopClientResponse,
+  parseRemoteDesktopStateReport,
   type JobProgress,
 } from "@vcpdeck/shared";
 import type {
@@ -53,6 +57,9 @@ import type {
   UpdateReady,
   UpdateFailed,
   FrpRuntimeStateAck,
+  RemoteDesktopClientResponse,
+  RemoteDesktopStateReport,
+  RemoteDesktopStateAck,
 } from "@vcpdeck/shared";
 import { clientPsk } from "../client/client-psk.js";
 
@@ -79,11 +86,15 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     private readonly orchestrator: ReleaseOrchestrator,
     // 更新事件发送通道（bindEmitters 模式，避免 provider 循环）
 	@Inject(forwardRef(() => GatewayUpdateChannel))
-    private readonly updateChannel: GatewayUpdateChannel,
-    // FRP 恢复编排（可选注入：旧测试两参构造时跳过）
+  	private readonly updateChannel: GatewayUpdateChannel,
+    // FRP 恢复编排（可选注入；保留旧构造器参数顺序）
     @Optional()
     @Inject(FrpReconciliationService)
     private readonly frpReconciliation?: FrpReconciliationService,
+    @Optional()
+    @Inject(RemoteDesktopService) private readonly remoteDesktopService?: RemoteDesktopService,
+    @Optional()
+    @Inject(RemoteDesktopRequestBroker) private readonly remoteDesktopBroker?: RemoteDesktopRequestBroker,
   ) {}
 
   onModuleInit() {
@@ -109,6 +120,9 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     });
     this.terminalBroker.bindEmitter((socketId, request) => {
       this.server.to(socketId).emit(Events.TERMINAL_REQUEST, request);
+    });
+    this.remoteDesktopBroker?.bindEmitter((socketId, request) => {
+      this.server.to(socketId).emit(Events.REMOTE_DESKTOP_REQUEST, request);
     });
     this.updateChannel.bindEmitters({
       sendUpdateRequest: (clientId, request) => {
@@ -139,6 +153,7 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       // 未完成 REGISTER 的 socket 也可能持有 broker pending request。
       this.piRequests.disconnect(client.id);
       this.terminalBroker.disconnect(client.id);
+      this.remoteDesktopBroker?.disconnect(client.id);
     }
     await this.clientService.markOfflineBySocketId(client.id);
     console.log(`[ws] disconnected: ${clientId ?? client.id}`);
@@ -157,6 +172,7 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
     this.piRequests.disconnect(socketId);
     this.terminalBroker.disconnect(socketId);
+    this.remoteDesktopBroker?.disconnect(socketId);
     // FRP 恢复周期只回收匹配 socket 的租约（service 内部判断）。
     void this.frpReconciliation?.disconnect(clientId, socketId);
     if (await this.piRuns.disconnectGeneration(clientId, socketId)) {
@@ -164,6 +180,37 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       await this.frpService.markInactiveByClientId(clientId);
     }
     await this.terminalService.handleClientDisconnect(clientId, socketId);
+    await this.remoteDesktopService?.handleClientDisconnect(clientId, socketId);
+  }
+
+  @SubscribeMessage(Events.REMOTE_DESKTOP_RESPONSE)
+  async handleRemoteDesktopResponse(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<void> {
+    if (typeof client.data.clientId !== "string") return;
+    try {
+      const parsed: RemoteDesktopClientResponse = parseRemoteDesktopClientResponse(data);
+      this.remoteDesktopBroker?.resolve(client.id, parsed);
+    } catch {
+      // 非法 Host 响应忽略，不将底层正文回显给任何 Browser。
+    }
+  }
+
+  @SubscribeMessage(Events.REMOTE_DESKTOP_STATE)
+  async handleRemoteDesktopState(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<RemoteDesktopStateAck> {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId) return { accepted: false, action: "none" };
+    try {
+      const report: RemoteDesktopStateReport = parseRemoteDesktopStateReport(data);
+      if (!this.remoteDesktopService) return { accepted: false, action: "none" };
+      return await this.remoteDesktopService.handleClientState(clientId, client.id, report);
+    } catch {
+      return { accepted: false, action: "none" };
+    }
   }
 
   // ── Client events ──

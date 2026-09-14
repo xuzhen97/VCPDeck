@@ -1,4 +1,4 @@
-import { Inject } from "@nestjs/common";
+import { Inject, Optional } from "@nestjs/common";
 import {
 	ConnectedSocket,
 	MessageBody,
@@ -9,6 +9,7 @@ import {
 import type { Server, Socket } from "socket.io";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { TerminalService } from "../terminal/terminal.service.js";
+import { RemoteDesktopService } from "../remote-desktop/remote-desktop.service.js";
 import { createHash } from "node:crypto";
 import { Events } from "@vcpdeck/shared";
 import type {
@@ -16,6 +17,9 @@ import type {
 	TerminalAck,
 	TerminalBrowserAttached,
 	TerminalErrorCode,
+	RemoteDesktopAck,
+	RemoteDesktopBrowserAttached,
+	RemoteDesktopErrorCode,
 } from "@vcpdeck/shared";
 import {
 	TERMINAL_ERROR_CODES,
@@ -26,7 +30,13 @@ import {
 	parseTerminalBrowserResize,
 	parseTerminalBrowserResync,
 	parseTerminalBrowserTakeover,
+	parseRemoteDesktopBrowserAttach,
+	parseRemoteDesktopBrowserDetach,
+	parseRemoteDesktopBrowserSignal,
+	parseRemoteDesktopBrowserTakeover,
+	safeRemoteDesktopErrorMessage,
 	safeTerminalErrorMessage,
+	REMOTE_DESKTOP_ERROR_CODES,
 } from "@vcpdeck/shared";
 
 const FRONTEND_ORIGIN = process.env.VCPDECK_FRONTEND_ORIGIN || "http://localhost:5173";
@@ -37,6 +47,20 @@ function sha256(s: string): string {
 
 function isTerminalErrorCode(v: unknown): v is TerminalErrorCode {
   return typeof v === "string" && (TERMINAL_ERROR_CODES as readonly string[]).includes(v);
+}
+
+function isRemoteDesktopErrorCode(v: unknown): v is RemoteDesktopErrorCode {
+  return typeof v === "string" && (REMOTE_DESKTOP_ERROR_CODES as readonly string[]).includes(v);
+}
+
+function remoteDesktopErrorAck(error: unknown): RemoteDesktopAck<never> {
+  const code = isRemoteDesktopErrorCode((error as { code?: unknown }).code)
+    ? (error as { code: RemoteDesktopErrorCode }).code
+    : "REMOTE_DESKTOP_PROTOCOL_MISMATCH";
+  return {
+    ok: false,
+    error: { code, message: safeRemoteDesktopErrorMessage((error as { message?: unknown }).message) },
+  };
 }
 
 /** 把业务错误转成安全 ack。 */
@@ -52,6 +76,7 @@ function errorAck(error: unknown): TerminalAck<never> {
 
 /** 从 socket 读取已认证 actor。 */
 function actorOf(client: Socket): ActorContext {
+  // SAFETY: handleConnection assigns actor before any authenticated /app message is handled.
   return (client as unknown as { actor: ActorContext }).actor;
 }
 
@@ -66,12 +91,16 @@ export class AppGateway {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TerminalService) private readonly terminalService: TerminalService,
+    @Optional()
+    @Inject(RemoteDesktopService) private readonly remoteDesktopService?: RemoteDesktopService,
   ) {}
 
   afterInit() {
-    this.terminalService.bindBrowserEmitter((socketId, event, payload) => {
+    const emit = (socketId: string, event: string, payload: unknown) => {
       this.server.to(socketId).emit(event, payload);
-    });
+    };
+    this.terminalService.bindBrowserEmitter(emit);
+    this.remoteDesktopService?.bindBrowserEmitter(emit);
   }
 
   async handleConnection(client: Socket) {
@@ -82,6 +111,7 @@ export class AppGateway {
         client.disconnect();
         return;
       }
+      // SAFETY: Socket.IO client is the authenticated connection object; actor is assigned immediately after authentication.
       (client as unknown as { actor: ActorContext }).actor = actor;
       console.log(`[ws:app] connected: ${actor.displayName} (${actor.source})`);
     } catch {
@@ -92,6 +122,7 @@ export class AppGateway {
 
   async handleDisconnect(client: Socket) {
     await this.terminalService.detachBrowserSocket(client.id);
+    await this.remoteDesktopService?.detachBrowserSocket(client.id);
   }
 
   private async authenticate(client: Socket): Promise<ActorContext | null> {
@@ -144,6 +175,71 @@ export class AppGateway {
   }
 
   // ── 终端事件（身份来自 handleConnection 的 actor） ──
+
+  @SubscribeMessage(Events.REMOTE_DESKTOP_ATTACH)
+  async handleRemoteDesktopAttach(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<RemoteDesktopAck<RemoteDesktopBrowserAttached>> {
+    try {
+      if (!this.remoteDesktopService) throw Object.assign(new Error("Remote Desktop is unavailable"), { code: "REMOTE_DESKTOP_HOST_OFFLINE" });
+      const parsed = parseRemoteDesktopBrowserAttach(data);
+      const result = await this.remoteDesktopService.attachBrowser({
+        sessionId: parsed.sessionId,
+        actor: actorOf(client),
+        socketId: client.id,
+        reconnectToken: parsed.reconnectToken,
+      });
+      return { ok: true, data: result };
+    } catch (error) {
+      return remoteDesktopErrorAck(error);
+    }
+  }
+
+  @SubscribeMessage(Events.REMOTE_DESKTOP_DETACH)
+  async handleRemoteDesktopDetach(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<RemoteDesktopAck<undefined>> {
+    try {
+      if (!this.remoteDesktopService) throw Object.assign(new Error("Remote Desktop is unavailable"), { code: "REMOTE_DESKTOP_HOST_OFFLINE" });
+      const parsed = parseRemoteDesktopBrowserDetach(data);
+      await this.remoteDesktopService.detachBrowser({ socketId: client.id, ...parsed });
+      return { ok: true, data: undefined };
+    } catch (error) {
+      return remoteDesktopErrorAck(error);
+    }
+  }
+
+  @SubscribeMessage(Events.REMOTE_DESKTOP_SIGNAL)
+  async handleRemoteDesktopSignal(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<RemoteDesktopAck<undefined>> {
+    try {
+      if (!this.remoteDesktopService) throw Object.assign(new Error("Remote Desktop is unavailable"), { code: "REMOTE_DESKTOP_HOST_OFFLINE" });
+      const parsed = parseRemoteDesktopBrowserSignal(data);
+      await this.remoteDesktopService.browserSignal({ socketId: client.id, ...parsed });
+      return { ok: true, data: undefined };
+    } catch (error) {
+      return remoteDesktopErrorAck(error);
+    }
+  }
+
+  @SubscribeMessage(Events.REMOTE_DESKTOP_TAKEOVER)
+  async handleRemoteDesktopTakeover(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<RemoteDesktopAck<{ role: "operator" }>> {
+    try {
+      if (!this.remoteDesktopService) throw Object.assign(new Error("Remote Desktop is unavailable"), { code: "REMOTE_DESKTOP_HOST_OFFLINE" });
+      const parsed = parseRemoteDesktopBrowserTakeover(data);
+      const result = await this.remoteDesktopService.browserTakeover({ socketId: client.id, ...parsed });
+      return { ok: true, data: result };
+    } catch (error) {
+      return remoteDesktopErrorAck(error);
+    }
+  }
 
   @SubscribeMessage(Events.TERMINAL_ATTACH)
   async handleTerminalAttach(

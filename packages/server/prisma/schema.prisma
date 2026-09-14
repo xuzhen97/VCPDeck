@@ -29,7 +29,9 @@ model Client {
   updatedAt         DateTime  @updatedAt
   jobs              Job[]
   frpMappings       FrpMapping[]
-  terminalSessions  TerminalSession[]
+  terminalSessions          TerminalSession[]
+  remoteDesktopSessions     RemoteDesktopSession[]
+  remoteDesktopAuditEvents  RemoteDesktopAuditEvent[]
 }
 
 model Job {
@@ -261,6 +263,53 @@ model TerminalAuditEvent {
   result     String   @default("ok")
   reason     String?
   createdAt  DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([sessionId, createdAt])
+}
+
+// ── 浏览器远程桌面会话（只存控制面元数据，不存媒体/输入/信令正文） ──
+model RemoteDesktopSession {
+  id                  String   @id
+  clientId            String
+  client              Client   @relation(fields: [clientId], references: [id])
+  createdByIdentityId String
+  createdByName       String
+  status              String   @default("creating")
+  selectedDisplayId   String?
+  displaysJson        String   @default("[]")
+  qualityProfile      String   @default("balanced")
+  clipboardMode       String   @default("off")
+  protocolVersion     Int      @default(1)
+  hostGeneration      String?
+  createdAt           DateTime @default(now())
+  connectedAt         DateTime?
+  detachedAt          DateTime?
+  endedAt             DateTime?
+  safeErrorCode       String?
+  safeErrorMessage    String?
+
+  audits              RemoteDesktopAuditEvent[]
+
+  @@index([clientId, status])
+  @@index([clientId, createdAt])
+}
+
+// ── 远程桌面最小审计（只记录生命周期元数据） ──
+model RemoteDesktopAuditEvent {
+  id            String                @id
+  sessionId     String
+  session       RemoteDesktopSession  @relation(fields: [sessionId], references: [id])
+  clientId      String
+  client        Client                @relation(fields: [clientId], references: [id])
+  event         String
+  identityId    String?
+  actorName     String?
+  attachmentId  String?
+  role          String?
+  result        String                @default("ok")
+  reason        String?
+  createdAt     DateTime              @default(now())
 
   @@index([clientId, createdAt])
   @@index([sessionId, createdAt])

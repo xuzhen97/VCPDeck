@@ -1,6 +1,6 @@
 # ADR-0015：Launcher 随发布包分发但独立于业务版本运行
 
-- 状态：Accepted
+- 状态：Accepted（Launcher 不随业务版本更新的范围由 ADR-0028 取代）
 - 日期：2026-08-17
 - 决策者：项目维护者
 - 关联：[`ADR-0003`](./0003-separate-launcher-for-updates.md)、[`ADR-0012`](./0012-bundled-release-artifacts.md)、[`deployment.md`](../deployment.md)
@@ -41,6 +41,10 @@
 - 每个平台 zip 增加一个 Launcher bundle；
 - Launcher 升级暂不自动化，发布者必须单独处理 Launcher 兼容性；
 - 旧版不含 `launcher` 字段的安装包不能被新的 `install.cjs` 作为首次安装包接受。
+
+## 后续取代
+
+ADR-0028 已取代本决策中已有 Launcher 保持冻结、不随业务版本更新的范围。Launcher 位于业务版本目录之外、由独立生命周期组件管理的原则继续有效；其最终形态为可验证更新的系统级 Supervisor。
 
 ## 验证与退出条件
 

@@ -13,7 +13,9 @@
     "test:frp": "node scripts/test-frp.cjs",
     "test:cli": "node scripts/test-cli-capabilities.cjs",
     "test:vcp-plugin": "node scripts/test-vcp-plugin.cjs",
-    "vcpdeck:link": "node scripts/link-cli.cjs"
+    "vcpdeck:link": "node scripts/link-cli.cjs",
+    "build:native": "cargo build --manifest-path native/remote-desktop/Cargo.toml --workspace",
+    "test:native": "cargo test --manifest-path native/remote-desktop/Cargo.toml --workspace"
   },
   "devDependencies": {
     "@types/archiver": "^8.0.0",

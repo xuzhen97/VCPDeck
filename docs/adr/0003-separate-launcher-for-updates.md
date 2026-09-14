@@ -1,6 +1,6 @@
 # ADR-0003：独立 Launcher 管理进程与更新
 
-- 状态：Accepted
+- 状态：Accepted（Launcher 冻结与不参与自动更新的范围由 ADR-0028 取代）
 - 日期：2026-08-15（补录既有决策）
 - 决策者：项目维护者
 - 关联：`docs/design/release-and-update.md`、`docs/compatibility.md`
@@ -24,6 +24,10 @@ Server/Client 需要跨 Windows/Linux 更新自身。业务进程无法可靠替
 正面：更新生命周期与业务解耦；可跨平台回退；Server/Client 使用同一模型。
 
 负面：首次安装复杂；Launcher 协议本身成为长期兼容边界；数据库迁移无法随应用回退自动逆转；当前最低 Launcher 版本尚未强制。
+
+## 后续取代
+
+ADR-0028 已取代本决策中 Launcher 冻结、不参与自动更新的范围，并将其演进为可更新的系统级 Supervisor。本 ADR 关于业务进程之外独立管理版本、探活和回退的原则继续有效。
 
 ## 验证与退出条件
 

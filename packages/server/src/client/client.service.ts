@@ -4,13 +4,12 @@ import {
 	parseFrpCapabilityStatus,
 	parseMachineInstallation,
 	parsePrivilegedCapabilityStatus,
+	parseRemoteDesktopCapabilityStatus,
 	type MachineInstallationStatus,
 	type MachineRegister,
-	type PrivilegedCapabilityStatus,
 	type Heartbeat,
 	type ClientInfo,
 	type DiskInfo,
-	type FrpCapabilityStatus,
 	type PiCapabilityStatus,
 	type TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
@@ -289,21 +288,14 @@ export class ClientService {
   private parseStoredDetails(
     json: string,
   ): {
-    details: {
-      pi?: PiCapabilityStatus;
-      terminal?: TerminalCapabilityStatus;
-      frp?: FrpCapabilityStatus;
-      privileged?: PrivilegedCapabilityStatus;
-    };
+    // 必须用共享包里的权威类型，而不是就地重新声明一份更窄的匿名类型：
+    // 可选字段可以让更窄的类型合法地赋给更宽的类型，TypeScript 不会报错，
+    // 于是新增的能力摘要会在读取时被静默丢弃（remoteDesktop 就曾如此丢失）。
+    details: ClientInfo["capabilityDetails"];
     installation: MachineInstallationStatus | null;
   } {
     const result: {
-      details: {
-        pi?: PiCapabilityStatus;
-        terminal?: TerminalCapabilityStatus;
-        frp?: FrpCapabilityStatus;
-        privileged?: PrivilegedCapabilityStatus;
-      };
+      details: ClientInfo["capabilityDetails"];
       installation: MachineInstallationStatus | null;
     } = { details: {}, installation: null };
     let raw: unknown;
@@ -327,6 +319,15 @@ export class ClientService {
         result.details.frp = parseFrpCapabilityStatus(record.frp);
       } catch {
         // frp 详情损坏：省略该字段，不宽松猜测（旧 Client 缺省时无此字段）。
+      }
+    }
+    if (record.remoteDesktop !== undefined) {
+      try {
+        result.details.remoteDesktop = parseRemoteDesktopCapabilityStatus(
+          record.remoteDesktop,
+        );
+      } catch {
+        // 远程桌面摘要损坏：省略，让 UI 看到“未报告”而不是半个能力。
       }
     }
     if (record.privileged !== undefined) {

@@ -218,7 +218,67 @@ Server 推送事件：
 - `terminal:resync-required`
 - `terminal:error`
 
+Remote Desktop 复用认证后的 `/app` Socket.IO 连接。Server 只转发严格校验后的 attachment、SDP/ICE 和状态控制面消息，不转发视频、输入或剪贴板正文。Browser 通过独立 PeerConnection 接收一条视频轨道，并使用 `control-reliable` 与 `pointer-realtime` 两条 DataChannel；Host 的 challenge-response 完成前不得接受输入或发送画面。
+
+协商方向固定为 **Browser offer / Host answer**。由于 DataChannel 必须由 offer 方声明，Browser 在 `createOffer()` 前就要创建两条通道（`control-reliable` 有序可靠；`pointer-realtime` 无序且 `maxRetransmits: 0`）并添加 `recvonly` 视频 transceiver；Host 设置远端 offer、把视频轨道挂到该 transceiver 上，再产出 answer。若 Browser 不创建通道，offer 就不会包含 `m=application` 段，Host 单方面创建的通道永远无法完成协商。Host 通过 `ondatachannel` 按 **label** 绑定通道，不依赖到达顺序，并以「必需 label 是否齐全」而非「已绑定数量」判定完成；Operator 必需 `control-reliable` 与 `pointer-realtime`，Viewer 只需 `control-reliable`，角色不允许的通道从不绑定。缺必需通道一律关闭该 PeerConnection，不降级为半可用状态。
+
+`session.signal` 的 `signal.kind` 只能是 `offer`、`ice` 或 `ice-complete`；Host 收到 `answer` 必须拒绝，因为 Host 固定为 answerer。Host 必须先把 answer 写回响应，再在后台完成通道绑定与 `challenge` 下发：Browser 只有拿到 answer 才会完成 DTLS 并打开通道，若在响应路径上等待通道就绪会自我死锁。
+
+attachment 角色以 Server 与 Host 双方一致为必要条件。Host 总是把会话的第一个 attachment 判定为 operator，因此当请求角色与 Host 的判定不一致（例如 Server 要 `viewer` 而 Host 会给出 `operator`）时，Host 必须回滚该 attachment 并返回 `REMOTE_DESKTOP_PERMISSION_DENIED`，绝不默默提权。
+
+控制输入的 canonical wire format 统一使用 camelCase：`keyCode`、`deltaX`、`deltaY`、`layoutGeneration`。Rust Host 必须拒绝对应的 snake_case 字段。剪贴板只允许纯文本，默认关闭，最大 UTF-8 大小为 `RemoteDesktopLimits.maxClipboardBytes`；远端文本只能在 Browser 用户显式操作后写入浏览器剪贴板。
+
+Ctrl+Alt+Del 是系统级 Secure Attention Sequence（SAS），无法用普通按键注入送达（Windows 需要专用 API）。因此它是一条独立控制消息 `{ "type": "secure-attention" }`，而非 `keyCode` 组合：Browser 检测到该组合时必须就地拦下 Delete、释放已按下的修饰键，绝不把它当普通按键下发；只有 Operator 可请求，Viewer 请求必须返回 `REMOTE_DESKTOP_PERMISSION_DENIED`。它不是输入注入，因此不受 `freeze` 限制（登录屏/锁屏切换期间仍需可用）。该动作是 **capability-driven** 的：只有能力摘要中 `secureAttention` 为真时 Browser 才展示入口，且该字段缺失时一律视为不支持，默认值永远是 `false`，平台后端未真实探测通过前不得上报。
+
+控制消息解析必须对 **所有** 变体做键白名单校验。serde 的 `deny_unknown_fields` 对 internally-tagged enum 的 **unit 变体**（`release-all`、`secure-attention`）不生效，仅依赖它会让 `{ "type": "release-all", "extra": 1 }` 这类夹带字段的载荷通过，跨边界解析必须另行拒绝未知字段。
+
+每个 Session 同时只传输一个选中显示器的视频轨道。Operator 可通过可靠控制通道发送 `display-select`；Desktop Host 在切换或显示拓扑变化期间冻结输入，并通过 `layout-update` 返回新的 `layoutGeneration`、显示器 ID 和尺寸。Browser 更新布局后发送 `layout-confirm` 才恢复输入；旧 generation 的 pointer 输入必须由 Browser 和 Host 拒绝。Session 初始显示器列表和选中 ID 来自 Server SessionInfo，Browser 不凭视频尺寸伪造完整显示器拓扑。
+
 请求使用 Socket.IO ack 返回 `{ok:true,data}` 或 `{ok:false,error:{code,message}}`。只有 operator 可以输入和 resize；viewer 只能观察。Browser 在 sessionStorage 保存 reconnect token，Server 只保存内存 hash；operator 断线后有 30 秒保护，之后 viewer 可 takeover。
+
+### Remote Desktop 恢复语义
+
+重连必须建立**全新的 attachment 与全新的 PeerConnection**，并重新完成 challenge-response。已断的 PeerConnection 既无法恢复 SCTP，Host 也仍然停在旧 attachment 上，因此复用旧连接是错误方向。
+
+Browser 侧状态机只有五个阶段：`connecting`、`connected`、`reconnecting`、`failed`、`closed`。两种触发都进入同一个 `reconnecting` 流程：`/app` socket 断开，以及 PeerConnection 的 `connectionState` 变为 `failed` 或 `disconnected`。进入恢复时立即关闭旧 PeerConnection（只丢引用会留下仍在收集 ICE 的僵尸对象）并通知通道监听者为 `null`，以便上层拆掉输入与剪贴板控制器；画面可能仍停留在最后一帧，但输入必须停用。
+
+两种触发的处理不同：socket 断开时必须等 `connect` 事件再重新 attach；ICE 失败时 socket 仍可用，应立刻重新 attach。并发发起两次 attach 会拿到两个 attachment 并让其中一个永远无人使用，因此必须用一个在途标志串行化。
+
+恢复窗口为 30 秒（与 Server 的 operator 保护期一致）。窗口内 attach 失败按固定间隔重试；窗口耗尽后进入 `failed` 并携带稳定错误码 `REMOTE_DESKTOP_RECONNECT_TIMEOUT`，不得继续静默重试。恢复材料（reconnect token）只用于“申请恢复”，永远不能替代 Host 的 challenge-response 授权；它存在 `sessionStorage`，正常关闭或恢复失败后必须清除，且存取失败或值不可信时一律按“无恢复能力”处理，不得中断当前会话。
+
+### Desktop Host 本机 IPC
+
+Client 与特权 Desktop Host 之间不建立网络连接，只使用平台受保护的本机端点：Windows Named Pipe `\\.\pipe\vcpdeck-desktop-host`，Linux Unix domain socket `/run/vcpdeck/desktop-host.sock`（bind 后收紧为 `0600`，并校验对端 UID 为 root 或 Host 自身 UID）。端点可由 `VCPDECK_DESKTOP_HOST_ENDPOINT` 覆盖；不支持其他平台，也没有 stdin/stdout 或 TCP 回退。
+
+帧格式为 4 字节网络序无符号长度前缀加 UTF-8 JSON，单帧上限与 `RemoteDesktopLimits.maxIpcFrameBytes` 一致（1 MiB）。每个 JSON 帧必须包含 `protocolVersion`、`generationId`、`kind`（`request` | `response` | `state`）和 `payload`，任一未知字段或未知 `kind` 都必须 fail closed 并关闭连接。
+
+`generationId` 由 Client 在连接时生成，Host 必须原样回显；Host 自己的进程 generation 只出现在 `response.payload.hostGeneration` 和 `state.payload.hostGeneration` 中。Client 校验 `hostGeneration` 漂移并据此关闭全部 pending 请求。
+
+`request.payload` 的 action 仅允许 `session.prepare`、`session.attach`、`session.detach`、`session.close`、`session.freeze-input`、`session.resume-input`、`session.signal`、`session.state`。其中 `session.prepare` 的响应 `result.displays` 使用与 Shared `RemoteDesktopDisplayInfo` 完全一致的 camelCase 字段（`scalePercent`、`virtual`），Host 能力摘要使用 `RemoteDesktopCapabilityStatus` 的 camelCase 字段；snake_case 字段必须被拒绝。Host 在每次请求后追加一帧 `state`，其 `payload` 即 `RemoteDesktopStateReport`。
+
+### Desktop Host 数据面输入链路
+
+通道就绪且 challenge 下发后，Host 必须为每个 attachment 启动**通道读取循环**：控制通道一个任务，Operator 的指针通道另一个任务（Viewer 从不获得指针通道，即使 Browser 擅自创建也不会被读取）。这是输入的最后一跳：缺少它时 `challenge-response` 永远不会被读出，Browser 会一直停在未认证状态，输入也永远不会到达操作系统。
+
+控制消息的处理分两步，两步都必须通过：`ControlSession::handle`／`handle_pointer` 做授权、冻结、角色与 layout generation 校验，并返回**携带载荷**的 `ControlAction`；`dispatch::apply_control_action` 再把动作映射为平台调用（`inject_input`、`release_all_inputs`、`secure_attention`、`select_display`）。动作必须携带事件本体——若只返回“已接受”而不带事件，载荷会在这一跳丢失。
+
+平台不支持或目标不存在时，dispatch 返回错误，读取循环随即终止并关闭该 attachment：半认证、半冻结或“声称成功但没有真正注入”的状态都不允许继续。
+
+**可靠控制通道上复用两类消息**：控制指令（`input`/`release-all`/`secure-attention`/`display-select`/`layout-confirm`）与纯文本剪贴板（`browser-to-remote`/`remote-to-browser`）。Host **必须先按原始帧的 `type` 分流**再各自严格解析；若把剪贴板消息当作控制消息解析，一条剪贴板消息就会让整个控制循环（连同输入）终止。
+
+剪贴板两个方向都必须完成 `clipboardMode` 与角色校验：`off` 完全关闭；`browser-to-remote` 只允许 Operator 发送；`bidirectional` 才允许 Operator 双向（Viewer 两个方向都不开放）。远端 → Browser 的方向由 Host 轮询平台剪贴板并推送：平台没有统一的变化通知接口，因此采用有界轮询 + **内容去重 + 回声抑制**。回声抑制是必需的：Browser 写入平台的文本随后会被轮询读回，不记录就会把它回推给 Browser 形成无限往返。模式不允许时**不记录已读内容**，否则之后打开双向模式会把当前内容当作“已推送过”而永久漏掉。
+
+**显示器切换**由 attachment 的 `ControlSession` 独占布局权威：`display-select` 推进 generation、冻结输入，Host 切换到真实捕获目标后必须向 Browser 广播 `layout-update`（`layoutGeneration`/`displayId`/`width`/`height`）。Browser 用**切换后**的 generation 回复 `layout-confirm` 才恢复输入；拿切换前的旧值确认无效。缺少 `layout-update` 会让 Browser 与 Host 双方永久冻结输入——切换显示器的同时把会话变成不可输入。`display-select` 只有 Operator 可发起：它会冻结整条会话的输入，Viewer 不得改变操作者的显示目标。
+
+授权状态在整个 Host 中**只有一份**，存在 `HostService` 中；数据面读取任务与 `is_authenticated`、状态上报必须共享同一个 `ControlSession`。若数据面与状态面各持一份授权，通道上完成的认证永远不会反映到状态上报。**通道绑定失败、peer 消失或数据面被释放时都必须同步撤销授权**，否则 Host 会保留一个没有可用数据面的 attachment。
+
+布局 generation 同样**只有一份**权威，位于 `ControlSession` 的输入路由中（pointer 消息就是按它校验的）。Host 不得另存一份“布局状态”：两份布局状态会与实际校验用的 generation 漂移，且带角色的操作检查很容易只写在无人调用的那一份里。
+
+`DesktopBackend` 必须实现 `inject_input`、`secure_attention`、`select_display` 与已有的 `release_all_inputs`。平台未接入时（如生产默认的 `MockBackend::unavailable`）这些方法必须返回错误，绝不静默成功。
+
+### ICE 配置
+
+Server 按 `VCPDECK_ICE_POLICY` 生成每个 attachment 的 `RemoteDesktopIceConfig`：默认 `p2p-only` 只下发 STUN，且绝不携带 `username`/`credential`；`relay-allowed` 才允许外部 TURN，并使用 coturn REST 短期凭据（TTL 限制在 60–600 秒，`expiresAt` 随配置下发）。凭据不写入数据库、审计和日志。自托管 coturn 模板与 compose 必须是 STUN-only：依赖 `no-auth` 拒绝全部分配请求，不得配置 `relay-ip`、`min-port`、`max-port` 或映射 49152–65535 中继端口范围。
 
 输出目标模型是 snapshot + 有序 delta：Client headless xterm 提供 snapshot，网络 chunk 携带 seq，Browser ack 用于慢消费者检测，落后 512 个块后要求 resync。当前协议实现存在以下偏移：
 

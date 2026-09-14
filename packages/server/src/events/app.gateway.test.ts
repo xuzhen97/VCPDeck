@@ -35,11 +35,19 @@ function makeGateway() {
 		browserResync: vi.fn(),
 		bindBrowserEmitter: vi.fn(),
 	};
-	const gateway = new AppGateway(prisma as never, terminalService as never);
+	const remoteDesktopService = {
+		attachBrowser: vi.fn(),
+		detachBrowser: vi.fn(),
+		detachBrowserSocket: vi.fn(),
+		browserSignal: vi.fn(),
+		browserTakeover: vi.fn(),
+		bindBrowserEmitter: vi.fn(),
+	};
+	const gateway = new AppGateway(prisma as never, terminalService as never, remoteDesktopService as never);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
 	gateway.server = { emit: vi.fn(), to } as never;
-	return { gateway, prisma, terminalService, to, emit };
+	return { gateway, prisma, terminalService, remoteDesktopService, to, emit };
 }
 
 describe("AppGateway terminal handlers", () => {
@@ -114,10 +122,62 @@ describe("AppGateway terminal handlers", () => {
 		expect(await gateway.handleTerminalResync(socket, { sessionId: "s1", attachmentId: "ta1" })).toEqual({ ok: true, data: undefined });
 	});
 
-	it("detach 按 socketId 清理该 socket 全部 attachment", async () => {
-		const { gateway, terminalService } = makeGateway();
+	it("Remote Desktop afterInit 绑定精确 Browser emitter", () => {
+		const { gateway, remoteDesktopService, to, emit } = makeGateway();
+		gateway.afterInit();
+		const binder = remoteDesktopService.bindBrowserEmitter.mock.calls[0]?.[0];
+		expect(typeof binder).toBe("function");
+		binder("browser-remote", "remote-desktop:signal", { signal: { kind: "ice-complete" } });
+		expect(to).toHaveBeenCalledWith("browser-remote");
+		expect(emit).toHaveBeenCalledWith("remote-desktop:signal", { signal: { kind: "ice-complete" } });
+	});
+
+	it("Remote Desktop attach 透传认证 actor 和 socket lease", async () => {
+		const { gateway, remoteDesktopService } = makeGateway();
+		const socket = makeSocket();
+		remoteDesktopService.attachBrowser.mockResolvedValue({
+			sessionId: "s1",
+			attachmentId: "a1",
+			role: "operator",
+			reconnectToken: "new-token",
+			controlProtectedUntil: null,
+			iceConfig: { policy: "p2p-only", iceServers: [], expiresAt: null },
+		});
+		await expect(gateway.handleRemoteDesktopAttach(socket, { sessionId: "s1", reconnectToken: "old-token" })).resolves.toEqual(
+			expect.objectContaining({ ok: true, data: expect.objectContaining({ attachmentId: "a1", role: "operator" }) }),
+		);
+		expect(remoteDesktopService.attachBrowser).toHaveBeenCalledWith({
+			sessionId: "s1",
+			actor: ACTOR,
+			socketId: "socket-1",
+			reconnectToken: "old-token",
+		});
+	});
+
+	it("Remote Desktop 非法 signal 和 service 错误都 fail closed", async () => {
+		const { gateway, remoteDesktopService } = makeGateway();
+		const socket = makeSocket();
+		const invalid = await gateway.handleRemoteDesktopSignal(socket, {
+			sessionId: "s1",
+			attachmentId: "a1",
+			signal: { kind: "answer", sdp: "forged", extra: true },
+		});
+		expect(invalid).toMatchObject({ ok: false, error: { code: "REMOTE_DESKTOP_PROTOCOL_MISMATCH" } });
+		expect(remoteDesktopService.browserSignal).not.toHaveBeenCalled();
+		remoteDesktopService.browserTakeover.mockRejectedValue(
+			Object.assign(new Error("another operator"), { code: "REMOTE_DESKTOP_TAKEOVER_CONFLICT" }),
+		);
+		await expect(gateway.handleRemoteDesktopTakeover(socket, { sessionId: "s1", attachmentId: "a1" })).resolves.toEqual({
+			ok: false,
+			error: { code: "REMOTE_DESKTOP_TAKEOVER_CONFLICT", message: "another operator" },
+		});
+	});
+
+	it("detach 按 socketId 清理 Terminal 和 Remote Desktop attachment", async () => {
+		const { gateway, terminalService, remoteDesktopService } = makeGateway();
 		const socket = makeSocket();
 		await gateway.handleDisconnect(socket);
 		expect(terminalService.detachBrowserSocket).toHaveBeenCalledWith("socket-1");
+		expect(remoteDesktopService.detachBrowserSocket).toHaveBeenCalledWith("socket-1");
 	});
 });

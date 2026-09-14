@@ -14,23 +14,25 @@ export const MACHINE_TABS = [
 	["jobs", "任务记录"],
 	["pi", "Pi"],
 	["terminal", "终端"],
+	["desktop", "桌面"],
 ] as const;
 
 /** 能力 → 中文标签；未映射的能力原样透传，确保显示不遗漏 */
-const CAPABILITY_LABELS: Record<string, string> = {
+const CAPABILITY_LABELS = {
 	exec: "命令执行",
 	"file.read": "文件操作",
 	"file.write": "文件操作",
 	frp: "映射",
 	"agent.pi": "Pi 运行",
 	"terminal.pty": "终端",
-};
+	"remote-desktop": "远程桌面",
+} satisfies Record<string, string>;
 
 export function capabilitiesLabel(raw: string[]): string[] {
 	const labels: string[] = [];
 	const seen = new Set<string>();
 	for (const cap of raw) {
-		const label = CAPABILITY_LABELS[cap] ?? cap;
+		const label = CAPABILITY_LABELS[cap as keyof typeof CAPABILITY_LABELS] ?? cap;
 		if (seen.has(label)) continue;
 		seen.add(label);
 		labels.push(label);

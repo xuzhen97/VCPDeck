@@ -46,6 +46,8 @@ import {
 	shutdownFrpRuntime,
 } from "./frpc-daemon.js";
 import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge.js";
+import { attachRemoteDesktopBridge } from "./remote-desktop/protocol-bridge.js";
+import { probeRemoteDesktopCapability } from "./remote-desktop/capability-probe.js";
 import { ClientLauncher } from "./launcher-control.js";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -280,6 +282,15 @@ export function connect(): Socket {
 	});
 
 	// ── 终端能力（延迟探测；失败仅禁用 Terminal Tab） ──
+	const remoteDesktopCapability = {
+		current: undefined as Awaited<ReturnType<typeof probeRemoteDesktopCapability>> | undefined,
+	};
+	const remoteDesktopBridge = attachRemoteDesktopBridge(socket, {
+		clientId: CLIENT_ID,
+		getCapability: () => remoteDesktopCapability.current,
+		probeCapability: () => probeWithTimeout(() => probeRemoteDesktopCapability()),
+	}, { verifyOnly });
+
 	const terminalGenerationId = randomUUID();
 	const terminalManager = createTerminalManager({
 		shells: [],
@@ -356,7 +367,7 @@ export function connect(): Socket {
 				return info;
 			}),
 		getRegister: (piStatus, terminalStatus, runtimeSecurity) =>
-			getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, process.env),
+			getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, process.env, remoteDesktopCapability.current),
 		getStatusReport: () => ({
 			clientId: CLIENT_ID,
 			jobs: getStatusReport(),
@@ -372,7 +383,18 @@ export function connect(): Socket {
 			frpBridge.onConnected();
 		}
 		void (async () => {
-			if (!verifyOnly) await ensureTerminalReady();
+			if (!verifyOnly) {
+				await ensureTerminalReady();
+				// 静默吞掉探测错误会让能力缺失变得不可见；至少留下失败原因。
+				remoteDesktopCapability.current = await remoteDesktopBridge
+					.probe()
+					.catch((error: unknown) => {
+						console.error(
+							`[vcpdeck] 远程桌面能力探测失败：${error instanceof Error ? error.message : String(error)}`,
+						);
+						return undefined;
+					});
+			}
 			await bridge.onConnected();
 		})();
 	});

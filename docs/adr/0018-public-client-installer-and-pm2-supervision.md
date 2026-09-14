@@ -1,6 +1,6 @@
 # ADR-0018：公开可控的 Client 一键安装入口与 PM2 守护
 
-- 状态：Accepted
+- 状态：Accepted（Linux PM2 部分由 ADR-0023 取代；Windows PM2/登录启动部分由 ADR-0028 取代）
 - 日期：2026-08-20
 - 决策者：项目维护者
 - 关联：[`ADR-0003`](./0003-separate-launcher-for-updates.md)、[`ADR-0009`](./0009-trusted-operator-security-domain.md)、[`ADR-0012`](./0012-bundled-release-artifacts.md)、[`ADR-0015`](./0015-launcher-distributed-with-release.md)、[`release-and-update.md`](../design/release-and-update.md)
@@ -80,6 +80,10 @@
 - 已有手工安装可通过固定命令进入幂等修复，只要它指向同一 Server；
 - 安装入口关闭不影响已安装 Client 连接和自更新；
 - 未来改为每 Client 凭据、签名安装器、原生 Service 或新增架构时，需要新 ADR 和明确迁移路径。
+
+## 后续取代
+
+ADR-0028 已取代本决策中的 Windows PM2、登录计划任务和长期旧 Launcher 维护模型。公开可控安装入口、共享 PSK 及未与新 Supervisor 冲突的安装约束继续有效；新安装直接进入系统级 Supervisor 最终形态。
 
 ## 验证与退出条件
 

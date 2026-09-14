@@ -1,6 +1,6 @@
 # ADR-0023：Linux Client 采用 systemd 系统部署与 root 等价专用账户
 
-- 状态：Accepted
+- 状态：Accepted（进程守护与 root 等价业务账户范围由 ADR-0028 取代）
 - 日期：2026-09-01
 - 决策者：项目维护者
 - 关联：[`ADR-0003`](./0003-separate-launcher-for-updates.md)、[`ADR-0009`](./0009-trusted-operator-security-domain.md)、[`ADR-0015`](./0015-launcher-distributed-with-release.md)、[`ADR-0018`](./0018-public-client-installer-and-pm2-supervision.md)、[`docs/design/release-and-update.md`](../design/release-and-update.md)、[`docs/deployment.md`](../deployment.md)
@@ -77,6 +77,10 @@ VCPDeck 当前面向少量可信操作者，远程 Job、Terminal、Pi 和文件
 - Shared 新增权限和安装模式兼容字段，旧 Client 缺失时展示为“未报告”；
 - Windows 安装、守护和自启行为保持不变；
 - 正式切换 Linux 安装入口前必须完成新空机和 M1 真实验证。
+
+## 后续取代
+
+ADR-0028 已取代本决策中 Linux Client 的现有 systemd 单进程守护、业务账户 `NOPASSWD: ALL` 和显式 transient Launcher updater 模型。固定系统安装、无人登录启动、存量迁移必须可回滚及未冲突的部署约束继续有效；最终由 root Supervisor 管理受限 Client 与有限特权组件。
 
 ## 验证与退出条件
 

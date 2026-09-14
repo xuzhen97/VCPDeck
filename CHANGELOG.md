@@ -2,6 +2,50 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [未发布]
+
+### Added
+
+- Remote Desktop 前端支持三档画质与剪贴板模式选择、单显示器选择，以及 Host `layout-update` 后的布局 generation 确认和输入冻结/恢复交互。
+- Desktop Host 本机 IPC 控制面：长度前缀帧严格解析、会话生命周期、attachment 授权与 challenge、状态上报，以及 Linux Unix socket 对端 UID 校验和 Windows Named Pipe 端点。
+- Remote Desktop ICE 配置：`p2p-only`/`relay-allowed` 严格环境解析、每 attachment 短期 TURN 凭据、STUN-only coturn 模板与 compose，以及 `scripts/install-coturn.cjs` 部署前静态护栏。
+- Host 侧 WebRTC answerer：接受 Browser offer、挂载视频轨道、按 label 绑定 DataChannel、下发 attachment challenge，并在缺通道时 fail closed。
+- Host 信号桥：`session.signal` 驱动真实 SDP 协商并回传 answer，通道就绪后下发 challenge 并建立控制会话。
+- **Secure Attention（Ctrl+Alt+Del）能力与动作**：`RemoteDesktopCapabilityStatus.secureAttention`（缺失即不支持）与 `{ "type": "secure-attention" }` 控制消息贯通 Shared、Rust 与 Browser；前端只在能力为真时展示入口，组合键不再作为普通按键下发。
+- **Desktop Host 数据面输入链路**：为每个 attachment 启动控制（与 Operator 指针）通道读取循环，`ControlSession` 校验后由 `dispatch::apply_control_action` 把动作真正应用到平台后端（`inject_input`/`release_all_inputs`/`secure_attention`/`select_display`）；`ControlAction` 现在携带事件本体，不再丢弃载荷。
+- **Browser 恢复状态机**：`RemoteDesktopPeer` 新增 `connecting`/`connected`/`reconnecting`/`failed`/`closed` 五阶段状态与 `onStateChange`；socket 断开或 ICE 失败都进入同一个恢复流程，30 秒窗口内重新 attach 并重新协商，窗口耗尽以 `REMOTE_DESKTOP_RECONNECT_TIMEOUT` 失败。恢复材料存入 `sessionStorage`（存取失败安全降级）。前端展示恢复横幅并在恢复期间拆掉输入控制器。
+- **显示器切换广播 `layout-update`**：`layout-update` 加入 Rust 协议控制消息，Host 在切换真实捕获目标后向 Browser 广播新布局；布局 generation 收敛为 `ControlSession` 单一权威，删除 `HostService` 中无人调用的重复布局状态。
+- **可靠通道入站分流**：新增 `decode_inbound_control_message` 与控制通道原始帧读取，Host 按 `type` 分流控制指令与剪贴板；剪贴板文本经模式与角色校验后写入平台剪贴板（`DesktopBackend::write_clipboard_text`）。
+- **远端剪贴板反向推送**：`ControlSession::clipboard_to_browser` 负责内容去重、回声抑制与模式/角色/大小校验，Host 按有界间隔轮询 `DesktopBackend::read_clipboard_text` 并向 Browser 推送 `remote-to-browser`。只有双向模式才轮询。
+- **前端远程桌面交互补全**：鼠标按键状态跟踪 + 指针捕获（拖拽越出画面仍需释放按键）、焦点驱动的浏览器保留组合键抢占（Ctrl+W/T/N/R、Ctrl+Tab、Alt+←/→、F5，保留 Escape/Tab/F12 为退出通道）、连接路径与延迟投影（`summarizeConnectionStats`：直连/中继/未知，绝不编造）、就地重试（`RemoteDesktopPeer.retry()`）。
+- **显示器列表只以权威拓扑为准**：`layout-update` 指向列表外的显示器时不再伪造 `physical`/`virtual`/`primary` 字段，只在选择器中补一个轻量条目。
+- **发布声明与 Ed25519 签名校验（ADR-0029 基础，尚未接入生产路径）**：Shared 新增纯逻辑 `release-signature`（规范化字节、严格解析、构件哈希/大小、`launcherMinVersion` 硬门禁、archive 越界/重复/未声明可执行文件拒绝）；Launcher 新增 Ed25519 签名与验签（`node:crypto`，信任根由调用方内置传入，不从待验证构件取得）。
+- **Windows 平台后端（Task 9 第一切片）**：新 crate `platform-windows` 用真实 Win32 实现显示器枚举（`EnumDisplayMonitors` + 与 `SM_CMONITORS` 对账）、输入注入（`SendInput`）、剪贴板读写与 **GDI BitBlt 屏幕捕获**（作为计划允许的有界回退）；已接入 `desktop-host` 的 Windows 生产入口。能力仍诚实上报 `available=false`（编码器未实现，诊断码 `REMOTE_DESKTOP_ENCODER_UNAVAILABLE`），`capture` 为真实探测结果。desktop-core 新增 `CapturedFrame` 与 BT.601 limited-range `to_i420()`（纯计算，含确定性数值测试）。
+- **Media Foundation H.264 编码器探测**：`platform-windows` 新增 `mf` 模块，真实枚举系统 H.264 编码器 MFT（硬件/软件分开枚举以准确标记），并按友好名称归一化厂商标识（nvenc/qsv/amf）；`hardwareEncoders` 改为真实探测结果。因 `windows-sys` 不含 MF 模块，新增 `windows = 0.61` 依赖（仅开启 MediaFoundation/Com/Foundation 三个 feature）。`supportedCodecs` 仍为空——探测到编码器不等于能产出编码帧。
+- **首次真实端到端媒体数据面**：`desktop-core::encoder` 新增 `VideoEncoder`（线程独享，不要求 `Send`）与 `EncoderFactory`（`Send + Sync`，只持配置）——平台编码器持有 COM 套间资源，不能放进 `Send + Sync` 的 backend。`peer.rs` 现在**保存视频轨道**（此前 `add_video_track` 的返回值被丢弃，数据面无从发送）并新增 `broadcast_sample`（一次编码、多路扇出）。`HostRuntime::pump_media` + `spawn_media_loop`（**独占线程 + `current_thread` 运行时**，避免 tokio 迁移任务线程破坏 COM 套间归属）已接入 Windows 生产入口（33ms 间隔）。本机实测：`available=true`、真实捕获 1920×1080、真实 Media Foundation 编码 60 帧共 206116 字节。
+- **媒体编码低延迟配置**：按 Microsoft 官方文档在 `SetOutputType` 之前设置 `CODECAPI_AVLowLatencyMode`、`CODECAPI_AVEncCommonLowLatency`、`CODECAPI_AVEncCommonRealTime`、`CODECAPI_AVEncMPVDefaultBPictureCount=0` 与 `MF_LOW_LATENCY`。实测编码器 lookahead 由 **16 帧降到 0 帧**（首帧即产出），消除了约 0.53 秒的编码延迟；代价是压缩率下降。已加延迟回归护栏。
+- **多组件 Supervisor（ADR-0028 核心，平台注册待后续）**：`supervision-policy` 抽出与既有 `Daemon` 一致的退避语义（指数退避、封顶、稳定窗口后计数清零）；`supervisor` 提供多组件的顺序启动、启动失败回滚、健康检查与按策略重启、放弃阈值、逆序幂等停止；`components` 提供 Daemon 适配器与子进程组件（**只有 `spawn` 事件才视为启动成功**，避免把从未启动的组件报成 running）。`VCPDECK_LAUNCHER_MODE=supervisor` 启用，并由 Supervisor 独占进程信号（新增 `DaemonConfig.manageSignals`，默认保持既有行为）。
+
+### Fixed
+
+- **`available` 与子能力不自洽**：`CapabilityStatus::new(..., capture=false, ...)` 在构造时算出了 `available=false`，而探测成功后只更新了 `capture` 却未重新推导 `available`，导致“capture/pointer/keyboard 全真、codecs 非空，但报告不可用”。现在 `available` 由子能力重新推导，诊断码也随之清除。
+- **捕获忽略操作者选中的显示器**：`capture_frame(None)` 一律回退到主屏，操作者通过 `display-select` 选过屏幕后捕获不会跟随，远端看到的与操作的不是同一块屏幕。
+- **编码 profile 与 SDP 声明不一致**：WebRTC 侧声明 `profile-level-id=42e01f`（Baseline 3.1）而编码器产出 Main profile，部分接收端会拒解；已改为 Baseline。
+- **Windows 捕获完全不可用（`GetDIBits` 用法错误）**：把 **DC** 当成了位图句柄传给 `GetDIBits`，且在位图仍被选中进 DC 时调用（Win32 明确禁止）——两者任一都会让捕获稳定失败。现在先取消选中、再传位图句柄。
+- **未知显示器会静默回退到主屏**：`target_monitor` 在 `Some(id)` 找不到时回退到主显示器，操作者会在不知情的情况下看到并控制错误的屏幕；现在只有 `None`（尚未选择）才回退，显式未知 id 一律失败。
+- **生产 Host 入口从未执行 WebRTC 协商**：`run()` → `serve_connection()` 直接使用裸 `HostService`，从不构造 `HostRuntime`；`HostService::handle_signal()` 只返回 `json!({})`。因此 `HostRuntime`（offer→answer、通道绑定、challenge、控制/指针/剪贴板循环、dispatch）与 `PeerManager` 在生产路径上不可达，Browser 永远拿不到 answer。现在入口改用 `HostRuntime`，并在响应写出后由后台任务 `pump()` 完成通道绑定与 challenge。新增 `production_entry_point_answers_a_real_offer` 走真实 `serve_connection` 断言真实 answer，修复前必失败。
+- **Browser 未创建 DataChannel 导致通道永远无法协商**：Browser 是 offerer，但之前只监听 `ondatachannel` 而从不创建通道，offer 中因此没有 `m=application` 段，Host 侧的控制与指针通道永远无法建立；现在 Browser 在 `createOffer()` 前创建 `control-reliable` 与 `pointer-realtime`，Host 按 label 绑定。
+- **通道绑定以数量而非必需 label 判定成功**：通道到达顺序不确定，只到达 `pointer-realtime` 时会被当作绑定完成，导致 Viewer 拿到指针通道而控制通道缺失；现在以必需 label 齐全为完成条件，并要求每个角色只绑定允许的通道。
+- **Host 可能默默提权**：会话第一个 attachment 总是 operator，当 Server 请求 `viewer` 而 Host 会判定 `operator` 时，之前会返回 operator；现在任何角色不一致都回滚并返回 `REMOTE_DESKTOP_PERMISSION_DENIED`。
+- **unit 控制消息可以夹带未知字段**：serde 的 `deny_unknown_fields` 对 internally-tagged enum 的 unit 变体不生效，`{"type":"release-all","extra":1}` 之前会被接受；现在解析前按 `type` 做键白名单校验，跨边界解析真正 fail closed。
+- **Host 授权状态存在两份、输入永远到不了平台**：`ControlAction` 之前只报告「已接受」而不携带事件，且没有任何代码读取 DataChannel，`next_pointer()` 从未被调用，控制消息被校验后即丢弃；同时 `HostService` 与 Host 运行态各自持有一份授权，导致通道上完成的认证不会反映到 `is_authenticated` 与状态上报。现在授权只保留一份，并新增通道读取循环与 `dispatch` 把输入真正注入平台；通道绑定失败或数据面释放时同步撤销授权。
+- **重连不关闭旧 PeerConnection**：进入恢复流程时只丢弃引用而不调用 `close()`，会留下仍在收集 ICE、持有编码器与连接的僵尸对象；现在恢复与 `close()` 都会真正关闭连接。同样修掉并发重连：socket `connect` 事件与重试定时器会各自发起一次 attach，拿到两个 attachment 并让其中一个永远无人使用，现在用在途标志串行化。
+- **显示器切换导致输入永久冻结**：Host 协议里根本没有 `layout-update` 消息，生产路径也从不调用 `HostService::select_display`（它是无人调用的死代码）；Browser 与 Host 双方都会在 `display-select` 后冻结输入并等待一个永远不会来的布局广播，会话从此不可输入。现在 Host 切换捕获目标后广播 `layout-update`，并用切换后的 generation 恢复输入。
+- **剪贴板消息会杀死整个控制循环**：剪贴板与控制消息共用 `control-reliable` 通道，而 Host 把入站帧全部当作控制消息解析，一条 `browser-to-remote` 就会解析失败并终止读取循环，连带输入全部失效。现在先按 `type` 分流再各自严格解析。
+- **Viewer 可以切换显示器**：`display-select` 的处理只检查了是否认证，唯一的角色检查留在无人调用的死代码 `HostService::select_display` 中；因此 Viewer 能冻结整条会话的输入并改变操作者的显示目标。现在 `ControlSession` 直接拒绝非 Operator 的 `display-select`。
+- **Browser 渲染会重建整个远程桌面会话**：`RemoteDesktopView` 的 effect 依赖 `peerFactory`/`inputFactory`/`clipboardFactory` 等工厂 prop，父组件用行内函数重新渲染就会拆掉并重建 WebRTC 会话；现在工厂只通过 ref 读取，effect 依赖收敛到 `sessionId` 与剪贴板模式。
+- **Rust 协议与 Shared 不一致**：`CapabilityStatus` 与 `DisplayInfo` 之前使用 snake_case 字段，导致合法的 camelCase capability 被拒绝、而无效载荷因字段名不匹配被误判为“非法”；现在两侧共享同一 fixture 并全部对齐。
+
 ## [0.6.30] - 2026-09-11
 
 ### Fixed

@@ -1,0 +1,179 @@
+{
+  "protocolVersion": 1,
+  "cases": [
+    {
+      "name": "offer-valid",
+      "kind": "signal",
+      "valid": true,
+      "payload": { "kind": "offer", "sdp": "v=0\r\n" }
+    },
+    {
+      "name": "ice-valid",
+      "kind": "signal",
+      "valid": true,
+      "payload": {
+        "kind": "ice",
+        "candidate": "candidate:1 1 UDP 2122260223 192.0.2.1 54400 typ host",
+        "sdpMid": "0",
+        "sdpMLineIndex": 0
+      }
+    },
+    {
+      "name": "ice-complete-valid",
+      "kind": "signal",
+      "valid": true,
+      "payload": { "kind": "ice-complete" }
+    },
+    {
+      "name": "offer-unknown-field",
+      "kind": "signal",
+      "valid": false,
+      "payload": { "kind": "offer", "sdp": "v=0\r\n", "actorId": "forged" }
+    },
+    {
+      "name": "signal-unknown-kind",
+      "kind": "signal",
+      "valid": false,
+      "payload": { "kind": "candidate", "candidate": "candidate:1" }
+    },
+    {
+      "name": "control-display-select-valid",
+      "kind": "control",
+      "valid": true,
+      "payload": { "type": "display-select", "displayId": "display-2" }
+    },
+    {
+      "name": "control-layout-confirm-valid",
+      "kind": "control",
+      "valid": true,
+      "payload": { "type": "layout-confirm", "layoutGeneration": 8 }
+    },
+    {
+      "name": "control-layout-confirm-snake-case",
+      "kind": "control",
+      "valid": false,
+      "payload": { "type": "layout-confirm", "layout_generation": 8 }
+    },
+    {
+      "name": "control-secure-attention-valid",
+      "kind": "control",
+      "valid": true,
+      "payload": { "type": "secure-attention" }
+    },
+    {
+      "name": "control-secure-attention-unknown-field",
+      "kind": "control",
+      "valid": false,
+      "payload": { "type": "secure-attention", "keyCode": 46 }
+    },
+    {
+      "name": "control-release-all-unknown-field",
+      "kind": "control",
+      "valid": false,
+      "payload": { "type": "release-all", "extra": 1 }
+    },
+    {
+      "name": "clipboard-browser-to-remote-valid",
+      "kind": "clipboard",
+      "valid": true,
+      "payload": { "type": "browser-to-remote", "text": "hello" }
+    },
+    {
+      "name": "clipboard-unknown-field",
+      "kind": "clipboard",
+      "valid": false,
+      "payload": { "type": "browser-to-remote", "text": "hello", "extra": true }
+    },
+    {
+      "name": "capability-valid-physical",
+      "kind": "capability",
+      "valid": true,
+      "payload": {
+        "protocolVersion": 1,
+        "hostVersion": "0.7.0",
+        "available": true,
+        "backend": "windows",
+        "displayManager": "gdm",
+        "compositor": "mutter",
+        "capture": true,
+        "pointer": true,
+        "keyboard": true,
+        "clipboardText": true,
+        "loginScreen": true,
+        "lockScreen": true,
+        "secureAttention": true,
+        "physicalDisplay": true,
+        "virtualDisplay": true,
+        "headless": false,
+        "hardwareEncoders": ["nvenc"],
+        "supportedCodecs": ["H264", "VP8"]
+      }
+    },
+    {
+      "name": "capability-valid-headless",
+      "kind": "capability",
+      "valid": true,
+      "payload": {
+        "protocolVersion": 1,
+        "hostVersion": "0.7.0",
+        "available": true,
+        "backend": "x11",
+        "capture": true,
+        "pointer": true,
+        "keyboard": true,
+        "clipboardText": true,
+        "loginScreen": true,
+        "lockScreen": true,
+        "physicalDisplay": false,
+        "virtualDisplay": true,
+        "headless": true,
+        "hardwareEncoders": [],
+        "supportedCodecs": ["VP8"]
+      }
+    },
+    {
+      "name": "capability-snake-case-rejected",
+      "kind": "capability",
+      "valid": false,
+      "payload": {
+        "protocol_version": 1,
+        "host_version": "0.7.0",
+        "available": true,
+        "backend": "windows",
+        "capture": true,
+        "pointer": true,
+        "keyboard": true,
+        "clipboard_text": true,
+        "login_screen": true,
+        "lock_screen": true,
+        "physical_display": true,
+        "virtual_display": true,
+        "headless": false,
+        "hardware_encoders": [],
+        "supported_codecs": ["VP8"]
+      }
+    },
+    {
+      "name": "headless-without-output",
+      "kind": "capability",
+      "valid": false,
+      "payload": {
+        "protocolVersion": 1,
+        "hostVersion": "0.7.0",
+        "available": true,
+        "backend": "windows",
+        "capture": true,
+        "pointer": true,
+        "keyboard": true,
+        "clipboardText": true,
+        "loginScreen": true,
+        "lockScreen": true,
+        "physicalDisplay": false,
+        "virtualDisplay": false,
+        "headless": true,
+        "hardwareEncoders": [],
+        "supportedCodecs": ["H264", "VP8"]
+      }
+    }
+  ]
+}

@@ -28,6 +28,13 @@ export interface DaemonConfig {
 	log?: (msg: string) => void;
 	/** 测试或宿主注入的本地版本保留器 */
 	retention?: VersionRetentionLike;
+	/**
+	 * 是否由 Daemon 自行注册进程信号处理器。
+	 *
+	 * 默认 `true`（保持既有行为）。在 Supervisor 模式下必须置 `false`：
+	 * 否则 Daemon 的处理器会直接 `process.exit`，抢占 Supervisor 的逆序停止。
+	 */
+	manageSignals?: boolean;
 }
 
 export interface VersionRetentionLike {
@@ -153,6 +160,7 @@ export class Daemon {
 	constructor(config: DaemonConfig) {
 		this.appDir = config.appDir;
 		this.artifact = config.artifact;
+		this.manageSignals = config.manageSignals ?? true;
 		this.probeUrl = config.probeUrl ?? "http://127.0.0.1:3001/api/status";
 		this.log = config.log ?? ((msg) => console.log(`[launcher] ${msg}`));
 		this.versions = new VersionStore({
@@ -171,11 +179,13 @@ export class Daemon {
 		this.updater = this.buildUpdater();
 
 		// 优雅停机：先停被守护进程再退出（Windows kill() 不触发 handler，Ctrl+C 有效）
-		const shutdown = () => {
-			void this.shutdown();
-		};
-		process.on("SIGTERM", shutdown);
-		process.on("SIGINT", shutdown);
+		if (this.manageSignals) {
+			const shutdown = () => {
+				void this.shutdown();
+			};
+			process.on("SIGTERM", shutdown);
+			process.on("SIGINT", shutdown);
+		}
 
 		const control = await createControlServer({
 			controlFile: join(this.appDir, "control.json"),
@@ -308,6 +318,9 @@ export class Daemon {
 
 	private lastStartAt = 0;
 
+	/** 是否由本类自行注册进程信号（Supervisor 模式下应为 false）。 */
+	private readonly manageSignals: boolean;
+
 	private async stopChild(): Promise<void> {
 		const child = this.child;
 		if (!child) return;
@@ -327,6 +340,28 @@ export class Daemon {
 				resolve();
 			});
 		});
+	}
+
+	/**
+	 * Supervisor 驱动的停止：停掉被守护进程但不退出 launcher 进程自身。
+	 *
+	 * 与 `shutdown()` 的区别是不调用 `process.exit`，因此可在被监管时反复调用。
+	 */
+	async stopSupervised(): Promise<void> {
+		this.stopping = true;
+		this.cancelRetentionStartupCleanup();
+		await this.stopChild();
+	}
+
+	/**
+	 * Supervisor 健康检查：被守护进程当前是否仍在运行。
+	 *
+	 * 只上报“进程是否存活”这一事实；捕获/输入/编码等能力探测属于平台后端，
+	 * 不得在这里假报为已检查。
+	 */
+	async healthCheck(): Promise<string | null> {
+		if (this.stopping) return "被守护进程已停止";
+		return this.child ? null : "被守护进程未运行";
 	}
 
 	/** 健康探活：server 走 HTTP + 版本匹配；client 需存活超过稳定窗口（秒退进程判失败） */

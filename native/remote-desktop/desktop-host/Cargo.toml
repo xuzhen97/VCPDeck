@@ -1,0 +1,24 @@
+[package]
+name = "desktop-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+desktop-core = { path = "../desktop-core" }
+platform-mock = { path = "../platform-mock" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-util", "macros", "signal", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+tokio = { version = "1", features = ["net"] }
+platform-windows = { path = "../platform-windows" }
+
+[target.'cfg(unix)'.dependencies]
+tokio = { version = "1", features = ["net"] }
+
+# 集成测试需要模拟 Browser 侧的 WebRTC API（recvonly transceiver 与 DataChannel 创建）。
+[dev-dependencies]
+rtc = { version = "0.21.0-rc.2", default-features = false }
+webrtc = { version = "0.21.0-rc.2", default-features = false, features = ["runtime-tokio", "crypto-ring"] }

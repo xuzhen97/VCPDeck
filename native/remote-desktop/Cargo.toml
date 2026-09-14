@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = [
+    "desktop-core",
+    "desktop-host",
+    "platform-mock",
+    "platform-windows",
+]

@@ -1,0 +1,27 @@
+[package]
+name = "platform-windows"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+desktop-core = { path = "../desktop-core" }
+
+[target.'cfg(windows)'.dependencies]
+# 只用已在 lockfile 中且已缓存的具体版本，保证可离线构建。
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# Media Foundation 绑定只在完整的 `windows` crate 里（windows-sys 没有 MF 模块）。
+# 只开枚举与编码所需的最小 feature 集，避免拉入整个 crate 体积。
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+] }

@@ -1,6 +1,6 @@
 # ADR-0025：Windows Client 使用最高权限登录计划任务
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0028
 - 日期：2026-09-09
 - 决策者：项目维护者
 - 关联：[ADR-0018](./0018-public-client-installer-and-pm2-supervision.md)、[`deployment.md`](../deployment.md)、[`security.md`](../security.md)
@@ -55,6 +55,10 @@ Windows 非交互进程无法可靠地为每个远程操作完成 UAC 同意，�
 - 修复存量 Limited 安装会重启该账户的 PM2 daemon；安装器必须避免误伤其他 PM2 应用，并在无法安全切换时停止；
 - 安装和修复需要一次 UAC 授权，取消授权即安装失败；
 - 仍依赖用户登录，不提供无人值守 Windows 服务语义。
+
+## 后续取代
+
+ADR-0028 已完整取代本决策的当前用户、PM2 与最高权限登录计划任务模型。Windows 最终使用 LocalSystem Supervisor 管理受限业务 Client、特权 Desktop Host 和用户 Session Helper；存量机器通过事务式迁移切换并在成功后删除旧任务。
 
 ## 验证与退出条件
 

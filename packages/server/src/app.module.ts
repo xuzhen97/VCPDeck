@@ -9,6 +9,7 @@ import { FrpModule } from "./frp/frp.module.js";
 import { PiModule } from "./pi/pi.module.js";
 import { ReleaseModule } from "./release/release.module.js";
 import { ClientInstallerModule } from "./client-installer/client-installer.module.js";
+import { RemoteDesktopModule } from "./remote-desktop/remote-desktop.module.js";
 
 @Module({
 	imports: [
@@ -22,6 +23,7 @@ import { ClientInstallerModule } from "./client-installer/client-installer.modul
 		PiModule,
 		ReleaseModule,
 		ClientInstallerModule,
+		RemoteDesktopModule,
 	],
 })
 export class AppModule {}
