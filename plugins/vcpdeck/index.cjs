@@ -1521,6 +1521,303 @@ var require_frp_runtime = __commonJS({
   }
 });
 
+// ../shared/dist/tunnel.js
+var require_tunnel = __commonJS({
+  "../shared/dist/tunnel.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = void 0;
+    exports2.parseTunnelIceServer = parseTunnelIceServer;
+    exports2.parseTunnelSessionCreateRequest = parseTunnelSessionCreateRequest;
+    exports2.parseTunnelSessionCreated = parseTunnelSessionCreated;
+    exports2.parseTunnelConfigInfo = parseTunnelConfigInfo;
+    exports2.parseTunnelConfigUpdate = parseTunnelConfigUpdate;
+    exports2.parseTunnelBrowserAttach = parseTunnelBrowserAttach;
+    exports2.parseTunnelPrepare = parseTunnelPrepare;
+    exports2.parseTunnelBrowserSignal = parseTunnelBrowserSignal;
+    exports2.parseTunnelClientSignal = parseTunnelClientSignal;
+    exports2.parseTunnelClientState = parseTunnelClientState;
+    exports2.parseTunnelClose = parseTunnelClose;
+    exports2.parseP2pTunnelCapabilityStatus = parseP2pTunnelCapabilityStatus;
+    exports2.P2P_TUNNEL_PROTOCOL_VERSION = 1;
+    exports2.TunnelLimits = {
+      maxSdpBytes: 128 * 1024,
+      maxCandidateBytes: 8 * 1024,
+      maxCandidateMidBytes: 64,
+      maxIceUrlBytes: 512,
+      maxIceUrlsPerList: 8,
+      maxUsernameBytes: 255,
+      maxCredentialBytes: 255,
+      maxRealmBytes: 255,
+      maxSessionIdBytes: 128,
+      maxClientIdBytes: 128,
+      attachTimeoutMs: 6e4,
+      sessionTtlMs: 24 * 60 * 60 * 1e3,
+      httpResponseBytes: 1024 * 1024,
+      httpTimeoutMs: 15e3,
+      httpPathBytes: 2048
+    };
+    var STUN_SCHEMES = ["stun", "stuns"];
+    var TURN_SCHEMES = ["turn", "turns"];
+    function isRecord2(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function requireString(value, field, maxLength, minLength = 1) {
+      if (typeof value !== "string" || value.length < minLength || value.length > maxLength) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 ${minLength}-${maxLength} \u7684\u5B57\u7B26\u4E32`);
+      }
+      return value;
+    }
+    function requirePort(value, field) {
+      if (!Number.isInteger(value) || value < 1 || value > 65535) {
+        throw new Error(`${field} \u5FC5\u987B\u662F 1\u201365535 \u7684\u6574\u6570`);
+      }
+      return value;
+    }
+    function requireBoolean(value, field) {
+      if (typeof value !== "boolean") {
+        throw new Error(`${field} \u5FC5\u987B\u662F\u5E03\u5C14\u503C`);
+      }
+      return value;
+    }
+    function assertKeys(input, allowed, field) {
+      for (const key of Object.keys(input)) {
+        if (!allowed.includes(key)) {
+          throw new Error(`${field} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function hasControlChar(value) {
+      for (let i = 0; i < value.length; i++) {
+        const code = value.charCodeAt(i);
+        if (code < 32 || code === 127)
+          return true;
+      }
+      return false;
+    }
+    function requireIceUrl(value, field, allowedSchemes) {
+      if (typeof value !== "string" || value.length < 1 || value.length > exports2.TunnelLimits.maxIceUrlBytes) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 1-${exports2.TunnelLimits.maxIceUrlBytes} \u7684\u5B57\u7B26\u4E32`);
+      }
+      if (hasControlChar(value)) {
+        throw new Error(`${field} \u542B\u63A7\u5236\u5B57\u7B26`);
+      }
+      const sep = value.indexOf(":");
+      if (sep <= 0) {
+        throw new Error(`${field} scheme \u65E0\u6548`);
+      }
+      const scheme = value.slice(0, sep);
+      if (!allowedSchemes.includes(scheme)) {
+        throw new Error(`${field} scheme \u5FC5\u987B\u4E3A ${allowedSchemes.join("/")}`);
+      }
+      if (value.includes("@")) {
+        throw new Error(`${field} \u542B\u7528\u6237\u4FE1\u606F`);
+      }
+      return value;
+    }
+    function parseIceUrlList(value, field, allowedSchemes, minLength = 0) {
+      if (!Array.isArray(value) || value.length < minLength || value.length > exports2.TunnelLimits.maxIceUrlsPerList) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 ${minLength}-${exports2.TunnelLimits.maxIceUrlsPerList} \u7684\u6570\u7EC4`);
+      }
+      return value.map((item, i) => requireIceUrl(item, `${field}[${i}]`, allowedSchemes));
+    }
+    function parseTunnelIceServer(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("iceServer \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["urls", "username", "credential"], "iceServer");
+      const result = {
+        urls: parseIceUrlList(input.urls, "urls", [...STUN_SCHEMES, ...TURN_SCHEMES], 1)
+      };
+      if (input.username !== void 0) {
+        result.username = requireString(input.username, "username", exports2.TunnelLimits.maxUsernameBytes);
+      }
+      if (input.credential !== void 0) {
+        result.credential = requireString(input.credential, "credential", exports2.TunnelLimits.maxCredentialBytes);
+      }
+      return result;
+    }
+    function parseIceServers(value, field) {
+      if (!Array.isArray(value) || value.length > exports2.TunnelLimits.maxIceUrlsPerList) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 0-${exports2.TunnelLimits.maxIceUrlsPerList} \u7684\u6570\u7EC4`);
+      }
+      return value.map((item, i) => parseTunnelIceServer(item));
+    }
+    function parseTunnelSessionCreateRequest(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("createRequest \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["clientId", "targetPort"], "createRequest");
+      return {
+        clientId: requireString(input.clientId, "clientId", exports2.TunnelLimits.maxClientIdBytes),
+        targetPort: requirePort(input.targetPort, "targetPort")
+      };
+    }
+    function requireIsoTimestamp(value, field) {
+      const s = requireString(value, field, 64);
+      if (Number.isNaN(Date.parse(s))) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u5408\u6CD5 ISO \u65F6\u95F4\u6233`);
+      }
+      return s;
+    }
+    function parseTunnelSessionCreated(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("sessionCreated \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["sessionId", "clientId", "targetPort", "attachDeadline", "iceServers"], "sessionCreated");
+      return {
+        sessionId: requireString(input.sessionId, "sessionId", exports2.TunnelLimits.maxSessionIdBytes),
+        clientId: requireString(input.clientId, "clientId", exports2.TunnelLimits.maxClientIdBytes),
+        targetPort: requirePort(input.targetPort, "targetPort"),
+        attachDeadline: requireIsoTimestamp(input.attachDeadline, "attachDeadline"),
+        iceServers: parseIceServers(input.iceServers, "iceServers")
+      };
+    }
+    function parseTunnelConfigInfo(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("configInfo \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["stunUrls", "turnUrls", "realm", "turnSecretConfigured", "updatedAt"], "configInfo");
+      return {
+        stunUrls: parseIceUrlList(input.stunUrls, "stunUrls", STUN_SCHEMES),
+        turnUrls: parseIceUrlList(input.turnUrls, "turnUrls", TURN_SCHEMES),
+        realm: requireString(input.realm, "realm", exports2.TunnelLimits.maxRealmBytes, 0),
+        turnSecretConfigured: requireBoolean(input.turnSecretConfigured, "turnSecretConfigured"),
+        updatedAt: input.updatedAt === null ? null : requireIsoTimestamp(input.updatedAt, "updatedAt")
+      };
+    }
+    function parseTunnelConfigUpdate(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("configUpdate \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["stunUrls", "turnUrls", "realm"], "configUpdate");
+      return {
+        stunUrls: parseIceUrlList(input.stunUrls, "stunUrls", STUN_SCHEMES),
+        turnUrls: parseIceUrlList(input.turnUrls, "turnUrls", TURN_SCHEMES),
+        realm: requireString(input.realm, "realm", exports2.TunnelLimits.maxRealmBytes, 0)
+      };
+    }
+    function parseTunnelBrowserAttach(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("browserAttach \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["sessionId"], "browserAttach");
+      return {
+        sessionId: requireString(input.sessionId, "sessionId", exports2.TunnelLimits.maxSessionIdBytes)
+      };
+    }
+    function parseTunnelPrepare(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("prepare \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["sessionId", "clientId", "targetPort", "iceServers"], "prepare");
+      return {
+        sessionId: requireString(input.sessionId, "sessionId", exports2.TunnelLimits.maxSessionIdBytes),
+        clientId: requireString(input.clientId, "clientId", exports2.TunnelLimits.maxClientIdBytes),
+        targetPort: requirePort(input.targetPort, "targetPort"),
+        iceServers: parseIceServers(input.iceServers, "iceServers")
+      };
+    }
+    function parseDescription(value, field, role) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      assertKeys(input, ["type", "sdp"], field);
+      const type = input.type;
+      if (type !== "offer" && type !== "answer") {
+        throw new Error(`${field}.type \u5FC5\u987B\u4E3A offer \u6216 answer`);
+      }
+      if (type !== role) {
+        throw new Error(`${field}.type \u5FC5\u987B\u4E3A ${role}`);
+      }
+      return {
+        type,
+        sdp: requireString(input.sdp, `${field}.sdp`, exports2.TunnelLimits.maxSdpBytes)
+      };
+    }
+    function parseCandidate(value, field) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      assertKeys(input, ["candidate", "sdpMid"], field);
+      return {
+        candidate: requireString(input.candidate, `${field}.candidate`, exports2.TunnelLimits.maxCandidateBytes),
+        sdpMid: requireString(input.sdpMid, `${field}.sdpMid`, exports2.TunnelLimits.maxCandidateMidBytes)
+      };
+    }
+    function parseSignal(value, role) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("signal \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["sessionId", "description", "candidate"], "signal");
+      const sessionId = requireString(input.sessionId, "sessionId", exports2.TunnelLimits.maxSessionIdBytes);
+      const hasDescription = input.description !== void 0;
+      const hasCandidate = input.candidate !== void 0;
+      if (hasDescription === hasCandidate) {
+        throw new Error("signal \u5FC5\u987B\u4E14\u53EA\u80FD\u542B description \u6216 candidate \u4E4B\u4E00");
+      }
+      if (hasDescription) {
+        return { sessionId, description: parseDescription(input.description, "description", role) };
+      }
+      return { sessionId, candidate: parseCandidate(input.candidate, "candidate") };
+    }
+    function parseTunnelBrowserSignal(value) {
+      return parseSignal(value, "offer");
+    }
+    function parseTunnelClientSignal(value) {
+      return parseSignal(value, "answer");
+    }
+    function parseTunnelClientState(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("clientState \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["sessionId", "state", "code"], "clientState");
+      const state = input.state;
+      if (state !== "connected" && state !== "failed" && state !== "closed") {
+        throw new Error("state \u5FC5\u987B\u4E3A connected\u3001failed \u6216 closed");
+      }
+      const result = {
+        sessionId: requireString(input.sessionId, "sessionId", exports2.TunnelLimits.maxSessionIdBytes),
+        state
+      };
+      if (input.code !== void 0) {
+        result.code = requireString(input.code, "code", 128);
+      }
+      return result;
+    }
+    function parseTunnelClose(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("close \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["sessionId"], "close");
+      return {
+        sessionId: requireString(input.sessionId, "sessionId", exports2.TunnelLimits.maxSessionIdBytes)
+      };
+    }
+    function parseP2pTunnelCapabilityStatus(value) {
+      const input = isRecord2(value) ? value : null;
+      if (!input)
+        throw new Error("p2pTunnel \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      assertKeys(input, ["available", "protocolVersion", "code"], "p2pTunnel");
+      const available = requireBoolean(input.available, "available");
+      if (input.protocolVersion !== exports2.P2P_TUNNEL_PROTOCOL_VERSION) {
+        throw new Error("protocolVersion \u5FC5\u987B\u662F 1");
+      }
+      const result = {
+        available,
+        protocolVersion: exports2.P2P_TUNNEL_PROTOCOL_VERSION
+      };
+      if (input.code !== void 0) {
+        if (input.code !== "P2P_NATIVE_BACKEND_UNAVAILABLE") {
+          throw new Error("code \u5FC5\u987B\u662F P2P_NATIVE_BACKEND_UNAVAILABLE");
+        }
+        result.code = "P2P_NATIVE_BACKEND_UNAVAILABLE";
+      }
+      return result;
+    }
+  }
+});
+
 // ../shared/dist/machine-register.js
 var require_machine_register = __commonJS({
   "../shared/dist/machine-register.js"(exports2) {
@@ -1531,6 +1828,7 @@ var require_machine_register = __commonJS({
     exports2.parsePrivilegedCapabilityStatus = parsePrivilegedCapabilityStatus;
     exports2.parseMachineRegister = parseMachineRegister;
     var frp_runtime_js_1 = require_frp_runtime();
+    var tunnel_js_1 = require_tunnel();
     var MAX_CLIENT_ID = 128;
     var MAX_HOSTNAME = 256;
     var MAX_OS = 64;
@@ -1616,7 +1914,7 @@ var require_machine_register = __commonJS({
         const details = value.capabilityDetails;
         if (!isRecord2(details))
           throw new Error("capabilityDetails \u5FC5\u987B\u4E3A\u5BF9\u8C61");
-        const known = ["pi", "terminal", "frp", "privileged"];
+        const known = ["pi", "terminal", "frp", "privileged", "p2pTunnel"];
         for (const key of Object.keys(details)) {
           if (!known.includes(key)) {
             throw new Error(`capabilityDetails \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
@@ -1633,6 +1931,9 @@ var require_machine_register = __commonJS({
         }
         if (details.privileged !== void 0) {
           parsedDetails.privileged = parsePrivilegedCapabilityStatus(details.privileged);
+        }
+        if (details.p2pTunnel !== void 0) {
+          parsedDetails.p2pTunnel = (0, tunnel_js_1.parseP2pTunnelCapabilityStatus)(details.p2pTunnel);
         }
         result.capabilityDetails = parsedDetails;
       }
@@ -1665,7 +1966,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.parseTunnelClose = exports2.parseTunnelClientState = exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -1775,7 +2077,12 @@ var require_dist = __commonJS({
       UPDATE_FAILED: "update:failed",
       SERVER_SHUTDOWN: "server:shutdown",
       FRP_STATE: "frp:state",
-      FRP_STATE_ACK: "frp:state-ack"
+      FRP_STATE_ACK: "frp:state-ack",
+      TUNNEL_ATTACH: "tunnel:attach",
+      TUNNEL_PREPARE: "tunnel:prepare",
+      TUNNEL_SIGNAL: "tunnel:signal",
+      TUNNEL_STATE: "tunnel:state",
+      TUNNEL_CLOSE: "tunnel:close"
     };
     var JobType;
     (function(JobType2) {
@@ -1982,6 +2289,49 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "parseFrpRuntimeStateReport", { enumerable: true, get: function() {
       return frp_runtime_js_1.parseFrpRuntimeStateReport;
+    } });
+    var tunnel_js_1 = require_tunnel();
+    Object.defineProperty(exports2, "P2P_TUNNEL_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return tunnel_js_1.P2P_TUNNEL_PROTOCOL_VERSION;
+    } });
+    Object.defineProperty(exports2, "TunnelLimits", { enumerable: true, get: function() {
+      return tunnel_js_1.TunnelLimits;
+    } });
+    Object.defineProperty(exports2, "parseP2pTunnelCapabilityStatus", { enumerable: true, get: function() {
+      return tunnel_js_1.parseP2pTunnelCapabilityStatus;
+    } });
+    Object.defineProperty(exports2, "parseTunnelBrowserAttach", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelBrowserAttach;
+    } });
+    Object.defineProperty(exports2, "parseTunnelBrowserSignal", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelBrowserSignal;
+    } });
+    Object.defineProperty(exports2, "parseTunnelClientSignal", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelClientSignal;
+    } });
+    Object.defineProperty(exports2, "parseTunnelClientState", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelClientState;
+    } });
+    Object.defineProperty(exports2, "parseTunnelClose", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelClose;
+    } });
+    Object.defineProperty(exports2, "parseTunnelConfigInfo", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelConfigInfo;
+    } });
+    Object.defineProperty(exports2, "parseTunnelConfigUpdate", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelConfigUpdate;
+    } });
+    Object.defineProperty(exports2, "parseTunnelIceServer", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelIceServer;
+    } });
+    Object.defineProperty(exports2, "parseTunnelPrepare", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelPrepare;
+    } });
+    Object.defineProperty(exports2, "parseTunnelSessionCreated", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelSessionCreated;
+    } });
+    Object.defineProperty(exports2, "parseTunnelSessionCreateRequest", { enumerable: true, get: function() {
+      return tunnel_js_1.parseTunnelSessionCreateRequest;
     } });
   }
 });
@@ -2444,6 +2794,22 @@ function createTerminalsApi(client) {
   };
 }
 
+// ../sdk/dist/tunnels.js
+function createTunnelsApi(client) {
+  return {
+    config: {
+      /** 读取脱敏后的 ICE/coturn 配置摘要（不含 shared secret）。 */
+      get: (signal) => client.request("GET", "/api/tunnels/config", void 0, signal),
+      /** 保存非秘密配置字段；secret 不接受 REST 写入。 */
+      update: (body, signal) => client.request("PUT", "/api/tunnels/config", body, signal)
+    },
+    /** 创建临时隧道 Session（短期凭据，禁止缓存）。 */
+    create: (body, signal) => client.request("POST", "/api/tunnels", body, signal),
+    /** 显式关闭 Session（幂等）。 */
+    remove: (sessionId, signal) => client.request("DELETE", `/api/tunnels/${encodeURIComponent(sessionId)}`, void 0, signal)
+  };
+}
+
 // ../sdk/dist/client.js
 var VcpDeckApiError = class extends Error {
   status;
@@ -2474,6 +2840,7 @@ var VcpDeckClient = class {
   pi;
   releases;
   terminals;
+  tunnels;
   health = {
     get: (signal) => this.request("GET", "/api/health", void 0, signal)
   };
@@ -2494,6 +2861,7 @@ var VcpDeckClient = class {
     this.pi = createPiApi(this);
     this.releases = createReleasesApi(this);
     this.terminals = createTerminalsApi(this);
+    this.tunnels = createTunnelsApi(this);
   }
   /** 发起 JSON REST 请求并归一化失败响应。 */
   async request(method, path2, body, signal) {

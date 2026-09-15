@@ -2,6 +2,13 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [Unreleased]
+
+### Added
+- **P2P 回环隧道（ADR-0026）**：机器工作区新增「隧道」Tab，对目标 Client 本机 `127.0.0.1:<port>` 的 HTTP 服务发起浏览器直连探测，展示状态行、正文与 `direct`/`relay` 路径；设置页新增「网络」页配置 STUN/TURN URL 与 realm（TURN 密钥仅由 `VCPDECK_TURN_SECRET_FILE` 提供，不在 Web 采集）。
+- **coturn 一键安装脚本** `scripts/install-coturn.sh`：支持 Debian/Ubuntu 与 CentOS/RHEL/Rocky/AlmaLinux，自动探测公网/内网 IP、生成权限受控 secret 文件并启用 systemd coturn；随发布包分发。
+- **node-datachannel 离线装配**：发布包内置 `node-datachannel` 与 Windows/Linux x64 预编译 native 包（win/linux zip 各自平台裁剪），目标机无需 node-gyp 或联网。
+
 ## [0.6.30] - 2026-09-11
 
 ### Fixed
