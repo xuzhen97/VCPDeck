@@ -1,6 +1,6 @@
 # VCPDeck 测试策略
 
-> 状态：Current｜维护责任：各包维护者/发布维护者｜最后核验：2026-09-11｜适用版本：`0.6.30` / 当前 `main`
+> 状态：Current｜维护责任：各包维护者/发布维护者｜最后核验：2026-09-15｜适用版本：`0.6.30` / 当前 `main`
 
 ## 1. 目标
 
@@ -23,6 +23,34 @@
 | FRP E2E | `scripts/test-frp.cjs` | 真实 frps/frpc、TCP/HTTP 映射 |
 | Launcher 冒烟 | `scripts/smoke-launcher.cjs` | prepare/apply、探活、失败回退 |
 | 手工/环境验收 | `docs/verification/` | Windows PTY、外部存储、真实网络和发布演练 |
+
+## 2.5 集成 / 真实环境测试方法论（跨网络 / 原生依赖 / 第三方服务）
+
+> 适用于「特性依赖真实网络拓扑、原生绑定、或外部服务（coturn/FRP/存储后端/真实浏览器）」的场景。单元与包内集成测试只覆盖逻辑，**真实字节流动必须另起真机验证**。以下从 P2P/coturn 隧道（ADR-0026）实战提炼，可复用于 FRP、Storage、Release 等同类特性。
+
+**（1）三层验证，逐层闭合**
+- 逻辑层：Shared parser / Service 状态机 / 前端路径分类 —— 单测覆盖（见 §2）。
+- 组件层：**每个真实依赖各验各的**，互不假设。例：coturn 能跑、凭据被接受、浏览器 WebRTC 通路通、直连隧道 E2E 通 —— 各自独立 PASS。
+- 端到端层：字节真过网络（浏览器→coturn→Client）。**只有这一层能证明「中继真的转发」**，组件层全 PASS 也不等于它 PASS。
+
+**（2）第三方服务用其「自带权威客户端」做 A/B 对照**
+- 别自己手写 raw 协议客户端去验服务端——**用该服务官方/自带的客户端**最可靠。例：验 coturn 用 `turnutils_uclient`（随 coturn 发行）：`空凭据→403 拒` vs `Server 签发凭据→分配 relay 端点`，一次对照即证明凭据算法与服务端兼容。
+- 同理：FRP 用 `frpc/frpc` 自带探测、存储后端用其 SDK 直连。
+
+**（3）浏览器 WebRTC 用 Playwright 驱动系统 Chrome（headful、无代理）**
+- headless Chromium 的 `RTCPeerConnection` 可能 ICE 不启动（`iceGatheringState` 停在 `new`），**会误判**。用 Playwright MCP 驱动**系统 Chrome**（`launchPersistentContext` 默认、确认 `navigator.webdriver`、无 `--proxy-server`）才反映真实浏览器行为。
+- 测试页用**注入的凭据 + `?mode=direct|relay|relayfail`** 自驱，读 `getStats()` 的 `candidateType`/`selected pair` + DataChannel 往返判定路径。
+
+**（4）网络隔离与定位技巧**
+- 用 **Vagrant/VirtualBox** 起 Linux 容器跑 coturn（Windows 无 coturn 包），`host-only` 隔离；必要时**同一服务绑多张卡**（host-only + NAT `10.0.2.15`）以区分「够不到」vs「客户端没触发」。
+- 判定「客户端是否真发包」：**在服务端看日志**（`journalctl -u coturn`）有无该源 IP 的 Allocate，比看客户端状态更硬。STUN 有回包但 TURN 0 流量 = 客户端没触发 TURN（常见于受限 VM 网络）。
+- 换网络复测仍复现 → 根因在客户端/环境，非服务端配置。
+
+**（5）区分「组件可用」与「端到端连通」，诚实记录边界**
+- 若某层在本机环境无法复现（如本机 VM 网络下浏览器 TURN 不触发），**不要硬凑**：记录「各组件独立验证可用 + 该层待两台不同网络真机复测」，逻辑上已闭合；验收文档（§8 / `docs/design/p2p-tunnel-acceptance.md`）给出真机步骤即可。
+- 验收文档必须含：**前置 / 步骤 / PASS-FAIL 判定 / 证据（看什么日志/状态）/ 常见 FAIL 排查**，让人能照做打勾。
+
+**（6）收尾清理**：测试 VM `vagrant destroy -f`（或 `VBoxManage unregistervm --delete`）、`.tmp/` 脚手架、测试进程与端口。`.tmp/` 被 git 忽略，不留痕。
 
 ## 3. 标准命令
 
