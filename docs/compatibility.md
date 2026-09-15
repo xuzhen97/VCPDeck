@@ -13,6 +13,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | Server ↔ Client 通用协议 | Shared 事件与 DTO；Client 上报版本/capability | 没有独立通用协议版本；同版本最安全 |
 | Server ↔ Client Pi | `PI_SESSION_JOB_PROTOCOL_VERSION=1`；capabilityDetails 含 SDK/Node/shell 安全摘要 | 必须精确匹配，不匹配明确拒绝 Pi |
 | Server ↔ Client Terminal | `terminal.pty` capabilityDetails + Shared 严格运行时解析 | 无独立数字版本；缺能力时拒绝，seq/generation/state 变化需整套同版本发布 |
+| Server ↔ Client P2P 隧道 | `P2P_TUNNEL_PROTOCOL_VERSION=1`；capabilityDetails.p2pTunnel 摘要 | 版本不匹配或无能力时不执行数据面，UI 提示不支持；旧 Client 缺省视为 unsupported |
 | Server ↔ Frontend | REST/Socket.IO/SSE | Frontend 应与 Server 同一发布版本部署 |
 | SDK ↔ Server | REST DTO 和错误 | SDK/Shared 可从同一 Git Tag 子目录安装；只支持与 Server 同版本的标准组合 |
 | CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | Pi 用户级 Git package 安装；升级必须显式切换 Tag；`0.2.1+` CLI 支持 Alibaba Release 分片直传 |

@@ -130,3 +130,42 @@ function validRegister(overrides = {}) {
         (0, vitest_1.expect)(() => (0, machine_register_js_1.parseMachineInstallation)(null)).toThrow();
     });
 });
+(0, vitest_1.describe)("parseMachineRegister p2pTunnel 能力", () => {
+    (0, vitest_1.it)("接受新 Client 上报的 p2pTunnel v1 能力", () => {
+        const parsed = (0, machine_register_js_1.parseMachineRegister)(validRegister({
+            capabilityDetails: {
+                frp: { available: true, reconcileProtocolVersion: 1 },
+                p2pTunnel: { available: true, protocolVersion: 1 },
+            },
+        }));
+        (0, vitest_1.expect)(parsed.capabilityDetails?.p2pTunnel).toEqual({ available: true, protocolVersion: 1 });
+    });
+    (0, vitest_1.it)("接受 native 后端缺失的 p2pTunnel 摘要", () => {
+        const parsed = (0, machine_register_js_1.parseMachineRegister)(validRegister({
+            capabilityDetails: {
+                p2pTunnel: {
+                    available: false,
+                    protocolVersion: 1,
+                    code: "P2P_NATIVE_BACKEND_UNAVAILABLE",
+                },
+            },
+        }));
+        (0, vitest_1.expect)(parsed.capabilityDetails?.p2pTunnel).toMatchObject({
+            available: false,
+            code: "P2P_NATIVE_BACKEND_UNAVAILABLE",
+        });
+    });
+    (0, vitest_1.it)("拒绝 p2pTunnel 未知协议版本", () => {
+        (0, vitest_1.expect)(() => (0, machine_register_js_1.parseMachineRegister)(validRegister({
+            capabilityDetails: {
+                p2pTunnel: { available: true, protocolVersion: 2 },
+            },
+        }))).toThrow();
+    });
+    (0, vitest_1.it)("旧 Client 缺省 p2pTunnel 时保持 undefined", () => {
+        const parsed = (0, machine_register_js_1.parseMachineRegister)(validRegister({
+            capabilityDetails: { frp: { available: false, code: "FRPC_NOT_FOUND" } },
+        }));
+        (0, vitest_1.expect)(parsed.capabilityDetails?.p2pTunnel).toBeUndefined();
+    });
+});

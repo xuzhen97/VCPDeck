@@ -1,4 +1,4 @@
-import { Inject } from "@nestjs/common";
+import { Inject, Optional } from "@nestjs/common";
 import {
 	ConnectedSocket,
 	MessageBody,
@@ -9,6 +9,7 @@ import {
 import type { Server, Socket } from "socket.io";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { TerminalService } from "../terminal/terminal.service.js";
+import { TunnelSessionService } from "../tunnel/tunnel-session.service.js";
 import { createHash } from "node:crypto";
 import { Events } from "@vcpdeck/shared";
 import type {
@@ -27,6 +28,8 @@ import {
 	parseTerminalBrowserResync,
 	parseTerminalBrowserTakeover,
 	safeTerminalErrorMessage,
+	parseTunnelBrowserAttach,
+	parseTunnelClose,
 } from "@vcpdeck/shared";
 
 const FRONTEND_ORIGIN = process.env.VCPDECK_FRONTEND_ORIGIN || "http://localhost:5173";
@@ -66,10 +69,17 @@ export class AppGateway {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TerminalService) private readonly terminalService: TerminalService,
+    // 可选注入：旧两参构造的测试保持兼容
+    @Optional()
+    @Inject(TunnelSessionService)
+    private readonly tunnelSessions?: TunnelSessionService,
   ) {}
 
   afterInit() {
     this.terminalService.bindBrowserEmitter((socketId, event, payload) => {
+      this.server.to(socketId).emit(event, payload);
+    });
+    this.tunnelSessions?.bindBrowserSender((socketId, event, payload) => {
       this.server.to(socketId).emit(event, payload);
     });
   }
@@ -92,6 +102,7 @@ export class AppGateway {
 
   async handleDisconnect(client: Socket) {
     await this.terminalService.detachBrowserSocket(client.id);
+    this.tunnelSessions?.disconnectBrowser(client.id);
   }
 
   private async authenticate(client: Socket): Promise<ActorContext | null> {
@@ -254,6 +265,49 @@ export class AppGateway {
       return { ok: true, data: undefined };
     } catch (error) {
       return errorAck(error);
+    }
+  }
+
+  // ── P2P 隧道信令（身份来自 handleConnection 的 actor） ──
+
+  private tunnelErrorAck(error: unknown): { ok: false; error: { code: string; message: string } } {
+    const e = error as { code?: unknown };
+    const code = typeof e.code === "string" ? e.code : "TUNNEL_PROTOCOL_INVALID";
+    return { ok: false, error: { code, message: "隧道操作失败" } };
+  }
+
+  @SubscribeMessage(Events.TUNNEL_ATTACH)
+  async handleTunnelAttach(@ConnectedSocket() client: Socket, @MessageBody() data: unknown) {
+    if (!this.tunnelSessions) return this.tunnelErrorAck({ code: "TUNNEL_UNAVAILABLE" });
+    try {
+      const parsed = parseTunnelBrowserAttach(data);
+      await this.tunnelSessions.attachBrowser(parsed.sessionId, actorOf(client), client.id);
+      return { ok: true, data: undefined };
+    } catch (error) {
+      return this.tunnelErrorAck(error);
+    }
+  }
+
+  @SubscribeMessage(Events.TUNNEL_SIGNAL)
+  async handleTunnelSignal(@ConnectedSocket() client: Socket, @MessageBody() data: unknown) {
+    if (!this.tunnelSessions) return this.tunnelErrorAck({ code: "TUNNEL_UNAVAILABLE" });
+    try {
+      await this.tunnelSessions.signalFromBrowser(client.id, data);
+      return { ok: true, data: undefined };
+    } catch (error) {
+      return this.tunnelErrorAck(error);
+    }
+  }
+
+  @SubscribeMessage(Events.TUNNEL_CLOSE)
+  async handleTunnelClose(@ConnectedSocket() client: Socket, @MessageBody() data: unknown) {
+    if (!this.tunnelSessions) return this.tunnelErrorAck({ code: "TUNNEL_UNAVAILABLE" });
+    try {
+      const parsed = parseTunnelClose(data);
+      await this.tunnelSessions.close(parsed.sessionId, actorOf(client));
+      return { ok: true, data: { closed: true } };
+    } catch (error) {
+      return this.tunnelErrorAck(error);
     }
   }
 

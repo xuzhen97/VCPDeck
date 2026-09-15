@@ -10,6 +10,7 @@ import { createReleasesApi } from "./releases.js";
 import { createStorageApi } from "./storage.js";
 import { createStorageSharesApi } from "./storage-shares.js";
 import { createTerminalsApi } from "./terminal.js";
+import { createTunnelsApi } from "./tunnels.js";
 /** VCPDeck REST API 归一化错误。 */
 export class VcpDeckApiError extends Error {
     status;
@@ -41,6 +42,7 @@ export class VcpDeckClient {
     pi;
     releases;
     terminals;
+    tunnels;
     health = {
         get: (signal) => this.request("GET", "/api/health", undefined, signal),
     };
@@ -61,6 +63,7 @@ export class VcpDeckClient {
         this.pi = createPiApi(this);
         this.releases = createReleasesApi(this);
         this.terminals = createTerminalsApi(this);
+        this.tunnels = createTunnelsApi(this);
     }
     /** 发起 JSON REST 请求并归一化失败响应。 */
     async request(method, path, body, signal) {

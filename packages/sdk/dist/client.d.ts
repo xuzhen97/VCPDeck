@@ -258,6 +258,16 @@ export declare class VcpDeckClient {
             pageSize?: number;
         }, signal?: AbortSignal) => Promise<import("@vcpdeck/shared").PaginatedResult<import("@vcpdeck/shared").TerminalAuditInfo>>;
     };
+    readonly tunnels: {
+        config: {
+            get: (signal?: AbortSignal) => Promise<import("@vcpdeck/shared").TunnelConfigInfo>;
+            update: (body: import("@vcpdeck/shared").TunnelConfigUpdate, signal?: AbortSignal) => Promise<import("@vcpdeck/shared").TunnelConfigInfo>;
+        };
+        create: (body: import("@vcpdeck/shared").TunnelSessionCreateRequest, signal?: AbortSignal) => Promise<import("@vcpdeck/shared").TunnelSessionCreated>;
+        remove: (sessionId: string, signal?: AbortSignal) => Promise<{
+            closed: true;
+        }>;
+    };
     readonly health: {
         get: (signal?: AbortSignal) => Promise<{
             ok: true;

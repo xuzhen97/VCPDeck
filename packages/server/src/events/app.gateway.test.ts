@@ -120,4 +120,50 @@ describe("AppGateway terminal handlers", () => {
 		await gateway.handleDisconnect(socket);
 		expect(terminalService.detachBrowserSocket).toHaveBeenCalledWith("socket-1");
 	});
+
+	it("Browser attach 调用 session 服务并透传 actor 与 socketId", async () => {
+		const { gateway, tunnelSessions } = makeTunnel();
+		const socket = makeSocket();
+		await gateway.handleTunnelAttach(socket, { sessionId: "tn_1" });
+		expect(tunnelSessions.attachBrowser).toHaveBeenCalledWith("tn_1", ACTOR, "socket-1");
+	});
+
+	it("非创建者 close 返回 TUNNEL_FORBIDDEN", async () => {
+		const { gateway, tunnelSessions } = makeTunnel();
+		(tunnelSessions.close as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+			Object.assign(new Error("x"), { code: "TUNNEL_FORBIDDEN" }),
+		);
+		const socket = makeSocket();
+		const ack = await gateway.handleTunnelClose(socket, { sessionId: "tn_1" });
+		expect(ack).toEqual({ ok: false, error: expect.objectContaining({ code: "TUNNEL_FORBIDDEN" }) });
+	});
+
+	it("Browser 断线回收匹配 socket 的 session", async () => {
+		const { gateway, tunnelSessions } = makeTunnel();
+		await gateway.handleDisconnect(makeSocket("socket-9"));
+		expect(tunnelSessions.disconnectBrowser).toHaveBeenCalledWith("socket-9");
+	});
 });
+
+function makeTunnel() {
+	const terminalService = {
+		attachBrowser: vi.fn(),
+		detachBrowser: vi.fn(),
+		detachBrowserSocket: vi.fn(),
+		browserInput: vi.fn(),
+		browserResize: vi.fn(),
+		browserTakeover: vi.fn(),
+		browserAckOutput: vi.fn(),
+		browserResync: vi.fn(),
+		bindBrowserEmitter: vi.fn(),
+	};
+	const tunnelSessions = {
+		bindBrowserSender: vi.fn(),
+		attachBrowser: vi.fn(async () => {}),
+		signalFromBrowser: vi.fn(async () => {}),
+		close: vi.fn(async () => ({ closed: true as const })),
+		disconnectBrowser: vi.fn(),
+	};
+	const gateway = new AppGateway({} as never, terminalService as never, tunnelSessions as never);
+	return { gateway, tunnelSessions };
+}

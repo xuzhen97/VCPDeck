@@ -51,15 +51,23 @@ export async function bundleServer(outfile: string): Promise<void> {
 }
 
 /**
+ * Client 业务构件外部保留的依赖：Pi SDK（含动态 import 与子进程加载）、
+ * @lydell/node-pty 与 node-datachannel 原生平台包（不打包，运行时从 node_modules 解析）。
+ */
+export const CLIENT_EXTERNAL = [
+	"@earendil-works/*",
+	"@lydell/*",
+	"*.node",
+	"node-datachannel",
+	"node-datachannel/*",
+];
+
+/**
  * Client：主进程 + pi/probe 两个 fork worker 各自打包。
- * 外部保留 Pi SDK（含动态 import 与子进程加载）与 @lydell/node-pty 平台包。
+ * 外部保留 Pi SDK（含动态 import 与子进程加载）与 @lydell/node-pty / node-datachannel 平台包。
  */
 export async function bundleClient(targets: BundleTarget[]): Promise<void> {
-	const options = baseOptions("packages/client/tsconfig.json", [
-		"@earendil-works/*",
-		"@lydell/*",
-		"*.node",
-	]);
+	const options = baseOptions("packages/client/tsconfig.json", CLIENT_EXTERNAL);
 	for (const t of targets) {
 		await build({
 			...options,

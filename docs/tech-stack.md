@@ -18,6 +18,7 @@
 | 远程终端 | node-pty、xterm.js / xterm-headless | Client 创建 PTY，Frontend 渲染终端，Server 代理会话并记录最小审计信息 |
 | 远程 Pi | `@earendil-works/pi-agent-core@0.84.0`、`@earendil-works/pi-coding-agent@0.84.0` | Client 通过 fork Worker 嵌入 Pi SDK，Server 代理请求/状态，Frontend 提供交互界面 |
 | FRP | frpc / frps | Client 管理 frpc 映射，Server 管理 FRPS 实例与映射元数据 |
+| P2P 隧道 | 浏览器 WebRTC、node-datachannel、coturn | Frontend 用 `RTCPeerConnection` 建 DataChannel，Client 用 `node-datachannel/polyfill` 接回环 TCP，coturn 作 TURN 兜底 |
 | SDK | Fetch API、TypeScript | Node.js 与浏览器共用的类型安全 REST 客户端 |
 | CLI | Node.js、esbuild | 当前提供发布包上传命令，并产出 Pi Skill 使用的单文件 CLI |
 | 进程与更新 | Node.js launcher | 守护 Server/Client，负责版本切换、探活、失败回退与崩溃重启 |
@@ -37,7 +38,7 @@ vcpdeck/
 │   └── launcher/     # Server/Client 进程守护与更新器
 ├── skills/
 │   └── vcpdeck/      # Pi Skill 描述；CLI 构建产物写入此处
-├── scripts/          # 构建、下载 FRP 与集成测试脚本
+├── scripts/          # 构建、下载 FRP、coturn 安装与集成测试脚本
 └── docs/             # 架构、协议、实现与验证文档
 ```
 

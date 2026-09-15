@@ -72,7 +72,7 @@ exports.CLIENT_ID = process.env.VCPDECK_CLIENT_ID || loadOrCreateClientId();
 function isMigrationVerifyOnly(env = process.env) {
     return env.VCPDECK_MIGRATION_VERIFY_ONLY === "1";
 }
-function getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, env = process.env) {
+function getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, env = process.env, p2pTunnelStatus) {
     const verifyOnly = isMigrationVerifyOnly(env);
     const cpus = os.cpus();
     const caps = [];
@@ -87,6 +87,10 @@ function getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, env = proces
         if (terminalStatus?.available) {
             caps.push("terminal.pty");
         }
+        // P2P 隧道：只有 native 后端成功加载才声明 operational 能力。
+        if (p2pTunnelStatus?.available) {
+            caps.push("tunnel.p2p");
+        }
     }
     const capabilityDetails = {};
     if (!verifyOnly) {
@@ -99,6 +103,10 @@ function getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, env = proces
             ? { available: true, reconcileProtocolVersion: shared_1.FRP_RECONCILE_PROTOCOL_VERSION }
             : { available: false, code: "FRPC_NOT_FOUND" };
         capabilityDetails.frp = frpStatus;
+        // P2P 隧道能力摘要：可用时携带 protocolVersion；不可用时上报稳定 code（不含 native 错误正文）。
+        if (p2pTunnelStatus !== undefined) {
+            capabilityDetails.p2pTunnel = p2pTunnelStatus;
+        }
     }
     // 运行时安全摘要两种模式都上报（M1 验证依赖 privileged 与 installation）；不含本地路径或凭据。
     if (runtimeSecurity?.privileged !== undefined) {

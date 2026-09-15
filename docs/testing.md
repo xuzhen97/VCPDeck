@@ -36,6 +36,8 @@ pnpm test
 
 `pnpm lint` 由根目录 `biome.json` 驱动（Biome，仅 linter 不含格式化；覆盖 `packages/*/src` 与 `scripts`）：错误级诊断阻塞门禁；降级为 warning 的规则（NestJS DI 未使用参数、noExplicitAny、非空断言等）为已知技术债，新增代码不应新增此类告警。
 
+脚本级自检：`bash scripts/install-coturn.test.sh`（coturn 发行版/地址/IPv4 纯函数）与 `pnpm exec tsx scripts/pack-release-deps.test.ts`（node-datachannel 双平台离线装配与平台裁剪）。
+
 按包：
 
 ```bash

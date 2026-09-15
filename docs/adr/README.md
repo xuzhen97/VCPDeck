@@ -84,3 +84,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0023](./0023-linux-system-client-and-root-equivalent-account.md) | Accepted | Linux Client 使用 systemd 系统部署与 root 等价专用账户，存量 PM2 安装通过 M1 迁移 |
 | [0024](./0024-public-storage-share-capabilities.md) | Accepted | 使用长期 opaque capability 提供公开 Storage 分享，并以有效分享保护底层 File |
 | [0025](./0025-windows-client-highest-privilege-logon-task.md) | Accepted | Windows Client 保留当前用户 + PM2 + 登录任务模型，并以最高可用权限恢复 Launcher |
+| [0026](./0026-browser-client-webrtc-tcp-tunnel.md) | Accepted | 浏览器与 Client 使用 WebRTC 通用 TCP 隧道，ICE 直连优先并以 coturn 中继兜底 |

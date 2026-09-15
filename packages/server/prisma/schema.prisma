@@ -76,6 +76,15 @@ model ClientInstallerConfig {
   updatedAt           DateTime @updatedAt
 }
 
+// ── P2P 隧道 ICE/coturn 配置（只存非秘密字段；shared secret 走 VCPDECK_TURN_SECRET_FILE） ──
+model TunnelConfig {
+  id        String   @id
+  stunUrls  String   @default("[]") // JSON 数组：stun/stuns URL
+  turnUrls  String   @default("[]") // JSON 数组：turn/turns URL
+  realm     String   @default("")
+  updatedAt DateTime @updatedAt
+}
+
 model ReleaseUploadSession {
   id                  String   @id
   version             String

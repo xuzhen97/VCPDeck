@@ -94,7 +94,14 @@ function makeGateway(reconciliation = makeReconciliation()) {
     const updateChannel = {
         bindEmitters: vitest_1.vi.fn(),
     };
-    const gateway = new client_gateway_js_1.ClientGateway(clientService, jobService, fileService, frpService, piRequests, piEvents, piRuns, terminalService, terminalBroker, orchestrator, updateChannel, reconciliation);
+    const tunnelSessions = {
+        bindClientSender: vitest_1.vi.fn(),
+        signalFromClient: vitest_1.vi.fn(async () => { }),
+        clientState: vitest_1.vi.fn(async () => { }),
+        closeFromClient: vitest_1.vi.fn(async () => { }),
+        disconnectClient: vitest_1.vi.fn(),
+    };
+    const gateway = new client_gateway_js_1.ClientGateway(clientService, jobService, fileService, frpService, piRequests, piEvents, piRuns, terminalService, terminalBroker, orchestrator, updateChannel, reconciliation, tunnelSessions);
     const emit = vitest_1.vi.fn();
     const to = vitest_1.vi.fn(() => ({ emit }));
     gateway.server = { emit: vitest_1.vi.fn(), to };
@@ -112,6 +119,7 @@ function makeGateway(reconciliation = makeReconciliation()) {
         orchestrator,
         updateChannel,
         reconciliation,
+        tunnelSessions,
         emit,
         to,
     };
@@ -649,5 +657,30 @@ const event = {
         ]);
         await gateway.sweepStaleClients();
         (0, vitest_1.expect)(reconciliation.disconnect).toHaveBeenCalledWith("c1", "socket-7");
+    });
+});
+(0, vitest_1.describe)("ClientGateway P2P tunnel routing", () => {
+    function clientSocket() {
+        const socket = makeSocket("client-socket");
+        socket.data.clientId = "c1";
+        return socket;
+    }
+    (0, vitest_1.it)("Client TUNNEL_STATE 按 socketId 转发到 session 服务", async () => {
+        const { gateway, tunnelSessions } = makeGateway();
+        await gateway.handleTunnelState(clientSocket(), { sessionId: "tn_1", state: "connected" });
+        (0, vitest_1.expect)(tunnelSessions.clientState).toHaveBeenCalledWith("client-socket", {
+            sessionId: "tn_1",
+            state: "connected",
+        });
+    });
+    (0, vitest_1.it)("Client TUNNEL_CLOSE 校验 lease 后释放 session", async () => {
+        const { gateway, tunnelSessions } = makeGateway();
+        await gateway.handleTunnelClose(clientSocket(), { sessionId: "tn_1" });
+        (0, vitest_1.expect)(tunnelSessions.closeFromClient).toHaveBeenCalledWith("c1", "client-socket", "tn_1");
+    });
+    (0, vitest_1.it)("Client 断线回收匹配 clientId+socket 的 session", async () => {
+        const { gateway, tunnelSessions } = makeGateway();
+        await gateway.handleDisconnect(clientSocket());
+        (0, vitest_1.expect)(tunnelSessions.disconnectClient).toHaveBeenCalledWith("c1", "client-socket");
     });
 });

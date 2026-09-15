@@ -19,6 +19,7 @@ import { TerminalService } from "../terminal/terminal.service.js";
 import { TerminalRequestBroker } from "../terminal/terminal-request-broker.js";
 import { ReleaseOrchestrator } from "../release/release.orchestrator.js";
 import { GatewayUpdateChannel } from "../release/update-channel.js";
+import { TunnelSessionService } from "../tunnel/tunnel-session.service.js";
 import {
   Events,
   JobStatus,
@@ -30,6 +31,7 @@ import {
   parseTerminalOutputChunk,
   parseMachineRegister,
   parseTerminalStateReport,
+  parseTunnelClose,
   type JobProgress,
 } from "@vcpdeck/shared";
 import type {
@@ -84,6 +86,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(FrpReconciliationService)
     private readonly frpReconciliation?: FrpReconciliationService,
+    // P2P 隧道 Session（可选注入：旧 12 参构造测试保持兼容）
+    @Optional()
+    @Inject(TunnelSessionService)
+    private readonly tunnelSessions?: TunnelSessionService,
   ) {}
 
   onModuleInit() {
@@ -109,6 +115,9 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     });
     this.terminalBroker.bindEmitter((socketId, request) => {
       this.server.to(socketId).emit(Events.TERMINAL_REQUEST, request);
+    });
+    this.tunnelSessions?.bindClientSender((socketId, event, payload) => {
+      this.server.to(socketId).emit(event, payload);
     });
     this.updateChannel.bindEmitters({
       sendUpdateRequest: (clientId, request) => {
@@ -157,6 +166,7 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
     this.piRequests.disconnect(socketId);
     this.terminalBroker.disconnect(socketId);
+    this.tunnelSessions?.disconnectClient(clientId, socketId);
     // FRP 恢复周期只回收匹配 socket 的租约（service 内部判断）。
     void this.frpReconciliation?.disconnect(clientId, socketId);
     if (await this.piRuns.disconnectGeneration(clientId, socketId)) {
@@ -361,6 +371,42 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     } catch {
       // 非法报告忽略
       return { acceptedSessionIds: [], closeSessionIds: [] };
+    }
+  }
+
+  // ── P2P 隧道事件（身份来自 socket 绑定的 clientId；严格解析在 service 内） ──
+
+  @SubscribeMessage(Events.TUNNEL_SIGNAL)
+  async handleTunnelSignal(@ConnectedSocket() client: Socket, @MessageBody() data: unknown) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId || !this.tunnelSessions) return;
+    try {
+      await this.tunnelSessions.signalFromClient(client.id, data);
+    } catch {
+      // 非法信令忽略
+    }
+  }
+
+  @SubscribeMessage(Events.TUNNEL_STATE)
+  async handleTunnelState(@ConnectedSocket() client: Socket, @MessageBody() data: unknown) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId || !this.tunnelSessions) return;
+    try {
+      await this.tunnelSessions.clientState(client.id, data);
+    } catch {
+      // 非法状态忽略
+    }
+  }
+
+  @SubscribeMessage(Events.TUNNEL_CLOSE)
+  async handleTunnelClose(@ConnectedSocket() client: Socket, @MessageBody() data: unknown) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId || !this.tunnelSessions) return;
+    try {
+      const parsed = parseTunnelClose(data);
+      await this.tunnelSessions.closeFromClient(clientId, client.id, parsed.sessionId);
+    } catch {
+      // 非法消息忽略
     }
   }
 

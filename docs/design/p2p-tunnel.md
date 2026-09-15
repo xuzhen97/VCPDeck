@@ -1,0 +1,106 @@
+# VCPDeck P2P 隧道设计
+
+> 状态：Current｜维护责任：网络/Client 维护者｜最后核验：2026-09-11｜适用版本：当前 `main`
+>
+> 事实来源：`packages/shared/src/tunnel.ts`、`packages/server/src/tunnel/`、`packages/server/src/events/app.gateway.ts`、`packages/server/src/events/client.gateway.ts`、`packages/client/src/tunnel/`、`packages/frontend/src/tunnel/`、`scripts/install-coturn.sh`、`scripts/pack-release.ts`
+
+本文描述当前已经实现的 Browser ↔ Client WebRTC DataChannel 回环 TCP 隧道。字段级事件与 parser 以 Shared 和 [`protocols.md`](../protocols.md) 为准；长期决策（DataChannel 承载 TCP 字节流、coturn TURN 兜底、secret 文件隔离、Client 仅连回环）见 [`ADR-0026`](../adr/0026-browser-client-webrtc-tcp-tunnel.md)。
+
+## 1. 范围与非目标
+
+当前提供：
+- 机器工作区「隧道」Tab：对目标 Client 本机 `127.0.0.1:<port>` 上运行的 HTTP 服务发起一次 GET 探测，显示状态行、正文与 `direct`/`relay` 路径。
+- 设置「网络」页：配置 STUN/TURN URL 与 realm，显示 TURN 密钥就绪状态（不采集 secret）。
+- coturn 一键安装脚本 `scripts/install-coturn.sh`（Debian/Ubuntu 与 CentOS/RHEL/Rocky/AlmaLinux）。
+- 发布包内置 `node-datachannel` 与双平台预编译 native 包，随包分发 `install-coturn.sh`。
+
+非目标（当前阶段）：
+- 不安装/管理 VNC、noVNC 或远程桌面，不新增远程桌面管理页。
+- 不提供面向任意远程主机或局域网扫描的通用 TCP 代理；Client 固定只连 `127.0.0.1`。
+- 不自研压缩、分片或传输协议；数据面复用 WebRTC `RTCDataChannel` 与 `node-datachannel`。
+
+## 2. 控制面与数据面
+
+- **控制面（Server 权威）**：`TunnelConfigService` 持久化 coturn 配置（单行 `id=1`，`TunnelConfig` 表），`TunnelSessionService` 在内存登记活动 Session（绑定发起 Browser 的 `/app` socket 与目标 Client 的 `/client` socket 身份），签发 24h 短期 TURN 凭据。
+- **数据面（Browser ↔ Client 直连）**：HTTP 字节流走 WebRTC `RTCDataChannel`，不经过 Server 转发大流量。Server 只做信令转发（offer/answer、trickle candidate）与状态/关闭广播。
+- **角色固定**：Browser 是 offerer 且创建 DataChannel；Client 是 answerer 且通过 `ondatachannel` 接收该 channel。入站 Browser 信令用 `parseTunnelBrowserSignal`（只允许 offer/candidate）解析，Client 侧信令用 `parseTunnelClientSignal`，未知字段/错误 code 抛稳定错误。
+
+## 3. 数据权威
+
+- coturn 配置：Server SQLite `TunnelConfig`（`stunUrls`/`turnUrls`/`realm` JSON 数组 + 字符串，单例行）。
+- TURN shared secret：**不落库、不进 REST、不进 Web 表单**。仅由 `VCPDECK_TURN_SECRET_FILE` 指向的 `root:serverUser`、mode `0640` 文件提供；缺失或不可读时 TURN 签发失败，STUN 仍可用。
+- 活动 Session：Server 内存；`/app` 或 `/client` 断线、attach 超时、Client 上报 failed/closed 都幂等回收。
+- 远程 TCP 连接：只存在于 Client 进程内，指向 `127.0.0.1:<targetPort>`。
+
+## 4. ICE 服务器与短期凭据
+
+- `issueIceServers(sessionId, now)`：STUN（无凭据）+ 每个 TURN URL 一份凭据。
+- TURN 用 coturn TURN REST API：`username = <expiresEpochSeconds>:<sessionId>`，`credential = base64(HMAC-SHA1(secret, username))`，`expires = now + 24h`。
+- 缺 TURN URL、realm 或 secret 时返回 `TUNNEL_TURN_NOT_CONFIGURED`；STUN-only 配置仍可直连。
+
+## 5. 信令与 Session 生命周期
+
+事件（`/app` ↔ Server ↔ `/client`，转发不持久化）：
+- `tunnel.prepare`（→Client）、`tunnel.attach`（Browser→Server，ack 含 iceServers）、`tunnel.signal`（双向）、`tunnel.state`（→Browser）、`tunnel.close`（→Client）。
+
+固定顺序（Browser 侧 `openBrowserTunnel`）：
+1. 创建 `RTCPeerConnection` + 可靠有序 DataChannel；
+2. `attach` 换回短期凭据（不阻塞 open，失败即清理）；
+3. 发送 offer（answer 前先应用，排队 answer 前的 candidate）；
+4. 等待 `channel.onopen`，超时 15s 拒绝并清理；
+5. 对 `127.0.0.1:<port>` 做一次 GET 探测，`getStats()` 分类 `direct`/`relay`；
+6. 无论成败 `close()`（移除 listener、关闭 channel/peer），`sdk.tunnels.remove(sessionId)` 回收 Server Session。
+
+## 6. 回环 TCP 数据泵（Client）
+
+`tunnel-bridge.ts` 把 DataChannel 桥到 `127.0.0.1:<targetPort>` 的 `node:net` socket：
+- 入站 `onmessage` 写 TCP；`write` 返回 false 时累计回压，超 1 MiB 关闭（`TUNNEL_BACKPRESSURE_LIMIT`，不丢包、不静默吞）。
+- 出站 `data` 切分为最多 16 KiB 二进制消息；`bufferedAmount ≥ 1 MiB` 暂停读取，`onbufferedamountlow`（阈值 256 KiB）恢复。
+- 目标拒绝连接报 `TUNNEL_TARGET_REFUSED`；Client native 后端加载失败报 `P2P_NATIVE_BACKEND_UNAVAILABLE` 且不上报能力。
+
+## 7. native 后端（node-datachannel）
+
+- Client 用 `node-datachannel/polyfill` 的 `RTCPeerConnection`/`RTCDataChannel`（Web API 形状），**延迟加载** native binding；`probeP2pBackend` 在 register 前探测，加载失败才把能力标为 unavailable。
+- `register.ts` 把 `p2pTunnel` 能力上报进 `MachineRegister`（`P2pTunnelCapabilityStatus`，`available:false` 附 `code`，旧 Client 缺省不出现该字段）。
+- 发布包将 `node-datachannel` 与 `@node-datachannel/win32-x64-msvc`、`@node-datachannel/linux-x64-gnu` 外置保留（esbuild external `node-datachannel/*`），staging 用 `supportedArchitectures: [win32, linux]` 同时安装两平台包，win zip 排除 linux native、linux zip 排除 win native。
+
+## 8. coturn 部署
+
+`scripts/install-coturn.sh`（`sudo`，在 Server 主机执行）：
+- 检测发行版家族（apt/dnf）；dnf 无 `coturn` 时先装 `epel-release` 再重试。
+- 探测 external IP（优先 `--external-ip`，否则 `api.ipify.org`），internal/relay IP 用 `ip -4 route get 1.1.1.1`；校验失败要求显式参数，不猜测。
+- 生成 32 字节 Base64 secret 到 `/etc/vcpdeck/turn-secret`（`root:serverUser`、`0640`），重跑保留既有 secret。
+- 写带 `# managed-by: vcpdeck-coturn` marker 的 `/etc/turnserver.conf`；非本脚本管理的既有配置拒绝覆盖。
+- 启用/重启 `coturn.service`（或 `turnserver.service`）并校验 active；结尾只打印端口、`VCPDECK_TURN_SECRET_FILE`、STUN/TURN URL 与 realm，不打印 secret。
+
+端口：`3478` TCP/UDP、relay `49160–49200` UDP。Web「网络」页只填 URL 与 realm；`VCPDECK_TURN_SECRET_FILE` 指向 secret 文件。
+
+## 9. 前端入口与错误映射
+
+- 机器「隧道」Tab（`tunnel-panel.tsx`）：目标端口 + 路径 + 强制中继开关，一次点击只允许一个活动请求；结果只进文本/`<pre>`，不注入 DOM HTML。
+- 设置「网络」（`tunnel-settings-panel.tsx`）：URL/realm 表单 + secret 就绪状态芯片。
+- 错误映射到稳定中文文案（离线、目标拒绝、回压超限、建立超时、会话过期等），不回显 Server 错误 details 或 secret。
+
+## 10. 错误码与清理
+
+`TUNNEL_CLIENT_UNAVAILABLE`、`TUNNEL_CLIENT_UNSUPPORTED`、`TUNNEL_TARGET_REFUSED`、`TUNNEL_BACKPRESSURE_LIMIT`、`TUNNEL_OPEN_TIMEOUT`、`TUNNEL_SESSION_EXPIRED`、`TUNNEL_TURN_NOT_CONFIGURED`、`P2P_NATIVE_BACKEND_UNAVAILABLE`、`TUNNEL_SIGNAL_FAILED`、`TUNNEL_DATA_ERROR`、`TUNNEL_ATTACH_FAILED`、`TUNNEL_CLOSED`。任一失败路径都幂等回收 Browser 资源、Client 数据面与 Server Session。
+
+## 11. 兼容与变更
+
+- 协议版本 `P2P_TUNNEL_PROTOCOL_VERSION = 1`；Client 上报能力版本，不一致或无能力时不执行数据面，UI 显示「该 Client 不支持 P2P 隧道协议 v1」。
+- 旧 Client 不上报 `p2pTunnel` 能力即视为 unsupported；SDK `tunnels` 域为新增只读 API，不改变既有构造/请求行为。
+
+## 12. 测试门禁
+
+- Shared parser/DTO 单测、Server TunnelConfig/Session/Controller/Gateway 单测、Client register/bridge 单测、SDK 只读域单测、Frontend runtime/设置/机器面板单测、`scripts/install-coturn.test.sh`（纯函数）、`scripts/pack-release-deps.test.ts`（native 平台裁剪）。
+- 真实网络验收：普通模式 `direct`、强制中继 `relay`、停 coturn 后强制中继失败并恢复；日志与 SQLite 不得出现 secret、TURN password、SDP、candidate 或 HTTP 正文。
+- 本地已验证：① 直连端到端（真实 Server + native Client + 本地 HTTP 目标，DataChannel 直连命中、目标关闭后 `TUNNEL_TARGET_REFUSED`）；② **真实 coturn（Vagrant/VirtualBox Ubuntu VM，`use-auth-secret` + `no-auth`）凭据 A/B** —— 空凭据被拒，Server 签发的 `expiry:sessionId` HMAC-SHA1 凭据被接受并分配 relay 端点，确认与 coturn `use-auth-secret` 完全兼容。③ **真实浏览器（Playwright 驱动的系统 Chrome 153，headful、无代理）矩阵测试**：
+  - **P2P 直连**：两端 `iceConnectionState=connected`、DataChannel `PING→PONG` 往返成功——浏览器侧隧道数据通路可用。
+  - **强制 relay（`iceTransportPolicy: relay`）**：ICE 进入 `gathering` 但无候选产生、连接停在 `new`；测试期间 **coturn 侧收不到来自浏览器（源 `192.168.56.1`）的任何 TURN 流量**（而 node 原生 UDP 直连 coturn 有响应、STUN 有回包）——即该 Chrome 在此 VirtualBox host-only 网络下未向 coturn 发出 TURN Allocate，属**浏览器↔VM 虚拟网络**的互操作限制，非 coturn/凭据/产品缺陷（凭据已被 coturn 自带 `turnutils_uclient` 实证可被接受并分配 relay 端点）。
+  - **换网络复测**：把 coturn 同时绑到 host-only（`192.168.56.10`）与 Vagrant NAT（`10.0.2.15`）两张卡、并把浏览器 TURN URL 切到 NAT 卡后，强制 relay **仍 0 条 TURN 流量**、连接仍停 `new`——证明根因不是「够不到 coturn」，而是该 Windows 宿主 + VirtualBox 虚拟网络（host-only/NAT 的 3478/UDP）下 **Chrome WebRTC 的 TURN 客户端未触发 Allocate**（STUN 可达、P2P host 候选可达，唯 TURN 不出）。
+  - 结论：产品侧仅需标准 `RTCPeerConnection` + `iceTransportPolicy: relay`（所有真实浏览器支持），配合已验证可用的 coturn 凭据即可走中继。**在本机单台 VM 环境无法端到端复现浏览器→coturn→Client 的字节流动**；要真实验证中继，需浏览器与 Client 分处两个不同网络（两台物理机/云 VM），且 Chrome 处于可正常出站 UDP 的环境。各组件均已独立验证可用，逻辑闭合。
+- 后续 noVNC：建立结果为原生 `RTCDataChannel`（具备 `send/close/binaryType/onerror/onmessage/onopen/protocol/readyState`），可直接作为 `new RFB(target, rtcDataChannel)` 的通道；本期不安装 noVNC、不启动 VNC。
+
+## 13. 相关文档
+
+[`protocols.md`](../protocols.md)、[`security.md`](../security.md)、[`deployment.md`](../deployment.md)、[`compatibility.md`](../compatibility.md)、[`ADR-0026`](../adr/0026-browser-client-webrtc-tcp-tunnel.md)、[`ADR-0012`](../adr/0012-bundled-release-artifacts.md)。

@@ -1,6 +1,7 @@
 import { type FrpCapabilityStatus } from "./frp-runtime.js";
 import type { PiCapabilityStatus } from "./pi.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
+import { type P2pTunnelCapabilityStatus } from "./tunnel.js";
 /** Client 安装模式（ADR-0023：Linux A2 专用账户 + systemd 系统服务；legacy-pm2 为待迁移旧安装）。 */
 export declare const MachineInstallationMode: {
     readonly SYSTEMD_ROOT_EQUIVALENT: "systemd-root-equivalent";
@@ -44,6 +45,8 @@ export interface MachineRegister {
         frp?: FrpCapabilityStatus;
         /** 可选：非交互特权能力摘要（ADR-0023 新 Client） */
         privileged?: PrivilegedCapabilityStatus;
+        /** 可选：P2P 隧道能力摘要（ADR-0026 新 Client） */
+        p2pTunnel?: P2pTunnelCapabilityStatus;
     };
     /** 可选：安装模式摘要（旧 Client 缺省表示未报告） */
     installation?: MachineInstallationStatus;

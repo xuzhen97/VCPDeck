@@ -2,6 +2,7 @@ import { io, type Socket } from "socket.io-client";
 import { Events } from "@vcpdeck/shared";
 import type {
 	MachineRegister,
+	P2pTunnelCapabilityStatus,
 	PiCapabilityStatus,
 	PiEvent,
 	PiStateAck,
@@ -46,7 +47,10 @@ import {
 	shutdownFrpRuntime,
 } from "./frpc-daemon.js";
 import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge.js";
+import { attachTunnelBridge, type TunnelBridge } from "./tunnel/tunnel-bridge.js";
+import { createNodeDataChannelPeer, probeP2pBackend } from "./tunnel/node-datachannel-peer.js";
 import { ClientLauncher } from "./launcher-control.js";
+import * as net from "node:net";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { fork } from "node:child_process";
@@ -258,13 +262,24 @@ export function connect(): Socket {
 		manager: getFrpRuntimeManager(),
 	});
 
+	// P2P 隧道桥：native 后端延迟探测；只有加载成功才创建 Peer。固定回环目标。
+	let p2pStatus: P2pTunnelCapabilityStatus | null = null;
+	const tunnelBridge: TunnelBridge | null = verifyOnly
+		? null
+		: attachTunnelBridge(socket, {
+				clientId: CLIENT_ID,
+				createPeer: (ice) => (p2pStatus?.available ? createNodeDataChannelPeer(ice) : null),
+				createTcp: (target) => net.connect(target),
+			});
+
 	// 进程级停机（SIGTERM/SIGINT 各一次）：
-	// 先 dispose 桥（关闭本代次上报资格）→ 计划内停 frpc（防版本切换误判 crash）→ exit(0)。
+	// 先 dispose 桥（关闭本代次上报资格 + 隧道数据面）→ 计划内停 frpc（防版本切换误判 crash）→ exit(0)。
 	let frpShuttingDown = false;
 	for (const signal of ["SIGTERM", "SIGINT"] as const) {
 		process.on(signal, () => {
 			if (frpShuttingDown) return;
 			frpShuttingDown = true;
+			tunnelBridge?.dispose();
 			frpBridge.dispose();
 			void shutdownFrpRuntime()
 				.catch(() => {
@@ -356,7 +371,7 @@ export function connect(): Socket {
 				return info;
 			}),
 		getRegister: (piStatus, terminalStatus, runtimeSecurity) =>
-			getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, process.env),
+			getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, process.env, p2pStatus ?? undefined),
 		getStatusReport: () => ({
 			clientId: CLIENT_ID,
 			jobs: getStatusReport(),
@@ -372,7 +387,11 @@ export function connect(): Socket {
 			frpBridge.onConnected();
 		}
 		void (async () => {
-			if (!verifyOnly) await ensureTerminalReady();
+			if (!verifyOnly) {
+				await ensureTerminalReady();
+				// 探测 P2P native 后端（结果供 createPeer 与 register 共用；失败降级为不可用）。
+				p2pStatus = await probeP2pBackend().catch(() => null);
+			}
 			await bridge.onConnected();
 		})();
 	});

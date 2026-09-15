@@ -20,6 +20,7 @@ const storage_module_js_1 = require("../storage/storage.module.js");
 const pi_module_js_1 = require("../pi/pi.module.js");
 const terminal_module_js_1 = require("../terminal/terminal.module.js");
 const release_module_js_1 = require("../release/release.module.js");
+const tunnel_module_js_1 = require("../tunnel/tunnel.module.js");
 let EventsModule = class EventsModule {
 };
 exports.EventsModule = EventsModule;
@@ -35,6 +36,7 @@ exports.EventsModule = EventsModule = __decorate([
             (0, common_1.forwardRef)(() => release_module_js_1.ReleaseModule),
             pi_module_js_1.PiModule,
             terminal_module_js_1.TerminalModule,
+            tunnel_module_js_1.TunnelModule,
         ],
         providers: [client_gateway_js_1.ClientGateway, app_gateway_js_1.AppGateway],
         exports: [client_gateway_js_1.ClientGateway],

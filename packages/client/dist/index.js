@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isMigrationVerifyOnly = isMigrationVerifyOnly;
 exports.attachPiBridge = attachPiBridge;
@@ -21,7 +54,10 @@ const process_tree_js_1 = require("./terminal/process-tree.js");
 const update_js_1 = require("./update.js");
 const frpc_daemon_js_1 = require("./frpc-daemon.js");
 const frp_socket_bridge_js_1 = require("./frp-socket-bridge.js");
+const tunnel_bridge_js_1 = require("./tunnel/tunnel-bridge.js");
+const node_datachannel_peer_js_1 = require("./tunnel/node-datachannel-peer.js");
 const launcher_control_js_1 = require("./launcher-control.js");
+const net = __importStar(require("node:net"));
 const node_crypto_1 = require("node:crypto");
 const node_os_1 = require("node:os");
 const node_child_process_1 = require("node:child_process");
@@ -189,14 +225,24 @@ function connect() {
         clientId: register_js_1.CLIENT_ID,
         manager: (0, frpc_daemon_js_1.getFrpRuntimeManager)(),
     });
+    // P2P 隧道桥：native 后端延迟探测；只有加载成功才创建 Peer。固定回环目标。
+    let p2pStatus = null;
+    const tunnelBridge = verifyOnly
+        ? null
+        : (0, tunnel_bridge_js_1.attachTunnelBridge)(socket, {
+            clientId: register_js_1.CLIENT_ID,
+            createPeer: (ice) => (p2pStatus?.available ? (0, node_datachannel_peer_js_1.createNodeDataChannelPeer)(ice) : null),
+            createTcp: (target) => net.connect(target),
+        });
     // 进程级停机（SIGTERM/SIGINT 各一次）：
-    // 先 dispose 桥（关闭本代次上报资格）→ 计划内停 frpc（防版本切换误判 crash）→ exit(0)。
+    // 先 dispose 桥（关闭本代次上报资格 + 隧道数据面）→ 计划内停 frpc（防版本切换误判 crash）→ exit(0)。
     let frpShuttingDown = false;
     for (const signal of ["SIGTERM", "SIGINT"]) {
         process.on(signal, () => {
             if (frpShuttingDown)
                 return;
             frpShuttingDown = true;
+            tunnelBridge?.dispose();
             frpBridge.dispose();
             void (0, frpc_daemon_js_1.shutdownFrpRuntime)()
                 .catch(() => {
@@ -286,7 +332,7 @@ function connect() {
                 info.installation = installation;
             return info;
         }),
-        getRegister: (piStatus, terminalStatus, runtimeSecurity) => (0, register_js_1.getRegisterInfo)(piStatus, terminalStatus, runtimeSecurity, process.env),
+        getRegister: (piStatus, terminalStatus, runtimeSecurity) => (0, register_js_1.getRegisterInfo)(piStatus, terminalStatus, runtimeSecurity, process.env, p2pStatus ?? undefined),
         getStatusReport: () => ({
             clientId: register_js_1.CLIENT_ID,
             jobs: (0, executor_js_1.getStatusReport)(),
@@ -299,8 +345,11 @@ function connect() {
             frpBridge.onConnected();
         }
         void (async () => {
-            if (!verifyOnly)
+            if (!verifyOnly) {
                 await ensureTerminalReady();
+                // 探测 P2P native 后端（结果供 createPeer 与 register 共用；失败降级为不可用）。
+                p2pStatus = await (0, node_datachannel_peer_js_1.probeP2pBackend)().catch(() => null);
+            }
             await bridge.onConnected();
         })();
     });

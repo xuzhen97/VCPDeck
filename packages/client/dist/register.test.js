@@ -107,6 +107,23 @@ let root = "";
         (0, vitest_1.expect)(info.capabilities).not.toContain("terminal.pty");
         (0, vitest_1.expect)(info.capabilityDetails?.terminal).toBeUndefined();
     });
+    (0, vitest_1.it)("native 后端可用时声明 tunnel.p2p 能力与 details；不可用只上报稳定 code", () => {
+        const ok = { available: true, protocolVersion: shared_1.P2P_TUNNEL_PROTOCOL_VERSION };
+        const withP2p = (0, register_js_1.getRegisterInfo)(undefined, undefined, undefined, process.env, ok);
+        (0, vitest_1.expect)(withP2p.capabilities).toContain("tunnel.p2p");
+        (0, vitest_1.expect)(withP2p.capabilityDetails?.p2pTunnel).toEqual(ok);
+        const unavailable = {
+            available: false,
+            protocolVersion: shared_1.P2P_TUNNEL_PROTOCOL_VERSION,
+            code: "P2P_NATIVE_BACKEND_UNAVAILABLE",
+        };
+        const withBad = (0, register_js_1.getRegisterInfo)(undefined, undefined, undefined, process.env, unavailable);
+        (0, vitest_1.expect)(withBad.capabilities).not.toContain("tunnel.p2p");
+        (0, vitest_1.expect)(withBad.capabilityDetails?.p2pTunnel).toEqual(unavailable);
+        const none = (0, register_js_1.getRegisterInfo)(undefined, undefined, undefined, process.env);
+        (0, vitest_1.expect)(none.capabilities).not.toContain("tunnel.p2p");
+        (0, vitest_1.expect)(none.capabilityDetails).not.toHaveProperty("p2pTunnel");
+    });
     (0, vitest_1.it)("A2 运行时安全摘要序列化：privileged + installation 上报，无路径或凭据", () => {
         const info = (0, register_js_1.getRegisterInfo)(undefined, undefined, {
             privileged: {

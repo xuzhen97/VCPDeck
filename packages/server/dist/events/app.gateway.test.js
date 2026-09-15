@@ -106,4 +106,44 @@ function makeGateway() {
         await gateway.handleDisconnect(socket);
         (0, vitest_1.expect)(terminalService.detachBrowserSocket).toHaveBeenCalledWith("socket-1");
     });
+    (0, vitest_1.it)("Browser attach 调用 session 服务并透传 actor 与 socketId", async () => {
+        const { gateway, tunnelSessions } = makeTunnel();
+        const socket = makeSocket();
+        await gateway.handleTunnelAttach(socket, { sessionId: "tn_1" });
+        (0, vitest_1.expect)(tunnelSessions.attachBrowser).toHaveBeenCalledWith("tn_1", ACTOR, "socket-1");
+    });
+    (0, vitest_1.it)("非创建者 close 返回 TUNNEL_FORBIDDEN", async () => {
+        const { gateway, tunnelSessions } = makeTunnel();
+        tunnelSessions.close.mockRejectedValueOnce(Object.assign(new Error("x"), { code: "TUNNEL_FORBIDDEN" }));
+        const socket = makeSocket();
+        const ack = await gateway.handleTunnelClose(socket, { sessionId: "tn_1" });
+        (0, vitest_1.expect)(ack).toEqual({ ok: false, error: vitest_1.expect.objectContaining({ code: "TUNNEL_FORBIDDEN" }) });
+    });
+    (0, vitest_1.it)("Browser 断线回收匹配 socket 的 session", async () => {
+        const { gateway, tunnelSessions } = makeTunnel();
+        await gateway.handleDisconnect(makeSocket("socket-9"));
+        (0, vitest_1.expect)(tunnelSessions.disconnectBrowser).toHaveBeenCalledWith("socket-9");
+    });
 });
+function makeTunnel() {
+    const terminalService = {
+        attachBrowser: vitest_1.vi.fn(),
+        detachBrowser: vitest_1.vi.fn(),
+        detachBrowserSocket: vitest_1.vi.fn(),
+        browserInput: vitest_1.vi.fn(),
+        browserResize: vitest_1.vi.fn(),
+        browserTakeover: vitest_1.vi.fn(),
+        browserAckOutput: vitest_1.vi.fn(),
+        browserResync: vitest_1.vi.fn(),
+        bindBrowserEmitter: vitest_1.vi.fn(),
+    };
+    const tunnelSessions = {
+        bindBrowserSender: vitest_1.vi.fn(),
+        attachBrowser: vitest_1.vi.fn(async () => { }),
+        signalFromBrowser: vitest_1.vi.fn(async () => { }),
+        close: vitest_1.vi.fn(async () => ({ closed: true })),
+        disconnectBrowser: vitest_1.vi.fn(),
+    };
+    const gateway = new app_gateway_js_1.AppGateway({}, terminalService, tunnelSessions);
+    return { gateway, tunnelSessions };
+}

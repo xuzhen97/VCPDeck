@@ -7,6 +7,7 @@ import {
 	Network,
 	SquareTerminal,
 	TerminalSquare,
+	Waypoints,
 	type LucideIcon,
 } from "lucide-react";
 import { useCallback } from "react";
@@ -48,6 +49,7 @@ const tabIcons: Record<string, LucideIcon> = {
 	jobs: History,
 	pi: BrainCircuit,
 	terminal: SquareTerminal,
+	tunnel: Waypoints,
 };
 
 export function MachinesPage() {

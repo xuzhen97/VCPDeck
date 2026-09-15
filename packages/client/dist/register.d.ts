@@ -1,4 +1,4 @@
-import type { MachineRegister, PiCapabilityStatus, TerminalCapabilityStatus } from "@vcpdeck/shared";
+import type { MachineRegister, P2pTunnelCapabilityStatus, PiCapabilityStatus, TerminalCapabilityStatus } from "@vcpdeck/shared";
 import type { RuntimeSecurityInfo } from "./privileged-capability.js";
 export declare const CLIENT_ID: string;
 /**
@@ -15,4 +15,4 @@ export declare const CLIENT_ID: string;
  * 全新安装与稳态永不进入该模式。
  */
 export declare function isMigrationVerifyOnly(env?: NodeJS.ProcessEnv): boolean;
-export declare function getRegisterInfo(piStatus?: PiCapabilityStatus, terminalStatus?: TerminalCapabilityStatus, runtimeSecurity?: RuntimeSecurityInfo, env?: NodeJS.ProcessEnv): MachineRegister;
+export declare function getRegisterInfo(piStatus?: PiCapabilityStatus, terminalStatus?: TerminalCapabilityStatus, runtimeSecurity?: RuntimeSecurityInfo, env?: NodeJS.ProcessEnv, p2pTunnelStatus?: P2pTunnelCapabilityStatus): MachineRegister;

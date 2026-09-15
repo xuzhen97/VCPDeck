@@ -11,3 +11,4 @@ export * from "./releases.js";
 export * from "./storage.js";
 export * from "./storage-shares.js";
 export * from "./terminal.js";
+export * from "./tunnels.js";

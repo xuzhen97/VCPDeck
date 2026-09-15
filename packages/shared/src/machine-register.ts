@@ -4,6 +4,10 @@ import {
 } from "./frp-runtime.js";
 import type { PiCapabilityStatus } from "./pi.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
+import {
+	parseP2pTunnelCapabilityStatus,
+	type P2pTunnelCapabilityStatus,
+} from "./tunnel.js";
 
 // ── 严格边界：字段长度上限（防御异常注册消息撑爆存储与 UI） ──
 const MAX_CLIENT_ID = 128;
@@ -67,6 +71,8 @@ export interface MachineRegister {
 		frp?: FrpCapabilityStatus;
 		/** 可选：非交互特权能力摘要（ADR-0023 新 Client） */
 		privileged?: PrivilegedCapabilityStatus;
+		/** 可选：P2P 隧道能力摘要（ADR-0026 新 Client） */
+		p2pTunnel?: P2pTunnelCapabilityStatus;
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告） */
 	installation?: MachineInstallationStatus;
@@ -168,7 +174,7 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 	if (value.capabilityDetails !== undefined) {
 		const details = value.capabilityDetails;
 		if (!isRecord(details)) throw new Error("capabilityDetails 必须为对象");
-		const known = ["pi", "terminal", "frp", "privileged"] as const;
+		const known = ["pi", "terminal", "frp", "privileged", "p2pTunnel"] as const;
 		for (const key of Object.keys(details)) {
 			if (!known.includes(key as (typeof known)[number])) {
 				throw new Error(`capabilityDetails 含未知字段 ${key}`);
@@ -185,6 +191,9 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 		}
 		if (details.privileged !== undefined) {
 			parsedDetails.privileged = parsePrivilegedCapabilityStatus(details.privileged);
+		}
+		if (details.p2pTunnel !== undefined) {
+			parsedDetails.p2pTunnel = parseP2pTunnelCapabilityStatus(details.p2pTunnel);
 		}
 		result.capabilityDetails = parsedDetails;
 	}

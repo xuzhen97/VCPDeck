@@ -13,10 +13,11 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.84.0",
     "@earendil-works/pi-coding-agent": "0.84.0",
+    "@lydell/node-pty": "1.2.0-beta.15",
     "@vcpdeck/shared": "workspace:*",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
-    "@lydell/node-pty": "1.2.0-beta.15",
+    "node-datachannel": "0.33.4",
     "socket.io-client": "^4.7.5"
   },
   "devDependencies": {

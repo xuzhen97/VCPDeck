@@ -112,6 +112,13 @@ function makeGateway(reconciliation = makeReconciliation()) {
 	const updateChannel = {
 		bindEmitters: vi.fn(),
 	};
+	const tunnelSessions = {
+		bindClientSender: vi.fn(),
+		signalFromClient: vi.fn(async () => {}),
+		clientState: vi.fn(async () => {}),
+		closeFromClient: vi.fn(async () => {}),
+		disconnectClient: vi.fn(),
+	};
 	const gateway = new ClientGateway(
 		clientService as never,
 		jobService as never,
@@ -125,6 +132,7 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		orchestrator as never,
 		updateChannel as never,
 		reconciliation as never,
+		tunnelSessions as never,
 	);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
@@ -143,6 +151,7 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		orchestrator,
 		updateChannel,
 		reconciliation,
+		tunnelSessions,
 		emit,
 		to,
 	};
@@ -818,5 +827,34 @@ describe("ClientGateway FRP reconciliation", () => {
 		await gateway.sweepStaleClients();
 
 		expect(reconciliation.disconnect).toHaveBeenCalledWith("c1", "socket-7");
+	});
+});
+
+describe("ClientGateway P2P tunnel routing", () => {
+	function clientSocket() {
+		const socket = makeSocket("client-socket");
+		socket.data.clientId = "c1";
+		return socket;
+	}
+
+	it("Client TUNNEL_STATE 按 socketId 转发到 session 服务", async () => {
+		const { gateway, tunnelSessions } = makeGateway();
+		await gateway.handleTunnelState(clientSocket(), { sessionId: "tn_1", state: "connected" });
+		expect(tunnelSessions.clientState).toHaveBeenCalledWith("client-socket", {
+			sessionId: "tn_1",
+			state: "connected",
+		});
+	});
+
+	it("Client TUNNEL_CLOSE 校验 lease 后释放 session", async () => {
+		const { gateway, tunnelSessions } = makeGateway();
+		await gateway.handleTunnelClose(clientSocket(), { sessionId: "tn_1" });
+		expect(tunnelSessions.closeFromClient).toHaveBeenCalledWith("c1", "client-socket", "tn_1");
+	});
+
+	it("Client 断线回收匹配 clientId+socket 的 session", async () => {
+		const { gateway, tunnelSessions } = makeGateway();
+		await gateway.handleDisconnect(clientSocket());
+		expect(tunnelSessions.disconnectClient).toHaveBeenCalledWith("c1", "client-socket");
 	});
 });

@@ -30,6 +30,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { ZipArchive } from "archiver";
 import { bundleClient, bundleLauncher, bundleServer } from "./bundle-apps.js";
@@ -91,7 +92,7 @@ function run(argv: string[], label: string): void {
  * 版本优先取源码 package.json 的声明；平台绑定包（构建机可能未安装目标平台）
  * 从父包 optionalDependencies 取精确版本。
  */
-const EXTERNAL_DEPS: Record<"server" | "client", string[]> = {
+export const EXTERNAL_DEPS: Record<"server" | "client", string[]> = {
 	server: [
 		"@prisma/client-runtime-utils",
 		"@prisma/adapter-libsql",
@@ -106,15 +107,20 @@ const EXTERNAL_DEPS: Record<"server" | "client", string[]> = {
 		"@lydell/node-pty",
 		"@lydell/node-pty-win32-x64",
 		"@lydell/node-pty-linux-x64",
+		"node-datachannel",
+		"@node-datachannel/win32-x64-msvc",
+		"@node-datachannel/linux-x64-gnu",
 	],
 };
 
 /** 平台绑定包的父包（读取 optionalDependencies 用） */
-const PLATFORM_PKG_PARENT: Record<string, string> = {
+export const PLATFORM_PKG_PARENT: Record<string, string> = {
 	"@libsql/win32-x64-msvc": "libsql",
 	"@libsql/linux-x64-gnu": "libsql",
 	"@lydell/node-pty-win32-x64": "@lydell/node-pty",
 	"@lydell/node-pty-linux-x64": "@lydell/node-pty",
+	"@node-datachannel/win32-x64-msvc": "node-datachannel",
+	"@node-datachannel/linux-x64-gnu": "node-datachannel",
 };
 
 interface PkgJson {
@@ -367,19 +373,21 @@ async function stagePackage(
  */
 type ArchiveVariant = "win-x64" | "linux-x64";
 
-const VARIANT_EXCLUDES: Record<ArchiveVariant, string[]> = {
+export const VARIANT_EXCLUDES: Record<ArchiveVariant, string[]> = {
 	"win-x64": [
 		"server/dist/frp/linux-x64",
 		"client/dist/frp/linux-x64",
 		"server/node_modules/@libsql/linux-x64-gnu",
 		"server/node_modules/@libsql/linux-x64-musl",
 		"client/node_modules/@lydell/node-pty-linux-x64",
+		"client/node_modules/@node-datachannel/linux-x64-gnu",
 	],
 	"linux-x64": [
 		"server/dist/frp/win-x64",
 		"client/dist/frp/win-x64",
 		"server/node_modules/@libsql/win32-x64-msvc",
 		"client/node_modules/@lydell/node-pty-win32-x64",
+		"client/node_modules/@node-datachannel/win32-x64-msvc",
 	],
 };
 
@@ -540,6 +548,11 @@ async function main(): Promise<void> {
 			join(ROOT, "scripts", "uninstall.cjs"),
 			join(ROOT, args.output, "uninstall.cjs"),
 		);
+		// coturn 一键安装脚本随构件分发（ADR-0026；在 Server 主机上运行，需 root）
+		cpSync(
+			join(ROOT, "scripts", "install-coturn.sh"),
+			join(ROOT, args.output, "install-coturn.sh"),
+		);
 
 		// 3. 压缩（win-x64 / linux-x64 两份）+ linux frp 内存注入 + sha256
 		const variants: ArchiveVariant[] = ["win-x64", "linux-x64"];
@@ -567,6 +580,9 @@ async function main(): Promise<void> {
 		console.log(
 			`[pack-release] 安装/卸载脚本与 zip 平级: ${join(ROOT, args.output, "install.cjs / uninstall.cjs")}`,
 		);
+		console.log(
+			`[pack-release] coturn 安装脚本: ${join(ROOT, args.output, "install-coturn.sh")}`,
+		);
 	} catch (error) {
 		for (const [path, content] of originals) {
 			if (content === undefined) rmSync(path, { force: true });
@@ -578,4 +594,8 @@ async function main(): Promise<void> {
 	}
 }
 
-void main();
+// 仅直接执行时运行 main；被单测 import 时不触发发布构建
+const __invokedDirectly =
+	process.argv[1] !== undefined &&
+	resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (__invokedDirectly) void main();

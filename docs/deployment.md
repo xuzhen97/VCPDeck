@@ -220,6 +220,19 @@ Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 PM
 - **M1 迁移**：存量 PM2 安装可用 `--migrate` 迁移到 A2，保留 `client-id`、保留无关 PM2 应用；迁移分两阶段（verify-only 验证身份/版本/特权 → 原子切稳态），稳态全能力注册是回滚边界，之前失败自动恢复旧 PM2，之后失败记 `manual-recovery-required`。
 - **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。
 
+### 4.7 coturn / TURN 中继（P2P 隧道）
+
+启用 P2P 隧道的 TURN 兜底需在 Server 主机部署 coturn（仅 Debian/Ubuntu 与 CentOS/RHEL/Rocky/AlmaLinux）：
+
+```bash
+sudo bash "./install-coturn.sh" \
+  --server-user=<vcpdeck-server 运行用户> \
+  --external-ip=<公网 IPv4> \
+  --realm=<TURN 域名或公网 IP>
+```
+
+脚本行为：检测发行版（apt/dnf，dnf 缺包时先装 `epel-release`）；生成 32 字节 Base64 secret 到 `/etc/vcpdeck/turn-secret`（`root:serverUser`、`0640`，重跑保留）；写带 `# managed-by: vcpdeck-coturn` marker 的 `/etc/turnserver.conf`；启用/重启并校验 `coturn.service` active。需放行 `3478` TCP/UDP 与 `49160–49200` UDP；把 `VCPDECK_TURN_SECRET_FILE=/etc/vcpdeck/turn-secret` 加入 Server 环境。Web「设置 → 网络」只填 STUN/TURN URL 与 realm，不填 secret。详见 [`design/p2p-tunnel.md`](./design/p2p-tunnel.md)。
+
 ## 5. 持久化目录
 
 至少持久化：

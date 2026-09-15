@@ -7,6 +7,7 @@ export * from "./terminal.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { PiCapabilityStatus } from "./pi.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
+import type { P2pTunnelCapabilityStatus } from "./tunnel.js";
 export type { PiAgentState, PiAttachmentDescriptor, PiCapabilityStatus, PiClientEvent, PiCwdRef, PiErrorCode, PiEvent, PiExtensionUiRequest, PiImagePlaceholder, PiMessage, PiMessageContent, PiPromptAccepted, PiProjectKey, PiRequest, PiResponse, PiRunSummary, PiSessionCreated, PiSessionJobSnapshot, PiSessionJobStatus, PiSessionOpenResult, PiStateAck, PiSessionContextPage, PiSessionDetail, PiSessionInfo, PiSessionTreeNode, PiStateReport, PiTextContent, PiThinkingLevel, PiThinkingPlaceholder, PiToolCallContent, PiModelInfo, } from "./pi.js";
 export type { ReleaseArchiveAvailableInfo, ReleaseArchiveDeletingInfo, ReleaseArchiveInfo, ReleaseArchiveStorage, ReleaseArchiveStorageSummary, ReleaseArchiveAvailability, ReleaseCleanupArchiveCandidate, ReleaseCleanupIssue, ReleaseCleanupPolicy, ReleaseCleanupPreview, ReleaseCleanupReason, ReleaseCleanupRunResult, ReleaseClientEntry, ReleaseInfo, ReleasePlatform, ReleaseUploadCreateInput, ReleaseUploadPart, ReleaseUploadSession, ServerShutdownNotice, UpdateFailed, UpdateManifest, UpdateReady, UpdateRequest, } from "./update.js";
 export { ReleaseClientState, ReleaseStatus, ReleaseUploadErrorCode, parseReleaseUploadComplete, parseReleaseUploadCreateInput, parseReleaseUploadPartRefresh, platformFromOs, isReleaseArchiveAvailable, } from "./update.js";
@@ -52,6 +53,11 @@ export declare const Events: {
     readonly SERVER_SHUTDOWN: "server:shutdown";
     readonly FRP_STATE: "frp:state";
     readonly FRP_STATE_ACK: "frp:state-ack";
+    readonly TUNNEL_ATTACH: "tunnel:attach";
+    readonly TUNNEL_PREPARE: "tunnel:prepare";
+    readonly TUNNEL_SIGNAL: "tunnel:signal";
+    readonly TUNNEL_STATE: "tunnel:state";
+    readonly TUNNEL_CLOSE: "tunnel:close";
 };
 export declare enum JobType {
     EXEC = "exec",
@@ -210,6 +216,8 @@ export interface ClientInfo {
         frp?: FrpCapabilityStatus;
         /** 可选：非交互特权能力摘要（旧 Client 缺省） */
         privileged?: PrivilegedCapabilityStatus;
+        /** 可选：P2P 隧道能力摘要（ADR-0026，旧 Client 缺省） */
+        p2pTunnel?: P2pTunnelCapabilityStatus;
     };
     /** 可选：安装模式摘要（旧 Client 缺省表示未报告，不推断为任何模式） */
     installation?: MachineInstallationStatus;
@@ -670,3 +678,5 @@ export interface ProbeResult {
 }
 export { FRP_RECONCILE_PROTOCOL_VERSION, parseFrpCapabilityStatus, parseFrpReconcilePayload, parseFrpReconcileResult, parseFrpRuntimeStateAck, parseFrpRuntimeStateReport, } from "./frp-runtime.js";
 export type { FrpCapabilityStatus, FrpReconcilePayload, FrpReconcileResult, FrpRecoveryOwner, FrpRuntimeMappingSnapshot, FrpRuntimeStateAck, FrpRuntimeStateReport, FrpRuntimeStatus, } from "./frp-runtime.js";
+export { P2P_TUNNEL_PROTOCOL_VERSION, TunnelLimits, parseP2pTunnelCapabilityStatus, parseTunnelBrowserAttach, parseTunnelBrowserSignal, parseTunnelClientSignal, parseTunnelClientState, parseTunnelClose, parseTunnelConfigInfo, parseTunnelConfigUpdate, parseTunnelIceServer, parseTunnelPrepare, parseTunnelSessionCreated, parseTunnelSessionCreateRequest, } from "./tunnel.js";
+export type { P2pTunnelCapabilityStatus, TunnelBrowserAttach, TunnelClose, TunnelClientState, TunnelConfigInfo, TunnelConfigUpdate, TunnelIceCandidate, TunnelIceServer, TunnelPrepare, TunnelSessionCreated, TunnelSessionCreateRequest, TunnelSignal, TunnelSdpDescription, } from "./tunnel.js";

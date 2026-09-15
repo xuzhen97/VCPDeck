@@ -5,6 +5,7 @@ exports.parseMachineInstallation = parseMachineInstallation;
 exports.parsePrivilegedCapabilityStatus = parsePrivilegedCapabilityStatus;
 exports.parseMachineRegister = parseMachineRegister;
 const frp_runtime_js_1 = require("./frp-runtime.js");
+const tunnel_js_1 = require("./tunnel.js");
 // ── 严格边界：字段长度上限（防御异常注册消息撑爆存储与 UI） ──
 const MAX_CLIENT_ID = 128;
 const MAX_HOSTNAME = 256;
@@ -103,7 +104,7 @@ function parseMachineRegister(value) {
         const details = value.capabilityDetails;
         if (!isRecord(details))
             throw new Error("capabilityDetails 必须为对象");
-        const known = ["pi", "terminal", "frp", "privileged"];
+        const known = ["pi", "terminal", "frp", "privileged", "p2pTunnel"];
         for (const key of Object.keys(details)) {
             if (!known.includes(key)) {
                 throw new Error(`capabilityDetails 含未知字段 ${key}`);
@@ -121,6 +122,9 @@ function parseMachineRegister(value) {
         }
         if (details.privileged !== undefined) {
             parsedDetails.privileged = parsePrivilegedCapabilityStatus(details.privileged);
+        }
+        if (details.p2pTunnel !== undefined) {
+            parsedDetails.p2pTunnel = (0, tunnel_js_1.parseP2pTunnelCapabilityStatus)(details.p2pTunnel);
         }
         result.capabilityDetails = parsedDetails;
     }

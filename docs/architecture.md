@@ -28,7 +28,7 @@ VCPDeck 当前是一个以 Server 为控制中心、以 Client 为远程执行�
    身份、Job、文件元数据、FRP 映射、终端会话元数据和发布记录由 Server 持久化；进程、PTY、Pi 会话和 frpc 等实时资源实际运行在 Client。
 
 4. **控制流与数据流按场景分工**  
-   REST 负责资源和命令入口，Socket.IO 负责双向实时控制，SSE 负责远程 Pi 的浏览器事件流，文件内容根据存储后端走 Server 中转或外部存储直传。
+   REST 负责资源和命令入口，Socket.IO 负责双向实时控制，SSE 负责远程 Pi 的浏览器事件流，文件内容根据存储后端走 Server 中转或外部存储直传。P2P 隧道的 HTTP 字节流走 Browser ↔ Client 的 WebRTC DataChannel 直连（coturn TURN 兜底），大流量不经 Server 转发，Server 只做信令与 Session 权威。
 
 5. **进程生命周期独立于业务进程**  
    Launcher 在 Server/Client 进程之外负责拉起、探活、版本切换和失败回退，避免业务进程自行替换自身。
@@ -130,7 +130,7 @@ flowchart TB
 | SDK | 浏览器或 Node.js 调用方 | 类型安全的 REST API 封装和错误归一化 | Socket.IO/SSE 生命周期、服务端业务状态机 |
 | CLI | 操作员机器或自动化环境 | 管理用户级/项目级目标环境；当前负责发布包上传；构建 Pi Skill 的单文件入口 | 承担 Server/Client 运行逻辑，或让项目配置直接定义 Server/凭据 |
 | Server | 控制面主机 | 认证、资源 API、Client 连接、Job 调度、状态持久化、实时流代理、更新编排 | 直接在远程机器执行命令或持有远程 PTY |
-| Client | 每台目标机器 | 能力探测、命令与文件操作、PTY、Pi、frpc、状态上报 | 用户身份管理和全局业务状态持久化 |
+| Client | 每台目标机器 | 能力探测、命令与文件操作、PTY、Pi、frpc、P2P 隧道（DataChannel 回环 TCP）、状态上报 | 用户身份管理和全局业务状态持久化 |
 | Launcher | Server/Client 所在主机 | 守护业务进程、准备 Node.js、应用更新、探活和回退 | Job 调度与业务协议处理 |
 | SQLite | Server 主机 | 保存控制面关系数据和状态记录 | 保存终端正文、PTY 或远程进程内存 |
 | Storage Provider | Server 本地或外部存储 | 保存跨机器传输的文件内容和发布构件 | 作为 Job 队列或业务数据库 |

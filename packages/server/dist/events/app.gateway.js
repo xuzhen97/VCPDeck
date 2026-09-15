@@ -17,6 +17,7 @@ const common_1 = require("@nestjs/common");
 const websockets_1 = require("@nestjs/websockets");
 const prisma_service_js_1 = require("../prisma/prisma.service.js");
 const terminal_service_js_1 = require("../terminal/terminal.service.js");
+const tunnel_session_service_js_1 = require("../tunnel/tunnel-session.service.js");
 const node_crypto_1 = require("node:crypto");
 const shared_1 = require("@vcpdeck/shared");
 const shared_2 = require("@vcpdeck/shared");
@@ -44,13 +45,20 @@ function actorOf(client) {
 let AppGateway = class AppGateway {
     prisma;
     terminalService;
+    tunnelSessions;
     server;
-    constructor(prisma, terminalService) {
+    constructor(prisma, terminalService, 
+    // 可选注入：旧两参构造的测试保持兼容
+    tunnelSessions) {
         this.prisma = prisma;
         this.terminalService = terminalService;
+        this.tunnelSessions = tunnelSessions;
     }
     afterInit() {
         this.terminalService.bindBrowserEmitter((socketId, event, payload) => {
+            this.server.to(socketId).emit(event, payload);
+        });
+        this.tunnelSessions?.bindBrowserSender((socketId, event, payload) => {
             this.server.to(socketId).emit(event, payload);
         });
     }
@@ -72,6 +80,7 @@ let AppGateway = class AppGateway {
     }
     async handleDisconnect(client) {
         await this.terminalService.detachBrowserSocket(client.id);
+        this.tunnelSessions?.disconnectBrowser(client.id);
     }
     async authenticate(client) {
         // 1. Cookie session
@@ -204,6 +213,47 @@ let AppGateway = class AppGateway {
             return errorAck(error);
         }
     }
+    // ── P2P 隧道信令（身份来自 handleConnection 的 actor） ──
+    tunnelErrorAck(error) {
+        const e = error;
+        const code = typeof e.code === "string" ? e.code : "TUNNEL_PROTOCOL_INVALID";
+        return { ok: false, error: { code, message: "隧道操作失败" } };
+    }
+    async handleTunnelAttach(client, data) {
+        if (!this.tunnelSessions)
+            return this.tunnelErrorAck({ code: "TUNNEL_UNAVAILABLE" });
+        try {
+            const parsed = (0, shared_2.parseTunnelBrowserAttach)(data);
+            await this.tunnelSessions.attachBrowser(parsed.sessionId, actorOf(client), client.id);
+            return { ok: true, data: undefined };
+        }
+        catch (error) {
+            return this.tunnelErrorAck(error);
+        }
+    }
+    async handleTunnelSignal(client, data) {
+        if (!this.tunnelSessions)
+            return this.tunnelErrorAck({ code: "TUNNEL_UNAVAILABLE" });
+        try {
+            await this.tunnelSessions.signalFromBrowser(client.id, data);
+            return { ok: true, data: undefined };
+        }
+        catch (error) {
+            return this.tunnelErrorAck(error);
+        }
+    }
+    async handleTunnelClose(client, data) {
+        if (!this.tunnelSessions)
+            return this.tunnelErrorAck({ code: "TUNNEL_UNAVAILABLE" });
+        try {
+            const parsed = (0, shared_2.parseTunnelClose)(data);
+            await this.tunnelSessions.close(parsed.sessionId, actorOf(client));
+            return { ok: true, data: { closed: true } };
+        }
+        catch (error) {
+            return this.tunnelErrorAck(error);
+        }
+    }
 };
 exports.AppGateway = AppGateway;
 __decorate([
@@ -266,6 +316,30 @@ __decorate([
     __metadata("design:paramtypes", [Function, Object]),
     __metadata("design:returntype", Promise)
 ], AppGateway.prototype, "handleTerminalResync", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)(shared_1.Events.TUNNEL_ATTACH),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Function, Object]),
+    __metadata("design:returntype", Promise)
+], AppGateway.prototype, "handleTunnelAttach", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)(shared_1.Events.TUNNEL_SIGNAL),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Function, Object]),
+    __metadata("design:returntype", Promise)
+], AppGateway.prototype, "handleTunnelSignal", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)(shared_1.Events.TUNNEL_CLOSE),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Function, Object]),
+    __metadata("design:returntype", Promise)
+], AppGateway.prototype, "handleTunnelClose", null);
 exports.AppGateway = AppGateway = __decorate([
     (0, websockets_1.WebSocketGateway)({
         namespace: "/app",
@@ -273,5 +347,7 @@ exports.AppGateway = AppGateway = __decorate([
     }),
     __param(0, (0, common_1.Inject)(prisma_service_js_1.PrismaService)),
     __param(1, (0, common_1.Inject)(terminal_service_js_1.TerminalService)),
-    __metadata("design:paramtypes", [prisma_service_js_1.PrismaService, terminal_service_js_1.TerminalService])
+    __param(2, (0, common_1.Optional)()),
+    __param(2, (0, common_1.Inject)(tunnel_session_service_js_1.TunnelSessionService)),
+    __metadata("design:paramtypes", [prisma_service_js_1.PrismaService, terminal_service_js_1.TerminalService, tunnel_session_service_js_1.TunnelSessionService])
 ], AppGateway);

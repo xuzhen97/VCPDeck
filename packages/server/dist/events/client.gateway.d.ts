@@ -12,6 +12,7 @@ import { TerminalService } from "../terminal/terminal.service.js";
 import { TerminalRequestBroker } from "../terminal/terminal-request-broker.js";
 import { ReleaseOrchestrator } from "../release/release.orchestrator.js";
 import { GatewayUpdateChannel } from "../release/update-channel.js";
+import { TunnelSessionService } from "../tunnel/tunnel-session.service.js";
 import { type JobProgress } from "@vcpdeck/shared";
 import type { Heartbeat, JobOutput, JobDone, JobCancelled, JobCancelFailed, StatusReport, DispatchPayload, PiEvent, PiResponse, PiStateReport, TerminalClientResponse, TerminalOutputChunk, TerminalExitReport, TerminalStateReport, UpdateReady, UpdateFailed, FrpRuntimeStateAck } from "@vcpdeck/shared";
 export declare class ClientGateway implements OnModuleInit, OnModuleDestroy {
@@ -27,9 +28,10 @@ export declare class ClientGateway implements OnModuleInit, OnModuleDestroy {
     private readonly orchestrator;
     private readonly updateChannel;
     private readonly frpReconciliation?;
+    private readonly tunnelSessions?;
     server: Server;
     private staleClientTimer;
-    constructor(clientService: ClientService, jobService: JobService, fileService: FileService, frpService: FrpService, piRequests: PiRequestBroker, piEvents: PiEventBroker, piRuns: PiRunService, terminalService: TerminalService, terminalBroker: TerminalRequestBroker, orchestrator: ReleaseOrchestrator, updateChannel: GatewayUpdateChannel, frpReconciliation?: FrpReconciliationService | undefined);
+    constructor(clientService: ClientService, jobService: JobService, fileService: FileService, frpService: FrpService, piRequests: PiRequestBroker, piEvents: PiEventBroker, piRuns: PiRunService, terminalService: TerminalService, terminalBroker: TerminalRequestBroker, orchestrator: ReleaseOrchestrator, updateChannel: GatewayUpdateChannel, frpReconciliation?: FrpReconciliationService | undefined, tunnelSessions?: TunnelSessionService | undefined);
     onModuleInit(): void;
     onModuleDestroy(): void;
     afterInit(): void;
@@ -54,6 +56,9 @@ export declare class ClientGateway implements OnModuleInit, OnModuleDestroy {
     handleTerminalOutput(client: Socket, data: TerminalOutputChunk): Promise<void>;
     handleTerminalExit(client: Socket, data: TerminalExitReport): Promise<void>;
     handleTerminalState(client: Socket, data: TerminalStateReport): Promise<import("@vcpdeck/shared").TerminalStateAck | undefined>;
+    handleTunnelSignal(client: Socket, data: unknown): Promise<void>;
+    handleTunnelState(client: Socket, data: unknown): Promise<void>;
+    handleTunnelClose(client: Socket, data: unknown): Promise<void>;
     handleStatusReport(client: Socket, data: StatusReport): Promise<void>;
     handleJobStdout(data: JobOutput): Promise<void>;
     handleJobStderr(data: JobOutput): Promise<void>;

@@ -14,7 +14,8 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseFrpRuntimeStateReport = exports.parseFrpRuntimeStateAck = exports.parseFrpReconcileResult = exports.parseFrpReconcilePayload = exports.parseFrpCapabilityStatus = exports.FRP_RECONCILE_PROTOCOL_VERSION = exports.StorageShareErrorCode = exports.FrpJobType = exports.FrpProtocolError = exports.FRP_ERROR_CODES = exports.FRP_MAPPING_STATUSES = exports.StorageProviderKind = exports.AuthErrorCode = exports.FileErrorCode = exports.parsePrivilegedCapabilityStatus = exports.parseMachineRegister = exports.parseMachineInstallation = exports.PrivilegedCapabilityMode = exports.MachineInstallationMode = exports.JobStatus = exports.JobType = exports.Events = exports.safePiErrorMessage = exports.parsePiAgentState = exports.isPiThinkingLevel = exports.isPiAgentIdle = exports.PI_THINKING_LEVELS = exports.PI_SESSION_JOB_PROTOCOL_VERSION = exports.PI_ERROR_CODES = exports.isReleaseArchiveAvailable = exports.platformFromOs = exports.parseReleaseUploadPartRefresh = exports.parseReleaseUploadCreateInput = exports.parseReleaseUploadComplete = exports.ReleaseUploadErrorCode = exports.ReleaseStatus = exports.ReleaseClientState = exports.parseClientInstallerPlatform = exports.parseClientInstallerNameUpdate = exports.parseClientInstallerConfigUpdate = exports.ClientInstallerErrorCode = exports.VERSION = void 0;
+exports.parseTunnelClose = exports.parseTunnelClientState = exports.parseTunnelClientSignal = exports.parseTunnelBrowserSignal = exports.parseTunnelBrowserAttach = exports.parseP2pTunnelCapabilityStatus = exports.TunnelLimits = exports.P2P_TUNNEL_PROTOCOL_VERSION = exports.parseFrpRuntimeStateReport = exports.parseFrpRuntimeStateAck = exports.parseFrpReconcileResult = exports.parseFrpReconcilePayload = exports.parseFrpCapabilityStatus = exports.FRP_RECONCILE_PROTOCOL_VERSION = exports.StorageShareErrorCode = exports.FrpJobType = exports.FrpProtocolError = exports.FRP_ERROR_CODES = exports.FRP_MAPPING_STATUSES = exports.StorageProviderKind = exports.AuthErrorCode = exports.FileErrorCode = exports.parsePrivilegedCapabilityStatus = exports.parseMachineRegister = exports.parseMachineInstallation = exports.PrivilegedCapabilityMode = exports.MachineInstallationMode = exports.JobStatus = exports.JobType = exports.Events = exports.safePiErrorMessage = exports.parsePiAgentState = exports.isPiThinkingLevel = exports.isPiAgentIdle = exports.PI_THINKING_LEVELS = exports.PI_SESSION_JOB_PROTOCOL_VERSION = exports.PI_ERROR_CODES = exports.isReleaseArchiveAvailable = exports.platformFromOs = exports.parseReleaseUploadPartRefresh = exports.parseReleaseUploadCreateInput = exports.parseReleaseUploadComplete = exports.ReleaseUploadErrorCode = exports.ReleaseStatus = exports.ReleaseClientState = exports.parseClientInstallerPlatform = exports.parseClientInstallerNameUpdate = exports.parseClientInstallerConfigUpdate = exports.ClientInstallerErrorCode = exports.VERSION = void 0;
+exports.parseTunnelSessionCreateRequest = exports.parseTunnelSessionCreated = exports.parseTunnelPrepare = exports.parseTunnelIceServer = exports.parseTunnelConfigUpdate = exports.parseTunnelConfigInfo = void 0;
 exports.parseFrpOperationTimeout = parseFrpOperationTimeout;
 exports.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
 var version_js_1 = require("./version.js");
@@ -90,6 +91,11 @@ exports.Events = {
     SERVER_SHUTDOWN: "server:shutdown",
     FRP_STATE: "frp:state",
     FRP_STATE_ACK: "frp:state-ack",
+    TUNNEL_ATTACH: "tunnel:attach",
+    TUNNEL_PREPARE: "tunnel:prepare",
+    TUNNEL_SIGNAL: "tunnel:signal",
+    TUNNEL_STATE: "tunnel:state",
+    TUNNEL_CLOSE: "tunnel:close",
 };
 // ── Job type ──
 var JobType;
@@ -294,3 +300,19 @@ Object.defineProperty(exports, "parseFrpReconcilePayload", { enumerable: true, g
 Object.defineProperty(exports, "parseFrpReconcileResult", { enumerable: true, get: function () { return frp_runtime_js_1.parseFrpReconcileResult; } });
 Object.defineProperty(exports, "parseFrpRuntimeStateAck", { enumerable: true, get: function () { return frp_runtime_js_1.parseFrpRuntimeStateAck; } });
 Object.defineProperty(exports, "parseFrpRuntimeStateReport", { enumerable: true, get: function () { return frp_runtime_js_1.parseFrpRuntimeStateReport; } });
+// ── P2P TCP Tunnel Protocol v1（ADR-0026） ──
+var tunnel_js_1 = require("./tunnel.js");
+Object.defineProperty(exports, "P2P_TUNNEL_PROTOCOL_VERSION", { enumerable: true, get: function () { return tunnel_js_1.P2P_TUNNEL_PROTOCOL_VERSION; } });
+Object.defineProperty(exports, "TunnelLimits", { enumerable: true, get: function () { return tunnel_js_1.TunnelLimits; } });
+Object.defineProperty(exports, "parseP2pTunnelCapabilityStatus", { enumerable: true, get: function () { return tunnel_js_1.parseP2pTunnelCapabilityStatus; } });
+Object.defineProperty(exports, "parseTunnelBrowserAttach", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelBrowserAttach; } });
+Object.defineProperty(exports, "parseTunnelBrowserSignal", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelBrowserSignal; } });
+Object.defineProperty(exports, "parseTunnelClientSignal", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelClientSignal; } });
+Object.defineProperty(exports, "parseTunnelClientState", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelClientState; } });
+Object.defineProperty(exports, "parseTunnelClose", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelClose; } });
+Object.defineProperty(exports, "parseTunnelConfigInfo", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelConfigInfo; } });
+Object.defineProperty(exports, "parseTunnelConfigUpdate", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelConfigUpdate; } });
+Object.defineProperty(exports, "parseTunnelIceServer", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelIceServer; } });
+Object.defineProperty(exports, "parseTunnelPrepare", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelPrepare; } });
+Object.defineProperty(exports, "parseTunnelSessionCreated", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelSessionCreated; } });
+Object.defineProperty(exports, "parseTunnelSessionCreateRequest", { enumerable: true, get: function () { return tunnel_js_1.parseTunnelSessionCreateRequest; } });

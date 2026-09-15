@@ -2,9 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FRP_RECONCILE_PROTOCOL_VERSION, VERSION } from "@vcpdeck/shared";
+import { FRP_RECONCILE_PROTOCOL_VERSION, P2P_TUNNEL_PROTOCOL_VERSION, VERSION } from "@vcpdeck/shared";
 import { getRegisterInfo } from "./register.js";
 import type {
+	P2pTunnelCapabilityStatus,
 	PiCapabilityStatus,
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
@@ -117,6 +118,26 @@ describe("getRegisterInfo", () => {
 		const info = getRegisterInfo(undefined, undefined);
 		expect(info.capabilities).not.toContain("terminal.pty");
 		expect(info.capabilityDetails?.terminal).toBeUndefined();
+	});
+
+	it("native 后端可用时声明 tunnel.p2p 能力与 details；不可用只上报稳定 code", () => {
+		const ok: P2pTunnelCapabilityStatus = { available: true, protocolVersion: P2P_TUNNEL_PROTOCOL_VERSION };
+		const withP2p = getRegisterInfo(undefined, undefined, undefined, process.env, ok);
+		expect(withP2p.capabilities).toContain("tunnel.p2p");
+		expect(withP2p.capabilityDetails?.p2pTunnel).toEqual(ok);
+
+		const unavailable: P2pTunnelCapabilityStatus = {
+			available: false,
+			protocolVersion: P2P_TUNNEL_PROTOCOL_VERSION,
+			code: "P2P_NATIVE_BACKEND_UNAVAILABLE",
+		};
+		const withBad = getRegisterInfo(undefined, undefined, undefined, process.env, unavailable);
+		expect(withBad.capabilities).not.toContain("tunnel.p2p");
+		expect(withBad.capabilityDetails?.p2pTunnel).toEqual(unavailable);
+
+		const none = getRegisterInfo(undefined, undefined, undefined, process.env);
+		expect(none.capabilities).not.toContain("tunnel.p2p");
+		expect(none.capabilityDetails).not.toHaveProperty("p2pTunnel");
 	});
 
 	it("A2 运行时安全摘要序列化：privileged + installation 上报，无路径或凭据", () => {

@@ -27,6 +27,7 @@ const terminal_service_js_1 = require("../terminal/terminal.service.js");
 const terminal_request_broker_js_1 = require("../terminal/terminal-request-broker.js");
 const release_orchestrator_js_1 = require("../release/release.orchestrator.js");
 const update_channel_js_1 = require("../release/update-channel.js");
+const tunnel_session_service_js_1 = require("../tunnel/tunnel-session.service.js");
 const shared_1 = require("@vcpdeck/shared");
 const client_psk_js_1 = require("../client/client-psk.js");
 const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
@@ -43,6 +44,7 @@ let ClientGateway = class ClientGateway {
     orchestrator;
     updateChannel;
     frpReconciliation;
+    tunnelSessions;
     server;
     staleClientTimer = null;
     constructor(clientService, jobService, fileService, frpService, piRequests, piEvents, piRuns, terminalService, terminalBroker, 
@@ -51,7 +53,9 @@ let ClientGateway = class ClientGateway {
     // 更新事件发送通道（bindEmitters 模式，避免 provider 循环）
     updateChannel, 
     // FRP 恢复编排（可选注入：旧测试两参构造时跳过）
-    frpReconciliation) {
+    frpReconciliation, 
+    // P2P 隧道 Session（可选注入：旧 12 参构造测试保持兼容）
+    tunnelSessions) {
         this.clientService = clientService;
         this.jobService = jobService;
         this.fileService = fileService;
@@ -64,6 +68,7 @@ let ClientGateway = class ClientGateway {
         this.orchestrator = orchestrator;
         this.updateChannel = updateChannel;
         this.frpReconciliation = frpReconciliation;
+        this.tunnelSessions = tunnelSessions;
     }
     onModuleInit() {
         this.staleClientTimer = setInterval(() => {
@@ -85,6 +90,9 @@ let ClientGateway = class ClientGateway {
         });
         this.terminalBroker.bindEmitter((socketId, request) => {
             this.server.to(socketId).emit(shared_1.Events.TERMINAL_REQUEST, request);
+        });
+        this.tunnelSessions?.bindClientSender((socketId, event, payload) => {
+            this.server.to(socketId).emit(event, payload);
         });
         this.updateChannel.bindEmitters({
             sendUpdateRequest: (clientId, request) => {
@@ -131,6 +139,7 @@ let ClientGateway = class ClientGateway {
         // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
         this.piRequests.disconnect(socketId);
         this.terminalBroker.disconnect(socketId);
+        this.tunnelSessions?.disconnectClient(clientId, socketId);
         // FRP 恢复周期只回收匹配 socket 的租约（service 内部判断）。
         void this.frpReconciliation?.disconnect(clientId, socketId);
         if (await this.piRuns.disconnectGeneration(clientId, socketId)) {
@@ -297,6 +306,41 @@ let ClientGateway = class ClientGateway {
         catch {
             // 非法报告忽略
             return { acceptedSessionIds: [], closeSessionIds: [] };
+        }
+    }
+    // ── P2P 隧道事件（身份来自 socket 绑定的 clientId；严格解析在 service 内） ──
+    async handleTunnelSignal(client, data) {
+        const clientId = client.data.clientId;
+        if (!clientId || !this.tunnelSessions)
+            return;
+        try {
+            await this.tunnelSessions.signalFromClient(client.id, data);
+        }
+        catch {
+            // 非法信令忽略
+        }
+    }
+    async handleTunnelState(client, data) {
+        const clientId = client.data.clientId;
+        if (!clientId || !this.tunnelSessions)
+            return;
+        try {
+            await this.tunnelSessions.clientState(client.id, data);
+        }
+        catch {
+            // 非法状态忽略
+        }
+    }
+    async handleTunnelClose(client, data) {
+        const clientId = client.data.clientId;
+        if (!clientId || !this.tunnelSessions)
+            return;
+        try {
+            const parsed = (0, shared_1.parseTunnelClose)(data);
+            await this.tunnelSessions.closeFromClient(clientId, client.id, parsed.sessionId);
+        }
+        catch {
+            // 非法消息忽略
         }
     }
     async handleStatusReport(client, data) {
@@ -640,6 +684,30 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], ClientGateway.prototype, "handleTerminalState", null);
 __decorate([
+    (0, websockets_1.SubscribeMessage)(shared_1.Events.TUNNEL_SIGNAL),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Function, Object]),
+    __metadata("design:returntype", Promise)
+], ClientGateway.prototype, "handleTunnelSignal", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)(shared_1.Events.TUNNEL_STATE),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Function, Object]),
+    __metadata("design:returntype", Promise)
+], ClientGateway.prototype, "handleTunnelState", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)(shared_1.Events.TUNNEL_CLOSE),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Function, Object]),
+    __metadata("design:returntype", Promise)
+], ClientGateway.prototype, "handleTunnelClose", null);
+__decorate([
     (0, websockets_1.SubscribeMessage)(shared_1.Events.STATUS_REPORT),
     __param(0, (0, websockets_1.ConnectedSocket)()),
     __param(1, (0, websockets_1.MessageBody)()),
@@ -704,5 +772,7 @@ exports.ClientGateway = ClientGateway = __decorate([
     __param(10, (0, common_1.Inject)((0, common_1.forwardRef)(() => update_channel_js_1.GatewayUpdateChannel))),
     __param(11, (0, common_1.Optional)()),
     __param(11, (0, common_1.Inject)(frp_reconciliation_service_js_1.FrpReconciliationService)),
-    __metadata("design:paramtypes", [client_service_js_1.ClientService, job_service_js_1.JobService, file_service_js_1.FileService, frp_service_js_1.FrpService, pi_request_broker_js_1.PiRequestBroker, pi_event_broker_js_1.PiEventBroker, pi_run_service_js_1.PiRunService, terminal_service_js_1.TerminalService, terminal_request_broker_js_1.TerminalRequestBroker, release_orchestrator_js_1.ReleaseOrchestrator, update_channel_js_1.GatewayUpdateChannel, frp_reconciliation_service_js_1.FrpReconciliationService])
+    __param(12, (0, common_1.Optional)()),
+    __param(12, (0, common_1.Inject)(tunnel_session_service_js_1.TunnelSessionService)),
+    __metadata("design:paramtypes", [client_service_js_1.ClientService, job_service_js_1.JobService, file_service_js_1.FileService, frp_service_js_1.FrpService, pi_request_broker_js_1.PiRequestBroker, pi_event_broker_js_1.PiEventBroker, pi_run_service_js_1.PiRunService, terminal_service_js_1.TerminalService, terminal_request_broker_js_1.TerminalRequestBroker, release_orchestrator_js_1.ReleaseOrchestrator, update_channel_js_1.GatewayUpdateChannel, frp_reconciliation_service_js_1.FrpReconciliationService, tunnel_session_service_js_1.TunnelSessionService])
 ], ClientGateway);

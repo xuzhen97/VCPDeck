@@ -28,6 +28,7 @@ export * from "./terminal.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { PiCapabilityStatus } from "./pi.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
+import type { P2pTunnelCapabilityStatus } from "./tunnel.js";
 // 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
 export type {
 	PiAgentState,
@@ -150,6 +151,11 @@ export const Events = {
 	SERVER_SHUTDOWN: "server:shutdown",
 	FRP_STATE: "frp:state",
 	FRP_STATE_ACK: "frp:state-ack",
+	TUNNEL_ATTACH: "tunnel:attach",
+	TUNNEL_PREPARE: "tunnel:prepare",
+	TUNNEL_SIGNAL: "tunnel:signal",
+	TUNNEL_STATE: "tunnel:state",
+	TUNNEL_CLOSE: "tunnel:close",
 } as const;
 
 // ── Job type ──
@@ -359,6 +365,8 @@ export interface ClientInfo {
 		frp?: FrpCapabilityStatus;
 		/** 可选：非交互特权能力摘要（旧 Client 缺省） */
 		privileged?: PrivilegedCapabilityStatus;
+		/** 可选：P2P 隧道能力摘要（ADR-0026，旧 Client 缺省） */
+		p2pTunnel?: P2pTunnelCapabilityStatus;
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告，不推断为任何模式） */
 	installation?: MachineInstallationStatus;
@@ -1019,3 +1027,36 @@ export type {
 	FrpRuntimeStateReport,
 	FrpRuntimeStatus,
 } from "./frp-runtime.js";
+
+// ── P2P TCP Tunnel Protocol v1（ADR-0026） ──
+export {
+	P2P_TUNNEL_PROTOCOL_VERSION,
+	TunnelLimits,
+	parseP2pTunnelCapabilityStatus,
+	parseTunnelBrowserAttach,
+	parseTunnelBrowserSignal,
+	parseTunnelClientSignal,
+	parseTunnelClientState,
+	parseTunnelClose,
+	parseTunnelConfigInfo,
+	parseTunnelConfigUpdate,
+	parseTunnelIceServer,
+	parseTunnelPrepare,
+	parseTunnelSessionCreated,
+	parseTunnelSessionCreateRequest,
+} from "./tunnel.js";
+export type {
+	P2pTunnelCapabilityStatus,
+	TunnelBrowserAttach,
+	TunnelClose,
+	TunnelClientState,
+	TunnelConfigInfo,
+	TunnelConfigUpdate,
+	TunnelIceCandidate,
+	TunnelIceServer,
+	TunnelPrepare,
+	TunnelSessionCreated,
+	TunnelSessionCreateRequest,
+	TunnelSignal,
+	TunnelSdpDescription,
+} from "./tunnel.js";

@@ -101,6 +101,7 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 - Server 不持久化终端正文、快照、输入和 reconnect token；
 - Server 不持久化 Pi prompt、正文、thinking 和真实 cwd；
 - TerminalAudit 仅记录生命周期；
+- P2P 隧道的 coturn 配置只存 URL/realm；TURN shared secret 仅存 `VCPDECK_TURN_SECRET_FILE` 指向的 `0640` 文件，临时凭据、SDP、candidate 与 HTTP 正文均不落库、不进日志；
 - 错误 message 不得包含 stack、文件内容、Token、签名 URL或原始外部 API 响应；
 - Release 和更新日志只记录版本、状态和安全失败摘要。
 
@@ -180,6 +181,7 @@ Alibaba Release 上传的数据面直接连接 Provider：Server 只签发/刷�
 | FRPS Token / Dashboard 密码 | Server DB、Job payload、Client TOML/FRPS 配置 | 当前明文；受控轮换并重建映射连接 |
 | Storage/OAuth Token | Storage config | 最小权限；撤销后验证状态 |
 | Local signSecret | `StorageBackendConfig.config` | 自动生成后持久化；疑似泄露时轮换，旧 URL 随即失效 |
+| TURN shared secret | `VCPDECK_TURN_SECRET_FILE` 指向的 `root:serverUser` `0640` 文件 | 不进 DB/REST/Web；轮换后旧 24h 临时凭据到期自然失效 |
 
 PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 Client → 更新 Server PSK并重启 → 更新各 Client → 验证注册。
 

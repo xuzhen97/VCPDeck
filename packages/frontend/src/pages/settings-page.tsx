@@ -4,6 +4,7 @@ import { PageHeading } from "@/components/page-heading";
 import { IdentitiesPanel } from "@/pages/identities-panel";
 import { ProfilePanel } from "@/pages/profile-panel";
 import { TokensPanel } from "@/pages/tokens-panel";
+import { TunnelSettingsPanel } from "@/pages/tunnel-settings-panel";
 
 export function SettingsPage() {
 	const { identity } = useAuth();
@@ -11,7 +12,7 @@ export function SettingsPage() {
 	const section = location.pathname.split("/")[2] || "profile";
 	if (section === "identities" && !identity?.isAdmin)
 		return <Navigate to="/settings/profile" replace />;
-	if (!["profile", "tokens", "identities"].includes(section))
+	if (!["profile", "tokens", "identities", "network"].includes(section))
 		return <Navigate to="/settings/profile" replace />;
 	return (
 		<div className="space-y-6">
@@ -32,6 +33,9 @@ export function SettingsPage() {
 				<NavLink className="vcpdeck-nav-link" to="/settings/tokens">
 					Token
 				</NavLink>
+				<NavLink className="vcpdeck-nav-link" to="/settings/network">
+					网络
+				</NavLink>
 				{identity?.isAdmin && (
 					<NavLink className="vcpdeck-nav-link" to="/settings/identities">
 						身份管理
@@ -40,6 +44,7 @@ export function SettingsPage() {
 			</nav>
 			{section === "profile" && <ProfilePanel />}
 			{section === "tokens" && <TokensPanel />}
+			{section === "network" && <TunnelSettingsPanel />}
 			{section === "identities" && identity?.isAdmin && <IdentitiesPanel />}
 		</div>
 	);
