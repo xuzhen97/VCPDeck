@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- 修复 Server 在 Client REST 能力投影中遗漏 `p2pTunnel`，导致 Web 将已上报 `tunnel.p2p` v1 的 Client 误判为不支持 P2P 隧道的问题。
+
 ## [0.7.0] - 2026-09-15
 
 ### Added

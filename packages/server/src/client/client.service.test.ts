@@ -437,6 +437,25 @@ describe("ClientService listOnline", () => {
 		});
 	});
 
+	it("listOnline 安全投影 p2pTunnel capability 详情（protocol v1）", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			{
+				...clientRow,
+				capabilityDetails: JSON.stringify({
+					p2pTunnel: { available: true, protocolVersion: 1 },
+				}),
+			},
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+
+		const [client] = await service.listOnline();
+		expect(client?.capabilityDetails.p2pTunnel).toEqual({
+			available: true,
+			protocolVersion: 1,
+		});
+	});
+
 	it("frp 能力详情损坏时省略 frp 字段但保留其余详情", async () => {
 		const findMany = vi.fn().mockResolvedValue([
 			{
