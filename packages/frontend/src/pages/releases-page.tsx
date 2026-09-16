@@ -15,6 +15,7 @@ import { StatusChip } from "@/components/status-chip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Drawer } from "@/components/ui/drawer";
+import { upgradeReasonLabel } from "@/lib/utils";
 import { ReleaseCleanupCard } from "./release-cleanup-card.js";
 
 function releaseSizeSummary(release: ReleaseInfo): string {
@@ -356,6 +357,45 @@ export function ReleasesPage() {
 	);
 }
 
+/**
+ * 系统级部署合规摘要（ADR-0027）：全部 Client（含离线）按最后有效摘要判定，
+ * 与业务 Release 版本无关；只列出需要人工升级的机器。
+ */
+function InstallationCompliance({ config }: { config: ClientInstallerConfigInfo | undefined }) {
+	const migration = config?.migration;
+	if (!migration) return null;
+	return (
+		<div className="space-y-2 rounded-md border border-border/60 p-3">
+			<p className="text-sm font-medium">
+				系统级部署 {migration.compliantCount} 台 · 需要人工升级{" "}
+				{migration.needsUpgradeCount} 台
+			</p>
+			{migration.clients.length === 0 ? (
+				<p className="text-xs text-muted-foreground">
+					所有 Client 均为系统级部署，无需人工迁移。
+				</p>
+			) : (
+				<ul className="space-y-1 text-xs">
+					{migration.clients.map((entry) => (
+						<li key={entry.clientId} className="flex flex-wrap items-center gap-2">
+							<span className="font-medium">{entry.name}</span>
+							<span className="text-muted-foreground">· {entry.os}</span>
+							<StatusChip
+								label={entry.online ? "在线" : "离线"}
+								tone={entry.online ? "success" : "neutral"}
+							/>
+							<StatusChip
+								label={`需要人工升级：${upgradeReasonLabel(entry.reason)}`}
+								tone="warning"
+							/>
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+}
+
 function InstallerCard({
 	config,
 	loading,
@@ -388,7 +428,7 @@ function InstallerCard({
 					<div>
 						<CardTitle>Client 一键安装</CardTitle>
 						<p className="mt-1 text-sm text-muted-foreground">
-							PM2 只守护 Launcher；Windows 登录后自启，Linux 随 systemd 启动。
+							Windows SYSTEM 开机任务，Linux systemd 系统服务；两者均在用户登录前启动。
 						</p>
 					</div>
 					<Button
@@ -421,13 +461,17 @@ function InstallerCard({
 						· Linux {config?.platforms["linux-x64"].available ? "可用" : "不可用"}
 					</span>
 				</div>
+				<InstallationCompliance config={config} />
 				{[
-					["Windows PowerShell 5.1+", windowsCommand],
-					["Linux Bash", linuxCommand],
-				].map(([label, command]) => (
+					["Windows PowerShell 5.1+", windowsCommand, "需在已提升管理员 PowerShell 执行，脚本不申请 UAC"],
+					["Linux Bash", linuxCommand, "普通用户可运行，但必须可完成 sudo 认证"],
+				].map(([label, command, hint]) => (
 					<div key={label} className="space-y-2">
 						<div className="flex items-center justify-between gap-2">
-							<p className="text-sm font-medium">{label}</p>
+							<div>
+								<p className="text-sm font-medium">{label}</p>
+								<p className="text-xs text-muted-foreground">{hint}</p>
+							</div>
 							<Button size="sm" variant="outline" onClick={() => void copy(command)}>
 								复制命令
 							</Button>
@@ -447,7 +491,7 @@ function InstallerCard({
 			<CardHeader>
 				<CardTitle>Client 一键卸载</CardTitle>
 				<p className="mt-1 text-sm text-muted-foreground">
-					只清理本机 Client、PM2 Launcher 和对应自启配置，不影响 Server 数据、Client ID、缓存或其他 PM2 应用。
+					只清理本机 Client、系统服务与对应自启配置，不影响 Server 数据、Client ID、缓存或其他应用。
 				</p>
 			</CardHeader>
 			<CardContent className="space-y-4">

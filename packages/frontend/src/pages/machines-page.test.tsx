@@ -128,11 +128,11 @@ describe("MachinesPage", () => {
 	});
 
 	it("displays root-equivalent risk and installation mode from capability details", async () => {
-		const privileged = (mode: "sudo-all" | "unavailable") => ({
-			available: mode === "sudo-all",
+		const privileged = (mode: "sudo-all" | "unavailable" | "windows-system") => ({
+			available: mode !== "unavailable",
 			mode,
-			nonInteractive: mode === "sudo-all",
-			runAsUser: "vcpdeck",
+			nonInteractive: mode !== "unavailable",
+			runAsUser: mode === "windows-system" ? "SYSTEM" : "vcpdeck",
 		});
 		const base = {
 			name: "host",
@@ -147,35 +147,43 @@ describe("MachinesPage", () => {
 			memPercent: null,
 			lastHeartbeatAt: null as string | null,
 		};
-		const make = (clientId: string, capabilityDetails: ClientInfo["capabilityDetails"], installation?: ClientInfo["installation"]) =>
-			({ clientId, capabilities: ["exec"], ...base, capabilityDetails, installation }) satisfies ClientInfo;
+		const make = (
+			clientId: string,
+			os: string,
+			capabilityDetails: ClientInfo["capabilityDetails"],
+			installation?: ClientInfo["installation"],
+		) =>
+			({
+				clientId,
+				capabilities: ["exec"],
+				...base,
+				os,
+				capabilityDetails,
+				installation,
+			}) satisfies ClientInfo;
 
-			renderPage(async () => [
-				make(
-					"linux-sudo",
-					{ privileged: privileged("sudo-all") },
-					{ mode: "systemd-root-equivalent" },
-				),
-				make("linux-nosudo", { privileged: privileged("unavailable") }),
-				make(
-					"legacy",
-					{ privileged: privileged("sudo-all") },
-					{ mode: "legacy-pm2" },
-				),
-				make("unreported", {}),
-			]);
+		// 合规矩阵（ADR-0027）：业务版本不参与判定。
+		renderPage(async () => [
+			make("win-new", "win32 10.0", { privileged: privileged("windows-system") }, { mode: "windows-system-task" }),
+			make("linux-new", "linux 6.8", { privileged: privileged("sudo-all") }, { mode: "systemd-root-equivalent" }),
+			make("legacy", "win32 10.0", { privileged: privileged("sudo-all") }, { mode: "legacy-pm2" }),
+			make("unknown", "linux 6.8", {}, undefined),
+			make("drift", "linux 6.8", { privileged: privileged("unavailable") }, { mode: "systemd-root-equivalent" }),
+			make("mismatch", "win32 10.0", { privileged: privileged("sudo-all") }, { mode: "systemd-root-equivalent" }),
+		]);
 
-		// root 等价风险（sudo-all）。
-		const sudoChips = await screen.findAllByText("root 等价特权");
-		expect(sudoChips.length).toBeGreaterThanOrEqual(1);
-		// 无 sudo 能力。
-		expect(await screen.findByText("root 等价特权不可用")).toBeVisible();
-		// 系统级部署与旧版 PM2 安装模式。
-		expect(await screen.findByText("系统级部署")).toBeVisible();
-		expect(screen.getAllByText("旧版 PM2").length).toBeGreaterThanOrEqual(1);
-		// 未报告（旧版 Client / 无字段）。
+		// 合规：Windows SYSTEM 与 Linux systemd 均显示系统级部署。
+		expect((await screen.findAllByText("系统级部署")).length).toBe(2);
+		// 不合规：稳定原因文案。
+		expect(await screen.findByText("需要人工升级：旧版 PM2")).toBeVisible();
+		expect(screen.getByText("需要人工升级：安装模式未报告")).toBeVisible();
+		expect(screen.getByText("需要人工升级：特权状态异常")).toBeVisible();
+		expect(screen.getByText("需要人工升级：安装状态异常")).toBeVisible();
+		// 原 root 等价风险 chip 保留，并区分 Windows SYSTEM。
+		expect(screen.getAllByText("root 等价特权").length).toBeGreaterThanOrEqual(1);
+		expect(await screen.findByText("SYSTEM 特权")).toBeVisible();
+		// 未报告特权（旧 Client）。
 		expect(await screen.findByText("特权未报告")).toBeVisible();
-		expect(screen.getAllByText("安装模式未报告").length).toBeGreaterThanOrEqual(1);
 	});
 
 	it("renders unified Windows, Linux and macOS SVG icons", async () => {

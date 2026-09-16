@@ -21,6 +21,23 @@ export interface ClientInstallerPlatformStatus {
 	reasonCode?: ClientInstallerErrorCode;
 }
 
+/** 发版页展示的单台 Client 系统级部署迁移状态（不含 capability 原文与凭据，ADR-0027）。 */
+export interface ClientInstallerMigrationEntry {
+	clientId: string;
+	name: string;
+	os: string;
+	online: boolean;
+	/** 不合规的稳定原因；数组只包含需要人工升级的 Client */
+	reason: import("./machine-register.js").ClientInstallationComplianceReason;
+}
+
+/** 发版页安装合规汇总：全部 Client（含离线）按最后有效摘要判定。 */
+export interface ClientInstallerMigrationSummary {
+	compliantCount: number;
+	needsUpgradeCount: number;
+	clients: ClientInstallerMigrationEntry[];
+}
+
 /** 认证用户读取的一键安装配置。 */
 export interface ClientInstallerConfigInfo {
 	enabled: boolean;
@@ -30,6 +47,8 @@ export interface ClientInstallerConfigInfo {
 	serverVersion: string;
 	releaseReady: boolean;
 	platforms: Record<ClientInstallerPlatform, ClientInstallerPlatformStatus>;
+	/** 系统级部署迁移汇总（ADR-0027）；独立于业务 Release 版本 */
+	migration: ClientInstallerMigrationSummary;
 }
 
 /** 安装引导器所需的公开、非秘密信息。 */
@@ -71,11 +90,13 @@ export interface ClientInstallerClientStatus {
 	installationMode: MachineInstallationMode | null;
 	/** 非交互 sudo 是否可用（旧 Client 未报告时为 null） */
 	nonInteractiveSudo: boolean | null;
+	/** 特权模式（旧 Client 未报告时为 null）：sudo-all / windows-system / unavailable */
+	privilegedMode: PrivilegedCapabilityMode | null;
 	connectedAt: string | null;
 	lastHeartbeatAt: string | null;
 }
 
-import type { MachineInstallationMode } from "./machine-register.js";
+import type { MachineInstallationMode, PrivilegedCapabilityMode } from "./machine-register.js";
 
 /** 严格解析安装平台。 */
 export function parseClientInstallerPlatform(

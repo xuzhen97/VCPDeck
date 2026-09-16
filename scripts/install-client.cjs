@@ -18,6 +18,11 @@ const { createInterface } = require("node:readline/promises");
 const PM2_NAME = "vcpdeck-client-launcher";
 const INSTALL_STATE_VERSION = 1;
 
+// ADR-0027：Windows 固定机器级安装根与 SYSTEM 开机任务名。
+const WINDOWS_APP_DIR = "C:\\ProgramData\\VCPDeck\\Client";
+const WINDOWS_CLIENT_TASK = "\\VCPDeck\\Client";
+const WINDOWS_SYSTEM_SID = "S-1-5-18"; // NT AUTHORITY\SYSTEM
+
 function parseUrl(value, label, base) {
 	try {
 		return base ? new URL(value, base) : new URL(value);
@@ -138,14 +143,24 @@ async function askConfiguration(defaultName, defaultDir) {
 	}
 }
 
-function ensureClientId() {
-	const path = join(homedir(), ".vcpdeck", "client-id");
-	mkdirSync(dirname(path), { recursive: true });
+/** 读取/生成 Client ID；path 缺省为旧用户级路径，迁移后权威切到 ProgramData 固定位置。 */
+function ensureClientId(path = join(homedir(), ".vcpdeck", "client-id"), dryRunRoot = null) {
+	if (dryRunRoot) {
+		const dryPath = join(dryRunRoot, "client-id");
+		let id = "";
+		try {
+			id = readFileSync(dryPath, "utf8").trim();
+		} catch {}
+		if (!id) id = randomUUID();
+		return id;
+	}
+	const target = path;
+	mkdirSync(dirname(target), { recursive: true });
 	let id = "";
-	if (existsSync(path)) id = readFileSync(path, "utf8").trim();
+	if (existsSync(target)) id = readFileSync(target, "utf8").trim();
 	if (!id) {
 		id = randomUUID();
-		writeFileSync(path, id, { mode: 0o600 });
+		writeFileSync(target, id, { mode: 0o600 });
 	}
 	return id;
 }
@@ -477,6 +492,21 @@ function registerStartupTask(
 	return "windows-logon-task(via-uac)";
 }
 
+/** bootstrap 预探测提升状态（whoami 无 shell 调用），供 Node 侧独立复核；探测失败即非合规。 */
+function readWindowsElevationIdentity() {
+	try {
+		const whoami = join(process.env.SystemRoot || "C:\\Windows", "System32", "whoami.exe");
+		const user = spawnSync(whoami, ["/user", "/fo", "csv", "/nh"], { encoding: "utf8" });
+		const groups = spawnSync(whoami, ["/groups", "/fo", "csv", "/nh"], { encoding: "utf8" });
+		return {
+			administrator: user.status === 0 && groups.status === 0 && /S-1-5-32-544/i.test(groups.stdout || ""),
+			highIntegrity: /S-1-16-(12288|16384)/i.test(groups.stdout || ""),
+		};
+	} catch {
+		return { administrator: false, highIntegrity: false };
+	}
+}
+
 function windowsIdentity() {
 	const whoami = join(process.env.SystemRoot || "C:\\Windows", "System32", "whoami.exe");
 	const user = spawnSync(whoami, ["/user", "/fo", "csv", "/nh"], { encoding: "utf8" });
@@ -602,12 +632,383 @@ function pm2Process(pm2) {
 	}
 }
 
-async function waitForClient(origin, clientId, psk, version, name, timeoutMs) {
+/**
+ * 校验当前 PowerShell 已提升：必须同时是本机 Administrators 成员且持有高完整性令牌；
+ * 不满足立即失败，脚本不申请 UAC（ADR-0027）。identity 由 bootstrap 预探测后传入，
+ * 也可注入 probe 供测试使用。
+ */
+function assertElevatedWindowsIdentity(identity) {
+	if (identity && identity.__fromProbe) {
+		const probe = identity.probe || (() => ({ administrator: false, highIntegrity: false }));
+		identity = probe();
+	}
+	if (!identity || identity.administrator !== true || identity.highIntegrity !== true) {
+		throw new Error("请以管理员身份运行 PowerShell 后重跑本命令（脚本不申请 UAC）");
+	}
+}
+
+/** 生成固定 SYSTEM 开机任务 XML：S-1-5-18、ServiceAccount、Highest、BootTrigger、失败重启 1 分钟×999。 */
+function buildWindowsSystemTaskXml(definition) {
+	const nodePath = String(definition.nodePath).replace(/&/g, "&amp;");
+	const launcherPath = String(definition.launcherPath).replace(/&/g, "&amp;");
+	const appDir = String(definition.appDir).replace(/&/g, "&amp;");
+	return `<?xml version="1.0" encoding="UTF-16"?>
+<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>VCPDeck Client Launcher (system, ADR-0027)</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+      <StartWhenAvailable>true</StartWhenAvailable>
+    </BootTrigger>
+    <TimeTrigger>
+      <Enabled>true</Enabled>
+      <StartBoundary>2026-01-01T00:00:00</StartBoundary>
+      <DelayedTriggerDuration>PT15S</DelayedTriggerDuration>
+      <StartWhenAvailable>true</StartWhenAvailable>
+    </TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="VCPDeckSystem">
+      <UserId>${WINDOWS_SYSTEM_SID}</UserId>
+      <LogonType>ServiceAccount</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Attempts>999</Attempts>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="VCPDeckSystem">
+    <Exec>
+      <Command>${nodePath}</Command>
+      <Arguments>"${launcherPath}"</Arguments>
+      <WorkingDirectory>${appDir}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+`;
+}
+
+/** 判断既有 SYSTEM 任务：null→missing；匹配→configured；设置漂移→repair；指向他处→conflict。 */
+function classifyWindowsSystemTask(xml, expected) {
+	if (!xml || !String(xml).includes(`<UserId>${WINDOWS_SYSTEM_SID}</UserId>`)) {
+		return xml ? "conflict" : "missing";
+	}
+	const source = String(xml);
+	const normalized = source.replace(/\\/g, "/").toLowerCase();
+	const appDir = String(expected.appDir).replace(/\\/g, "/").toLowerCase();
+	const workingDirectory = source.match(/<WorkingDirectory>([\s\S]*?)<\/WorkingDirectory>/i)?.[1]
+		?.replace(/\\/g, "/")
+		.toLowerCase();
+	const command = source.match(/<Command>([\s\S]*?)<\/Command>/i)?.[1]
+		?.replace(/\\/g, "/")
+		.trim()
+		.toLowerCase();
+	if (workingDirectory && workingDirectory !== appDir) return "conflict";
+	if (command && !command.includes(appDir)) return "conflict";
+	const required = [expected.nodePath, expected.launcherPath, expected.appDir]
+		.map((value) => String(value).replace(/\\/g, "/").toLowerCase());
+	if (!required.every((value) => normalized.includes(value))) return "conflict";
+	const settingsOk =
+		/<logontype>\s*serviceaccount\s*<\/logontype>/i.test(source) &&
+		/<runlevel>\s*highestavailable\s*<\/runlevel>/i.test(source) &&
+		/<boottrigger>/i.test(source) &&
+		/<delay>\s*pt15s\s*<\/delay>|<delayedtriggerduration>\s*pt15s\s*<\/delayedtriggerduration>/i.test(source) &&
+		/<disallowstartifonbatteries>\s*false\s*<\/disallowstartifonbatteries>/i.test(source) &&
+		/<stopifgoingonbatteries>\s*false\s*<\/stopifgoingonbatteries>/i.test(source) &&
+		/<startwhenavailable>\s*true\s*<\/startwhenavailable>/i.test(source) &&
+		/<multipleinstancespolicy>\s*ignorenew\s*<\/multipleinstancespolicy>/i.test(source) &&
+		/<executiontimelimit>\s*pt0s\s*<\/executiontimelimit>/i.test(source) &&
+		/<restartonfailure>/i.test(source);
+	return settingsOk ? "configured" : "repair";
+}
+
+/** 发现机器级 Git（机器 PATH、App Paths、标准安装目录）；用户私有 Git 视为不可用（ADR-0027）。 */
+function findMachineGit(env = {}) {
+	const exists = env.exists || ((p) => existsSync(p));
+	const machinePath = (env.env?.PATH || process.env.PATH || "").split(delimiter).filter(Boolean);
+	for (const dir of machinePath) {
+		const candidate = join(dir, "git.exe");
+		if (/^([a-z]:[\/\\]|\\\\|[a-z]:[\/\\]\\ini)/i.test(dir) && exists(candidate)) return candidate;
+	}
+	const appPaths = env.appPaths ? env.appPaths() : null;
+	if (appPaths && typeof appPaths === "string" && exists(appPaths)) return appPaths;
+	for (const candidate of [
+		"C:\\Program Files\\Git\\cmd\\git.exe",
+		"C:\\Program Files (x86)\\Git\\cmd\\git.exe",
+	]) {
+		if (exists(candidate)) return candidate;
+	}
+	return null;
+}
+
+/** Git 为可选工具：缺失时尝试机器级 winget 安装，任何失败只警告、不阻断 Client 安装。 */
+function ensureOptionalMachineGit(env = {}) {
+	const git = env.findGit ? env.findGit() : findMachineGit(env);
+	if (git) return { git, warning: null };
+	const spawn = env.spawn || ((command, args) => spawnSync(command, args, { encoding: "utf8", windowsHide: true }));
+	let result;
+	try {
+		result = spawn("winget.exe", [
+			"install",
+			"--id",
+			"Git.Git",
+			"--exact",
+			"--scope",
+			"machine",
+			"--silent",
+			"--accept-package-agreements",
+			"--accept-source-agreements",
+		]);
+	} catch {
+		return { git: null, warning: "未找到 winget，跳过机器级 Git 安装（不影响 Client 核心能力）" };
+	}
+	if (!result || result.status !== 0) {
+		return { git: null, warning: "机器级 Git 安装失败（不影响 Client 核心能力，可稍后手动安装）" };
+	}
+	const installed = env.findGit ? env.findGit() : findMachineGit(env);
+	return installed ? { git: installed, warning: null } : { git: null, warning: "winget 报告成功但 Git 校验失败（不影响 Client 核心能力）" };
+}
+
+/** 探测当前提升管理员的旧用户安装来源；只接受单一、路径已确认、同 Server 的来源（fail closed）。 */
+function discoverLegacyWindowsInstall(adapter, serverOrigin) {
+	// home 可注入（测试用）；生产取真实用户 HOME，旧来源仅限当前提升管理员所属 Profile。
+	const home = typeof adapter.home === "string" && adapter.home ? adapter.home : homedir();
+	const statePath = join(home, ".vcpdeck", "client-install.json");
+	const state = adapter.dryRun ? adapter.readJson(statePath) : safeReadJson(statePath);
+	if (!state || typeof state !== "object") return null;
+	const appDirRaw = typeof state.appDir === "string" ? state.appDir : null;
+	const appDir = appDirRaw ? resolve(appDirRaw) : null;
+	const env = appDir ? adapter.readEnv(join(appDir, "launcher.env")) : {};
+	const expectedLauncher = appDir ? resolve(join(appDir, "dist", "main.js")) : null;
+	const origin = normalizeOrigin(env.VCPDECK_SERVER || state.serverOrigin);
+	const entries = [];
+	try {
+		const list = JSON.parse(adapter.pm2(["jlist"])?.stdout || "[]");
+		if (Array.isArray(list)) {
+			for (const entry of list) {
+				if (entry?.name === PM2_NAME) entries.push(entry);
+			}
+		}
+	} catch {
+		throw new Error("无法读取 PM2 进程列表，拒绝迁移");
+	}
+	if (!origin || origin !== serverOrigin) {
+		throw new Error(`旧 Client 指向其他 Server（${origin || "未知"}），拒绝迁移`);
+	}
+	const appDirNormalized = (appDir || "").replace(/\\/g, "/");
+	const homeBase = join(home, ".vcpdeck").replace(/\\/g, "/");
+	if (!appDir || !appDirNormalized.startsWith(`${homeBase}/`)) {
+		throw new Error("旧安装目录不在用户 .vcpdeck 下，拒绝迁移");
+	}
+	if (!state.clientId || !/^[0-9a-f-]{36}$/i.test(state.clientId)) {
+		throw new Error("旧 Client ID 缺失或非法，拒绝迁移");
+	}
+	if (entries.length > 1) throw new Error("发现多个同名 VCPDeck PM2 进程，拒绝迁移");
+	if (entries.length === 1) {
+		const actual = resolve(entries[0]?.pm2_env?.pm_exec_path || "");
+		if (!expectedLauncher || actual !== expectedLauncher) {
+			throw new Error(`PM2 中同名进程指向未知目录（${actual || "未知"}），拒绝迁移`);
+		}
+	}
+	return {
+		statePath,
+		appDir,
+		clientId: state.clientId,
+		displayName: typeof state.displayName === "string" ? state.displayName : null,
+		hasProcess: entries.length === 1,
+		serverOrigin: origin,
+	};
+}
+
+function safeReadJson(path) {
+	try {
+		return JSON.parse(readFileSync(path, "utf8"));
+	} catch {
+		return null;
+	}
+}
+
+/** 清理已确认的旧 VCPDeck PM2 现场；不删除用户 PM2/Node/个人文件（ADR-0027）。 */
+function cleanLegacyWindowsInstall(adapter, source) {
+	const record = (name) => adapter.records.push(name);
+	record("stop-old-launcher");
+	if (source.hasProcess) {
+		adapter.pm2(["delete", PM2_NAME]);
+		record("delete-old-pm2-entry");
+		adapter.pm2(["save"]);
+		record("save-remaining-pm2-apps");
+		const remaining = safeReadJsonSafePm2(adapter);
+		if (!remaining) {
+			const removedTask = adapter.spawn("schtasks.exe", ["/Delete", "/TN", "VCPDeck PM2 Startup", "/F"]);
+			if (removedTask.status === 0) record("remove-old-startup");
+		}
+	} else if (adapter.dryRun === false) {
+		// 非 dry-run 且无进程：只删除已确认的旧任务，其他 PM2 应用保留。
+		const taskXml = readWindowsTaskXml("VCPDeck PM2 Startup");
+		if (taskXml === null) {
+			const existing = adapter.spawn("schtasks.exe", ["/Query", "/TN", "VCPDeck PM2 Startup"]);
+			if (existing.status === 0) throw new Error("无法读取旧计划任务定义，拒绝删除");
+		} else if (taskXml.replace(/\\/g, "/").toLowerCase().includes(source.appDir.replace(/\\/g, "/").toLowerCase())) {
+			adapter.spawn("schtasks.exe", ["/Delete", "/TN", "VCPDeck PM2 Startup", "/F"]);
+			record("remove-old-startup");
+		}
+	}
+	record("remove-old-app-dir");
+	if (!adapter.dryRun) {
+		rmSync(source.appDir, { recursive: true, force: true });
+		try {
+			rmSync(source.statePath, { force: true });
+		} catch {
+			// 状态文件可保留：身份权威已切到 ProgramData。
+		}
+	}
+}
+
+function safeReadJsonSafePm2(adapter) {
+	try {
+		const list = JSON.parse(adapter.pm2(["jlist"])?.stdout || "[]");
+		if (!Array.isArray(list)) return [];
+		return list.filter((entry) => entry?.name !== PM2_NAME);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Windows 一键安装（ADR-0027）：先准备并校验全部材料，再清理旧 PM2 现场，
+ * 最后安装 SYSTEM 开机任务并验收 Client 真实 SYSTEM 身份。
+ * adapter 可注入（dryRun 时不真实落盘/执行命令），供测试验证顺序与 fail closed。
+ */
+async function runWindowsInstall(options) {
+		const { adapter, args, bootstrap, preflight, fetchJson: fetchJsonImpl, download: downloadImpl } = options;
+		const dryRun = adapter?.dryRun === true;
+		const fetchJsonCall = fetchJsonImpl || fetchJson;
+		const downloadCall = downloadImpl || download;
+		const record = (name) => adapter?.records?.push(name);
+
+		// 阶段 1：旧来源校验（单一、同 Server、路径已确认），失败即停止。
+		record("validate-source");
+		const legacy = discoverLegacyWindowsInstall(adapter, args.serverOrigin);
+
+		// 阶段 2：固定机器级布局与私有 Node 就绪。
+		adapter.mkdir(WINDOWS_APP_DIR);
+		record("prepare-runtime");
+		const nodeExe = join(WINDOWS_APP_DIR, "runtime", "node", "node.exe");
+		if (!adapter.probe(nodeExe)) throw new Error("ProgramData 私有 Node.js 未就绪，请重跑安装命令");
+
+		// 阶段 3：下载并校验 Release 与低层安装器（清理前全部材料就绪）。
+		record("prepare-archive");
+		const cacheRoot = args["cache-dir"] || join(homedir(), ".vcpdeck", "cache");
+		const cache = join(cacheRoot, `vcpdeck-${bootstrap.releaseVersion}-win-x64.zip`);
+		if (!adapter.probe(cache)) {
+			await downloadCall(
+				new URL(bootstrap.archiveUrl, args.serverOrigin).href,
+				cache,
+				bootstrap.archiveSha256,
+			);
+		}
+		const lowInstaller = join(cacheRoot, "install.cjs");
+		if (!adapter.probe(lowInstaller)) {
+			await downloadCall(
+				new URL(preflight.lowLevelInstallerUrl, args.serverOrigin).href,
+				lowInstaller,
+				preflight.lowLevelInstallerSha256,
+			);
+		}
+		record("validate-archive");
+
+		// 阶段 4：清理旧 PM2 现场（材料全部就绪后）。
+		if (legacy) cleanLegacyWindowsInstall(adapter, legacy);
+
+		// 阶段 5：全新系统级安装（固定布局，敏感文件收紧 ACL）。
+		record("install-system-layout");
+		const displayName = (typeof args.name === "string" && args.name) || legacy?.displayName || hostname();
+		const clientId = legacy?.clientId || ensureClientId(join(WINDOWS_APP_DIR, "client-id"), dryRun ? cacheRoot : null);
+		const envContent = [
+			"# 由 VCPDeck Client 一键安装器生成（敏感值请妥善保管）",
+			`VCPDECK_APP_DIR=${WINDOWS_APP_DIR}`,
+			"VCPDECK_ARTIFACT=client",
+			`VCPDECK_SERVER=${args.serverOrigin}`,
+			`VCPDECK_PSK=${bootstrap.psk}`,
+			`VCPDECK_CLIENT_ID=${clientId}`,
+			"VCPDECK_INSTALLATION_MODE=windows-system-task",
+			"",
+		].join("\n");
+		const envPath = join(WINDOWS_APP_DIR, "launcher.env");
+		if (dryRun) adapter.writeFile(envContent, envPath);
+		else writeFileSync(envPath, envContent, { mode: 0o600 });
+		adapter.icacls(envPath);
+		adapter.icacls(WINDOWS_APP_DIR);
+		const state = {
+			version: INSTALL_STATE_VERSION,
+			serverOrigin: args.serverOrigin,
+			appDir: WINDOWS_APP_DIR,
+			displayName,
+			clientId,
+			stage: "install",
+			releaseVersion: bootstrap.releaseVersion,
+			startup: `scheduled-task:${WINDOWS_CLIENT_TASK}`,
+		};
+		const statePath = join(WINDOWS_APP_DIR, "install-state.json");
+		if (dryRun) adapter.writeFile(JSON.stringify(state), statePath);
+		else writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+		// 阶段 6：注册并启动 SYSTEM 开机任务。
+		record("register-system-task");
+		const taskXml = buildWindowsSystemTaskXml({
+			nodePath: nodeExe,
+			launcherPath: join(WINDOWS_APP_DIR, "dist", "main.js"),
+			appDir: WINDOWS_APP_DIR,
+		});
+		const xmlPath = join(WINDOWS_APP_DIR, "client-task.xml");
+		if (dryRun) adapter.writeFile(taskXml, xmlPath);
+		else writeFileSync(xmlPath, taskXml);
+		const create = adapter.spawn("schtasks.exe", ["/Create", "/XML", xmlPath, "/TN", WINDOWS_CLIENT_TASK, "/F"]);
+		if (create.status !== 0) throw new Error(`SYSTEM 开机任务注册失败：${create.stderr || `退出码 ${create.status}`}`);
+		adapter.spawn("schtasks.exe", ["/Query", "/TN", WINDOWS_CLIENT_TASK]);
+		adapter.spawn("schtasks.exe", ["/Run", "/TN", WINDOWS_CLIENT_TASK]);
+		record("start-system-task");
+
+		// 阶段 7：验收 Client 以新安装模式与 SYSTEM 身份真实上线。
+		record("verify-system-client");
+		const status = await waitForClient(args.serverOrigin, clientId, bootstrap.psk, bootstrap.releaseVersion, displayName, bootstrap.verificationTimeoutMs || 120_000, fetchJsonCall);
+		if (!status || status.installationMode !== "windows-system-task" || status.privilegedMode !== "windows-system") {
+			throw new Error(`Client 未通过系统级验收（安装模式=${status?.installationMode || "未报告"}，特权=${status?.privilegedMode || "未报告"}）`);
+		}
+		state.stage = "done";
+		state.completedAt = new Date().toISOString();
+		if (dryRun) adapter.writeFile(JSON.stringify(state), statePath);
+		else writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+		// Git 为可选机器级工具，失败只警告。
+		const gitResult = ensureOptionalMachineGit({});
+		if (gitResult.warning) console.warn(`[vcpdeck] ${gitResult.warning}`);
+
+		console.log(`\n[vcpdeck] 安装成功: ${displayName} (${clientId})`);
+		console.log(`  版本: ${bootstrap.releaseVersion}`);
+		console.log(`  系统任务: ${WINDOWS_CLIENT_TASK}（NT AUTHORITY\\SYSTEM 开机自启）`);
+		console.log(`  安装根: ${WINDOWS_APP_DIR}`);
+}
+
+async function waitForClient(origin, clientId, psk, version, name, timeoutMs, fetchJsonImpl) {
+	const fetchJsonRef = fetchJsonImpl || fetchJson;
 	const deadline = Date.now() + timeoutMs;
 	let last = null;
 	while (Date.now() < deadline) {
 		try {
-			last = await fetchJson(
+			last = await fetchJsonRef(
 				`${origin}/api/client-installer/clients/${encodeURIComponent(clientId)}/status`,
 				{
 					headers: { "x-vcpdeck-psk": psk },
@@ -621,7 +1022,7 @@ async function waitForClient(origin, clientId, psk, version, name, timeoutMs) {
 				last.capabilitiesReported
 			) {
 				if (last.name !== name) {
-					await fetchJson(
+					await fetchJsonRef(
 						`${origin}/api/client-installer/clients/${encodeURIComponent(clientId)}/name`,
 						{
 							method: "PUT",
@@ -645,7 +1046,58 @@ async function waitForClient(origin, clientId, psk, version, name, timeoutMs) {
 
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
-	if (platform() === "win32") windowsIdentity();
+	if (platform() === "win32") {
+		// ADR-0027：Windows 固定 SYSTEM 开机任务安装路径；不再使用 PM2/登录任务。
+		assertElevatedWindowsIdentity(readWindowsElevationIdentity());
+		const preflight = await fetchJson(
+			`${args.serverOrigin}/api/client-installer/preflight?platform=win-x64`,
+			{ timeoutMs: 60_000 },
+		);
+		const bootstrap = await fetchJson(
+			`${args.serverOrigin}/api/client-installer/bootstrap`,
+			{
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ platform: "win-x64" }),
+				timeoutMs: 60_000,
+			},
+		);
+		const adapter = {
+			dryRun: false,
+			records: [],
+			probe: (p) => existsSync(p),
+			readJson: (p) => safeReadJson(p),
+			readEnv: (p) => readEnv(p),
+			writeFile: (content, p) => writeFileSync(p, content, { mode: 0o600 }),
+			mkdir: (p) => mkdirSync(p, { recursive: true }),
+			icacls: (p) => {
+				execFileSync("icacls.exe", [p, "/inheritance:r", "/grant:S:(A;;GA;;;SY)", "/grant:S:(A;;GA;;;BA)"], {
+					stdio: "inherit",
+				});
+			},
+			spawn: (command, cmdArgs = []) => {
+				const result = spawnSync(command, cmdArgs, { encoding: "utf8", windowsHide: true });
+				return { status: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
+			},
+			pm2: (pm2Args) => {
+				const result = spawnSync(
+					"node",
+					[join(homedir(), ".vcpdeck", "tools", "pm2", "node_modules", "pm2", "bin", "pm2"), ...pm2Args],
+					{ encoding: "utf8", windowsHide: true },
+				);
+				return { status: result.status ?? 1, stdout: result.stdout };
+			},
+		};
+		await runWindowsInstall({
+			adapter,
+			args,
+			bootstrap,
+			preflight,
+			fetchJson,
+			download,
+		});
+		return;
+	}
 	const defaultDir = join(homedir(), ".vcpdeck", "launcher-client");
 	const priorStatePath = join(homedir(), ".vcpdeck", "client-install.json");
 	let priorState = {};
@@ -839,6 +1291,17 @@ if (require.main === module) {
 }
 
 module.exports = {
+	WINDOWS_APP_DIR,
+	WINDOWS_CLIENT_TASK,
+	assertElevatedWindowsIdentity,
+	readWindowsElevationIdentity,
+	buildWindowsSystemTaskXml,
+	classifyWindowsSystemTask,
+	findMachineGit,
+	ensureOptionalMachineGit,
+	discoverLegacyWindowsInstall,
+	cleanLegacyWindowsInstall,
+	runWindowsInstall,
 	parseArgs,
 	readEnv,
 	normalizeOrigin,

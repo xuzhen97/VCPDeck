@@ -209,7 +209,7 @@ pnpm dev:all
 
 访问前端：<http://localhost:5173>。Server API 默认监听 <http://localhost:3001>。
 
-正式发布并完成 Server 自更新后，可在驾驶台 `/releases` 启用 Client 一键安装，复制 Windows PowerShell 或 Linux Bash 固定命令。Linux 新安装使用 A2 systemd 系统级部署；Windows 保留用户私有 Node.js/PM2 与登录自启模型。安装器会等待 Client 以当前 Server 版本完成能力上报。当前支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd；入口默认关闭，安全边界见 [`docs/security.md`](docs/security.md)。
+正式发布并完成 Server 自更新后，可在驾驶台 `/releases` 启用 Client 一键安装，复制 Windows PowerShell 或 Linux Bash 固定命令。Linux 新安装使用 A2 systemd 系统级部署；Windows 新安装固定到 `C:\ProgramData\VCPDeck\Client`，由 `NT AUTHORITY\SYSTEM` 开机任务守护，需在已提升管理员 PowerShell 中执行（不申请 UAC）。安装器会等待 Client 以当前 Server 版本完成能力上报；发版页还会汇总「需要人工升级」的机器（原因与业务版本无关）。当前支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd；入口默认关闭，安全边界见 [`docs/security.md`](docs/security.md)。
 
 ### 启动本地 FRPS 测试实例
 

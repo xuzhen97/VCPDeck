@@ -25,6 +25,28 @@ function release(status = ReleaseStatus.DONE) {
 	};
 }
 
+/** ADR-0027：构造 ClientInfo 形摘要（合规矩阵输入）。 */
+function makeClient(overrides: {
+	id: string;
+	name: string;
+	os: string;
+	online: boolean;
+	installation?: { mode: string };
+	privileged?: { available: boolean; mode: string; nonInteractive: boolean; runAsUser: string };
+} = { id: "c", name: "n", os: "linux 6.8", online: false }) {
+	const capabilityDetails: Record<string, unknown> = {};
+	if (overrides.privileged !== undefined) capabilityDetails.privileged = overrides.privileged;
+	return {
+		clientId: overrides.id,
+		name: overrides.name,
+		hostname: overrides.name,
+		os: overrides.os,
+		online: overrides.online,
+		capabilityDetails,
+		...(overrides.installation !== undefined ? { installation: overrides.installation } : {}),
+	};
+}
+
 function mocks(enabled = false) {
 	const rows = [
 		{
@@ -41,6 +63,18 @@ function mocks(enabled = false) {
 		},
 		releases: { findByVersion: vi.fn(async () => release()) },
 		clients: {
+			listAll: vi.fn(async () => [
+				makeClient({
+					id: "win-new",
+					name: "win-new",
+					os: "win32 10.0",
+					online: true,
+					installation: { mode: "windows-system-task" },
+					privileged: { available: true, mode: "windows-system", nonInteractive: true, runAsUser: "SYSTEM" },
+				}),
+				makeClient({ id: "linux-old", name: "linux-old", os: "linux 6.8", online: false, installation: { mode: "legacy-pm2" } }),
+				makeClient({ id: "unreported", name: "unreported", os: "win32 10.0", online: false }),
+			]),
 			getInstallerStatus: vi.fn(async () => ({ registered: true, online: true })),
 			rename: vi.fn(),
 		},
@@ -152,7 +186,7 @@ describe("ClientInstallerService", () => {
 		}
 	});
 
-	it("preflight 按平台路由安装器资产：linux-x64 走 A2 系统安装器，win-x64 保持 PM2 安装器", async () => {
+	it("preflight 按平台路由安装器资产：linux-x64 走 A2 systemd 安装器，win-x64 走 SYSTEM 开机任务安装器", async () => {
 		const { prisma, releases, clients } = mocks(true);
 		const service = new ClientInstallerService(
 			prisma as never,
@@ -174,6 +208,38 @@ describe("ClientInstallerService", () => {
 		expect(win.lowLevelInstallerUrl).toBe(
 			"/api/client-installer/assets/install.cjs",
 		);
+	});
+
+	describe("getConfig 迁移汇总（ADR-0027）", () => {
+		it("包含离线 Client，独立于业务版本给出待人工升级原因", async () => {
+			const { prisma, releases, clients } = mocks(false);
+			const service = new ClientInstallerService(prisma as never, releases as never, clients as never);
+			const config = await service.getConfig();
+			expect(config.migration.compliantCount).toBe(1);
+			expect(config.migration.needsUpgradeCount).toBe(2);
+			const reasons = new Map(config.migration.clients.map((c) => [c.name, c.reason]));
+			expect(reasons.get("linux-old")).toBe("legacy-pm2");
+			expect(reasons.get("unreported")).toBe("installation-unreported");
+			expect(config.migration.clients.find((c) => c.name === "linux-old")?.online).toBe(false);
+		});
+
+		it("全部 Client 合规时 needsUpgradeCount 为 0 且列表为空", async () => {
+			const { prisma, releases, clients } = mocks(false);
+			const compliant = [
+				makeClient({
+					id: "a",
+					name: "a",
+					os: "linux 6.8",
+					online: true,
+					installation: { mode: "systemd-root-equivalent" },
+					privileged: { available: true, mode: "sudo-all", nonInteractive: true, runAsUser: "vcpdeck" },
+				}),
+			];
+			clients.listAll.mockResolvedValue(compliant as never);
+			const service = new ClientInstallerService(prisma as never, releases as never, clients as never);
+			const config = await service.getConfig();
+			expect(config.migration).toEqual({ compliantCount: 1, needsUpgradeCount: 0, clients: [] });
+		});
 	});
 
 	it("验收接口要求正确共享 PSK", () => {

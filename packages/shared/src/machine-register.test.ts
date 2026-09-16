@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+	getClientInstallationCompliance,
 	parseMachineInstallation,
 	parseMachineRegister,
 	parsePrivilegedCapabilityStatus,
+	type ClientInstallationCompliance,
 	type MachineRegister,
 } from "./machine-register.js";
+
+type ComplianceFixture = Parameters<typeof getClientInstallationCompliance>[0];
 
 /** 构造一份合法的新 Client 注册消息（含 ADR-0023 新增字段）。 */
 function validRegister(overrides: Partial<MachineRegister> = {}): MachineRegister {
@@ -184,6 +188,95 @@ describe("parseMachineInstallation", () => {
 		expect(() => parseMachineInstallation({ mode: "pm2" })).toThrow();
 		expect(() => parseMachineInstallation({})).toThrow();
 		expect(() => parseMachineInstallation(null)).toThrow();
+	});
+
+	it("接受 windows-system-task 安装模式（ADR-0027）", () => {
+		expect(parseMachineInstallation({ mode: "windows-system-task" })).toEqual({
+			mode: "windows-system-task",
+		});
+		expect(() => parseMachineInstallation({ mode: "windows-logon-task" })).toThrow();
+	});
+});
+
+describe("parsePrivilegedCapabilityStatus windows-system", () => {
+	it("接受合规的 SYSTEM 身份摘要", () => {
+		expect(
+			parsePrivilegedCapabilityStatus({
+				available: true,
+				mode: "windows-system",
+				nonInteractive: true,
+				runAsUser: "SYSTEM",
+			}),
+		).toEqual({
+			available: true,
+			mode: "windows-system",
+			nonInteractive: true,
+			runAsUser: "SYSTEM",
+		});
+	});
+
+	it("拒绝 windows-system 声明不可用或交互执行", () => {
+		expect(() =>
+			parsePrivilegedCapabilityStatus({
+				available: false,
+				mode: "windows-system",
+				nonInteractive: false,
+				runAsUser: "SYSTEM",
+			}),
+		).toThrow(/windows-system/);
+		expect(() =>
+			parsePrivilegedCapabilityStatus({
+				available: true,
+				mode: "windows-system",
+				nonInteractive: false,
+				runAsUser: "SYSTEM",
+			}),
+		).toThrow(/windows-system/);
+	});
+});
+
+describe("getClientInstallationCompliance（ADR-0027 合规矩阵）", () => {
+	const client = (
+		os: string,
+		mode: "systemd-root-equivalent" | "windows-system-task" | "legacy-pm2" | undefined,
+		privileged: { available: boolean; mode: "sudo-all" | "windows-system" | "unavailable"; nonInteractive: boolean; runAsUser: string } | undefined,
+	): ComplianceFixture => ({
+		os,
+		installation: mode === undefined ? undefined : { mode },
+		capabilityDetails: privileged === undefined ? undefined : { privileged },
+	});
+
+	type CompliancePriv = { available: boolean; mode: "sudo-all" | "windows-system" | "unavailable"; nonInteractive: boolean; runAsUser: string };
+	const sudoAll: CompliancePriv = { available: true, mode: "sudo-all", nonInteractive: true, runAsUser: "vcpdeck" };
+	const winSystem: CompliancePriv = { available: true, mode: "windows-system", nonInteractive: true, runAsUser: "SYSTEM" };
+
+	const cases: [
+		string,
+		ComplianceFixture,
+		boolean,
+		ClientInstallationCompliance["reason"],
+	][] = [
+		["Windows 系统任务 + SYSTEM 合规", client("win32 10.0", "windows-system-task", winSystem), true, null],
+		["Linux systemd + sudo-all 合规", client("linux 6.8", "systemd-root-equivalent", sudoAll), true, null],
+		["旧 PM2 模式", client("win32 10.0", "legacy-pm2", undefined), false, "legacy-pm2"],
+		["安装模式未报告", client("linux 6.8", undefined, undefined), false, "installation-unreported"],
+		["特权漂移为 unavailable", client("linux 6.8", "systemd-root-equivalent", { available: false, mode: "unavailable", nonInteractive: false, runAsUser: "vcpdeck" }), false, "privilege-noncompliant"],
+		["平台与模式冲突", client("win32 10.0", "systemd-root-equivalent", sudoAll), false, "platform-mode-mismatch"],
+		["系统模式但特权未报告", client("linux 6.8", "systemd-root-equivalent", undefined), false, "privilege-noncompliant"],
+		["未知平台不合规", client("darwin 24.0", "windows-system-task", winSystem), false, "platform-unsupported"],
+		["sudo-all 但非交互探测失败", client("linux 6.8", "systemd-root-equivalent", { available: true, mode: "sudo-all", nonInteractive: false, runAsUser: "vcpdeck" }), false, "privilege-noncompliant"],
+	];
+
+	for (const [label, fixture, compliant, reason] of cases) {
+		it(`${label} → ${reason ?? "compliant"}`, () => {
+			const result = getClientInstallationCompliance(fixture);
+			expect(result).toEqual({ compliant, reason });
+		});
+	}
+
+	it("旧 Client 缺字段时不抛错，仅判未报告", () => {
+		const result = getClientInstallationCompliance({ os: "win32 10.0" });
+		expect(result).toEqual({ compliant: false, reason: "installation-unreported" });
 	});
 });
 

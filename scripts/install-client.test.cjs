@@ -37,9 +37,10 @@ test("Windows bootstrap 的 Node 探测兼容 Windows PowerShell 5.1", () => {
 	const dir = mkdtempSync(join(tmpdir(), "vcpdeck-node-probe-"));
 	try {
 		const probe = join(dir, "probe.ps1");
+		// 与源文件一致带 UTF-8 BOM：PowerShell 5.1 否则按 ANSI 读取，中文注释会被误解码。
 		writeFileSync(
 			probe,
-			`${source.slice(start, end)}\n$node = (Get-Command node -ErrorAction Stop).Source\nif (-not (Test-Node $node)) { exit 1 }\n`,
+			`\uFEFF${source.slice(start, end)}\n$node = (Get-Command node -ErrorAction Stop).Source\nif (-not (Test-Node $node)) { exit 1 }\n`,
 		);
 		const result = spawnSync(
 			"powershell.exe",

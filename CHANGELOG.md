@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Windows Client 系统级安装（ADR-0027）**：一键安装改为 `NT AUTHORITY\SYSTEM` 下的 `\VCPDeck\Client` 开机任务，固定安装到 `C:\ProgramData\VCPDeck\Client` 并使用机器级私有 Node，**无需用户登录**即保持在线，不再安装或运行 PM2。安装必须在已提升的管理员 PowerShell 中执行，脚本不申请 UAC；Git 为可选工具（缺失时尝试机器级 `winget`，失败只警告）。
+- **部署合规提示与人工升级汇总**：机器卡片按 Shared `getClientInstallationCompliance` 显示「系统级部署」或「需要人工升级：<稳定原因>」；发版页新增合规摘要与待升级机器列表（含离线 Client）。该判定独立于业务版本，`clientVersion` 已是最新仍可能提示迁移。
+- **Linux 清理式迁移与幂等续装**：`--migrate` 在全部材料校验成功后清理旧 VCPDeck PM2 现场（只删除可证明属于 VCPDeck 的 entry、旧自启与旧运行目录），启动 A2 稳态服务并全能力验收；失败只记录阶段状态并保留 A2 现场，可用同一命令重跑。
+
+### Changed
+
+- **迁移失败语义变更**：Windows 与 Linux 迁移不再回滚或 `resurrect` 旧 PM2；身份（`client-id`）、Server Origin 与显示名称保留。Windows 卸载会把 `client-id` 原子保留到 `C:\ProgramData\VCPDeck\client-id` 后再删除运行目录。
+- **Client 上报**：新增 `installation.mode=windows-system-task` 与 `capabilityDetails.privileged.mode=windows-system`；旧 Client 缺字段仍按「未报告」处理。
+
+### Migration
+
+- 存量 Windows PM2/登录任务与 Linux PM2 安装需**在每台目标机手动重跑一次**对应平台的一键安装命令完成迁移；Server 不批量下发。迁移会中断该机 Client 一段时间，建议在维护窗口执行。
+- **发布门禁**：真实 Windows（含无人登录开机）与 Linux 冷启动验收尚未在发布环境执行，完成前不得在 CHANGELOG 中标记为已验收。
+
 ## [0.7.1] - 2026-09-15
 
 ### Fixed

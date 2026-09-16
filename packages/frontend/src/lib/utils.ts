@@ -38,3 +38,16 @@ export function capabilitiesLabel(raw: string[]): string[] {
 	}
 	return labels;
 }
+
+/** 不合规原因 → 已批准中文文案（ADR-0027）；未映射原因原样透传，确保不遗漏。 */
+const UPGRADE_REASON_LABELS: Record<string, string> = {
+	"legacy-pm2": "旧版 PM2",
+	"installation-unreported": "安装模式未报告",
+	"privilege-noncompliant": "特权状态异常",
+	"platform-mode-mismatch": "安装状态异常",
+	"platform-unsupported": "不支持的平台",
+};
+
+export function upgradeReasonLabel(reason: string): string {
+	return UPGRADE_REASON_LABELS[reason] ?? reason;
+}

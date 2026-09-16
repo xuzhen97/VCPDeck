@@ -121,7 +121,7 @@ function buildSudoersContent() {
 }
 
 /** 生成敏感启动环境文件内容（仅固定 6 键）。 */
-function buildEnvContent({ serverOrigin, psk, clientId, migrationVerifyOnly = false }) {
+function buildEnvContent({ serverOrigin, psk, clientId }) {
 	const lines = [
 		"# 由 VCPDeck Linux A2 安装器生成（敏感值请妥善保管）",
 		`VCPDECK_APP_DIR=${APP_DIR}`,
@@ -131,7 +131,6 @@ function buildEnvContent({ serverOrigin, psk, clientId, migrationVerifyOnly = fa
 		`VCPDECK_CLIENT_ID=${clientId}`,
 		"VCPDECK_INSTALLATION_MODE=systemd-root-equivalent",
 	];
-	if (migrationVerifyOnly) lines.push("VCPDECK_MIGRATION_VERIFY_ONLY=1");
 	lines.push("");
 	return lines.join("\n");
 }
@@ -940,6 +939,23 @@ function resolveMigrationSource(c) {
 			`PM2 客户端入口不属于迁移源: ${c.pm2Process.pm_exec_path || "(缺失)"}`,
 		);
 	}
+	// 清理前所有权校验（ADR-0027）：旧 app-dir 必须恰好是来源用户 canonical HOME 下的
+	// `.vcpdeck/launcher-client`，且 launcher.env 不得声明其他 artifact，否则拒绝删除。
+	const sourceHome = String(c.sourceHome || dirname(dirname(c.clientDir || "/"))).replace(/\\/g, "/");
+	const expectedAppDir = `${sourceHome}/.vcpdeck/launcher-client`;
+	const actualAppDir = String(c.clientDir || "").replace(/\\/g, "/");
+	if (!actualAppDir || actualAppDir !== expectedAppDir) {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
+			`旧安装目录不是来源用户的 .vcpdeck/launcher-client: ${actualAppDir || "(缺失)"}`,
+		);
+	}
+	if (c.artifact && c.artifact !== "client") {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
+			`旧 launcher.env 声明的 artifact 不是 client: ${c.artifact}`,
+		);
+	}
 	if (c.releaseActive) {
 		throw installerError(
 			LINUX_INSTALLER_ERROR.MIGRATION_RELEASE_ACTIVE,
@@ -976,12 +992,7 @@ async function prepareMigrationInstall({ adapter, args, psk, clientId }) {
 	writeAtomic(
 		adapter,
 		ENV_FILE,
-		buildEnvContent({
-			serverOrigin: args.serverOrigin,
-			psk,
-			clientId,
-			migrationVerifyOnly: true,
-		}),
+		buildEnvContent({ serverOrigin: args.serverOrigin, psk, clientId }),
 		{ mode: 0o640, owner: "root", group: ACCOUNT_NAME },
 	);
 	installSudoers(adapter);
@@ -997,14 +1008,15 @@ const PM2_DELETE_COMMAND =
 	'node="$(find "$HOME/.vcpdeck/runtime/node" -type f -path "*/bin/node" -executable -print -quit 2>/dev/null)"; ' +
 	'pm2="$(find "$HOME/.vcpdeck/tools/pm2/node_modules/pm2" -type f -path "*/bin/pm2" -executable -print -quit 2>/dev/null)"; ' +
 	'[ -n "$node" ] && [ -n "$pm2" ] && "$node" "$pm2" delete vcpdeck-client-launcher';
-const PM2_RESURRECT_COMMAND =
+const PM2_SAVE_COMMAND =
 	'node="$(find "$HOME/.vcpdeck/runtime/node" -type f -path "*/bin/node" -executable -print -quit 2>/dev/null)"; ' +
 	'pm2="$(find "$HOME/.vcpdeck/tools/pm2/node_modules/pm2" -type f -path "*/bin/pm2" -executable -print -quit 2>/dev/null)"; ' +
-	'[ -n "$node" ] && [ -n "$pm2" ] && "$node" "$pm2" resurrect';
+	'[ -n "$node" ] && [ -n "$pm2" ] && "$node" "$pm2" save';
 
 /**
- * 执行 M1 迁移切换与有界回退（经注入 adapter，可测试不触达真实系统）。
- * 旧 PM2 守护进程保持运行，只删除 VCPDeck 进程，避免误杀无关 PM2 应用。
+ * 执行 M1 清理式迁移（经注入 adapter，可测试不触达真实系统）。
+ * 完整材料就绪后停止旧 PM2 Client、只删除 VCPDeck entry 与旧现场，再启动 A2 稳态服务；
+ * 失败只记录阶段状态并保留 A2 现场，绝不 resurrect 或恢复旧 PM2（ADR-0023/ADR-0027）。
  */
 async function runMigrationCutover({
 	adapter,
@@ -1026,33 +1038,16 @@ async function runMigrationCutover({
 	};
 	const startupUnit = source.startupUnit || `pm2-${source.username}.service`;
 	const preserveApps = Array.isArray(source.preserveApps) ? source.preserveApps : [];
+	const oldAppDir = source.sourceAppDir;
+	const oldStatePath = `${source.sourceHome}/.vcpdeck/client-install.json`;
 	let oldClientStopped = false;
-	let steadyStateAccepted = false;
 	log(`[vcpdeck-linux] 迁移源用户=${source.username}；保留无关 PM2 应用: ${preserveApps.join(", ") || "(无)"}`);
 
-	// 真实 adapter 先准备完整 A2 现场并写入 verify-only 标志；测试 adapter
-	// 不具备 installClientArtifact，因此只验证后续切换顺序。
-	record("prepare-new-verify-only");
+	record("prepare-system-install");
 	if (typeof r.installClientArtifact === "function") {
 		await prepareMigrationInstall({ adapter: r, args, psk, clientId });
 	}
 
-	const rollbackBeforeAcceptance = () => {
-		exec(["systemctl", "stop", SERVICE_NAME], "停止失败的新服务");
-		record("stop-disable-new");
-		exec(["systemctl", "enable", startupUnit], "恢复旧自启");
-		record("restore-old-startup");
-		const restored = runAsUser(r, source.username, PM2_RESURRECT_COMMAND);
-		if (restored?.status !== 0) {
-			throw installerError(LINUX_INSTALLER_ERROR.ROLLBACK_FAILED, "恢复旧 PM2 Client 失败");
-		}
-		record("restore-old-client");
-		record("wait-old-verify");
-		record("mark-failed");
-		return { outcome: "failed", clientId };
-	};
-
-	// 测试 adapter 只验证顺序；真实 adapter 负责完整准备，不复制旧 env/PSK。
 	try {
 		record("record-old");
 		const oldClient = runAsUser(r, source.username, PM2_DELETE_COMMAND);
@@ -1061,28 +1056,20 @@ async function runMigrationCutover({
 		}
 		oldClientStopped = true;
 		record("stop-old-client");
-		exec(["systemctl", "start", SERVICE_NAME], "启动新 verify-only 服务");
-		record("start-new-verify-only");
-		record("wait-new-verify");
-		await waitForClient(r, {
-			origin: args.serverOrigin,
-			psk,
-			clientId,
-			version: args.releaseVersion,
-			requireCapabilities: false,
-		});
-
-		exec(["systemctl", "stop", SERVICE_NAME], "停止 verify-only 服务");
-		record("stop-new");
-		if (typeof r.installClientArtifact === "function") {
-			writeAtomic(
-				r,
-				ENV_FILE,
-				buildEnvContent({ serverOrigin: args.serverOrigin, psk, clientId }),
-				{ mode: 0o640, owner: "root", group: ACCOUNT_NAME },
-			);
+		// 保留其他 PM2 应用：只 save，不 kill PM2 daemon。
+		runAsUser(r, source.username, PM2_SAVE_COMMAND);
+		record("save-remaining-pm2");
+		// 无其他 PM2 应用时旧自启已无作用；有其他应用时保留旧 startup unit。
+		if (preserveApps.length === 0) {
+			exec(["systemctl", "disable", startupUnit], "禁用旧自启");
 		}
-		record("clear-verify-flag");
+		record("remove-old-startup-if-unused");
+		// 参数数组删除，不经 shell 拼接；路径来自已确认的迁移源。
+		exec(["rm", "-rf", oldAppDir], "删除旧 app-dir");
+		record("remove-old-app-dir");
+		exec(["rm", "-f", oldStatePath], "删除旧安装状态");
+		record("remove-old-install-state");
+
 		exec(["systemctl", "restart", SERVICE_NAME], "启动稳态服务");
 		record("start-new-steady");
 		record("wait-new-full");
@@ -1094,23 +1081,32 @@ async function runMigrationCutover({
 			requireCapabilities: true,
 		});
 		const steadyOk =
-			!failAtSteady && status.registered && status.online &&
-			status.clientVersion === args.releaseVersion && status.capabilitiesReported &&
-			status.installationMode === "systemd-root-equivalent" && status.nonInteractiveSudo === true;
-		if (!steadyOk) return rollbackBeforeAcceptance();
+			!failAtSteady &&
+			status.registered &&
+			status.online &&
+			status.clientVersion === args.releaseVersion &&
+			status.capabilitiesReported &&
+			status.installationMode === "systemd-root-equivalent" &&
+			status.nonInteractiveSudo === true;
+		if (!steadyOk) {
+			return failClosed(log, record, clientId, "稳态全能力验收未通过");
+		}
 
-		// 此刻新 Client 已以完整能力注册，之后不再自动回退旧 PM2。
-		steadyStateAccepted = true;
-		exec(["systemctl", "disable", startupUnit], "禁用旧自启");
-		record("disable-old-startup");
-		record("save-remaining-pm2");
 		record("mark-done");
 		log("[vcpdeck-linux] M1 迁移完成");
 		return { outcome: "done", clientId };
 	} catch (error) {
-		if (!oldClientStopped || steadyStateAccepted) throw error;
-		return rollbackBeforeAcceptance();
+		// 旧 Client 已删除时不能留下空窗：记录阶段状态并保留 A2 现场供同一命令重跑，不恢复旧 PM2。
+		if (!oldClientStopped) throw error;
+		return failClosed(log, record, clientId, error.message);
 	}
+}
+
+/** 失败收敛：记录阶段状态、保留 A2 现场，不 resurrect 旧 PM2。 */
+function failClosed(log, record, clientId, reason) {
+	record("mark-failed");
+	log(`[vcpdeck-linux] 迁移失败，保留 A2 现场并可用同一命令重跑: ${reason}`);
+	return { outcome: "failed", clientId };
 }
 
 // ── 权限门禁 ──
@@ -1170,6 +1166,7 @@ function collectMigrationSources(adapter, expectedServerOrigin = null) {
 			if (!appInfo || !appInfo.exists) continue;
 			const clientId = readClientIdFromDir(adapter, appDir);
 			const serverOrigin = readOriginFromEnv(adapter, appDir);
+			const artifact = readArtifactFromEnv(adapter, appDir);
 			const pm2Process = readPm2Process(adapter, username);
 			const otherApps = readOtherPm2Apps(adapter, username);
 			const releaseActive = readReleaseActive(adapter, appDir);
@@ -1178,6 +1175,7 @@ function collectMigrationSources(adapter, expectedServerOrigin = null) {
 				clientId,
 				clientDir: appDir,
 				serverOrigin,
+				artifact,
 				expectedServerOrigin,
 				pm2Process,
 				otherApps,
@@ -1217,6 +1215,18 @@ function readOriginFromEnv(adapter, appDir) {
 		if (typeof raw !== "string") return null;
 		const match = raw.match(/^VCPDECK_SERVER=(\S+)/m);
 		return match ? validateOrigin(match[1]) || match[1] : null;
+	} catch {
+		return null;
+	}
+}
+
+/** 从应用目录 Launcher 环境读取 VCPDECK_ARTIFACT（不存在返回 null）。 */
+function readArtifactFromEnv(adapter, appDir) {
+	try {
+		const raw = adapter.readFile?.(`${appDir}/launcher.env`);
+		if (typeof raw !== "string") return null;
+		const match = raw.match(/^VCPDECK_ARTIFACT=(\S+)/m);
+		return match ? match[1] : null;
 	} catch {
 		return null;
 	}
@@ -1294,7 +1304,7 @@ async function main() {
 				clientId: source.clientId,
 				log,
 			});
-			console.log(`\n[vcpdeck-linux] 迁移${result.outcome === "done" ? "完成" : "失败（已回退）"}`);
+			console.log(`\n[vcpdeck-linux] 迁移${result.outcome === "done" ? "完成" : "失败（已保留 A2 现场，可用同一命令重跑）"}`);
 		} else {
 			// 全新安装才创建持久 client-id；迁移必须从旧现场读取并保留原 ID。
 			assertSafeLayout(VAR_DIR, adapter.statInfo(VAR_DIR));

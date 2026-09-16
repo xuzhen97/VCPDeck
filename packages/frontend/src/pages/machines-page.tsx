@@ -1,4 +1,5 @@
 import type { ClientInfo } from "@vcpdeck/shared";
+import { getClientInstallationCompliance } from "@vcpdeck/shared";
 import {
 	BrainCircuit,
 	FolderOpen,
@@ -19,25 +20,36 @@ import { OperatingSystemIcon } from "@/components/operating-system-icon";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
-import { MACHINE_TABS, capabilitiesLabel } from "@/lib/utils";
+import { MACHINE_TABS, capabilitiesLabel, upgradeReasonLabel } from "@/lib/utils";
 
 /**
- * 非交互特权能力展示（ADR-0023）：
- * sudo-all → root 等价风险；unavailable → 无 root 等价；缺省 → 未报告（不推断）。
+ * 非交互特权能力展示（ADR-0023/ADR-0027）：
+ * sudo-all → root 等价风险；windows-system → Windows SYSTEM；其余按可用性显示。
  */
 function privilegedLabel(client: ClientInfo): string {
 	const p = client.capabilityDetails?.privileged;
 	if (!p) return "特权未报告";
+	if (p.mode === "windows-system") {
+		return p.available && p.nonInteractive ? "SYSTEM 特权" : "SYSTEM 特权不可用";
+	}
 	if (p.available && p.mode === "sudo-all" && p.nonInteractive) return "root 等价特权";
 	return "root 等价特权不可用";
 }
 
-/** 安装模式展示：systemd-root-equivalent → 系统级；legacy-pm2 → 旧版 PM2；缺省 → 未报告。 */
-function installationLabel(client: ClientInfo): string {
-	const m = client.installation?.mode;
-	if (m === "systemd-root-equivalent") return "系统级部署";
-	if (m === "legacy-pm2") return "旧版 PM2";
-	return "安装模式未报告";
+/**
+ * 部署合规展示（ADR-0027）：统一调用 Shared 判定，独立于业务版本。
+ * 合规 → 系统级部署；不合规 → 需要人工升级 + 稳定原因文案。
+ */
+function installationChip(client: ClientInfo): {
+	label: string;
+	tone: "success" | "warning";
+} {
+	const compliance = getClientInstallationCompliance(client);
+	if (compliance.compliant) return { label: "系统级部署", tone: "success" };
+	return {
+		label: `需要人工升级：${upgradeReasonLabel(compliance.reason ?? "未报告")}`,
+		tone: "warning",
+	};
 }
 
 /** 详情页 tab → 卡片快捷跳转图标 */
@@ -98,6 +110,7 @@ export function MachinesPage() {
 
 function MachineCard({ client }: { client: ClientInfo }) {
 	const base = `/machines/${encodeURIComponent(client.clientId)}`;
+	const installation = installationChip(client);
 	return (
 		<Card className="overflow-hidden transition-shadow hover:shadow-2xl">
 			<CardHeader className="pb-4">
@@ -137,12 +150,13 @@ function MachineCard({ client }: { client: ClientInfo }) {
 					<StatusChip
 						label={privilegedLabel(client)}
 						tone={
-							client.capabilityDetails?.privileged?.mode === "sudo-all"
+							client.capabilityDetails?.privileged?.mode === "sudo-all" ||
+							client.capabilityDetails?.privileged?.mode === "windows-system"
 								? "warning"
 								: "neutral"
 						}
 					/>
-					<StatusChip label={installationLabel(client)} />
+					<StatusChip label={installation.label} tone={installation.tone} />
 				</div>
 				<div className="mt-5 flex flex-wrap gap-3 border-t border-border/60 pt-4 text-sm">
 					{MACHINE_TABS.map(([key, label]) => {

@@ -205,6 +205,60 @@ function removeWindowsStartupTask(
 	return "removed";
 }
 
+// ADR-0027：Windows 系统级卸载固定常量。
+const WIN_SYSTEM_ROOT = "C:\\ProgramData\\VCPDeck";
+const WIN_SYSTEM_APP_DIR = "C:\\ProgramData\\VCPDeck\\Client";
+const WIN_SYSTEM_TASK = "\\VCPDeck\\Client";
+const WIN_CLIENT_ID_PATH = "C:\\ProgramData\\VCPDeck\\client-id";
+
+/**
+ * 系统级卸载（ADR-0027）：停止任务 → 删除任务 → 将 Client ID 原子保留到 ProgramData → 删除 Client 运行目录。
+ * 保留旧用户卸载分支；默认卸载不删除机器身份（client-id 移到固定路径供重装复用）。
+ * adapter 可注入（dryRun 不真实落盘/执行），供测试验证顺序与 fail closed。
+ */
+function uninstallSystemClient(adapter) {
+	const statePath = join(WIN_SYSTEM_ROOT, "Client", "install-state.json");
+	const state = adapter.readJson(statePath);
+	if (!state || typeof state !== "object") throw new Error(`未找到系统级 Client 安装状态: ${statePath}`);
+	if (state.version !== STATE_VERSION) throw new Error("Client 安装状态版本不受支持");
+	const appDir = typeof state.appDir === "string" ? resolve(state.appDir) : null;
+	const root = require("node:path").parse(appDir || "").root;
+	const normalizedAppDir = (appDir || "").replace(/\\/g, "/").toLowerCase();
+	const normalizedRoot = WIN_SYSTEM_ROOT.replace(/\\/g, "/").toLowerCase();
+	if (!appDir || appDir === root || !normalizedAppDir.startsWith(`${normalizedRoot}/`)) {
+		throw new Error(`拒绝卸载危险 appDir: ${appDir || "未知"}`);
+	}
+	const env = adapter.readEnv(join(appDir, "launcher.env"));
+	if (env.VCPDECK_ARTIFACT !== "client") throw new Error(`appDir 不是 Client 安装目录: ${appDir}`);
+	if (env.VCPDECK_APP_DIR && resolve(env.VCPDECK_APP_DIR) !== appDir) {
+		throw new Error(`launcher.env 与 Client 安装目录不一致: ${appDir}`);
+	}
+	if (typeof state.clientId !== "string" || !/^[0-9a-f-]{36}$/i.test(state.clientId)) {
+		throw new Error("Client ID 缺失或非法，拒绝卸载");
+	}
+	// 停止并删除 SYSTEM 开机任务（任务存在但无法停止时 fail closed）。
+	const ended = adapter.spawn("schtasks.exe", ["/End", "/TN", WIN_SYSTEM_TASK, "/F"]);
+	if (ended.status !== 0 && ended.status !== null) {
+		const exists = adapter.spawn("schtasks.exe", ["/Query", "/TN", WIN_SYSTEM_TASK]);
+		if (exists.status === 0) throw new Error(`无法停止计划任务 ${WIN_SYSTEM_TASK}，拒绝继续卸载`);
+	}
+	adapter.spawn("schtasks.exe", ["/Delete", "/TN", WIN_SYSTEM_TASK, "/F"]);
+	// Client ID 原子保留到 ProgramData 固定路径，身份权威不随运行目录删除。
+	if (!adapter.dryRun) {
+		mkdirSync(WIN_SYSTEM_ROOT, { recursive: true });
+		writeFileSync(WIN_CLIENT_ID_PATH, state.clientId.trim(), { mode: 0o600 });
+	} else {
+		adapter.writeFile(state.clientId, WIN_CLIENT_ID_PATH);
+	}
+	adapter.icacls(WIN_CLIENT_ID_PATH);
+	adapter.rm(appDir);
+	return {
+		removed: true,
+		appDir,
+		clientIdPreservedAt: WIN_CLIENT_ID_PATH,
+	};
+}
+
 function removeStartup({
 	appDir,
 	startup,
@@ -289,6 +343,34 @@ async function confirmRemoval(appDir, yes) {
 
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
+	if (platform() === "win32" && existsSync(join(WIN_SYSTEM_ROOT, "Client", "install-state.json"))) {
+		const adapter = {
+			dryRun: false,
+			readJson: (p) => {
+				try {
+					return JSON.parse(readFileSync(p, "utf8"));
+				} catch {
+					return null;
+				}
+			},
+			readEnv,
+			writeFile: (content, p) => writeFileSync(p, content, { mode: 0o600 }),
+			rm: (p) => rmSync(p, { recursive: true, force: true }),
+			icacls: (p) => {
+				execFileSync("icacls.exe", [p, "/inheritance:r", "/grant:S:(A;;GA;;;SY)", "/grant:S:(A;;GA;;;BA)"], {
+					stdio: "inherit",
+				});
+			},
+			spawn: (command, cmdArgs = []) => {
+				const result = spawnSync(command, cmdArgs, { encoding: "utf8", windowsHide: true });
+				return { status: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
+			},
+		};
+		const result = uninstallSystemClient(adapter);
+		console.log(`[vcpdeck] 系统级 Client 运行环境已卸载: ${result.appDir}`);
+		console.log(`[vcpdeck] Client ID 已保留: ${result.clientIdPreservedAt}`);
+		return;
+	}
 	const loaded = loadState();
 	console.log(`[vcpdeck] 将卸载 Client: ${loaded.state.appDir}`);
 	if (!(await confirmRemoval(loaded.state.appDir, args.yes))) {
@@ -312,6 +394,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+	uninstallSystemClient,
+	WIN_SYSTEM_APP_DIR,
+	WIN_CLIENT_ID_PATH,
 	parseArgs,
 	validateState,
 	loadState,

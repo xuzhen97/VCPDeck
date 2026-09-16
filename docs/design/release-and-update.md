@@ -26,7 +26,7 @@
 - Frontend 静态资源的独立自动部署（当前随 Server 构件分发）；
 - 数据库 schema 自动回滚；
 - 发布者数字签名；
-- 自动安装 Windows Service；Windows Client 一键安装继续使用 PM2/当前用户最高权限登录计划任务；Linux Client 新安装使用 A2 systemd，Server 系统服务仍由运维准备；
+- 自动安装 Windows Service；Windows Client 一键安装使用 `NT AUTHORITY\SYSTEM` 开机任务（ADR-0027），Linux Client 新安装使用 A2 systemd，Server 系统服务仍由运维准备；
 - 对任意历史 Server/Client 版本提供兼容承诺。
 
 ## 2. 组件与职责
@@ -47,7 +47,7 @@
 
 Launcher 是稳定的外部生命周期管理器。它随发布 zip 提供并由安装脚本首次部署到 `<app-dir>/dist/main.js`，但不随业务版本自动覆盖。Server 负责全局控制面，Client 只负责本机更新配合；任何一方都不能在没有 Launcher 的情况下可靠完成自替换和失败回退。
 
-`/releases` 还提供默认关闭、持久化的 Client 一键安装入口（ADR-0018）和 Client 一键卸载入口。启用后，固定 Windows/Linux 命令会动态选择与运行中 Server 完全同版本且状态为 `done` 的 Release；Linux 新安装部署到 A2 systemd，Windows 仍准备用户私有 Node.js、PM2 并注册登录自启。禁用只阻止新的安装请求，不影响已有 Client。Linux 卸载命令在目标机删除 A2 的 systemd、账户和固定目录；Windows 卸载继续读取 `~/.vcpdeck/client-install.json` 删除对应 PM2 Launcher、自启配置和安装目录。
+`/releases` 还提供默认关闭、持久化的 Client 一键安装入口（ADR-0018）和 Client 一键卸载入口。启用后，固定 Windows/Linux 命令会动态选择与运行中 Server 完全同版本且状态为 `done` 的 Release；Linux 新安装部署到 A2 systemd，Windows 新安装固定到 `C:\ProgramData\VCPDeck\Client`、准备机器级私有 Node 并注册 `\VCPDeck\Client` SYSTEM 开机任务（不安装 PM2、不申请 UAC）。入口还会展示独立于业务版本的部署合规汇总（系统级部署 / 需要人工升级及其稳定原因，含离线 Client），数据由 Server 用 Shared `getClientInstallationCompliance` 汇总。禁用只阻止新的安装请求，不影响已有 Client。Linux 卸载命令在目标机删除 A2 的 systemd、账户和固定目录；Windows 卸载停用并删除 SYSTEM 任务、把 `client-id` 原子保留到 `C:\ProgramData\VCPDeck\client-id` 后删除运行目录；未迁移的旧用户 PM2 安装仍走旧安装状态卸载分支。
 
 ## 3. 数据与状态权威
 

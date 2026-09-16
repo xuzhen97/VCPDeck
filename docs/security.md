@@ -75,12 +75,12 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 
 ### 4.5 提升权限 Client
 
-Windows 一键安装通过当前管理员用户的 `RunLevel=Highest` 登录计划任务恢复 PM2，因此 Launcher、Client、Job、Terminal、Files 和 Pi 继承该用户的提升令牌。它不是 LocalSystem 或 Windows Service，不改变账户身份与 HOME，也不保证无人登录时在线；标准用户不会因此获得管理员身份。Windows 当前不通过 `installation.mode` 或 `capabilityDetails.privileged` 上报该状态，控制面不得把“未报告”推断为低权限。
+Windows 一键安装（ADR-0027）在 `NT AUTHORITY\SYSTEM`（SID `S-1-5-18`）下注册 `\VCPDeck\Client` 开机任务，因此 Launcher、Client、Job、Terminal、Files 和 Pi 以 **LocalSystem（root 等价）** 身份运行，**无需用户登录**；它使用 `C:\ProgramData\VCPDeck\Client` 的独立运行目录与私有 Node，不继承安装者的用户 Profile/环境，也不因此把管理员身份授予标准用户。任务 action、`launcher.env` 与 Client 根目录以 `icacls` 关闭继承并只授权 SYSTEM 与 Administrators。Client 注册上报 `installation.mode=windows-system-task` 与 `capabilityDetails.privileged.mode=windows-system`；旧 Client 缺字段时只判“未报告”，控制面不得推断为低权限或已经合规。
 
 Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 等价** Client：Job、Terminal、Pi 可显式 `sudo -n` 执行任意 root 命令，不受沙箱限制，继承目标机 OS 账户的全部权限。
 
 - **审计边界**：Server 只记录控制面、Job 输出与 Session 生命周期；**不**声称完整的主机级 root-shell 审计，也不防目标机本地篡改。需要强审计/隔离的目标机不应作为 root 等价 Client。
-- **上报与展示**：Client 注册上报 `capabilityDetails.privileged`（`sudo-all`/`unavailable`）；Frontend 与 CLI 显式展示 root 等价风险，`jobs run`/`pi run` 执行前提示“Server 仅记录控制面/Job/Session 审计”。旧 Client 未上报时按“未报告”展示，不推断为任何能力。
+- **上报与展示**：Client 注册上报 `capabilityDetails.privileged`（`sudo-all`/`windows-system`/`unavailable`）与 `installation.mode`；Server 用 Shared `getClientInstallationCompliance` 统一判定，驾驶台与 CLI 显式展示系统级部署或“需要人工升级：<稳定原因>”，`jobs run`/`pi run` 执行前提示“Server 仅记录控制面/Job/Session 审计”。旧 Client 未上报时按“未报告”展示，不推断为任何能力。
 - **环境隔离（E1）**：专用账户 HOME 独立，安装器不复制旧用户 `.pi`/`.ssh`/`.gitconfig`/shell 配置或个人凭据。
 
 ## 5. 输入与执行安全

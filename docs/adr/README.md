@@ -76,12 +76,13 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0015](./0015-launcher-distributed-with-release.md) | Accepted | Launcher 随发布包分发，安装到 app-dir 外部稳定路径，不随业务版本覆盖 |
 | [0016](./0016-release-archive-storage-provider.md) | Superseded by ADR-0019 | 历史方案：外部存储下载直连，但上传由 Server 转存 |
 | [0017](./0017-cli-multi-environment-configuration.md) | Accepted | CLI 使用用户级环境注册表，项目配置只选择环境；严格优先级与 fail-closed 解析 |
-| [0018](./0018-public-client-installer-and-pm2-supervision.md) | Accepted（Linux 部分由 ADR-0023 取代） | 提供公开可控的 Client 一键安装入口；Windows 继续由 PM2 只守护 Launcher |
+| [0018](./0018-public-client-installer-and-pm2-supervision.md) | Accepted（Linux 部分由 ADR-0023、Windows PM2 部分由 ADR-0027 取代） | 提供公开可控的 Client 一键安装入口；系统级部署见后续决策 |
 | [0019](./0019-direct-release-upload-to-external-storage.md) | Accepted | 外部 Storage Provider 的 Release 上传与下载数据面均直连，Server 只控制权限、会话、元数据和编排 |
 | [0020](./0020-cli-dataplane-namespace.md) | Accepted | CLI 复用 `/app` 数据面命名空间接入终端与 Pi 交互 |
 | [0021](./0021-frp-dashboard-confirmed-mapping-lifecycle.md) | Accepted | FRP 映射以 Client 动作和 FRPS Dashboard 双重确认收敛 |
 | [0022](./0022-release-artifact-and-launcher-retention.md) | Accepted | Release 审计与归档正文分离生命周期，Server 与 Launcher 按各自权威独立清理 |
-| [0023](./0023-linux-system-client-and-root-equivalent-account.md) | Accepted | Linux Client 使用 systemd 系统部署与 root 等价专用账户，存量 PM2 安装通过 M1 迁移 |
+| [0023](./0023-linux-system-client-and-root-equivalent-account.md) | Accepted（旧 PM2 回退迁移策略由 ADR-0027 取代） | Linux Client 使用 systemd 系统部署与 root 等价专用账户 |
 | [0024](./0024-public-storage-share-capabilities.md) | Accepted | 使用长期 opaque capability 提供公开 Storage 分享，并以有效分享保护底层 File |
-| [0025](./0025-windows-client-highest-privilege-logon-task.md) | Accepted | Windows Client 保留当前用户 + PM2 + 登录任务模型，并以最高可用权限恢复 Launcher |
+| [0025](./0025-windows-client-highest-privilege-logon-task.md) | Superseded by ADR-0027 | 历史方案：Windows Client 使用当前用户、PM2 与最高权限登录任务 |
 | [0026](./0026-browser-client-webrtc-tcp-tunnel.md) | Accepted | 浏览器与 Client 使用 WebRTC 通用 TCP 隧道，ICE 直连优先并以 coturn 中继兜底 |
+| [0027](./0027-system-level-client-installation-and-clean-migration.md) | Accepted | Windows 使用 SYSTEM 开机任务、Linux 保持 systemd/sudo-all；旧 PM2 保留身份后清理式迁移，并提示不合规 Client 人工升级 |

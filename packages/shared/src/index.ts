@@ -193,23 +193,29 @@ export enum JobStatus {
 
 // ── Register / Heartbeat ──
 import {
+	ClientInstallationComplianceReason,
 	MachineInstallationMode,
 	PrivilegedCapabilityMode,
+	getClientInstallationCompliance,
 	parseMachineInstallation,
 	parseMachineRegister,
 	parsePrivilegedCapabilityStatus,
 } from "./machine-register.js";
 import type {
+	ClientInstallationCompliance,
 	MachineInstallationStatus,
 	MachineRegister,
 	PrivilegedCapabilityStatus,
 } from "./machine-register.js";
 export {
+	ClientInstallationComplianceReason,
 	MachineInstallationMode,
 	PrivilegedCapabilityMode,
+	getClientInstallationCompliance,
 	parseMachineInstallation,
 	parseMachineRegister,
 	parsePrivilegedCapabilityStatus,
+	type ClientInstallationCompliance,
 	type MachineInstallationStatus,
 	type MachineRegister,
 	type PrivilegedCapabilityStatus,

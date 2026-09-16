@@ -12,6 +12,8 @@ function makePrivilegedEnv(opts: {
 	username?: string;
 	sudoStatus?: number;
 	sudoThrows?: boolean;
+	windowsIdentity?: string;
+	windowsIdentityThrows?: boolean;
 }): PrivilegedProbeEnv {
 	return {
 		platform: opts.platform ?? "linux",
@@ -19,6 +21,10 @@ function makePrivilegedEnv(opts: {
 		runNonInteractiveSudo: async () => {
 			if (opts.sudoThrows) throw new Error("spawn failed");
 			return opts.sudoStatus ?? 1;
+		},
+		runWindowsIdentity: async () => {
+			if (opts.windowsIdentityThrows) throw new Error("spawn failed");
+			return opts.windowsIdentity ?? "";
 		},
 	};
 }
@@ -51,12 +57,46 @@ describe("probePrivilegedCapability", () => {
 		});
 	});
 
-	it("非 Linux 返回 undefined（未报告，不探测 sudo）", async () => {
+	it("非 Windows/Linux 返回 undefined（未报告）", async () => {
+		expect(await probePrivilegedCapability(makePrivilegedEnv({ platform: "darwin" }))).toBeUndefined();
+	});
+
+	it("Windows SYSTEM 身份 → windows-system 可用（ADR-0027）", async () => {
 		expect(
 			await probePrivilegedCapability(
-				makePrivilegedEnv({ platform: "win32", sudoStatus: 0 }),
+				makePrivilegedEnv({ platform: "win32", windowsIdentity: "NT AUTHORITY\\SYSTEM" }),
 			),
-		).toBeUndefined();
+		).toEqual({
+			available: true,
+			mode: "windows-system",
+			nonInteractive: true,
+			runAsUser: "SYSTEM",
+		});
+	});
+
+	it("Windows 管理员账户（非 SYSTEM）→ unavailable，不声明 root 等价", async () => {
+		expect(
+			await probePrivilegedCapability(
+				makePrivilegedEnv({ platform: "win32", windowsIdentity: "HOST\\Administrator" }),
+			),
+		).toEqual({
+			available: false,
+			mode: "unavailable",
+			nonInteractive: false,
+			runAsUser: "HOST\\Administrator",
+		});
+	});
+
+	it("Windows whoami 失败 → unavailable（失败关闭）", async () => {
+		const status = await probePrivilegedCapability(
+			makePrivilegedEnv({ platform: "win32", windowsIdentityThrows: true }),
+		);
+		expect(status).toEqual({
+			available: false,
+			mode: "unavailable",
+			nonInteractive: false,
+			runAsUser: "unknown",
+		});
 	});
 
 	it("当前用户名缺失时回退 unknown，仍不泄露路径", async () => {
@@ -90,7 +130,20 @@ describe("detectInstallationInfo", () => {
 		).toEqual({ mode: "legacy-pm2" });
 	});
 
-	it("Windows 未报告安装模式（保持原 PM2 语义）", () => {
-		expect(detectInstallationInfo(win)).toBeUndefined();
+	it("Windows A2 模式变量 → windows-system-task（ADR-0027）", () => {
+		expect(detectInstallationInfo({ platform: "win32", installationMode: "windows-system-task" })).toEqual({
+			mode: "windows-system-task",
+		});
+	});
+
+	it("Windows 其他/未报告 → legacy-pm2（待迁移）", () => {
+		expect(detectInstallationInfo(win)).toEqual({ mode: "legacy-pm2" });
+		expect(detectInstallationInfo({ platform: "win32", installationMode: "weird" })).toEqual({
+			mode: "legacy-pm2",
+		});
+	});
+
+	it("非 Windows/Linux 返回 undefined（未报告）", () => {
+		expect(detectInstallationInfo({ platform: "darwin" })).toBeUndefined();
 	});
 });

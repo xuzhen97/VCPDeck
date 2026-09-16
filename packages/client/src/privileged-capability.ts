@@ -10,6 +10,8 @@ export interface PrivilegedProbeEnv {
 	readonly platform: NodeJS.Platform;
 	readonly currentUser: () => string;
 	readonly runNonInteractiveSudo: () => Promise<number>;
+	/** Windows 真实身份探测（whoami.exe，无 shell）；返回原始输出，空串表示失败。 */
+	readonly runWindowsIdentity: () => Promise<string>;
 }
 
 /** 安装模式探测的可注入环境。 */
@@ -33,6 +35,44 @@ function defaultCurrentUser(): string {
 	} catch {
 		return process.env.USER || process.env.LOGNAME || "unknown";
 	}
+}
+
+/** 默认探测：无 shell 执行 whoami.exe、固定超时；只取身份文本，不打印任何输出。 */
+function defaultRunWindowsIdentity(): Promise<string> {
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = (value: string) => {
+			if (!settled) {
+				settled = true;
+				resolve(value);
+			}
+		};
+		let stdout = "";
+		try {
+			const child = execFile(
+				"whoami.exe",
+				[],
+				{ timeout: SUDO_PROBE_TIMEOUT_MS, encoding: "utf8" },
+				(error) => {
+					clearTimeout(timer);
+					finish(error ? "" : stdout.trim());
+				},
+			);
+			child.stdout?.on("data", (chunk: unknown) => {
+				stdout += String(chunk);
+			});
+			const timer = setTimeout(() => {
+				try {
+					child.kill("SIGKILL");
+				} catch {
+					// 进程已结束：kill 为无操作。
+				}
+				finish("");
+			}, SUDO_PROBE_TIMEOUT_MS);
+		} catch {
+			finish("");
+		}
+	});
 }
 
 /** 默认探测：非交互、无 shell、固定超时；不捕获、不打印任何凭据或输出。 */
@@ -75,7 +115,17 @@ function createDefaultPrivilegedProbeEnv(): PrivilegedProbeEnv {
 		platform: process.platform,
 		currentUser: defaultCurrentUser,
 		runNonInteractiveSudo: defaultRunNonInteractiveSudo,
+		runWindowsIdentity: defaultRunWindowsIdentity,
 	};
+}
+
+/** 规范化 whoami 输出为安全可上报的运行账户（去尾部 \r、拒绝控制字符与超长；失败返回 unknown）。 */
+function normalizeWindowsIdentity(raw: string): string {
+	const value = raw.replace(/\r?\n/g, "").trim();
+	// 控制字符（C0）不应出现在账户名中；逐字符判定以避免正则控制字符。
+	const hasControlCharacter = [...value].some((ch) => (ch.codePointAt(0) ?? 0) < 0x20);
+	if (value.length === 0 || value.length > 256 || hasControlCharacter) return "unknown";
+	return value;
 }
 
 function createDefaultInstallationProbeEnv(): InstallationProbeEnv {
@@ -92,12 +142,28 @@ function safeRunAsUser(username: string): string {
 }
 
 /**
- * 探测当前运行账户是否具备免密非交互 sudo（仅 Linux；非 Linux 返回 undefined 表示未报告）。
- * 成功（`sudo -n true` 退出码 0）→ sudo-all 可用；失败/超时/异常 → unavailable，失败关闭。
+ * 探测当前运行账户的非交互特权能力。
+ * Linux：免密 sudo 成功（`sudo -n true` 退出码 0）→ sudo-all；失败/超时/异常 → unavailable，失败关闭。
+ * Windows（ADR-0027）：whoami 输出精确为 `NT AUTHORITY\SYSTEM` → windows-system；其他身份、失败或超时 → unavailable。
+ * 环境变量只声明安装模式，SYSTEM 权限必须由独立真实身份探测证明，两者互为证据链。
+ * 其他平台返回 undefined 表示未报告。
  */
 export async function probePrivilegedCapability(
 	env: PrivilegedProbeEnv = createDefaultPrivilegedProbeEnv(),
 ): Promise<PrivilegedCapabilityStatus | undefined> {
+	if (env.platform === "win32") {
+		let identity = "";
+		try {
+			identity = await env.runWindowsIdentity();
+		} catch {
+			identity = "";
+		}
+		const runAsUser = normalizeWindowsIdentity(identity);
+		if (runAsUser.toUpperCase() === "NT AUTHORITY\\SYSTEM") {
+			return { available: true, mode: "windows-system", nonInteractive: true, runAsUser: "SYSTEM" };
+		}
+		return { available: false, mode: "unavailable", nonInteractive: false, runAsUser };
+	}
 	if (env.platform !== "linux") return undefined;
 	let runAsUser: string;
 	try {
@@ -118,12 +184,20 @@ export async function probePrivilegedCapability(
 }
 
 /**
- * 探测 Client 安装模式（仅 Linux；Windows 返回 undefined 表示未报告，保持原 PM2 语义）。
- * A2 安装通过 `VCPDECK_INSTALLATION_MODE=systemd-root-equivalent` 声明；其余 Linux 视为待迁移 legacy-pm2。
+ * 探测 Client 安装模式。
+ * Linux：`VCPDECK_INSTALLATION_MODE=systemd-root-equivalent` 声明 A2；其余 Linux 视为待迁移 legacy-pm2。
+ * Windows（ADR-0027）：环境值精确为 `windows-system-task` 时上报新模式；其他/缺失均为 legacy-pm2。
+ * 其他平台返回 undefined 表示未报告。
  */
 export function detectInstallationInfo(
 	env: InstallationProbeEnv = createDefaultInstallationProbeEnv(),
 ): MachineInstallationStatus | undefined {
+	if (env.platform === "win32") {
+		if (env.installationMode === "windows-system-task") {
+			return { mode: "windows-system-task" };
+		}
+		return { mode: "legacy-pm2" };
+	}
 	if (env.platform !== "linux") return undefined;
 	if (env.installationMode === "systemd-root-equivalent") {
 		return { mode: "systemd-root-equivalent" };

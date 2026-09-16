@@ -206,6 +206,14 @@ export class ClientService {
     return clients.map((c) => this.toClientInfo(c));
   }
 
+  /** 返回全部 Client（含离线，按最近连接排序）；发版页迁移汇总与离线机器提示依赖此方法（ADR-0027）。 */
+  async listAll(): Promise<ClientInfo[]> {
+    const clients = await this.prisma.client.findMany({
+      orderBy: { connectedAt: "desc" },
+    });
+    return clients.map((c) => this.toClientInfo(c));
+  }
+
   /** 返回一键安装器所需的最小 Client 验收摘要。 */
   async getInstallerStatus(clientId: string) {
     const client = await this.prisma.client.findUnique({ where: { id: clientId } });
@@ -219,6 +227,7 @@ export class ClientService {
         capabilitiesReported: false,
         installationMode: null,
         nonInteractiveSudo: null,
+        privilegedMode: null,
         connectedAt: null,
         lastHeartbeatAt: null,
       };
@@ -241,6 +250,7 @@ export class ClientService {
       capabilitiesReported: Array.isArray(capabilities) && capabilities.length > 0,
       installationMode: stored.installation?.mode ?? null,
       nonInteractiveSudo: stored.details.privileged?.nonInteractive ?? null,
+      privilegedMode: stored.details.privileged?.mode ?? null,
       connectedAt: client.connectedAt?.toISOString() ?? null,
       lastHeartbeatAt: client.lastHeartbeatAt?.toISOString() ?? null,
     };

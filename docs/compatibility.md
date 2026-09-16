@@ -39,7 +39,11 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 
 Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd 组合。ARM64、Alpine/musl、CentOS 7、WSL、容器和无 systemd Linux 会在下载大构件前明确拒绝；Node.js 自身支持某架构不代表 FRP、PTY 和 Release 原生依赖已支持。
 
-**Linux A2 额外前提**：全新安装要求 root 或可用 sudo（安装器 `sudo -v` 验证），无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，不回退 PM2/用户服务；安装后的 `vcpdeck` 账户是 root 等价 Client（见 [`security.md`](./security.md) §4.5）。Windows 安装行为不变（用户登录触发，无 systemd）。
+**Windows SYSTEM 安装额外前提**：安装命令必须在**已提升的管理员 PowerShell** 中执行（同时要求 Administrators 成员与 high-integrity 令牌）；未提升立即失败，安装器不申请 UAC。固定安装到 `C:\ProgramData\VCPDeck\Client`，由 `NT AUTHORITY\SYSTEM` 下的 `\VCPDeck\Client` 开机任务守护，不依赖用户登录、不使用 PM2。
+
+**Linux A2 额外前提**：全新安装要求 root 或可用 sudo（安装器 `sudo -v` 验证），无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，不回退 PM2/用户服务；安装后的 `vcpdeck` 账户是 root 等价 Client（见 [`security.md`](./security.md) §4.5）。
+
+**系统级部署契约（ADR-0027）**：Client 注册上报 `installation.mode` 与 `capabilityDetails.privileged`。当前合规组合只有 `windows-system-task` + `windows-system`（Windows）与 `systemd-root-equivalent` + `sudo-all`（Linux）。旧 Client 缺字段、`legacy-pm2`、平台与模式不匹配、特权模式/可用性不满足都只记“未报告”或稳定不合规原因，**不猜测、不推断为合规**；`Shared` 的 `getClientInstallationCompliance` 是唯一判定入口。该判定**独立于业务 Release 版本**：`clientVersion` 已是最新仍可能提示“需要人工升级”。存量迁移不在 Server 上批量下发，需在目标机手动执行对应平台的安装命令。
 
 ## 4. 升级顺序
 

@@ -28,56 +28,35 @@ pnpm --filter @vcpdeck/client start
 
 ### Windows Client 重启
 
-Windows 一键安装器可能把 PM2 安装到当前用户的私有目录，因此新开的 PowerShell 中直接执行 `pm2` 可能提示“找不到命令”。必须使用**安装 Client 的同一个 Windows 用户**，并只重启 PM2 管理的 Launcher。安装器创建的登录任务绑定安装用户 SID，使用 `RunLevel=Highest`、`InteractiveToken`，在登录 10 秒后执行并允许电池供电运行；若当前 PM2 daemon 是旧版 Limited 任务启动的，重跑安装器会自动重启 daemon 并由最高权限任务恢复，新开进程与 Client 均持有 High Mandatory Level。
+Windows 一键安装（ADR-0027）把 Client 安装到 `C:\ProgramData\VCPDeck\Client`，由 `NT AUTHORITY\SYSTEM` 下的 `\VCPDeck\Client` 开机任务守护，**不安装、不运行 PM2**，也不依赖任何用户登录或用户私有目录。
 
 ```powershell
-# 若 pm2.cmd 已在 PATH 中，直接执行：
-pm2 restart vcpdeck-client-launcher
+# 查看任务定义与上次运行结果（需已提升的管理员 PowerShell）
+Get-ScheduledTask -TaskPath '\VCPDeck\' -TaskName 'Client'
+Get-ScheduledTaskInfo -TaskPath '\VCPDeck\' -TaskName 'Client'
 ```
 
-如果 `pm2` 不在 PATH，使用安装器默认的私有 PM2 和 Node.js：
+重启 Client 只需重启任务本身：
 
 ```powershell
-$Pm2Cli = "$HOME\.vcpdeck\tools\pm2\node_modules\pm2\bin\pm2"
-
-# 优先使用安装器可能下载的用户私有 Node.js；没有时再使用 PATH 中的 Node.js
-$Node = (Get-ChildItem "$HOME\.vcpdeck\runtime\node\node-*\node.exe" `
-  -File -ErrorAction SilentlyContinue |
-  Sort-Object FullName -Descending |
-  Select-Object -First 1).FullName
-if (-not $Node) { $Node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source }
-if (-not $Node -or -not (Test-Path $Node)) { throw "找不到 Node.js" }
-if (-not (Test-Path $Pm2Cli)) { throw "找不到私有 PM2：$Pm2Cli" }
-
-& $Node $Pm2Cli restart vcpdeck-client-launcher
-& $Node $Pm2Cli status
+schtasks.exe /End /TN "\VCPDeck\Client" /F
+schtasks.exe /Run /TN "\VCPDeck\Client"
 ```
 
-电脑重启并登录该用户后，若 PM2 进程列表没有自动恢复，先排查任务执行状态与现场日志：
+若开机后 Client 未恢复，先看任务状态与运行结果，再看 Client 日志：
 
 ```powershell
-schtasks.exe /Query /TN "VCPDeck PM2 Startup" /V /FO LIST
-Get-Content "$HOME\.vcpdeck\launcher-client\startup.log" -Tail 50 -ErrorAction SilentlyContinue
+Get-ChildItem "C:\ProgramData\VCPDeck\Client\logs" -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 5
+Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAction SilentlyContinue
 ```
 
-也可手动执行安装器生成的恢复脚本（内含绝对路径 Node/PM2，不依赖 PATH）：
-
-```powershell
-& "$HOME\.vcpdeck\launcher-client\pm2-resurrect.cmd"
-```
-
-然后再次执行上面的 `restart` 命令。排查 Launcher 日志时：
-
-```powershell
-& $Node $Pm2Cli logs vcpdeck-client-launcher --lines 100
-```
-
-若 `pm2-resurrect.cmd` 和私有 PM2 路径都不存在，说明安装未完整保留 PM2 现场；不要删除 `~/.vcpdeck/client-id`，应重跑 `/releases` 页面生成的同一条 Client 安装命令。
+任务 action 使用 `C:\ProgramData\VCPDeck\Client\runtime\node` 下的私有 Node 与 `dist\main.js`，不依赖 PATH。不要删除 `C:\ProgramData\VCPDeck\client-id`（卸载会保留它供重装复用）；需要重装修复时重跑 `/releases` 页面生成的同一条安装命令（必须在已提升管理员 PowerShell 中执行）。
 
 ### Linux A2 Client 运维（systemd）
 
 - **无人值守开机自启**：`vcpdeck-client.service` 为 `enabled` + `Restart=always`，开机由 systemd 拉起，无需用户登录/linger。验证链：`systemctl status vcpdeck-client.service`（active）→ Server 控制面 `online=true` 且版本/能力齐备。
-- **迁移（M1）**：存量 PM2 安装用 `--migrate` 迁到 A2（保留 `client-id`、无关 PM2 应用）。两阶段：verify-only 验证身份/版本/特权 → 原子切稳态；稳态全能力注册为回滚边界，之前失败自动恢复旧 PM2，之后记 `manual-recovery-required`。迁移前若源指向不同 Server、`client-id` 非法、PM2 未 online 或有进行中 Release，安装器直接拒绝。
+- **迁移（M1）**：存量 PM2 安装用 `--migrate` 迁到 A2（保留 `client-id`、Server Origin、显示名称与无关 PM2 应用）。全部材料校验成功后才清理式迁移：核对并删除旧 VCPDeck PM2 entry → `pm2 save` → 无其他 PM2 应用时停用旧自启（否则保留）→ 删除旧 app-dir 与旧安装状态 → 启动 `vcpdeck-client.service` 并全能力验收。**失败只记录阶段状态并保留 A2 现场，可用同一命令重跑，不会 resurrect 或恢复旧 PM2**。迁移前若源指向不同 Server、`client-id` 非法、PM2 未 online、PM2 entry 指向其他目录或有进行中 Release，安装器直接拒绝。
 - **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。非 systemd 单元会被拒绝（走 PM2 卸载）。
 - **root 等价风险**：该 Client 可执行任意 root 命令；Job/Terminal/Pi 操作前确认在可信运维域内（Server 仅记录控制面/Job/Session 审计，见 [`security.md`](./security.md) §4.5）。
 
@@ -212,27 +191,31 @@ Get-Content "$HOME\.vcpdeck\launcher-client\startup.log" -Tail 50 -ErrorAction S
 
 ### Client 一键安装失败
 
+> 下列带 PM2 的条目只适用于**尚未迁移的旧安装**；当前 Windows 新安装为 SYSTEM 开机任务，故障排查见上文 §2「Windows Client 重启」。
+
 - `CLIENT_INSTALLER_DISABLED`：回 `/releases` 启用入口；不会影响已有 Client；
 - `CLIENT_INSTALLER_RELEASE_NOT_READY`：确认当前 Server 版本存在状态为 `done` 的同版本 Release；
 - `CLIENT_INSTALLER_ARCHIVE_MISSING`：补齐目标平台 Release archive；
 - 平台检查失败：核对 x64、受支持发行版、glibc/systemd，WSL/容器/ARM64/musl 不在范围；当前仅额外支持 Bazzite x64，不自动支持其他 Fedora Atomic 发行版；
 - Bazzite 基础依赖失败：安装器只对缺失的 `curl`、`unzip`、`tar`、`xz` 或 CA 证书调用 `sudo rpm-ostree`，不应改用 `dnf install`；先执行 `rpm-ostree status` 检查 pending deployment、网络和 sudo 权限。若提示依赖将在重启后生效，手工重启 Bazzite 后重跑同一条安装命令；安装器不会自动重启。A2 安装完成后运行时位于 `/opt/vcpdeck/client/node`，由 `vcpdeck-client.service` 管理；
-- Node/PM2 下载失败：Windows 或旧 Linux PM2 安装时检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源。Linux A2 不使用 PM2，Node 运行时直接安装到 `/opt/vcpdeck/client/node`。若旧 PM2 安装错误包含 `env: “node”: 没有那个文件或目录`，说明 Server 仍在提供未把私有 Node `bin` 注入 npm 子进程 `PATH` 的旧安装器，应先更新 Server 后重跑同一固定命令。若 Node 输出的探测表达式丢失 `"x64"` 或 `"."` 引号，则是旧版 Windows PowerShell 5.1 引导脚本，同样先更新 Server；
+- Node/PM2 下载失败：Windows 或旧 Linux PM2 安装时检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源。Windows SYSTEM 安装不使用 PM2，私有 Node 落在 `C:\ProgramData\VCPDeck\Client\runtime\node`；Linux A2 不使用 PM2，Node 运行时直接安装到 `/opt/vcpdeck/client/node`。若旧 PM2 安装错误包含 `env: “node”: 没有那个文件或目录`，说明 Server 仍在提供未把私有 Node `bin` 注入 npm 子进程 `PATH` 的旧安装器，应先更新 Server 后重跑同一固定命令。若 Node 输出的探测表达式丢失 `"x64"` 或 `"."` 引号，则是旧版 Windows PowerShell 5.1 引导脚本，同样先更新 Server；
 - 旧 PM2 Launcher 显示 `online`，但 120 秒后仍报 `registered:false`：检查 Launcher error log；若反复出现 `The operation was aborted due to timeout` 且系统没有 Node，说明旧 ecosystem 没有把私有 Node `bin` 注入 Launcher `PATH`，Launcher 正在尝试下载第二份运行时。更新 Server 后重跑同一固定命令；紧急恢复可将私有 Node `bin` 前置到 ecosystem 的 `env.PATH`，以 `--update-env` 重启 Launcher 并 `pm2 save`。A2 systemd 部署则检查 `systemctl status vcpdeck-client.service`、`journalctl -u vcpdeck-client.service` 和 `/etc/vcpdeck/client.env` 权限；
 - Linux 安装末尾出现 `TMP_DIR: 未绑定的变量`：这是旧 bootstrap 的 EXIT trap 在函数返回后展开局部变量所致，不会删除已安装文件；更新 Server 后重跑同一固定命令完成幂等修复；
 - PM2 同名路径冲突：运行 `pm2 describe vcpdeck-client-launcher`，不要自动覆盖指向其他 app-dir 的进程；
 - Launcher online 但验收超时：运行 `pm2 logs vcpdeck-client-launcher --lines 100`，核对 `launcher.env`、Server 可达性、PSK 和 `/client` WebSocket；
 - 若修改 `launcher.env` 后仍连接旧 Server，运行 `pm2 env <id>` 核对 PM2 是否缓存了旧 `VCPDECK_SERVER`。Node `--env-file` 不覆盖已存在的同名进程环境；新版一键安装器会生成 `launcher-env.cjs` preload（先清除继承的 `VCPDECK_*`，再主动读取 `launcher.env`）并在 ecosystem 中设置 `filter_env: ["VCPDECK_"]`。旧安装应更新这些文件后，以 `pm2 delete vcpdeck-client-launcher`、`pm2 start <app-dir>/ecosystem.config.cjs --only vcpdeck-client-launcher`、`pm2 save` 重建进程，确保 `launcher.env` 是 Launcher 配置权威；
-- 失败会保留 `~/.vcpdeck/client-install.json`、缓存、版本目录与 PM2 现场，修复后重跑同一固定命令；
-- `/releases` 的 Client 一键卸载命令只读取该安装状态，删除对应 `vcpdeck-client-launcher`、Client 目录和约定的自启配置，不删除 `~/.vcpdeck/client-id`、通用缓存、其他 PM2 应用或 Server 数据；找不到安装状态或同名 PM2 进程指向其他目录时会拒绝操作。
+- 失败会保留现场供重跑：旧 Windows 用户安装保留 `~/.vcpdeck/client-install.json`、缓存、版本目录与 PM2 现场；Windows SYSTEM 安装保留 `C:\ProgramData\VCPDeck\Client`；Linux A2 保留 `/opt/vcpdeck/client` 与 `/etc/vcpdeck/client.env`；
+- `/releases` 的 Client 一键卸载命令只读取该安装状态：Windows SYSTEM 安装停用并删除 `\VCPDeck\Client` 任务、把 `client-id` 原子保留到 `C:\ProgramData\VCPDeck\client-id` 后删除运行目录；旧安装只删除对应 `vcpdeck-client-launcher`、Client 目录和约定的自启配置。两者都不删除 `client-id`（ProgramData 保留路径除外）、通用缓存、其他 PM2 应用或 Server 数据；找不到安装状态、任务 action 指向其他目录或同名 PM2 进程指向其他目录时会拒绝操作。
 
-### Client PM2 进程丢失
+### Client PM2 进程丢失（旧安装）
+
+> 仅适用于尚未迁移的 Windows/Linux 旧 PM2 安装；Windows SYSTEM 安装请改用任务与 ProgramData 日志排查。
 
 - 现象：`pm2 list` 为空且 `pm2 describe vcpdeck-client-launcher` 不存在，但 `~/.pm2/dump.pm2` 存在——PM2 守护被清空而恢复快照仍在；
 - 恢复：`pm2 resurrect` 后 `pm2 list` 确认进程回 online，再到驾驶台或 `vcpdeck clients list` 核对在线；
 - 起不来时 `pm2 logs vcpdeck-client-launcher --lines 100` 核对 `launcher.env`、Server 可达性与 PSK；
-- 自启单元/计划任务也被删时，Linux 重跑 `pm2 startup` 按提示注册 systemd；Windows 重跑一键安装固定命令重建登录触发任务；
-- 全程不得动 `~/.vcpdeck/client-id`，否则会以新身份注册成新机器。
+- 自启单元/计划任务也被删时，Linux 重跑 `pm2 startup` 按提示注册 systemd；旧 Windows 安装重跑一键安装固定命令重建登录触发任务；
+- 全程不得动 `client-id`（Linux 旧安装为 `~/.vcpdeck/client-id`，Windows SYSTEM 安装为 `C:\ProgramData\VCPDeck\client-id`），否则会以新身份注册成新机器。
 
 ### Client 无法连接
 

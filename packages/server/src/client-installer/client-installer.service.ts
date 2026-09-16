@@ -5,8 +5,11 @@ import { Inject, Injectable } from "@nestjs/common";
 import {
 	ReleaseStatus,
 	VERSION,
+	getClientInstallationCompliance,
 	isReleaseArchiveAvailable,
 	type ActorContext,
+	type ClientInstallationComplianceReason,
+	type ClientInfo,
 	type ReleasePlatform,
 } from "@vcpdeck/shared";
 import { ClientService } from "../client/client.service.js";
@@ -32,6 +35,40 @@ export interface ClientInstallerConfigInfo {
 	serverVersion: string;
 	releaseReady: boolean;
 	platforms: Record<ReleasePlatform, { available: boolean; reasonCode?: string }>;
+	/** 系统级部署迁移汇总（ADR-0027）：全部 Client（含离线）按最后有效摘要判定，独立于业务版本 */
+	migration: {
+		compliantCount: number;
+		needsUpgradeCount: number;
+		clients: Array<{
+			clientId: string;
+			name: string;
+			os: string;
+			online: boolean;
+			reason: ClientInstallationComplianceReason;
+		}>;
+	};
+}
+
+/** 由最后有效注册摘要计算迁移汇总；只暴露稳定原因，不泄漏 capability 原文。 */
+function buildMigrationSummary(clients: ClientInfo[]) {
+	const needsUpgrade: ClientInstallerConfigInfo["migration"]["clients"] = [];
+	let compliantCount = 0;
+	for (const client of clients) {
+		const compliance = getClientInstallationCompliance(client);
+		if (compliance.compliant) {
+			compliantCount += 1;
+			continue;
+		}
+		needsUpgrade.push({
+			clientId: client.clientId,
+			name: client.name,
+			os: client.os,
+			online: client.online,
+			reason: compliance.reason ?? "installation-unreported",
+		});
+	}
+	needsUpgrade.sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+	return { compliantCount, needsUpgradeCount: needsUpgrade.length, clients: needsUpgrade };
 }
 export interface ClientInstallerPreflight {
 	serverVersion: string;
@@ -69,7 +106,7 @@ const INSTALLER_ASSETS = [
 	"uninstall-client-linux.cjs",
 ] as const;
 
-/** 按平台选择安装器资产：linux-x64 走 A2 系统安装器，win-x64 保持 PM2 安装器。 */
+/** 按平台选择安装器资产：linux-x64 走 A2 systemd 安装器，win-x64 走 SYSTEM 开机任务安装器（ADR-0027）。 */
 function installerAssetName(platform: ClientInstallerPlatform): string {
 	return platform === "linux-x64" ? "install-client-linux.cjs" : "install-client.cjs";
 }
@@ -95,9 +132,10 @@ export class ClientInstallerService {
 	) {}
 
 	async getConfig(): Promise<ClientInstallerConfigInfo> {
-		const [config, release] = await Promise.all([
+		const [config, release, allClients] = await Promise.all([
 			this.ensureConfig(),
 			this.releases.findByVersion(VERSION),
+			this.clients.listAll(),
 		]);
 		const releaseReady = release?.status === ReleaseStatus.DONE;
 		return {
@@ -117,6 +155,7 @@ export class ClientInstallerService {
 					isReleaseArchiveAvailable(release?.archives["linux-x64"]),
 				),
 			},
+			migration: buildMigrationSummary(allClients),
 		};
 	}
 

@@ -474,3 +474,91 @@ describe("ClientService listOnline", () => {
 		expect(client?.capabilityDetails.frp).toBeUndefined();
 	});
 });
+
+/** ADR-0027：构造全量 Client 行（含在线/离线与安装/特权摘要）。 */
+function makeClientRow(overrides: {
+	id: string;
+	name: string;
+	os: string;
+	online: boolean;
+	installation?: { mode: string };
+	privileged?: { available: boolean; mode: string; nonInteractive: boolean; runAsUser: string };
+} = { id: "c", name: "n", os: "linux 6.8", online: false }) {
+	const details: Record<string, unknown> = {};
+	if (overrides.installation !== undefined) details.installation = overrides.installation;
+	if (overrides.privileged !== undefined) details.privileged = overrides.privileged;
+	return {
+		...clientRow,
+		id: overrides.id,
+		name: overrides.name,
+		os: overrides.os,
+		online: overrides.online,
+		capabilityDetails: JSON.stringify(details),
+	};
+}
+
+describe("ClientService ADR-0027 全量摘要", () => {
+	it("listAll 返回在线与离线 Client 并保留最后安装/特权摘要", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			makeClientRow({
+				id: "win-new",
+				name: "win-new",
+				os: "win32 10.0",
+				online: true,
+				installation: { mode: "windows-system-task" },
+				privileged: { available: true, mode: "windows-system", nonInteractive: true, runAsUser: "SYSTEM" },
+			}),
+			makeClientRow({
+				id: "linux-old",
+				name: "linux-old",
+				os: "linux 6.8",
+				online: false,
+				installation: { mode: "legacy-pm2" },
+			}),
+			makeClientRow({ id: "unreported", name: "unreported", os: "win32 10.0", online: false }),
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+
+		const all = await service.listAll();
+		expect(findMany).toHaveBeenCalledWith({ orderBy: { connectedAt: "desc" } });
+		expect(all.map((c) => c.clientId)).toEqual(["win-new", "linux-old", "unreported"]);
+		expect(all[0].installation).toEqual({ mode: "windows-system-task" });
+		expect(all[0].capabilityDetails.privileged).toMatchObject({ mode: "windows-system" });
+		expect(all[1].installation).toEqual({ mode: "legacy-pm2" });
+		expect(all[2].installation).toBeUndefined();
+	});
+
+	it("listOnline 语义不变（仅在线）", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			makeClientRow({ id: "a", name: "a", os: "linux 6.8", online: true }),
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+		await service.listOnline();
+		expect(findMany).toHaveBeenCalledWith({ where: { online: true }, orderBy: { connectedAt: "desc" } });
+	});
+
+	it("getInstallerStatus 投影 privilegedMode（windows-system / null）", async () => {
+		const findUnique = vi.fn().mockImplementation(async ({ where }: { where: { id: string } }) =>
+			where.id === "sys"
+				? makeClientRow({
+						id: "sys",
+						name: "sys",
+						os: "win32 10.0",
+						online: true,
+						installation: { mode: "windows-system-task" },
+						privileged: { available: true, mode: "windows-system", nonInteractive: true, runAsUser: "SYSTEM" },
+					})
+				: makeClientRow({ id: "old", name: "old", os: "linux 6.8", online: false }),
+		);
+		const prisma = prismaMock({ findUnique }) as never;
+		const service = new ClientService(prisma);
+
+		const sys = await service.getInstallerStatus("sys");
+		expect(sys.installationMode).toBe("windows-system-task");
+		expect(sys.privilegedMode).toBe("windows-system");
+		const old = await service.getInstallerStatus("old");
+		expect(old.privilegedMode).toBeNull();
+	});
+});

@@ -20,9 +20,10 @@ const MAX_CAPABILITIES = 100;
 const MAX_TOTAL_MEM_MB = 10_000_000;
 const MAX_RUN_AS_USER = 256;
 
-/** Client 安装模式（ADR-0023：Linux A2 专用账户 + systemd 系统服务；legacy-pm2 为待迁移旧安装）。 */
+/** Client 安装模式（ADR-0023：Linux A2 专用账户 + systemd；ADR-0027：Windows SYSTEM 开机任务；legacy-pm2 为待迁移旧安装）。 */
 export const MachineInstallationMode = {
 	SYSTEMD_ROOT_EQUIVALENT: "systemd-root-equivalent",
+	WINDOWS_SYSTEM_TASK: "windows-system-task",
 	LEGACY_PM2: "legacy-pm2",
 } as const;
 
@@ -34,9 +35,10 @@ export interface MachineInstallationStatus {
 	mode: MachineInstallationMode;
 }
 
-/** 非交互特权执行模式：仅 sudo-all（Q2）与 unavailable 两种。 */
+/** 非交互特权执行模式：sudo-all（Linux A2）、windows-system（ADR-0027 SYSTEM 任务）与 unavailable。 */
 export const PrivilegedCapabilityMode = {
 	SUDO_ALL: "sudo-all",
+	WINDOWS_SYSTEM: "windows-system",
 	UNAVAILABLE: "unavailable",
 } as const;
 
@@ -100,7 +102,11 @@ export function parseMachineInstallation(
 	if (!isRecord(value) || Object.keys(value).length !== 1) {
 		throw new Error("installation 必须为仅含 mode 的对象");
 	}
-	const valid = [MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT, MachineInstallationMode.LEGACY_PM2];
+	const valid = [
+	MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT,
+	MachineInstallationMode.WINDOWS_SYSTEM_TASK,
+	MachineInstallationMode.LEGACY_PM2,
+	];
 	if (!valid.includes(value.mode as MachineInstallationMode)) {
 		throw new Error(`installation.mode 必须为 ${valid.join(" 或 ")}`);
 	}
@@ -118,18 +124,100 @@ export function parsePrivilegedCapabilityStatus(
 	if (typeof available !== "boolean" || typeof nonInteractive !== "boolean") {
 		throw new Error("privileged.available 与 privileged.nonInteractive 必须为 boolean");
 	}
-	if (mode !== PrivilegedCapabilityMode.SUDO_ALL && mode !== PrivilegedCapabilityMode.UNAVAILABLE) {
-		throw new Error("privileged.mode 必须为 sudo-all 或 unavailable");
+	if (
+		mode !== PrivilegedCapabilityMode.SUDO_ALL &&
+		mode !== PrivilegedCapabilityMode.WINDOWS_SYSTEM &&
+		mode !== PrivilegedCapabilityMode.UNAVAILABLE
+	) {
+		throw new Error("privileged.mode 必须为 sudo-all、windows-system 或 unavailable");
 	}
 	const user = requireString(runAsUser, "privileged.runAsUser", MAX_RUN_AS_USER);
-	// 语义约束：unavailable 不得声明非交互可用；sudo-all 必须可用。
-	if (mode === PrivilegedCapabilityMode.SUDO_ALL && available !== true) {
-		throw new Error("privileged.mode=sudo-all 必须 available=true");
+	// 语义约束：sudo-all/windows-system 必须可用且非交互；unavailable 不得声明非交互可用。
+	if (
+		(mode === PrivilegedCapabilityMode.SUDO_ALL || mode === PrivilegedCapabilityMode.WINDOWS_SYSTEM) &&
+		(available !== true || nonInteractive !== true)
+	) {
+		throw new Error(`privileged.mode=${mode} 必须 available=true 且 nonInteractive=true`);
 	}
 	if (mode === PrivilegedCapabilityMode.UNAVAILABLE && nonInteractive !== false) {
 		throw new Error("privileged.mode=unavailable 必须 nonInteractive=false");
 	}
 	return { available, mode, nonInteractive, runAsUser: user };
+}
+
+/** 安装/特权合规不稳定的稳定原因（人工升级提示的单一事实来源，ADR-0027）。 */
+export const ClientInstallationComplianceReason = {
+	/** 显式上报旧 PM2 安装模式 */
+	LEGACY_PM2: "legacy-pm2",
+	/** 安装模式未报告（旧 Client 缺字段） */
+	INSTALLATION_UNREPORTED: "installation-unreported",
+	/** 特权模式/可用性不满足系统级要求，或未报告 */
+	PRIVILEGE_NONCOMPLIANT: "privilege-noncompliant",
+	/** 安装模式与操作系统不匹配 */
+	PLATFORM_MODE_MISMATCH: "platform-mode-mismatch",
+	/** 不支持的操作系统 */
+	PLATFORM_UNSUPPORTED: "platform-unsupported",
+} as const;
+
+export type ClientInstallationComplianceReason =
+	(typeof ClientInstallationComplianceReason)[keyof typeof ClientInstallationComplianceReason];
+
+/** 合规判定所需的 Client 最小投影（与 ClientInfo 字段同形，独立于业务版本）。 */
+export type ClientInstallationComplianceSource = Pick<
+	MachineRegister,
+	"os" | "installation" | "capabilityDetails"
+>;
+
+/** 安装与特权合规判定结果；compliant=true 时 reason 为 null。 */
+export interface ClientInstallationCompliance {
+	compliant: boolean;
+	reason: ClientInstallationComplianceReason | null;
+}
+
+type PrivilegedStatusLike = Pick<
+	PrivilegedCapabilityStatus,
+	"available" | "mode" | "nonInteractive"
+>;
+
+/**
+ * 判定 Client 部署是否合规（独立于业务版本，ADR-0027）。
+ * Windows 需 windows-system-task + windows-system；Linux 需 systemd-root-equivalent + sudo-all 且非交互。
+ * 缺字段只判“未报告”，不抛出、不猜测；未知平台返回 platform-unsupported。
+ */
+export function getClientInstallationCompliance(
+	client: {
+		os: string;
+		installation?: MachineInstallationStatus;
+		capabilityDetails?: { privileged?: PrivilegedStatusLike };
+	},
+): ClientInstallationCompliance {
+	const mode = client.installation?.mode;
+	if (mode === undefined) {
+		return { compliant: false, reason: ClientInstallationComplianceReason.INSTALLATION_UNREPORTED };
+	}
+	if (mode === MachineInstallationMode.LEGACY_PM2) {
+		return { compliant: false, reason: ClientInstallationComplianceReason.LEGACY_PM2 };
+	}
+	const isWin = client.os.startsWith("win32");
+	const isLinux = client.os.startsWith("linux");
+	if (!isWin && !isLinux) {
+		return { compliant: false, reason: ClientInstallationComplianceReason.PLATFORM_UNSUPPORTED };
+	}
+	const expected = isWin ? MachineInstallationMode.WINDOWS_SYSTEM_TASK : MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT;
+	if (mode !== expected) {
+		return { compliant: false, reason: ClientInstallationComplianceReason.PLATFORM_MODE_MISMATCH };
+	}
+	const privileged = client.capabilityDetails?.privileged;
+	const expectedPrivilege = isWin ? PrivilegedCapabilityMode.WINDOWS_SYSTEM : PrivilegedCapabilityMode.SUDO_ALL;
+	if (
+		privileged === undefined ||
+		privileged.mode !== expectedPrivilege ||
+		privileged.available !== true ||
+		privileged.nonInteractive !== true
+	) {
+		return { compliant: false, reason: ClientInstallationComplianceReason.PRIVILEGE_NONCOMPLIANT };
+	}
+	return { compliant: true, reason: null };
 }
 
 /**

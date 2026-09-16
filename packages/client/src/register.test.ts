@@ -169,6 +169,31 @@ describe("getRegisterInfo", () => {
 		expect(json).not.toContain("VCPDECK_PSK");
 	});
 
+	it("Windows SYSTEM 运行时安全摘要序列化：windows-system + windows-system-task 上报（ADR-0027）", () => {
+		const info = getRegisterInfo(
+			undefined,
+			undefined,
+			{
+				privileged: {
+					available: true,
+					mode: "windows-system",
+					nonInteractive: true,
+					runAsUser: "SYSTEM",
+				},
+				installation: { mode: "windows-system-task" },
+			},
+		);
+		expect(info.installation).toEqual({ mode: "windows-system-task" });
+		expect(info.capabilityDetails?.privileged).toEqual({
+			available: true,
+			mode: "windows-system",
+			nonInteractive: true,
+			runAsUser: "SYSTEM",
+		});
+		const json = JSON.stringify(info);
+		expect(json).not.toContain("VCPDECK_PSK");
+	});
+
 	it("无运行时安全摘要时不报告 privileged 与 installation（旧 Client 语义）", () => {
 		const info = getRegisterInfo();
 		expect(info.capabilityDetails?.privileged).toBeUndefined();

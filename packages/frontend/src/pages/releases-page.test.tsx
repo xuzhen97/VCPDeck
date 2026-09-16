@@ -47,6 +47,30 @@ function release(overrides: Partial<ReleaseInfo> = {}): ReleaseInfo {
 	};
 }
 
+/** 系统级部署合规汇总（ADR-0027）：含离线 Client，与业务版本无关。 */
+function migration() {
+	return {
+		compliantCount: 2,
+		needsUpgradeCount: 2,
+		clients: [
+			{
+				clientId: "c1",
+				name: "linux-old",
+				os: "linux 6.8",
+				online: false,
+				reason: "legacy-pm2" as const,
+			},
+			{
+				clientId: "c2",
+				name: "win-old",
+				os: "win32 10.0",
+				online: true,
+				reason: "installation-unreported" as const,
+			},
+		],
+	};
+}
+
 function makeClient(releases: ReleaseInfo[]) {
 	return {
 		auth: {
@@ -71,6 +95,7 @@ function makeClient(releases: ReleaseInfo[]) {
 					"win-x64": { available: true },
 					"linux-x64": { available: true },
 				},
+				migration: migration(),
 			})),
 			updateConfig: vi.fn(async (enabled: boolean) => ({
 				enabled,
@@ -83,6 +108,7 @@ function makeClient(releases: ReleaseInfo[]) {
 					"win-x64": { available: true },
 					"linux-x64": { available: true },
 				},
+				migration: migration(),
 			})),
 		},
 		releases: {
@@ -179,8 +205,45 @@ describe("ReleasesPage", () => {
 		expect(screen.getByText(/uninstall-client-bootstrap\.ps1/)).toHaveTextContent(
 			"/api/client-installer/assets/uninstall-client-bootstrap.ps1",
 		);
+		// 系统级部署语义：Windows SYSTEM 开机任务 + Linux systemd，不得再提 PM2/登录后自启。
+		expect(
+			screen.getByText(/Windows SYSTEM 开机任务，Linux systemd 系统服务/),
+		).toBeVisible();
+		expect(screen.queryByText(/登录后自启/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/PM2 只守护 Launcher/)).not.toBeInTheDocument();
+		expect(
+			screen.getByText("需在已提升管理员 PowerShell 执行，脚本不申请 UAC"),
+		).toBeVisible();
+		expect(
+			screen.getByText("普通用户可运行，但必须可完成 sudo 认证"),
+		).toBeVisible();
 		await user.click(screen.getByRole("button", { name: "启用一键安装" }));
 		expect(client.clientInstaller.updateConfig).toHaveBeenCalledWith(true);
+	});
+
+	it("展示系统级部署汇总与待人工升级机器（含离线）", async () => {
+		const client = makeClient([release()]);
+		render(
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<ReleasesPage />
+				</AuthProvider>
+			</SdkProvider>,
+		);
+
+		expect(
+			await screen.findByText("系统级部署 2 台 · 需要人工升级 2 台"),
+		).toBeVisible();
+		expect(screen.getByText("linux-old")).toBeVisible();
+		expect(screen.getByText("win-old")).toBeVisible();
+		expect(screen.getByText("· linux 6.8")).toBeVisible();
+		expect(screen.getByText("· win32 10.0")).toBeVisible();
+		expect(screen.getByText("离线")).toBeVisible();
+		expect(screen.getByText("在线")).toBeVisible();
+		expect(screen.getAllByText("需要人工升级：旧版 PM2")).toHaveLength(1);
+		expect(
+			screen.getAllByText("需要人工升级：安装模式未报告"),
+		).toHaveLength(1);
 	});
 
 	it("无发版记录时给出空态提示", async () => {

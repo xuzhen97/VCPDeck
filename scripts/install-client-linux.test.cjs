@@ -301,6 +301,29 @@ test("M1: 有进行中的 Release → LINUX_MIGRATION_RELEASE_ACTIVE 拒绝", ()
 	);
 });
 
+test("M1: 旧 app-dir 不在来源用户 .vcpdeck/launcher-client → 拒绝删除", () => {
+	const s = src({
+		clientDir: "/var/home/xuzhen97/other-app",
+		pm2Process: {
+			name: "vcpdeck-client-launcher",
+			status: "online",
+			pm_exec_path: "/var/home/xuzhen97/other-app/dist/main.js",
+		},
+	});
+	assert.throws(
+		() => discoverMigrationSource({ uid: 0, candidates: [s] }),
+		(error) => error.code === "LINUX_MIGRATION_SOURCE_INVALID",
+	);
+});
+
+test("M1: launcher.env 声明其他 artifact → 拒绝删除", () => {
+	const s = src({ artifact: "server" });
+	assert.throws(
+		() => discoverMigrationSource({ uid: 0, candidates: [s] }),
+		(error) => error.code === "LINUX_MIGRATION_SOURCE_INVALID",
+	);
+});
+
 test("稳定错误码常量齐全", () => {
 	assert.equal(LINUX_INSTALLER_ERROR.NOT_ROOT, "LINUX_NOT_ROOT");
 	assert.equal(LINUX_INSTALLER_ERROR.SUDO_AUTH_FAILED, "LINUX_SUDO_AUTH_FAILED");
@@ -339,11 +362,16 @@ function recordingAdapter() {
 	return adapter;
 }
 
-test("M1: 切换 happy-path 顺序正确，且新服务在旧 Client 停止前不启动", async () => {
+	test("M1: 切换 happy-path 顺序正确，且新服务在旧 Client 停止前不启动", async () => {
 	const adapter = recordingAdapter();
 	await runMigrationCutover({
 		adapter,
-		source: { username: "xuzhen97", clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c" },
+		source: {
+			username: "xuzhen97",
+			clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
+			sourceAppDir: "/home/xuzhen97/.vcpdeck/launcher-client",
+			sourceHome: "/home/xuzhen97",
+		},
 		args: { serverOrigin: "https://cockpit.example.com:3001", releaseVersion: "0.6.15" },
 		psk: "SECRET",
 		clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
@@ -351,17 +379,15 @@ test("M1: 切换 happy-path 顺序正确，且新服务在旧 Client 停止前�
 	});
 	const order = adapter.calls;
 	const happy = [
-		"prepare-new-verify-only",
+		"prepare-system-install",
 		"record-old",
 		"stop-old-client",
-		"start-new-verify-only",
-		"wait-new-verify",
-		"stop-new",
-		"clear-verify-flag",
+		"save-remaining-pm2",
+		"remove-old-startup-if-unused",
+		"remove-old-app-dir",
+		"remove-old-install-state",
 		"start-new-steady",
 		"wait-new-full",
-		"disable-old-startup",
-		"save-remaining-pm2",
 		"mark-done",
 	];
 	assert.deepEqual(order, happy);
@@ -369,12 +395,16 @@ test("M1: 切换 happy-path 顺序正确，且新服务在旧 Client 停止前�
 	assert.ok(order.indexOf("stop-old-client") < order.indexOf("start-new-steady"));
 });
 
-test("M1: 稳态注册前失败 → 回退旧 PM2 并 mark-failed", async () => {
+test("M1: 稳态验收失败只 mark-failed 且不 resurrect 旧 PM2", async () => {
 	const adapter = recordingAdapter();
-	adapter.waitNewFull = false; // 模拟稳态全能力验证失败
 	const state = await runMigrationCutover({
 		adapter,
-		source: { username: "xuzhen97", clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c" },
+		source: {
+			username: "xuzhen97",
+			clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
+			sourceAppDir: "/home/xuzhen97/.vcpdeck/launcher-client",
+			sourceHome: "/home/xuzhen97",
+		},
 		args: { serverOrigin: "https://cockpit.example.com:3001", releaseVersion: "0.6.15" },
 		psk: "SECRET",
 		clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
@@ -384,7 +414,57 @@ test("M1: 稳态注册前失败 → 回退旧 PM2 并 mark-failed", async () => 
 	const order = adapter.calls;
 	assert.deepEqual(
 		order.slice(order.indexOf("start-new-steady")),
-		["start-new-steady", "wait-new-full", "stop-disable-new", "restore-old-startup", "restore-old-client", "wait-old-verify", "mark-failed"],
+		["start-new-steady", "wait-new-full", "mark-failed"],
 	);
+	// 永不回滚旧 PM2。
+	assert.ok(!order.some((n) => /resurrect|restore-old/.test(n)));
 	assert.equal(state.outcome, "failed");
+});
+
+test("M1: 有无关 PM2 应用时保留旧自启，无其他应用时停用旧自启", async () => {
+	const keep = recordingAdapter();
+	const keptCommands = [];
+	keep.exec = (argv) => {
+		keptCommands.push(argv.join(" "));
+		return { status: 0, stdout: "active\nenabled", ok: true };
+	};
+	await runMigrationCutover({
+		adapter: keep,
+		source: {
+			username: "xuzhen97",
+			clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
+			sourceAppDir: "/home/xuzhen97/.vcpdeck/launcher-client",
+			sourceHome: "/home/xuzhen97",
+			preserveApps: ["other-app"],
+		},
+		args: { serverOrigin: "https://cockpit.example.com:3001", releaseVersion: "0.6.15" },
+		psk: "SECRET",
+		clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
+		log: () => {},
+	});
+	assert.ok(!keptCommands.some((c) => c.startsWith("systemctl disable pm2-xuzhen97.service")));
+
+	const drop = recordingAdapter();
+	const droppedCommands = [];
+	drop.exec = (argv) => {
+		droppedCommands.push(argv.join(" "));
+		return { status: 0, stdout: "active\nenabled", ok: true };
+	};
+	await runMigrationCutover({
+		adapter: drop,
+		source: {
+			username: "xuzhen97",
+			clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
+			sourceAppDir: "/home/xuzhen97/.vcpdeck/launcher-client",
+			sourceHome: "/home/xuzhen97",
+		},
+		args: { serverOrigin: "https://cockpit.example.com:3001", releaseVersion: "0.6.15" },
+		psk: "SECRET",
+		clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
+		log: () => {},
+	});
+	assert.ok(droppedCommands.includes("systemctl disable pm2-xuzhen97.service"));
+	// 旧现场以参数数组删除，不经 shell 拼接。
+	assert.ok(droppedCommands.includes("rm -rf /home/xuzhen97/.vcpdeck/launcher-client"));
+	assert.ok(droppedCommands.includes("rm -f /home/xuzhen97/.vcpdeck/client-install.json"));
 });
