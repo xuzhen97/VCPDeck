@@ -932,11 +932,12 @@ function resolveInstallMode({ args, uid, callerUser, hasA2State, candidates }) {
 			candidates: Array.isArray(candidates) ? candidates : [],
 		});
 	if (args.migrate === true) return { kind: "migrate", source: discover() };
-	// 已有 A2 状态：这是对现有系统级安装的幂等修复，不清理、不改身份。
-	if (hasA2State) return { kind: "fresh" };
+	// 有效旧 PM2 与 A2 并存表示迁移未完成：优先恢复迁移并覆盖误生成的 A2 身份。
+	// 仅在无旧候选时，已有 A2 才按幂等修复处理，不清理、不改身份。
 	if (args.migrateFromUser || (Array.isArray(candidates) && candidates.length > 0)) {
 		return { kind: "migrate", source: discover() };
 	}
+	if (hasA2State) return { kind: "fresh" };
 	return { kind: "fresh" };
 }
 
@@ -1180,6 +1181,9 @@ function collectMigrationSources(adapter, expectedServerOrigin = null) {
 		// 通过 getent passwd 获取 canonical home，避免 Bazzite 的 /home 与 /var/home
 		// 产生重复候选；不把用户目录名称拼进 shell 命令。
 		const result = adapter.exec?.(["getent", "passwd"]);
+		if (result?.status !== 0) {
+			throw new Error(result?.stderr?.trim() || `getent passwd 退出码 ${result?.status ?? "未知"}`);
+		}
 		const homes = (result?.stdout || "")
 			.split("\n")
 			.map((line) => line.trim().split(":"))
@@ -1212,8 +1216,11 @@ function collectMigrationSources(adapter, expectedServerOrigin = null) {
 			});
 		}
 		return candidates;
-	} catch {
-		return [];
+	} catch (error) {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
+			`扫描迁移源失败，拒绝创建新身份：${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 }
 
@@ -1406,6 +1413,7 @@ module.exports = {
 	writeAtomic,
 	runFreshInstall,
 	discoverMigrationSource,
+	collectMigrationSources,
 	resolveInstallMode,
 	runMigrationCutover,
 	installRuntime,

@@ -24,6 +24,7 @@ const {
 	installRuntime,
 	createRealAdapter,
 	discoverMigrationSource,
+	collectMigrationSources,
 	resolveInstallMode,
 	runMigrationCutover,
 } = require("./install-client-linux.cjs");
@@ -353,7 +354,7 @@ test("稳定错误码常量齐全", () => {
 	assert.equal(fresh.kind, "fresh");
 });
 
-test("安装模式解析：--migrate=false 强制重装，已有 A2 身份时不自动迁移", () => {
+test("安装模式解析：--migrate=false 强制重装；已有 A2 与旧 PM2 并存时恢复迁移", () => {
 	assert.equal(
 		resolveInstallMode({
 			args: { migrate: false },
@@ -363,7 +364,7 @@ test("安装模式解析：--migrate=false 强制重装，已有 A2 身份时不
 		}).kind,
 		"fresh",
 	);
-	// 已有 A2 现场：按幂等修复处理，不清理旧目录、不改身份。
+	// 双实例现场说明迁移未完成：有效旧 PM2 源优先，覆盖错误生成的 A2 身份。
 	assert.equal(
 		resolveInstallMode({
 			args: {},
@@ -371,7 +372,27 @@ test("安装模式解析：--migrate=false 强制重装，已有 A2 身份时不
 			hasA2State: true,
 			candidates: [src()],
 		}).kind,
+		"migrate",
+	);
+	// 没有旧候选时才把已有 A2 作为幂等修复，不改身份。
+	assert.equal(
+		resolveInstallMode({
+			args: {},
+			uid: 0,
+			hasA2State: true,
+			candidates: [],
+		}).kind,
 		"fresh",
+	);
+});
+
+test("迁移源系统扫描失败时 fail closed，不得降级成 fresh 新身份", () => {
+	assert.throws(
+		() =>
+			collectMigrationSources({
+				exec: () => ({ status: 1, stdout: "", stderr: "getent failed" }),
+			}),
+		/扫描迁移源失败.*getent failed/,
 	);
 });
 

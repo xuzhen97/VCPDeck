@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-11｜适用版本：`0.8.16` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-11｜适用版本：`0.8.17` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 一键安装使用 `NT AUTHORITY\SYSTEM` 开机任务（ADR-0027），Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 
@@ -217,7 +217,7 @@ Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 `w
   - `/etc/systemd/system/vcpdeck-client.service`：systemd 单元，`User=vcpdeck`、`Restart=always`，开机自启。
 - **专用账户**：`vcpdeck`，锁定密码、`/bin/bash`、独立 HOME；安装器不创建任何直接登录凭据。该账户是 **root 等价** Client：Job、Terminal、Pi 可显式 `sudo -n` 调用任意 root 命令。
 - **Launcher 边界**：systemd 只守护稳定 Launcher；Launcher 继续负责业务版本切换与回退。Launcher 自升级用受限 transient `systemd-run`（脱 Client cgroup、`Timeout`、`KillMode=process`、无 `PrivateNetwork`/`NewerCredentials`），单元内不直接替换自身可执行文件。
-- **M1 迁移**：存量 PM2 安装无需额外参数：不带 `--migrate` 时安装器会**自动探测**存量 PM2 源并改走清理式迁移（与 Windows 行为一致，页面固定命令即可）；已有 A2 身份时按幂等修复处理，不变更身份。多源歧义或有源但校验不通过时 fail closed（透出稳定原因），需要强制重装时传 `--migrate=false`（也可显式 `--migrate=true` / `--migrate-from-user=<name>`）。迁移保留 `client-id`、Server Origin 与显示名称，保留无关 PM2 应用；全部材料校验成功后才清理旧 VCPDeck PM2 entry、旧自启与旧运行目录，再启动 A2 稳态服务并全能力验收。失败只记录阶段状态并保留 A2 现场，可用同一命令重跑；**不会 resurrect 或恢复旧 PM2**（ADR-0027）。
+- **M1 迁移**：存量 PM2 安装无需额外参数：不带 `--migrate` 时安装器会**自动探测**存量 PM2 源并改走清理式迁移（与 Windows 行为一致，页面固定命令即可）；已有 A2 身份且无旧 PM2 候选时按幂等修复处理，不变更身份；若 A2 与有效旧 PM2 同时存在则视为未完成迁移，优先恢复清理式迁移并以旧身份覆盖误生成的 A2 身份。多源歧义或有源但校验不通过时 fail closed（透出稳定原因），需要强制重装时传 `--migrate=false`（也可显式 `--migrate=true` / `--migrate-from-user=<name>`）。迁移保留 `client-id`、Server Origin 与显示名称，保留无关 PM2 应用；全部材料校验成功后才清理旧 VCPDeck PM2 entry、旧自启与旧运行目录，再启动 A2 稳态服务并全能力验收。失败只记录阶段状态并保留 A2 现场，可用同一命令重跑；**不会 resurrect 或恢复旧 PM2**（ADR-0027）。
 - **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。
 
 ### 4.7 coturn / TURN 中继（P2P 隧道）
