@@ -22,6 +22,9 @@ const INSTALL_STATE_VERSION = 1;
 const WINDOWS_APP_DIR = "C:\\ProgramData\\VCPDeck\\Client";
 const WINDOWS_CLIENT_TASK = "\\VCPDeck\\Client";
 const WINDOWS_SYSTEM_SID = "S-1-5-18"; // NT AUTHORITY\SYSTEM
+// ADR-0027：系统级卸载会把机器身份保留到此路径；重装必须复用它，否则会新建重复身份并与旧别名冲突。
+const WINDOWS_PRESERVED_CLIENT_ID = "C:\\ProgramData\\VCPDeck\\client-id";
+const CLIENT_ID_PATTERN = /^[0-9a-f-]{36}$/i;
 
 function parseUrl(value, label, base) {
 	try {
@@ -150,8 +153,8 @@ function clearReadOnly(path) {
 	} catch {}
 }
 
-/** 读取/生成 Client ID；path 缺省为旧用户级路径，迁移后权威切到 ProgramData 固定位置。 */
-function ensureClientId(path = join(homedir(), ".vcpdeck", "client-id"), dryRunRoot = null) {
+/** 读取/生成 Client ID；保留路径存有机器身份时优先复用（ADR-0027）。 */
+function ensureClientId(path = join(homedir(), ".vcpdeck", "client-id"), dryRunRoot = null, preservedPath = null) {
 	if (dryRunRoot) {
 		const dryPath = join(dryRunRoot, "client-id");
 		let id = "";
@@ -163,10 +166,16 @@ function ensureClientId(path = join(homedir(), ".vcpdeck", "client-id"), dryRunR
 	}
 	const target = path;
 	mkdirSync(dirname(target), { recursive: true });
-	let id = "";
-	if (existsSync(target)) id = readFileSync(target, "utf8").trim();
-	if (!id) {
-		id = randomUUID();
+	const existing = existsSync(target) ? readFileSync(target, "utf8").trim() : "";
+	let id = existing;
+	if (!id && preservedPath) {
+		try {
+			const preserved = readFileSync(preservedPath, "utf8").trim();
+			if (CLIENT_ID_PATTERN.test(preserved)) id = preserved;
+		} catch {}
+	}
+	if (!id) id = randomUUID();
+	if (id !== existing) {
 		clearReadOnly(target);
 		writeFileSync(target, id, { mode: 0o600 });
 	}
@@ -813,7 +822,7 @@ function discoverLegacyWindowsInstall(adapter, serverOrigin) {
 	if (!appDir || !appDirNormalized.startsWith(`${homeBase}/`)) {
 		throw new Error("旧安装目录不在用户 .vcpdeck 下，拒绝迁移");
 	}
-	if (!state.clientId || !/^[0-9a-f-]{36}$/i.test(state.clientId)) {
+	if (!state.clientId || !CLIENT_ID_PATTERN.test(state.clientId)) {
 		throw new Error("旧 Client ID 缺失或非法，拒绝迁移");
 	}
 	if (entries.length > 1) throw new Error("发现多个同名 VCPDeck PM2 进程，拒绝迁移");
@@ -981,7 +990,13 @@ async function runWindowsInstall(options) {
 			if (!adapter.probe(entry)) throw new Error(`发布物缺失：${entry}`);
 		}
 		const displayName = (typeof args.name === "string" && args.name) || legacy?.displayName || hostname();
-		const clientId = legacy?.clientId || ensureClientId(join(WINDOWS_APP_DIR, "client-id"), dryRun ? cacheRoot : null);
+		const clientId =
+			legacy?.clientId ||
+			ensureClientId(
+				join(WINDOWS_APP_DIR, "client-id"),
+				dryRun ? cacheRoot : null,
+				WINDOWS_PRESERVED_CLIENT_ID,
+			);
 		const envContent = [
 			"# 由 VCPDeck Client 一键安装器生成（敏感值请妥善保管）",
 			`VCPDECK_APP_DIR=${WINDOWS_APP_DIR}`,
@@ -1067,15 +1082,22 @@ async function waitForClient(origin, clientId, psk, version, name, timeoutMs, fe
 				last.capabilitiesReported
 			) {
 				if (last.name !== name) {
-					await fetchJsonRef(
-						`${origin}/api/client-installer/clients/${encodeURIComponent(clientId)}/name`,
-						{
-							method: "PUT",
-							headers: { "content-type": "application/json", "x-vcpdeck-psk": psk },
-							body: JSON.stringify({ name }),
-							timeoutMs: 15_000,
-						},
-					);
+					try {
+						await fetchJsonRef(
+							`${origin}/api/client-installer/clients/${encodeURIComponent(clientId)}/name`,
+							{
+								method: "PUT",
+								headers: { "content-type": "application/json", "x-vcpdeck-psk": psk },
+								body: JSON.stringify({ name }),
+								timeoutMs: 15_000,
+							},
+						);
+					} catch (error) {
+						// 别名冲突不阻断安装：Client 已在线并通过版本/能力验收，别名被旧记录占用属于运维清理项。
+						console.warn(
+							`[vcpdeck] 别名 "${name}" 未生效（${error instanceof Error ? error.message : String(error)}）；当前显示为 "${last.name}"。请在控制台重命名占用的旧记录，或复用其 client-id 后重跑本命令。`,
+						);
+					}
 				}
 				return last;
 			}

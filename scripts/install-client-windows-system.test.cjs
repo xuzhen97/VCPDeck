@@ -1,7 +1,8 @@
 // ADR-0027：Windows SYSTEM 开机任务安装器的纯函数/adapter 测试（不触碰真实系统）。
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
+const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const installer = require("./install-client.cjs");
 
@@ -110,9 +111,10 @@ test("安装根 ACE 可继承，且 bootstrap 能自愈不可写现场", () => {
 	assert.match(installer, /icacls\(WINDOWS_APP_DIR, \{ directory: true \}\)/);
 	// 重建根 ACE 必须早于读 client-id：既有文件在旧版本下已失去全部 ACE，
 	// 晚于此时才设置 ACL 会先抛 EPERM（open client-id）。
+	const clientIdReadIndex = installer.search(/ensureClientId\(\s*join\(WINDOWS_APP_DIR/);
+	assert.ok(clientIdReadIndex > 0, "应能定位 SYSTEM 安装的 client-id 读取");
 	assert.ok(
-		installer.indexOf("adapter.icacls(WINDOWS_APP_DIR, { directory: true })") <
-			installer.indexOf('ensureClientId(join(WINDOWS_APP_DIR, "client-id")'),
+		installer.indexOf("adapter.icacls(WINDOWS_APP_DIR, { directory: true })") < clientIdReadIndex,
 		"安装根 ACL 必须先于 client-id 读取",
 	);
 	// 只读属性会让 Node 写入报 EPERM；既有文件的空 DACL 也需逐对象显式授权。
@@ -120,7 +122,7 @@ test("安装根 ACE 可继承，且 bootstrap 能自愈不可写现场", () => {
 	assert.match(installer, /clearReadOnly\(target\);/);
 	assert.ok(
 		installer.indexOf('for (const name of ["client-id", "launcher.env", "install-state.json"])') <
-			installer.indexOf('ensureClientId(join(WINDOWS_APP_DIR, "client-id")'),
+			clientIdReadIndex,
 		"既有文件修复必须先于 client-id 读取",
 	);
 
@@ -149,6 +151,40 @@ test("bootstrap 直接解压到 runtime 根，并暴露 Node 源的真实失败�
 	// SHASUMS256 解析不能依赖固定双空格，否则匹配失败会变成空引用异常。
 	assert.match(bootstrap, /-split '\\r\?\\n'/);
 	assert.match(bootstrap, /-split '\\s\+'/);
+});
+
+test("别名被旧记录占用时不阻断安装，只给出可操作警告", () => {
+	const source = readFileSync(join(__dirname, "install-client.cjs"), "utf8");
+	const start = source.indexOf("if (last.name !== name) {");
+	assert.ok(start > 0, "应能定位验收后的别名设置");
+	const block = source.slice(start, source.indexOf("\t\t\t\treturn last;", start));
+	// 旧记录占用别名时会返回 409；安装此时已在线验收通过，不能让它等到 120 秒超时。
+	assert.match(block, /try \{/);
+	assert.match(block, /catch \(error\)/);
+	assert.match(block, /console\.warn/);
+	assert.doesNotMatch(block, /throw /);
+});
+
+test("重装复用 ADR-0027 保留的机器身份，不新建重复 Client ID", () => {
+	const dir = mkdtempSync(join(tmpdir(), "vcpdeck-clientid-"));
+	try {
+		const target = join(dir, "Client", "client-id");
+		const preserved = join(dir, "client-id");
+		const id = "f794cbdc-7147-4d43-9919-00841236e8ab";
+		writeFileSync(preserved, `${id}\n`);
+		assert.equal(installer.ensureClientId(target, null, preserved), id);
+		assert.equal(readFileSync(target, "utf8"), id);
+		// 目标文件已有身份时不被保留路径覆盖
+		const own = "a07a04d6-1b61-4658-869b-25f24a42982f";
+		writeFileSync(target, own);
+		assert.equal(installer.ensureClientId(target, null, preserved), own);
+		// 保留值非法时仍生成新身份
+		writeFileSync(preserved, "not-a-uuid");
+		rmSync(target);
+		assert.notEqual(installer.ensureClientId(target, null, preserved), "not-a-uuid");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("Windows 安装失败诊断指向 SYSTEM 任务，不再只提示旧 PM2 日志", () => {
