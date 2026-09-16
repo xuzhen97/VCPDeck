@@ -37,7 +37,7 @@ test("Windows bootstrap 的 Node 探测兼容 Windows PowerShell 5.1", () => {
 
 	if (process.platform !== "win32") return;
 	const start = source.indexOf("function Test-Node");
-	const end = source.indexOf("\n$node =", start);
+	const end = source.indexOf("\nfunction ", start + 1);
 	assert.ok(start >= 0 && end > start, "应能提取 Test-Node 函数");
 	const dir = mkdtempSync(join(tmpdir(), "vcpdeck-node-probe-"));
 	try {

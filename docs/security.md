@@ -1,6 +1,6 @@
 # VCPDeck 安全模型与维护要求
 
-> 状态：Current｜维护责任：安全负责人/模块维护者｜最后核验：2026-09-11｜适用版本：`0.8.7` / 当前 `main`
+> 状态：Current｜维护责任：安全负责人/模块维护者｜最后核验：2026-09-11｜适用版本：`0.8.8` / 当前 `main`
 
 ## 1. 安全结论
 
@@ -75,7 +75,7 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 
 ### 4.5 提升权限 Client
 
-Windows 一键安装（ADR-0027）在 `NT AUTHORITY\SYSTEM`（SID `S-1-5-18`）下注册 `\VCPDeck\Client` 开机任务，因此 Launcher、Client、Job、Terminal、Files 和 Pi 以 **LocalSystem（root 等价）** 身份运行，**无需用户登录**；它使用 `C:\ProgramData\VCPDeck\Client` 的独立运行目录与私有 Node，不继承安装者的用户 Profile/环境，也不因此把管理员身份授予标准用户。任务 action、`launcher.env` 与 Client 根目录以 `icacls` 关闭继承并只授权 SYSTEM 与 Administrators。Client 注册上报 `installation.mode=windows-system-task` 与 `capabilityDetails.privileged.mode=windows-system`；旧 Client 缺字段时只判“未报告”，控制面不得推断为低权限或已经合规。
+Windows 一键安装（ADR-0027）在 `NT AUTHORITY\SYSTEM`（SID `S-1-5-18`）下注册 `\VCPDeck\Client` 开机任务，因此 Launcher、Client、Job、Terminal、Files 和 Pi 以 **LocalSystem（root 等价）** 身份运行，**无需用户登录**；它使用 `C:\ProgramData\VCPDeck\Client` 的独立运行目录与私有 Node，不继承安装者的用户 Profile/环境，也不因此把管理员身份授予标准用户。任务 action、`launcher.env` 与 Client 根目录以 `icacls` 关闭继承并只授权 SYSTEM 与 Administrators；目录使用可继承的 `(OI)(CI)F`，否则子目录会失去全部 ACE 而拒绝所有人访问。Client 注册上报 `installation.mode=windows-system-task` 与 `capabilityDetails.privileged.mode=windows-system`；旧 Client 缺字段时只判“未报告”，控制面不得推断为低权限或已经合规。
 
 Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 等价** Client：Job、Terminal、Pi 可显式 `sudo -n` 执行任意 root 命令，不受沙箱限制，继承目标机 OS 账户的全部权限。
 

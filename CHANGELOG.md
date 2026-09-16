@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-09-16
+
+### Fixed
+
+- **Windows 安装根对目录使用了不可继承的 ACL**：`icacls` 的 `/grant:r *S-1-5-18:F` 不带 `(OI)(CI)`，设置后子目录（如 `runtime\node`）会丢失全部 ACE 变成空 DACL，导致即使提升的管理员也被拒绝访问，后续安装报 `Access to the path ... is denied`。现在目录使用可继承的 `(OI)(CI)F`，并在 bootstrap 复用/下载 Node 前探测可写性，必要时按 `takeown` + `icacls /T /C` 自愈已损坏现场。
+
 ## [0.8.7] - 2026-09-16
 
 ### Fixed

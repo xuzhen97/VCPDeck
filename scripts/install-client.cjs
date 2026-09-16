@@ -953,7 +953,7 @@ async function runWindowsInstall(options) {
 		if (dryRun) adapter.writeFile(envContent, envPath);
 		else writeFileSync(envPath, envContent, { mode: 0o600 });
 		adapter.icacls(envPath);
-		adapter.icacls(WINDOWS_APP_DIR);
+		adapter.icacls(WINDOWS_APP_DIR, { directory: true });
 		const state = {
 			version: INSTALL_STATE_VERSION,
 			serverOrigin: args.serverOrigin,
@@ -1073,8 +1073,12 @@ async function main() {
 			readEnv: (p) => readEnv(p),
 			writeFile: (content, p) => writeFileSync(p, content, { mode: 0o600 }),
 			mkdir: (p) => mkdirSync(p, { recursive: true }),
-			icacls: (p) => {
-				execFileSync("icacls.exe", [p, "/inheritance:r", "/grant:r", "*S-1-5-18:F", "*S-1-5-32-544:F"], {
+			// 目录必须用可继承 ACE（(OI)(CI)）：不可继承的 F 会让子目录丢失全部权限，连管理员也无法再写入。
+			icacls: (p, { directory = false } = {}) => {
+				const grants = directory
+					? ["*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"]
+					: ["*S-1-5-18:F", "*S-1-5-32-544:F"];
+				execFileSync("icacls.exe", [p, "/inheritance:r", "/grant:r", ...grants], {
 					stdio: "inherit",
 				});
 			},

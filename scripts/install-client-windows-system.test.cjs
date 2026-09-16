@@ -102,6 +102,20 @@ test("Windows ACL 使用 icacls 的 SID:权限格式，不把 SDDL 当作 grant 
 	}
 });
 
+test("安装根 ACE 可继承，且 bootstrap 能自愈不可写现场", () => {
+	// 不可继承的目录 ACE 会让 runtime 等子目录丢失全部权限，连管理员也无法再写入。
+	const installer = readFileSync(join(__dirname, "install-client.cjs"), "utf8");
+	assert.match(installer, /\*S-1-5-18:\(OI\)\(CI\)F/);
+	assert.match(installer, /\*S-1-5-32-544:\(OI\)\(CI\)F/);
+	assert.match(installer, /icacls\(WINDOWS_APP_DIR, \{ directory: true \}\)/);
+
+	const bootstrap = readFileSync(join(__dirname, "install-client-bootstrap.ps1"), "utf8");
+	assert.match(bootstrap, /function Repair-AppDirAcl/);
+	assert.match(bootstrap, /\*S-1-5-18:\(OI\)\(CI\)F/);
+	assert.match(bootstrap, /\/T \/C/);
+	assert.match(bootstrap, /takeown\.exe \/F \$appDir \/A \/R \/D Y/);
+});
+
 test("Windows 安装失败诊断指向 SYSTEM 任务，不再只提示旧 PM2 日志", () => {
 	const source = readFileSync(join(__dirname, "install-client.cjs"), "utf8");
 	assert.match(source, /if \(platform\(\) === "win32"\)/);

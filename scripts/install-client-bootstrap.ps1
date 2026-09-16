@@ -34,12 +34,32 @@ function Test-Node([string]$Path) {
     return $LASTEXITCODE -eq 0
   } catch { return $false }
 }
+# 0.8.7 之前对安装根使用了不可继承的 ACE，子目录会失去全部 ACE（空 DACL，连管理员也拒绝访问）。
+# 空 DACL 需要先 takeown（SeTakeOwnership）才能让 icacls /T 走到深层对象，再重建可继承授权。
+function Repair-AppDirAcl {
+  & takeown.exe /F $appDir /A /R /D Y 2>$null | Out-Null
+  & icacls.exe $appDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /T /C 2>$null | Out-Null
+}
+function Test-NodeWrite {
+  try {
+    New-Item -ItemType Directory -Force $runtimeRoot -ErrorAction Stop | Out-Null
+    $probe = Join-Path $runtimeRoot ".writeprobe-$PID"
+    New-Item -ItemType File -Path $probe -ErrorAction Stop | Out-Null
+    Remove-Item -Force $probe
+    return $true
+  } catch { return $false }
+}
+$nodeWritable = Test-NodeWrite
+if (-not $nodeWritable) { Repair-AppDirAcl; $nodeWritable = Test-NodeWrite }
+if (-not $nodeWritable) {
+  Fail "无法写入 $runtimeRoot；请以管理员身份执行：takeown /F `"$appDir`" /A /R /D Y; icacls `"$appDir`" /inheritance:r /grant:r `"*S-1-5-18:(OI)(CI)F`" `"*S-1-5-32-544:(OI)(CI)F`" /T /C"
+}
+
 # 只复用或下载到机器级私有 runtime；SYSTEM 任务不得依赖机器 PATH 或用户 Node。
 $node = Get-ChildItem -Path $runtimeRoot -Filter node.exe -File -Recurse -ErrorAction SilentlyContinue |
   Sort-Object FullName -Descending |
   Select-Object -First 1 -ExpandProperty FullName
 if (-not (Test-Node $node)) {
-  New-Item -ItemType Directory -Force $runtimeRoot | Out-Null
   $node = $null
   foreach ($base in @('https://npmmirror.com/mirrors/node','https://nodejs.org/dist')) {
     try {
