@@ -955,6 +955,31 @@ async function runWindowsInstall(options) {
 			adapter.icacls(existing);
 			clearReadOnly(existing);
 		}
+		// 阶段 5.1：铺设发布物（<appDir>/dist/main.js 与 apps/<版本>/client）。
+		// 缺少这一步时 SYSTEM 任务没有可执行入口，只会表现为“未在超时内上线”。
+		record("install-release");
+		if (!dryRun) {
+			console.log(`[vcpdeck] 铺设 Client 发布物 ${bootstrap.releaseVersion}`);
+			const lay = adapter.spawn(nodeExe, [
+				lowInstaller,
+				"--artifact=client",
+				`--zip=${cache}`,
+				`--version=${bootstrap.releaseVersion}`,
+				`--app-dir=${WINDOWS_APP_DIR}`,
+				`--sha256=${bootstrap.archiveSha256}`,
+				"--no-env",
+				"--force",
+			]);
+			if (lay.status !== 0) {
+				throw new Error(`铺设发布物失败：${lay.stderr || `退出码 ${lay.status}`}`);
+			}
+		}
+		for (const entry of [
+			join(WINDOWS_APP_DIR, "dist", "main.js"),
+			join(WINDOWS_APP_DIR, "apps", bootstrap.releaseVersion, "client", "dist", "index.js"),
+		]) {
+			if (!adapter.probe(entry)) throw new Error(`发布物缺失：${entry}`);
+		}
 		const displayName = (typeof args.name === "string" && args.name) || legacy?.displayName || hostname();
 		const clientId = legacy?.clientId || ensureClientId(join(WINDOWS_APP_DIR, "client-id"), dryRun ? cacheRoot : null);
 		const envContent = [

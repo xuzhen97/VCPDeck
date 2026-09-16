@@ -434,8 +434,35 @@ export class Daemon {
 	}
 }
 
+/**
+ * ADR-0027：Windows SYSTEM 开机任务不注入环境变量，改为读取安装根下的 launcher.env。
+ * 已存在的同名环境变量优先（PM2 与手动启动路径不受影响）；值不做引号剥离外的解析。
+ */
+export function loadLauncherEnvFile(
+	env: NodeJS.ProcessEnv = process.env,
+	cwd: string = process.cwd(),
+): void {
+	const appDir = env.VCPDECK_APP_DIR ?? cwd;
+	let text: string;
+	try {
+		text = readFileSync(join(appDir, "launcher.env"), "utf8");
+	} catch {
+		return;
+	}
+	for (const line of text.split(/\r?\n/)) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const index = trimmed.indexOf("=");
+		if (index <= 0) continue;
+		const key = trimmed.slice(0, index).trim();
+		if (!key || env[key] !== undefined) continue;
+		env[key] = trimmed.slice(index + 1).trim();
+	}
+}
+
 /** 从环境变量加载配置 */
 export function loadConfigFromEnv(): DaemonConfig {
+	loadLauncherEnvFile();
 	const appDir =
 		process.env.VCPDECK_APP_DIR ?? join(homedir(), ".vcpdeck", "launcher");
 	const artifact = process.env.VCPDECK_ARTIFACT;

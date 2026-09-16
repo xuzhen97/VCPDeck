@@ -318,6 +318,7 @@ test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail 
 				"pm2:jlist",
 				"remove-old-app-dir",
 				"install-system-layout",
+				"install-release",
 				"register-system-task",
 				"schtasks.exe:/Create /XML C:\\ProgramData\\VCPDeck\\Client\\client-task.xml /TN \\VCPDeck\\Client /RU SYSTEM /F",
 				"schtasks.exe:/Query /TN \\VCPDeck\\Client",

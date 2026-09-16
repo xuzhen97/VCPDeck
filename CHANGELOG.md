@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-09-16
+
+### Fixed
+
+- **Windows SYSTEM 安装缺少“铺设发布物”步骤**：`runWindowsInstall` 只下载了低层 `install.cjs` 却从未执行，导致 `C:\ProgramData\VCPDeck\Client` 下没有 `dist/main.js` 与 `apps/<版本>/client`；任务启动即失败，最终只表现为“Client 未在超时内上线”。现在布局阶段先调用低层安装器铺设发布物（`--artifact=client --no-env --force`），并在注册任务前 fail closed 校验 `dist/main.js` 与 `apps/<版本>/client/dist/index.js` 存在。
+- **SYSTEM 任务不注入环境变量，而 Launcher 只读 `process.env`**：任务无 `EnvironmentFile` 等价物，Launcher 启动时因 `VCPDECK_ARTIFACT` 缺失直接退出。现在 Launcher 在加载配置前自行读取安装根（`VCPDECK_APP_DIR` 或工作目录）下的 `launcher.env`，仅补齐缺失键，已有的同名环境变量优先（PM2/手动启动不受影响），并随 `process.env` 传给被守护的 Client 子进程。
+
 ## [0.8.11] - 2026-09-16
 
 ### Fixed
