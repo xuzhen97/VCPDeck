@@ -547,3 +547,67 @@ test("M1: 有无关 PM2 应用时保留旧自启，无其他应用时停用旧�
 	assert.ok(droppedCommands.includes("rm -rf /home/xuzhen97/.vcpdeck/launcher-client"));
 	assert.ok(droppedCommands.includes("rm -f /home/xuzhen97/.vcpdeck/client-install.json"));
 });
+
+// ── A2 fresh install 路径：configuration 阶段必须用 ENV_FILE 作为 path，不能把 options 当 content ──
+
+test("writeAtomic 4 参数顺序写入 ENV_FILE 时 content 是字符串", () => {
+	const { writeAtomic, buildEnvContent } = require("./install-client-linux.cjs");
+	const writes = [];
+	const adapter = {
+		writeFile: (path, content) => writes.push({ path, content }),
+		chmod: () => {},
+		chown: () => {},
+		rm: () => {},
+		rename: () => {},
+	};
+	writeAtomic(
+		adapter,
+		ENV_FILE,
+		buildEnvContent({
+			serverOrigin: "https://cockpit.example.com:3001",
+			psk: "SECRET_PSK",
+			clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
+		}),
+		{ mode: 0o640, owner: "root", group: ACCOUNT_NAME },
+	);
+	const envWrite = writes.find((entry) => entry.path === `${ENV_FILE}.${process.pid}.tmp`);
+	assert.ok(envWrite, `期望写入 ${ENV_FILE} 临时文件，实际: ${JSON.stringify(writes.map((w) => w.path))}`);
+	assert.strictEqual(typeof envWrite.content, "string");
+	assert.ok(envWrite.content.includes("VCPDECK_PSK=SECRET_PSK"));
+	assert.ok(envWrite.content.includes("VCPDECK_SERVER=https://cockpit.example.com:3001"));
+	assert.ok(envWrite.content.includes("VCPDECK_INSTALLATION_MODE=systemd-root-equivalent"));
+});
+
+test("writeAtomic 3 参数错误顺序（漏 path）会让 fs.writeFileSync 收到 Object 报错", () => {
+	const { writeAtomic, buildEnvContent } = require("./install-client-linux.cjs");
+	const fs = require("node:fs");
+	const { mkdtempSync, rmSync } = require("node:fs");
+	const { join } = require("node:path");
+	const { tmpdir } = require("node:os");
+	const sandbox = mkdtempSync(join(tmpdir(), "vcpdeck-write-atomic-"));
+	const adapter = {
+		writeFile: (path, content) => fs.writeFileSync(path, content, { mode: 0o600 }),
+		chmod: () => {},
+		chown: () => {},
+		rm: () => {},
+		rename: () => {},
+	};
+	try {
+		assert.throws(
+			() =>
+				writeAtomic(
+					adapter,
+					buildEnvContent({
+						serverOrigin: "https://cockpit.example.com:3001",
+						psk: "SECRET_PSK",
+						clientId: "67f965a4-e3cf-43ba-8d84-70e14cda864c",
+					}),
+					{ mode: 0o640, owner: "root", group: ACCOUNT_NAME },
+				),
+			(maybeError) =>
+				/ERR_INVALID_ARG_TYPE/.test(String(maybeError && maybeError.code)),
+		);
+	} finally {
+		rmSync(sandbox, { recursive: true, force: true });
+	}
+});

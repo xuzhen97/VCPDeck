@@ -430,6 +430,7 @@ async function runFreshInstall({ adapter, args, psk, clientId, log = () => {} })
 				applyRuntimeOwnership(adapter);
 				writeAtomic(
 					adapter,
+					ENV_FILE,
 					buildEnvContent({
 						serverOrigin: args.serverOrigin,
 						psk,

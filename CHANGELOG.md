@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-16
+
+### Fixed
+
+- **A2 fresh install 在 configuration 阶段崩溃**：Linux A2 安装器 `configuration` 阶段的 `writeAtomic` 调用漏传 `ENV_FILE` 参数，导致 `fs.writeFileSync` 收到 options 对象并抛出 `ERR_INVALID_ARG_TYPE`，fresh install 在所有依赖/构件准备完成后崩溃。该问题由 Vagrant Ubuntu 22.04 VM 端到端验证抓取，并新增针对性回归测试。
+
+## [0.8.1] - 2026-09-16
+
+### Fixed
+
+- **Windows 一键安装命令兼容 PowerShell 5.1 UTF-8 BOM**：动态执行 `/api/client-installer/scripts/win-x64` 和卸载脚本前移除脚本首个 BOM，避免 `param` 被解析为 `﻿param` 导致 `-ServerOrigin` 参数未绑定。
+
 ## [0.8.0] - 2026-09-16
 
 ### Added

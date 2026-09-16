@@ -205,6 +205,10 @@ describe("ReleasesPage", () => {
 		expect(screen.getByText(/uninstall-client-bootstrap\.ps1/)).toHaveTextContent(
 			"/api/client-installer/assets/uninstall-client-bootstrap.ps1",
 		);
+		expect(screen.getAllByText(/TrimStart\(\[char\]0xFEFF\)/)).toHaveLength(2);
+		for (const command of screen.getAllByText(/\.TrimStart\(\[char\]0xFEFF\); & \(\[scriptblock\]::Create\(\$script\)\)/)) {
+			expect(command).toHaveTextContent("-ServerOrigin 'http://localhost:3000'");
+		}
 		// 系统级部署语义：Windows SYSTEM 开机任务 + Linux systemd，不得再提 PM2/登录后自启。
 		expect(
 			screen.getByText(/Windows SYSTEM 开机任务，Linux systemd 系统服务/),

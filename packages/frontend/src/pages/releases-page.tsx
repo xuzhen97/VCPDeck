@@ -155,9 +155,9 @@ export function ReleasesPage() {
 	const releases = useMemo(() => resource.data?.data ?? [], [resource.data]);
 	const installerOrigin = window.location.origin;
 	const linuxCommand = `curl -fsSL '${installerOrigin}/api/client-installer/scripts/linux-x64' | bash -s -- '${installerOrigin}'`;
-	const windowsCommand = `$script = irm '${installerOrigin}/api/client-installer/scripts/win-x64'; & ([scriptblock]::Create($script)) -ServerOrigin '${installerOrigin}'`;
+	const windowsCommand = `$script = (irm '${installerOrigin}/api/client-installer/scripts/win-x64').TrimStart([char]0xFEFF); & ([scriptblock]::Create($script)) -ServerOrigin '${installerOrigin}'`;
 	const linuxUninstallCommand = `curl -fsSL '${installerOrigin}/api/client-installer/assets/uninstall-client-bootstrap.sh' | bash -s -- '${installerOrigin}'`;
-	const windowsUninstallCommand = `$script = irm '${installerOrigin}/api/client-installer/assets/uninstall-client-bootstrap.ps1'; & ([scriptblock]::Create($script)) -ServerOrigin '${installerOrigin}'`;
+	const windowsUninstallCommand = `$script = (irm '${installerOrigin}/api/client-installer/assets/uninstall-client-bootstrap.ps1').TrimStart([char]0xFEFF); & ([scriptblock]::Create($script)) -ServerOrigin '${installerOrigin}'`;
 	const localOrigin = ["localhost", "127.0.0.1", "::1"].includes(
 		window.location.hostname,
 	);
