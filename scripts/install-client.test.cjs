@@ -30,6 +30,11 @@ test("Windows bootstrap 的 Node 探测兼容 Windows PowerShell 5.1", () => {
 	assert.match(source, /\| & \$Path -/);
 	assert.doesNotMatch(source, /& \$Path -e/);
 
+	// SYSTEM 任务不得依赖机器 PATH；不能把 C:\\Program Files\\nodejs\\node.exe
+	// 传给只接受 ProgramData 私有 runtime 的低层安装器。
+	assert.doesNotMatch(source, /Get-Command node/);
+	assert.match(source, /\$runtimeRoot/);
+
 	if (process.platform !== "win32") return;
 	const start = source.indexOf("function Test-Node");
 	const end = source.indexOf("\n$node =", start);

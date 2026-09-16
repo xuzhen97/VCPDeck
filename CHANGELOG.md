@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-09-16
+
+### Fixed
+
+- **Windows bootstrap 仍把机器 PATH 的 Node 传给 SYSTEM 安装器**：即使私有 Node 尚未就绪，bootstrap 原先也会回退到 `Get-Command node`，把 `C:\Program Files\nodejs\node.exe` 传给只允许 ProgramData 私有 runtime 的低层安装器，随后被正确拒绝为“路径无效”。现已删除 PATH fallback；Windows SYSTEM 安装只复用或下载 `C:\ProgramData\VCPDeck\Client\runtime\node` 下的 Node。
+
 ## [0.8.4] - 2026-09-16
 
 ### Fixed

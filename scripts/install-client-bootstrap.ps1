@@ -34,13 +34,10 @@ function Test-Node([string]$Path) {
     return $LASTEXITCODE -eq 0
   } catch { return $false }
 }
-# 优先复用已就绪的机器级私有 runtime，其次机器级 PATH 中可用的 Node 24+，最后下载到私有 runtime。
+# 只复用或下载到机器级私有 runtime；SYSTEM 任务不得依赖机器 PATH 或用户 Node。
 $node = Get-ChildItem -Path $runtimeRoot -Filter node.exe -File -Recurse -ErrorAction SilentlyContinue |
   Sort-Object FullName -Descending |
   Select-Object -First 1 -ExpandProperty FullName
-if (-not (Test-Node $node)) {
-  $node = (Get-Command node -ErrorAction SilentlyContinue).Source
-}
 if (-not (Test-Node $node)) {
   New-Item -ItemType Directory -Force $runtimeRoot | Out-Null
   $node = $null
