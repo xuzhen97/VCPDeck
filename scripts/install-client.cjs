@@ -966,6 +966,16 @@ async function runWindowsInstall(options) {
 		// 阶段 4：清理旧 PM2 现场（材料全部就绪后）。
 		if (legacy) cleanLegacyWindowsInstall(adapter, legacy);
 
+		// 同版本重装时 Client 的 cwd 位于 apps/<版本>/client；Windows 不允许删除正在
+		// 使用的目录。先结束既有 SYSTEM 任务，后续重新注册并启动，确保新身份/环境生效。
+		record("stop-system-task-for-layout");
+		const existingTask = adapter.spawn("schtasks.exe", ["/Query", "/TN", WINDOWS_CLIENT_TASK]);
+		if (existingTask.status === 0) {
+			// 已注册但未运行时 /End 也可能返回非零；继续铺设，由目标目录删除与验收
+			// 分别判定是否仍被占用、是否确实以新环境重新上线。
+			adapter.spawn("schtasks.exe", ["/End", "/TN", WINDOWS_CLIENT_TASK]);
+		}
+
 		// 阶段 5：全新系统级安装（固定布局，敏感文件收紧 ACL）。
 		record("install-system-layout");
 		// 必须先重建安装根的可继承授权：0.8.7 之前写入的不可继承 ACE 会让既有子对象

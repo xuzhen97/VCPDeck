@@ -40,6 +40,7 @@ function recordingAdapter() {
 			const key = `${command}:${args.join(" ")}`;
 			records.push(key);
 			if (command === "schtasks.exe" && args[0] === "/Create" && args.join(" ").includes("\\VCPDeck\\Client")) return { status: 0 };
+			if (command === "schtasks.exe" && args[0] === "/End" && args.join(" ").includes("\\VCPDeck\\Client")) return { status: 0 };
 			if (command === "schtasks.exe" && args[0] === "/Query" && args.join(" ").includes("\\VCPDeck\\Client")) return { status: 0, stdout: taskXml };
 			return { status: 1, stderr: `unexpected ${command}` };
 		},
@@ -377,6 +378,9 @@ test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail 
 				"save-remaining-pm2-apps",
 				"pm2:jlist",
 				"remove-old-app-dir",
+				"stop-system-task-for-layout",
+				"schtasks.exe:/Query /TN \\VCPDeck\\Client",
+				"schtasks.exe:/End /TN \\VCPDeck\\Client",
 				"install-system-layout",
 				"install-release",
 				"register-system-task",

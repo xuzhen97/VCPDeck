@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.15] - 2026-09-16
+
+### Fixed
+
+- **Windows 同版本重装覆盖正在运行的 Client 目录时报 `EPERM`**：现有 SYSTEM Client 的工作目录位于 `apps/<当前版本>/client`，安装器此前未停止 `\VCPDeck\Client` 任务就递归删除当前版本目录；Windows 会拒绝删除被运行进程占用的目录。现在铺设发布物前先结束既有 SYSTEM 任务，删除目录使用 Node 原生 10 秒有界重试，随后重新注册并启动任务；同时确保恢复后的 `client-id` 与 `launcher.env` 不会被 `MultipleInstances=IgnoreNew` 的旧实例继续占用。
+
 ## [0.8.14] - 2026-09-16
 
 ### Fixed

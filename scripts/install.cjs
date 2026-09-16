@@ -339,7 +339,9 @@ function installFromStaging(stagingDir, { artifact, version, appDir, force }) {
 		fail(`目标版本目录已存在: ${target}\n  如需覆盖请加 --force`);
 	}
 	installLauncherFromStaging(stagingDir, appDir, manifest);
-	rmSync(target, { recursive: true, force: true });
+	// Windows 结束既有任务后，进程/句柄释放可能稍有延迟；Node 原生有界重试即可，
+	// 不用自建轮询。超过 10 秒仍占用则保留现场并失败。
+	rmSync(target, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
 	mkdirSync(target, { recursive: true });
 	cpSync(join(stagingDir, "manifest.json"), join(target, "manifest.json"));
 	cpSync(artifactDir, join(target, artifact), { recursive: true });
