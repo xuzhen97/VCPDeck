@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-09-16
+
+### Fixed
+
+- **已提升的管理员 PowerShell 被 Windows 一键安装/卸载脚本误判为未提升**：bootstrap 原先错误地从 `WindowsIdentity.Groups` 查找 Mandatory Label SID；该集合不包含令牌完整性 SID，导致窗口已显示“管理员”仍被拒绝。现改用 `WindowsPrincipal.IsInRole(Administrator)` 区分 UAC 过滤令牌，低层 Node 安装器继续通过 `whoami /groups` 独立复核 Administrators 成员与 high-integrity 令牌。
+
 ## [0.8.2] - 2026-09-16
 
 ### Fixed

@@ -5,12 +5,11 @@ function Fail([string]$Message) { throw "[vcpdeck] $Message" }
 if ($PSVersionTable.PSVersion.Major -lt 5) { Fail '需要 PowerShell 5.1+' }
 if (-not [Environment]::Is64BitOperatingSystem) { Fail '仅支持 Windows x64' }
 
-# ADR-0027：必须在用户主动提升的本机管理员 PowerShell 中运行；脚本绝不调用 Start-Process -Verb RunAs 申请 UAC。
+# ADR-0027：IsInRole 在 UAC 过滤令牌下返回 false，可直接区分未提升/已提升管理员；脚本不申请 UAC。
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-$isHighIntegrity = @($identity.Groups | Where-Object { $_.Value -match '^S-1-16-(12288|16384)$' }).Count -gt 0
-if (-not $isAdmin -or -not $isHighIntegrity) {
+if (-not $isAdmin) {
   Fail '请以管理员身份运行 PowerShell 后重跑本命令（脚本不申请 UAC）'
 }
 

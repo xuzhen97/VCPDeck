@@ -1,6 +1,8 @@
 // ADR-0027：Windows SYSTEM 开机任务安装器的纯函数/adapter 测试（不触碰真实系统）。
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
 const installer = require("./install-client.cjs");
 
 /** 记录型 adapter：dry-run 时文件操作不真实落盘，命令调用全部记录。 */
@@ -77,6 +79,15 @@ test("未提升管理员 PowerShell 立即失败，不申请 UAC", () => {
 		elevated,
 	);
 	installer.assertElevatedWindowsIdentity({ administrator: true, highIntegrity: true });
+});
+
+test("PowerShell bootstrap 用 WindowsPrincipal 判断提升，不从 Groups 误查 Mandatory Label", () => {
+	for (const name of ["install-client-bootstrap.ps1", "uninstall-client-bootstrap.ps1"]) {
+		const source = readFileSync(join(__dirname, name), "utf8");
+		assert.match(source, /\.IsInRole\(\[Security\.Principal\.WindowsBuiltInRole\]::Administrator\)/);
+		assert.doesNotMatch(source, /\$identity\.Groups|S-1-16-/);
+		assert.match(source, /if \(-not \$isAdmin\)/);
+	}
 });
 
 test("SYSTEM 任务 XML 固定 S-1-5-18、ServiceAccount、开机触发与失败重启，且不含 PM2", () => {
