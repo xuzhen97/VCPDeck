@@ -79,6 +79,20 @@ function sha256(path) {
 	return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+/**
+ * 缓存构件是否仍然可用：必须存在且 SHA-256 与期望一致。
+ * 低层安装器文件名固定（cache/install.cjs），只判断“文件存在”会把旧版本永久留在机器上，
+ * 导致新参数（如 --force）不被旧 parseArgs 识别而静默丢弃。
+ */
+function cachedArtifactOk(path, expectedSha, probe = existsSync) {
+	if (!expectedSha || !probe(path)) return false;
+	try {
+		return sha256(path) === String(expectedSha).toLowerCase();
+	} catch {
+		return false;
+	}
+}
+
 async function fetchJson(url, options = {}) {
 	const response = await fetch(url, {
 		...options,
@@ -932,7 +946,7 @@ async function runWindowsInstall(options) {
 		record("prepare-archive");
 		const cacheRoot = args["cache-dir"] || join(homedir(), ".vcpdeck", "cache");
 		const cache = join(cacheRoot, `vcpdeck-${bootstrap.releaseVersion}-win-x64.zip`);
-		if (!adapter.probe(cache)) {
+		if (!cachedArtifactOk(cache, bootstrap.archiveSha256, adapter.probe)) {
 			await downloadCall(
 				new URL(bootstrap.archiveUrl, args.serverOrigin).href,
 				cache,
@@ -940,7 +954,7 @@ async function runWindowsInstall(options) {
 			);
 		}
 		const lowInstaller = join(cacheRoot, "install.cjs");
-		if (!adapter.probe(lowInstaller)) {
+		if (!cachedArtifactOk(lowInstaller, preflight.lowLevelInstallerSha256, adapter.probe)) {
 			await downloadCall(
 				new URL(preflight.lowLevelInstallerUrl, args.serverOrigin).href,
 				lowInstaller,
@@ -1381,6 +1395,7 @@ module.exports = {
 	readEnv,
 	normalizeOrigin,
 	ensureClientId,
+	cachedArtifactOk,
 	installPm2Retry,
 	resolveGlobalPm2,
 	buildNodeRuntimeEnv,

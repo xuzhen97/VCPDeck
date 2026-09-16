@@ -2,6 +2,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { createHash } = require("node:crypto");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const installer = require("./install-client.cjs");
@@ -185,6 +186,29 @@ test("重装复用 ADR-0027 保留的机器身份，不新建重复 Client ID", 
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("缓存构件必须按 SHA-256 校验，低层安装器不能只靠文件名复用", () => {
+	const dir = mkdtempSync(join(tmpdir(), "vcpdeck-cache-"));
+	try {
+		const file = join(dir, "install.cjs");
+		writeFileSync(file, "// v1\n");
+		const sha = createHash("sha256").update(readFileSync(file)).digest("hex");
+		assert.equal(installer.cachedArtifactOk(file, sha), true);
+		// 旧版本缓存（内容不同）必须判定为需要重新下载
+		assert.equal(installer.cachedArtifactOk(file, "ab".repeat(32)), false);
+		assert.equal(installer.cachedArtifactOk(join(dir, "missing.cjs"), sha), false);
+		assert.equal(installer.cachedArtifactOk(file, undefined), false);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+	// SYSTEM 流程的两个缓存（Release zip 与 install.cjs）都必须走内容校验
+	const source = readFileSync(join(__dirname, "install-client.cjs"), "utf8");
+	assert.match(source, /cachedArtifactOk\(cache, bootstrap\.archiveSha256, adapter\.probe\)/);
+	assert.match(
+		source,
+		/cachedArtifactOk\(lowInstaller, preflight\.lowLevelInstallerSha256, adapter\.probe\)/,
+	);
 });
 
 test("Windows 安装失败诊断指向 SYSTEM 任务，不再只提示旧 PM2 日志", () => {
