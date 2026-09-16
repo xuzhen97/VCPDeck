@@ -116,6 +116,26 @@ test("安装根 ACE 可继承，且 bootstrap 能自愈不可写现场", () => {
 	assert.match(bootstrap, /takeown\.exe \/F \$appDir \/A \/R \/D Y/);
 });
 
+test("bootstrap 直接解压到 runtime 根，并暴露 Node 源的真实失败原因", () => {
+	const bootstrap = readFileSync(join(__dirname, "install-client-bootstrap.ps1"), "utf8");
+	// 解压zip 内部已有 node-v<版本>-win-x64 顶层目录，直接落到 runtime 根可避免失效目录与跨目录移动。
+	assert.match(bootstrap, /node-v\$v-win-x64\\node\.exe/);
+	assert.match(bootstrap, /Expand-Archive \$zip \$runtimeRoot -Force/);
+	assert.doesNotMatch(bootstrap, /Move-Item \(Join-Path \$tmp/);
+	// 两个源都失败时必须把最后一次真实异常带出，否则只能看到笼统的“无法准备 Node.js”。
+	assert.match(bootstrap, /\$lastError/);
+	assert.match(bootstrap, /失败）：\$lastError/);
+	// Get-FileHash 来自 Microsoft.PowerShell.Utility：PSModulePath 被 PowerShell 7 模块覆盖时
+	// Windows PowerShell 5.1 加载的 Utility 不含该 cmdlet，报“无法识别”而使安装失败；改用 .NET。
+	assert.doesNotMatch(bootstrap, /Get-FileHash\s+-Algorithm/);
+	assert.match(bootstrap, /function Get-Sha256/);
+	assert.match(bootstrap, /\[Security\.Cryptography\.SHA256\]::Create\(\)\.ComputeHash/);
+
+	// SHASUMS256 解析不能依赖固定双空格，否则匹配失败会变成空引用异常。
+	assert.match(bootstrap, /-split '\\r\?\\n'/);
+	assert.match(bootstrap, /-split '\\s\+'/);
+});
+
 test("Windows 安装失败诊断指向 SYSTEM 任务，不再只提示旧 PM2 日志", () => {
 	const source = readFileSync(join(__dirname, "install-client.cjs"), "utf8");
 	assert.match(source, /if \(platform\(\) === "win32"\)/);

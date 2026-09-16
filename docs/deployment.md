@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-11｜适用版本：`0.8.8` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-11｜适用版本：`0.8.9` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 一键安装使用 `NT AUTHORITY\SYSTEM` 开机任务（ADR-0027），Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 

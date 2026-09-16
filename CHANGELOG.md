@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-09-16
+
+### Fixed
+
+- **Windows bootstrap 依赖 `Get-FileHash`，在 PSModulePath 被 PowerShell 7 模块覆盖的机器上无法识别**：这些机器上 Windows PowerShell 5.1 会加载到不含该 cmdlet 的 `Microsoft.PowerShell.Utility`，导致 Node.js 与安装器校验失败，而错误被 `catch` 吞掉后只报“无法准备 Node.js 24+ x64”。现在改为直接用 .NET 计算 SHA-256，并在两个源都失败时输出真实的最后一次异常。
+- **Windows bootstrap 的 Node 下载改为直接解压到 `runtime\node`**：移除“解压到临时目录再 `Move-Item`”的步骤，避免失效目录或目标目录已存在导致的失败；解压后立即验证 `node.exe` 可执行。
+- **ACL 自愈阶段的 `takeown`/`icacls` 原生 stderr 会中断安装**：在 `Stop` 偏好下原生命令 stderr 会变成终止错误，现在修复阶段改用 `Continue`，仅以最终可写性判定成败。
+
 ## [0.8.8] - 2026-09-16
 
 ### Fixed
