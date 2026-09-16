@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-09-16
+
+### Fixed
+
+- **Windows SYSTEM 安装器错误假设私有 Node 路径为固定 `node.exe`**：bootstrap 实际准备的 Node 位于 `C:\ProgramData\VCPDeck\Client\runtime\node\node-<version>\node.exe`，低层安装器却只检查根目录路径，导致管理员安装在 Node 下载完成后仍报“ProgramData 私有 Node.js 未就绪”。现改用 bootstrap 传入的真实私有 Node 路径，并限制该路径必须位于 ProgramData runtime 目录内；失败诊断改为提示 SYSTEM 任务和安装现场。
+
 ## [0.8.3] - 2026-09-16
 
 ### Fixed

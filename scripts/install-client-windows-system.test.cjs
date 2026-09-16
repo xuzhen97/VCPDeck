@@ -90,6 +90,13 @@ test("PowerShell bootstrap 用 WindowsPrincipal 判断提升，不从 Groups 误
 	}
 });
 
+test("Windows 安装失败诊断指向 SYSTEM 任务，不再只提示旧 PM2 日志", () => {
+	const source = readFileSync(join(__dirname, "install-client.cjs"), "utf8");
+	assert.match(source, /if \(platform\(\) === "win32"\)/);
+	assert.match(source, /Windows 诊断/);
+	assert.match(source, /日志: pm2 logs/);
+});
+
 test("SYSTEM 任务 XML 固定 S-1-5-18、ServiceAccount、开机触发与失败重启，且不含 PM2", () => {
 	const xml = installer.buildWindowsSystemTaskXml({
 		nodePath: "C:\\ProgramData\\VCPDeck\\Client\\runtime\\node\\node.exe",
@@ -186,7 +193,11 @@ test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail 
 	const adapter = recordingAdapter();
 	const run = installer.runWindowsInstall({
 		adapter,
-		args: { serverOrigin: "https://deck.example.com", platform: "win-x64", nodePath: "C:\\node.exe" },
+		args: {
+			serverOrigin: "https://deck.example.com",
+			platform: "win-x64",
+			nodePath: "C:\\ProgramData\\VCPDeck\\Client\\runtime\\node\\node.exe",
+		},
 		bootstrap: {
 			releaseVersion: "9.9.9",
 			archiveUrl: "/api/releases/9.9.9/file?platform=win-x64",
@@ -244,6 +255,54 @@ test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail 
 	});
 });
 
+test("SYSTEM 任务使用 bootstrap 传入的 ProgramData Node 路径，不假设 runtime\\node\\node.exe", async () => {
+	const adapter = recordingAdapter();
+	let taskXml = "";
+	adapter.writeFile = (content, path) => {
+		adapter.records.push(`write:${path}`);
+		if (path.endsWith("client-task.xml")) taskXml = content;
+	};
+	await installer.runWindowsInstall({
+		adapter,
+		args: {
+			serverOrigin: "https://deck.example.com",
+			platform: "win-x64",
+			nodePath: "C:\\ProgramData\\VCPDeck\\Client\\runtime\\node\\node-24.15.0\\node.exe",
+		},
+		bootstrap: {
+			releaseVersion: "9.9.9",
+			archiveUrl: "/api/releases/9.9.9/file?platform=win-x64",
+			archiveSha256: "ab".repeat(32),
+			psk: "test-psk",
+			verificationTimeoutMs: 1000,
+		},
+		preflight: {
+			lowLevelInstallerUrl: "/api/client-installer/assets/install.cjs",
+			lowLevelInstallerSha256: "cd".repeat(32),
+		},
+		fetchJson: async () => ({
+			registered: true,
+			online: true,
+			clientVersion: "9.9.9",
+			name: "deck",
+			capabilitiesReported: true,
+			installationMode: "windows-system-task",
+			privilegedMode: "windows-system",
+		}),
+		download: async () => {},
+	});
+	assert.equal(
+		taskXml.includes("<Command>C:\\ProgramData\\VCPDeck\\Client\\runtime\\node\\node.exe</Command>"),
+		false,
+	);
+	assert.equal(
+		taskXml.includes(
+			"<Command>C:\\ProgramData\\VCPDeck\\Client\\runtime\\node\\node-24.15.0\\node.exe</Command>",
+		),
+		true,
+	);
+});
+
 test("旧来源指向不同 Server 时在 stop-old-launcher 前 fail closed", () => {
 	const adapter = recordingAdapter();
 	adapter.readJson = (path) =>
@@ -261,7 +320,11 @@ test("旧来源指向不同 Server 时在 stop-old-launcher 前 fail closed", ()
 	};
 	const run = installer.runWindowsInstall({
 		adapter,
-		args: { serverOrigin: "https://deck.example.com", platform: "win-x64", nodePath: "C:\\node.exe" },
+		args: {
+			serverOrigin: "https://deck.example.com",
+			platform: "win-x64",
+			nodePath: "C:\\ProgramData\\VCPDeck\\Client\\runtime\\node\\node.exe",
+		},
 		bootstrap: { releaseVersion: "9.9.9", archiveUrl: "/f", archiveSha256: "ab".repeat(32), psk: "p" },
 		preflight: { lowLevelInstallerUrl: "/l", lowLevelInstallerSha256: "cd".repeat(32) },
 		fetchJson: async () => ({ registered: true }),
@@ -302,7 +365,11 @@ test("旧 PM2 同名进程指向其他目录时在清理前 fail closed", () => 
 	};
 	const run = installer.runWindowsInstall({
 		adapter,
-		args: { serverOrigin: "https://deck.example.com", platform: "win-x64", nodePath: "C:\\node.exe" },
+		args: {
+			serverOrigin: "https://deck.example.com",
+			platform: "win-x64",
+			nodePath: "C:\\ProgramData\\VCPDeck\\Client\\runtime\\node\\node.exe",
+		},
 		bootstrap: { releaseVersion: "9.9.9", archiveUrl: "/f", archiveSha256: "ab".repeat(32), psk: "p" },
 		preflight: { lowLevelInstallerUrl: "/l", lowLevelInstallerSha256: "cd".repeat(32) },
 		fetchJson: async () => ({ registered: true }),

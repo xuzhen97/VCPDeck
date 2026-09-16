@@ -11,7 +11,7 @@ const {
 	writeFileSync,
 } = require("node:fs");
 const { homedir, hostname, platform, userInfo } = require("node:os");
-const { basename, delimiter, dirname, join, resolve } = require("node:path");
+const { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } = require("node:path");
 const { stdin, stdout } = require("node:process");
 const { createInterface } = require("node:readline/promises");
 
@@ -905,7 +905,17 @@ async function runWindowsInstall(options) {
 		// 阶段 2：固定机器级布局与私有 Node 就绪。
 		adapter.mkdir(WINDOWS_APP_DIR);
 		record("prepare-runtime");
-		const nodeExe = join(WINDOWS_APP_DIR, "runtime", "node", "node.exe");
+		const nodeExe = resolve(args.nodePath || "");
+		const runtimeRoot = resolve(WINDOWS_APP_DIR, "runtime", "node");
+		const nodeRelative = relative(runtimeRoot, nodeExe);
+		if (
+			!nodeRelative ||
+			nodeRelative === ".." ||
+			nodeRelative.startsWith(`..${sep}`) ||
+			isAbsolute(nodeRelative)
+		) {
+			throw new Error("ProgramData 私有 Node.js 路径无效，请重跑安装命令");
+		}
 		if (!adapter.probe(nodeExe)) throw new Error("ProgramData 私有 Node.js 未就绪，请重跑安装命令");
 
 		// 阶段 3：下载并校验 Release 与低层安装器（清理前全部材料就绪）。
@@ -1285,7 +1295,11 @@ if (require.main === module) {
 			`\n[vcpdeck] 安装失败: ${error instanceof Error ? error.message : String(error)}`,
 		);
 		console.error(`[vcpdeck] 已保留现场；修复后重新执行同一条安装命令。`);
-		console.error(`[vcpdeck] 日志: pm2 logs ${PM2_NAME} --lines 100`);
+		if (platform() === "win32") {
+			console.error(`[vcpdeck] Windows 诊断：任务 ${WINDOWS_CLIENT_TASK}；安装现场 ${WINDOWS_APP_DIR}`);
+		} else {
+			console.error(`[vcpdeck] 日志: pm2 logs ${PM2_NAME} --lines 100`);
+		}
 		process.exitCode = 1;
 	});
 }
