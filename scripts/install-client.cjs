@@ -819,14 +819,18 @@ function discoverLegacyWindowsInstall(adapter, serverOrigin) {
 	const origin = normalizeOrigin(env.VCPDECK_SERVER || state.serverOrigin);
 	const entries = [];
 	try {
-		const list = JSON.parse(adapter.pm2(["jlist"])?.stdout || "[]");
+		const result = adapter.pm2(["jlist"]);
+		if (result?.status !== 0) {
+			throw new Error(result?.stderr?.trim() || `退出码 ${result?.status ?? "未知"}`);
+		}
+		const list = JSON.parse(result.stdout || "[]");
 		if (Array.isArray(list)) {
 			for (const entry of list) {
 				if (entry?.name === PM2_NAME) entries.push(entry);
 			}
 		}
-	} catch {
-		throw new Error("无法读取 PM2 进程列表，拒绝迁移");
+	} catch (error) {
+		throw new Error(`无法读取 PM2 进程列表，拒绝迁移：${error instanceof Error ? error.message : String(error)}`);
 	}
 	if (!origin || origin !== serverOrigin) {
 		throw new Error(`旧 Client 指向其他 Server（${origin || "未知"}），拒绝迁移`);
@@ -864,17 +868,28 @@ function safeReadJson(path) {
 	}
 }
 
+/** Windows 进程停止后句柄释放可能延迟；使用 Node 原生有界重试删除已确认目录。 */
+function removeTreeWithRetries(path, remove = rmSync) {
+	remove(path, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
+}
+
 /** 清理已确认的旧 VCPDeck PM2 现场；不删除用户 PM2/Node/个人文件（ADR-0027）。 */
 function cleanLegacyWindowsInstall(adapter, source) {
 	const record = (name) => adapter.records.push(name);
 	record("stop-old-launcher");
 	if (source.hasProcess) {
-		adapter.pm2(["delete", PM2_NAME]);
+		const deleted = adapter.pm2(["delete", PM2_NAME]);
+		if (deleted?.status !== 0) {
+			throw new Error(`PM2 delete 失败：${deleted?.stderr?.trim() || `退出码 ${deleted?.status ?? "未知"}`}`);
+		}
 		record("delete-old-pm2-entry");
-		adapter.pm2(["save"]);
+		const saved = adapter.pm2(["save"]);
+		if (saved?.status !== 0) {
+			throw new Error(`PM2 save 失败：${saved?.stderr?.trim() || `退出码 ${saved?.status ?? "未知"}`}`);
+		}
 		record("save-remaining-pm2-apps");
 		const remaining = safeReadJsonSafePm2(adapter);
-		if (!remaining) {
+		if (remaining.length === 0) {
 			const removedTask = adapter.spawn("schtasks.exe", ["/Delete", "/TN", "VCPDeck PM2 Startup", "/F"]);
 			if (removedTask.status === 0) record("remove-old-startup");
 		}
@@ -891,7 +906,7 @@ function cleanLegacyWindowsInstall(adapter, source) {
 	}
 	record("remove-old-app-dir");
 	if (!adapter.dryRun) {
-		rmSync(source.appDir, { recursive: true, force: true });
+		removeTreeWithRetries(source.appDir);
 		try {
 			rmSync(source.statePath, { force: true });
 		} catch {
@@ -901,12 +916,16 @@ function cleanLegacyWindowsInstall(adapter, source) {
 }
 
 function safeReadJsonSafePm2(adapter) {
+	const result = adapter.pm2(["jlist"]);
+	if (result?.status !== 0) {
+		throw new Error(`PM2 jlist 失败：${result?.stderr?.trim() || `退出码 ${result?.status ?? "未知"}`}`);
+	}
 	try {
-		const list = JSON.parse(adapter.pm2(["jlist"])?.stdout || "[]");
-		if (!Array.isArray(list)) return [];
+		const list = JSON.parse(result.stdout || "[]");
+		if (!Array.isArray(list)) throw new Error("结果不是数组");
 		return list.filter((entry) => entry?.name !== PM2_NAME);
-	} catch {
-		return [];
+	} catch (error) {
+		throw new Error(`PM2 jlist 结果无效：${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
@@ -1153,6 +1172,12 @@ async function main() {
 				timeoutMs: 60_000,
 			},
 		);
+		const legacyPm2 =
+			resolveGlobalPm2(findCommand("pm2.cmd"), args.nodePath) ||
+			resolveGlobalPm2(
+				join(homedir(), ".vcpdeck", "tools", "pm2", "pm2.cmd"),
+				args.nodePath,
+			);
 		const adapter = {
 			dryRun: false,
 			records: [],
@@ -1175,12 +1200,17 @@ async function main() {
 				return { status: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
 			},
 			pm2: (pm2Args) => {
+				if (!legacyPm2) return { status: 127, stdout: "", stderr: "未找到旧安装使用的 PM2 CLI" };
 				const result = spawnSync(
-					"node",
-					[join(homedir(), ".vcpdeck", "tools", "pm2", "node_modules", "pm2", "bin", "pm2"), ...pm2Args],
+					legacyPm2.command,
+					[...legacyPm2.argsPrefix, ...pm2Args],
 					{ encoding: "utf8", windowsHide: true },
 				);
-				return { status: result.status ?? 1, stdout: result.stdout };
+				return {
+					status: result.status ?? 1,
+					stdout: result.stdout,
+					stderr: `${result.error?.message || ""}${result.stderr || ""}`,
+				};
 			},
 		};
 		await runWindowsInstall({
@@ -1399,6 +1429,7 @@ module.exports = {
 	findMachineGit,
 	ensureOptionalMachineGit,
 	discoverLegacyWindowsInstall,
+	removeTreeWithRetries,
 	cleanLegacyWindowsInstall,
 	runWindowsInstall,
 	parseArgs,

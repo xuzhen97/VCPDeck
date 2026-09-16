@@ -325,6 +325,17 @@ test("winget 不存在/失败只警告，不阻断安装", () => {
 	assert.match(failed.warning, /Git/);
 });
 
+test("旧 PM2 目录清理等待 Windows 进程句柄释放", () => {
+	let call = null;
+	installer.removeTreeWithRetries("C:\\Users\\x\\.vcpdeck\\launcher-client", (path, options) => {
+		call = { path, options };
+	});
+	assert.deepEqual(call, {
+		path: "C:\\Users\\x\\.vcpdeck\\launcher-client",
+		options: { recursive: true, force: true, maxRetries: 20, retryDelay: 500 },
+	});
+});
+
 test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail closed 固定", () => {
 	const adapter = recordingAdapter();
 	const run = installer.runWindowsInstall({
@@ -377,6 +388,7 @@ test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail 
 				"pm2:save",
 				"save-remaining-pm2-apps",
 				"pm2:jlist",
+				"schtasks.exe:/Delete /TN VCPDeck PM2 Startup /F",
 				"remove-old-app-dir",
 				"stop-system-task-for-layout",
 				"schtasks.exe:/Query /TN \\VCPDeck\\Client",
@@ -480,6 +492,34 @@ test("旧来源指向不同 Server 时在 stop-old-launcher 前 fail closed", ()
 				"未变更 PM2 状态",
 			);
 		});
+});
+
+test("旧 PM2 查询失败时 fail closed，不得误判为无迁移源", () => {
+	const adapter = recordingAdapter();
+	adapter.pm2 = () => ({ status: 1, stderr: "pm2 cli missing" });
+	assert.throws(
+		() => installer.discoverLegacyWindowsInstall(adapter, "https://deck.example.com"),
+		/无法读取 PM2 进程列表.*pm2 cli missing/,
+	);
+});
+
+test("旧 PM2 删除失败时保留旧目录并停止迁移", () => {
+	const adapter = recordingAdapter();
+	adapter.dryRun = false;
+	adapter.pm2 = (args) =>
+		args[0] === "delete"
+			? { status: 1, stderr: "delete failed" }
+			: { status: 0, stdout: "[]" };
+	assert.throws(
+		() =>
+			installer.cleanLegacyWindowsInstall(adapter, {
+				appDir: "C:\\Users\\x\\.vcpdeck\\launcher-client",
+				statePath: "C:\\Users\\x\\.vcpdeck\\client-install.json",
+				hasProcess: true,
+			}),
+		/PM2 delete 失败.*delete failed/,
+	);
+	assert.ok(!adapter.records.includes("remove-old-app-dir"));
 });
 
 test("旧 PM2 同名进程指向其他目录时在清理前 fail closed", () => {

@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.16] - 2026-09-17
+
+### Fixed
+
+- **Windows 旧 PM2 Client 迁移误用不存在的私有 PM2 CLI**：SYSTEM 安装器此前固定调用 `~/.vcpdeck/tools/pm2/...`，但旧安装可能使用 NVM/全局 `pm2.cmd`；`jlist/delete/save` 的非零退出又未校验，导致安装器误以为已停旧 Client，随后删除仍被占用的 `~/.vcpdeck/launcher-client` 并报 `EPERM`。现在复用已验证的全局 PM2 JS 入口，PM2 查询/删除/保存任一失败均 fail closed，旧目录删除等待 Windows 进程句柄释放；保留无关 PM2 应用，仅在无其他应用时删除旧启动任务。
+
 ## [0.8.15] - 2026-09-16
 
 ### Fixed

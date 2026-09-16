@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-11｜适用版本：`0.8.15` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-11｜适用版本：`0.8.16` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 一键安装使用 `NT AUTHORITY\SYSTEM` 开机任务（ADR-0027），Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 
@@ -195,7 +195,7 @@ Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt
 
 任意已登录操作者可在发版页启用或禁用入口。入口默认关闭，状态保存在 SQLite；启用后页面按当前 Origin 显示固定 Windows PowerShell 和 Linux Bash 命令。命令每次动态选择与 Server 版本完全一致、状态为 `done` 且含对应平台 archive 的 Release。
 
-Linux 新安装器会校验 root/可用 sudo、下载并校验 Release 与 Client archive，部署到 `/opt/vcpdeck/client`，创建锁定密码的 `vcpdeck` 专用账户、`/etc/vcpdeck/client.env`、sudoers 和 `vcpdeck-client.service`，然后等待 Server 确认在线/版本/能力；Windows 安装必须从**已提升的管理员 PowerShell** 执行（脚本不会申请 UAC，未提升立即失败），固定安装到 `C:\ProgramData\VCPDeck\Client` 并复用其中已就绪的机器级私有 Node；重复安装会先结束既有 `\VCPDeck\Client` 任务，释放当前版本目录并重新加载恢复后的身份与环境（下载成功时也直接落到该目录，不写用户 Profile），Git 为可选工具（缺少时尝试 `winget install --id Git.Git --exact --scope machine --silent`，失败只警告不阻断），最后注册并启动 `\VCPDeck\Client` SYSTEM 开机任务，再向 Server 验收 `windows-system-task` 与 Windows SYSTEM 特权。存量安装（Windows 旧用户 PM2/登录任务、Linux 旧用户 PM2）均在生产并校验全部材料后**清理式迁移**：只删除能证明属于 VCPDeck 的 PM2 entry、旧自启与旧运行目录，保留 `client-id`、Server Origin 与显示名称，无关 PM2 应用与个人文件不动。若已有配置指向其他 Server 则拒绝。Bazzite 依赖分层若提示重启，必须先重启系统，再重跑同一命令。
+Linux 新安装器会校验 root/可用 sudo、下载并校验 Release 与 Client archive，部署到 `/opt/vcpdeck/client`，创建锁定密码的 `vcpdeck` 专用账户、`/etc/vcpdeck/client.env`、sudoers 和 `vcpdeck-client.service`，然后等待 Server 确认在线/版本/能力；Windows 安装必须从**已提升的管理员 PowerShell** 执行（脚本不会申请 UAC，未提升立即失败），固定安装到 `C:\ProgramData\VCPDeck\Client` 并复用其中已就绪的机器级私有 Node；重复安装会先结束既有 `\VCPDeck\Client` 任务，释放当前版本目录并重新加载恢复后的身份与环境（下载成功时也直接落到该目录，不写用户 Profile），Git 为可选工具（缺少时尝试 `winget install --id Git.Git --exact --scope machine --silent`，失败只警告不阻断），最后注册并启动 `\VCPDeck\Client` SYSTEM 开机任务，再向 Server 验收 `windows-system-task` 与 Windows SYSTEM 特权。存量安装（Windows 旧用户 PM2/登录任务、Linux 旧用户 PM2）均在生产并校验全部材料后**清理式迁移**：只删除能证明属于 VCPDeck 的 PM2 entry、旧自启与旧运行目录；Windows 会复用旧安装实际使用的全局 PM2 CLI，并对查询、删除和保存结果 fail closed；保留 `client-id`、Server Origin 与显示名称，无关 PM2 应用与个人文件不动。若已有配置指向其他 Server 则拒绝。Bazzite 依赖分层若提示重启，必须先重启系统，再重跑同一命令。
 
 支持范围：Windows 10/11 x64、Windows Server 2019+ x64；Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd。不支持 ARM64、Alpine/musl、CentOS 7、WSL、容器、无 systemd Linux 及其他未经逐项验收的 Fedora Atomic 发行版。Node 与 PM2 下载优先国内镜像，失败回退官方源（Windows SYSTEM 安装不使用 PM2）。
 
