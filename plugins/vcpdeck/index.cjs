@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.7.1";
+    exports2.VERSION = "0.8.0";
   }
 });
 
@@ -1823,9 +1823,10 @@ var require_machine_register = __commonJS({
   "../shared/dist/machine-register.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = void 0;
+    exports2.ClientInstallationComplianceReason = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = void 0;
     exports2.parseMachineInstallation = parseMachineInstallation;
     exports2.parsePrivilegedCapabilityStatus = parsePrivilegedCapabilityStatus;
+    exports2.getClientInstallationCompliance = getClientInstallationCompliance;
     exports2.parseMachineRegister = parseMachineRegister;
     var frp_runtime_js_1 = require_frp_runtime();
     var tunnel_js_1 = require_tunnel();
@@ -1840,10 +1841,12 @@ var require_machine_register = __commonJS({
     var MAX_RUN_AS_USER = 256;
     exports2.MachineInstallationMode = {
       SYSTEMD_ROOT_EQUIVALENT: "systemd-root-equivalent",
+      WINDOWS_SYSTEM_TASK: "windows-system-task",
       LEGACY_PM2: "legacy-pm2"
     };
     exports2.PrivilegedCapabilityMode = {
       SUDO_ALL: "sudo-all",
+      WINDOWS_SYSTEM: "windows-system",
       UNAVAILABLE: "unavailable"
     };
     function isRecord2(value) {
@@ -1859,7 +1862,11 @@ var require_machine_register = __commonJS({
       if (!isRecord2(value) || Object.keys(value).length !== 1) {
         throw new Error("installation \u5FC5\u987B\u4E3A\u4EC5\u542B mode \u7684\u5BF9\u8C61");
       }
-      const valid = [exports2.MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT, exports2.MachineInstallationMode.LEGACY_PM2];
+      const valid = [
+        exports2.MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT,
+        exports2.MachineInstallationMode.WINDOWS_SYSTEM_TASK,
+        exports2.MachineInstallationMode.LEGACY_PM2
+      ];
       if (!valid.includes(value.mode)) {
         throw new Error(`installation.mode \u5FC5\u987B\u4E3A ${valid.join(" \u6216 ")}`);
       }
@@ -1873,17 +1880,53 @@ var require_machine_register = __commonJS({
       if (typeof available !== "boolean" || typeof nonInteractive !== "boolean") {
         throw new Error("privileged.available \u4E0E privileged.nonInteractive \u5FC5\u987B\u4E3A boolean");
       }
-      if (mode !== exports2.PrivilegedCapabilityMode.SUDO_ALL && mode !== exports2.PrivilegedCapabilityMode.UNAVAILABLE) {
-        throw new Error("privileged.mode \u5FC5\u987B\u4E3A sudo-all \u6216 unavailable");
+      if (mode !== exports2.PrivilegedCapabilityMode.SUDO_ALL && mode !== exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM && mode !== exports2.PrivilegedCapabilityMode.UNAVAILABLE) {
+        throw new Error("privileged.mode \u5FC5\u987B\u4E3A sudo-all\u3001windows-system \u6216 unavailable");
       }
       const user = requireString(runAsUser, "privileged.runAsUser", MAX_RUN_AS_USER);
-      if (mode === exports2.PrivilegedCapabilityMode.SUDO_ALL && available !== true) {
-        throw new Error("privileged.mode=sudo-all \u5FC5\u987B available=true");
+      if ((mode === exports2.PrivilegedCapabilityMode.SUDO_ALL || mode === exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM) && (available !== true || nonInteractive !== true)) {
+        throw new Error(`privileged.mode=${mode} \u5FC5\u987B available=true \u4E14 nonInteractive=true`);
       }
       if (mode === exports2.PrivilegedCapabilityMode.UNAVAILABLE && nonInteractive !== false) {
         throw new Error("privileged.mode=unavailable \u5FC5\u987B nonInteractive=false");
       }
       return { available, mode, nonInteractive, runAsUser: user };
+    }
+    exports2.ClientInstallationComplianceReason = {
+      /** 显式上报旧 PM2 安装模式 */
+      LEGACY_PM2: "legacy-pm2",
+      /** 安装模式未报告（旧 Client 缺字段） */
+      INSTALLATION_UNREPORTED: "installation-unreported",
+      /** 特权模式/可用性不满足系统级要求，或未报告 */
+      PRIVILEGE_NONCOMPLIANT: "privilege-noncompliant",
+      /** 安装模式与操作系统不匹配 */
+      PLATFORM_MODE_MISMATCH: "platform-mode-mismatch",
+      /** 不支持的操作系统 */
+      PLATFORM_UNSUPPORTED: "platform-unsupported"
+    };
+    function getClientInstallationCompliance(client) {
+      const mode = client.installation?.mode;
+      if (mode === void 0) {
+        return { compliant: false, reason: exports2.ClientInstallationComplianceReason.INSTALLATION_UNREPORTED };
+      }
+      if (mode === exports2.MachineInstallationMode.LEGACY_PM2) {
+        return { compliant: false, reason: exports2.ClientInstallationComplianceReason.LEGACY_PM2 };
+      }
+      const isWin = client.os.startsWith("win32");
+      const isLinux = client.os.startsWith("linux");
+      if (!isWin && !isLinux) {
+        return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PLATFORM_UNSUPPORTED };
+      }
+      const expected = isWin ? exports2.MachineInstallationMode.WINDOWS_SYSTEM_TASK : exports2.MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT;
+      if (mode !== expected) {
+        return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PLATFORM_MODE_MISMATCH };
+      }
+      const privileged = client.capabilityDetails?.privileged;
+      const expectedPrivilege = isWin ? exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM : exports2.PrivilegedCapabilityMode.SUDO_ALL;
+      if (privileged === void 0 || privileged.mode !== expectedPrivilege || privileged.available !== true || privileged.nonInteractive !== true) {
+        return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PRIVILEGE_NONCOMPLIANT };
+      }
+      return { compliant: true, reason: null };
     }
     function parseMachineRegister(value) {
       if (!isRecord2(value))
@@ -1966,8 +2009,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.parseTunnelClose = exports2.parseTunnelClientState = exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
-    exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = void 0;
+    exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = exports2.parseTunnelClose = exports2.parseTunnelClientState = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -2116,11 +2159,17 @@ var require_dist = __commonJS({
       JobStatus3["CANCELLED"] = "cancelled";
     })(JobStatus2 || (exports2.JobStatus = JobStatus2 = {}));
     var machine_register_js_1 = require_machine_register();
+    Object.defineProperty(exports2, "ClientInstallationComplianceReason", { enumerable: true, get: function() {
+      return machine_register_js_1.ClientInstallationComplianceReason;
+    } });
     Object.defineProperty(exports2, "MachineInstallationMode", { enumerable: true, get: function() {
       return machine_register_js_1.MachineInstallationMode;
     } });
     Object.defineProperty(exports2, "PrivilegedCapabilityMode", { enumerable: true, get: function() {
       return machine_register_js_1.PrivilegedCapabilityMode;
+    } });
+    Object.defineProperty(exports2, "getClientInstallationCompliance", { enumerable: true, get: function() {
+      return machine_register_js_1.getClientInstallationCompliance;
     } });
     Object.defineProperty(exports2, "parseMachineInstallation", { enumerable: true, get: function() {
       return machine_register_js_1.parseMachineInstallation;

@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-16
+
 ### Added
 
 - **Windows Client 系统级安装（ADR-0027）**：一键安装改为 `NT AUTHORITY\SYSTEM` 下的 `\VCPDeck\Client` 开机任务，固定安装到 `C:\ProgramData\VCPDeck\Client` 并使用机器级私有 Node，**无需用户登录**即保持在线，不再安装或运行 PM2。安装必须在已提升的管理员 PowerShell 中执行，脚本不申请 UAC；Git 为可选工具（缺失时尝试机器级 `winget`，失败只警告）。
