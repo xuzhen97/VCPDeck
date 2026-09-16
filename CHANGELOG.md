@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-09-16
+
+### Fixed
+
+- **Windows 安装器在读取 `client-id` 之后才重建安装根 ACL**：0.8.7 之前写入的不可继承 ACE 会让既有子对象（`client-id`、`launcher.env` 等）失去全部 ACE，导致续装时报 `EPERM: operation not permitted, open 'C:\ProgramData\VCPDeck\Client\client-id'`，且永远走不到修复。现在先对安装根写入可继承的 `(OI)(CI)F`，由内核将权限传播到既有子对象，再执行身份读取；已用本地现场验证被清空的 `client-id` 能立即恢复继承读写权限。
+
 ## [0.8.9] - 2026-09-16
 
 ### Fixed

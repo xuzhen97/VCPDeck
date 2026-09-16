@@ -937,6 +937,9 @@ async function runWindowsInstall(options) {
 
 		// 阶段 5：全新系统级安装（固定布局，敏感文件收紧 ACL）。
 		record("install-system-layout");
+		// 必须先重建安装根的可继承授权：0.8.7 之前写入的不可继承 ACE 会让既有子对象
+		// （client-id、launcher.env 等）失去全部 ACE 而无法读写；设根 ACE 后由内核传播到既有子对象。
+		adapter.icacls(WINDOWS_APP_DIR, { directory: true });
 		const displayName = (typeof args.name === "string" && args.name) || legacy?.displayName || hostname();
 		const clientId = legacy?.clientId || ensureClientId(join(WINDOWS_APP_DIR, "client-id"), dryRun ? cacheRoot : null);
 		const envContent = [
@@ -953,7 +956,6 @@ async function runWindowsInstall(options) {
 		if (dryRun) adapter.writeFile(envContent, envPath);
 		else writeFileSync(envPath, envContent, { mode: 0o600 });
 		adapter.icacls(envPath);
-		adapter.icacls(WINDOWS_APP_DIR, { directory: true });
 		const state = {
 			version: INSTALL_STATE_VERSION,
 			serverOrigin: args.serverOrigin,

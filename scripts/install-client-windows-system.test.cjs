@@ -108,6 +108,13 @@ test("安装根 ACE 可继承，且 bootstrap 能自愈不可写现场", () => {
 	assert.match(installer, /\*S-1-5-18:\(OI\)\(CI\)F/);
 	assert.match(installer, /\*S-1-5-32-544:\(OI\)\(CI\)F/);
 	assert.match(installer, /icacls\(WINDOWS_APP_DIR, \{ directory: true \}\)/);
+	// 重建根 ACE 必须早于读 client-id：既有文件在旧版本下已失去全部 ACE，
+	// 晚于此时才设置 ACL 会先抛 EPERM（open client-id）。
+	assert.ok(
+		installer.indexOf("adapter.icacls(WINDOWS_APP_DIR, { directory: true })") <
+			installer.indexOf('ensureClientId(join(WINDOWS_APP_DIR, "client-id")'),
+		"安装根 ACL 必须先于 client-id 读取",
+	);
 
 	const bootstrap = readFileSync(join(__dirname, "install-client-bootstrap.ps1"), "utf8");
 	assert.match(bootstrap, /function Repair-AppDirAcl/);
