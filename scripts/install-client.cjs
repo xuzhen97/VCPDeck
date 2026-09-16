@@ -143,6 +143,13 @@ async function askConfiguration(defaultName, defaultDir) {
 	}
 }
 
+/** 清除 Windows 只读属性：Node 写入只读文件会直接报 EPERM，旧安装可能残留该属性。 */
+function clearReadOnly(path) {
+	try {
+		chmodSync(path, 0o600);
+	} catch {}
+}
+
 /** 读取/生成 Client ID；path 缺省为旧用户级路径，迁移后权威切到 ProgramData 固定位置。 */
 function ensureClientId(path = join(homedir(), ".vcpdeck", "client-id"), dryRunRoot = null) {
 	if (dryRunRoot) {
@@ -160,6 +167,7 @@ function ensureClientId(path = join(homedir(), ".vcpdeck", "client-id"), dryRunR
 	if (existsSync(target)) id = readFileSync(target, "utf8").trim();
 	if (!id) {
 		id = randomUUID();
+		clearReadOnly(target);
 		writeFileSync(target, id, { mode: 0o600 });
 	}
 	return id;
@@ -940,6 +948,13 @@ async function runWindowsInstall(options) {
 		// 必须先重建安装根的可继承授权：0.8.7 之前写入的不可继承 ACE 会让既有子对象
 		// （client-id、launcher.env 等）失去全部 ACE 而无法读写；设根 ACE 后由内核传播到既有子对象。
 		adapter.icacls(WINDOWS_APP_DIR, { directory: true });
+		// 既有文件可能被旧版本改成只读或写入不可继承 ACL：先恢复可写与访问，再读取身份与写入环境。
+		for (const name of ["client-id", "launcher.env", "install-state.json"]) {
+			const existing = join(WINDOWS_APP_DIR, name);
+			if (!adapter.probe(existing)) continue;
+			adapter.icacls(existing);
+			clearReadOnly(existing);
+		}
 		const displayName = (typeof args.name === "string" && args.name) || legacy?.displayName || hostname();
 		const clientId = legacy?.clientId || ensureClientId(join(WINDOWS_APP_DIR, "client-id"), dryRun ? cacheRoot : null);
 		const envContent = [

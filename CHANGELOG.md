@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.11] - 2026-09-16
+
+### Fixed
+
+- **Windows 续装把既有 `client-id` 的 `EPERM` 归因于 ACL，实际缺少只读属性处理**：Node 在 Windows 上写入带只读属性的文件会直接报 `EPERM`（与空 DACL 同为 `EPERM`，难以区分）。现在安装器在读取/写入 `client-id`、`launcher.env`、`install-state.json` 前先清除只读属性，并逐对象重建这两个文件的访问权，不再依赖现场是否健康；已在本地分别复现“只读文件”与“空 DACL”两条 `EPERM` 路径并验证修复。
+
 ## [0.8.10] - 2026-09-16
 
 ### Fixed

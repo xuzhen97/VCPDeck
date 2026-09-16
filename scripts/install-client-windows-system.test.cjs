@@ -115,6 +115,14 @@ test("安装根 ACE 可继承，且 bootstrap 能自愈不可写现场", () => {
 			installer.indexOf('ensureClientId(join(WINDOWS_APP_DIR, "client-id")'),
 		"安装根 ACL 必须先于 client-id 读取",
 	);
+	// 只读属性会让 Node 写入报 EPERM；既有文件的空 DACL 也需逐对象显式授权。
+	assert.match(installer, /function clearReadOnly/);
+	assert.match(installer, /clearReadOnly\(target\);/);
+	assert.ok(
+		installer.indexOf('for (const name of ["client-id", "launcher.env", "install-state.json"])') <
+			installer.indexOf('ensureClientId(join(WINDOWS_APP_DIR, "client-id")'),
+		"既有文件修复必须先于 client-id 读取",
+	);
 
 	const bootstrap = readFileSync(join(__dirname, "install-client-bootstrap.ps1"), "utf8");
 	assert.match(bootstrap, /function Repair-AppDirAcl/);
