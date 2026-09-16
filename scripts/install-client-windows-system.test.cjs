@@ -90,6 +90,18 @@ test("PowerShell bootstrap 用 WindowsPrincipal 判断提升，不从 Groups 误
 	}
 });
 
+test("Windows ACL 使用 icacls 的 SID:权限格式，不把 SDDL 当作 grant 参数", () => {
+	for (const source of [
+		readFileSync(join(__dirname, "install-client.cjs"), "utf8"),
+		readFileSync(join(__dirname, "uninstall-client.cjs"), "utf8"),
+	]) {
+		assert.match(source, /\/grant:r/);
+		assert.match(source, /\*S-1-5-18:F/);
+		assert.match(source, /\*S-1-5-32-544:F/);
+		assert.doesNotMatch(source, /\/grant:S:\(A;;GA;;;(?:SY|BA)\)/);
+	}
+});
+
 test("Windows 安装失败诊断指向 SYSTEM 任务，不再只提示旧 PM2 日志", () => {
 	const source = readFileSync(join(__dirname, "install-client.cjs"), "utf8");
 	assert.match(source, /if \(platform\(\) === "win32"\)/);

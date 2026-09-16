@@ -1081,7 +1081,7 @@ async function main() {
 			writeFile: (content, p) => writeFileSync(p, content, { mode: 0o600 }),
 			mkdir: (p) => mkdirSync(p, { recursive: true }),
 			icacls: (p) => {
-				execFileSync("icacls.exe", [p, "/inheritance:r", "/grant:S:(A;;GA;;;SY)", "/grant:S:(A;;GA;;;BA)"], {
+				execFileSync("icacls.exe", [p, "/inheritance:r", "/grant:r", "*S-1-5-18:F", "*S-1-5-32-544:F"], {
 					stdio: "inherit",
 				});
 			},
