@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-09-16
+
+### Fixed
+
+- **Windows SYSTEM 计划任务 XML 不符合 Task Scheduler schema**：修复 BootTrigger 中非法的 `StartWhenAvailable`、非法的 `TimeTrigger` 延迟写法、`RestartOnFailure` 的 `Attempts` 字段、缺失的 `version="1.2"` 和错误的 UTF-16 声明；并删除 XML 中不被 schema 接受的 `LogonType=ServiceAccount`，改为注册时显式传 `/RU SYSTEM`，保持开机前登录、最高权限运行。
+
 ## [0.8.6] - 2026-09-16
 
 ### Fixed

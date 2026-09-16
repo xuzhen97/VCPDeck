@@ -647,32 +647,25 @@ function assertElevatedWindowsIdentity(identity) {
 	}
 }
 
-/** 生成固定 SYSTEM 开机任务 XML：S-1-5-18、ServiceAccount、Highest、BootTrigger、失败重启 1 分钟×999。 */
+/** 生成固定 SYSTEM 开机任务 XML：S-1-5-18、Highest、BootTrigger、失败重启 1 分钟×999。 */
 function buildWindowsSystemTaskXml(definition) {
 	const nodePath = String(definition.nodePath).replace(/&/g, "&amp;");
 	const launcherPath = String(definition.launcherPath).replace(/&/g, "&amp;");
 	const appDir = String(definition.appDir).replace(/&/g, "&amp;");
 	return `<?xml version="1.0" encoding="UTF-16"?>
-<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>VCPDeck Client Launcher (system, ADR-0027)</Description>
   </RegistrationInfo>
   <Triggers>
     <BootTrigger>
       <Enabled>true</Enabled>
-      <StartWhenAvailable>true</StartWhenAvailable>
+      <Delay>PT15S</Delay>
     </BootTrigger>
-    <TimeTrigger>
-      <Enabled>true</Enabled>
-      <StartBoundary>2026-01-01T00:00:00</StartBoundary>
-      <DelayedTriggerDuration>PT15S</DelayedTriggerDuration>
-      <StartWhenAvailable>true</StartWhenAvailable>
-    </TimeTrigger>
   </Triggers>
   <Principals>
     <Principal id="VCPDeckSystem">
       <UserId>${WINDOWS_SYSTEM_SID}</UserId>
-      <LogonType>ServiceAccount</LogonType>
       <RunLevel>HighestAvailable</RunLevel>
     </Principal>
   </Principals>
@@ -686,7 +679,7 @@ function buildWindowsSystemTaskXml(definition) {
     <Priority>7</Priority>
     <RestartOnFailure>
       <Interval>PT1M</Interval>
-      <Attempts>999</Attempts>
+      <Count>999</Count>
     </RestartOnFailure>
   </Settings>
   <Actions Context="VCPDeckSystem">
@@ -721,7 +714,7 @@ function classifyWindowsSystemTask(xml, expected) {
 		.map((value) => String(value).replace(/\\/g, "/").toLowerCase());
 	if (!required.every((value) => normalized.includes(value))) return "conflict";
 	const settingsOk =
-		/<logontype>\s*serviceaccount\s*<\/logontype>/i.test(source) &&
+		!/<logontype>/i.test(source) &&
 		/<runlevel>\s*highestavailable\s*<\/runlevel>/i.test(source) &&
 		/<boottrigger>/i.test(source) &&
 		/<delay>\s*pt15s\s*<\/delay>|<delayedtriggerduration>\s*pt15s\s*<\/delayedtriggerduration>/i.test(source) &&
@@ -984,8 +977,8 @@ async function runWindowsInstall(options) {
 		});
 		const xmlPath = join(WINDOWS_APP_DIR, "client-task.xml");
 		if (dryRun) adapter.writeFile(taskXml, xmlPath);
-		else writeFileSync(xmlPath, taskXml);
-		const create = adapter.spawn("schtasks.exe", ["/Create", "/XML", xmlPath, "/TN", WINDOWS_CLIENT_TASK, "/F"]);
+		else writeFileSync(xmlPath, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(taskXml, "utf16le")]));
+		const create = adapter.spawn("schtasks.exe", ["/Create", "/XML", xmlPath, "/TN", WINDOWS_CLIENT_TASK, "/RU", "SYSTEM", "/F"]);
 		if (create.status !== 0) throw new Error(`SYSTEM 开机任务注册失败：${create.stderr || `退出码 ${create.status}`}`);
 		adapter.spawn("schtasks.exe", ["/Query", "/TN", WINDOWS_CLIENT_TASK]);
 		adapter.spawn("schtasks.exe", ["/Run", "/TN", WINDOWS_CLIENT_TASK]);

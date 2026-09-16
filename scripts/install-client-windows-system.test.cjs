@@ -61,7 +61,7 @@ function recordingAdapter() {
 }
 
 function systemXml(nodePath, launcherPath, appDir, extra = "") {
-	return `<Task><Principal id="Author"><UserId>S-1-5-18</UserId><LogonType>ServiceAccount</LogonType><RunLevel>HighestAvailable</RunLevel></Principal><Triggers><BootTrigger><StartWhenAvailable>true</StartWhenAvailable></BootTrigger><TimeTrigger><Enabled>true</Enabled><Delay>PT15S</Delay></TimeTrigger></Triggers><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Attempts>999</Attempts></RestartOnFailure></Settings><Actions><Exec><Command>${nodePath}</Command><Arguments>"${launcherPath}"</Arguments><WorkingDirectory>${appDir}</WorkingDirectory></Exec></Actions>${extra}</Task>`;
+	return `<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal><Triggers><BootTrigger><Enabled>true</Enabled><Delay>PT15S</Delay></BootTrigger></Triggers><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure></Settings><Actions><Exec><Command>${nodePath}</Command><Arguments>"${launcherPath}"</Arguments><WorkingDirectory>${appDir}</WorkingDirectory></Exec></Actions>${extra}</Task>`;
 }
 
 test("固定 ProgramData 安装根", () => {
@@ -109,21 +109,35 @@ test("Windows 安装失败诊断指向 SYSTEM 任务，不再只提示旧 PM2 �
 	assert.match(source, /日志: pm2 logs/);
 });
 
-test("SYSTEM 任务 XML 固定 S-1-5-18、ServiceAccount、开机触发与失败重启，且不含 PM2", () => {
+test("SYSTEM 任务 XML 固定 S-1-5-18、最高权限、开机触发与失败重启，且不含 PM2", () => {
 	const xml = installer.buildWindowsSystemTaskXml({
 		nodePath: "C:\\ProgramData\\VCPDeck\\Client\\runtime\\node\\node.exe",
 		launcherPath: "C:\\ProgramData\\VCPDeck\\Client\\dist\\main.js",
 		appDir: "C:\\ProgramData\\VCPDeck\\Client",
 	});
+	assert.match(xml, /<\?xml version="1\.0" encoding="UTF-16"\?>/);
+	assert.match(xml, /<Task version="1\.2" xmlns="http:\/\/schemas\.microsoft\.com\/windows\/2004\/02\/mit\/task">/);
 	assert.match(xml, /<UserId>S-1-5-18<\/UserId>/);
-	assert.match(xml, /<LogonType>ServiceAccount<\/LogonType>/);
+	assert.doesNotMatch(xml, /<LogonType>/);
 	assert.match(xml, /<RunLevel>HighestAvailable<\/RunLevel>/);
 	assert.match(xml, /<BootTrigger>/);
-	assert.match(xml, /<Delay>PT15S<\/Delay>|<DelayedTriggerDuration>PT15S<\/DelayedTriggerDuration>/);
+	const bootTrigger = xml.match(/<BootTrigger>([\s\S]*?)<\/BootTrigger>/)?.[1] || "";
+	assert.match(bootTrigger, /<Delay>PT15S<\/Delay>/);
+	assert.doesNotMatch(bootTrigger, /<StartWhenAvailable>/);
+	assert.doesNotMatch(xml, /<TimeTrigger>/);
+	const settings = xml.match(/<Settings>([\s\S]*?)<\/Settings>/)?.[1] || "";
+	assert.match(settings, /<StartWhenAvailable>true<\/StartWhenAvailable>/);
 	assert.match(xml, /<ExecutionTimeLimit>PT0S<\/ExecutionTimeLimit>/);
 	assert.match(xml, /<MultipleInstancesPolicy>IgnoreNew<\/MultipleInstancesPolicy>/);
-	assert.match(xml, /<RestartOnFailure>/);
+	assert.match(xml, /<RestartOnFailure>[\s\S]*<Interval>PT1M<\/Interval>[\s\S]*<Count>999<\/Count>[\s\S]*<\/RestartOnFailure>/);
+	assert.doesNotMatch(xml, /<Attempts>/);
 	assert.doesNotMatch(xml, /pm2/i);
+});
+
+test("SYSTEM 任务 XML 写入为带 BOM 的 UTF-16LE", () => {
+	const source = readFileSync(join(__dirname, "install-client.cjs"), "utf8");
+	assert.match(source, /Buffer\.from\(\[0xff, 0xfe\]\)/);
+	assert.match(source, /Buffer\.from\(taskXml, "utf16le"\)/);
 });
 
 test("SYSTEM 任务分类：匹配 configured、漂移 repair、冲突 conflict", () => {
@@ -256,7 +270,7 @@ test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail 
 				"remove-old-app-dir",
 				"install-system-layout",
 				"register-system-task",
-				"schtasks.exe:/Create /XML C:\\ProgramData\\VCPDeck\\Client\\client-task.xml /TN \\VCPDeck\\Client /F",
+				"schtasks.exe:/Create /XML C:\\ProgramData\\VCPDeck\\Client\\client-task.xml /TN \\VCPDeck\\Client /RU SYSTEM /F",
 				"schtasks.exe:/Query /TN \\VCPDeck\\Client",
 				"schtasks.exe:/Run /TN \\VCPDeck\\Client",
 				"start-system-task",

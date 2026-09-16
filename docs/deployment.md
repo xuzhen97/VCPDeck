@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-11｜适用版本：`0.8.6` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-11｜适用版本：`0.8.7` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 一键安装使用 `NT AUTHORITY\SYSTEM` 开机任务（ADR-0027），Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 
@@ -182,7 +182,7 @@ pm2 logs vcpdeck-server-launcher --lines 100
 
 Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt/vcpdeck/launcher` 即可；`pm2 startup` 会生成 systemd 自启脚本。
 
-开机自启：手工部署的 Launcher 可在 Linux 运行 `pm2 startup` 并按提示执行输出的命令。Linux Client 一键安装的新部署使用 A2 `vcpdeck-client.service`，不使用 PM2/linger/登录脚本；旧 Linux 安装迁移前仍按旧 PM2 规则处理。Windows Client 一键安装不使用 PM2，而是在 `NT AUTHORITY\SYSTEM`（SID `S-1-5-18`）下注册 `\VCPDeck\Client` 开机任务（BootTrigger，15 秒延迟、`RunLevel=HighestAvailable`、`LogonType=ServiceAccount`、无执行时限、失败重启 1 分钟×999、`IgnoreNew`），因此**无需任何用户登录**即可保持 Client 在线；任务直接执行 `C:\ProgramData\VCPDeck\Client` 下的私有 Node 与 Launcher。
+开机自启：手工部署的 Launcher 可在 Linux 运行 `pm2 startup` 并按提示执行输出的命令。Linux Client 一键安装的新部署使用 A2 `vcpdeck-client.service`，不使用 PM2/linger/登录脚本；旧 Linux 安装迁移前仍按旧 PM2 规则处理。Windows Client 一键安装不使用 PM2，而是在 `NT AUTHORITY\SYSTEM`（SID `S-1-5-18`）下注册 `\VCPDeck\Client` 开机任务（BootTrigger，15 秒延迟、`RunLevel=HighestAvailable`、注册时指定 `SYSTEM`、无执行时限、失败重启 1 分钟×999、`IgnoreNew`），因此**无需任何用户登录**即可保持 Client 在线；任务直接执行 `C:\ProgramData\VCPDeck\Client` 下的私有 Node 与 Launcher。
 
 注意事项：
 

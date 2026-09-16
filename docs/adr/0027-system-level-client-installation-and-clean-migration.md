@@ -17,7 +17,7 @@ Linux A2 已使用 systemd 守护 Launcher，并允许 root 或可认证 sudo �
 ## 决策
 
 1. Windows 一键安装必须从用户主动打开的、已提升的本机管理员 PowerShell 运行。脚本只校验提升状态，不申请 UAC；未提升时立即失败。
-2. Windows 不再安装或使用 PM2。原生 Windows Task Scheduler 以 `NT AUTHORITY\SYSTEM`、`ServiceAccount`、`Highest` 注册开机任务，直接使用 VCPDeck 私有 Node 的绝对路径运行稳定 Launcher；任务无需用户登录，配置失败重启、无限运行、电池可用和禁止重复实例。
+2. Windows 不再安装或使用 PM2。原生 Windows Task Scheduler 以 `NT AUTHORITY\SYSTEM`、注册时指定 `SYSTEM`、`Highest` 注册开机任务，直接使用 VCPDeck 私有 Node 的绝对路径运行稳定 Launcher；任务无需用户登录，配置失败重启、无限运行、电池可用和禁止重复实例。
 3. Windows 使用 `C:\ProgramData\VCPDeck\Client` 下的机器级应用、运行时、状态、身份、配置和日志。敏感配置仅允许 SYSTEM 与 Administrators 读取或修改。Client 使用独立 SYSTEM 环境，不继承安装用户的 Profile、用户 PATH、Pi、Git、SSH 或 Shell 配置。
 4. Windows 软件发现只使用机器级 PATH、App Paths、VCPDeck 管理目录和明确的标准机器级路径。Node 是随安装准备的必需私有运行时；Git 是可选工具，机器级缺失时可尝试用 winget 静默安装 `Git.Git --scope machine`，失败只降低相应能力，不阻断 Client 核心安装。
 5. Linux 继续采用 ADR-0023：安装命令可由 root 或能通过 `sudo -v` 的普通用户执行；无可用 sudo 时 fail closed。systemd 以专用 `vcpdeck` 账户守护 Launcher，该账户通过经校验的 sudoers 获得 `NOPASSWD: ALL`，无需用户登录即可开机启动。
