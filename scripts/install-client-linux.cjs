@@ -272,7 +272,6 @@ function parseArgs(argv) {
 		"install-cjs",
 		"migrate",
 		"migrate-from-user",
-		"migrate-verify-only",
 		"yes",
 	]);
 	const result = {};
@@ -311,9 +310,10 @@ function parseArgs(argv) {
 	if (result.installCjs && !/^[A-Za-z0-9_.\\\\/:-]+$/.test(result.installCjs)) {
 		throw new Error("--install-cjs 含非法字符");
 	}
-	result.migrate = result["migrate"] === "true";
+	// 三态：true 强制迁移、false 强制全新安装、undefined 自动探测存量 PM2 源。
+	result.migrate =
+		result["migrate"] === undefined ? undefined : result["migrate"] === "true";
 	result.migrateFromUser = result["migrate-from-user"];
-	result.migrateVerifyOnly = result["migrate-verify-only"] === "true";
 	result.yes = result["yes"] === "true";
 	return result;
 }
@@ -915,6 +915,30 @@ function discoverMigrationSource(opts = {}) {
 	return resolveMigrationSource(pool[0]);
 }
 
+/**
+ * 解析本次执行是「清理式迁移」还是「全新安装」（ADR-0027）。
+ * `--migrate=true` 强制迁移；`--migrate=false` 强制全新安装；未指定时自动探测存量 PM2 源，
+ * 使 `/releases` 页面固定命令直接完成迁移。已有 A2 身份时一律按修复处理，绝不切换身份。
+ * 探测到候选但校验不通过时 fail closed（透出具体原因）；需要强制重装时传 `--migrate=false`。
+ */
+function resolveInstallMode({ args, uid, callerUser, hasA2State, candidates }) {
+	if (args.migrate === false) return { kind: "fresh" };
+	const discover = () =>
+		discoverMigrationSource({
+			uid,
+			callerUser,
+			requestedUser: args.migrateFromUser,
+			candidates: Array.isArray(candidates) ? candidates : [],
+		});
+	if (args.migrate === true) return { kind: "migrate", source: discover() };
+	// 已有 A2 状态：这是对现有系统级安装的幂等修复，不清理、不改身份。
+	if (hasA2State) return { kind: "fresh" };
+	if (args.migrateFromUser || (Array.isArray(candidates) && candidates.length > 0)) {
+		return { kind: "migrate", source: discover() };
+	}
+	return { kind: "fresh" };
+}
+
 function resolveMigrationSource(c) {
 	if (c.serverOrigin && c.expectedServerOrigin && c.serverOrigin !== c.expectedServerOrigin) {
 		throw installerError(
@@ -1111,12 +1135,15 @@ function failClosed(log, record, clientId, reason) {
 
 // ── 权限门禁 ──
 
-/** 确认运行环境为 root 或可 sudo；返回提权执行器。 */
+/** 确认运行环境为 root 或可 sudo；返回提权执行器。失败时本机尚未发生任何改动。 */
 function requirePrivileged({ uid = process.getuid?.() } = {}) {
 	if (uid === 0) return { elevated: false, exec: (argv, o) => execSyncReal(argv, o) };
 	const probe = spawnSync("sudo", ["-v"], { stdio: "ignore" });
 	if (probe.status !== 0) {
-		throw installerError(LINUX_INSTALLER_ERROR.SUDO_AUTH_FAILED, "sudo 认证失败");
+		throw installerError(
+			LINUX_INSTALLER_ERROR.SUDO_AUTH_FAILED,
+			"sudo 认证失败；升级为系统级部署需要 root 或可完成 sudo 认证的用户（需要时可交互输入密码），当前未改动任何既有安装，也不回退到用户态安装",
+		);
 	}
 	return { elevated: true, exec: (argv, o) => execSyncReal(["sudo", ...argv], o) };
 }
@@ -1288,14 +1315,23 @@ async function main() {
 	const psk = await bootstrapSecret(args);
 	const log = (msg) => console.log(redactSecrets(msg, [psk]));
 	try {
-		if (args.migrate) {
-			const candidates = collectMigrationSources(adapter, args.serverOrigin);
-			const source = discoverMigrationSource({
-				uid: process.getuid?.() ?? 0,
-				callerUser: process.env.SUDO_USER,
-				requestedUser: args.migrateFromUser,
-				candidates,
-			});
+		const uid = process.getuid?.() ?? 0;
+		const candidates = collectMigrationSources(adapter, args.serverOrigin);
+		const hasA2State = validateClientId(
+			String(adapter.readFile(CLIENT_ID_FILE, "utf8") || "").trim(),
+		);
+		const plan = resolveInstallMode({
+			args,
+			uid,
+			callerUser: process.env.SUDO_USER,
+			hasA2State,
+			candidates,
+		});
+		if (plan.kind === "migrate") {
+			const source = plan.source;
+			log(
+				`[vcpdeck-linux] 检测到迁移源用户=${source.username}，改走清理式迁移（已有 A2 现场时不会切换身份）`,
+			);
 			const result = await runMigrationCutover({
 				adapter,
 				source,
@@ -1369,6 +1405,7 @@ module.exports = {
 	writeAtomic,
 	runFreshInstall,
 	discoverMigrationSource,
+	resolveInstallMode,
 	runMigrationCutover,
 	installRuntime,
 	ensureClientId,

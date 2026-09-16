@@ -24,6 +24,7 @@ const {
 	installRuntime,
 	createRealAdapter,
 	discoverMigrationSource,
+	resolveInstallMode,
 	runMigrationCutover,
 } = require("./install-client-linux.cjs");
 
@@ -328,6 +329,84 @@ test("稳定错误码常量齐全", () => {
 	assert.equal(LINUX_INSTALLER_ERROR.NOT_ROOT, "LINUX_NOT_ROOT");
 	assert.equal(LINUX_INSTALLER_ERROR.SUDO_AUTH_FAILED, "LINUX_SUDO_AUTH_FAILED");
 	assert.ok(LINUX_INSTALLER_ERROR.VERIFICATION_FAILED);
+});
+
+	test("安装模式解析：默认自动探测存量 PM2 源并迁移（页面固定命令即可迁移）", () => {
+	const legacy = src();
+	const plan = resolveInstallMode({
+		args: {},
+		uid: 0,
+		callerUser: undefined,
+		hasA2State: false,
+		candidates: [legacy],
+	});
+	assert.equal(plan.kind, "migrate");
+	assert.equal(plan.source.clientId, legacy.clientId);
+
+	const fresh = resolveInstallMode({
+		args: {},
+		uid: 1000,
+		callerUser: "xuzhen97",
+		hasA2State: false,
+		candidates: [],
+	});
+	assert.equal(fresh.kind, "fresh");
+});
+
+test("安装模式解析：--migrate=false 强制重装，已有 A2 身份时不自动迁移", () => {
+	assert.equal(
+		resolveInstallMode({
+			args: { migrate: false },
+			uid: 0,
+			hasA2State: false,
+			candidates: [src()],
+		}).kind,
+		"fresh",
+	);
+	// 已有 A2 现场：按幂等修复处理，不清理旧目录、不改身份。
+	assert.equal(
+		resolveInstallMode({
+			args: {},
+			uid: 0,
+			hasA2State: true,
+			candidates: [src()],
+		}).kind,
+		"fresh",
+	);
+});
+
+test("安装模式解析：--migrate=true 无源时拒绝，多源不一致时 fail closed", () => {
+	assert.throws(
+		() =>
+			resolveInstallMode({
+				args: { migrate: true },
+				uid: 0,
+				hasA2State: false,
+				candidates: [],
+			}),
+		(error) => error.code === "LINUX_MIGRATION_SOURCE_MISSING",
+	);
+	assert.throws(
+		() =>
+			resolveInstallMode({
+				args: {},
+				uid: 0,
+				hasA2State: false,
+				candidates: [src({ username: "alice" }), src({ username: "bob" })],
+			}),
+		(error) => error.code === "LINUX_MIGRATION_AMBIGUOUS",
+	);
+	// 探测到候选但校验不通过（PM2 未 online）：自动模式下 fail closed，不透走全新安装。
+	assert.throws(
+		() =>
+			resolveInstallMode({
+				args: {},
+				uid: 0,
+				hasA2State: false,
+				candidates: [src({ pm2Process: { name: "vcpdeck-client-launcher", status: "stopped" } })],
+			}),
+		(error) => error.code === "LINUX_MIGRATION_PM2_NOT_ONLINE",
+	);
 });
 
 // ── M1 迁移切换/回退顺序（call-recording adapter） ──

@@ -464,7 +464,7 @@ function InstallerCard({
 				<InstallationCompliance config={config} />
 				{[
 					["Windows PowerShell 5.1+", windowsCommand, "需在已提升管理员 PowerShell 执行，脚本不申请 UAC"],
-					["Linux Bash", linuxCommand, "普通用户可运行，但必须可完成 sudo 认证"],
+					["Linux Bash", linuxCommand, "普通用户可运行，但必须可完成 sudo 认证；无 root/sudo 时会在下载前失败关闭，不改动现有安装"],
 				].map(([label, command, hint]) => (
 					<div key={label} className="space-y-2">
 						<div className="flex items-center justify-between gap-2">

@@ -57,6 +57,23 @@ parse_bootstrap_args() {
   BOOTSTRAP_SERVER_ORIGIN="$value"
 }
 
+# 检测本机是否残留旧用户级 PM2 Client（仅用于给出可操作提示，不做任何改动）。
+has_legacy_user_client() {
+  [ -n "${HOME:-}" ] || return 1
+  [ -e "$HOME/.vcpdeck/launcher-client" ] || [ -e "$HOME/.vcpdeck/client-install.json" ]
+}
+
+# 权限不足时的统一提示：说明前提、既有安装未被改动、如何取得权限。
+fail_privilege() {
+  local reason="$1"
+  echo "[vcpdeck] LINUX_SUDO_AUTH_FAILED ${reason}" >&2
+  if has_legacy_user_client; then
+    echo "[vcpdeck] 检测到本机存在旧用户级 PM2 安装（$HOME/.vcpdeck）；升级为系统级部署需要 root 或可完成 sudo 认证的用户，当前未改动任何既有安装。" >&2
+  fi
+  echo "[vcpdeck] 请以 root 重跑，或确认当前用户可执行 sudo（需要时可交互输入密码）；安装器不会回退到用户态安装。" >&2
+  return 1
+}
+
 # 权限门禁（ADR-0023 A2）：root 直接放行；普通用户必须通过 sudo -v；
 # 失败以稳定码 LINUX_SUDO_AUTH_FAILED 退出，不回退到用户态安装。
 require_sudo() {
@@ -64,11 +81,11 @@ require_sudo() {
     return 0
   fi
   if ! command_exists sudo; then
-    echo "[vcpdeck] LINUX_SUDO_AUTH_FAILED 无法使用 sudo（未安装或不可用）" >&2
+    fail_privilege "无法使用 sudo（未安装或不可用）"
     return 1
   fi
   if ! sudo -v; then
-    echo "[vcpdeck] LINUX_SUDO_AUTH_FAILED sudo 认证失败；请确认当前用户可免密或可交互 sudo 后重试" >&2
+    fail_privilege "sudo 认证失败；请确认当前用户可免密或可交互 sudo 后重试"
     return 1
   fi
   return 0

@@ -56,7 +56,7 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 ### Linux A2 Client 运维（systemd）
 
 - **无人值守开机自启**：`vcpdeck-client.service` 为 `enabled` + `Restart=always`，开机由 systemd 拉起，无需用户登录/linger。验证链：`systemctl status vcpdeck-client.service`（active）→ Server 控制面 `online=true` 且版本/能力齐备。
-- **迁移（M1）**：存量 PM2 安装用 `--migrate` 迁到 A2（保留 `client-id`、Server Origin、显示名称与无关 PM2 应用）。全部材料校验成功后才清理式迁移：核对并删除旧 VCPDeck PM2 entry → `pm2 save` → 无其他 PM2 应用时停用旧自启（否则保留）→ 删除旧 app-dir 与旧安装状态 → 启动 `vcpdeck-client.service` 并全能力验收。**失败只记录阶段状态并保留 A2 现场，可用同一命令重跑，不会 resurrect 或恢复旧 PM2**。迁移前若源指向不同 Server、`client-id` 非法、PM2 未 online、PM2 entry 指向其他目录或有进行中 Release，安装器直接拒绝。
+- **迁移（M1）**：存量 PM2 安装直接重跑同一条安装命令即可（无需 `--migrate`，安装器自动探测存量 PM2 源）；已有 A2 身份时按幂等修复处理，不变更身份。全部材料校验成功后才清理式迁移：核对并删除旧 VCPDeck PM2 entry → `pm2 save` → 无其他 PM2 应用时停用旧自启（否则保留）→ 删除旧 app-dir 与旧安装状态 → 启动 `vcpdeck-client.service` 并全能力验收。**失败只记录阶段状态并保留 A2 现场，可用同一命令重跑，不会 resurrect 或恢复旧 PM2**。迁移前若源指向不同 Server、`client-id` 非法、PM2 未 online、PM2 entry 指向其他目录、旧 app-dir 不是来源用户的 `.vcpdeck/launcher-client` 或有进行中 Release，安装器直接拒绝；多用户机器源不唯一时用 `--migrate-from-user=<name>`，需强制重装时用 `--migrate=false`。
 - **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。非 systemd 单元会被拒绝（走 PM2 卸载）。
 - **root 等价风险**：该 Client 可执行任意 root 命令；Job/Terminal/Pi 操作前确认在可信运维域内（Server 仅记录控制面/Job/Session 审计，见 [`security.md`](./security.md) §4.5）。
 
@@ -194,6 +194,7 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 > 下列带 PM2 的条目只适用于**尚未迁移的旧安装**；当前 Windows 新安装为 SYSTEM 开机任务，故障排查见上文 §2「Windows Client 重启」。
 
 - `CLIENT_INSTALLER_DISABLED`：回 `/releases` 启用入口；不会影响已有 Client；
+- `LINUX_SUDO_AUTH_FAILED`：Linux 安装需要 root 或可完成 `sudo -v` 的用户。该门禁在安装依赖、下载构件之前执行，失败时本机无任何改动，旧用户级 PM2 安装保持原样、不会出现双实例；安装器会提示可用 root 重跑或可交互输入 sudo 密码，**不会回退到用户态安装**。需彻底清理旧用户级安装时，应在具备 sudo 权限的维护窗口执行；
 - `CLIENT_INSTALLER_RELEASE_NOT_READY`：确认当前 Server 版本存在状态为 `done` 的同版本 Release；
 - `CLIENT_INSTALLER_ARCHIVE_MISSING`：补齐目标平台 Release archive；
 - 平台检查失败：核对 x64、受支持发行版、glibc/systemd，WSL/容器/ARM64/musl 不在范围；当前仅额外支持 Bazzite x64，不自动支持其他 Fedora Atomic 发行版；

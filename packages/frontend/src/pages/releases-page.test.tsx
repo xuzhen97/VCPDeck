@@ -215,7 +215,7 @@ describe("ReleasesPage", () => {
 			screen.getByText("需在已提升管理员 PowerShell 执行，脚本不申请 UAC"),
 		).toBeVisible();
 		expect(
-			screen.getByText("普通用户可运行，但必须可完成 sudo 认证"),
+			screen.getByText(/普通用户可运行，但必须可完成 sudo 认证/),
 		).toBeVisible();
 		await user.click(screen.getByRole("button", { name: "启用一键安装" }));
 		expect(client.clientInstaller.updateConfig).toHaveBeenCalledWith(true);

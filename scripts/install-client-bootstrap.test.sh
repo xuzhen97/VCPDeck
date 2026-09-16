@@ -153,6 +153,21 @@ assert_contains "SUDO=1" "$out"
 out="$(priv_test 1000 0 'require_sudo; echo "RC=$? SUDO=$SUDO_CALLED"')"
 assert_contains "RC=1" "$out"
 assert_contains "LINUX_SUDO_AUTH_FAILED" "$out"
+assert_contains "可交互输入密码" "$out"
+
+# 无 sudo 二进制且存在旧用户级 PM2 安装：失败关闭、稳定码，并说明既有安装未被改动
+mkdir -p "$FIXTURES/legacy-home/.vcpdeck/launcher-client"
+mkdir -p "$FIXTURES/fresh-home"
+nosudo_script='source "$1"; set +e; id() { echo 1000; }; command_exists() { return 1; }; export HOME="$2/legacy-home"; out="$(require_sudo 2>&1)"; printf "OUT=%s\n" "$out"; exit 0'
+nosudo_out="$(run_bash "$nosudo_script")"
+assert_contains "LINUX_SUDO_AUTH_FAILED" "$nosudo_out"
+assert_contains "旧用户级 PM2 安装" "$nosudo_out"
+assert_contains "未改动任何既有安装" "$nosudo_out"
+assert_contains "不会回退到用户态安装" "$nosudo_out"
+
+# 无旧安装时不应输出旧安装提示（避免误导）
+fresh_script='source "$1"; set +e; id() { echo 1000; }; command_exists() { return 1; }; export HOME="$2/fresh-home"; out="$(require_sudo 2>&1)"; printf "OUT=%s\n" "$out"; exit 0'
+assert_not_contains "旧用户级 PM2 安装" "$(run_bash "$fresh_script")"
 
 # run_privileged：root 直接执行（不经 sudo）
 out="$(priv_test 0 1 'run_privileged echo hi; echo "SUDO=$SUDO_CALLED"')"

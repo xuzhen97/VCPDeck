@@ -207,7 +207,7 @@ Bazzite 缺少 `curl`、`unzip`、`tar`、`xz` 或系统 CA 证书时，安装�
 
 Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 `windows-system-task`/SYSTEM 开机任务模型不同，也不同于旧版 Linux 用户私有 PM2 安装：
 
-- **权限前提**：安装必须 root 或可用 sudo；无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，**无 PM2/用户服务/linger/cron 回退**。
+- **权限前提**：安装必须 root 或可用 sudo；无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，**无 PM2/用户服务/linger/cron 回退**。该门禁在安装依赖、下载构件之前执行：失败时本机不发生任何改动，旧用户级 PM2 安装保持不变，也不会出现双实例；安装器会直接提示需要 root 或可完成 `sudo -v` 的用户（可交互输入密码）。
 - **布局**（均在版本目录之外）：
   - `/opt/vcpdeck/client`：系统应用 + 各版本 `apps/<version>/`（Launcher 保留在版本目录内供未来升级）；
   - `/var/lib/vcpdeck-client`：持久身份 `client-id`、迁移状态与运行时状态；
@@ -217,7 +217,7 @@ Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 `w
   - `/etc/systemd/system/vcpdeck-client.service`：systemd 单元，`User=vcpdeck`、`Restart=always`，开机自启。
 - **专用账户**：`vcpdeck`，锁定密码、`/bin/bash`、独立 HOME；安装器不创建任何直接登录凭据。该账户是 **root 等价** Client：Job、Terminal、Pi 可显式 `sudo -n` 调用任意 root 命令。
 - **Launcher 边界**：systemd 只守护稳定 Launcher；Launcher 继续负责业务版本切换与回退。Launcher 自升级用受限 transient `systemd-run`（脱 Client cgroup、`Timeout`、`KillMode=process`、无 `PrivateNetwork`/`NewerCredentials`），单元内不直接替换自身可执行文件。
-- **M1 迁移**：存量 PM2 安装可用 `--migrate` 迁移到 A2，保留 `client-id`、Server Origin 与显示名称，保留无关 PM2 应用；全部材料校验成功后才**清理式迁移**（核对并删除旧 VCPDeck PM2 entry → `pm2 save` → 无其他 PM2 应用时停用旧自启、否则保留 → 删除旧 app-dir 与旧安装状态 → 启动 A2 稳态服务并全能力验收）。失败只记录阶段状态并保留 A2 现场，可用同一命令重跑；**不会 resurrect 或恢复旧 PM2**（ADR-0027）。
+- **M1 迁移**：存量 PM2 安装无需额外参数：不带 `--migrate` 时安装器会**自动探测**存量 PM2 源并改走清理式迁移（与 Windows 行为一致，页面固定命令即可）；已有 A2 身份时按幂等修复处理，不变更身份。多源歧义或有源但校验不通过时 fail closed（透出稳定原因），需要强制重装时传 `--migrate=false`（也可显式 `--migrate=true` / `--migrate-from-user=<name>`）。迁移保留 `client-id`、Server Origin 与显示名称，保留无关 PM2 应用；全部材料校验成功后才清理旧 VCPDeck PM2 entry、旧自启与旧运行目录，再启动 A2 稳态服务并全能力验收。失败只记录阶段状态并保留 A2 现场，可用同一命令重跑；**不会 resurrect 或恢复旧 PM2**（ADR-0027）。
 - **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。
 
 ### 4.7 coturn / TURN 中继（P2P 隧道）
