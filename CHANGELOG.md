@@ -11,6 +11,10 @@
 - **迁移把命令入口 URL 当成 Server 归属校验，导致同一 Server 的 loopback 与公网入口互相冲突**：旧安装的 `launcher.env` 常写 `http://127.0.0.1:3001`（Server 本机），而从公网入口执行安装命令时会报 `LINUX_MIGRATION_SERVER_MISMATCH`，使存量安装无法直接升级。迁移现在以旧配置的 Server Origin 为权威：从任一入口执行都保留原归属，bootstrap（PSK）、写入的 ENV 与全能力验收全部走该 Origin；旧 Origin 不可达时报 `LINUX_MIGRATION_SERVER_UNREACHABLE` 并在触碰旧安装前停止。ADR-0027 第 7 条的“Server 一致性”同步明确为“不得换 Server + 旧 Origin 可达”，与第 8 条“保留 Server Origin”一致。
 - **PSK 获取顺序**：bootstrap 从 `main()` 开头移到迁移源判定之后，避免在未知归属时先取凭据。
 
+### Docs
+
+- 更新 Current 文档与 README/CLI 文档中钉住版本的引用：`适用版本` 标注与 `@v0.8.17`/`#v0.8.17` 安装示例全部同步到 `0.8.20`；重新生成并提交随版本号注入的 CLI/Skill/插件构件。
+
 ## [0.8.19] - 2026-09-17
 
 ### Fixed
