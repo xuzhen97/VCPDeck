@@ -77,7 +77,7 @@ const LINUX_INSTALLER_ERROR = {
 	MIGRATION_SOURCE_MISSING: "LINUX_MIGRATION_SOURCE_MISSING",
 	MIGRATION_SOURCE_DENIED: "LINUX_MIGRATION_SOURCE_DENIED",
 	MIGRATION_AMBIGUOUS: "LINUX_MIGRATION_AMBIGUOUS",
-	MIGRATION_SERVER_MISMATCH: "LINUX_MIGRATION_SERVER_MISMATCH",
+	MIGRATION_SERVER_UNREACHABLE: "LINUX_MIGRATION_SERVER_UNREACHABLE",
 	MIGRATION_INVALID_ID: "LINUX_MIGRATION_INVALID_ID",
 	MIGRATION_PM2_NOT_ONLINE: "LINUX_MIGRATION_PM2_NOT_ONLINE",
 	MIGRATION_RELEASE_ACTIVE: "LINUX_MIGRATION_RELEASE_ACTIVE",
@@ -900,7 +900,7 @@ async function realFetchJson(url, options = {}) {
 /**
  * 发现 M1 迁移源（旧 PM2 安装）。
  * @param {{uid?:number, callerUser?:string, requestedUser?:string, candidates?:Array<object>}} opts
- * candidate: { username, clientId, clientDir, serverOrigin, expectedServerOrigin?, pm2Process?, releaseActive?, otherApps? }
+ * candidate: { username, clientId, clientDir, serverOrigin, pm2Process?, releaseActive?, otherApps? }
  * 普通（非 root）调用者只能迁移自己范围内的源；root 多源且未显式指定则拒绝（歧义）。
  */
 function discoverMigrationSource(opts = {}) {
@@ -977,13 +977,17 @@ function resolveInstallMode({ args, uid, callerUser, hasA2State, candidates }) {
 	return { kind: "fresh" };
 }
 
+/**
+ * 迁移时的有效 Server Origin：以旧配置为准（保留原归属），命令入口只用于取构件。
+ * 同一 Server 可能同时有 loopback 与公网入口，因此不能用字串相等判定归属；
+ * 旧配置无可用 Origin（或全新安装）时才用命令入口。
+ */
+function resolveEffectiveOrigin({ plan, args }) {
+	const preserved = plan?.kind === "migrate" ? validateOrigin(plan.source?.serverOrigin) : null;
+	return preserved || args.serverOrigin;
+}
+
 function resolveMigrationSource(c) {
-	if (c.serverOrigin && c.expectedServerOrigin && c.serverOrigin !== c.expectedServerOrigin) {
-		throw installerError(
-			LINUX_INSTALLER_ERROR.MIGRATION_SERVER_MISMATCH,
-			`迁移源指向其他 Server: ${c.serverOrigin}（当前 ${c.expectedServerOrigin}）`,
-		);
-	}
 	if (!validateClientId(c.clientId)) {
 		throw installerError(LINUX_INSTALLER_ERROR.MIGRATION_INVALID_ID, `Client ID 非法: ${c.clientId}`);
 	}
@@ -1246,7 +1250,7 @@ function scanUserHomes(adapter) {
 		.map((parts) => ({ username: parts[0], home: parts[5] }));
 }
 
-function collectMigrationSources(adapter, expectedServerOrigin = null) {
+function collectMigrationSources(adapter) {
 	try {
 		// 迁移源包括 /home、/var/home 下的用户安装，以及 root 的旧安装（云主机常见
 		// 以 root 跑 PM2）；canonical home 可避免 Bazzite 的 /home 与 /var/home 重复候选。
@@ -1278,7 +1282,6 @@ function collectMigrationSources(adapter, expectedServerOrigin = null) {
 					sourceHome: home,
 					serverOrigin: readOriginFromEnv(adapter, appDir),
 					artifact: readArtifactFromEnv(adapter, appDir),
-					expectedServerOrigin,
 					pm2Process,
 					pm2Error,
 					otherApps: pm2List ? otherPm2AppNames(pm2List, pm2Process?.name) : [],
@@ -1469,11 +1472,12 @@ async function main() {
 	const args = parseArgs(process.argv.slice(2));
 	const { elevated } = requirePrivileged();
 	const adapter = createRealAdapter();
-	const psk = await bootstrapSecret(args);
+	const commandOrigin = args.serverOrigin;
+	let psk = "";
 	const log = (msg) => console.log(redactSecrets(msg, [psk]));
 	try {
 		const uid = process.getuid?.() ?? 0;
-		const candidates = collectMigrationSources(adapter, args.serverOrigin);
+		const candidates = collectMigrationSources(adapter);
 		const hasA2State = validateClientId(
 			String(adapter.readFile(CLIENT_ID_FILE, "utf8") || "").trim(),
 		);
@@ -1483,6 +1487,22 @@ async function main() {
 			callerUser: process.env.SUDO_USER,
 			hasA2State,
 			candidates,
+		});
+		// 迁移保留原归属：Server 以旧配置为准，命令入口只用于取本次构件。
+		args.serverOrigin = resolveEffectiveOrigin({ plan, args });
+		if (args.serverOrigin !== commandOrigin) {
+			log(`[vcpdeck-linux] 迁移保留旧 Server: ${args.serverOrigin}（命令入口 ${commandOrigin}）`);
+		}
+		// 旧 Server 不可达时不执行任何破坏性动作（构件已下载，现场未动）。
+		psk = await bootstrapSecret(args).catch((error) => {
+			const detail = `${args.serverOrigin} 获取安装凭据失败（${error instanceof Error ? error.message : String(error)}）`;
+			if (plan.kind !== "migrate") {
+				throw installerError(LINUX_INSTALLER_ERROR.VERIFICATION_FAILED, detail);
+			}
+			throw installerError(
+				LINUX_INSTALLER_ERROR.MIGRATION_SERVER_UNREACHABLE,
+				`迁移源 ${detail}；旧安装未改动。如需放弃旧身份改为全新安装，请传 --migrate=false`,
+			);
 		});
 		if (plan.kind === "fresh" && args.migrate !== false) {
 			// 护栏：旧安装正在跑（或在旧布局里），但未能识别为可迁移源时不得静默新建身份，
@@ -1581,6 +1601,7 @@ module.exports = {
 	pickLegacyClientProcess,
 	otherPm2AppNames,
 	resolveInstallMode,
+	resolveEffectiveOrigin,
 	runMigrationCutover,
 	installRuntime,
 	ensureClientId,

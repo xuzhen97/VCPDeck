@@ -35,6 +35,7 @@ const {
 	pickLegacyClientProcess,
 	otherPm2AppNames,
 	resolveInstallMode,
+	resolveEffectiveOrigin,
 	runMigrationCutover,
 } = require("./install-client-linux.cjs");
 
@@ -300,7 +301,7 @@ test("旧 root + /opt 布局被识别为迁移源，并保留其他 PM2 应用",
 				? { exists: true, type: "dir", owner: "root" }
 				: { exists: false },
 	};
-	const candidates = collectMigrationSources(adapter, "http://127.0.0.1:3001");
+	const candidates = collectMigrationSources(adapter);
 	assert.equal(candidates.length, 1);
 	assert.equal(candidates[0].username, "root");
 	assert.equal(candidates[0].clientDir, "/opt/vcpdeck/launcher-client");
@@ -326,7 +327,7 @@ test("PM2 查询失败时不得当成没有旧安装，解析迁移源必须 fai
 			path === "/root/.vcpdeck/client-id" ? "712a5612-b051-4706-9d2d-b19cdbffaba0\n" : "VCPDECK_ARTIFACT=client\n",
 		statInfo: (path) => ({ exists: path === "/opt/vcpdeck/launcher-client", type: "dir", owner: "root" }),
 	};
-	const candidates = collectMigrationSources(adapter, null);
+	const candidates = collectMigrationSources(adapter);
 	assert.equal(candidates.length, 1);
 	assert.equal(candidates[0].pm2Process, null);
 	assert.match(candidates[0].pm2Error, /PM2 进程列表/);
@@ -554,11 +555,40 @@ test("M1: 普通 sudo 用户只能迁移自己范围内的源", () => {
 	);
 });
 
-test("M1: 源指向不同 Server → LINUX_MIGRATION_SERVER_MISMATCH", () => {
-	const s = src({ serverOrigin: "https://other.example.com:3001", expectedServerOrigin: "https://cockpit.example.com:3001" });
-	assert.throws(
-		() => discoverMigrationSource({ uid: 0, candidates: [s] }),
-		(error) => error.code === "LINUX_MIGRATION_SERVER_MISMATCH",
+test("M1: 同一 Server 的 loopback 与公网入口并存时，保留旧 Origin 而不拒绝", () => {
+	// 真实场景：旧 launcher.env 是 http://127.0.0.1:3001，操作者从公网入口执行安装命令。
+	const s = src({ serverOrigin: "http://127.0.0.1:3001" });
+	const source = discoverMigrationSource({ uid: 0, candidates: [s] });
+	assert.equal(source.serverOrigin, "http://127.0.0.1:3001");
+	assert.equal(
+		resolveEffectiveOrigin({
+			plan: { kind: "migrate", source },
+			args: { serverOrigin: "http://203.0.113.9:3001" },
+		}),
+		"http://127.0.0.1:3001",
+	);
+	// 旧配置无 Origin 或全新安装时，才用命令入口。
+	assert.equal(
+		resolveEffectiveOrigin({
+			plan: { kind: "migrate", source: src({ serverOrigin: null }) },
+			args: { serverOrigin: "http://203.0.113.9:3001" },
+		}),
+		"http://203.0.113.9:3001",
+	);
+	assert.equal(
+		resolveEffectiveOrigin({
+			plan: { kind: "fresh" },
+			args: { serverOrigin: "http://203.0.113.9:3001" },
+		}),
+		"http://203.0.113.9:3001",
+	);
+	// 旧配置里是非法值时不得当权威。
+	assert.equal(
+		resolveEffectiveOrigin({
+			plan: { kind: "migrate", source: src({ serverOrigin: "not-an-origin" }) },
+			args: { serverOrigin: "http://203.0.113.9:3001" },
+		}),
+		"http://203.0.113.9:3001",
 	);
 });
 
