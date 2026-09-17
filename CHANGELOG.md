@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [0.8.18] - 2026-09-17
+
+### Fixed
+
+- **Linux A2 安装报 `ERR_FS_EISDIR: /opt/vcpdeck/client/node/current` 并留下错误目录**：Node 版本此前从 bootstrap Node 的目录名猜测，只兼容 `node-v24.16.0-linux-x64` 形式；nvm 的 `~/.nvm/versions/node/v24.16.0` 和系统 `/usr/bin/node` 都解析不出，于是回退成版本名 `current`，把整个发行版复制进 `/opt/vcpdeck/client/node/current`，随后覆盖 `node/current` 符号链接时对真实目录执行非递归 `rmSync` 失败。现在版本由 bootstrap Node `-v` 自报，无法确定时 fail closed；`node/current` 覆盖改为递归删除，同一命令可直接重跑修复。
+- **系统 Node 可能被整体复制到 `/opt`**：bootstrap 复用系统 Node（如 `/usr/bin/node`）时，发行版目录会被推断为 `/usr`，安装器会尝试把整个 `/usr` 复制进 `/opt`。现在仅当目录名确认为 Node 发行版时才整体复制，否则只复制解析后的真实 `node` 二进制。
+- **未识别的旧安装在跑时静默新建第二身份**：旧安装落在自动探测范围外（如 root 账户 + `/opt/vcpdeck/launcher-client`、`~/.nvm` 全局 PM2）时，安装器会走全新安装并创建新 `client-id`，与仍在运行的旧 Client 形成同机双实例。现在检测到这类痕迹会 fail closed 并列出具体路径，需人工处理或显式传 `--migrate=false` 才新建身份。
+
 ## [0.8.17] - 2026-09-17
 
 ### Fixed

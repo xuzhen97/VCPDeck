@@ -25,6 +25,8 @@ const {
 	createRealAdapter,
 	discoverMigrationSource,
 	collectMigrationSources,
+	scanUserHomes,
+	findLegacyClientTraces,
 	resolveInstallMode,
 	runMigrationCutover,
 } = require("./install-client-linux.cjs");
@@ -181,18 +183,125 @@ test("createRealAdapter 正确读取 passwd 的 HOME 与 shell 字段", () => {
 	assert.match(source, /home: parts\[5\], shell: parts\[6\]/);
 });
 
-test("installRuntime 重试时复用已完整 Node，不重复复制目录", { skip: process.platform === "win32" }, async () => {
+test("installRuntime 重试时复用已完整 Node，不重复复制目录", async () => {
 	const calls = [];
 	const adapter = {
+		exec: () => ({ status: 0, stdout: "v26.8.1\n", stderr: "" }),
 		statInfo: () => ({ exists: true, type: "dir", owner: "root" }),
 		execFileSyncExists: () => true,
 		mkdirp: () => {},
+		chown: () => {},
+		chmod: () => {},
 		rm: () => calls.push("rm"),
 		copyTree: () => calls.push("copy"),
+		copyFile: () => calls.push("copyFile"),
+		realpath: (path) => path,
 		symlink: (target, path) => calls.push(["symlink", target, path]),
 	};
 	await installRuntime(adapter, { bootstrapNode: "/tmp/node-26.8.1/bin/node" });
 	assert.deepEqual(calls, [["symlink", "26.8.1", "/opt/vcpdeck/client/node/current"]]);
+});
+
+/** 构造 installRuntime 测试用 adapter：/opt 下视为未安装，除非刚被复制。 */
+function runtimeAdapter(calls, versionStdout = "v24.16.0\n") {
+	const created = new Set();
+	return {
+		exec: () => ({ status: 0, stdout: versionStdout, stderr: "" }),
+		statInfo: () => ({ exists: false }),
+		execFileSyncExists: (path) =>
+			!String(path).startsWith("/opt/vcpdeck/client/node/") || created.has(path),
+		mkdirp: (path) => calls.push(["mkdirp", path]),
+		chown: () => {},
+		chmod: () => {},
+		rm: (path) => {
+			calls.push(["rm", path]);
+			created.clear();
+		},
+		copyTree: (src, dest) => {
+			calls.push(["copyTree", src, dest]);
+			created.add(`${dest}/bin/node`);
+		},
+		copyFile: (src, dest) => {
+			calls.push(["copyFile", src, dest]);
+			created.add(dest);
+		},
+		realpath: (path) => path,
+		symlink: (target, link) => calls.push(["symlink", target, link]),
+	};
+}
+
+test("installRuntime 版本取自 bootstrap Node 自报，nvm 风格目录不再落到 node/current", async () => {
+	const calls = [];
+	await installRuntime(runtimeAdapter(calls), {
+		bootstrapNode: "/root/.nvm/versions/node/v24.16.0/bin/node",
+	});
+	assert.deepEqual(calls, [
+		["mkdirp", "/opt/vcpdeck/client/node"],
+		["copyTree", "/root/.nvm/versions/node/v24.16.0", "/opt/vcpdeck/client/node/24.16.0"],
+		["symlink", "24.16.0", "/opt/vcpdeck/client/node/current"],
+	]);
+});
+
+test("installRuntime 对系统 Node 只复制二进制，不整体复制 /usr", async () => {
+	const calls = [];
+	await installRuntime(runtimeAdapter(calls), { bootstrapNode: "/usr/bin/node" });
+	assert.deepEqual(calls, [
+		["mkdirp", "/opt/vcpdeck/client/node"],
+		["mkdirp", "/opt/vcpdeck/client/node/24.16.0/bin"],
+		["copyFile", "/usr/bin/node", "/opt/vcpdeck/client/node/24.16.0/bin/node"],
+		["symlink", "24.16.0", "/opt/vcpdeck/client/node/current"],
+	]);
+});
+
+test("installRuntime 无法确定 Node 版本时 fail closed，不用 current 当版本目录", async () => {
+	const calls = [];
+	const adapter = { ...runtimeAdapter(calls, ""), exec: () => ({ status: 1, stdout: "", stderr: "nope" }) };
+	await assert.rejects(
+		() => installRuntime(adapter, { bootstrapNode: "/usr/bin/node" }),
+		/无法确定 bootstrap Node 版本/,
+	);
+	assert.ok(!calls.some(([op]) => ["copyTree", "copyFile", "symlink"].includes(op)));
+});
+
+test("node/current 覆盖既有目录时递归删除，避免 EISDIR", () => {
+	const source = readFileSync(__filename.replace(/\.test\.cjs$/, ".cjs"), "utf8");
+	assert.match(source, /rmSync\(linkPath, \{ recursive: true, force: true \}\)/);
+});
+
+test("探测未识别的旧安装痕迹（含 root 与 /opt 旧布局），避免新建第二身份", () => {
+	const adapter = {
+		exec: () => ({
+			status: 0,
+			stdout: "root:x:0:0:root:/root:/bin/bash\nubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n",
+			stderr: "",
+		}),
+		readFile: (path) => (path === "/root/.vcpdeck/client-id" ? "712a5612-b051-4706-9d2d-b19cdbffaba0\n" : ""),
+		statInfo: (path) => ({ exists: path === "/opt/vcpdeck/launcher-client" }),
+	};
+	const traces = findLegacyClientTraces(adapter);
+	assert.equal(traces.length, 2);
+	assert.match(traces.join(" "), /\/root\/\.vcpdeck\/client-id/);
+	assert.match(traces.join(" "), /\/opt\/vcpdeck\/launcher-client/);
+	// 干净机器不得误判。
+	assert.deepEqual(
+		findLegacyClientTraces({ ...adapter, readFile: () => "", statInfo: () => ({ exists: false }) }),
+		[],
+	);
+});
+
+test("scanUserHomes 保留 root 与 /home，且 getent 失败时不静默返回空", () => {
+	const homes = scanUserHomes({
+		exec: () => ({
+			status: 0,
+			stdout: "root:x:0:0:root:/root:/bin/bash\nu:x:1:1::/home/u:/bin/sh\nlinux:x:2:2::/home/linux:/bin/sh\n",
+			stderr: "",
+		}),
+	});
+	assert.deepEqual(homes, [
+		{ username: "root", home: "/root" },
+		{ username: "u", home: "/home/u" },
+	]);
+	assert.throws(() => scanUserHomes({ exec: () => ({ status: 2, stderr: "boom" }) }), /boom/);
 });
 
 test("checkAccount 拒绝与既有非 vcpdeck 账户冲突，接受缺失", () => {

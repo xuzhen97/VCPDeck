@@ -27,6 +27,7 @@ const { createHash, randomUUID } = require("node:crypto");
 const {
 	chmodSync,
 	chownSync,
+	copyFileSync,
 	cpSync,
 	existsSync,
 	lchownSync,
@@ -34,12 +35,15 @@ const {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	renameSync,
 	symlinkSync,
 	writeFileSync,
 } = require("node:fs");
-const { basename, dirname, join, resolve } = require("node:path");
+// 本安装器只在 Linux 上运行；统一使用 POSIX 路径语义，避免在其他平台跑测试时
+// 生成反斜杠路径导致固定布局（/opt、/var）校验误判。
+const { basename, dirname, join } = require("node:path").posix;
 
 // ── 固定布局常量 ──
 const APP_DIR = "/opt/vcpdeck/client";
@@ -56,6 +60,10 @@ const PM2_NAME = "vcpdeck-client-launcher";
 const HOME_SKIP_DIRS = new Set(["linux", "ha"]);
 const ACCOUNT_NAME = "vcpdeck";
 const ACCOUNT_SHELL = "/bin/bash";
+// ADR-0018 时代的固定旧安装目录；只用于探测未识别的迁移源，不自动删除。
+const LEGACY_OPT_APP_DIR = "/opt/vcpdeck/launcher-client";
+// 可整体复制的 Node 发行版目录名：node-v24.16.0-linux-x64 / v24.16.0 / 24.16.0。
+const NODE_DIST_DIR_PATTERN = /^(?:node-)?v?\d+\.\d+\.\d+(?:-[a-zA-Z0-9_]+)*$/;
 
 /** 稳定错误码（跨信任边界与 UI 展示使用）。 */
 const LINUX_INSTALLER_ERROR = {
@@ -528,35 +536,55 @@ async function installAccount(adapter) {
 	return decision;
 }
 
+/** 读取 bootstrap Node 自报版本；不可用时返回空串（不按目录名猜版本）。 */
+function probeNodeVersion(adapter, bootstrapNode) {
+	if (!bootstrapNode) return "";
+	const probe = adapter.exec?.([bootstrapNode, "-v"]);
+	const raw = String(probe?.stdout || "").trim().replace(/^v/, "");
+	return /^\d+\.\d+\.\d+$/.test(raw) ? raw : "";
+}
+
 /**
- * 安装完整 Node 运行时到 /opt 并原子切换 node/current。
- * 复用 bootstrap 已下载并校验的 Node 发行版（bootstrap-node 所在目录），
- * 复制到 /opt/vcpdeck/client/node/<version>，避免二次下载、不依赖系统 Node。
+ * 可整体复制的 Node 发行版目录；系统 Node（如 /usr/bin/node）没有独立发行版目录时
+ * 返回 null，调用方改为只复制解析后的真实二进制，避免把 /usr 整个拷进 /opt。
+ */
+function nodeDistributionRoot(adapter, bootstrapNode) {
+	if (!bootstrapNode) return null;
+	const realBin = adapter.realpath ? adapter.realpath(bootstrapNode) : bootstrapNode;
+	const root = dirname(dirname(realBin));
+	return NODE_DIST_DIR_PATTERN.test(basename(root)) ? root : null;
+}
+
+/**
+ * 安装 Node 运行时到 /opt 并原子切换 node/current。
+ * 版本以 bootstrap Node 自报为准：nvm 的 v24.16.0、系统 /usr/bin/node 都不满足
+ * node-<版本> 命名，按目录名猜版本会把运行时铺到 node/current 并破坏该符号链接。
  */
 async function installRuntime(adapter, args) {
 	const nodeRoot = join(APP_DIR, "node");
 	ensureDirs(adapter, [nodeRoot]);
 	const bootstrapNode = args.bootstrapNode;
-	// bootstrap-node 形如 <nodeRoot>/<version>/bin/node → 发行版目录为 dirname(dirname())。
-	let distDir = null;
-	let version = args.nodeVersion || "";
-	if (bootstrapNode && adapter.execFileSyncExists(bootstrapNode)) {
-		distDir = dirname(dirname(resolve(bootstrapNode)));
-		if (!version) {
-			const base = basename(distDir).replace(/^node-?v?/, "").trim();
-			version = /^\d+\.\d+\.\d+$/.test(base) ? base : "current";
-		}
+	let version = String(args.nodeVersion || "").trim();
+	if (!/^\d+\.\d+\.\d+$/.test(version)) version = probeNodeVersion(adapter, bootstrapNode);
+	if (!version) {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.VERIFICATION_FAILED,
+			`无法确定 bootstrap Node 版本（${bootstrapNode || "缺失"}），拒绝安装运行时`,
+		);
 	}
-	if (!version) version = "current";
 	const target = join(nodeRoot, version);
 	const targetInfo = adapter.statInfo(target);
 	assertSafeLayout(target, targetInfo);
 	const nodeBin = join(target, "bin", "node");
-	if (distDir && distDir !== target && adapter.execFileSyncExists(distDir)) {
-		// 重试安装时，完整目标直接复用；上次中断留下的不完整 root 目录才重铺。
-		if (!adapter.execFileSyncExists(nodeBin)) {
-			if (targetInfo.exists) adapter.rm(target, { force: true });
+	if (!adapter.execFileSyncExists(nodeBin)) {
+		// 重试安装时完整目标直接复用；上次中断留下的不完整目录才重铺。
+		const distDir = nodeDistributionRoot(adapter, bootstrapNode);
+		if (targetInfo.exists) adapter.rm(target, { force: true });
+		if (distDir && distDir !== target) {
 			adapter.copyTree(distDir, target);
+		} else {
+			adapter.mkdirp(join(target, "bin"), { mode: 0o755, owner: "root" });
+			adapter.copyFile(adapter.realpath ? adapter.realpath(bootstrapNode) : bootstrapNode, nodeBin);
 		}
 	}
 	if (!adapter.execFileSyncExists(nodeBin)) {
@@ -565,7 +593,7 @@ async function installRuntime(adapter, args) {
 			`Node 运行时未就位于 ${nodeBin}`,
 		);
 	}
-	adapter.symlink(version, join(APP_DIR, "node", "current"));
+	adapter.symlink(version, join(nodeRoot, "current"));
 	return target;
 }
 
@@ -738,9 +766,17 @@ function createRealAdapter() {
 			if (owner) chownSync(path, owner === "root" ? 0 : uidToId(owner), gidToId(owner));
 		},
 		statInfo,
+		realpath(path) {
+			return realpathSync(path);
+		},
+		copyFile(src, dest) {
+			copyFileSync(src, dest);
+			chmodSync(dest, 0o755);
+		},
 		symlink(target, linkPath) {
-			const st = statInfo(linkPath);
-			if (st.exists) rmSync(linkPath, { force: true });
+			// linkPath 可能是上次失败留下的真实目录（不只是符号链接），必须递归删除，
+			// 否则 rmSync 对目录返回 ERR_FS_EISDIR。
+			if (statInfo(linkPath).exists) rmSync(linkPath, { recursive: true, force: true });
 			symlinkSync(target, linkPath);
 		},
 		exec(argv, options = {}) {
@@ -1176,21 +1212,32 @@ function ensureClientId(adapter) {
  * 读取 client-id、Server Origin 与 PM2 进程状态，构造候选源列表（异常安全，返回 []）。
  * 仅用于 `--migrate` 分支（M1）。
  */
+/**
+ * 读取本机 passwd 中的用户与其 canonical HOME（不经 shell 拼接用户名）。
+ * 扫描失败必须抛出：异常被吞成“无候选”会让安装器静默创建第二个身份。
+ */
+function scanUserHomes(adapter) {
+	const result = adapter.exec?.(["getent", "passwd"]);
+	if (result?.status !== 0) {
+		throw new Error(result?.stderr?.trim() || `getent passwd 退出码 ${result?.status ?? "未知"}`);
+	}
+	return (result?.stdout || "")
+		.split("\n")
+		.map((line) => line.trim().split(":"))
+		.filter((parts) => parts.length >= 7)
+		.filter((parts) => /^\//.test(parts[5]))
+		.filter((parts) => !HOME_SKIP_DIRS.has(parts[0]))
+		.map((parts) => ({ username: parts[0], home: parts[5] }));
+}
+
 function collectMigrationSources(adapter, expectedServerOrigin = null) {
 	try {
-		// 通过 getent passwd 获取 canonical home，避免 Bazzite 的 /home 与 /var/home
-		// 产生重复候选；不把用户目录名称拼进 shell 命令。
-		const result = adapter.exec?.(["getent", "passwd"]);
-		if (result?.status !== 0) {
-			throw new Error(result?.stderr?.trim() || `getent passwd 退出码 ${result?.status ?? "未知"}`);
-		}
-		const homes = (result?.stdout || "")
-			.split("\n")
-			.map((line) => line.trim().split(":"))
-			.filter((parts) => parts.length >= 7)
-			.filter((parts) => /^\/(?:home|var\/home)\//.test(parts[5]))
-			.filter((parts) => !HOME_SKIP_DIRS.has(parts[0]))
-			.map((parts) => ({ username: parts[0], home: parts[5] }));
+		// 只把 /home、/var/home 下的用户安装当作迁移源；canonical home 可避免
+		// Bazzite 的 /home 与 /var/home 产生重复候选。root 旧安装另行探测
+		// （findLegacyClientTraces），不与用户安装混成多源歧义。
+		const homes = scanUserHomes(adapter).filter(({ home }) =>
+			/^\/(?:home|var\/home)\//.test(home),
+		);
 		const candidates = [];
 		for (const { username, home } of homes) {
 			const appDir = `${home}/.vcpdeck/launcher-client`;
@@ -1222,6 +1269,26 @@ function collectMigrationSources(adapter, expectedServerOrigin = null) {
 			`扫描迁移源失败，拒绝创建新身份：${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
+}
+
+/**
+ * 探测未被识别为迁移源的旧 VCPDeck 安装痕迹（只读，不删除）。
+ * @returns {string[]} 命中说明；空数组表示未发现旧安装。
+ */
+function findLegacyClientTraces(adapter) {
+	const traces = [];
+	for (const { home } of scanUserHomes(adapter)) {
+		const identity = `${home}/.vcpdeck/client-id`;
+		if (validateClientId(String(adapter.readFile?.(identity) || "").trim())) {
+			traces.push(`旧身份文件 ${identity}`);
+		}
+		const legacyAppDir = `${home}/.vcpdeck/launcher-client`;
+		if (adapter.statInfo(legacyAppDir)?.exists) traces.push(`旧安装目录 ${legacyAppDir}`);
+	}
+	if (adapter.statInfo(LEGACY_OPT_APP_DIR)?.exists) {
+		traces.push(`旧安装目录 ${LEGACY_OPT_APP_DIR}`);
+	}
+	return traces;
 }
 
 /** 从应用目录读取 client-id（不存在/非法返回 null）。 */
@@ -1335,6 +1402,17 @@ async function main() {
 			hasA2State,
 			candidates,
 		});
+		if (plan.kind === "fresh" && args.migrate !== false) {
+			// 护栏：旧安装正在跑（或在旧布局里），但未能识别为可迁移源时不得静默新建身份，
+			// 否则会出现在线双 Client（如 root + /opt/vcpdeck 旧布局）。
+			const traces = findLegacyClientTraces(adapter);
+			if (traces.length > 0) {
+				throw installerError(
+					LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
+					`检测到未识别的旧 VCPDeck 安装痕迹（${traces.join("；")}），拒绝以新身份安装，避免与在跑的旧 Client 形成同机双实例；请先人工处理旧安装，确认要新建身份时传 --migrate=false`,
+				);
+			}
+		}
 		if (plan.kind === "migrate") {
 			const source = plan.source;
 			log(
@@ -1414,6 +1492,8 @@ module.exports = {
 	runFreshInstall,
 	discoverMigrationSource,
 	collectMigrationSources,
+	scanUserHomes,
+	findLegacyClientTraces,
 	resolveInstallMode,
 	runMigrationCutover,
 	installRuntime,
