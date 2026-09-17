@@ -1,7 +1,10 @@
 "use strict";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
+const { readFileSync, mkdirSync, mkdtempSync, writeFileSync } = require("node:fs");
+const { tmpdir } = require("node:os");
+const { dirname, join } = require("node:path");
+const { spawnSync } = require("node:child_process");
 const {
 	APP_DIR,
 	VAR_DIR,
@@ -27,6 +30,10 @@ const {
 	collectMigrationSources,
 	scanUserHomes,
 	findLegacyClientTraces,
+	PM2_RESOLVE_SNIPPET,
+	pm2EntryScript,
+	pickLegacyClientProcess,
+	otherPm2AppNames,
 	resolveInstallMode,
 	runMigrationCutover,
 } = require("./install-client-linux.cjs");
@@ -266,6 +273,173 @@ test("installRuntime 无法确定 Node 版本时 fail closed，不用 current �
 test("node/current 覆盖既有目录时递归删除，避免 EISDIR", () => {
 	const source = readFileSync(__filename.replace(/\.test\.cjs$/, ".cjs"), "utf8");
 	assert.match(source, /rmSync\(linkPath, \{ recursive: true, force: true \}\)/);
+});
+
+test("旧 root + /opt 布局被识别为迁移源，并保留其他 PM2 应用", () => {
+	const jlist = JSON.stringify([
+		{ name: "rag-server", pm2_env: { status: "online", pm_exec_path: "/opt/rag-server/server-launcher.cjs" } },
+		{
+			name: "vcpdeck-client-launcher",
+			pm2_env: { status: "online", pm_exec_path: "/opt/vcpdeck/launcher-client/dist/main.js" },
+		},
+	]);
+	const adapter = {
+		exec: (argv) =>
+			argv[0] === "getent"
+				? { status: 0, stdout: "root:x:0:0:root:/root:/bin/bash\n", stderr: "" }
+				: { status: 0, stdout: jlist, stderr: "" },
+		readFile: (path) => {
+			if (path === "/root/.vcpdeck/client-id") return "712a5612-b051-4706-9d2d-b19cdbffaba0\n";
+			if (path === "/opt/vcpdeck/launcher-client/launcher.env") {
+				return "VCPDECK_ARTIFACT=client\nVCPDECK_SERVER=http://127.0.0.1:3001\n";
+			}
+			return "";
+		},
+		statInfo: (path) =>
+			path === "/opt/vcpdeck/launcher-client"
+				? { exists: true, type: "dir", owner: "root" }
+				: { exists: false },
+	};
+	const candidates = collectMigrationSources(adapter, "http://127.0.0.1:3001");
+	assert.equal(candidates.length, 1);
+	assert.equal(candidates[0].username, "root");
+	assert.equal(candidates[0].clientDir, "/opt/vcpdeck/launcher-client");
+	assert.equal(candidates[0].sourceHome, "/root");
+	assert.equal(candidates[0].pm2Error, null);
+
+	const source = discoverMigrationSource({ uid: 0, candidates });
+	assert.equal(source.clientId, "712a5612-b051-4706-9d2d-b19cdbffaba0");
+	assert.equal(source.sourceAppDir, "/opt/vcpdeck/launcher-client");
+	assert.equal(source.startupUnit, "pm2-root.service");
+	assert.equal(source.sourceHome, "/root");
+	// 关键：其他 PM2 应用必须被保留，否则迁移会停用 pm2-root.service。
+	assert.deepEqual(source.preserveApps, ["rag-server"]);
+});
+
+test("PM2 查询失败时不得当成没有旧安装，解析迁移源必须 fail closed", () => {
+	const adapter = {
+		exec: (argv) =>
+			argv[0] === "getent"
+				? { status: 0, stdout: "root:x:0:0:root:/root:/bin/bash\n", stderr: "" }
+				: { status: 1, stdout: "", stderr: "pm2: command not found" },
+		readFile: (path) =>
+			path === "/root/.vcpdeck/client-id" ? "712a5612-b051-4706-9d2d-b19cdbffaba0\n" : "VCPDECK_ARTIFACT=client\n",
+		statInfo: (path) => ({ exists: path === "/opt/vcpdeck/launcher-client", type: "dir", owner: "root" }),
+	};
+	const candidates = collectMigrationSources(adapter, null);
+	assert.equal(candidates.length, 1);
+	assert.equal(candidates[0].pm2Process, null);
+	assert.match(candidates[0].pm2Error, /PM2 进程列表/);
+	assert.deepEqual(candidates[0].otherApps, []);
+	assert.throws(
+		() => discoverMigrationSource({ uid: 0, candidates }),
+		(error) =>
+			error.code === "LINUX_MIGRATION_SOURCE_INVALID" && /无法确认旧 PM2 状态/.test(error.message),
+	);
+});
+
+test("PM2 解析片段能定位私有安装与 nvm 全局 PM2，并配对同版本 node", (t) => {
+	if (spawnSync("sh", ["-c", "exit 0"]).status !== 0) {
+		t.skip("本机没有可用的 POSIX sh");
+		return;
+	}
+	const home = mkdtempSync(join(tmpdir(), "pm2-resolve-"));
+	const run = () =>
+		spawnSync("sh", ["-c", `${PM2_RESOLVE_SNIPPET} printf '%s|%s' "$node" "$pm2"`], {
+			env: { ...process.env, HOME: home },
+			encoding: "utf8",
+		}).stdout;
+
+	const nvmRoot = join(home, ".nvm/versions/node/v24.16.0");
+	mkdirSync(join(nvmRoot, "lib/node_modules/pm2/bin"), { recursive: true });
+	mkdirSync(join(nvmRoot, "bin"), { recursive: true });
+	writeFileSync(join(nvmRoot, "bin/node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+	writeFileSync(join(nvmRoot, "lib/node_modules/pm2/bin/pm2"), "", { mode: 0o644 });
+	const nvmResolved = run().split("|");
+	assert.ok(nvmResolved[1].endsWith(".nvm/versions/node/v24.16.0/lib/node_modules/pm2/bin/pm2"));
+	// node 必须从 PM2 同一安装根推导，而不是任意全局 node。
+	assert.equal(nvmResolved[0], nvmResolved[1].replace(/lib\/node_modules\/pm2\/bin\/pm2$/, "bin/node"));
+
+	const privNode = join(home, ".vcpdeck/runtime/node/node-v24.16.0/bin/node");
+	const privPm2 = join(home, ".vcpdeck/tools/pm2/node_modules/pm2/bin/pm2");
+	mkdirSync(dirname(privNode), { recursive: true });
+	mkdirSync(dirname(privPm2), { recursive: true });
+	writeFileSync(privNode, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+	writeFileSync(privPm2, "", { mode: 0o644 });
+	const privResolved = run().split("|");
+	assert.ok(privResolved[0].endsWith(".vcpdeck/runtime/node/node-v24.16.0/bin/node"));
+	assert.ok(privResolved[1].endsWith(".vcpdeck/tools/pm2/node_modules/pm2/bin/pm2"));
+});
+
+test("旧 PM2 条目按入口脚本匹配：pm_exec_path 指向 node、脚本在 args", () => {
+	const list = [
+		{ name: "rag-client", pm2_env: { status: "online", pm_exec_path: "/opt/rag-client/client-launcher.cjs" } },
+		{
+			// VCP ToolBox 应用注入了 VCPDECK_* 环境，但不是 VCPDeck Launcher，不得被误选。
+			name: "vcp-admin",
+			pm2_env: {
+				status: "online",
+				pm_exec_path: "/opt/VCPToolBox/adminServer.js",
+				VCPDECK_ARTIFACT: "client",
+				VCPDECK_APP_DIR: "/root/.vcpdeck/launcher-client",
+			},
+		},
+		{
+			name: "vcpdeck-client-launcher",
+			pm2_env: {
+				status: "online",
+				pm_exec_path: "/root/.nvm/versions/node/v24.14.1/bin/node",
+				args: [
+					"--env-file=/root/.vcpdeck/launcher-client/launcher.env",
+					"/root/.vcpdeck/launcher-client/dist/main.js",
+				],
+			},
+		},
+	];
+	const matched = pickLegacyClientProcess(list, "/root/.vcpdeck/launcher-client");
+	assert.equal(matched.name, "vcpdeck-client-launcher");
+	assert.equal(matched.pm_exec_path, "/root/.vcpdeck/launcher-client/dist/main.js");
+	// 保留其余应用（含 rag-client 与 VCP ToolBox），否则会停用旧自启。
+	assert.deepEqual(otherPm2AppNames(list, matched.name), ["rag-client", "vcp-admin"]);
+	// 名称不同但入口指向同目录时也能匹配（如自定义名的旧安装）。
+	assert.equal(
+		pickLegacyClientProcess(
+			[{ name: "my-vcpdeck", pm2_env: { status: "online", pm_exec_path: "/home/u/.vcpdeck/launcher-client/dist/main.js" } }],
+			"/home/u/.vcpdeck/launcher-client",
+		).name,
+		"my-vcpdeck",
+	);
+	// 多个候选条目一律 fail closed。
+	assert.throws(
+		() =>
+			pickLegacyClientProcess(
+				[
+					{ name: "vcpdeck-client-launcher", pm2_env: { status: "online", pm_exec_path: "/a/dist/main.js" } },
+					{ name: "vcpdeck-client-launcher-2", pm2_env: { status: "online", pm_exec_path: "/b/dist/main.js" } },
+				],
+				"/b",
+			),
+		/多个 VCPDeck Client 条目/,
+	);
+});
+
+test("迁移按探测到的 PM2 名称删除，非法名称 fail closed", () => {
+	const candidate = (name) => ({
+		username: "root",
+		clientId: "712a5612-b051-4706-9d2d-b19cdbffaba0",
+		clientDir: "/root/.vcpdeck/launcher-client",
+		sourceHome: "/root",
+		serverOrigin: null,
+		artifact: "client",
+		pm2Process: { name, status: "online", pm_exec_path: "/root/.vcpdeck/launcher-client/dist/main.js" },
+		otherApps: ["rag-client"],
+		releaseActive: false,
+	});
+	assert.equal(discoverMigrationSource({ uid: 0, candidates: [candidate("vcp-admin")] }).pm2Name, "vcp-admin");
+	assert.throws(
+		() => discoverMigrationSource({ uid: 0, candidates: [candidate("x; rm -rf /")] }),
+		(error) => error.code === "LINUX_MIGRATION_SOURCE_INVALID" && /应用名不合法/.test(error.message),
+	);
 });
 
 test("探测未识别的旧安装痕迹（含 root 与 /opt 旧布局），避免新建第二身份", () => {

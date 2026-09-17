@@ -987,10 +987,22 @@ function resolveMigrationSource(c) {
 	if (!validateClientId(c.clientId)) {
 		throw installerError(LINUX_INSTALLER_ERROR.MIGRATION_INVALID_ID, `Client ID 非法: ${c.clientId}`);
 	}
-	if (!c.pm2Process || c.pm2Process.status !== "online" || c.pm2Process.name !== PM2_NAME) {
+	if (c.pm2Error) {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
+			`无法确认旧 PM2 状态，拒绝迁移：${c.pm2Error}`,
+		);
+	}
+	if (!c.pm2Process || c.pm2Process.status !== "online") {
 		throw installerError(
 			LINUX_INSTALLER_ERROR.MIGRATION_PM2_NOT_ONLINE,
 			`PM2 客户端进程未 online（name=${c.pm2Process?.name}, status=${c.pm2Process?.status}）`,
+		);
+	}
+	if (!PM2_NAME_PATTERN.test(String(c.pm2Process.name || ""))) {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
+			`PM2 应用名不合法，拒绝删除: ${c.pm2Process.name}`,
 		);
 	}
 	const expectedExecPath = `${String(c.clientDir || "").replace(/\\/g, "/")}/dist/main.js`;
@@ -1001,15 +1013,16 @@ function resolveMigrationSource(c) {
 			`PM2 客户端入口不属于迁移源: ${c.pm2Process.pm_exec_path || "(缺失)"}`,
 		);
 	}
-	// 清理前所有权校验（ADR-0027）：旧 app-dir 必须恰好是来源用户 canonical HOME 下的
-	// `.vcpdeck/launcher-client`，且 launcher.env 不得声明其他 artifact，否则拒绝删除。
+	// 清理前所有权校验（ADR-0027）：旧 app-dir 必须是来源用户 canonical HOME 下的
+	// `.vcpdeck/launcher-client`，或是 ADR-0018 时代的固定目录 /opt/vcpdeck/launcher-client；
+	// 且 launcher.env 不得声明其他 artifact，否则拒绝删除。
 	const sourceHome = String(c.sourceHome || dirname(dirname(c.clientDir || "/"))).replace(/\\/g, "/");
-	const expectedAppDir = `${sourceHome}/.vcpdeck/launcher-client`;
 	const actualAppDir = String(c.clientDir || "").replace(/\\/g, "/");
-	if (!actualAppDir || actualAppDir !== expectedAppDir) {
+	const allowedAppDirs = new Set([`${sourceHome}/.vcpdeck/launcher-client`, LEGACY_OPT_APP_DIR]);
+	if (!actualAppDir || !allowedAppDirs.has(actualAppDir)) {
 		throw installerError(
 			LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
-			`旧安装目录不是来源用户的 .vcpdeck/launcher-client: ${actualAppDir || "(缺失)"}`,
+			`旧安装目录既不是来源用户的 .vcpdeck/launcher-client，也不是 ${LEGACY_OPT_APP_DIR}: ${actualAppDir || "(缺失)"}`,
 		);
 	}
 	if (c.artifact && c.artifact !== "client") {
@@ -1027,6 +1040,7 @@ function resolveMigrationSource(c) {
 	return {
 		username: c.username,
 		clientId: c.clientId,
+		pm2Name: c.pm2Process.name,
 		sourceAppDir: c.clientDir,
 		serverOrigin: c.serverOrigin,
 		sourceHome: c.sourceHome || dirname(dirname(c.clientDir)),
@@ -1066,15 +1080,6 @@ async function prepareMigrationInstall({ adapter, args, psk, clientId }) {
 	requireCommand(adapter, ["systemctl", "enable", SERVICE_NAME], "systemctl enable");
 }
 
-const PM2_DELETE_COMMAND =
-	'node="$(find "$HOME/.vcpdeck/runtime/node" -type f -path "*/bin/node" -executable -print -quit 2>/dev/null)"; ' +
-	'pm2="$(find "$HOME/.vcpdeck/tools/pm2/node_modules/pm2" -type f -path "*/bin/pm2" -executable -print -quit 2>/dev/null)"; ' +
-	'[ -n "$node" ] && [ -n "$pm2" ] && "$node" "$pm2" delete vcpdeck-client-launcher';
-const PM2_SAVE_COMMAND =
-	'node="$(find "$HOME/.vcpdeck/runtime/node" -type f -path "*/bin/node" -executable -print -quit 2>/dev/null)"; ' +
-	'pm2="$(find "$HOME/.vcpdeck/tools/pm2/node_modules/pm2" -type f -path "*/bin/pm2" -executable -print -quit 2>/dev/null)"; ' +
-	'[ -n "$node" ] && [ -n "$pm2" ] && "$node" "$pm2" save';
-
 /**
  * 执行 M1 清理式迁移（经注入 adapter，可测试不触达真实系统）。
  * 完整材料就绪后停止旧 PM2 Client、只删除 VCPDeck entry 与旧现场，再启动 A2 稳态服务；
@@ -1112,14 +1117,25 @@ async function runMigrationCutover({
 
 	try {
 		record("record-old");
-		const oldClient = runAsUser(r, source.username, PM2_DELETE_COMMAND);
+		// 旧条目的 PM2 名称不固定，必须按探测到的名称删除。
+		const oldClient = runAsUser(r, source.username, pm2Command(`delete ${source.pm2Name}`));
 		if (oldClient?.status !== 0) {
-			throw installerError(LINUX_INSTALLER_ERROR.VERIFICATION_FAILED, "删除旧 VCPDeck PM2 进程失败");
+			throw installerError(
+				LINUX_INSTALLER_ERROR.VERIFICATION_FAILED,
+				`删除旧 VCPDeck PM2 进程失败（${source.pm2Name}）`,
+			);
 		}
 		oldClientStopped = true;
 		record("stop-old-client");
 		// 保留其他 PM2 应用：只 save，不 kill PM2 daemon。
-		runAsUser(r, source.username, PM2_SAVE_COMMAND);
+		// save 失败会把已删除的 VCPDeck entry 留在旧 dump，重启时 pm2 resurrect 会把它拉回来。
+		const saved = runAsUser(r, source.username, PM2_SAVE_COMMAND);
+		if (saved?.status !== 0) {
+			throw installerError(
+				LINUX_INSTALLER_ERROR.VERIFICATION_FAILED,
+				"保留剩余 PM2 应用失败（pm2 save）",
+			);
+		}
 		record("save-remaining-pm2");
 		// 无其他 PM2 应用时旧自启已无作用；有其他应用时保留旧 startup unit。
 		if (preserveApps.length === 0) {
@@ -1232,38 +1248,49 @@ function scanUserHomes(adapter) {
 
 function collectMigrationSources(adapter, expectedServerOrigin = null) {
 	try {
-		// 只把 /home、/var/home 下的用户安装当作迁移源；canonical home 可避免
-		// Bazzite 的 /home 与 /var/home 产生重复候选。root 旧安装另行探测
-		// （findLegacyClientTraces），不与用户安装混成多源歧义。
-		const homes = scanUserHomes(adapter).filter(({ home }) =>
-			/^\/(?:home|var\/home)\//.test(home),
+		// 迁移源包括 /home、/var/home 下的用户安装，以及 root 的旧安装（云主机常见
+		// 以 root 跑 PM2）；canonical home 可避免 Bazzite 的 /home 与 /var/home 重复候选。
+		const homes = scanUserHomes(adapter).filter(
+			({ home }) => home === "/root" || /^\/(?:home|var\/home)\//.test(home),
 		);
 		const candidates = [];
+		const legacyInfo = adapter.statInfo(LEGACY_OPT_APP_DIR);
 		for (const { username, home } of homes) {
-			const appDir = `${home}/.vcpdeck/launcher-client`;
-			const appInfo = adapter.statInfo(appDir);
-			if (!appInfo || !appInfo.exists) continue;
-			const clientId = readClientIdFromDir(adapter, appDir);
-			const serverOrigin = readOriginFromEnv(adapter, appDir);
-			const artifact = readArtifactFromEnv(adapter, appDir);
-			const pm2Process = readPm2Process(adapter, username);
-			const otherApps = readOtherPm2Apps(adapter, username);
-			const releaseActive = readReleaseActive(adapter, appDir);
-			candidates.push({
-				username,
-				clientId,
-				clientDir: appDir,
-				serverOrigin,
-				artifact,
-				expectedServerOrigin,
-				pm2Process,
-				otherApps,
-				releaseActive,
-				startupUnit: `pm2-${username}.service`,
-			});
+			// ADR-0018 时代的固定旧安装目录：按属主归属到对应用户，避免多用户重复候选。
+			const appDirs = [`${home}/.vcpdeck/launcher-client`];
+			if (legacyInfo?.exists && legacyInfo.owner === username) appDirs.push(LEGACY_OPT_APP_DIR);
+			for (const appDir of appDirs) {
+				const appInfo = adapter.statInfo(appDir);
+				if (!appInfo || !appInfo.exists) continue;
+				// PM2 查询失败必须把原因带在候选上：静默当成“没有旧安装”会新建第二身份。
+				let pm2List = null;
+				let pm2Error = null;
+				try {
+					pm2List = readPm2List(adapter, username);
+				} catch (error) {
+					pm2Error = error instanceof Error ? error.message : String(error);
+				}
+				const pm2Process = pm2List ? pickLegacyClientProcess(pm2List, appDir) : null;
+				candidates.push({
+					username,
+					clientId: readClientIdFromDir(adapter, appDir, home),
+					clientDir: appDir,
+					sourceHome: home,
+					serverOrigin: readOriginFromEnv(adapter, appDir),
+					artifact: readArtifactFromEnv(adapter, appDir),
+					expectedServerOrigin,
+					pm2Process,
+					pm2Error,
+					otherApps: pm2List ? otherPm2AppNames(pm2List, pm2Process?.name) : [],
+					releaseActive: readReleaseActive(adapter, appDir),
+					startupUnit: `pm2-${username}.service`,
+				});
+			}
 		}
 		return candidates;
 	} catch (error) {
+		// 已带稳定错误码的拒绝（如多条目歧义）必须原样透出，不能被盖成“扫描失败”。
+		if (error?.code) throw error;
 		throw installerError(
 			LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
 			`扫描迁移源失败，拒绝创建新身份：${error instanceof Error ? error.message : String(error)}`,
@@ -1291,19 +1318,21 @@ function findLegacyClientTraces(adapter) {
 	return traces;
 }
 
-/** 从应用目录读取 client-id（不存在/非法返回 null）。 */
-function readClientIdFromDir(adapter, appDir) {
+/** 从应用目录或旧身份路径读取 client-id（不存在/非法返回 null）。 */
+function readClientIdFromDir(adapter, appDir, home = "") {
 	try {
 		const candidates = [
 			`${appDir}/client-id`,
 			`${dirname(appDir)}/client-id`,
-		];
+			// 旧版安装器的权威路径是 ~/.vcpdeck/client-id，而不是 launcher-client 下；
+			// ADR-0018 时代的 /opt/vcpdeck/launcher-client 布局只能从这里读到身份。
+			home ? `${home}/.vcpdeck/client-id` : null,
+		].filter(Boolean);
 		for (const path of candidates) {
 			const raw = adapter.readFile?.(path);
 			const id = typeof raw === "string" ? raw.trim() : "";
 			if (validateClientId(id)) return id;
 		}
-		// 旧版安装器的权威路径是 ~/.vcpdeck/client-id，而不是 launcher-client 下。
 		return null;
 	} catch {
 		return null;
@@ -1339,38 +1368,91 @@ function runAsUser(adapter, username, command) {
 	return adapter.exec?.(["su", "-", username, "-c", command]);
 }
 
-const PM2_JLIST_COMMAND =
-	'node="$(find "$HOME/.vcpdeck/runtime/node" -type f -path "*/bin/node" -executable -print -quit 2>/dev/null)"; ' +
-	'pm2="$(find "$HOME/.vcpdeck/tools/pm2/node_modules/pm2" -type f -path "*/bin/pm2" -executable -print -quit 2>/dev/null)"; ' +
-	'[ -n "$node" ] && [ -n "$pm2" ] && "$node" "$pm2" jlist';
+// 旧的 PM2 应用名可被自定义（如 vcp-admin），但必须是我们能把入 shell 命令的普通 token。
+const PM2_NAME_PATTERN = /^[A-Za-z0-9._@-]+$/;
 
-/** 读取用户 PM2 中的 VCPDeck Client 进程（不存在返回 null）。 */
-function readPm2Process(adapter, username) {
+/**
+ * 以目标用户身份查找 Node 与 PM2 的 shell 片段。
+ * 优先 VCPDeck 私有安装；否则找用户 nvm 或系统全局安装（旧 Linux 安装常用
+ * `~/.nvm` 全局 PM2）。不用 `command -v pm2` 的 shim：其 shebang 依赖非交互
+ * PATH 里的 node，而迁移流程不控制该 PATH。
+ */
+const PM2_RESOLVE_SNIPPET =
+	'node=""; pm2=""; ' +
+	'if [ -f "$HOME/.vcpdeck/tools/pm2/node_modules/pm2/bin/pm2" ]; then ' +
+	'pm2="$HOME/.vcpdeck/tools/pm2/node_modules/pm2/bin/pm2"; ' +
+	'node="$(find "$HOME/.vcpdeck/runtime/node" -type f -path "*/bin/node" -executable -print -quit 2>/dev/null)"; ' +
+	'else ' +
+	'for c in "$HOME/.nvm/versions/node"/*/lib/node_modules/pm2/bin/pm2 /usr/local/lib/node_modules/pm2/bin/pm2 /usr/lib/node_modules/pm2/bin/pm2; do ' +
+	'[ -f "$c" ] || continue; ' +
+	'n="${c%/lib/node_modules/pm2/bin/pm2}/bin/node"; ' +
+	'[ -x "$n" ] || continue; ' +
+	'node="$n"; pm2="$c"; break; ' +
+	'done; ' +
+	'fi; ';
+const pm2Command = (pm2Args) =>
+	`${PM2_RESOLVE_SNIPPET}[ -n "$node" ] && [ -n "$pm2" ] && "$node" "$pm2" ${pm2Args}`;
+const PM2_JLIST_COMMAND = pm2Command("jlist");
+const PM2_SAVE_COMMAND = pm2Command("save");
+
+/** 读取指定用户的 PM2 进程列表；查询失败必须抛错，不得被当成“没有旧安装”。 */
+function readPm2List(adapter, username) {
+	const res = runAsUser(adapter, username, PM2_JLIST_COMMAND);
+	if (res?.status !== 0) {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
+			`无法读取用户 ${username} 的 PM2 进程列表，拒绝迁移：${String(res?.stderr || "").trim() || `退出码 ${res?.status}`}`,
+		);
+	}
 	try {
-		const res = runAsUser(adapter, username, PM2_JLIST_COMMAND);
-		const text = res?.stdout;
-		if (!text) return null;
-		const list = JSON.parse(text);
-		const proc = Array.isArray(list) ? list.find((p) => p && p.name === PM2_NAME) : null;
-		if (!proc) return null;
-		const status = proc.pm2_env && proc.pm2_env.status === "online" ? "online" : "stopped";
-		return { name: PM2_NAME, status, pm_exec_path: proc.pm2_env?.pm_exec_path || null };
-	} catch {
-		return null;
+		const list = JSON.parse(res.stdout || "[]");
+		if (!Array.isArray(list)) throw new Error("jlist 不是数组");
+		return list;
+	} catch (error) {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.MIGRATION_SOURCE_INVALID,
+			`用户 ${username} 的 PM2 进程列表无法解析，拒绝迁移：${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 }
 
-/** 读取用户 PM2 中的其他应用名（迁移时保留，不删除、不迁移）。 */
-function readOtherPm2Apps(adapter, username) {
-	try {
-		const res = runAsUser(adapter, username, PM2_JLIST_COMMAND);
-		const list = JSON.parse(res?.stdout || "[]");
-		return Array.isArray(list)
-			? list.map((p) => p && p.name).filter((n) => n && n !== PM2_NAME)
-			: [];
-	} catch {
-		return [];
+/** 旧 PM2 条目实际执行的 Launcher 脚本（兼容 pm_exec_path=node、脚本在 args 的旧写法）。 */
+function pm2EntryScript(proc) {
+	const env = proc?.pm2_env || {};
+	const exec = String(env.pm_exec_path || "");
+	if (exec.endsWith(".js")) return exec;
+	const rawArgs = Array.isArray(env.args) ? env.args : String(env.args || "").split(/\s+/);
+	return rawArgs.map((arg) => String(arg)).find((arg) => arg.endsWith(".js")) || exec;
+}
+
+/**
+ * 从 PM2 列表挑选迁移目标条目。
+ * 旧安装的名称与启动形式都不固定（`vcpdeck-client-launcher`、`vcp-admin`，或
+ * pm_exec_path 指向 node 而脚本在 args），因此按名称或 Launcher 脚本路径匹配；
+ * 多个匹配一律 fail closed。
+ */
+function pickLegacyClientProcess(list, clientDir) {
+	const expected = `${String(clientDir || "").replace(/\\/g, "/")}/dist/main.js`;
+	const matches = list.filter(
+		(p) =>
+			p &&
+			(p.name === PM2_NAME || String(pm2EntryScript(p)).replace(/\\/g, "/") === expected),
+	);
+	if (matches.length === 0) return null;
+	if (matches.length > 1) {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.MIGRATION_AMBIGUOUS,
+			`PM2 中存在多个 VCPDeck Client 条目: ${matches.map((p) => p.name).join(", ")}`,
+		);
 	}
+	const proc = matches[0];
+	const status = proc.pm2_env && proc.pm2_env.status === "online" ? "online" : "stopped";
+	return { name: proc.name, status, pm_exec_path: pm2EntryScript(proc) };
+}
+
+/** 列出除待迁移条目外仍需保留的 PM2 应用名（决定是否停用旧自启）。 */
+function otherPm2AppNames(list, excludeName) {
+	return list.map((p) => p && p.name).filter((n) => n && n !== excludeName);
 }
 
 /** 判断应用目录是否有进行中的 Release（存在 release 标记文件）。 */
@@ -1494,6 +1576,10 @@ module.exports = {
 	collectMigrationSources,
 	scanUserHomes,
 	findLegacyClientTraces,
+	PM2_RESOLVE_SNIPPET,
+	pm2EntryScript,
+	pickLegacyClientProcess,
+	otherPm2AppNames,
 	resolveInstallMode,
 	runMigrationCutover,
 	installRuntime,

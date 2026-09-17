@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.8.19] - 2026-09-17
+
+### Fixed
+
+- **Linux 旧安装形式不同时无法迁移**：旧 Linux 安装的账户、目录与 PM2 形式都可能不同——以 root 运行、应用目录是 ADR-0018 时代的固定 `/opt/vcpdeck/launcher-client`、PM2 由 nvm/系统全局安装、PM2 应用名被改成自定义名（如 `vcp-admin`），或 `pm_exec_path` 指向 node 而脚本放在 `args` 里。安装器现在扫描 root 的旧安装、接受上述固定旧目录、从私有/nvm/系统全局位置定位 PM2，并按 Launcher 入口脚本（而非固定应用名）匹配迁移目标，按探测到的名称删除旧条目；其余 PM2 应用（含 PM2 托管的 VCPDeck Server 与 VCP ToolBox）一律保留，因此不再误停 `pm2-root.service`。
+- **PM2 查询失败被当成“没有旧安装”**：`pm2 jlist` 失败或输出无法解析时此前当成空结果，会在 `pm2 save` 后误判“无其他 PM2 应用”而停用旧自启，或在迁移时静默跳过旧身份。现在查询失败、输出非法、条目歧义、应用名不合法一律 fail closed；`pm2 save` 失败也视为迁移失败（否则旧 dump 会在重启时 resurrect 已删除的 VCPDeck Client）。
+
 ## [0.8.18] - 2026-09-17
 
 ### Fixed
