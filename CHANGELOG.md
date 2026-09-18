@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-18
+
 ### Added
 
 - **机器「远程桌面」Tab（noVNC over 既有 P2P 隧道）**：通过已验收的 Browser↔Client WebRTC DataChannel 回环到目标机 `127.0.0.1:5900`，用 noVNC 的 `RFB` 直接接收已打开的 `RTCDataChannel` 渲染 VNC 画面（支持 P2P 直连 / TURN 中继路径显示、只读模式、凭据弹窗）。纯前端能力：Shared / Server / Client / SDK 无协议改动；VNC 服务端由运维经既有 Job/exec 在目标机自行安装并仅监听 `127.0.0.1`（VCPDeck 不托管 VNC 生命周期）。详见 [`docs/design/p2p-tunnel.md`](./docs/design/p2p-tunnel.md) 与 ADR-0026。
