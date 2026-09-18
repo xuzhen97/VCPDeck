@@ -91,6 +91,7 @@ interface Session {
 	paused: boolean;
 	outbacklog: number;
 	closed: boolean;
+	terminal: boolean;
 }
 
 function toBuffer(data: ArrayBuffer | Uint8Array): Buffer {
@@ -126,7 +127,7 @@ function createTunnelBridge(deps: TunnelBridgeDeps): TunnelBridge {
 			// 固定回环目标：只允许连本机 targetPort，禁止任意主机或局域网扫描。
 			tcp = deps.createTcp({ host: "127.0.0.1", port: s.targetPort });
 		} catch {
-			fail(s.sessionId, "TUNNEL_TARGET_REFUSED");
+			targetTerminated(s, "TUNNEL_TARGET_REFUSED");
 			return;
 		}
 		s.tcp = tcp;
@@ -147,7 +148,15 @@ function createTunnelBridge(deps: TunnelBridgeDeps): TunnelBridge {
 		channel.onmessage = ({ data }) => {
 			if (s.closed) return;
 			const buf = toBuffer(data);
-			const ok = tcp.write(buf);
+			console.log(`[cbr] dc→tcp ${buf.byteLength}B asc=${JSON.stringify(buf.toString().replace(/[^\x20-\x7e]/g, ".").slice(0, 12))}`);
+			let ok: boolean;
+			try {
+				ok = tcp.write(buf);
+			} catch {
+				// TCP 已销毁：目标终止后的写失败属预期，仅停止接收；仅当目标未终止时才整体拆除
+				if (!s.terminal) closeSession(s.sessionId);
+				return;
+			}
 			if (!ok) s.outbacklog += buf.byteLength;
 			if (s.outbacklog > BACKPRESSURE_LIMIT_BYTES) {
 				fail(s.sessionId, "TUNNEL_BACKPRESSURE_LIMIT");
@@ -158,13 +167,20 @@ function createTunnelBridge(deps: TunnelBridgeDeps): TunnelBridge {
 		tcp.on("data", (chunk) => {
 			if (s.closed || s.paused) return;
 			const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+			console.log(`[cbr] tcp→dc ${buf.length}B asc=${JSON.stringify(buf.toString().replace(/[^\x20-\x7e]/g, ".").slice(0, 12))}`);
 			if (channel.bufferedAmount >= HIGH_WATER_BYTES) {
 				s.paused = true;
 				tcp.pause();
 				return;
 			}
-			for (let off = 0; off < buf.length; off += CHUNK_BYTES) {
-				channel.send(buf.subarray(off, off + CHUNK_BYTES) as Uint8Array);
+			// 对端 DataChannel 可能在数据流传输中关闭（浏览器断开 / 会话被回收）；
+			// send() 在已关闭通道上会同步抛错 → 捕获并清理，避免拖垮整个 Client 进程。
+			try {
+				for (let off = 0; off < buf.length; off += CHUNK_BYTES) {
+					channel.send(buf.subarray(off, off + CHUNK_BYTES) as Uint8Array);
+				}
+			} catch {
+				closeSession(s.sessionId);
 			}
 		});
 		tcp.on("drain", () => {
@@ -172,9 +188,29 @@ function createTunnelBridge(deps: TunnelBridgeDeps): TunnelBridge {
 		});
 		tcp.on("error", (err) => {
 			const code = err?.code === "ECONNREFUSED" ? "TUNNEL_TARGET_REFUSED" : "TUNNEL_TCP_ERROR";
-			fail(s.sessionId, code);
+			targetTerminated(s, code);
 		});
-		tcp.on("close", () => closeSession(s.sessionId));
+		tcp.on("close", () => targetTerminated(s));
+	}
+
+	function closeTarget(s: Session): void {
+		try {
+			s.tcp?.end();
+			s.tcp?.destroy();
+		} catch {
+			// 忽略
+		}
+	}
+
+	// 目标 TCP 终止（被拒绝 / 报错 / 目标主动关闭 / 回压）：
+	// 只上报权威状态 + 拆目标 TCP；WebRTC 通道保留，由 Server 的 TUNNEL_CLOSE 统一关闭，
+	// 确保 Browser 先拿到具体错误码（TUNNEL_STATE）再感知到通道拆除（否则快速失败端口时会竞态）。
+	function targetTerminated(s: Session, code?: string): void {
+		if (s.closed || s.terminal) return;
+		s.terminal = true;
+		if (code) emitState(s.sessionId, "failed", code);
+		else emitState(s.sessionId, "closed");
+		closeTarget(s);
 	}
 
 	function closeSession(sessionId: string): void {
@@ -191,15 +227,11 @@ function createTunnelBridge(deps: TunnelBridgeDeps): TunnelBridge {
 		} catch {
 			// 忽略
 		}
-		try {
-			s.tcp?.end();
-			s.tcp?.destroy();
-		} catch {
-			// 忽略
-		}
+		closeTarget(s);
 		sessions.delete(sessionId);
 	}
 
+	// WebRTC 数据通道层面故障（通道自身错误）：整体拆除会话。
 	function fail(sessionId: string, code: string): void {
 		emitState(sessionId, "failed", code);
 		closeSession(sessionId);
@@ -227,6 +259,7 @@ function createTunnelBridge(deps: TunnelBridgeDeps): TunnelBridge {
 				paused: false,
 				outbacklog: 0,
 				closed: false,
+				terminal: false,
 			};
 			sessions.set(p.sessionId, s);
 			peer.onicecandidate = (e) => {

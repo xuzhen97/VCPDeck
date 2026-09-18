@@ -98,6 +98,8 @@
 	.vcpdeck-sidebar-collapsed .vcpdeck-sidebar-label { @apply pointer-events-none inline-block max-w-0 opacity-0; }
 	.vcpdeck-sidebar-mobile-open.vcpdeck-sidebar-collapsed .vcpdeck-sidebar-label { @apply pointer-events-auto max-w-none opacity-100; }
 	.vcpdeck-panel { @apply border border-border/75 bg-card/70 shadow-xl backdrop-blur-2xl; }
+	/* 远程桌面容器进入浏览器全屏时铺满视口（noVNC 内部 _screen 为 100%×100%，随此自适应） */
+	.desktop-canvas:fullscreen { height: 100%; width: 100%; border: none; border-radius: 0; background: #000; }
 	.vcpdeck-nav-link { @apply flex min-h-11 items-center gap-3 rounded-lg border border-transparent px-3 text-sm font-medium text-muted-foreground transition; }
 	.vcpdeck-nav-link:hover { @apply bg-secondary/70 text-foreground; }
 	.vcpdeck-nav-link.active { @apply border-primary/60 bg-primary/10 text-foreground; box-shadow: inset 3px 0 0 var(--primary); }

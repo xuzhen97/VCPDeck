@@ -26,6 +26,7 @@ import { JobsPage } from "@/pages/jobs-page";
 import { PiPanel } from "@/pages/pi-panel";
 import { TerminalPanel } from "@/pages/terminal-panel";
 import { TunnelPanel } from "@/pages/tunnel-panel";
+import { DesktopPanel } from "@/pages/desktop-panel";
 
 export function MachineWorkspace() {
 	const sdk = useSdk();
@@ -243,6 +244,7 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				{tab === "pi" && <PiPanel client={client} />}
 				{tab === "terminal" && <TerminalPanel clientId={client.clientId} />}
 				{tab === "tunnel" && <TunnelPanel client={client} />}
+				{tab === "desktop" && <DesktopPanel client={client} />}
 				{![
 					"overview",
 					"execute",
@@ -252,6 +254,7 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 					"pi",
 					"terminal",
 					"tunnel",
+					"desktop",
 				].includes(tab) && (
 					<Card>
 						<CardContent className="pt-6 text-sm text-muted-foreground">

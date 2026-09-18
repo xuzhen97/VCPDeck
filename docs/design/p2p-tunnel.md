@@ -1,6 +1,6 @@
 # VCPDeck P2P 隧道设计
 
-> 状态：Current｜维护责任：网络/Client 维护者｜最后核验：2026-09-11｜适用版本：当前 `main`
+> 状态：Current｜维护责任：网络/Client 维护者｜最后核验：2026-09-17｜适用版本：当前 `main`
 >
 > 事实来源：`packages/shared/src/tunnel.ts`、`packages/server/src/tunnel/`、`packages/server/src/events/app.gateway.ts`、`packages/server/src/events/client.gateway.ts`、`packages/client/src/tunnel/`、`packages/frontend/src/tunnel/`、`scripts/install-coturn.sh`、`scripts/pack-release.ts`
 
@@ -10,14 +10,16 @@
 
 当前提供：
 - 机器工作区「隧道」Tab：对目标 Client 本机 `127.0.0.1:<port>` 上运行的 HTTP 服务发起一次 GET 探测，显示状态行、正文与 `direct`/`relay` 路径。
+- 机器工作区「远程桌面」Tab：通过同一条 P2P 隧道回环到目标机 `127.0.0.1:5900`，用 noVNC 的 `RFB` 直接接收已打开的 `RTCDataChannel`，把目标机 VNC 画面渲染进浏览器（见第 3 节）。
 - 设置「网络」页：配置 STUN/TURN URL 与 realm，显示 TURN 密钥就绪状态（不采集 secret）。
 - coturn 一键安装脚本 `scripts/install-coturn.sh`（Debian/Ubuntu 与 CentOS/RHEL/Rocky/AlmaLinux）。
 - 发布包内置 `node-datachannel` 与双平台预编译 native 包，随包分发 `install-coturn.sh`。
 
 非目标（当前阶段）：
-- 不安装/管理 VNC、noVNC 或远程桌面，不新增远程桌面管理页。
+- 不安装、不启动、不托管 VNC 服务端生命周期。VNC 服务端由运维经既有 Job/exec 能力在目标机自行安装，且必须只监听 `127.0.0.1`（VNC 自身密码不作为安全边界）。
 - 不提供面向任意远程主机或局域网扫描的通用 TCP 代理；Client 固定只连 `127.0.0.1`。
 - 不自研压缩、分片或传输协议；数据面复用 WebRTC `RTCDataChannel` 与 `node-datachannel`。
+- 不做多屏、剪贴板同步、文件传输、音频、录制。
 
 ## 2. 控制面与数据面
 
@@ -57,6 +59,7 @@
 - 入站 `onmessage` 写 TCP；`write` 返回 false 时累计回压，超 1 MiB 关闭（`TUNNEL_BACKPRESSURE_LIMIT`，不丢包、不静默吞）。
 - 出站 `data` 切分为最多 16 KiB 二进制消息；`bufferedAmount ≥ 1 MiB` 暂停读取，`onbufferedamountlow`（阈值 256 KiB）恢复。
 - 目标拒绝连接报 `TUNNEL_TARGET_REFUSED`；Client native 后端加载失败报 `P2P_NATIVE_BACKEND_UNAVAILABLE` 且不上报能力。
+- **目标终止的拆除顺序**：目标 TCP 终止（被拒绝 / 报错 / 目标主动关闭 / 回压超限）只上报权威 `TUNNEL_STATE` 并拆目标 TCP，**WebRTC 通道保留**，由 Server 的 `TUNNEL_CLOSE` 统一关闭；仅当 WebRTC 通道自身出错或收到 `TUNNEL_CLOSE` / 进程关闭时才整体拆 `peer`+`channel`。这样 Browser 必先收到具体错误码（如 `TUNNEL_TARGET_REFUSED`）再感知通道拆除，避免快速失败端口时本地 `onerror` 抢先把错误降级成通用 `TUNNEL_CLOSED`（同机回环下最易复现）。
 
 ## 7. native 后端（node-datachannel）
 
@@ -78,8 +81,10 @@
 ## 9. 前端入口与错误映射
 
 - 机器「隧道」Tab（`tunnel-panel.tsx`）：目标端口 + 路径 + 强制中继开关，一次点击只允许一个活动请求；结果只进文本/`<pre>`，不注入 DOM HTML。
+- 机器「远程桌面」Tab（`desktop-panel.tsx`）：目标端口（默认 5900）+ 只读开关；一次点击建立一条会话，固定顺序 `create` → `openBrowserTunnel` → `createVncSession`，断开 / 卸载 / 切 Tab 都按 `rfb.disconnect()` → `tunnel.close()` → `tunnels.remove()` 固定顺序清理（幂等）。noVNC 画面渲染进常驻画布容器；凭据经 `credentialsrequired` 事件弹窗交互（密码只在内存，不落 localStorage）。
+- VNC 会话适配（`vnc-session.ts`）：把已打开的 `RTCDataChannel` 交给 noVNC `RFB`（默认动态 `import("@novnc/novnc")`，构造即开始 RFB 握手）；noVNC 接管 channel 的 `send/on*` 事件，故本模块创建后不再持有这些 handler，隧道清理由面板按固定顺序完成。
 - 设置「网络」（`tunnel-settings-panel.tsx`）：URL/realm 表单 + secret 就绪状态芯片。
-- 错误映射到稳定中文文案（离线、目标拒绝、回压超限、建立超时、会话过期等），不回显 Server 错误 details 或 secret。
+- 错误映射到稳定中文文案（`tunnel/errors.ts`：隧道通用文案 + VNC 认证失败 / 断开）；`openBrowserTunnel` 在打开后把 `TUNNEL_STATE` 的 `code` 暴露为只读 `failureCode`，供面板取具体原因（如 5900 无监听）。不回显 Server 错误 details、SDP、凭据或 secret。
 
 ## 10. 错误码与清理
 
@@ -89,17 +94,19 @@
 
 - 协议版本 `P2P_TUNNEL_PROTOCOL_VERSION = 1`；Client 上报能力版本，不一致或无能力时不执行数据面，UI 显示「该 Client 不支持 P2P 隧道协议 v1」。
 - 旧 Client 不上报 `p2pTunnel` 能力即视为 unsupported；SDK `tunnels` 域为新增只读 API，不改变既有构造/请求行为。
+- 远程桌面本期为**纯前端**能力，Shared / Server / Client / SDK 无协议改动：复用既有 `TunnelSessionCreateRequest`（`targetPort` 已是 1–65535，5900 即可用）。前端侧增量：`browser-tunnel.ts` 新增只读 `failureCode`、`relayOnly` 改可选；Frontend 新增 `@novnc/novnc` 依赖并因 noVNC 1.7 的顶层 await 把 Vite `build.target` 提到 `es2022`（与 ADR-0011 modern evergreen 基线一致）；noVNC 经动态 `import` 独立分包，仅打开远程桌面时加载。
 
 ## 12. 测试门禁
 
-- Shared parser/DTO 单测、Server TunnelConfig/Session/Controller/Gateway 单测、Client register/bridge 单测、SDK 只读域单测、Frontend runtime/设置/机器面板单测、`scripts/install-coturn.test.sh`（纯函数）、`scripts/pack-release-deps.test.ts`（native 平台裁剪）。
+- Shared parser/DTO 单测、Server TunnelConfig/Session/Controller/Gateway 单测、Client register/bridge 单测、SDK 只读域单测、Frontend runtime/设置/机器面板/远程桌面单测（`desktop-panel.test.tsx`、`vnc-session.test.ts`）、`browser-tunnel.test.ts`（含打开后失败原因码）、`scripts/install-coturn.test.sh`（纯函数）、`scripts/pack-release-deps.test.ts`（native 平台裁剪）。
 - 真实网络验收：普通模式 `direct`、强制中继 `relay`、停 coturn 后强制中继失败并恢复；日志与 SQLite 不得出现 secret、TURN password、SDP、candidate 或 HTTP 正文。
 - 本地已验证：① 直连端到端（真实 Server + native Client + 本地 HTTP 目标，DataChannel 直连命中、目标关闭后 `TUNNEL_TARGET_REFUSED`）；② **真实 coturn（Vagrant/VirtualBox Ubuntu VM，`use-auth-secret` + `no-auth`）凭据 A/B** —— 空凭据被拒，Server 签发的 `expiry:sessionId` HMAC-SHA1 凭据被接受并分配 relay 端点，确认与 coturn `use-auth-secret` 完全兼容。③ **真实浏览器（Playwright 驱动的系统 Chrome 153，headful、无代理）矩阵测试**：
   - **P2P 直连**：两端 `iceConnectionState=connected`、DataChannel `PING→PONG` 往返成功——浏览器侧隧道数据通路可用。
   - **强制 relay（`iceTransportPolicy: relay`）**：ICE 进入 `gathering` 但无候选产生、连接停在 `new`；测试期间 **coturn 侧收不到来自浏览器（源 `192.168.56.1`）的任何 TURN 流量**（而 node 原生 UDP 直连 coturn 有响应、STUN 有回包）——即该 Chrome 在此 VirtualBox host-only 网络下未向 coturn 发出 TURN Allocate，属**浏览器↔VM 虚拟网络**的互操作限制，非 coturn/凭据/产品缺陷（凭据已被 coturn 自带 `turnutils_uclient` 实证可被接受并分配 relay 端点）。
   - **换网络复测**：把 coturn 同时绑到 host-only（`192.168.56.10`）与 Vagrant NAT（`10.0.2.15`）两张卡、并把浏览器 TURN URL 切到 NAT 卡后，强制 relay **仍 0 条 TURN 流量**、连接仍停 `new`——证明根因不是「够不到 coturn」，而是该 Windows 宿主 + VirtualBox 虚拟网络（host-only/NAT 的 3478/UDP）下 **Chrome WebRTC 的 TURN 客户端未触发 Allocate**（STUN 可达、P2P host 候选可达，唯 TURN 不出）。
   - 结论：产品侧仅需标准 `RTCPeerConnection` + `iceTransportPolicy: relay`（所有真实浏览器支持），配合已验证可用的 coturn 凭据即可走中继。**在本机单台 VM 环境无法端到端复现浏览器→coturn→Client 的字节流动**；要真实验证中继，需浏览器与 Client 分处两个不同网络（两台物理机/云 VM），且 Chrome 处于可正常出站 UDP 的环境。各组件均已独立验证可用，逻辑闭合。
-- 后续 noVNC：建立结果为原生 `RTCDataChannel`（具备 `send/close/binaryType/onerror/onmessage/onopen/protocol/readyState`），可直接作为 `new RFB(target, rtcDataChannel)` 的通道；本期不安装 noVNC、不启动 VNC。
+- 远程桌面（noVNC）：已落地——浏览器隧道建立结果为原生 `RTCDataChannel`（具备 `send/close/binaryType/onerror/onmessage/onopen/protocol/readyState`，已验证 noVNC `Websock.attach` 可接受），直接作为 `new RFB(target, rtcDataChannel)` 通道。VNC 服务端由运维经既有 Job/exec 安装且仅监听 `127.0.0.1`。
+- 远程桌面真实网络验收（手动，非自动化）：① P2P 直连能看画面能操作；② 强制 TURN 中继同样可用；③ 目标机未启动 VNC 时报「目标端口拒绝连接」并回收会话；④ VNC 配密码时弹窗、输错报认证失败、取消即清理；⑤ 断开后重连仍可成功（无 Session 泄漏）。**已知风险**：RFB 是长连接、双向、服务端主动推帧，与 HTTP 探测「发一次 GET 等关闭」不同，`tunnel-bridge.ts` 的 16 KiB 分片与 1 MiB 回压阈值首次被持续压力覆盖；若卡顿/断流优先怀疑该路径阈值。
 
 ## 13. 相关文档
 

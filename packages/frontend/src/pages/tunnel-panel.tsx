@@ -6,6 +6,7 @@ import {
 import { useSdk } from "@/api/context";
 import { createAppSocket } from "@/terminal/terminal-socket";
 import { openBrowserTunnel, type BrowserTunnel, type TunnelPath } from "@/tunnel/browser-tunnel";
+import { friendlyTunnelError } from "@/tunnel/errors";
 import { probeHttp, type HttpProbeResult, type ProbeChannel } from "@/tunnel/http-probe";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -111,6 +112,7 @@ export function TunnelPanel({ client }: { client: ClientInfo }) {
 			</CardHeader>
 			<CardContent className="space-y-4">
 				<form
+					data-testid="tunnel-form"
 					onSubmit={submit}
 					className="flex flex-wrap items-end gap-3"
 				>
@@ -176,23 +178,4 @@ export function TunnelPanel({ client }: { client: ClientInfo }) {
 			</CardContent>
 		</Card>
 	);
-}
-
-function friendlyTunnelError(code?: string): string {
-	switch (code) {
-		case "TUNNEL_CLIENT_UNAVAILABLE":
-			return "目标机器当前离线";
-		case "TUNNEL_CLIENT_UNSUPPORTED":
-			return "该 Client 不支持 P2P 隧道协议 v1";
-		case "TUNNEL_TARGET_REFUSED":
-			return "目标端口拒绝连接（服务可能未监听）";
-		case "TUNNEL_BACKPRESSURE_LIMIT":
-			return "隧道数据回压超限，已关闭";
-		case "TUNNEL_OPEN_TIMEOUT":
-			return "连接建立超时（可能无法打洞或中继不可用）";
-		case "TUNNEL_SESSION_EXPIRED":
-			return "会话已过期，请重试";
-		default:
-			return "隧道操作失败，请重试";
-	}
 }

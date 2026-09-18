@@ -5,6 +5,7 @@ import {
 	FolderOpen,
 	History,
 	LayoutDashboard,
+	Monitor,
 	Network,
 	SquareTerminal,
 	TerminalSquare,
@@ -62,6 +63,7 @@ const tabIcons: Record<string, LucideIcon> = {
 	pi: BrainCircuit,
 	terminal: SquareTerminal,
 	tunnel: Waypoints,
+	desktop: Monitor,
 };
 
 export function MachinesPage() {

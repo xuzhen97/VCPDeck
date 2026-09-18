@@ -157,7 +157,7 @@ describe("openBrowserTunnel", () => {
 		expect(peer.close).toHaveBeenCalled();
 	});
 
-	it("Server 上报 failed 状态时清理并拒绝 open", async () => {
+	it("Server 上报 failed 状态时以该 code 清理并拒绝 open", async () => {
 		const { socket, peer, opts } = setup();
 		const opening = openBrowserTunnel(opts);
 		socket.emitServer(Events.TUNNEL_STATE, {
@@ -165,7 +165,7 @@ describe("openBrowserTunnel", () => {
 			state: "failed",
 			code: "TUNNEL_TARGET_REFUSED",
 		});
-		await expect(opening).rejects.toMatchObject({ code: "TUNNEL_CLOSED" });
+		await expect(opening).rejects.toMatchObject({ code: "TUNNEL_TARGET_REFUSED" });
 		expect(peer.close).toHaveBeenCalled();
 	});
 

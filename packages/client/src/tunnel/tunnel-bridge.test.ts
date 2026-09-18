@@ -179,6 +179,21 @@ describe("TunnelBridge 回环 TCP 数据泵", () => {
 		expect(peer.close).toHaveBeenCalled();
 	});
 
+	it("DataChannel 在数据流传输中关闭：send 抛错被捕获，清理 Session 不崩溃", () => {
+		const { peer, channel, tcp, bridge } = setup();
+		bridge.receivePrepare({ sessionId: "tn_1", targetPort: 3000, iceServers: [] });
+		peer.emitDataChannel(channel as unknown as TunnelDataChannel);
+		channel.emitOpen();
+		// 模拟浏览器断开：对端 DataChannel 关闭，send() 同步抛错（旧代码会拖垮整个 Client 进程）
+		(channel as unknown as { send: (d: Uint8Array) => void }).send = () => {
+			throw new Error("DataChannel is closed");
+		};
+		expect(() => tcp.emitData(Buffer.alloc(16 * 1024))).not.toThrow();
+		expect(tcp.end).toHaveBeenCalled();
+		expect(tcp.destroy).toHaveBeenCalled();
+		expect(peer.close).toHaveBeenCalled();
+	});
+
 	it("candidate 在 remote description 前排队，offer 到达后补发", async () => {
 		const { peer, bridge } = setup();
 		bridge.receivePrepare({ sessionId: "tn_1", targetPort: 3000, iceServers: [] });
@@ -211,7 +226,10 @@ describe("TunnelBridge 回环 TCP 数据泵", () => {
 			Events.TUNNEL_STATE,
 			expect.objectContaining({ state: "failed", code: "TUNNEL_TARGET_REFUSED" }),
 		);
-		expect(peer.close).toHaveBeenCalled();
+		// 目标终止：拆目标 TCP，但保留 WebRTC 通道——等 Server 的 TUNNEL_CLOSE 再统一关闭，
+		// 这样 Browser 会先收到具体错误码（TUNNEL_STATE）再感知到通道拆除。
+		expect(tcp.end).toHaveBeenCalled();
+		expect(peer.close).not.toHaveBeenCalled();
 	});
 
 	it("native 后端不可用时上报 P2P_NATIVE_BACKEND_UNAVAILABLE 且不建数据面", () => {
