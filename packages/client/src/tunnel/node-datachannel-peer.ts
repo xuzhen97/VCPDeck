@@ -19,8 +19,22 @@ type NativePolyfill = {
 	RTCPeerConnection: new (config?: unknown) => NativePeerConnection;
 };
 
+/** node-datachannel 原生 ICE server 结构；凭据为独立字段，不经过 URL 拼接。 */
+export interface NativeIceServer {
+	hostname: string;
+	port: number;
+	username?: string;
+	password?: string;
+	relayType?: "TurnUdp" | "TurnTcp" | "TurnTls";
+}
+
+type NativeModule = {
+	PeerConnection: new (name: string, config: { iceServers: NativeIceServer[] }) => unknown;
+};
+
 // 用变量名引用 native 模块：tsc 不尝试解析其 d.ts（skipLibCheck 下也稳妥），运行时按字面量加载。
 const NATIVE_POLYFILL_SPEC = "node-datachannel/polyfill";
+const NATIVE_MODULE_SPEC = "node-datachannel";
 
 let cached: NativePolyfill | null = null;
 let loadPromise: Promise<NativePolyfill | null> | null = null;
@@ -47,13 +61,136 @@ function currentPolyfill(): NativePolyfill | null {
 	return cached;
 }
 
+let cachedNative: NativeModule | null = null;
+let nativeLoadPromise: Promise<NativeModule | null> | null = null;
+
+/** 延迟加载原生模块（用于自行构造 PeerConnection）；失败返回 null（可重试）。 */
+function loadNative(): Promise<NativeModule | null> {
+	if (cachedNative) return Promise.resolve(cachedNative);
+	if (!nativeLoadPromise) {
+		nativeLoadPromise = import(NATIVE_MODULE_SPEC as string)
+			.then((mod: unknown) => {
+				const m = mod as { PeerConnection?: unknown };
+				if (typeof m.PeerConnection === "function") {
+					cachedNative = { PeerConnection: m.PeerConnection as never };
+					return cachedNative;
+				}
+				return null;
+			})
+			.catch(() => null);
+	}
+	return nativeLoadPromise;
+}
+
+function currentNative(): NativeModule | null {
+	return cachedNative;
+}
+
+/** 解析后的 ICE URL；scheme 已小写，transport 来自 `?transport=` 查询参数。 */
+interface ParsedIceUrl {
+	scheme: "stun" | "stuns" | "turn" | "turns";
+	hostname: string;
+	port: number;
+	transport: string | null;
+}
+
+const ICE_SCHEMES = ["stun", "stuns", "turn", "turns"] as const;
+
+/**
+ * 解析 `stun:host:port` / `turn:host:port?transport=udp|tcp` 形态的 ICE URL。
+ * 形状不合法或无法解析时返回 null（不做宽松猜测）。
+ */
+function parseIceUrl(url: string): ParsedIceUrl | null {
+	const sep = url.indexOf(":");
+	if (sep <= 0) return null;
+	const scheme = url.slice(0, sep).toLowerCase();
+	if (!(ICE_SCHEMES as readonly string[]).includes(scheme)) return null;
+	const rest = url.slice(sep + 1);
+	const queryAt = rest.indexOf("?");
+	const authority = queryAt >= 0 ? rest.slice(0, queryAt) : rest;
+	const query = queryAt >= 0 ? rest.slice(queryAt + 1) : "";
+
+	let hostname = "";
+	let portText = "";
+	if (authority.startsWith("[")) {
+		// IPv6 字面量：[::1]:3478
+		const end = authority.indexOf("]");
+		if (end < 0) return null;
+		hostname = authority.slice(1, end);
+		const after = authority.slice(end + 1);
+		if (!after.startsWith(":")) return null;
+		portText = after.slice(1);
+	} else {
+		const lastColon = authority.lastIndexOf(":");
+		if (lastColon <= 0) return null;
+		hostname = authority.slice(0, lastColon);
+		portText = authority.slice(lastColon + 1);
+	}
+	if (hostname.length === 0) return null;
+	if (!/^\d+$/.test(portText)) return null;
+	const port = Number(portText);
+	if (port < 1 || port > 65535) return null;
+
+	let transport: string | null = null;
+	for (const part of query.split("&")) {
+		const eq = part.indexOf("=");
+		if (eq <= 0) continue;
+		if (part.slice(0, eq).toLowerCase() === "transport") {
+			transport = part.slice(eq + 1).toLowerCase();
+		}
+	}
+	return { scheme: scheme as ParsedIceUrl["scheme"], hostname, port, transport };
+}
+
+/** `turns` 走 TLS；`turn` 默认 UDP，`?transport=tcp` 走 TCP。 */
+function relayTypeOf(
+	scheme: ParsedIceUrl["scheme"],
+	transport: string | null,
+): NativeIceServer["relayType"] {
+	if (scheme === "turns") return "TurnTls";
+	return transport === "tcp" ? "TurnTcp" : "TurnUdp";
+}
+
+/**
+ * 把 shared 的 ICE server 转成 node-datachannel 原生结构。
+ *
+ * 不能交给 `node-datachannel/polyfill` 自行转换：它把凭据拼成
+ * `turn:<username>:<credential>@host:port` 的 URL，而 coturn REST 的用户名本身含冒号
+ * （`<expiry>:<sessionId>`），libdatachannel 解析 userinfo 时在第一个冒号处切开，导致上报
+ * 给 TURN 的用户名被截断，MESSAGE-INTEGRITY 校验失败（401，客户端拿不到 relay 候选）。
+ * 结构化字段不经过 URL 解析，用户名原样下发。
+ */
+export function toNativeIceServers(iceServers: TunnelIceServer[]): NativeIceServer[] {
+	const out: NativeIceServer[] = [];
+	for (const server of iceServers) {
+		for (const url of server.urls) {
+			const parsed = parseIceUrl(url);
+			if (!parsed) continue;
+			if (parsed.scheme === "stun" || parsed.scheme === "stuns") {
+				out.push({ hostname: parsed.hostname, port: parsed.port });
+				continue;
+			}
+			// TURN 必须有凭据，缺凭据不下发（不猜测，也不匿名连中继）。
+			if (!server.username || !server.credential) continue;
+			out.push({
+				hostname: parsed.hostname,
+				port: parsed.port,
+				username: server.username,
+				password: server.credential,
+				relayType: relayTypeOf(parsed.scheme, parsed.transport),
+			});
+		}
+	}
+	return out;
+}
+
 /**
  * 探测 P2P native 后端可用性（加载失败 → available:false + 稳定 code）。
  * @returns 供 register 上报的能力摘要；仅含脱敏字段。
  */
 export async function probeP2pBackend(): Promise<P2pTunnelCapabilityStatus> {
-	const ok = await loadPolyfill();
-	if (ok) {
+	const [polyfill, native] = await Promise.all([loadPolyfill(), loadNative()]);
+	if (polyfill && native) {
 		return { available: true, protocolVersion: P2P_TUNNEL_PROTOCOL_VERSION };
 	}
 	return {
@@ -69,10 +206,15 @@ export async function probeP2pBackend(): Promise<P2pTunnelCapabilityStatus> {
  */
 export function createNodeDataChannelPeer(iceServers: TunnelIceServer[]): TunnelPeer | null {
 	const polyfill = currentPolyfill();
-	if (!polyfill) return null;
+	const native = currentNative();
+	if (!polyfill || !native) return null;
 
-	// native 构造：iceServers 与 shared TunnelIceServer 结构一致（urls/username/credential）。
-	const pc = new polyfill.RTCPeerConnection({ iceServers });
+	// 自行构造原生 PeerConnection 并以 peerConnection 注入 polyfill：绕开 polyfill 的 URL 拼接
+	// （见 toNativeIceServers），同时保留 polyfill 的 WebRTC 形状 API 与事件转发。
+	const nativePeer = new native.PeerConnection(`vcpdeck-${Math.random().toString(36).slice(2, 9)}`, {
+		iceServers: toNativeIceServers(iceServers),
+	});
+	const pc = new polyfill.RTCPeerConnection({ peerConnection: nativePeer, iceServers });
 
 	const peer: TunnelPeer = {
 		setRemoteDescription: (d) => pc.setRemoteDescription(d as never),

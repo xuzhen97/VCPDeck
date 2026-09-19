@@ -12,6 +12,8 @@
 
 - **coturn 一键安装脚本产出的 TURN 配置无法被 coturn 采纳，所有 TURN 中继分配恒返回 401**：`static-auth-secret-file` 在 coturn 4.6.x 中不存在（只有 `--static-auth-secret`），写进 `/etc/turnserver.conf` 会被判为 `Bad configuration format`，coturn 启动时拿不到 shared secret；同时 `generate_secret()` 直接调用 `base64`（默认每 76 列换行），88 字符 secret 被写成两行，使 coturn 与 Server 的 HMAC key 不一致。现在配置只保留 `use-auth-secret=yes`，secret 改由 systemd drop-in 在启动时以 `--static-auth-secret="$(cat /etc/vcpdeck/turn-secret)"` 注入（保持单一来源，避免轮换漂移）；`ensure_secret()` 会把历史多行 secret 归一为单行。生产已实测：coturn 4.6.1 `ALLOCATE` 成功并返回 relay 端口，浏览器强制 relay 时拿到 `typ relay` 候选并连接成功（面板显示「TURN 中继」）。
 
+- **客户端原生 WebRTC 后端向 TURN 上报的用户名被截断，导致客户端自身拿不到 relay 候选**：`node-datachannel/polyfill` 会把凭据拼成 `turn:<username>:<credential>@host:port` 的 URL，而 coturn REST 的用户名本身含冒号（`<expiry>:<sessionId>`），libdatachannel 解析 userinfo 时在第一个冒号处切开 → 上报的用户名只剩时间戳 → `MESSAGE-INTEGRITY` 校验失败（401）。现改为自行构造原生 `PeerConnection`（结构化 `hostname/port/username/password/relayType`，凭据不经过 URL）再以 `peerConnection` 注入 polyfill，保留原有 WebRTC 形状 API 与事件转发。实测客户端侧 relay 候选由 0 个恢复为 1 个，目标机处于对称 NAT 后、需要双侧中继的场景不再降级失败。
+
 ## [0.9.2] - 2026-09-19
 
 ### Fixed
