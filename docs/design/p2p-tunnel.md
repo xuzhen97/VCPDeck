@@ -1,6 +1,6 @@
 # VCPDeck P2P 隧道设计
 
-> 状态：Current｜维护责任：网络/Client 维护者｜最后核验：2026-09-17｜适用版本：当前 `main`
+> 状态：Current｜维护责任：网络/Client 维护者｜最后核验：2026-09-19｜适用版本：当前 `main`
 >
 > 事实来源：`packages/shared/src/tunnel.ts`、`packages/server/src/tunnel/`、`packages/server/src/events/app.gateway.ts`、`packages/server/src/events/client.gateway.ts`、`packages/client/src/tunnel/`、`packages/frontend/src/tunnel/`、`scripts/install-coturn.sh`、`scripts/pack-release.ts`
 
