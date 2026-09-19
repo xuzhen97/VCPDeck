@@ -211,16 +211,19 @@ export async function openBrowserTunnel(options: OpenBrowserTunnelOptions): Prom
 	// DataChannel open / error
 	// open 成功不摘除权威监听：通道建立后目标 TCP 仍可能失效，需保留 TUNNEL_STATE/TUNNEL_CLOSE
 	// 以便拿到具体错误码（否则快速失败端口时会在 onopen 后丢失 Server 上报的 code）。
-	channel.onopen = () => {
+	// 用 addEventListener 而非 onopen/onerror 属性：消费者（noVNC 的 Websock.attach）会直接赋值
+	// channel.onopen/onerror（见 noVNC core/websock.js），若隧道也用属性会被覆盖 → open 永不兑现
+	// → 15s 后误触 TUNNEL_OPEN_TIMEOUT 并拆掉通道。监听器形式可与消费者共存。
+	channel.addEventListener("open", () => {
 		if (!opened && !settled) {
 			opened = true;
 			openResolve();
 		}
-	};
+	});
 	// 本地通道错误/断开：只拆传输通道，不判定最终错误码——等 Server 权威 TUNNEL_STATE 或 open 超时。
-	channel.onerror = () => {
+	channel.addEventListener("error", () => {
 		finalizeTransport();
-	};
+	});
 	const openTimer = setTimeout(() => {
 		if (!settled) {
 			finalizeTransport();

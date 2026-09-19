@@ -30,6 +30,7 @@ function makeSocket() {
 }
 
 function makeChannel() {
+	const listeners: Record<string, Array<(e?: unknown) => void>> = {};
 	const channel = {
 		onopen: null as (() => void) | null,
 		onerror: null as ((e?: unknown) => void) | null,
@@ -37,11 +38,19 @@ function makeChannel() {
 		onmessage: null as ((e: { data: ArrayBuffer | Uint8Array }) => void) | null,
 		send: vi.fn(),
 		close: vi.fn(),
+		addEventListener(type: string, fn: (e?: unknown) => void) {
+			(listeners[type] ??= []).push(fn);
+		},
+		removeEventListener(type: string, fn: (e?: unknown) => void) {
+			listeners[type] = (listeners[type] ?? []).filter((f) => f !== fn);
+		},
 		emitOpen() {
 			this.onopen?.();
+			for (const fn of listeners.open ?? []) fn();
 		},
 		emitError(e?: unknown) {
 			this.onerror?.(e);
+			for (const fn of listeners.error ?? []) fn(e);
 		},
 	};
 	return channel;
@@ -141,6 +150,21 @@ describe("openBrowserTunnel", () => {
 		expect(seen).toEqual([channel]);
 		expect(resolved).toBe(false);
 
+		channel.emitOpen();
+		await expect(opening).resolves.toMatchObject({ channel });
+	});
+
+	it("消费者覆盖 channel.onopen/onerror 属性后，隧道仍能感知 open（noVNC Websock.attach 会覆盖属性）", async () => {
+		const { channel, opts } = setup();
+		const opening = openBrowserTunnel({
+			...opts,
+			onChannel: (ch) => {
+				// 模拟 noVNC core/websock.js 的 attach()：直接赋值这些事件属性
+				const raw = ch as unknown as { onopen: () => void; onerror: () => void };
+				raw.onopen = () => {};
+				raw.onerror = () => {};
+			},
+		});
 		channel.emitOpen();
 		await expect(opening).resolves.toMatchObject({ channel });
 	});
