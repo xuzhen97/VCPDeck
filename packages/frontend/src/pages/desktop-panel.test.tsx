@@ -13,6 +13,7 @@ vi.mock("@/tunnel/browser-tunnel", () => ({
 }));
 vi.mock("@/tunnel/vnc-session", () => ({
 	createVncSession: vi.fn(),
+	preloadRfb: vi.fn(),
 }));
 vi.mock("@/terminal/terminal-socket", () => ({
 	createAppSocket: vi.fn(() => ({} as never)),
@@ -69,6 +70,18 @@ function makeTunnel() {
 	};
 }
 
+/**
+ * 模拟隧道建立：真实实现会在 DataChannel open 之前同步回调 `onChannel`，
+ * 面板必须在该回调里挂载 noVNC（否则会丢失通道 open 后立即到达的 RFB banner）。
+ * 这里同样先触发 `onChannel` 再 resolve。
+ */
+function mockOpen(tunnel: ReturnType<typeof makeTunnel>) {
+	vi.mocked(openBrowserTunnel).mockImplementation(async (opts) => {
+		opts.onChannel?.(tunnel.channel);
+		return tunnel as never;
+	});
+}
+
 function makeVnc() {
 	return {
 		disconnect: vi.fn(),
@@ -103,6 +116,31 @@ describe("DesktopPanel", () => {
 		expect(create).not.toHaveBeenCalled();
 	});
 
+	it("明文 HTTP（非安全上下文）提示 HTTPS，且不阻断连接", async () => {
+		const prev = Object.getOwnPropertyDescriptor(window, "isSecureContext");
+		Object.defineProperty(window, "isSecureContext", {
+			value: false,
+			configurable: true,
+		});
+		try {
+			const tunnel = makeTunnel();
+			const vnc = makeVnc();
+			mockOpen(tunnel);
+			vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+			const { client: sdkClient, create } = makeSdk();
+			renderPanel(p2pClient, sdkClient);
+			expect(await screen.findByTestId("desktop-insecure-context")).toHaveTextContent(
+				"HTTPS",
+			);
+			// 只是提示：仍可正常发起连接
+			await userEvent.setup().click(screen.getByRole("button", { name: "连接" }));
+			await waitFor(() => expect(create).toHaveBeenCalled());
+		} finally {
+			if (prev) Object.defineProperty(window, "isSecureContext", prev);
+			else Reflect.deleteProperty(window, "isSecureContext");
+		}
+	});
+
 	it("非法端口拒绝连接并报错", async () => {
 		const { client: sdkClient, create } = makeSdk();
 		renderPanel(p2pClient, sdkClient);
@@ -118,11 +156,13 @@ describe("DesktopPanel", () => {
 	it("连接成功：创建 Session、打开隧道、创建 VNC 会话，展示路径芯片并可断开", async () => {
 		const tunnel = makeTunnel();
 		const vnc = makeVnc();
-		vi.mocked(openBrowserTunnel).mockResolvedValue(tunnel as never);
+		mockOpen(tunnel);
 		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
 
 		const { client: sdkClient, remove, create } = makeSdk();
 		const { unmount } = renderPanel(p2pClient, sdkClient);
+		// 安全上下文（jsdom 默认）不显示提示
+		expect(screen.queryByTestId("desktop-insecure-context")).toBeNull();
 
 		const user = userEvent.setup();
 		await user.click(screen.getByRole("button", { name: "连接" }));
@@ -155,7 +195,7 @@ describe("DesktopPanel", () => {
 	it("凭据弹窗提交时把密码交给底层 VNC 会话", async () => {
 		const tunnel = makeTunnel();
 		const vnc = makeVnc();
-		vi.mocked(openBrowserTunnel).mockResolvedValue(tunnel as never);
+		mockOpen(tunnel);
 		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
 
 		const { client: sdkClient } = makeSdk();
@@ -180,7 +220,7 @@ describe("DesktopPanel", () => {
 		const tunnel = makeTunnel();
 		tunnel.failureCode = "TUNNEL_TARGET_REFUSED";
 		const vnc = makeVnc();
-		vi.mocked(openBrowserTunnel).mockResolvedValue(tunnel as never);
+		mockOpen(tunnel);
 		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
 
 		const { client: sdkClient, remove } = makeSdk();
@@ -199,7 +239,7 @@ describe("DesktopPanel", () => {
 	it("连接后全屏按钮把画面容器设为浏览器全屏", async () => {
 		const tunnel = makeTunnel();
 		const vnc = makeVnc();
-		vi.mocked(openBrowserTunnel).mockResolvedValue(tunnel as never);
+		mockOpen(tunnel);
 		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
 		const { client: sdkClient } = makeSdk();
 		renderPanel(p2pClient, sdkClient);
@@ -221,7 +261,7 @@ describe("DesktopPanel", () => {
 	it("全屏控制位于画布容器内，全屏时仍可见可点", async () => {
 		const tunnel = makeTunnel();
 		const vnc = makeVnc();
-		vi.mocked(openBrowserTunnel).mockResolvedValue(tunnel as never);
+		mockOpen(tunnel);
 		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
 		const { client: sdkClient } = makeSdk();
 		renderPanel(p2pClient, sdkClient);
@@ -235,5 +275,29 @@ describe("DesktopPanel", () => {
 		const canvas = screen.getByTestId("desktop-canvas");
 		const fsBtn = await screen.findByRole("button", { name: "全屏" });
 		expect(canvas.contains(fsBtn)).toBe(true);
+	});
+
+	it("noVNC 在隧道 open 之前就挂到通道上（避免丢失 RFB banner）", async () => {
+		const tunnel = makeTunnel();
+		vi.mocked(createVncSession).mockResolvedValue(makeVnc() as never);
+		// 隧道 open 故意挂起：用于断言 noVNC 已在 open 前挂载
+		let releaseOpen!: () => void;
+		const openPromise = new Promise<never>((resolve) => {
+			releaseOpen = () => resolve(undefined as never);
+		});
+		vi.mocked(openBrowserTunnel).mockImplementation((opts) => {
+			opts.onChannel?.(tunnel.channel);
+			return openPromise;
+		});
+
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		await userEvent.setup().click(screen.getByRole("button", { name: "连接" }));
+
+		// open 仍未 resolve，但 noVNC 已带着同一条通道启动
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		expect(vi.mocked(createVncSession).mock.calls[0][1]).toBe(tunnel.channel);
+
+		releaseOpen();
 	});
 });

@@ -29,6 +29,12 @@ export interface OpenBrowserTunnelOptions {
 	createPeer?: (configuration: RTCConfiguration) => RTCPeerConnection;
 	/** open 超时（默认 15s）。 */
 	openTimeoutMs?: number;
+	/**
+	 * 通道创建后、open 之前的同步回调：调用方须在此把消费者（如 noVNC）挂到 channel 上。
+	 * 通道一 open，目标服务端可能立即发送首帧（RFB banner）；若等 open 之后才挂监听，
+	 * 该首帧已到达并被丢弃且无法重放（noVNC 的 Websock.attach 支持尚未 open 的通道）。
+	 */
+	onChannel?: (channel: RTCDataChannel) => void;
 }
 
 const DEFAULT_OPEN_TIMEOUT_MS = 15_000;
@@ -58,6 +64,8 @@ export async function openBrowserTunnel(options: OpenBrowserTunnelOptions): Prom
 		iceTransportPolicy: relayOnly ? "relay" : "all",
 	});
 	const channel = peer.createDataChannel(CHANNEL_LABEL, { ordered: true });
+	// 让调用方在 open 前挂载消费者（noVNC），避免丢失 open 后立即到达的服务端首帧
+	options.onChannel?.(channel);
 
 	let closed = false; // 传输通道（channel/peer）已拆除
 	let settled = false; // open 已 resolve/reject → 摘除 socket 监听

@@ -62,12 +62,36 @@ export interface VncSession {
 	readonly rfb: RfbInstance;
 }
 
+/** noVNC 模块形状（只声明本模块用到的默认导出）。 */
+type RfbModule = {
+	default: new (target: HTMLElement, channel: RTCDataChannel) => RfbInstance;
+};
+
+/** 共享加载 promise：预热后连接时的构造不再受模块加载延迟影响。 */
+let rfbModulePromise: Promise<RfbModule> | null = null;
+
+function loadRfb(): Promise<RfbModule> {
+	rfbModulePromise ??= import("@novnc/novnc") as unknown as Promise<RfbModule>;
+	return rfbModulePromise;
+}
+
+/**
+ * 预加载 noVNC 模块（不建立连接）。
+ *
+ * 远程桌面面板应在挂载时调用：RFB 必须在 DataChannel open 之前挂上监听，
+ * 否则通道一 open、服务端立即发送的 RFB banner 会在模块加载期间被丢弃，
+ * 导致握手永远停在等待版本串。预热把该延迟移出关键路径。
+ */
+export function preloadRfb(): void {
+	void loadRfb();
+}
+
 /** 默认 RFB 构造器：动态加载 noVNC，避免单测环境预加载其浏览器依赖。 */
 async function defaultFactory(
 	container: HTMLElement,
 	channel: RTCDataChannel,
 ): Promise<RfbInstance> {
-	const { default: RFB } = await import("@novnc/novnc");
+	const { default: RFB } = await loadRfb();
 	// noVNC 构造即开始 RFB 握手；实例成员满足 RfbInstance 最小面
 	return new RFB(container, channel) as RfbInstance;
 }

@@ -81,8 +81,9 @@
 ## 9. 前端入口与错误映射
 
 - 机器「隧道」Tab（`tunnel-panel.tsx`）：目标端口 + 路径 + 强制中继开关，一次点击只允许一个活动请求；结果只进文本/`<pre>`，不注入 DOM HTML。
-- 机器「远程桌面」Tab（`desktop-panel.tsx`）：目标端口（默认 5900）+ 只读开关；一次点击建立一条会话，固定顺序 `create` → `openBrowserTunnel` → `createVncSession`，断开 / 卸载 / 切 Tab 都按 `rfb.disconnect()` → `tunnel.close()` → `tunnels.remove()` 固定顺序清理（幂等）。noVNC 画面渲染进常驻画布容器；凭据经 `credentialsrequired` 事件弹窗交互（密码只在内存，不落 localStorage）。
-- VNC 会话适配（`vnc-session.ts`）：把已打开的 `RTCDataChannel` 交给 noVNC `RFB`（默认动态 `import("@novnc/novnc")`，构造即开始 RFB 握手）；noVNC 接管 channel 的 `send/on*` 事件，故本模块创建后不再持有这些 handler，隧道清理由面板按固定顺序完成。
+- 机器「远程桌面」Tab（`desktop-panel.tsx`）：目标端口（默认 5900）+ 只读开关；一次点击建立一条会话：`create` 会话 → `openBrowserTunnel`，并在其 `onChannel` 回调（DataChannel 创建后、open 之前）内立即 `createVncSession` 挂载 noVNC（否则通道 open 后服务端立即发送的 RFB banner 会被丢弃，握手停在等待版本串），断开 / 卸载 / 切 Tab 都按 `rfb.disconnect()` → `tunnel.close()` → `tunnels.remove()` 固定顺序清理（幂等）。noVNC 画面渲染进常驻画布容器；凭据经 `credentialsrequired` 事件弹窗交互（密码只在内存，不落 localStorage）。
+- 安全上下文前提（noVNC 1.7 硬性要求）：浏览器只在安全上下文（HTTPS 或 `localhost`）提供 `crypto.subtle` 与 WebCodecs。明文 HTTP + 非 localhost 入口下 RFB 构造时打印 `noVNC requires a secure context (TLS). Expect crashes!`，**未加密的 VNC 密码认证（DES，纯 JS）与常规 JPEG/Tight/ZRLE 解码仍可用**，但 VeNCrypt/RA2 加密认证、H.264（WebCodecs）与剪贴板 API 不可用。面板在该情况下显示黄条提示（`data-testid="desktop-insecure-context"`）但不阻断连接；根治方式是改用 HTTPS 入口（生产按 [`deployment.md`](../deployment.md) 的 `VCPDECK_COOKIE_SECURE` 要求本就应如此）。
+- VNC 会话适配（`vnc-session.ts`）：把 `RTCDataChannel` 交给 noVNC `RFB`（默认动态 `import("@novnc/novnc")`，构造即开始 RFB 握手；可经 `preloadRfb()` 预热以移出连接关键路径）。该通道**可以尚未 open**：noVNC 的 `Websock.attach` 只挂 `binaryType/onmessage/onopen/onclose/onerror` 并等原生 `onopen`；noVNC 接管 channel 的 `send/on*` 事件，故本模块创建后不再持有这些 handler，隧道清理由面板按固定顺序完成。
 - 设置「网络」（`tunnel-settings-panel.tsx`）：URL/realm 表单 + secret 就绪状态芯片。
 - 错误映射到稳定中文文案（`tunnel/errors.ts`：隧道通用文案 + VNC 认证失败 / 断开）；`openBrowserTunnel` 在打开后把 `TUNNEL_STATE` 的 `code` 暴露为只读 `failureCode`，供面板取具体原因（如 5900 无监听）。不回显 Server 错误 details、SDP、凭据或 secret。
 
@@ -98,7 +99,7 @@
 
 ## 12. 测试门禁
 
-- Shared parser/DTO 单测、Server TunnelConfig/Session/Controller/Gateway 单测、Client register/bridge 单测、SDK 只读域单测、Frontend runtime/设置/机器面板/远程桌面单测（`desktop-panel.test.tsx`、`vnc-session.test.ts`）、`browser-tunnel.test.ts`（含打开后失败原因码）、`scripts/install-coturn.test.sh`（纯函数）、`scripts/pack-release-deps.test.ts`（native 平台裁剪）。
+- Shared parser/DTO 单测、Server TunnelConfig/Session/Controller/Gateway 单测、Client register/bridge 单测、SDK 只读域单测、Frontend runtime/设置/机器面板/远程桌面单测（`desktop-panel.test.tsx` 含非安全上下文提示与「noVNC 在隧道 open 前挂载通道」、`vnc-session.test.ts`）、`browser-tunnel.test.ts`（含打开后失败原因码、`onChannel` 在 open 前同步回调）、`scripts/install-coturn.test.sh`（纯函数）、`scripts/pack-release-deps.test.ts`（native 平台裁剪）。
 - 真实网络验收：普通模式 `direct`、强制中继 `relay`、停 coturn 后强制中继失败并恢复；日志与 SQLite 不得出现 secret、TURN password、SDP、candidate 或 HTTP 正文。
 - 本地已验证：① 直连端到端（真实 Server + native Client + 本地 HTTP 目标，DataChannel 直连命中、目标关闭后 `TUNNEL_TARGET_REFUSED`）；② **真实 coturn（Vagrant/VirtualBox Ubuntu VM，`use-auth-secret` + `no-auth`）凭据 A/B** —— 空凭据被拒，Server 签发的 `expiry:sessionId` HMAC-SHA1 凭据被接受并分配 relay 端点，确认与 coturn `use-auth-secret` 完全兼容。③ **真实浏览器（Playwright 驱动的系统 Chrome 153，headful、无代理）矩阵测试**：
   - **P2P 直连**：两端 `iceConnectionState=connected`、DataChannel `PING→PONG` 往返成功——浏览器侧隧道数据通路可用。

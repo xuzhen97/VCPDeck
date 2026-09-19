@@ -126,6 +126,25 @@ describe("openBrowserTunnel", () => {
 		await expect(opening).resolves.toMatchObject({ channel });
 	});
 
+	it("onChannel 在通道 open 之前同步回调，供消费者提前挂载（避免丢失服务端首帧）", async () => {
+		const { channel, opts } = setup();
+		const seen: unknown[] = [];
+		let resolved = false;
+		const opening = openBrowserTunnel({
+			...opts,
+			onChannel: (ch) => seen.push(ch),
+		}).then((t) => {
+			resolved = true;
+			return t;
+		});
+		// open 尚未触发：回调已同步拿到 channel，且 open promise 未 resolve
+		expect(seen).toEqual([channel]);
+		expect(resolved).toBe(false);
+
+		channel.emitOpen();
+		await expect(opening).resolves.toMatchObject({ channel });
+	});
+
 	it("relayOnly 设置 iceTransportPolicy=relay", () => {
 		const { createPeer, opts } = setup(true);
 		void openBrowserTunnel(opts);

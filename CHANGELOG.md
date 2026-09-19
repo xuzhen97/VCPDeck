@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-19
+
+### Fixed
+
+- **明文 HTTP 入口下远程桌面报 `noVNC requires a secure context (TLS). Expect crashes!`**：noVNC 1.7 在 RFB 构造时硬性检查 `window.isSecureContext`。浏览器只在 HTTPS 或 `localhost` 下提供 `crypto.subtle` 与 WebCodecs，因此经 `http://<IP>:3001` 访问驾驶台时，未加密的 VNC 密码认证与常规解码仍可用，但加密认证（VeNCrypt / RA2）、H.264 解码与剪贴板同步会异常。远程桌面 Tab 现在会在非安全上下文下显示明确提示（不阻断连接）；根治方式是改用 HTTPS 或 localhost 入口，与 [`deployment.md`](./docs/deployment.md) 中生产必须 HTTPS + `VCPDECK_COOKIE_SECURE=true` 的要求一致。
+- **远程桌面连接一直停在「连接中…」+ 黑屏（RFB banner 被丢弃）**：面板原先在 `openBrowserTunnel` 解析（此时 DataChannel 已 open）之后才 `await import("@novnc/novnc")` 并构造 `RFB`；而目标 VNC 服务端在 TCP 一连上就立即发送 RFB banner（实测通道 open 后 1ms 到达），noVNC 挂载约晚 53ms，首帧被丢弃且无法重放，握手永远停在等待版本串。现在 `openBrowserTunnel` 新增 `onChannel` 回调，在通道 **open 之前**把 channel 交给面板挂载 noVNC（noVNC 的 `Websock.attach` 支持尚未 open 的通道），并在远程桌面面板挂载时经 `preloadRfb()` 预热 noVNC 模块，把加载延迟移出连接关键路径。
+
 ## [0.9.0] - 2026-09-18
 
 ### Added

@@ -15,6 +15,7 @@ import { openBrowserTunnel, type BrowserTunnel } from "@/tunnel/browser-tunnel";
 import { friendlyDesktopError } from "@/tunnel/errors";
 import {
 	createVncSession,
+	preloadRfb,
 	type VncCredentialsRequest,
 	type VncSession,
 	type VncState,
@@ -39,7 +40,9 @@ const DEFAULT_PORT = "5900";
 
 /**
  * 机器「远程桌面」Tab：通过已有 P2P 隧道（目标回环 5900）连接目标机 VNC 服务端。
- * 一次点击只允许一个活动会话；固定顺序 create → openBrowserTunnel → createVncSession，
+ * 一次点击只允许一个活动会话；固定顺序 create tunnel session → openBrowserTunnel，
+ * 并在其 onChannel 回调内立即 createVncSession（保证 noVNC 在通道 open 前挂载，
+ * 否则会丢失 open 后服务端立即发送的 RFB banner）；
  * 关闭时按 rfb.disconnect() → tunnel.close() → tunnels.remove() 的固定顺序清理。
  * 卸载 / 断开 / 切 Tab 都走同一条清理链；凭据经 noVNC 的 credentialsrequired 事件交互。
  */
@@ -65,6 +68,12 @@ export function DesktopPanel({ client }: { client: ClientInfo }) {
 		p2p?.available === true &&
 		p2p.protocolVersion === P2P_TUNNEL_PROTOCOL_VERSION;
 
+	// noVNC 需要浏览器安全上下文（HTTPS 或 localhost）。明文 HTTP 下 WebCrypto 与 WebCodecs
+	// 被浏览器禁用：VNC 密码认证与纯 JS 解码仍可用，但加密认证（VeNCrypt / RA2）、H.264 解码
+	// 与剪贴板同步会异常。这里只提示，不阻断连接。
+	const insecureContext =
+		typeof window !== "undefined" && window.isSecureContext === false;
+
 	// 幂等清理：rfb → tunnel → server session。可安全重复调用。
 	// 注意：这里不清 connectedRef —— noVNC 的 "disconnect" 事件是异步触发的，
 	// 若在此清除会导致 handleState 把“正常手动断开”误判为连接失败。
@@ -85,6 +94,8 @@ export function DesktopPanel({ client }: { client: ClientInfo }) {
 	}
 
 	useEffect(() => {
+		// 预热 noVNC：连接时须在通道 open 前完成挂载（见 connect 的 onChannel）
+		preloadRfb();
 		return () => {
 			teardown();
 			setCredReq(null);
@@ -161,33 +172,38 @@ export function DesktopPanel({ client }: { client: ClientInfo }) {
 					targetPort,
 				});
 				sessionRef.current = session;
+				// noVNC 必须在 DataChannel open 之前挂上监听：通道一 open，目标 VNC 服务端
+				// 会立即发送 RFB banner；若等 open 之后再加载/构造 noVNC，首帧已到达并被丢弃，
+				// 握手会永远停在等待版本串（表现为一直「连接中…」+ 黑屏）。
+				let vncPromise: Promise<VncSession> | null = null;
 				const tunnel = await openBrowserTunnel({
 					socket: createAppSocket(),
 					session,
+					onChannel: (channel) => {
+						vncPromise = createVncSession(
+							containerRef.current as HTMLDivElement,
+							channel,
+							{
+								viewOnly,
+								onState: handleState,
+								onCredentials: (req) => setCredReq(req),
+								onSecurityFailure: (reason) => {
+									// 认证失败：给出具体错误并清理
+									const code = "VNC_AUTH_FAILED";
+									const failureCode = tunnelRef.current?.failureCode ?? null;
+									teardown();
+									setCredReq(null);
+									setPhase("failed");
+									setError(
+										friendlyDesktopError(reason ? code : failureCode ?? code),
+									);
+								},
+							},
+						);
+					},
 				});
 				tunnelRef.current = tunnel;
-				await createVncSession(
-					containerRef.current as HTMLDivElement,
-					tunnel.channel,
-					{
-						viewOnly,
-						onState: handleState,
-						onCredentials: (req) => setCredReq(req),
-						onSecurityFailure: (reason) => {
-							// 认证失败：给出具体错误并清理
-							const code = "VNC_AUTH_FAILED";
-							const failureCode = tunnelRef.current?.failureCode ?? null;
-							teardown();
-							setCredReq(null);
-							setPhase("failed");
-							setError(
-								friendlyDesktopError(reason ? code : failureCode ?? code),
-							);
-						},
-					},
-				).then((vnc) => {
-					vncRef.current = vnc;
-				});
+				if (vncPromise) vncRef.current = await vncPromise;
 			} catch (err) {
 				// 隧道建立阶段失败（含 attach 被拒、目标无监听）
 				const code = (err as { code?: string })?.code;
@@ -297,6 +313,17 @@ export function DesktopPanel({ client }: { client: ClientInfo }) {
 						{connected ? "断开" : connecting ? "连接中…" : "连接"}
 					</Button>
 				</form>
+
+				{insecureContext && (
+					<p
+						data-testid="desktop-insecure-context"
+						className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-300"
+					>
+						当前页面不是安全上下文（明文 HTTP）：noVNC 依赖的 WebCrypto 与 WebCodecs
+						被浏览器禁用，加密认证（VeNCrypt / RA2）、H.264 解码与剪贴板同步不可用，
+						连接可能异常。请改用 HTTPS 或 localhost 入口访问驾驶台。
+					</p>
+				)}
 
 				{/* noVNC 画布容器：连接前后都渲染，供 RFB 挂载；同时也是浏览器全屏目标。
 				    连接后的控制（状态芯片 + 全屏按钮）以悬浮层放进容器内 —— 全屏时
