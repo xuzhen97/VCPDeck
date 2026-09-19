@@ -81,13 +81,13 @@ Tab 补全：`vcpdeck completions bash` 追加到 `~/.bashrc`，或 `vcpdeck com
 Node.js 24+ 环境中按稳定 Tag 用户级安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.9.1
+pi install git:github.com/xuzhen97/VCPDeck@v0.9.2
 ```
 
 Pi 会克隆整个仓库并发现 `skills/vcpdeck/SKILL.md`；同目录 `vcpdeck.cjs` 已随 Tag 提交，无需在安装机编译。升级或回滚需显式切换 Tag，例如：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.9.1
+pi install git:github.com/xuzhen97/VCPDeck@v0.9.2
 ```
 
 Skill 与 CLI 用户级只安装一份，但执行时保留当前项目 cwd，因此每个项目都可以用自己的 `.vcpdeck.json` 选择用户级已注册环境。
@@ -115,8 +115,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.9.1&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.9.1&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.9.2&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.9.2&path:/packages/shared"
 ```
 
 两个包必须使用同一 Tag。pnpm 会在 Git 获取阶段构建未提交的 `dist`，并把实际 commit 与构建许可记录到目标项目。SDK 不读取 CLI 环境配置；调用方显式提供 Server 和认证：

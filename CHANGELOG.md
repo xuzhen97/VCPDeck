@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-19
+
+### Fixed
+
+- **远程桌面连上约 15 秒后必定自动断开（0.9.1 回归）**：`openBrowserTunnel` 原先用 `channel.onopen` / `channel.onerror` **属性**等待通道打开；0.9.1 为修复 RFB banner 丢失把 noVNC 的挂载提前到 open 之前，而 noVNC 的 `Websock.attach()` 会直接覆写这两个属性，导致隧道的 open promise 永不兑现，`DEFAULT_OPEN_TIMEOUT_MS`（15s）误触发并 `finalizeTransport()` 拆掉通道（表现为「能看到画面，约 15 秒后静默回到未连接」）。改为 `addEventListener("open"/"error")` 与消费者共存，并补回归测试（模拟消费者覆写属性后隧道仍能感知 open）。
+
 ## [0.9.1] - 2026-09-19
 
 ### Fixed
