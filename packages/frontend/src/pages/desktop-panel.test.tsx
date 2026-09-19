@@ -1,6 +1,6 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import type { ClientInfo, TunnelSessionCreated } from "@vcpdeck/shared";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
@@ -16,7 +16,7 @@ vi.mock("@/tunnel/vnc-session", () => ({
 	preloadRfb: vi.fn(),
 }));
 vi.mock("@/terminal/terminal-socket", () => ({
-	createAppSocket: vi.fn(() => ({} as never)),
+	createAppSocket: vi.fn(() => ({ on: vi.fn(), off: vi.fn() }) as never),
 }));
 
 const SESSION: TunnelSessionCreated = {
@@ -86,6 +86,12 @@ function makeVnc() {
 	return {
 		disconnect: vi.fn(),
 		setViewOnly: vi.fn(),
+		setViewMode: vi.fn(),
+		setResizeSession: vi.fn(),
+		setQuality: vi.fn(),
+		setCompression: vi.fn(),
+		sendClipboard: vi.fn(),
+		sendCtrlAltDel: vi.fn(),
 		sendCredentials: vi.fn(),
 		rfb: {} as never,
 	};
@@ -172,7 +178,7 @@ describe("DesktopPanel", () => {
 			expect(createVncSession).toHaveBeenCalledWith(
 				expect.anything(),
 				expect.anything(),
-				expect.objectContaining({ viewOnly: false }),
+				expect.objectContaining({ viewOnly: true }),
 			),
 		);
 		const onState = vi.mocked(createVncSession).mock.calls[0][2]?.onState;
@@ -258,8 +264,7 @@ describe("DesktopPanel", () => {
 		await waitFor(() => expect(requestFullscreen).toHaveBeenCalled());
 	});
 
-	it("全屏控制位于画布容器内，全屏时仍可见可点", async () => {
-		const tunnel = makeTunnel();
+	it("全屏控制位于画布容器内，全屏时仍可见可点", async () => {		const tunnel = makeTunnel();
 		const vnc = makeVnc();
 		mockOpen(tunnel);
 		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
@@ -299,5 +304,235 @@ describe("DesktopPanel", () => {
 		expect(vi.mocked(createVncSession).mock.calls[0][1]).toBe(tunnel.channel);
 
 		releaseOpen();
+	});
+
+	it("默认只读 + 适配模式 + 远端跟随 + 中档画质；切档位/模式/跟随作用到底层会话", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		const opts = vi.mocked(createVncSession).mock.calls[0][2]!;
+		expect(opts.viewOnly).toBe(true);
+		expect(opts.viewMode).toBe("fit");
+		expect(opts.resizeSession).toBe(true);
+		expect([opts.qualityLevel, opts.compressionLevel]).toEqual([6, 2]);
+
+		// 工具栏控件在会话已连接时出现
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+		await screen.findByTestId("desktop-view-actual");
+
+		await user.click(screen.getByTestId("desktop-view-actual"));
+		await waitFor(() => expect(vnc.setViewMode).toHaveBeenCalledWith("actual"));
+		await user.click(screen.getByTestId("desktop-viewonly"));
+		await waitFor(() => expect(vnc.setViewOnly).toHaveBeenCalledWith(false));
+		await user.click(screen.getByTestId("desktop-resize-follow"));
+		await waitFor(() => expect(vnc.setResizeSession).toHaveBeenCalledWith(false));
+		await user.selectOptions(screen.getByTestId("desktop-quality"), "high");
+		await waitFor(() => expect(vnc.setQuality).toHaveBeenCalledWith(9));
+	});
+
+	it("画布不再固定在 60vh，而是自适应容器", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const canvas = screen.getByTestId("desktop-canvas");
+		expect(canvas.className).not.toContain("h-[60vh]");
+		// 未连接时只有最小高度
+		expect(canvas.className).toContain("min-h-64");
+
+		await userEvent.setup().click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+		// 连接后自适应容器高度（不再固定 60vh）
+		await waitFor(() => expect(screen.getByTestId("desktop-canvas").className).toContain("h-[70dvh]"));
+	});
+
+	it("远端剪贴板展示、发送本地剪贴板与 Ctrl+Alt+Del", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		const opts = vi.mocked(createVncSession).mock.calls[0][2]!;
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+
+		// 远端剪贴板
+		opts.onClipboard?.("远端文本");
+		expect(await screen.findByTestId("desktop-clipboard-recv")).toHaveTextContent("远端文本");
+
+		// 发送本地剪贴板
+		Object.defineProperty(navigator, "clipboard", {
+			value: { readText: vi.fn(async () => "本地文本") },
+			configurable: true,
+		});
+		await user.click(await screen.findByTestId("desktop-clipboard-send"));
+		await waitFor(() => expect(vnc.sendClipboard).toHaveBeenCalledWith("本地文本"));
+
+		// Ctrl+Alt+Del
+		await user.click(screen.getByTestId("desktop-cad"));
+		await waitFor(() => expect(vnc.sendCtrlAltDel).toHaveBeenCalled());
+	});
+
+	it("切换显示器只改裁剪区域，不重连也不重建会话", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient, create } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+		const callsAfterConnect = vi.mocked(createVncSession).mock.calls.length;
+		const sessionsAfterConnect = create.mock.calls.length;
+
+		// 默认全屏
+		await waitFor(() =>
+			expect(screen.getByTestId("desktop-crop-frame")).toHaveAttribute("data-crop-aspect", "100 / 100"),
+		);
+
+		await user.click(screen.getByTestId("desktop-display-left"));
+		await waitFor(() =>
+			expect(screen.getByTestId("desktop-crop-frame")).toHaveAttribute("data-crop-aspect", "50 / 100"),
+		);
+
+		await user.click(screen.getByTestId("desktop-display-right"));
+		await waitFor(() =>
+			expect(screen.getByTestId("desktop-crop-frame")).toHaveAttribute("data-crop-aspect", "50 / 100"),
+		);
+
+		await user.click(screen.getByTestId("desktop-display-all"));
+		await waitFor(() =>
+			expect(screen.getByTestId("desktop-crop-frame")).toHaveAttribute("data-crop-aspect", "100 / 100"),
+		);
+
+		// 不重连、不重建会话
+		expect(vi.mocked(createVncSession).mock.calls.length).toBe(callsAfterConnect);
+		expect(create.mock.calls.length).toBe(sessionsAfterConnect);
+		expect(vnc.disconnect).not.toHaveBeenCalled();
+	});
+
+	it("已连接后断开：给出重连提示并自动重连", async () => {
+		// shouldAdvanceTime：让 Testing Library 的 waitFor 能随真实时间推进假定时器
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient, create } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+		expect(create).toHaveBeenCalledTimes(1);
+
+		// 已连接之后的断开 → 不再静默，而是进入自动重连
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("disconnected" as never);
+		expect(await screen.findByTestId("desktop-reconnect")).toHaveTextContent("第 1 次");
+
+		await act(async () => {
+			vi.advanceTimersByTime(1000);
+		});
+		await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+		vi.useRealTimers();
+	});
+	it("目标端口拒绝：给出原因且不自动重连", async () => {
+		const tunnel = makeTunnel();
+		tunnel.failureCode = "TUNNEL_TARGET_REFUSED";
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient, create } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		await userEvent.setup().click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("disconnected" as never);
+		expect(await screen.findByTestId("desktop-error")).toHaveTextContent("目标端口拒绝连接");
+		expect(screen.queryByTestId("desktop-reconnect")).toBeNull();
+		expect(create).toHaveBeenCalledTimes(1);
+	});
+
+	it("连续全黑出现提示，画面恢复后自动消失", async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		let black: Uint8ClampedArray | null = new Uint8ClampedArray([0, 0, 0, 255]);
+		const sampler = vi.fn(() => black);
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		render(
+			<SdkProvider client={sdkClient}>
+				<DesktopPanel client={p2pClient} blackSampler={sampler} />
+			</SdkProvider>,
+		);
+		const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		await act(async () => {
+			vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+		});
+
+		// 连续全黑 → 提示
+		await act(async () => {
+			vi.advanceTimersByTime(2000 * 6);
+		});
+		expect(sampler.mock.calls.length).toBeGreaterThanOrEqual(5);
+		expect(screen.getByTestId("desktop-black-warning")).toHaveTextContent("可能未接显示器");
+
+		// 画面恢复 → 自动消失
+		black = new Uint8ClampedArray([255, 255, 255, 255]);
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(screen.queryByTestId("desktop-black-warning")).toBeNull();
+		vi.useRealTimers();
+	});
+
+	it("重连尝试自身失败也会继续退避重试，到达上限后才报失败", async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient, create } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		await act(async () => {
+			vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+		});
+		// 之后创建会话一直失败（模拟持续离线）
+		create.mockRejectedValue(new Error("offline"));
+
+		await act(async () => {
+			vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("disconnected" as never);
+		});
+		// 分多轮推进：每轮结束会 flush 微任务，使异步重试排下的下一个定时器能被下一轮触发
+		for (let i = 0; i < 8; i += 1) {
+			// eslint-disable-next-line no-await-in-loop
+			await act(async () => {
+				vi.advanceTimersByTime(15000);
+			});
+		}
+		// 多次重试而不是一次即止
+		expect(create.mock.calls.length).toBeGreaterThan(3);
+		await waitFor(() => expect(screen.getByTestId("desktop-error")).toHaveTextContent("重连失败"));
+		vi.useRealTimers();
 	});
 });

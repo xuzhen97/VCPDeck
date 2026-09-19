@@ -11,15 +11,40 @@
 export interface RfbInstance {
 	viewOnly: boolean;
 	scaleViewport: boolean;
+	clipViewport: boolean;
+	dragViewport: boolean;
 	resizeSession: boolean;
+	qualityLevel: number;
+	compressionLevel: number;
+	background: string;
 	disconnect: () => void;
 	sendCredentials: (creds: {
 		username?: string;
 		password?: string;
 		target?: string;
 	}) => void;
+	/** 把文本作为剪贴板内容发送给远端。 */
+	clipboardPasteFrom: (text: string) => void;
+	/** 发送 Ctrl-Alt-Del。 */
+	sendCtrlAltDel: () => void;
 	addEventListener: (type: string, listener: EventListener) => void;
 	removeEventListener: (type: string, listener: EventListener) => void;
+}
+
+/** 查看模式：适配容器 / 1:1 可拖动 / 1:1 带滚动条。 */
+export type ViewMode = "fit" | "actual" | "scroll";
+
+/**
+ * 把查看模式映射为 noVNC 的三个视口属性（三者互相独立，必须同时设置）。
+ * 详见 noVNC API：scaleViewport / clipViewport / dragViewport。
+ */
+export function applyViewMode(
+	rfb: Pick<RfbInstance, "scaleViewport" | "clipViewport" | "dragViewport">,
+	mode: ViewMode,
+): void {
+	rfb.scaleViewport = mode === "fit";
+	rfb.clipViewport = mode === "actual";
+	rfb.dragViewport = mode === "actual";
 }
 
 /** 构造 RFB 实例；默认走 noVNC，测试可注入 fake。 */
@@ -37,16 +62,24 @@ export interface VncCredentialsRequest {
 }
 
 export interface VncSessionOptions {
-	/** 只读模式（不向远端发送键鼠）。默认 false。 */
+	/** 只读模式（不向远端发送键鼠）。默认 false（面板默认传 true）。 */
 	viewOnly?: boolean;
-	/** 缩放远端画面适配容器，不改变远端分辨率。默认 true。 */
-	scaleViewport?: boolean;
+	/** 查看模式，决定 scaleViewport/clipViewport/dragViewport。默认 "fit"。 */
+	viewMode?: ViewMode;
+	/** 容器尺寸变化时请求远端分辨率跟随（SetDesktopSize）。默认 true。 */
+	resizeSession?: boolean;
+	/** JPEG 质量 0-9。默认 6。 */
+	qualityLevel?: number;
+	/** zlib 压缩 0-9。默认 2。 */
+	compressionLevel?: number;
 	/** 连接状态变化（归一化后）。 */
 	onState?: (s: VncState) => void;
 	/** 服务端要求凭据时回调（由面板弹窗并调用 sendCredentials）。 */
 	onCredentials?: (req: VncCredentialsRequest) => void;
 	/** 认证失败时回调。 */
 	onSecurityFailure?: (reason?: string) => void;
+	/** 收到远端剪贴板文本时回调。 */
+	onClipboard?: (text: string) => void;
 	/** 注入 RFB 构造器（测试用）。 */
 	createRfb?: RfbFactory;
 }
@@ -56,6 +89,18 @@ export interface VncSession {
 	disconnect: () => void;
 	/** 运行中切换只读模式。 */
 	setViewOnly: (v: boolean) => void;
+	/** 运行中切换查看模式。 */
+	setViewMode: (mode: ViewMode) => void;
+	/** 运行中切换“远端分辨率跟随”。 */
+	setResizeSession: (v: boolean) => void;
+	/** 运行中切换 JPEG 质量（0-9）。 */
+	setQuality: (q: number) => void;
+	/** 运行中切换压缩等级（0-9）。 */
+	setCompression: (c: number) => void;
+	/** 把本地文本发送到远端剪贴板。 */
+	sendClipboard: (text: string) => void;
+	/** 发送 Ctrl-Alt-Del。 */
+	sendCtrlAltDel: () => void;
 	/** 面板弹窗收集到凭据后提交给服务端。 */
 	sendCredentials: (creds: { username?: string; password?: string }) => void;
 	/** 只读访问底层 RFB（测试 / 进阶用途）。 */
@@ -110,10 +155,12 @@ export async function createVncSession(
 	const factory = opts.createRfb ?? defaultFactory;
 	const rfb = await factory(container, channel);
 
-	// 实例属性默认值：缩放默认开、不改远端分辨率、只读由面板决定
+	// 实例属性默认值：适配模式、远端分辨率跟随、中档画质；只读由面板决定
 	rfb.viewOnly = !!opts.viewOnly;
-	rfb.scaleViewport = opts.scaleViewport ?? true;
-	rfb.resizeSession = false;
+	applyViewMode(rfb, opts.viewMode ?? "fit");
+	rfb.resizeSession = opts.resizeSession ?? true;
+	rfb.qualityLevel = opts.qualityLevel ?? 6;
+	rfb.compressionLevel = opts.compressionLevel ?? 2;
 
 	const listeners: Array<[type: string, fn: EventListener]> = [];
 	function listen(type: string, fn: EventListener) {
@@ -131,11 +178,20 @@ export async function createVncSession(
 		const detail = (e as CustomEvent).detail ?? {};
 		opts.onCredentials?.({ types: detail.types ?? [] });
 	});
+	listen("clipboard", (e: Event) => {
+		const detail = (e as CustomEvent).detail ?? {};
+		if (typeof detail.text === "string") opts.onClipboard?.(detail.text);
+	});
 
 	// 连接刚建立前（connecting 阶段）先上报一次，便于面板展示进度
 	opts.onState?.("connecting");
 
 	let disconnected = false;
+	/** 断开后对 RFB 的任何状态写入都会被 noVNC 拒绝，这里统一做幂等保护。 */
+	const applyIfLive = (fn: () => void): void => {
+		if (disconnected) return;
+		fn();
+	};
 	return {
 		disconnect() {
 			if (disconnected) return;
@@ -145,7 +201,33 @@ export async function createVncSession(
 			rfb.disconnect();
 		},
 		setViewOnly(v: boolean) {
-			rfb.viewOnly = v;
+			applyIfLive(() => {
+				rfb.viewOnly = v;
+			});
+		},
+		setViewMode(mode: ViewMode) {
+			applyIfLive(() => applyViewMode(rfb, mode));
+		},
+		setResizeSession(v: boolean) {
+			applyIfLive(() => {
+				rfb.resizeSession = v;
+			});
+		},
+		setQuality(q: number) {
+			applyIfLive(() => {
+				rfb.qualityLevel = q;
+			});
+		},
+		setCompression(c: number) {
+			applyIfLive(() => {
+				rfb.compressionLevel = c;
+			});
+		},
+		sendClipboard(text: string) {
+			applyIfLive(() => rfb.clipboardPasteFrom(text));
+		},
+		sendCtrlAltDel() {
+			applyIfLive(() => rfb.sendCtrlAltDel());
 		},
 		sendCredentials(creds) {
 			rfb.sendCredentials(creds);

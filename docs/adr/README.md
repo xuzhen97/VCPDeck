@@ -86,3 +86,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0025](./0025-windows-client-highest-privilege-logon-task.md) | Superseded by ADR-0027 | 历史方案：Windows Client 使用当前用户、PM2 与最高权限登录任务 |
 | [0026](./0026-browser-client-webrtc-tcp-tunnel.md) | Accepted | 浏览器与 Client 使用 WebRTC 通用 TCP 隧道，ICE 直连优先并以 coturn 中继兜底 |
 | [0027](./0027-system-level-client-installation-and-clean-migration.md) | Accepted | Windows 使用 SYSTEM 开机任务、Linux 保持 systemd/sudo-all；旧 PM2 保留身份后清理式迁移，并提示不合规 Client 人工升级 |
+| [0028](./0028-windows-desktop-capture-engine-in-session-vnc.md) | Accepted | Windows 桌面查看复用交互会话内的 VNC 服务端作为抓屏引擎，不自建会话内捕获组件 |

@@ -31,3 +31,12 @@ export function friendlyDesktopError(code?: string | null): string {
 	if (code === "VNC_DISCONNECTED") return "远程桌面已断开";
 	return friendlyTunnelError(code);
 }
+
+/**
+ * 控制面（`/app` socket）掉线时的统一文案。
+ * 隧道 Session 绑定在 Browser socket 上，socket 一断 Server 就会回收会话，
+ * 因此这类断开对操作者可见且可自动重连。
+ */
+export function friendlyControlPlaneLost(): string {
+	return "控制面连接中断，正在重连…";
+}

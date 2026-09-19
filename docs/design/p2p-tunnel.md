@@ -81,9 +81,17 @@
 ## 9. 前端入口与错误映射
 
 - 机器「隧道」Tab（`tunnel-panel.tsx`）：目标端口 + 路径 + 强制中继开关，一次点击只允许一个活动请求；结果只进文本/`<pre>`，不注入 DOM HTML。
-- 机器「远程桌面」Tab（`desktop-panel.tsx`）：目标端口（默认 5900）+ 只读开关；一次点击建立一条会话：`create` 会话 → `openBrowserTunnel`，并在其 `onChannel` 回调（DataChannel 创建后、open 之前）内立即 `createVncSession` 挂载 noVNC（否则通道 open 后服务端立即发送的 RFB banner 会被丢弃，握手停在等待版本串），断开 / 卸载 / 切 Tab 都按 `rfb.disconnect()` → `tunnel.close()` → `tunnels.remove()` 固定顺序清理（幂等）。noVNC 画面渲染进常驻画布容器；凭据经 `credentialsrequired` 事件弹窗交互（密码只在内存，不落 localStorage）。
+- 机器「远程桌面」Tab（`desktop-panel.tsx`）：目标端口（默认 5900）+ 连接/断开；一次点击建立一条会话：`create` 会话 → `openBrowserTunnel`，并在其 `onChannel` 回调（DataChannel 创建后、open 之前）内立即 `createVncSession` 挂载 noVNC（否则通道 open 后服务端立即发送的 RFB banner 会被丢弃，握手停在等待版本串），断开 / 卸载 / 切 Tab 都按 `rfb.disconnect()` → `tunnel.close()` → `tunnels.remove()` 固定顺序清理（幂等）。凭据经 `credentialsrequired` 事件弹窗交互（密码只在内存，不落 localStorage）。
+  - **默认只读**（`viewOnly=true`，不发送任何键鼠事件），工具栏可显式切换为可操作（切换后不再显示 `只读` 芯片）。
+  - 画布高度**自适应容器**（不再固定 `60vh`），三种查看模式：**适配**（`scaleViewport`，完整显示、比例不符留黑边）/ **1:1**（`clipViewport` + `dragViewport`，可拖动）/ **滚动**（不缩放、滚动条）。**画质档位只影响清晰度与带宽，永不改变可见范围。**
+  - 分辨率：默认 `resizeSession=true`（容器尺寸变化即发 `SetDesktopSize`），可关为“仅本地缩放”。**注意：在物理 Windows 桌面上该开关是空操作** —— ExtendedDesktopSize 在 Windows 上等同于改物理屏幕分辨率，而会话内 VNC 服务端抓的是真实控制台桌面，改不了（实测窗口从 1280 改到 900 后，远端帧仍为 3960×1920）；只有虚拟显示/X 会话（如 Xvfb）能真生效。**用户可见的“完整显示”目标由「适配」模式的本地等比缩放保证**，不依赖该开关；不生效时开关无副作用，也不做 UI 标注（noVNC 未公开支持标志）。
+  - 画质：`qualityLevel`（低 3 / 中 6 / 高 9）+ `compressionLevel=2`，连接中可改，直接作用于服务端编码。
+  - 剪贴板双向：`clipboard` 事件只**展示**在面板（不静默覆写系统剪贴板）；「发送剪贴板」经 `clipboardPasteFrom`（需浏览器授权，失败只提示不中断）；并提供 `sendCtrlAltDel`。
+  - **按显示器查看 = 客户端区域裁剪**：服务端送整块虚拟桌面（本机实测 3960×1920），RFB 无“选择显示器”消息、noVNC 1.7 也未公开多屏几何，故本期提供「全部 / 左半 / 右半」比例区域（`screen-view.ts` 计算，CSS 变换裁剪，零每帧开销、**不重连、不重建会话**）；精确显示器边界见 ADR-0028 的后续项。
+  - **断线语义**：连上之后断开不再静默 —— 按 `reconnect.ts` 的 `classifyDisconnect` 给出原因；可重试的按 1/2/4/8/15 秒退避自动重连（上限 5 次，页面重新可见时立即重试一次），确定性失败（目标端口拒绝、VNC 认证失败、Client 离线/不支持等）只报原因不重试；用户主动断开不报错也不重连。
+  - **无活动显示输出**：每 2 秒把画布缩采样到 32×32 判定（`black-screen.ts`），连续 5 次近全黑则显示可关闭提示，不当作链路故障、不自动重试。
 - 安全上下文前提（noVNC 1.7 硬性要求）：浏览器只在安全上下文（HTTPS 或 `localhost`）提供 `crypto.subtle` 与 WebCodecs。明文 HTTP + 非 localhost 入口下 RFB 构造时打印 `noVNC requires a secure context (TLS). Expect crashes!`，**未加密的 VNC 密码认证（DES，纯 JS）与常规 JPEG/Tight/ZRLE 解码仍可用**，但 VeNCrypt/RA2 加密认证、H.264（WebCodecs）与剪贴板 API 不可用。面板在该情况下显示黄条提示（`data-testid="desktop-insecure-context"`）但不阻断连接；根治方式是改用 HTTPS 入口（生产按 [`deployment.md`](../deployment.md) 的 `VCPDECK_COOKIE_SECURE` 要求本就应如此）。
-- VNC 会话适配（`vnc-session.ts`）：把 `RTCDataChannel` 交给 noVNC `RFB`（默认动态 `import("@novnc/novnc")`，构造即开始 RFB 握手；可经 `preloadRfb()` 预热以移出连接关键路径）。该通道**可以尚未 open**：noVNC 的 `Websock.attach` 只挂 `binaryType/onmessage/onopen/onclose/onerror` 并等原生 `onopen`；noVNC 接管 channel 的 `send/on*` 事件，故本模块创建后不再持有这些 handler，隧道清理由面板按固定顺序完成。
+- VNC 会话适配（`vnc-session.ts`）：把 `RTCDataChannel` 交给 noVNC `RFB`（默认动态 `import("@novnc/novnc")`，构造即开始 RFB 握手；可经 `preloadRfb()` 预热以移出连接关键路径）。该通道**可以尚未 open**：noVNC 的 `Websock.attach` 只挂 `binaryType/onmessage/onopen/onclose/onerror` 并等原生 `onopen`；noVNC 接管 channel 的 `send/on*` 事件，故本模块创建后不再持有这些 handler，隧道清理由面板按固定顺序完成。面板**不直接触碰 RFB 属性**：本模块暴露 `viewMode`（`applyViewMode` 映射三个视口属性）、`resizeSession`、`qualityLevel`、`compressionLevel`、运行时 `setViewOnly`，以及出站 `sendClipboard` / `sendCtrlAltDel` 与入站 `onClipboard`。
 - 设置「网络」（`tunnel-settings-panel.tsx`）：URL/realm 表单 + secret 就绪状态芯片。
 - 错误映射到稳定中文文案（`tunnel/errors.ts`：隧道通用文案 + VNC 认证失败 / 断开）；`openBrowserTunnel` 在打开后把 `TUNNEL_STATE` 的 `code` 暴露为只读 `failureCode`，供面板取具体原因（如 5900 无监听）。不回显 Server 错误 details、SDP、凭据或 secret。
 

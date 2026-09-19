@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createVncSession, type RfbInstance } from "./vnc-session.js";
+import { applyViewMode, createVncSession, type RfbInstance } from "./vnc-session.js";
 
 /** 记录事件监听、可触发事件的 fake RFB。 */
 function makeFakeRfb(): RfbInstance & {
@@ -9,9 +9,16 @@ function makeFakeRfb(): RfbInstance & {
 	return {
 		viewOnly: false,
 		scaleViewport: false,
+		clipViewport: false,
+		dragViewport: false,
 		resizeSession: false,
+		qualityLevel: 0,
+		compressionLevel: 0,
+		background: "",
 		disconnect: vi.fn(),
 		sendCredentials: vi.fn(),
+		clipboardPasteFrom: vi.fn(),
+		sendCtrlAltDel: vi.fn(),
 		addEventListener(type: string, fn: EventListener) {
 			(listeners[type] ??= []).push(fn);
 		},
@@ -47,26 +54,72 @@ function makeContainer() {
 }
 
 describe("createVncSession", () => {
-	it("默认 viewOnly=false、scaleViewport=true、resizeSession=false", async () => {
+	it("默认 viewOnly=false、适配模式（scaleViewport=true）、resizeSession=true、中档画质", async () => {
 		const rfb = makeFakeRfb();
 		const session = await createVncSession(makeContainer(), makeChannel(), {
 			createRfb: () => rfb,
 		});
 		expect(rfb.viewOnly).toBe(false);
 		expect(rfb.scaleViewport).toBe(true);
-		expect(rfb.resizeSession).toBe(false);
+		expect(rfb.clipViewport).toBe(false);
+		expect(rfb.resizeSession).toBe(true);
+		expect([rfb.qualityLevel, rfb.compressionLevel]).toEqual([6, 2]);
 		expect(session.rfb).toBe(rfb);
 	});
 
-	it("尊重传入的 viewOnly / scaleViewport 选项", async () => {
+	it("尊重传入的 viewOnly / viewMode / resizeSession / 画质选项", async () => {
 		const rfb = makeFakeRfb();
 		await createVncSession(makeContainer(), makeChannel(), {
 			viewOnly: true,
-			scaleViewport: false,
+			viewMode: "actual",
+			resizeSession: false,
+			qualityLevel: 9,
+			compressionLevel: 0,
 			createRfb: () => rfb,
 		});
 		expect(rfb.viewOnly).toBe(true);
-		expect(rfb.scaleViewport).toBe(false);
+		expect([rfb.scaleViewport, rfb.clipViewport, rfb.dragViewport]).toEqual([false, true, true]);
+		expect(rfb.resizeSession).toBe(false);
+		expect([rfb.qualityLevel, rfb.compressionLevel]).toEqual([9, 0]);
+	});
+
+	it("applyViewMode 产出三种模式的属性组合", () => {
+		const rfb = makeFakeRfb();
+		applyViewMode(rfb, "fit");
+		expect([rfb.scaleViewport, rfb.clipViewport, rfb.dragViewport]).toEqual([true, false, false]);
+		applyViewMode(rfb, "actual");
+		expect([rfb.scaleViewport, rfb.clipViewport, rfb.dragViewport]).toEqual([false, true, true]);
+		applyViewMode(rfb, "scroll");
+		expect([rfb.scaleViewport, rfb.clipViewport, rfb.dragViewport]).toEqual([false, false, false]);
+	});
+
+	it("运行时切换模式 / 远端跟随 / 画质均作用于底层属性", async () => {
+		const rfb = makeFakeRfb();
+		const session = await createVncSession(makeContainer(), makeChannel(), {
+			createRfb: () => rfb,
+		});
+		session.setViewMode("actual");
+		session.setResizeSession(false);
+		session.setQuality(3);
+		session.setCompression(7);
+		expect([rfb.scaleViewport, rfb.clipViewport, rfb.dragViewport]).toEqual([false, true, true]);
+		expect(rfb.resizeSession).toBe(false);
+		expect([rfb.qualityLevel, rfb.compressionLevel]).toEqual([3, 7]);
+	});
+
+	it("clipboard 事件转发文本；sendClipboard / sendCtrlAltDel 透传", async () => {
+		const rfb = makeFakeRfb();
+		const seen: string[] = [];
+		const session = await createVncSession(makeContainer(), makeChannel(), {
+			onClipboard: (text) => seen.push(text),
+			createRfb: () => rfb,
+		});
+		rfb.dispatchEvent("clipboard", { text: "from-remote" });
+		expect(seen).toEqual(["from-remote"]);
+		session.sendClipboard("to-remote");
+		session.sendCtrlAltDel();
+		expect(rfb.clipboardPasteFrom).toHaveBeenCalledWith("to-remote");
+		expect(rfb.sendCtrlAltDel).toHaveBeenCalledTimes(1);
 	});
 
 	it("connect/disconnect 事件映射为 connected / disconnected", async () => {
@@ -121,8 +174,7 @@ describe("createVncSession", () => {
 		expect(rfb.viewOnly).toBe(true);
 	});
 
-	it("disconnect() 幂等：摘除自身监听、底层 disconnect 仅调用一次", async () => {
-		const rfb = makeFakeRfb();
+	it("disconnect() 幂等：摘除自身监听、底层 disconnect 仅调用一次", async () => {		const rfb = makeFakeRfb();
 		const onState = vi.fn();
 		const session = await createVncSession(makeContainer(), makeChannel(), {
 			onState,
@@ -135,5 +187,26 @@ describe("createVncSession", () => {
 		// 监听已摘除：再触发底层事件不应回调本会话
 		rfb.dispatchEvent("connect");
 		expect(onState).not.toHaveBeenCalled();
+	});
+
+	it("断开后各 setter / 出站方法不再作用到底层 RFB（noVNC 会拒绝已断开对象）", async () => {
+		const rfb = makeFakeRfb();
+		const session = await createVncSession(makeContainer(), makeChannel(), {
+			createRfb: () => rfb,
+		});
+		session.disconnect();
+		session.setViewOnly(true);
+		session.setViewMode("actual");
+		session.setResizeSession(false);
+		session.setQuality(9);
+		session.setCompression(9);
+		session.sendClipboard("x");
+		session.sendCtrlAltDel();
+		expect(rfb.viewOnly).toBe(false);
+		expect(rfb.scaleViewport).toBe(true); // 仍保持 fit
+		expect(rfb.resizeSession).toBe(true);
+		expect([rfb.qualityLevel, rfb.compressionLevel]).toEqual([6, 2]);
+		expect(rfb.clipboardPasteFrom).not.toHaveBeenCalled();
+		expect(rfb.sendCtrlAltDel).not.toHaveBeenCalled();
 	});
 });
