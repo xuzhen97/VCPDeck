@@ -80,6 +80,38 @@ else
 	pass=$((pass + 1))
 fi
 
+# 6. secret 必须单行且为 Base64（base64 默认 76 列换行会写出多行 secret，
+#    导致 Server 与 coturn 的 HMAC key 不一致）
+secret_output="$(bash -c 'source "$1"; generate_secret' _ "$INSTALLER")"
+assert_eq "$secret_output" "$(printf '%s' "$secret_output" | tr -d '\n')" "secret must be single-line"
+if [[ "$secret_output" =~ ^[A-Za-z0-9+/]+=*$ ]]; then
+	pass=$((pass + 1))
+else
+	fail=$((fail + 1))
+	echo "FAIL: secret must be base64, got [$secret_output]" >&2
+fi
+
+# 7. 配置不得包含 coturn 不支持的 static-auth-secret-file，且启用 REST secret
+config_output="$(bash -c 'source "$1"; render_config 203.0.113.10 10.0.0.4 203.0.113.10' _ "$INSTALLER")"
+if grep -qF 'static-auth-secret-file' <<<"$config_output"; then
+	fail=$((fail + 1))
+	echo "FAIL: config must not use static-auth-secret-file" >&2
+else
+	pass=$((pass + 1))
+fi
+assert_eq 'use-auth-secret=yes' "$(grep -x 'use-auth-secret=yes' <<<"$config_output")" "config use-auth-secret"
+assert_eq 'realm=203.0.113.10' "$(grep -x 'realm=203.0.113.10' <<<"$config_output")" "config realm"
+
+# 8. drop-in 必须重置 ExecStart 并从 secret 文件注入 --static-auth-secret
+dropin_output="$(bash -c 'source "$1"; render_secret_dropin' _ "$INSTALLER")"
+assert_eq 'ExecStart=' "$(grep -x 'ExecStart=' <<<"$dropin_output")" "dropin resets ExecStart"
+if grep -qF -- '--static-auth-secret="$(cat /etc/vcpdeck/turn-secret)"' <<<"$dropin_output"; then
+	pass=$((pass + 1))
+else
+	fail=$((fail + 1))
+	echo "FAIL: dropin must inject static-auth-secret from secret file, got [$dropin_output]" >&2
+fi
+
 echo "PASS=$pass FAIL=$fail"
 if ((fail > 0)); then
 	exit 1

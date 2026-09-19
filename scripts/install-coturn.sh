@@ -96,10 +96,11 @@ detect_internal_ip() {
 	ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1);exit}}}' || true
 }
 
-# 生成 32 字节随机密钥的 Base64 字符串
+# 生成 32 字节随机密钥的 Base64 字符串；必须单行：base64 默认每 76 列插入换行，
+# 多行 secret 会让 Server 与 coturn 的 HMAC key 不一致，导致 TURN 分配全部 401。
 generate_secret() {
-	od -An -N 32 -v -tx1 /dev/urandom | tr -d " \n" | base64 2>/dev/null \
-		|| head -c 32 /dev/urandom | base64
+	od -An -N 32 -v -tx1 /dev/urandom | tr -d " \n" | base64 2>/dev/null | tr -d "\n" \
+		|| head -c 32 /dev/urandom | base64 | tr -d "\n"
 }
 
 # ── 副作用函数 ──────────────────────────────────────────────────
@@ -137,6 +138,14 @@ ensure_secret() {
 			chmod 0640 "$SECRET_FILE"
 		fi
 		chown "root:$server_user" "$SECRET_FILE" 2>/dev/null || true
+		# 归一历史版本用 base64（默认 76 列换行）写出的多行 secret：
+		# 换行会进入 HMAC key，使 coturn 与 Server 签名口径不一致。
+		local normalized
+		normalized="$(tr -d '\r\n' <"$SECRET_FILE")"
+		if [[ -n "$normalized" && "$normalized" != "$(<"$SECRET_FILE")" ]]; then
+			umask 077
+			printf '%s' "$normalized" >"$SECRET_FILE"
+		fi
 		return 0
 	fi
 	local secret
@@ -151,6 +160,37 @@ ensure_secret() {
 	chmod 0640 "$SECRET_FILE"
 }
 
+# 渲染 coturn 配置正文（纯函数，供测试断言）。
+# secret 不写进配置：coturn 4.6.x 没有 static-auth-secret-file 选项，
+# 改为由 systemd drop-in 从 $SECRET_FILE 注入，保持单一来源。
+render_config() {
+	local external_ip="$1"
+	local internal_ip="$2"
+	local realm="$3"
+	local external_line
+	external_line="$(render_external_ip "$external_ip" "$internal_ip")"
+	echo "$MARKER"
+	echo "listening-port=$LISTEN_PORT"
+	echo "listening-ip=0.0.0.0"
+	[[ -n "$internal_ip" ]] && echo "relay-ip=$internal_ip"
+	echo "$external_line"
+	echo "min-port=$RELAY_MIN_PORT"
+	echo "max-port=$RELAY_MAX_PORT"
+	echo "realm=$realm"
+	echo "use-auth-secret=yes"
+	echo "no-cli=yes"
+	echo "no-multicast-peers=yes"
+	echo "fingerprint=yes"
+}
+
+# 渲染 systemd drop-in 正文（纯函数，供测试断言）：把 --static-auth-secret
+# 从 secret 文件注入 coturn，替代 4.5+ 已不存在的配置文件写法。
+render_secret_dropin() {
+	echo "[Service]"
+	echo "ExecStart="
+	echo "ExecStart=/bin/sh -c 'exec /usr/bin/turnserver -c $CONF --static-auth-secret=\"\$(cat $SECRET_FILE)\" --pidfile='"
+}
+
 write_config() {
 	local external_ip="$1"
 	local internal_ip="$2"
@@ -160,23 +200,16 @@ write_config() {
 		echo "检测到非 VCPDeck 管理的 /etc/turnserver.conf，拒绝覆盖" >&2
 		return 1
 	fi
-	local external_line
-	external_line="$(render_external_ip "$external_ip" "$internal_ip")"
-	{
-		echo "$MARKER"
-		echo "listening-port=$LISTEN_PORT"
-		echo "listening-ip=0.0.0.0"
-		[[ -n "$internal_ip" ]] && echo "relay-ip=$internal_ip"
-		echo "$external_line"
-		echo "min-port=$RELAY_MIN_PORT"
-		echo "max-port=$RELAY_MAX_PORT"
-		echo "realm=$realm"
-		echo "use-auth-secret=yes"
-		echo "no-cli=yes"
-		echo "no-multicast-peers=yes"
-		echo "fingerprint=yes"
-		echo "static-auth-secret-file=$SECRET_FILE"
-	} >"$CONF"
+	render_config "$external_ip" "$internal_ip" "$realm" >"$CONF"
+}
+
+# 安装 drop-in 并重载 systemd，使 coturn 启动时带上 secret
+install_secret_dropin() {
+	local unit="$1"
+	local dir="/etc/systemd/system/${unit}.d"
+	mkdir -p "$dir"
+	render_secret_dropin >"$dir/10-auth-secret.conf"
+	systemctl daemon-reload
 }
 
 ensure_service() {
@@ -190,6 +223,7 @@ ensure_service() {
 		return 1
 	fi
 	systemctl enable --now "$unit"
+	install_secret_dropin "$unit" || return 1
 	systemctl restart "$unit"
 	if ! systemctl is-active --quiet "$unit"; then
 		echo "$unit 未处于 active 状态" >&2

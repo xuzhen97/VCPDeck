@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **远程桌面 Tab 可用性改造（不再需要自研协议、数据面无改动）**：保留 noVNC 作为 RFB 协议引擎，重做面板 UX 层。默认**只读**并可显式切换为可操作；画布高度自适应容器并提供「适配 / 1:1 / 滚动」三种查看模式（**完整显示优先、永不裁剪内容**）；默认打开 `resizeSession`（远端分辨率跟随窗口，可关）；新增画质档（低/中/高）与压缩档；新增剪贴板双向与 Ctrl+Alt+Del；新增「全部 / 左半 / 右半」区域裁剪（按显示器查看的降级实现，**不重连**）；连上后的断开不再静默，改为给出原因并按 1/2/4/8/15 秒退避自动重连（上限 5 次，用户主动断开/认证失败/端口拒绝不重试）；连续全黑时提示「未检测到活动显示输出」。抓屏引擎固定在目标机交互会话内的 VNC 服务端，见 ADR-0028。
+
+### Fixed
+
+- **coturn 一键安装脚本产出的 TURN 配置无法被 coturn 采纳，所有 TURN 中继分配恒返回 401**：`static-auth-secret-file` 在 coturn 4.6.x 中不存在（只有 `--static-auth-secret`），写进 `/etc/turnserver.conf` 会被判为 `Bad configuration format`，coturn 启动时拿不到 shared secret；同时 `generate_secret()` 直接调用 `base64`（默认每 76 列换行），88 字符 secret 被写成两行，使 coturn 与 Server 的 HMAC key 不一致。现在配置只保留 `use-auth-secret=yes`，secret 改由 systemd drop-in 在启动时以 `--static-auth-secret="$(cat /etc/vcpdeck/turn-secret)"` 注入（保持单一来源，避免轮换漂移）；`ensure_secret()` 会把历史多行 secret 归一为单行。生产已实测：coturn 4.6.1 `ALLOCATE` 成功并返回 relay 端口，浏览器强制 relay 时拿到 `typ relay` 候选并连接成功（面板显示「TURN 中继」）。
+
 ## [0.9.2] - 2026-09-19
 
 ### Fixed

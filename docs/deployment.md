@@ -231,7 +231,9 @@ sudo bash "./install-coturn.sh" \
   --realm=<TURN 域名或公网 IP>
 ```
 
-脚本行为：检测发行版（apt/dnf，dnf 缺包时先装 `epel-release`）；生成 32 字节 Base64 secret 到 `/etc/vcpdeck/turn-secret`（`root:serverUser`、`0640`，重跑保留）；写带 `# managed-by: vcpdeck-coturn` marker 的 `/etc/turnserver.conf`；启用/重启并校验 `coturn.service` active。需放行 `3478` TCP/UDP 与 `49160–49200` UDP；把 `VCPDECK_TURN_SECRET_FILE=/etc/vcpdeck/turn-secret` 加入 Server 环境。Web「设置 → 网络」只填 STUN/TURN URL 与 realm，不填 secret。详见 [`design/p2p-tunnel.md`](./design/p2p-tunnel.md)。
+脚本行为：检测发行版（apt/dnf，dnf 缺包时先装 `epel-release`）；生成 32 字节 Base64 secret（**单行**）到 `/etc/vcpdeck/turn-secret`（`root:serverUser`、`0640`，重跑保留并把历史多行 secret 归一为单行）；写带 `# managed-by: vcpdeck-coturn` marker 的 `/etc/turnserver.conf`（含 `use-auth-secret=yes`，不写 secret 内容）；写 systemd drop-in `/etc/systemd/system/<unit>.d/10-auth-secret.conf`，在启动时以 `--static-auth-secret="$(cat /etc/vcpdeck/turn-secret)"` 注入与 Server 同一份 secret；启用/重启并校验 `coturn.service` active。需放行 `3478` TCP/UDP 与 `49160–49200` UDP；把 `VCPDECK_TURN_SECRET_FILE=/etc/vcpdeck/turn-secret` 加入 Server 环境。Web「设置 → 网络」只填 STUN/TURN URL 与 realm，不填 secret。详见 [`design/p2p-tunnel.md`](./design/p2p-tunnel.md)。
+
+> coturn 4.6.x 没有 `static-auth-secret-file` 配置项：写进 `/etc/turnserver.conf` 会被判为 `Bad configuration format`，coturn 启动时拿不到 secret，于是所有 TURN 分配返回 `401 Unauthorized`（客户端表现为强制 relay 时收集不到 relay candidate）。secret 只能通过 systemd drop-in 或命令行 `--static-auth-secret` 注入，且必须与 `/etc/vcpdeck/turn-secret` 同串、同样为单行。轮换 secret：覆盖 `/etc/vcpdeck/turn-secret`（单行）后执行 `systemctl restart coturn`；Server 每次签发短期凭据时读取该文件，无需重启。
 
 ## 5. 持久化目录
 
