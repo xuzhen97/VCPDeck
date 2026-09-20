@@ -1,59 +1,130 @@
-# ADR-0028：Windows 桌面查看的抓屏引擎固定在目标机交互会话内的 VNC 服务端
+# ADR-0028：Windows 桌面查看固定使用受控 UltraVNC，并在交互会话内捕获
 
 - 状态：Accepted
 - 日期：2026-09-19
 - 决策者：项目维护者
-- 关联：[`ADR-0009`](./0009-trusted-operator-security-domain.md)、[`ADR-0023`](./0023-linux-system-client-and-root-equivalent-account.md)、[`ADR-0026`](./0026-browser-client-webrtc-tcp-tunnel.md)、[`ADR-0027`](./0027-system-level-client-installation-and-clean-migration.md)、[`design/p2p-tunnel.md`](../design/p2p-tunnel.md)
+- 关联：[`ADR-0009`](./0009-trusted-operator-security-domain.md)、[`ADR-0023`](./0023-linux-system-client-and-root-equivalent-account.md)、[`ADR-0026`](./0026-browser-client-webrtc-tcp-tunnel.md)、[`ADR-0027`](./0027-system-level-client-installation-and-clean-migration.md)、[`design/p2p-tunnel.md`](../design/p2p-tunnel.md)、[`design/windows-ultravnc-setup.md`](../design/windows-ultravnc-setup.md)
 
 ## 背景
 
-需要让浏览器经既有 P2P 隧道（ADR-0026）查看目标机桌面。该能力要求"看到目标机**交互会话**里正在显示的画面"，这直接决定抓屏必须发生在哪个会话。
+浏览器经既有 P2P 隧道查看和操作 Windows 目标机桌面。该能力要求捕获目标机**交互会话**中正在显示的画面，抓屏组件所在会话是首要约束。
 
-当前 Windows Client 按 ADR-0027 以 `NT AUTHORITY\SYSTEM` 开机任务运行，位于 **Session 0**，没有交互桌面。2026-09-19 在 7 台生产 Windows Client 上实测：执行进程 `SessionId=0`、`VirtualScreen` 恒为 `1024×768`、`Graphics.CopyFromScreen` 一律抛 `The handle is invalid`。因此**"由 Client 自己抓屏"在当前身份模型下不成立**。
+Windows Client 按 ADR-0027 以 `NT AUTHORITY\SYSTEM` 开机任务运行在 Session 0，没有交互桌面。2026-09-19 在 7 台生产 Windows Client 上实测：Client 进程 `SessionId=0`、`VirtualScreen` 恒为 `1024×768`，`Graphics.CopyFromScreen` 抛出 `The handle is invalid`。因此不能让现有 Client 进程直接抓取用户桌面。与此同时，Session 0 的 Client 可以通过回环连接交互会话内的 VNC Server，现有 Browser → P2P Tunnel → Client → `127.0.0.1:5900` 链路已经证明可行。
 
-同时实测确认：**回环连接是跨会话的**（Session 0 的 Client 能连到交互会话内监听的回环端口），这正是既有 noVNC 远程桌面能工作的原因——抓屏引擎位于交互会话内，VCPDeck 只做回环转发与浏览器侧渲染。
+此前 VCPDeck 允许运维自行提供任意会话内 VNC Server，只在浏览器侧使用 noVNC。该边界不能稳定提供以下产品能力：
 
-另需明确：Windows 目标机常接入第三方虚拟显示器驱动（向日葵 / ToDesk / GameViewer 等），"无显示器也能看到桌面"靠的是这些驱动提供活动显示模式；**真·无任何活动显示输出时任何桌面抓取都只能得到全黑**，这是 Windows 显示模型本身的限制，与选用哪种抓取技术无关。
+- 不同 VNC 实现的多显示器语义不同；
+- noVNC 公共 API 不提供通用的显示器列表和精确选屏接口；
+- 把合并 framebuffer 按 50% 裁成“左半/右半”不是真正的显示器切换，不适用于不同分辨率、上下排列或非双屏环境；
+- 在 noVNC 外层用 CSS 放大和平移画面，会使 noVNC 的输入坐标模型无法感知显示变换，可能造成鼠标偏移；
+- `resizeSession` 会发送 `SetDesktopSize`，其语义与“仅改善浏览器操作且不改变目标机显示设置”冲突。
+
+UltraVNC 的 Windows Server 和官方 Viewer 提供显示源切换能力。其客户端消息 `SetSW`（消息类型 10，长度 6 字节）可以令 Server 切换当前显示器，并在显示器序列中进入全部显示器模式。该扩展尚未形成 noVNC 的稳定公共 API，完整互操作语义也必须针对固定 UltraVNC 版本验证。
+
+本决策仅处理 Windows 10/11。Linux 桌面不在本期范围。
 
 ## 决策
 
-1. 桌面查看（只读与可操作）统一**复用目标机交互会话内的 VNC 服务端**作为抓屏与编码引擎。VCPDeck 只负责两件事：P2P 隧道回环转发（沿用 ADR-0026，协议零改动）+ 浏览器侧 RFB 渲染（沿用 noVNC 作为协议引擎）。
-2. **不自建会话内抓屏组件**：不新增会话内常驻 helper、不使用 `WTSQueryUserToken` + `CreateProcessAsUser` 做会话投递、不新增服务端截屏或 JPEG/MJPEG 推流协议。
-3. VNC 服务端的安装、配置与生命周期由运维通过既有 Job/exec 在目标机自行完成。VCPDeck **不托管其安装、不代为提权、不承诺其自启方式**。
-4. 目标机前置条件写入运维文档：交互会话内运行 VNC 服务端并仅监听回环；无显示器机器需 HDMI 假负载或虚拟显示器驱动；按运维需要配置只读或口令。
-5. 桌面查看能力**仅承诺 Windows**。Linux Client 是 root/systemd 系统级（ADR-0023），不在图形会话内，本期不实现；将来需要时按同一会话内捕获边界重新评估。
-6. "无活动显示输出"**不得被当作链路故障**：前端显式提示并给出运维指引，不自动重试，也不新增自建虚拟显示器能力。
+1. **继续把抓屏引擎放在 Windows 交互会话内。** SYSTEM Client 只负责 P2P 隧道与回环 TCP 转发，不在 Session 0 自建抓屏、编码或输入注入组件。
 
-## 候选方案
+2. **Windows 远程桌面固定使用 VCPDeck 验证过的 UltraVNC Server x64 版本和配置基线。** 不再承诺任意 VNC Server 都具备完整的多屏、输入和生命周期能力。具体版本必须经过真实机器兼容矩阵后锁定；未经重新验收不得自动漂移到“最新版”。
 
-- **自建会话内 helper（登录计划任务常驻）**：可以脱离 VNC，但新增常驻运行组件、跨会话部署与自启管理、自有编码/推流协议与前端解析，成本与失败面远高于复用 VNC 服务端；未选择。
-- **按需会话投递（Session 0 用 `CreateProcessAsUser` 把 helper 投进活动会话）**：无常驻进程，但需要在 Client 内实现 Win32 会话投递与失败处理，难以验证且失败面大；未选择。
-- **从 Session 0 使用 DXGI Desktop Duplication / Windows.Graphics.Capture**：会话隔离下无法抓取其他会话的桌面，技术不可行；未选择。
-- **服务端 MJPEG/JPEG 推流**：需要新协议、新组件与目标机编码器，且与 ADR-0026"隧道只传原始字节、上层复用既有开源协议"的取向相悖；未选择。
-- **继续要求 Client 自行抓屏**（本 ADR 之前的事实做法）：实测在 7/7 台生产机器上不可行；排除。
+3. **VCPDeck 负责 UltraVNC 基线的可重复达成和检测。** 支持边界包括安装来源与校验、固定版本、配置模板、启动方式、回环监听、状态与版本检查、升级和卸载规则。实施可复用现有安装和远程 Job 能力，但不得把抓屏职责移回 Session 0。高风险安装、升级、删除操作继续遵守显式确认要求。
+
+4. **UltraVNC 只能监听 `127.0.0.1`，默认端口为 5900。** 不向局域网或公网暴露 VNC。VNC 密码只能作为纵深保护，主要安全边界仍是 VCPDeck 身份、临时 Tunnel Session、WebRTC 加密和 Client 回环目标限制。
+
+5. **真正的显示器切换使用 UltraVNC `SetSW`，不再使用“左半/右半”比例裁剪。** VCPDeck 在 noVNC 周围维护隔离的 UltraVNC 兼容层，负责消息编码、连接级状态、超时、有界循环和降级。React 页面不得拼接协议字节，也不得直接依赖 noVNC 的 `_sock` 等私有字段。
+
+6. **精准标签以可验证状态为前提。** 只有固定版本的真实验证能够可靠确认初始状态、循环顺序、当前显示源和目标结果时，UI 才显示“全部 / 屏幕 1 / 屏幕 2”。如果只能可靠循环，UI 降级为“切换到下一屏”；若连循环语义也无法验证，则不提供切屏按钮。不得根据 framebuffer 宽度、黑边或固定 50% 比例猜测显示器。
+
+7. **显示器切换不得破坏 Viewer 隔离。** 实施前必须确认 `SetSW` 是每连接状态还是会影响所有并发 Viewer。若它会改变其他 Viewer 的全局捕获源且无法隔离，则停止实施精准选屏并回到架构评审，不以存在已知串扰的实现交付。
+
+8. **浏览器查看只使用本地缩放。** `resizeSession` 默认且持续为 `false`，普通 UI 不提供“远端分辨率跟随”。适应窗口、100%、缩放、平移、页面内最大化和浏览器全屏都只改变本地 viewport，不发送 `SetDesktopSize`，不修改 Windows 分辨率、DPI、排列或主屏。
+
+9. **画面与输入共享同一坐标模型。** 移除 noVNC 挂载点外层的 framebuffer 裁剪、放大和反向平移。优先使用 noVNC 的公开 viewport 能力；若连续缩放需要扩展，则显示变换和坐标逆变换必须封装在同一适配层并覆盖留黑边、平移、DPR、页面缩放、全屏和 framebuffer 尺寸变化。默认使用绝对坐标鼠标，不启用 Pointer Lock。
+
+10. **工具栏位于远程画面之外。** 路径、只读、显示源、缩放、最大化和全屏控制不覆盖远端内容。浏览器 Fullscreen API 的目标是“工具栏 + 画面”的整个工作区；页面内最大化是独立的浏览器视口 overlay。
+
+11. **不改变现有 P2P 数据面协议。** RFB 和 `SetSW` 继续作为原始字节经过 ADR-0026 的 WebRTC DataChannel ↔ 回环 TCP 隧道。若浏览器需要在连接前识别受支持的 UltraVNC 版本或健康状态，新增能力字段必须进入 `@vcpdeck/shared`，并同步 Server、Client、SDK、Frontend、兼容性文档和测试；不得由前端根据端口或画面猜测。
+
+12. **无活动显示输出仍是运维前置条件，不是链路故障。** 真正没有活动显示输出时，需要 HDMI 假负载或受支持的虚拟显示器驱动；前端继续明确提示，不自动重试，也不在本期自建虚拟显示器。
 
 ## 后果
 
 正面：
 
-- 新增运行组件与跨运行时协议均为**零**；桌面查看复用已验收的隧道与 noVNC（ADR-0026）。
-- 抓屏发生在正确的会话内，天然支持"无显示器但已装虚拟显示器驱动"的机器。
-- 与既有安全边界一致：不引入新的提权或会话投递代码路径。
+- 多显示器控制从不可靠的浏览器裁剪变为 VNC Server 真实切换捕获源；
+- 固定版本和配置消除“任意 VNC 实现”带来的不可测试差异；
+- 移除外层 CSS 画面变换后，noVNC 的 framebuffer 与输入坐标重新处于同一模型；
+- 所有缩放留在浏览器，不改变目标机显示设置；
+- 继续复用既有 P2P 隧道，不新增桌面图像协议或 Server 大流量转发；
+- 工具栏不再遮挡远程画面。
 
 负面与约束：
 
-- 目标机必须存在会话内 VNC 服务端；没有它就无法查看桌面（能力由运维前置条件决定）。
-- 真·无活动显示输出的机器仍然全黑，只能靠 HDMI 假负载或虚拟显示器驱动解决。
-- 只读保证的强度取决于客户端是否发送输入事件：面板**默认只读**且不发送键鼠，同时提供显式切换为可操作的开关；需要更强保证时在服务端侧另行配置只读。
-- 浏览器侧能力受 noVNC 公开 API 限制：noVNC 未公开多屏几何，按显示器的**精确**边界裁剪不可得，只能做比例区域裁剪。
+- VCPDeck 新增 UltraVNC 安装、版本锁定、配置、升级和健康检查责任；
+- `SetSW` 是 UltraVNC 特定扩展，noVNC 尚无稳定公共 API，VCPDeck 需要维护小型兼容层或受控补丁；
+- UltraVNC 升级必须重新执行真实多屏、输入、锁屏、UAC、direct/relay 和并发 Viewer 验收；
+- 精准显示器编号可能因协议无法确认而降级成“下一屏”；产品必须接受诚实降级；
+- 无活动显示输出仍需硬件假负载或虚拟显示器驱动；
+- 本决策不提供 Linux 桌面支持。
+
+## 替代方案
+
+### 保持任意 VNC Server，并在网页裁剪完整 framebuffer
+
+未选择。它无法可靠识别真实显示器边界，并会把 noVNC 不知道的 CSS 变换引入输入链路。即使额外上报 Windows 显示器几何，也仍需维护坐标逆变换，且不能解决不同 VNC Server 的行为差异。
+
+### 为每个显示器运行独立 VNC 实例和端口
+
+作为 `SetSW` 无法满足隔离要求时的候选回退，不作为默认方案。它需要多个 VNC 实例、端口和配置，可能争抢抓屏驱动或输入资源；切屏还需重建 Tunnel 与 RFB 会话，生命周期和诊断成本更高。
+
+### 扩展标准 RFB/noVNC 的通用多屏布局支持
+
+未作为本期主方案。即使解析 `ExtendedDesktopSize`，服务端也未必提供选择显示器的标准消息；实现范围会扩展到多个 VNC Server 的互操作。当前只为固定 UltraVNC 基线实现最小适配。
+
+### 自建交互会话 helper 或按需会话投递
+
+未选择。会新增 Windows 会话投递、常驻组件、自有捕获与编码协议，以及更大的安全和运维失败面。现有 UltraVNC 已在正确会话内提供成熟的捕获与输入能力。
+
+### 从 Session 0 使用 DXGI Desktop Duplication 或 Windows.Graphics.Capture
+
+不可行。Windows 会话隔离下，SYSTEM Client 的 Session 0 不能直接捕获其他用户交互会话的桌面。
+
+## 已实测事实（2026-09-20）
+
+下列值来自在 Windows 目标机上真实安装与验证的结果；它们是本决策落地时的具体锚点，完整可复现步骤与排查对照见 [`design/windows-ultravnc-setup.md`](../design/windows-ultravnc-setup.md)。
+
+- 锁定版本：**UltraVNC 1.8.3.0 x64**（官方页面 `uvnc.com` → 直链 `uvnc.eu/download/1800/UltraVNC_1830_x64_Setup.exe`），SHA-256 `e9c22419…bd131e` 与官方公布值一致，Authenticode 为 `Valid`（签名主体为该项目维护者）。
+- 安装目录：**`C:\Program Files\uvnc\UltraVNC`**（以卸载表 `InstallLocation` 为准，不能从安装器脚本推断）。
+- 配置权威：**`C:\ProgramData\UltraVNC\ultravnc.ini`**；`setpasswd.exe` 也写该文件。仅回环由 `AllowLoopback=1` + `LoopbackOnly=1` 实现，另需 `AutoPortSelect=0` 锁死 5900（默认 `1` 会在被占用时静默顺延，使固定端口的隧道莫名失败）。
+- **UltraVNC 强制要求口令**：未设口令时安全类型数量为 0 并拒绝连接（`This server does not have a valid password enabled...`）。因此“无口令”不可作为部署形态；且实测其 `passwd=` 存储格式不是经典 8 字节位反转，**只能经 `setpasswd.exe` 设置**，不得手工构造。
+- 会话架构证据：服务模式下稳定出现**两个** `winvnc` 进程，分别为 Session 0（服务宿主）与 Session 1（交互会话内抓屏/注入），与本文决策 1 的会话边界要求一致。
+- 服务名为 `uvnc_service`；配置变更后需杀净 `winvnc` 进程再起服务才会生效，且不得用 `Stop-Service -Force`（会卡在 `STOP_PENDING`）。
+- 交付边界：**前端侧的 `SetSW` 显示器切换适配层尚未实现**；当前前端只保证完整桌面可看可操作，因此决策 6 的“精准显示源标签”仍未交付，不属当前能力。
 
 ## 验证与退出条件
 
-最低验证：
+固定 UltraVNC 版本前至少验证：
 
-- 生产 Windows Client 上经隧道连到会话内 VNC 服务端，`direct` 与强制 `relay` 两种路径各保持连接 ≥5 分钟不断开；
-- 只读模式下键盘/鼠标输入不产生远端响应，可操作模式下有响应；
-- 无活动显示输出的机器上给出明确提示而非静默黑屏；
-- 隧道、Shared 协议、Server、SDK、Client 无任何协议或行为改动。
+- Windows 10/11，单屏和双屏；
+- 同分辨率、不同分辨率、左右排列和上下排列；
+- Windows 缩放 100%/125%/150%，常见浏览器 DPR 与页面缩放；
+- 每个显示源的四角、中心、双击和拖拽坐标准确性，误差不得随离中心距离线性放大；
+- 适应、100% 和本地 50%–200% 缩放不改变远端分辨率；
+- 普通登录、锁屏、UAC 和重新登录；
+- direct 与强制 relay；
+- 显示器热插拔后的状态失效与重新发现；
+- 多 Viewer 并发时 `SetSW` 的隔离语义；
+- 无活动显示输出时给出明确提示；
+- UltraVNC 仅监听回环。
 
-若将来出现以下需求，用新 ADR 重新评估：必须脱离 VNC（例如目标机不允许安装 VNC 服务端）、需要 Linux 桌面查看、需要精确多显示器边界，或需要引入服务端推流协议。
+出现以下任一情况时停止精准选屏实施并回到架构评审：
+
+- `SetSW` 会改变所有并发 Viewer 的全局状态且无法隔离；
+- 当前显示源无法可靠确认，而产品不能接受 cycle-only；
+- 接入 `SetSW` 必须大规模 fork noVNC 或破坏其 RFB parser；
+- 固定 UltraVNC 无法稳定覆盖目标 Windows 版本、登录、锁屏或 UAC；
+- 托管 UltraVNC 与现有 SYSTEM Client 安装模型产生不可接受的安全或生命周期冲突。
+
+若退出条件触发，优先重新评估“每显示源独立 VNC 端口/会话”，不得恢复伪“左半/右半”裁剪。

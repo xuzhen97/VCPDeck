@@ -19,6 +19,7 @@
 | 远程执行 | [`remote-execution.md`](./remote-execution.md) | 当前 command/script、输出、取消、安全边界与 runtime registry 迁移 |
 | P2P 隧道 | [`p2p-tunnel.md`](./p2p-tunnel.md) | 当前 Browser↔Client WebRTC DataChannel 回环 TCP、coturn TURN 兜底、secret 文件隔离、noVNC 远程桌面（回环 5900）与 direct/relay 验收边界 |
 | P2P 隧道验收 | [`p2p-tunnel-acceptance.md`](./p2p-tunnel-acceptance.md) | 直连/中继（两台跨网络机器）/凭据安全/负向的逐项验收步骤、判定与证据 |
+| Windows 桌面后端 | [`windows-ultravnc-setup.md`](./windows-ultravnc-setup.md) | 目标机 UltraVNC 的获取校验、静默安装、受控配置、验收判据、回滚与实测坑 |
 
 ## 新专题模板
 

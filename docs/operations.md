@@ -329,6 +329,8 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 
 「远程桌面」Tab 只做两件事：经 P2P 隧道回环转发 + 浏览器侧渲染。**抓屏引擎在目标机的交互会话内**（见 [ADR-0028](../adr/0028-windows-desktop-capture-engine-in-session-vnc.md)），因此以下前提由运维准备：
 
+> 目标机安装与配置 UltraVNC 的完整可复现步骤、官方校验值、验收判据与实测坑，见 [`design/windows-ultravnc-setup.md`](./design/windows-ultravnc-setup.md)。
+
 1. **会话内 VNC 服务端**：必须在目标机的**交互登录会话**里运行 VNC 服务端，并仅监听 `127.0.0.1`（推荐 5900）。
    - Windows Client 由 `NT AUTHORITY\SYSTEM` 开机任务运行在 Session 0，**没有交互桌面**（实测 `Graphics.CopyFromScreen` 报 `The handle is invalid`），不能由 Client 自己抓屏；客户端只是从 Session 0 走回环转发（回环跨会话可用）。
    - 建议放进用户会话自启（如 `HKCU\...\Run`），并按需要配置只读或口令。
