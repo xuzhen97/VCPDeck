@@ -7,6 +7,11 @@
  * 持有这些 handler；隧道清理由调用方在会话结束时按固定顺序完成。
  */
 
+import {
+	createUltraVncDisplayControl,
+	type SwChannel,
+} from "./ultravnc-setsw.js";
+
 /** noVNC RFB 实例的最小面（只声明本模块用到的成员，便于测试注入）。 */
 export interface RfbInstance {
 	viewOnly: boolean;
@@ -97,6 +102,11 @@ export interface VncSession {
 	sendClipboard: (text: string) => void;
 	/** 发送 Ctrl-Alt-Del。 */
 	sendCtrlAltDel: () => void;
+	/**
+	 * 切换到下一显示源（UltraVNC `SetSW`）。
+	 * 此为 winvnc **服务端共享**状态，会影响其他正在查看同一台机器的会话。
+	 */
+	cycleDisplaySource: () => void;
 	/** 面板弹窗收集到凭据后提交给服务端。 */
 	sendCredentials: (creds: { username?: string; password?: string }) => void;
 	/** 只读访问底层 RFB（测试 / 进阶用途）。 */
@@ -192,6 +202,13 @@ export async function createVncSession(
 		if (disconnected) return;
 		fn();
 	};
+	// SetSW：与 noVNC 共用同一条有序通道，只写 6 字节，不触碰 noVNC 私有字段
+	// SAFETY: 规范允许 `RTCDataChannel.send` 接受 ArrayBufferView；TS 的 send 重载在
+	// `Uint8Array<ArrayBufferLike>` 与 `ArrayBufferView<ArrayBuffer>` 之间存在不必要的
+	// 变型冲突，所以把通道收窄到本模块实际使用的最小面（`readyState` + `send`）。
+	const displayControl = createUltraVncDisplayControl(
+		channel as unknown as SwChannel,
+	);
 	return {
 		disconnect() {
 			if (disconnected) return;
@@ -223,6 +240,9 @@ export async function createVncSession(
 		},
 		sendCtrlAltDel() {
 			applyIfLive(() => rfb.sendCtrlAltDel());
+		},
+		cycleDisplaySource() {
+			applyIfLive(() => displayControl.cycle());
 		},
 		sendCredentials(creds) {
 			rfb.sendCredentials(creds);

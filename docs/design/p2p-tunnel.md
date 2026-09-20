@@ -89,11 +89,15 @@
   - 画质：`qualityLevel`（低 3 / 中 6 / 高 9）+ `compressionLevel=2`，连接中可改，直接作用于服务端编码；**与缩放完全独立**（缩放只改本地显示尺寸）。
   - **最大化与全屏**：状态芯片（P2P 路径、只读）与全部控件位于画面**之外**的工具栏，均处于同一「工作区」内；页面内「最大化」用 fixed overlay 铺满视口（不调用 Fullscreen API），「全屏」把**工作区**（工具栏 + 画面）交给 Fullscreen API，因此全屏后控件仍可见可点，`Esc` 可退出。
   - 剪贴板双向：`clipboard` 事件只**展示**在面板（不静默覆写系统剪贴板）；「发送剪贴板」经 `clipboardPasteFrom`（需浏览器授权，失败只提示不中断）；并提供 `sendCtrlAltDel`。
-  - **不做按显示器裁剪**：服务端送的是它自己合成的整块桌面（例如物理 2880×1800 与虚拟 1080×1920 拼接为 ≈3960×1920），页面**原样展示**，不再提供「全部 / 左半 / 右半」。旧实现按固定 50% 比例裁剪加外层 CSS 变换，对不等宽/不等分辨率/非左右排列的显示器必然错位，且会让 noVNC 的指针换算失真，已删除（原 `screen-view.ts` 与其测试一并移除）。真正的按显示器切换需要 VNC 服务端侧支持（如 UltraVNC 的 `SetSW`），属后续独立决策，见 ADR-0028。
+  - **显示源切换（UltraVNC `SetSW`）**：工具栏提供「切换到下一屏」，向**同一条** DataChannel 写入 6 字节 `[10, 0, 0, 0, 0, 0]`（类型 10，`status`/`x`/`y` 置 0；真机实测该组合即被接受并生效）。实现位于 `ultravnc-setsw.ts`，**只用公开的 `RTCDataChannel.send`，不触碰 noVNC 私有字段**。
+    - 已实测：这是 winvnc **服务端共享**状态——在一条连接上切换会推送给所有已连客户端，**新建连接也直接看到切换后的状态**。因此**同一目标机的并发会话共享所选显示源**，UI 已就地明示「会影响其他正在查看本机的会话」（见 ADR-0028 决策 7）。
+    - 同尺寸多屏无法用尺寸区分是哪一块，且源码中 `nr_monitors == 2` 时“全部显示器”的尺寸取自派生自当前所选屏的 `m_Cliprect.br`，尺寸本身不可靠，因此**只提供循环式「下一屏」，不给屏幕编号**。
+    - 通道未 open 或会话已断开时不发送（不抛错、不重连、不重建会话）。
+  - **不做按显示器裁剪**：服务端送什么就**原样展示**，不再提供「全部 / 左半 / 右半」。旧实现按固定 50% 比例裁剪加外层 CSS 变换，对不等宽/不等分辨率/非左右排列的显示器必然错位，且会让 noVNC 的指针换算失真，已删除（原 `screen-view.ts` 与其测试一并移除）。
   - **断线语义**：连上之后断开不再静默 —— 按 `reconnect.ts` 的 `classifyDisconnect` 给出原因；可重试的按 1/2/4/8/15 秒退避自动重连（上限 5 次，页面重新可见时立即重试一次），确定性失败（目标端口拒绝、VNC 认证失败、Client 离线/不支持等）只报原因不重试；用户主动断开不报错也不重连。
   - **无活动显示输出**：每 2 秒把画布缩采样到 32×32 判定（`black-screen.ts`），连续 5 次近全黑则显示可关闭提示，不当作链路故障、不自动重试。
 - 安全上下文前提（noVNC 1.7 硬性要求）：浏览器只在安全上下文（HTTPS 或 `localhost`）提供 `crypto.subtle` 与 WebCodecs。明文 HTTP + 非 localhost 入口下 RFB 构造时打印 `noVNC requires a secure context (TLS). Expect crashes!`，**未加密的 VNC 密码认证（DES，纯 JS）与常规 JPEG/Tight/ZRLE 解码仍可用**，但 VeNCrypt/RA2 加密认证、H.264（WebCodecs）与剪贴板 API 不可用。面板在该情况下显示黄条提示（`data-testid="desktop-insecure-context"`）但不阻断连接；根治方式是改用 HTTPS 入口（生产按 [`deployment.md`](../deployment.md) 的 `VCPDECK_COOKIE_SECURE` 要求本就应如此）。
-- VNC 会话适配（`vnc-session.ts`）：把 `RTCDataChannel` 交给 noVNC `RFB`（默认动态 `import("@novnc/novnc")`，构造即开始 RFB 握手；可经 `preloadRfb()` 预热以移出连接关键路径）。该通道**可以尚未 open**：noVNC 的 `Websock.attach` 只挂 `binaryType/onmessage/onopen/onclose/onerror` 并等原生 `onopen`；noVNC 接管 channel 的 `send/on*` 事件，故本模块创建后不再持有这些 handler，隧道清理由面板按固定顺序完成。面板**不直接触碰 RFB 属性**：本模块暴露 `viewMode`（`applyViewMode` 映射三个视口属性）、`qualityLevel`、`compressionLevel`、运行时 `setViewOnly`，以及出站 `sendClipboard` / `sendCtrlAltDel` 与入站 `onClipboard`；`resizeSession` 恒为 `false` 且不对外暴露开关。
+- VNC 会话适配（`vnc-session.ts`）：把 `RTCDataChannel` 交给 noVNC `RFB`（默认动态 `import("@novnc/novnc")`，构造即开始 RFB 握手；可经 `preloadRfb()` 预热以移出连接关键路径）。该通道**可以尚未 open**：noVNC 的 `Websock.attach` 只挂 `binaryType/onmessage/onopen/onclose/onerror` 并等原生 `onopen`；noVNC 接管 channel 的 `send/on*` 事件，故本模块创建后不再持有这些 handler，隧道清理由面板按固定顺序完成。面板**不直接触碰 RFB 属性**：本模块暴露 `viewMode`（`applyViewMode` 映射三个视口属性）、`qualityLevel`、`compressionLevel`、运行时 `setViewOnly`，以及出站 `sendClipboard` / `sendCtrlAltDel` / `cycleDisplaySource`（UltraVNC `SetSW`）与入站 `onClipboard`；`resizeSession` 恒为 `false` 且不对外暴露开关。
 - 设置「网络」（`tunnel-settings-panel.tsx`）：URL/realm 表单 + secret 就绪状态芯片。
 - 错误映射到稳定中文文案（`tunnel/errors.ts`：隧道通用文案 + VNC 认证失败 / 断开）；`openBrowserTunnel` 在打开后把 `TUNNEL_STATE` 的 `code` 暴露为只读 `failureCode`，供面板取具体原因（如 5900 无监听）。不回显 Server 错误 details、SDP、凭据或 secret。
 

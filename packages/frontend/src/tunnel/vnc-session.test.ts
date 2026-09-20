@@ -47,7 +47,7 @@ function makeChannel() {
 		onclose: null as unknown,
 		onerror: null as unknown,
 		protocol: "",
-		readyState: 1,
+		readyState: "open",
 	} as unknown as RTCDataChannel;
 }
 
@@ -197,6 +197,32 @@ describe("createVncSession", () => {
 			createRfb: () => rfb,
 		});
 		expect(session).not.toHaveProperty("setResizeSession");
+	});
+
+	it("cycleDisplaySource 向同一条通道写入 6 字节 SetSW", async () => {
+		const rfb = makeFakeRfb();
+		const channel = makeChannel();
+		const session = await createVncSession(makeContainer(), channel, {
+			createRfb: () => rfb,
+		});
+		session.cycleDisplaySource();
+		const send = (channel as unknown as { send: ReturnType<typeof vi.fn> }).send;
+		expect(send).toHaveBeenCalledTimes(1);
+		expect([...(send.mock.calls[0][0] as Uint8Array)]).toEqual([
+			10, 0, 0, 0, 0, 0,
+		]);
+	});
+
+	it("断开后 cycleDisplaySource 不再写通道", async () => {
+		const rfb = makeFakeRfb();
+		const channel = makeChannel();
+		const session = await createVncSession(makeContainer(), channel, {
+			createRfb: () => rfb,
+		});
+		session.disconnect();
+		session.cycleDisplaySource();
+		const send = (channel as unknown as { send: ReturnType<typeof vi.fn> }).send;
+		expect(send).not.toHaveBeenCalled();
 	});
 
 	it("断开后各 setter / 出站方法不再作用到底层 RFB（noVNC 会拒绝已断开对象）", async () => {

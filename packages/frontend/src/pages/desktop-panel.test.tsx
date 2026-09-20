@@ -93,6 +93,7 @@ function makeVnc() {
 		sendClipboard: vi.fn(),
 		sendCtrlAltDel: vi.fn(),
 		sendCredentials: vi.fn(),
+		cycleDisplaySource: vi.fn(),
 		rfb: {} as never,
 	};
 }
@@ -410,6 +411,44 @@ describe("DesktopPanel", () => {
 		await user.click(screen.getByTestId("desktop-zoom-150"));
 		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("150%");
 		await waitFor(() => expect(vnc.setViewMode).toHaveBeenCalledWith("fit"));
+	});
+
+	it("提供「切换到下一屏」，且不重连、不重建会话", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient, create } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+		const callsBefore = vi.mocked(createVncSession).mock.calls.length;
+		const sessionsBefore = create.mock.calls.length;
+
+		await user.click(await screen.findByTestId("desktop-next-display"));
+
+		expect(vnc.cycleDisplaySource).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(createVncSession).mock.calls.length).toBe(callsBefore);
+		expect(create.mock.calls.length).toBe(sessionsBefore);
+	});
+
+	it("明示显示源切换会影响其他正在查看本机的会话", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+
+		expect(await screen.findByTestId("desktop-display-source-note")).toHaveTextContent(
+			"其他",
+		);
 	});
 
 	it("noVNC 在隧道 open 之前就挂到通道上（避免丢失 RFB banner）", async () => {

@@ -679,6 +679,24 @@ export function DesktopPanel({
 						>
 							Ctrl+Alt+Del
 						</Button>
+						{/* 显示源切换：UltraVNC SetSW。服务端全局状态，所以必须明示会影响其他并发会话。 */}
+						<div className="flex items-center gap-2">
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								data-testid="desktop-next-display"
+								onClick={() => vncRef.current?.cycleDisplaySource()}
+							>
+								切换到下一屏
+							</Button>
+							<span
+								data-testid="desktop-display-source-note"
+								className="text-xs text-muted-foreground"
+							>
+								会影响其他正在查看本机的会话
+							</span>
+						</div>
 						<Button
 							type="button"
 							size="sm"
