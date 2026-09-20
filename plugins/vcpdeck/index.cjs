@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.9.3";
+    exports2.VERSION = "0.10.0";
   }
 });
 
@@ -1641,7 +1641,7 @@ var require_tunnel = __commonJS({
       if (!Array.isArray(value) || value.length > exports2.TunnelLimits.maxIceUrlsPerList) {
         throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 0-${exports2.TunnelLimits.maxIceUrlsPerList} \u7684\u6570\u7EC4`);
       }
-      return value.map((item, i) => parseTunnelIceServer(item));
+      return value.map((item) => parseTunnelIceServer(item));
     }
     function parseTunnelSessionCreateRequest(value) {
       const input = isRecord2(value) ? value : null;

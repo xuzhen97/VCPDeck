@@ -236,7 +236,7 @@ function parseIceServers(value: unknown, field: string): TunnelIceServer[] {
 	if (!Array.isArray(value) || value.length > TunnelLimits.maxIceUrlsPerList) {
 		throw new Error(`${field} 必须为长度 0-${TunnelLimits.maxIceUrlsPerList} 的数组`);
 	}
-	return value.map((item, i) => parseTunnelIceServer(item));
+	return value.map((item) => parseTunnelIceServer(item));
 }
 
 /** 严格解析创建请求：仅 clientId + targetPort。 */
