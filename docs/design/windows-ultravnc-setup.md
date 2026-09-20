@@ -1,6 +1,6 @@
 # Windows 目标机 UltraVNC 安装与配置示例
 
-> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-20｜适用版本：`0.10.0` / 当前 `main`
+> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-20｜适用版本：`0.10.5` / 当前 `main`
 >
 > 本文是**操作示例**：记录在 Windows 目标机上安装并配置受控 UltraVNC 的完整可复现步骤，以及实测得到的坑与判据。
 > 长期决策（为什么固定 UltraVNC、为什么不自建会话内抓屏组件）见 [`ADR-0028`](../adr/0028-windows-desktop-capture-engine-in-session-vnc.md)；远程桌面前端行为见 [`p2p-tunnel.md`](./p2p-tunnel.md)；运维边界见 [`operations.md`](../operations.md) §9。

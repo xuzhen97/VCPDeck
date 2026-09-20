@@ -240,6 +240,50 @@ describe("release command", () => {
 		expect(logs.join("\n")).not.toContain("vcp_test_token");
 	});
 
+	it("Alibaba 恢复会话遇到已存在分片 409 时仍由 Provider 完成合并确认", async () => {
+		const completed: string[] = [];
+		const { port } = await listen((request, response) => {
+			const chunks: Buffer[] = [];
+			request.on("data", (chunk: Buffer) => chunks.push(chunk));
+			request.on("end", () => {
+				const url = request.url ?? "";
+				response.setHeader("content-type", "application/json");
+				if (url === "/api/releases/uploads") {
+					const platform = JSON.parse(Buffer.concat(chunks).toString("utf8")).platform as string;
+					response.end(JSON.stringify({
+						mode: "direct",
+						sessionId: `session-${platform}`,
+						partSize: 64,
+						parts: [{ partNumber: 1, url: `https://provider.example/${platform}` }],
+						expiresAt: "2026-08-22T00:00:00.000Z",
+					}));
+					return;
+				}
+				if (url.endsWith("/complete")) completed.push(url);
+				response.end(JSON.stringify({ release: release("uploaded") }));
+			});
+		});
+		const state = await fixture(port);
+		const win = join(state.root, "vcpdeck-1.2.3-win-x64.zip");
+		const linux = join(state.root, "vcpdeck-1.2.3-linux-x64.zip");
+		await writeFile(win, "win-archive");
+		await writeFile(linux, "linux-archive");
+		const directFetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response(null, { status: 200 }))
+			.mockResolvedValueOnce(new Response(null, { status: 409 }));
+
+		await runReleaseCommand("upload", [win, linux], {
+			paths: state.paths,
+			processEnv: state.processEnv,
+			directFetch: directFetch as typeof fetch,
+			directRetryDelayMs: 0,
+			log: () => undefined,
+		});
+
+		expect(completed).toHaveLength(2);
+	});
+
 	it("拒绝非 HTTPS Provider 分片 URL，且不发送构件正文", async () => {
 		const { port } = await listen((request, response) => {
 			request.resume();

@@ -113,13 +113,30 @@ async function fetchJson(url, options = {}) {
 	return body;
 }
 
-async function download(url, target, expectedSha) {
-	const response = await fetch(url, {
-		redirect: "follow",
-		signal: AbortSignal.timeout(600_000),
-	});
-	if (!response.ok) throw new Error(`下载失败 HTTP ${response.status}`);
-	const bytes = Buffer.from(await response.arrayBuffer());
+async function download(url, target, expectedSha, fetchImpl = fetch, sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms))) {
+	let bytes;
+	let lastError;
+	for (let attempt = 1; attempt <= 3; attempt += 1) {
+		try {
+			const response = await fetchImpl(url, {
+				redirect: "follow",
+				signal: AbortSignal.timeout(600_000),
+			});
+			if (!response.ok) {
+				const error = new Error(`下载失败 HTTP ${response.status}`);
+				if (![502, 503, 504].includes(response.status)) throw Object.assign(error, { retryable: false });
+				lastError = error;
+			} else {
+				bytes = Buffer.from(await response.arrayBuffer());
+				break;
+			}
+		} catch (error) {
+			if (error?.retryable === false) throw error;
+			lastError = error;
+		}
+		if (attempt < 3) await sleep(attempt * 1000);
+	}
+	if (!bytes) throw lastError;
 	mkdirSync(dirname(target), { recursive: true });
 	const temp = `${target}.${process.pid}.tmp`;
 	writeFileSync(temp, bytes);
@@ -805,6 +822,40 @@ function ensureOptionalMachineGit(env = {}) {
 	return installed ? { git: installed, warning: null } : { git: null, warning: "winget 报告成功但 Git 校验失败（不影响 Client 核心能力）" };
 }
 
+function pm2EntryPaths(entry) {
+	return [entry?.pm2_env?.pm_exec_path, ...(Array.isArray(entry?.pm2_env?.args) ? entry.pm2_env.args : [entry?.pm2_env?.args])]
+		.filter((value) => typeof value === "string" && value)
+		.map((value) => resolve(value));
+}
+
+function processTree(rootPid, processes) {
+	if (!Number.isInteger(rootPid) || rootPid <= 0) throw new Error("旧 PM2 Launcher PID 缺失或非法，拒绝迁移");
+	const byPid = new Map();
+	const children = new Map();
+	for (const process of processes) {
+		const pid = Number(process?.pid);
+		const parentPid = Number(process?.parentPid);
+		if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(parentPid) || parentPid < 0 || !process?.creationDate) continue;
+		const entry = { pid, parentPid, creationDate: String(process.creationDate) };
+		byPid.set(pid, entry);
+		const list = children.get(parentPid) || [];
+		list.push(pid);
+		children.set(parentPid, list);
+	}
+	if (!byPid.has(rootPid)) throw new Error("旧 PM2 Launcher PID 不在当前进程表中，拒绝迁移");
+	const result = [];
+	const pending = [rootPid];
+	const seen = new Set();
+	while (pending.length) {
+		const pid = pending.shift();
+		if (seen.has(pid)) continue;
+		seen.add(pid);
+		result.push(byPid.get(pid));
+		pending.push(...(children.get(pid) || []));
+	}
+	return result;
+}
+
 /** 探测当前提升管理员的旧用户安装来源；只接受单一、路径已确认、同 Server 的来源（fail closed）。 */
 function discoverLegacyWindowsInstall(adapter, serverOrigin) {
 	// home 可注入（测试用）；生产取真实用户 HOME，旧来源仅限当前提升管理员所属 Profile。
@@ -826,7 +877,7 @@ function discoverLegacyWindowsInstall(adapter, serverOrigin) {
 		const list = JSON.parse(result.stdout || "[]");
 		if (Array.isArray(list)) {
 			for (const entry of list) {
-				if (entry?.name === PM2_NAME) entries.push(entry);
+				if (entry?.name === PM2_NAME || (expectedLauncher && pm2EntryPaths(entry).includes(expectedLauncher))) entries.push(entry);
 			}
 		}
 	} catch (error) {
@@ -844,10 +895,16 @@ function discoverLegacyWindowsInstall(adapter, serverOrigin) {
 		throw new Error("旧 Client ID 缺失或非法，拒绝迁移");
 	}
 	if (entries.length > 1) throw new Error("发现多个同名 VCPDeck PM2 进程，拒绝迁移");
+	let processRoot = null;
 	if (entries.length === 1) {
-		const actual = resolve(entries[0]?.pm2_env?.pm_exec_path || "");
-		if (!expectedLauncher || actual !== expectedLauncher) {
-			throw new Error(`PM2 中同名进程指向未知目录（${actual || "未知"}），拒绝迁移`);
+		const paths = pm2EntryPaths(entries[0]);
+		if (!expectedLauncher || !paths.includes(expectedLauncher)) {
+			throw new Error(`PM2 中同名进程指向未知目录（${paths.join(", ") || "未知"}），拒绝迁移`);
+		}
+		try {
+			processRoot = processTree(Number(entries[0].pid), adapter.listProcesses())[0];
+		} catch (error) {
+			throw new Error(`无法确认旧 Launcher 进程树，拒绝迁移：${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 	return {
@@ -856,6 +913,8 @@ function discoverLegacyWindowsInstall(adapter, serverOrigin) {
 		clientId: state.clientId,
 		displayName: typeof state.displayName === "string" ? state.displayName : null,
 		hasProcess: entries.length === 1,
+		pm2Name: entries[0]?.name || null,
+		processRoot,
 		serverOrigin: origin,
 	};
 }
@@ -878,17 +937,23 @@ function cleanLegacyWindowsInstall(adapter, source) {
 	const record = (name) => adapter.records.push(name);
 	record("stop-old-launcher");
 	if (source.hasProcess) {
-		const deleted = adapter.pm2(["delete", PM2_NAME]);
+		const tree = processTree(source.processRoot.pid, adapter.listProcesses());
+		if (tree[0].creationDate !== source.processRoot.creationDate) {
+			throw new Error("旧 PM2 Launcher PID 已被其他进程复用，拒绝迁移");
+		}
+		const deleted = adapter.pm2(["delete", source.pm2Name || PM2_NAME]);
 		if (deleted?.status !== 0) {
 			throw new Error(`PM2 delete 失败：${deleted?.stderr?.trim() || `退出码 ${deleted?.status ?? "未知"}`}`);
 		}
 		record("delete-old-pm2-entry");
+		adapter.killProcessTree(tree);
+		record("stop-old-process-tree");
 		const saved = adapter.pm2(["save"]);
 		if (saved?.status !== 0) {
 			throw new Error(`PM2 save 失败：${saved?.stderr?.trim() || `退出码 ${saved?.status ?? "未知"}`}`);
 		}
 		record("save-remaining-pm2-apps");
-		const remaining = safeReadJsonSafePm2(adapter);
+		const remaining = safeReadJsonSafePm2(adapter, source.pm2Name || PM2_NAME);
 		if (remaining.length === 0) {
 			const removedTask = adapter.spawn("schtasks.exe", ["/Delete", "/TN", "VCPDeck PM2 Startup", "/F"]);
 			if (removedTask.status === 0) record("remove-old-startup");
@@ -906,7 +971,35 @@ function cleanLegacyWindowsInstall(adapter, source) {
 	}
 	record("remove-old-app-dir");
 	if (!adapter.dryRun) {
-		removeTreeWithRetries(source.appDir);
+		try {
+			(adapter.removeTree || removeTreeWithRetries)(source.appDir);
+		} catch (deleteError) {
+			try {
+				source.quarantinePath = adapter.quarantineTree(source.appDir);
+				record("quarantine-old-app-dir");
+				try {
+					adapter.writeDiagnostic?.(deleteError, source);
+				} catch {}
+			} catch (quarantineError) {
+				if (quarantineError && typeof quarantineError === "object") {
+					quarantineError.deleteError = deleteError instanceof Error ? deleteError.message : String(deleteError);
+				}
+				try {
+					const diagnosticPath = adapter.writeDiagnostic?.(quarantineError, source);
+					if (diagnosticPath && quarantineError && typeof quarantineError === "object") quarantineError.diagnosticPath = diagnosticPath;
+				} catch (diagnosticError) {
+					if (quarantineError && typeof quarantineError === "object") {
+						quarantineError.diagnosticError = diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError);
+					}
+				}
+				if (source.confirmedOffline === true && source.hasProcess === false) {
+					record("preserve-locked-old-app-dir");
+					console.warn(`[vcpdeck] Server 已确认旧 Client 离线；锁定的历史目录保留在 ${source.appDir}`);
+				} else {
+					throw quarantineError;
+				}
+			}
+		}
 		try {
 			rmSync(source.statePath, { force: true });
 		} catch {
@@ -915,7 +1008,7 @@ function cleanLegacyWindowsInstall(adapter, source) {
 	}
 }
 
-function safeReadJsonSafePm2(adapter) {
+function safeReadJsonSafePm2(adapter, deletedName = PM2_NAME) {
 	const result = adapter.pm2(["jlist"]);
 	if (result?.status !== 0) {
 		throw new Error(`PM2 jlist 失败：${result?.stderr?.trim() || `退出码 ${result?.status ?? "未知"}`}`);
@@ -923,7 +1016,7 @@ function safeReadJsonSafePm2(adapter) {
 	try {
 		const list = JSON.parse(result.stdout || "[]");
 		if (!Array.isArray(list)) throw new Error("结果不是数组");
-		return list.filter((entry) => entry?.name !== PM2_NAME);
+		return list.filter((entry) => entry?.name !== deletedName);
 	} catch (error) {
 		throw new Error(`PM2 jlist 结果无效：${error instanceof Error ? error.message : String(error)}`);
 	}
@@ -983,7 +1076,22 @@ async function runWindowsInstall(options) {
 		record("validate-archive");
 
 		// 阶段 4：清理旧 PM2 现场（材料全部就绪后）。
-		if (legacy) cleanLegacyWindowsInstall(adapter, legacy);
+		if (legacy) {
+			if (!legacy.hasProcess) {
+				let oldStatus;
+				try {
+					oldStatus = await fetchJsonCall(
+						`${args.serverOrigin}/api/client-installer/clients/${encodeURIComponent(legacy.clientId)}/status`,
+						{ headers: { "x-vcpdeck-psk": bootstrap.psk }, timeoutMs: 15_000 },
+					);
+				} catch (error) {
+					throw new Error(`无法确认旧 Client 已离线，拒绝保留锁定目录：${error instanceof Error ? error.message : String(error)}`);
+				}
+				if (oldStatus?.online !== false) throw new Error("旧 Client 仍在线，拒绝保留锁定目录并启动第二实例");
+				legacy.confirmedOffline = true;
+			}
+			cleanLegacyWindowsInstall(adapter, legacy);
+		}
 
 		// 同版本重装时 Client 的 cwd 位于 apps/<版本>/client；Windows 不允许删除正在
 		// 使用的目录。先结束既有 SYSTEM 任务，后续重新注册并启动，确保新身份/环境生效。
@@ -1178,6 +1286,7 @@ async function main() {
 				join(homedir(), ".vcpdeck", "tools", "pm2", "pm2.cmd"),
 				args.nodePath,
 			);
+		const diagnosticEvents = [];
 		const adapter = {
 			dryRun: false,
 			records: [],
@@ -1211,6 +1320,90 @@ async function main() {
 					stdout: result.stdout,
 					stderr: `${result.error?.message || ""}${result.stderr || ""}`,
 				};
+			},
+			listProcesses: () => {
+				const script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CreationDate,Name,ExecutablePath,CommandLine | ConvertTo-Json -Compress";
+				const result = spawnSync(defaultPowerShellPath(), ["-NoProfile", "-NonInteractive", "-Command", script], {
+					encoding: "utf8",
+					windowsHide: true,
+				});
+				if (result.status !== 0) throw new Error(result.stderr?.trim() || "CIM 进程查询失败");
+				const parsed = JSON.parse(result.stdout || "[]");
+				return (Array.isArray(parsed) ? parsed : [parsed]).map((entry) => ({
+					pid: Number(entry.ProcessId),
+					parentPid: Number(entry.ParentProcessId),
+					creationDate: String(entry.CreationDate || ""),
+					name: String(entry.Name || ""),
+					executablePath: String(entry.ExecutablePath || ""),
+					commandLine: String(entry.CommandLine || ""),
+				}));
+			},
+			killProcessTree: (tree) => {
+				const expected = new Map(tree.map((entry) => [entry.pid, entry.creationDate]));
+				const current = () => new Map(adapter.listProcesses().map((entry) => [entry.pid, entry.creationDate]));
+				for (const entry of [...tree].reverse()) {
+					if (current().get(entry.pid) !== entry.creationDate) continue;
+					const result = spawnSync("taskkill.exe", ["/PID", String(entry.pid), "/F"], { encoding: "utf8", windowsHide: true });
+					diagnosticEvents.push({
+						action: "taskkill",
+						pid: entry.pid,
+						status: result.status,
+						stdout: String(result.stdout || "").trim(),
+						stderr: String(result.stderr || result.error?.message || "").trim(),
+					});
+				}
+				const alive = current();
+				const remaining = [...expected].filter(([pid, creationDate]) => alive.get(pid) === creationDate).map(([pid]) => pid);
+				if (remaining.length) throw new Error(`旧 Launcher 进程树仍在运行（PID ${remaining.join(", ")}），拒绝删除目录`);
+			},
+			removeTree: removeTreeWithRetries,
+			quarantineTree: (sourcePath) => {
+				const target = `${sourcePath}.vcpdeck-orphan-${Date.now()}-${randomUUID()}`;
+				require("node:fs").renameSync(sourcePath, target);
+				console.warn(`[vcpdeck] 旧目录无法直接清空，已隔离到 ${target}`);
+				return target;
+			},
+			writeDiagnostic: (error, source) => {
+				const run = (command, commandArgs) => {
+					const result = spawnSync(command, commandArgs, { encoding: "utf8", windowsHide: true });
+					return {
+						command: `${command} ${commandArgs.join(" ")}`,
+						status: result.status,
+						stdout: String(result.stdout || "").slice(-20_000),
+						stderr: String(result.stderr || result.error?.message || "").slice(-20_000),
+					};
+				};
+				const inspectedPath = source.quarantinePath || source.appDir;
+				let processes = [];
+				try {
+					const oldPath = source.appDir.replace(/\\/g, "/").toLowerCase();
+					processes = adapter.listProcesses()
+						.filter((entry) => source.processRoot?.pid === entry.pid ||
+							entry.executablePath.replace(/\\/g, "/").toLowerCase().includes(oldPath) ||
+							entry.commandLine.replace(/\\/g, "/").toLowerCase().includes(oldPath))
+						.map(({ commandLine, ...entry }) => ({ ...entry, commandLineReferencesOldPath: commandLine.replace(/\\/g, "/").toLowerCase().includes(oldPath) }));
+				} catch (processError) {
+					processes = [{ queryError: processError instanceof Error ? processError.message : String(processError) }];
+				}
+				const report = {
+					at: new Date().toISOString(),
+					error: error instanceof Error ? { name: error.name, message: error.message, code: error.code, stack: error.stack } : String(error),
+					source: { appDir: source.appDir, quarantinePath: source.quarantinePath || null, statePath: source.statePath, pm2Name: source.pm2Name, processRoot: source.processRoot },
+					stages: adapter.records,
+					events: diagnosticEvents,
+					relatedProcesses: processes,
+					directory: {
+						inspectedPath,
+						exists: existsSync(inspectedPath),
+						attrib: run("attrib.exe", [inspectedPath]),
+						acl: run("icacls.exe", [inspectedPath]),
+					},
+					legacyTask: run("schtasks.exe", ["/Query", "/TN", "VCPDeck PM2 Startup", "/V", "/FO", "LIST"]),
+					systemTask: run("schtasks.exe", ["/Query", "/TN", WINDOWS_CLIENT_TASK, "/V", "/FO", "LIST"]),
+				};
+				const path = join(WINDOWS_APP_DIR, "install-diagnostic.log");
+				writeFileSync(path, JSON.stringify(report, null, 2), { mode: 0o600 });
+				return path;
 			},
 		};
 		await runWindowsInstall({
@@ -1409,6 +1602,8 @@ if (require.main === module) {
 		console.error(
 			`\n[vcpdeck] 安装失败: ${error instanceof Error ? error.message : String(error)}`,
 		);
+		if (error?.diagnosticPath) console.error(`[vcpdeck] 完整诊断日志: ${error.diagnosticPath}`);
+		if (error?.diagnosticError) console.error(`[vcpdeck] 诊断日志写入失败: ${error.diagnosticError}`);
 		console.error(`[vcpdeck] 已保留现场；修复后重新执行同一条安装命令。`);
 		if (platform() === "win32") {
 			console.error(`[vcpdeck] Windows 诊断：任务 ${WINDOWS_CLIENT_TASK}；安装现场 ${WINDOWS_APP_DIR}`);
@@ -1437,6 +1632,7 @@ module.exports = {
 	normalizeOrigin,
 	ensureClientId,
 	cachedArtifactOk,
+	download,
 	installPm2Retry,
 	resolveGlobalPm2,
 	buildNodeRuntimeEnv,

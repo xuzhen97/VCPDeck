@@ -517,7 +517,7 @@ async function putDirectPart(
 				},
 				body: bytes as unknown as BodyInit,
 			});
-			if (response.ok) return;
+			if (response.ok || response.status === 409) return;
 			if (response.status === 403 && attempt < 2) {
 				const refreshed = await client.releases.refreshUploadParts(sessionId, [
 					partNumber,

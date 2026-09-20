@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-09-20
+
+### Fixed
+
+- **Windows 旧目录被未知目录句柄锁定时，递归删除与同卷改名都会失败（`EPERM` → `EBUSY`）**：安装器现在以 Server 的旧 Client ID 在线状态作为最终安全门槛。仅当本机无旧 PM2 进程且 Server 明确返回 `online:false` 时，才保留锁定的历史目录、删除旧安装状态权威并继续 SYSTEM 安装；旧 Client 在线或状态查询失败时仍 fail closed，避免同一 Client ID 启动双实例。不额外终止未知进程，也不删除锁定目录内容。
+
+## [0.10.4] - 2026-09-20
+
+### Fixed
+
+- **Windows 旧 Client 已无 PM2/相关进程且 ACL 正常时，大型历史 `node_modules` 仍可能让 Node `rmSync` 折叠为根目录 `EPERM`**：已验证的旧 `launcher-client` 若无法直接递归删除，安装器现在将它原子改名为同级唯一 tombstone 并继续 SYSTEM 安装，使新安装不再依赖历史缓存即时清空。隔离只作用于通过 Client ID、Server Origin 和用户 `.vcpdeck` 路径校验的单一旧目录；改名也失败时仍 fail closed 并写诊断，不终止额外进程、不删除其他目录。诊断 ACL 查询改为根目录级，避免大型依赖树触发 `icacls` 输出 `ENOBUFS`。
+
+## [0.10.3] - 2026-09-20
+
+### Fixed
+
+- **Windows Client 迁移删除旧目录失败时只显示裸 `EPERM`，无法定位真实占用者**：删除失败现在保留原始异常，同时将完整诊断写入 `C:\ProgramData\VCPDeck\Client\install-diagnostic.log` 并在控制台打印路径。日志包含完整 stack、迁移阶段、逐 PID `taskkill` 结果、清理后仍引用旧路径的进程、目录属性与 ACL，以及旧 PM2/SYSTEM 计划任务状态；不记录环境变量、PSK 或文件正文。诊断采集自身失败也不会覆盖原始安装错误。
+
+## [0.10.2] - 2026-09-20
+
+### Fixed
+
+- **Windows 旧 PM2 Launcher 删除后孤儿 Client 仍锁定目录并报 `EPERM`**：迁移现在从已通过入口路径校验的 PM2 Launcher PID 出发，使用 Windows CIM 建立精确父子进程树，并以 `PID + CreationDate` 防止 PID 复用；删除 PM2 条目后只终止这棵树中仍为同一实例的进程。无关 `node.exe`、其他 PM2 应用和树外进程不会被终止；进程树无法确认或身份发生变化时 fail closed。
+- **Alibaba Release 直传在 Provider 合并瞬时失败后无法恢复**：所有分片已上传但完成合并失败时，重跑 CLI 会复用持久会话；Provider 对已存在分片返回 HTTP 409 现在视为幂等冲突，CLI 继续计算本地全文件 SHA-256 并调用 Provider 完成合并。只有 Provider 确认完整分片且 Server 成功登记两个平台构件后才触发更新。
+
+## [0.10.1] - 2026-09-20
+
+### Fixed
+
+- **Windows 旧 PM2 Client 使用自定义进程名时迁移删除目录报 `EPERM`**：迁移现在按已确认的 Launcher 入口路径识别旧 PM2 条目（兼容 `pm_exec_path` 直接指向 Launcher，或 Node 作为入口、Launcher 位于 `args`），并按实际进程名删除；不再只认固定 `vcpdeck-client-launcher`，避免旧进程仍占用 `~/.vcpdeck/launcher-client`。
+- **Client 一键安装下载 Release 遇到瞬时 `fetch failed` 直接中止**：Release 与安装器下载现在对网络异常及 HTTP 502/503/504 最多尝试三次，并覆盖响应正文中途断流；仍保留 SHA-256 完整性校验。
+
 ## [0.10.0] - 2026-09-19
 
 ### Changed

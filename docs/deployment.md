@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-19｜适用版本：`0.10.0` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-19｜适用版本：`0.10.5` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 一键安装使用 `NT AUTHORITY\SYSTEM` 开机任务（ADR-0027），Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 
@@ -400,6 +400,7 @@ node packages/cli/dist/index.js release wait x.y.z --env=prod --timeout=1800
 ### 9.6 失败处置与重试
 
 - Release `failed`：查 `errorMessage` 定位阶段（prepare 下载/校验、drain 超时、launcher 回退等），修复后**发布新版本号**重新触发，不支持对同一版本重试；
+- Alibaba 直传在全部分片到达 100% 后若 Provider 合并瞬时失败，Release 会保留为 `uploaded` 且不触发更新；用相同 SHA/大小的构件重跑原上传命令可恢复持久会话。Provider 对已存在分片返回 HTTP 409 时 CLI 继续执行本地全文件 SHA-256 与 Provider 合并确认，只有两个平台均成功登记后才开始更新；
 - 单台 Client `failed`（`clientStates` 里有 reason）：修复该机器后，发布新版本会重新覆盖它；`done` 的 Release 不会自动重试已 failed 的 Client；
 - Server drain 超时后派发闸门不会自动解除：核对活跃 Job，通常重启 Server 恢复派发；
 - 新 Server 探活失败时 Launcher 已自动回退上一版本，Release 会被恢复编排标记为 failed（“版本不符”）；

@@ -44,6 +44,11 @@ function recordingAdapter() {
 			if (command === "schtasks.exe" && args[0] === "/Query" && args.join(" ").includes("\\VCPDeck\\Client")) return { status: 0, stdout: taskXml };
 			return { status: 1, stderr: `unexpected ${command}` };
 		},
+		listProcesses: () => [
+			{ pid: 4000, parentPid: 100, creationDate: "launcher" },
+			{ pid: 4001, parentPid: 4000, creationDate: "client" },
+		],
+		killProcessTree: (tree) => records.push(`kill-tree:${tree.map((entry) => entry.pid).join(",")}`),
 		// 默认：旧 VCPDeck PM2 进程指向已确认的旧 app-dir；delete 后视为已删除；fail-closed 测试整体替换。
 		pm2: (args) => {
 			records.push(`pm2:${args.join(" ")}`);
@@ -53,7 +58,7 @@ function recordingAdapter() {
 				return {
 					status: 0,
 					stdout: JSON.stringify([
-						{ name: "vcpdeck-client-launcher", pm2_env: { pm_exec_path: "C:\\Users\\x\\.vcpdeck\\launcher-client\\dist\\main.js" } },
+						{ pid: 4000, name: "vcpdeck-client-launcher", pm2_env: { pm_exec_path: "C:\\Users\\x\\.vcpdeck\\launcher-client\\dist\\main.js" } },
 					]),
 				};
 			}
@@ -336,6 +341,176 @@ test("旧 PM2 目录清理等待 Windows 进程句柄释放", () => {
 	});
 });
 
+test("旧目录直接删除 EPERM 时原子隔离后继续迁移，不触碰其他目录", () => {
+	const adapter = recordingAdapter();
+	adapter.dryRun = false;
+	adapter.removeTree = () => {
+		const error = new Error("EPERM, Permission denied");
+		error.code = "EPERM";
+		throw error;
+	};
+	adapter.quarantineTree = (source) => {
+		adapter.records.push(`quarantine:${source}`);
+		return `${source}.vcpdeck-orphan-test`;
+	};
+	adapter.writeDiagnostic = (_error, source) => {
+		adapter.records.push(`diagnostic:${source.quarantinePath}`);
+		return "C:\\ProgramData\\VCPDeck\\Client\\install-diagnostic.log";
+	};
+	installer.cleanLegacyWindowsInstall(adapter, {
+		appDir: "C:\\Users\\x\\.vcpdeck\\launcher-client",
+		statePath: "C:\\Users\\x\\.vcpdeck\\client-install.json",
+		hasProcess: false,
+	});
+	assert.ok(adapter.records.includes("quarantine:C:\\Users\\x\\.vcpdeck\\launcher-client"));
+	assert.ok(adapter.records.includes("diagnostic:C:\\Users\\x\\.vcpdeck\\launcher-client.vcpdeck-orphan-test"));
+});
+
+test("旧目录删除与隔离都失败但 Server 确认旧 Client 离线时保留目录继续", () => {
+	const adapter = recordingAdapter();
+	adapter.dryRun = false;
+	adapter.removeTree = () => {
+		const error = new Error("EPERM, delete denied");
+		error.code = "EPERM";
+		throw error;
+	};
+	adapter.quarantineTree = () => {
+		const error = new Error("EBUSY, rename denied");
+		error.code = "EBUSY";
+		throw error;
+	};
+	adapter.writeDiagnostic = (error, source) => {
+		adapter.records.push(`diagnostic:${error.message}:${source.appDir}`);
+		return "C:\\ProgramData\\VCPDeck\\Client\\install-diagnostic.log";
+	};
+	installer.cleanLegacyWindowsInstall(adapter, {
+		appDir: "C:\\Users\\x\\.vcpdeck\\launcher-client",
+		statePath: "C:\\Users\\x\\.vcpdeck\\client-install.json",
+		hasProcess: false,
+		confirmedOffline: true,
+	});
+	assert.ok(adapter.records.includes("preserve-locked-old-app-dir"));
+	assert.ok(adapter.records.includes("diagnostic:EBUSY, rename denied:C:\\Users\\x\\.vcpdeck\\launcher-client"));
+});
+
+test("旧目录删除与隔离都失败且未确认离线时 fail closed", () => {
+	const adapter = recordingAdapter();
+	adapter.dryRun = false;
+	adapter.removeTree = () => { throw Object.assign(new Error("EPERM, delete denied"), { code: "EPERM" }); };
+	adapter.quarantineTree = () => { throw Object.assign(new Error("EBUSY, rename denied"), { code: "EBUSY" }); };
+	adapter.writeDiagnostic = () => "C:\\ProgramData\\VCPDeck\\Client\\install-diagnostic.log";
+	assert.throws(
+		() => installer.cleanLegacyWindowsInstall(adapter, {
+			appDir: "C:\\Users\\x\\.vcpdeck\\launcher-client",
+			statePath: "C:\\Users\\x\\.vcpdeck\\client-install.json",
+			hasProcess: false,
+			confirmedOffline: false,
+		}),
+		/rename denied/,
+	);
+});
+
+test("旧 PM2 使用自定义名称时按 Launcher 路径识别并删除真实条目", () => {
+	const adapter = recordingAdapter();
+	adapter.pm2 = (args) => {
+		adapter.records.push(`pm2:${args.join(" ")}`);
+		if (args[0] === "jlist") {
+			return {
+				status: 0,
+				stdout: JSON.stringify([
+					{ pid: 4100, name: "my-vcpdeck", pm2_env: { pm_exec_path: "C:\\ProgramData\\node.exe", args: ["--env-file=x", "C:\\Users\\x\\.vcpdeck\\launcher-client\\dist\\main.js"] } },
+					{ pid: 9900, name: "other-app", pm2_env: { pm_exec_path: "C:\\other\\main.js" } },
+				]),
+			};
+		}
+		return { status: 0 };
+	};
+	adapter.listProcesses = () => [
+		{ pid: 4100, parentPid: 100, creationDate: "launcher" },
+		{ pid: 4200, parentPid: 4100, creationDate: "client" },
+		{ pid: 4300, parentPid: 4200, creationDate: "worker" },
+		{ pid: 9900, parentPid: 100, creationDate: "unrelated" },
+	];
+	adapter.killProcessTree = (tree) => adapter.records.push(`kill-tree:${tree.map((entry) => entry.pid).join(",")}`);
+	const source = installer.discoverLegacyWindowsInstall(adapter, "https://deck.example.com");
+	assert.equal(source.pm2Name, "my-vcpdeck");
+	assert.equal(source.processRoot.pid, 4100);
+	installer.cleanLegacyWindowsInstall(adapter, source);
+	assert.ok(adapter.records.includes("pm2:delete my-vcpdeck"));
+	assert.ok(adapter.records.includes("kill-tree:4100,4200,4300"));
+	assert.ok(!adapter.records.some((record) => record.includes("9900")));
+});
+
+test("旧 Launcher PID 在清理前被复用时 fail closed，不终止新进程", () => {
+	const adapter = recordingAdapter();
+	let scans = 0;
+	adapter.listProcesses = () => {
+		scans += 1;
+		return [{ pid: 4000, parentPid: 100, creationDate: scans === 1 ? "old-launcher" : "new-unrelated-process" }];
+	};
+	assert.throws(
+		() => {
+			const source = installer.discoverLegacyWindowsInstall(adapter, "https://deck.example.com");
+			installer.cleanLegacyWindowsInstall(adapter, source);
+		},
+		/PID 已被其他进程复用/,
+	);
+	assert.ok(!adapter.records.some((record) => record.startsWith("pm2:delete")));
+	assert.ok(!adapter.records.some((record) => record.startsWith("kill-tree:")));
+});
+
+test("同名 PM2 条目指向其他目录时不误杀，即使另有路径匹配条目也拒绝迁移", () => {
+	const adapter = recordingAdapter();
+	adapter.pm2 = () => ({
+		status: 0,
+		stdout: JSON.stringify([
+			{ name: "vcpdeck-client-launcher", pm2_env: { pm_exec_path: "C:\\other\\main.js" } },
+			{ name: "my-vcpdeck", pm2_env: { pm_exec_path: "C:\\Users\\x\\.vcpdeck\\launcher-client\\dist\\main.js" } },
+		]),
+	});
+	assert.throws(
+		() => installer.discoverLegacyWindowsInstall(adapter, "https://deck.example.com"),
+		/多个同名 VCPDeck PM2 进程/,
+	);
+	assert.ok(!adapter.records.some((record) => record.startsWith("pm2:delete")));
+});
+
+test("Release 下载遇到瞬时 fetch failed 后重试", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "vcpdeck-download-"));
+	const target = join(dir, "release.zip");
+	let calls = 0;
+	try {
+		await installer.download("https://deck.example.com/release.zip", target, null, async () => {
+			calls += 1;
+			if (calls === 1) throw new TypeError("fetch failed");
+			return new Response("zip", { status: 200 });
+		}, async () => {});
+		assert.equal(calls, 2);
+		assert.equal(readFileSync(target, "utf8"), "zip");
+
+		let bodyCalls = 0;
+		await installer.download("https://deck.example.com/release.zip", target, null, async () => {
+			bodyCalls += 1;
+			if (bodyCalls === 1) return { ok: true, arrayBuffer: async () => { throw new TypeError("terminated"); } };
+			return new Response("complete", { status: 200 });
+		}, async () => {});
+		assert.equal(bodyCalls, 2);
+		assert.equal(readFileSync(target, "utf8"), "complete");
+
+		let fatalCalls = 0;
+		await assert.rejects(
+			installer.download("https://deck.example.com/missing.zip", target, null, async () => {
+				fatalCalls += 1;
+				return new Response("missing", { status: 404 });
+			}, async () => {}),
+			/HTTP 404/,
+		);
+		assert.equal(fatalCalls, 1);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail closed 固定", () => {
 	const adapter = recordingAdapter();
 	const run = installer.runWindowsInstall({
@@ -385,6 +560,8 @@ test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail 
 				"stop-old-launcher",
 				"pm2:delete vcpdeck-client-launcher",
 				"delete-old-pm2-entry",
+				"kill-tree:4000,4001",
+				"stop-old-process-tree",
 				"pm2:save",
 				"save-remaining-pm2-apps",
 				"pm2:jlist",
@@ -516,6 +693,7 @@ test("旧 PM2 删除失败时保留旧目录并停止迁移", () => {
 				appDir: "C:\\Users\\x\\.vcpdeck\\launcher-client",
 				statePath: "C:\\Users\\x\\.vcpdeck\\client-install.json",
 				hasProcess: true,
+				processRoot: { pid: 4000, parentPid: 100, creationDate: "launcher" },
 			}),
 		/PM2 delete 失败.*delete failed/,
 	);

@@ -40,7 +40,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.10.0";
+    exports2.VERSION = "0.10.5";
   }
 });
 
@@ -14993,7 +14993,7 @@ async function putDirectPart(client, sessionId, partNumber, initialUrl, bytes, c
         },
         body: bytes
       });
-      if (response.ok)
+      if (response.ok || response.status === 409)
         return;
       if (response.status === 403 && attempt < 2) {
         const refreshed = await client.releases.refreshUploadParts(sessionId, [

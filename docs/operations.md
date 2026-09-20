@@ -1,6 +1,6 @@
 # VCPDeck 运维手册
 
-> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-19｜适用版本：`0.10.0` / 当前 `main`
+> 状态：Current｜维护责任：运维/发布维护者｜最后核验：2026-09-20｜适用版本：`0.10.5` / 当前 `main`
 
 ## 1. 运行基线
 
@@ -199,7 +199,8 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 - `CLIENT_INSTALLER_ARCHIVE_MISSING`：补齐目标平台 Release archive；
 - 平台检查失败：核对 x64、受支持发行版、glibc/systemd，WSL/容器/ARM64/musl 不在范围；当前仅额外支持 Bazzite x64，不自动支持其他 Fedora Atomic 发行版；
 - Bazzite 基础依赖失败：安装器只对缺失的 `curl`、`unzip`、`tar`、`xz` 或 CA 证书调用 `sudo rpm-ostree`，不应改用 `dnf install`；先执行 `rpm-ostree status` 检查 pending deployment、网络和 sudo 权限。若提示依赖将在重启后生效，手工重启 Bazzite 后重跑同一条安装命令；安装器不会自动重启。A2 安装完成后运行时位于 `/opt/vcpdeck/client/node`，由 `vcpdeck-client.service` 管理；
-- Node/PM2 下载失败：Windows 或旧 Linux PM2 安装时检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源。Windows SYSTEM 安装不使用 PM2，私有 Node 落在 `C:\ProgramData\VCPDeck\Client\runtime\node`；Linux A2 不使用 PM2，Node 运行时直接安装到 `/opt/vcpdeck/client/node`。若旧 PM2 安装错误包含 `env: “node”: 没有那个文件或目录`，说明 Server 仍在提供未把私有 Node `bin` 注入 npm 子进程 `PATH` 的旧安装器，应先更新 Server 后重跑同一固定命令。若 Node 输出的探测表达式丢失 `"x64"` 或 `"."` 引号，则是旧版 Windows PowerShell 5.1 引导脚本，同样先更新 Server；
+- Node/PM2 下载失败：Windows 或旧 Linux PM2 安装时检查目标机公网、DNS、TLS 和代理；安装器先尝试国内源再回退官方源。Windows SYSTEM 安装的 Release/安装器下载对网络异常及 HTTP 502/503/504 最多尝试三次，私有 Node 落在 `C:\ProgramData\VCPDeck\Client\runtime\node`；Linux A2 不使用 PM2，Node 运行时直接安装到 `/opt/vcpdeck/client/node`。若旧 PM2 安装错误包含 `env: “node”: 没有那个文件或目录`，说明 Server 仍在提供未把私有 Node `bin` 注入 npm 子进程 `PATH` 的旧安装器，应先更新 Server 后重跑同一固定命令。若 Node 输出的探测表达式丢失 `"x64"` 或 `"."` 引号，则是旧版 Windows PowerShell 5.1 引导脚本，同样先更新 Server；
+- Windows 旧 PM2 目录清理报 `EPERM`：先更新 Server 后重跑同一固定安装命令。安装器会按已确认的 Launcher 入口路径识别旧 PM2 条目，再从该 Launcher 的 PID 建立父子进程树；删除 PM2 条目后只终止树内且 `PID + CreationDate` 仍匹配的孤儿进程，不按 `node.exe` 名称批量终止，也不影响其他 PM2 应用。进程树无法确认或 PID 已被复用时安装器拒绝迁移。若大型历史依赖树无法直接递归删除，安装器先尝试把已验证的旧 `launcher-client` 原子改名为同级 `.vcpdeck-orphan-*` 隔离目录；若目录句柄导致删除和改名均失败，只有 Server 按旧 Client ID 明确确认 `online:false` 且本机无旧 PM2 进程时才保留历史目录继续 SYSTEM 安装，在线或状态查询失败仍 fail closed，避免双实例。失败诊断位于 `C:\ProgramData\VCPDeck\Client\install-diagnostic.log`，不包含环境变量、PSK 或文件正文；
 - 旧 PM2 Launcher 显示 `online`，但 120 秒后仍报 `registered:false`：检查 Launcher error log；若反复出现 `The operation was aborted due to timeout` 且系统没有 Node，说明旧 ecosystem 没有把私有 Node `bin` 注入 Launcher `PATH`，Launcher 正在尝试下载第二份运行时。更新 Server 后重跑同一固定命令；紧急恢复可将私有 Node `bin` 前置到 ecosystem 的 `env.PATH`，以 `--update-env` 重启 Launcher 并 `pm2 save`。A2 systemd 部署则检查 `systemctl status vcpdeck-client.service`、`journalctl -u vcpdeck-client.service` 和 `/etc/vcpdeck/client.env` 权限；
 - Linux 安装末尾出现 `TMP_DIR: 未绑定的变量`：这是旧 bootstrap 的 EXIT trap 在函数返回后展开局部变量所致，不会删除已安装文件；更新 Server 后重跑同一固定命令完成幂等修复；
 - Linux A2 安装报 `ERR_FS_EISDIR: ... /opt/vcpdeck/client/node/current`：这是 0.8.17 及更早版本从 nvm/系统 Node 目录名猜版本失败、把发行版复制进 `node/current` 所致；更新 Server 后重跑同一固定命令，安装器会递归清掉该目录并铺到 `node/<真实版本>`；
