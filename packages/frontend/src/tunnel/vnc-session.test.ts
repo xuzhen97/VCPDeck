@@ -20,7 +20,9 @@ function makeFakeRfb(): RfbInstance & {
 		clipboardPasteFrom: vi.fn(),
 		sendCtrlAltDel: vi.fn(),
 		addEventListener(type: string, fn: EventListener) {
-			(listeners[type] ??= []).push(fn);
+			const arr = listeners[type] ?? [];
+			arr.push(fn);
+			listeners[type] = arr;
 		},
 		removeEventListener(type: string, fn: EventListener) {
 			const arr = listeners[type] ?? [];
@@ -28,9 +30,9 @@ function makeFakeRfb(): RfbInstance & {
 			if (i >= 0) arr.splice(i, 1);
 		},
 		dispatchEvent(type: string, detail?: object) {
-			(listeners[type] ?? []).forEach((fn) =>
-				fn(new CustomEvent(type, { detail })),
-			);
+			for (const fn of listeners[type] ?? []) {
+				fn(new CustomEvent(type, { detail }));
+			}
 		},
 	};
 }
@@ -54,7 +56,7 @@ function makeContainer() {
 }
 
 describe("createVncSession", () => {
-	it("默认 viewOnly=false、适配模式（scaleViewport=true）、resizeSession=true、中档画质", async () => {
+	it("默认 viewOnly=false、适配模式（scaleViewport=true）、resizeSession 恒为 false、中档画质", async () => {
 		const rfb = makeFakeRfb();
 		const session = await createVncSession(makeContainer(), makeChannel(), {
 			createRfb: () => rfb,
@@ -62,17 +64,17 @@ describe("createVncSession", () => {
 		expect(rfb.viewOnly).toBe(false);
 		expect(rfb.scaleViewport).toBe(true);
 		expect(rfb.clipViewport).toBe(false);
-		expect(rfb.resizeSession).toBe(true);
+		// 永不请求远端改分辨率（Phase C）：发 SetDesktopSize 会改变目标机显示设置
+		expect(rfb.resizeSession).toBe(false);
 		expect([rfb.qualityLevel, rfb.compressionLevel]).toEqual([6, 2]);
 		expect(session.rfb).toBe(rfb);
 	});
 
-	it("尊重传入的 viewOnly / viewMode / resizeSession / 画质选项", async () => {
+	it("尊重传入的 viewOnly / viewMode / 画质选项", async () => {
 		const rfb = makeFakeRfb();
 		await createVncSession(makeContainer(), makeChannel(), {
 			viewOnly: true,
 			viewMode: "actual",
-			resizeSession: false,
 			qualityLevel: 9,
 			compressionLevel: 0,
 			createRfb: () => rfb,
@@ -93,16 +95,16 @@ describe("createVncSession", () => {
 		expect([rfb.scaleViewport, rfb.clipViewport, rfb.dragViewport]).toEqual([false, false, false]);
 	});
 
-	it("运行时切换模式 / 远端跟随 / 画质均作用于底层属性", async () => {
+	it("运行时切换模式 / 画质均作用于底层属性", async () => {
 		const rfb = makeFakeRfb();
 		const session = await createVncSession(makeContainer(), makeChannel(), {
 			createRfb: () => rfb,
 		});
 		session.setViewMode("actual");
-		session.setResizeSession(false);
 		session.setQuality(3);
 		session.setCompression(7);
 		expect([rfb.scaleViewport, rfb.clipViewport, rfb.dragViewport]).toEqual([false, true, true]);
+		// 任何运行时操作都不得把远端 resize 打开
 		expect(rfb.resizeSession).toBe(false);
 		expect([rfb.qualityLevel, rfb.compressionLevel]).toEqual([3, 7]);
 	});
@@ -189,6 +191,14 @@ describe("createVncSession", () => {
 		expect(onState).not.toHaveBeenCalled();
 	});
 
+	it("会话对象不再暴露远端 resize 开关", async () => {
+		const rfb = makeFakeRfb();
+		const session = await createVncSession(makeContainer(), makeChannel(), {
+			createRfb: () => rfb,
+		});
+		expect(session).not.toHaveProperty("setResizeSession");
+	});
+
 	it("断开后各 setter / 出站方法不再作用到底层 RFB（noVNC 会拒绝已断开对象）", async () => {
 		const rfb = makeFakeRfb();
 		const session = await createVncSession(makeContainer(), makeChannel(), {
@@ -197,14 +207,13 @@ describe("createVncSession", () => {
 		session.disconnect();
 		session.setViewOnly(true);
 		session.setViewMode("actual");
-		session.setResizeSession(false);
 		session.setQuality(9);
 		session.setCompression(9);
 		session.sendClipboard("x");
 		session.sendCtrlAltDel();
 		expect(rfb.viewOnly).toBe(false);
 		expect(rfb.scaleViewport).toBe(true); // 仍保持 fit
-		expect(rfb.resizeSession).toBe(true);
+		expect(rfb.resizeSession).toBe(false);
 		expect([rfb.qualityLevel, rfb.compressionLevel]).toEqual([6, 2]);
 		expect(rfb.clipboardPasteFrom).not.toHaveBeenCalled();
 		expect(rfb.sendCtrlAltDel).not.toHaveBeenCalled();

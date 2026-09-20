@@ -66,8 +66,6 @@ export interface VncSessionOptions {
 	viewOnly?: boolean;
 	/** 查看模式，决定 scaleViewport/clipViewport/dragViewport。默认 "fit"。 */
 	viewMode?: ViewMode;
-	/** 容器尺寸变化时请求远端分辨率跟随（SetDesktopSize）。默认 true。 */
-	resizeSession?: boolean;
 	/** JPEG 质量 0-9。默认 6。 */
 	qualityLevel?: number;
 	/** zlib 压缩 0-9。默认 2。 */
@@ -91,8 +89,6 @@ export interface VncSession {
 	setViewOnly: (v: boolean) => void;
 	/** 运行中切换查看模式。 */
 	setViewMode: (mode: ViewMode) => void;
-	/** 运行中切换“远端分辨率跟随”。 */
-	setResizeSession: (v: boolean) => void;
 	/** 运行中切换 JPEG 质量（0-9）。 */
 	setQuality: (q: number) => void;
 	/** 运行中切换压缩等级（0-9）。 */
@@ -116,6 +112,8 @@ type RfbModule = {
 let rfbModulePromise: Promise<RfbModule> | null = null;
 
 function loadRfb(): Promise<RfbModule> {
+	// SAFETY: noVNC 的 ESM 默认导出是 RFB 构造器，其公开面已由 RfbInstance 声明；
+	// 这里用一次静态断言把动态 import 收窄到本模块实际使用的最小面。
 	rfbModulePromise ??= import("@novnc/novnc") as unknown as Promise<RfbModule>;
 	return rfbModulePromise;
 }
@@ -155,10 +153,12 @@ export async function createVncSession(
 	const factory = opts.createRfb ?? defaultFactory;
 	const rfb = await factory(container, channel);
 
-	// 实例属性默认值：适配模式、远端分辨率跟随、中档画质；只读由面板决定
+	// 实例属性默认值：适配模式、中档画质；只读由面板决定
 	rfb.viewOnly = !!opts.viewOnly;
 	applyViewMode(rfb, opts.viewMode ?? "fit");
-	rfb.resizeSession = opts.resizeSession ?? true;
+	// 永不请求远端改分辨率：SetDesktopSize 在物理 Windows 桌面上等同于改屏幕分辨率，
+	// 而本产品要求查看行为不得影响目标机。缩放一律在浏览器本地完成。
+	rfb.resizeSession = false;
 	rfb.qualityLevel = opts.qualityLevel ?? 6;
 	rfb.compressionLevel = opts.compressionLevel ?? 2;
 
@@ -207,11 +207,6 @@ export async function createVncSession(
 		},
 		setViewMode(mode: ViewMode) {
 			applyIfLive(() => applyViewMode(rfb, mode));
-		},
-		setResizeSession(v: boolean) {
-			applyIfLive(() => {
-				rfb.resizeSession = v;
-			});
 		},
 		setQuality(q: number) {
 			applyIfLive(() => {

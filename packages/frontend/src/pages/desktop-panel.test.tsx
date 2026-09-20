@@ -242,7 +242,7 @@ describe("DesktopPanel", () => {
 		await waitFor(() => expect(remove).toHaveBeenCalledWith("tn_1"));
 	});
 
-	it("连接后全屏按钮把画面容器设为浏览器全屏", async () => {
+	it("全屏按钮把「工具栏 + 画面」的工作区设为浏览器全屏", async () => {
 		const tunnel = makeTunnel();
 		const vnc = makeVnc();
 		mockOpen(tunnel);
@@ -256,15 +256,16 @@ describe("DesktopPanel", () => {
 		const opts = vi.mocked(createVncSession).mock.calls[0][2]!;
 		opts.onState?.("connected" as never);
 
-		// mock 出全屏 API：点「全屏」应调用容器的 requestFullscreen
-		const canvas = screen.getByTestId("desktop-canvas");
+		// 全屏目标必须是包含工具栏的工作区，而不是画布（否则全屏后控件不可见）
+		const workspace = screen.getByTestId("desktop-workspace");
 		const requestFullscreen = vi.fn(async () => undefined);
-		(canvas as unknown as { requestFullscreen: unknown }).requestFullscreen = requestFullscreen;
+		(workspace as unknown as { requestFullscreen: unknown }).requestFullscreen = requestFullscreen;
 		await user.click(await screen.findByRole("button", { name: "全屏" }));
 		await waitFor(() => expect(requestFullscreen).toHaveBeenCalled());
 	});
 
-	it("全屏控制位于画布容器内，全屏时仍可见可点", async () => {		const tunnel = makeTunnel();
+	it("工具栏在画面之外，且在同一个全屏工作区内", async () => {
+		const tunnel = makeTunnel();
 		const vnc = makeVnc();
 		mockOpen(tunnel);
 		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
@@ -276,10 +277,139 @@ describe("DesktopPanel", () => {
 		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
 		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
 
-		// 全屏按钮必须是画布容器的后代，Fullscreen 显示容器时才可见
+		const workspace = screen.getByTestId("desktop-workspace");
+		const toolbar = await screen.findByTestId("desktop-toolbar");
 		const canvas = screen.getByTestId("desktop-canvas");
-		const fsBtn = await screen.findByRole("button", { name: "全屏" });
-		expect(canvas.contains(fsBtn)).toBe(true);
+
+		// 工具栏不得在画面内部（不能遮挡远程内容）
+		expect(canvas.contains(toolbar)).toBe(false);
+		// 但必须在全屏工作区内，否则全屏时不可见
+		expect(workspace.contains(toolbar)).toBe(true);
+		expect(workspace.contains(canvas)).toBe(true);
+	});
+
+	it("页面内最大化不调用 Fullscreen API，且可退出", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+
+		const workspace = screen.getByTestId("desktop-workspace");
+		const requestFullscreen = vi.fn(async () => undefined);
+		(workspace as unknown as { requestFullscreen: unknown }).requestFullscreen = requestFullscreen;
+
+		await user.click(await screen.findByRole("button", { name: "最大化" }));
+		expect(requestFullscreen).not.toHaveBeenCalled();
+		expect(workspace.className).toContain("fixed");
+
+		await user.click(screen.getByRole("button", { name: "退出最大化" }));
+		expect(screen.getByTestId("desktop-workspace").className).not.toContain("fixed");
+	});
+
+	it("倍率缩放只放大 noVNC 容器，不产生任何 transform", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+
+		const host = await screen.findByTestId("desktop-vnc-host");
+		expect(host.style.width).toBe("");
+
+		await user.click(screen.getByTestId("desktop-zoom-150"));
+		expect(host.style.width).toBe("150%");
+		expect(host.style.height).toBe("150%");
+		// 绝不能用 transform/zoom 做倍率：noVNC 的 display.scale 感知不到，会使指针坐标失真
+		expect(host.getAttribute("style") ?? "").not.toMatch(/transform|zoom/i);
+		// 放大后仍用 noVNC 的适配缩放（容器变大 ⇒ 画面变大，坐标自洽）
+		await waitFor(() => expect(vnc.setViewMode).toHaveBeenCalledWith("fit"));
+	});
+
+	it("适应窗口清除放大；1:1 交给 noVNC 裁剪模式", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+
+		await user.click(await screen.findByTestId("desktop-zoom-150"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("150%");
+
+		await user.click(screen.getByTestId("desktop-zoom-fit"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("");
+		await waitFor(() => expect(vnc.setViewMode).toHaveBeenCalledWith("fit"));
+
+		await user.click(screen.getByTestId("desktop-zoom-actual"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("");
+		await waitFor(() => expect(vnc.setViewMode).toHaveBeenCalledWith("actual"));
+	});
+
+	it("加/减档位沿倍率阶梯移动并夹紧边界", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+
+		await user.click(await screen.findByTestId("desktop-zoom-in"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("125%");
+		await user.click(screen.getByTestId("desktop-zoom-in"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("150%");
+		await user.click(screen.getByTestId("desktop-zoom-out"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("125%");
+		await user.click(screen.getByTestId("desktop-zoom-out"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("");
+		// 已在最小端：再减也不越界
+		await user.click(screen.getByTestId("desktop-zoom-out"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("");
+	});
+
+	it("查看模式与缩放档位保持一致（不出现 1:1 与放大容器并存）", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+
+		await user.click(await screen.findByTestId("desktop-zoom-150"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("150%");
+
+		// 切到 1:1：容器必须回到 100%，否则会与 noVNC 的裁剪模式叠加
+		await user.click(screen.getByTestId("desktop-view-actual"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("");
+		await waitFor(() => expect(vnc.setViewMode).toHaveBeenCalledWith("actual"));
+
+		// 再选倍率：回到 fit（容器放大驱动缩放）
+		await user.click(screen.getByTestId("desktop-zoom-150"));
+		expect(screen.getByTestId("desktop-vnc-host").style.width).toBe("150%");
+		await waitFor(() => expect(vnc.setViewMode).toHaveBeenCalledWith("fit"));
 	});
 
 	it("noVNC 在隧道 open 之前就挂到通道上（避免丢失 RFB banner）", async () => {
@@ -306,7 +436,7 @@ describe("DesktopPanel", () => {
 		releaseOpen();
 	});
 
-	it("默认只读 + 适配模式 + 远端跟随 + 中档画质；切档位/模式/跟随作用到底层会话", async () => {
+	it("默认只读 + 适配模式 + 永不请求远端 resize + 中档画质；切档位/模式作用到底层会话", async () => {
 		const tunnel = makeTunnel();
 		const vnc = makeVnc();
 		mockOpen(tunnel);
@@ -319,7 +449,7 @@ describe("DesktopPanel", () => {
 		const opts = vi.mocked(createVncSession).mock.calls[0][2]!;
 		expect(opts.viewOnly).toBe(true);
 		expect(opts.viewMode).toBe("fit");
-		expect(opts.resizeSession).toBe(true);
+		// 「远端跟随」已移除：面板不提供任何改变远端分辨率的开关
 		expect([opts.qualityLevel, opts.compressionLevel]).toEqual([6, 2]);
 
 		// 工具栏控件在会话已连接时出现
@@ -330,10 +460,11 @@ describe("DesktopPanel", () => {
 		await waitFor(() => expect(vnc.setViewMode).toHaveBeenCalledWith("actual"));
 		await user.click(screen.getByTestId("desktop-viewonly"));
 		await waitFor(() => expect(vnc.setViewOnly).toHaveBeenCalledWith(false));
-		await user.click(screen.getByTestId("desktop-resize-follow"));
-		await waitFor(() => expect(vnc.setResizeSession).toHaveBeenCalledWith(false));
 		await user.selectOptions(screen.getByTestId("desktop-quality"), "high");
 		await waitFor(() => expect(vnc.setQuality).toHaveBeenCalledWith(9));
+		// 「远端跟随」已移除，任何时候都不得请求远端 resize
+		expect(screen.queryByTestId("desktop-resize-follow")).toBeNull();
+		expect(vnc.setResizeSession).not.toHaveBeenCalled();
 	});
 
 	it("画布不再固定在 60vh，而是自适应容器", async () => {
@@ -385,44 +516,49 @@ describe("DesktopPanel", () => {
 		await waitFor(() => expect(vnc.sendCtrlAltDel).toHaveBeenCalled());
 	});
 
-	it("切换显示器只改裁剪区域，不重连也不重建会话", async () => {
+	it("不再渲染「左半/右半」控件与裁剪包裹层", async () => {
 		const tunnel = makeTunnel();
 		const vnc = makeVnc();
 		mockOpen(tunnel);
 		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
-		const { client: sdkClient, create } = makeSdk();
+		const { client: sdkClient } = makeSdk();
 		renderPanel(p2pClient, sdkClient);
 		const user = userEvent.setup();
 		await user.click(screen.getByRole("button", { name: "连接" }));
 		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
 		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
-		const callsAfterConnect = vi.mocked(createVncSession).mock.calls.length;
-		const sessionsAfterConnect = create.mock.calls.length;
+		await screen.findByTestId("desktop-view-actual");
 
-		// 默认全屏
-		await waitFor(() =>
-			expect(screen.getByTestId("desktop-crop-frame")).toHaveAttribute("data-crop-aspect", "100 / 100"),
-		);
+		expect(screen.queryByText("左半")).toBeNull();
+		expect(screen.queryByText("右半")).toBeNull();
+		expect(screen.queryByTestId("desktop-crop-frame")).toBeNull();
+		expect(screen.queryByTestId("desktop-display-left")).toBeNull();
+		expect(screen.queryByTestId("desktop-display-right")).toBeNull();
+		expect(screen.queryByTestId("desktop-display-all")).toBeNull();
+	});
 
-		await user.click(screen.getByTestId("desktop-display-left"));
-		await waitFor(() =>
-			expect(screen.getByTestId("desktop-crop-frame")).toHaveAttribute("data-crop-aspect", "50 / 100"),
-		);
+	it("noVNC 宿主到画布容器之间没有任何 CSS 变换（否则坐标会被二次缩放）", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
 
-		await user.click(screen.getByTestId("desktop-display-right"));
-		await waitFor(() =>
-			expect(screen.getByTestId("desktop-crop-frame")).toHaveAttribute("data-crop-aspect", "50 / 100"),
-		);
-
-		await user.click(screen.getByTestId("desktop-display-all"));
-		await waitFor(() =>
-			expect(screen.getByTestId("desktop-crop-frame")).toHaveAttribute("data-crop-aspect", "100 / 100"),
-		);
-
-		// 不重连、不重建会话
-		expect(vi.mocked(createVncSession).mock.calls.length).toBe(callsAfterConnect);
-		expect(create.mock.calls.length).toBe(sessionsAfterConnect);
-		expect(vnc.disconnect).not.toHaveBeenCalled();
+		// noVNC 用 x / display.scale 换算指针坐标，而 display.scale 只由容器尺寸决定。
+		// 任何加在 canvas 祖先上的 transform/translate/zoom 都会让坐标失真。
+		const host = await screen.findByTestId("desktop-vnc-host");
+		const canvas = screen.getByTestId("desktop-canvas");
+		let el: HTMLElement | null = host;
+		while (el && el !== canvas) {
+			expect(el.getAttribute("style") ?? "").not.toMatch(/transform|translate|scale|zoom/i);
+			el = el.parentElement;
+		}
+		expect(el).toBe(canvas);
 	});
 
 	it("已连接后断开：给出重连提示并自动重连", async () => {

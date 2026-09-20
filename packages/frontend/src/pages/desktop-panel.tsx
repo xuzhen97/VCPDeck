@@ -22,12 +22,6 @@ import {
 	type VncState,
 } from "@/tunnel/vnc-session";
 import {
-	cropLayout,
-	normalizedAspect,
-	rectForPreset,
-	type DisplayPreset,
-} from "@/tunnel/screen-view";
-import {
 	classifyDisconnect,
 	MAX_RETRIES,
 	retryDelayMs,
@@ -38,13 +32,18 @@ import {
 	sampleCanvasPixels,
 } from "@/tunnel/black-screen";
 import {
+	nextZoom,
+	PERCENT_ZOOMS,
+	zoomContainerStyle,
+	type ZoomLevel,
+} from "@/tunnel/local-zoom";
+import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Maximize2, Minimize2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -87,7 +86,8 @@ export function DesktopPanel({
 	// 默认只读：不发送任何键鼠事件；可显式切换为可操作
 	const [viewOnly, setViewOnly] = useState(true);
 	const [viewMode, setViewMode] = useState<ViewMode>("fit");
-	const [resizeFollow, setResizeFollow] = useState(true);
+	// 本地缩放档位：只影响浏览器显示，绝不发送 SetDesktopSize
+	const [zoom, setZoom] = useState<ZoomLevel>("fit");
 	const [quality, setQuality] = useState<QualityKey>("mid");
 	const [phase, setPhase] = useState<Phase>("idle");
 	const [path, setPath] = useState<TunnelPath | null>(null);
@@ -95,17 +95,19 @@ export function DesktopPanel({
 	const [credReq, setCredReq] = useState<VncCredentialsRequest | null>(null);
 	const [password, setPassword] = useState("");
 	const [isFullscreen, setIsFullscreen] = useState(false);
+	// 页面内最大化：fixed overlay 铺满浏览器视口，不进入浏览器 Fullscreen API
+	const [isMaximized, setIsMaximized] = useState(false);
 	const [remoteClip, setRemoteClip] = useState<string | null>(null);
-	// 显示器区域裁剪：服务端送的是整块虚拟桌面，这里只改变可见区域（不重连）
-	const [displayPreset, setDisplayPreset] = useState<DisplayPreset>("all");
-	const [displaySplit, setDisplaySplit] = useState(0.5);
-	const [frameSize, setFrameSize] = useState<{ w: number; h: number } | null>(null);
-	const [canvasBox, setCanvasBox] = useState<{ w: number; h: number } | null>(null);
+	// 注意：不做客户端区域裁剪，也不在 canvas 之外做任何缩放变换 ——
+	// noVNC 用 `x / display.scale` 换算指针坐标，而 display.scale 只由容器尺寸决定；
+	// 外层 transform / 百分比放大都会让坐标失真（偏移随距离线性增长）。
 	const [retryCount, setRetryCount] = useState(0);
 	const [blackWarning, setBlackWarning] = useState(false);
 	const blackDismissedRef = useRef(false);
 
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	// 全屏目标：包含工具栏与画面的工作区（不能是画布，否则全屏后控件不可见）
+	const workspaceRef = useRef<HTMLDivElement | null>(null);
 	const vncHostRef = useRef<HTMLDivElement | null>(null);
 	const tunnelRef = useRef<BrowserTunnel | null>(null);
 	const vncRef = useRef<VncSession | null>(null);
@@ -154,8 +156,10 @@ export function DesktopPanel({
 		vncRef.current = null;
 		try {
 			vnc?.disconnect();
-		} catch {
-			/* 忽略 */
+		} catch (err) {
+			// 清理必须幂等：noVNC 对已断开的 RFB 对象会抛错，这里显式吞掉，
+			// 不影响后续 tunnel/session 回收。
+			void err;
 		}
 		const tunnel = tunnelRef.current;
 		tunnelRef.current = null;
@@ -186,38 +190,6 @@ export function DesktopPanel({
 		document.addEventListener("fullscreenchange", onChange);
 		return () => document.removeEventListener("fullscreenchange", onChange);
 	}, []);
-
-	// 跟踪画布盒尺寸：区域裁剪需要按真实像素把被裁区域等比放到画布内
-	useEffect(() => {
-		const el = containerRef.current;
-		if (!el) return;
-		const update = () =>
-			setCanvasBox({ w: el.clientWidth, h: el.clientHeight });
-		update();
-		const ro = new ResizeObserver(update);
-		ro.observe(el);
-		return () => ro.disconnect();
-	}, []);
-
-	// 帧尺寸（noVNC canvas 的 width/height 即画面像素）——远端可能因 SetDesktopSize 改变
-	useEffect(() => {
-		if (phase !== "connected") {
-			setFrameSize(null);
-			return;
-		}
-		const sample = () => {
-			const c = containerRef.current?.querySelector("canvas");
-			if (!c || c.width === 0 || c.height === 0) return;
-			setFrameSize((prev) =>
-				prev && prev.w === c.width && prev.h === c.height
-					? prev
-					: { w: c.width, h: c.height },
-			);
-		};
-		sample();
-		const timer = setInterval(sample, 2000);
-		return () => clearInterval(timer);
-	}, [phase]);
 
 	// 连续全黑 → “未检测到活动显示输出”提示（低成本缩采样，不影响连接）
 	useEffect(() => {
@@ -372,7 +344,6 @@ export function DesktopPanel({
 							{
 								viewOnly,
 								viewMode,
-								resizeSession: resizeFollow,
 								qualityLevel: QUALITY_LEVELS[quality],
 								compressionLevel: 2,
 								onState: handleState,
@@ -422,15 +393,45 @@ export function DesktopPanel({
 		setError(null);
 	}
 
-	// 全屏/还原：把画面容器设为浏览器 Fullscreen（Esc 或按钮均可退出，native 优先）
+	// 全屏/还原：把「工具栏 + 画面」工作区设为浏览器 Fullscreen（Esc 或按钮均可退出）
 	function toggleFullscreen() {
-		const el = containerRef.current;
+		const el = workspaceRef.current;
 		if (!el) return;
 		if (document.fullscreenElement) {
 			void document.exitFullscreen?.();
 		} else {
 			void el.requestFullscreen?.();
 		}
+	}
+
+	/** 页面内最大化：仅切换布局，不调用 Fullscreen API。 */
+	function toggleMaximize() {
+		setIsMaximized((v) => !v);
+	}
+
+	/**
+	 * 应用本地缩放档位。
+	 * 倍率档位靠“放大 noVNC 容器”实现（autoscale 随容器变大），视口模式保持 fit；
+	 * 全程不发送远端 resize，也不在画面上加 CSS transform。
+	 * 同步 viewMode 状态，避免「查看模式」与「缩放」两组控件显示互相矛盾。
+	 */
+	function applyZoom(level: ZoomLevel) {
+		setZoom(level);
+		const mode: ViewMode = level === "actual" ? "actual" : "fit";
+		setViewMode(mode);
+		vncRef.current?.setViewMode(mode);
+	}
+
+	/**
+	 * 应用查看模式（适配 / 1:1 / 滚动）。
+	 * 适配与 1:1 同时是缩放档位的一部分，因此这里一并回写 zoom：
+	 * 否则会出现「查看=1:1 但容器仍被放大 150%」这类叠加错误状态。
+	 * 「滚动」保持 100% 容器，滚动条交给 noVNC。
+	 */
+	function applyViewMode(mode: ViewMode) {
+		setViewMode(mode);
+		setZoom(mode === "scroll" ? "fit" : mode);
+		vncRef.current?.setViewMode(mode);
 	}
 
 	// 把本地剪贴板文本发到远端（需要浏览器授权，失败只提示不中断会话）
@@ -500,22 +501,7 @@ export function DesktopPanel({
 
 	const connecting = phase === "connecting";
 	const connected = phase === "connected";
-
-	// 区域裁剪：rect 为画面内百分比矩形；layout 把 noVNC 挂载点放大并反向平移。
-	const cropRect = rectForPreset(displayPreset, displaySplit);
-	const frameW = frameSize?.w ?? 100;
-	const frameH = frameSize?.h ?? 100;
-	const crop = cropLayout(cropRect, frameW, frameH);
-	// 被裁区域在画布内的等比适配盒（保证不变形、完整显示该区域）
-	const regionW = cropRect.w * frameW;
-	const regionH = cropRect.h * frameH;
-	const fitScale = canvasBox
-		? Math.min(canvasBox.w / regionW, canvasBox.h / regionH)
-		: null;
-	const cropFrameStyle =
-		fitScale && fitScale > 0
-			? { width: `${regionW * fitScale}px`, height: `${regionH * fitScale}px` }
-			: { width: "100%", height: "100%" };
+	const zoomStyle = zoomContainerStyle(zoom) ?? undefined;
 
 	return (
 		<Card>
@@ -552,8 +538,30 @@ export function DesktopPanel({
 					</Button>
 				</form>
 
+				{/* 工作区：工具栏 + 画面。浏览器全屏目标就是这里 —— Fullscreen API 只显示
+				    该元素及其后代，因此工具栏必须在工作区内、但在画面之外。 */}
+				<div
+					ref={workspaceRef}
+					data-testid="desktop-workspace"
+					className={
+						isMaximized
+							? "fixed inset-0 z-50 flex flex-col gap-2 overflow-auto bg-background p-4"
+							: "flex flex-col gap-2"
+					}
+				>
 				{connected && (
-					<div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/60 p-3">
+					<div data-testid="desktop-toolbar" className="flex flex-wrap items-center gap-4 rounded-lg border border-border/60 p-3">
+						<StatusChip
+							label={
+								path === "direct"
+									? "P2P 直连"
+									: path === "relay"
+										? "TURN 中继"
+										: "路径未知"
+							}
+							tone={path === "unknown" ? "warning" : "success"}
+						/>
+						{viewOnly && <StatusChip label="只读" tone="success" />}
 						<div className="flex items-center gap-1">
 							<span className="mr-1 text-xs text-muted-foreground">查看</span>
 							{(Object.keys(VIEW_MODE_LABELS) as ViewMode[]).map((m) => (
@@ -563,10 +571,7 @@ export function DesktopPanel({
 									size="sm"
 									variant={viewMode === m ? "default" : "outline"}
 									data-testid={`desktop-view-${m}`}
-									onClick={() => {
-										setViewMode(m);
-										vncRef.current?.setViewMode(m);
-									}}
+									onClick={() => applyViewMode(m)}
 								>
 									{VIEW_MODE_LABELS[m]}
 								</Button>
@@ -584,19 +589,6 @@ export function DesktopPanel({
 								}}
 							/>
 							只读（当前已会发送键鼠）
-						</label>
-						<label className="flex items-center gap-2 text-sm">
-							<input
-								type="checkbox"
-								aria-label="远端分辨率跟随"
-								data-testid="desktop-resize-follow"
-								checked={resizeFollow}
-								onChange={(e) => {
-									setResizeFollow(e.target.checked);
-									vncRef.current?.setResizeSession(e.target.checked);
-								}}
-							/>
-							远端跟随
 						</label>
 						<div className="flex items-center gap-2 text-sm">
 							<label htmlFor="desktop-quality">画质</label>
@@ -616,6 +608,59 @@ export function DesktopPanel({
 								<option value="high">高</option>
 							</select>
 						</div>
+						<div className="flex items-center gap-1">
+							<span className="mr-1 text-xs text-muted-foreground">缩放</span>
+							<Button
+								type="button"
+								size="sm"
+								variant={zoom === "fit" ? "default" : "outline"}
+								data-testid="desktop-zoom-fit"
+								onClick={() => applyZoom("fit")}
+							>
+								适应
+							</Button>
+							<Button
+								type="button"
+								size="sm"
+								variant={zoom === "actual" ? "default" : "outline"}
+								data-testid="desktop-zoom-actual"
+								onClick={() => applyZoom("actual")}
+							>
+								1:1
+							</Button>
+							{PERCENT_ZOOMS.map((level) => (
+								<Button
+									key={level}
+									type="button"
+									size="sm"
+									variant={zoom === level ? "default" : "outline"}
+									data-testid={`desktop-zoom-${level}`}
+									onClick={() => applyZoom(level)}
+								>
+									{level}%
+								</Button>
+							))}
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								aria-label="缩小"
+								data-testid="desktop-zoom-out"
+								onClick={() => applyZoom(nextZoom(zoom, -1))}
+							>
+								−
+							</Button>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								aria-label="放大"
+								data-testid="desktop-zoom-in"
+								onClick={() => applyZoom(nextZoom(zoom, 1))}
+							>
+								+
+							</Button>
+						</div>
 						<Button
 							type="button"
 							size="sm"
@@ -634,29 +679,52 @@ export function DesktopPanel({
 						>
 							Ctrl+Alt+Del
 						</Button>
-						<div className="flex items-center gap-1">
-							<span className="mr-1 text-xs text-muted-foreground">显示</span>
-							{(
-								[
-									["all", "全部"],
-									["left", "左半"],
-									["right", "右半"],
-								] as Array<[DisplayPreset, string]>
-							).map(([value, label]) => (
-								<Button
-									key={value}
-									type="button"
-									size="sm"
-									variant={displayPreset === value ? "default" : "outline"}
-									data-testid={`desktop-display-${value}`}
-									onClick={() => setDisplayPreset(value)}
-								>
-									{label}
-								</Button>
-							))}
-						</div>
+						<Button
+							type="button"
+							size="sm"
+							variant="outline"
+							aria-label={isMaximized ? "退出最大化" : "最大化"}
+							onClick={toggleMaximize}
+						>
+							{isMaximized ? "退出最大化" : "最大化"}
+						</Button>
+						<Button
+							type="button"
+							size="sm"
+							variant="outline"
+							aria-label={isFullscreen ? "退出全屏" : "全屏"}
+							onClick={toggleFullscreen}
+						>
+							{isFullscreen ? "退出全屏" : "全屏"}
+						</Button>
 					</div>
 				)}
+
+				{/* noVNC 画布容器：连接前后都渲染，供 RFB 挂载。
+				    noVNC 内部 _screen 为 100%×100% 并挂 ResizeObserver，容器有确定高度即自适应缩放。 */}
+				<div
+					data-testid="desktop-canvas"
+					ref={containerRef}
+					className={"desktop-canvas relative h-[70dvh] min-h-64 w-full overflow-hidden border border-border bg-black"}
+				>
+					{!connected && phase !== "connecting" && (
+						<span className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+							连接后可在此查看远程桌面画面
+						</span>
+					)}
+
+					{/* 本地缩放视口：倍率档位把 noVNC 容器放大，超出部分由这里滚动平移。
+					    不能用 CSS transform 缩放画面 —— noVNC 的 display.scale 感知不到，坐标会失真。 */}
+					<div className="desktop-viewport h-full w-full overflow-auto">
+						<div
+							data-testid="desktop-vnc-host"
+							ref={vncHostRef}
+							className="desktop-vnc-host h-full w-full"
+							style={zoomStyle}
+						/>
+					</div>
+				</div>
+				</div>
 
 				{remoteClip !== null && (
 					<div className="space-y-1">
@@ -690,67 +758,6 @@ export function DesktopPanel({
 						连接可能异常。请改用 HTTPS 或 localhost 入口访问驾驶台。
 					</p>
 				)}
-
-				{/* noVNC 画布容器：连接前后都渲染，供 RFB 挂载；同时也是浏览器全屏目标。
-				    连接后的控制（状态芯片 + 全屏按钮）以悬浮层放进容器内 —— 全屏时
-				    Fullscreen API 只显示该元素及其后代，这样按钮仍可见可点（Esc 亦可退出）。
-				    noVNC 内部 _screen 为 100%×100% 并挂 ResizeObserver，容器有确定高度即自适应缩放。 */}
-				<div
-					data-testid="desktop-canvas"
-					ref={containerRef}
-					className={"desktop-canvas relative flex h-[70dvh] min-h-64 w-full items-center justify-center overflow-hidden border border-border bg-black"}
-				>
-					{!connected && phase !== "connecting" && (
-						<span className="text-sm text-muted-foreground">
-							连接后可在此查看远程桌面画面
-						</span>
-					)}
-
-					{/* 裁剪包裹层：只显示 cropRect 区域；切换区域不重连、不重建会话 */}
-					<div className="absolute inset-0 flex items-center justify-center">
-						<div
-							data-testid="desktop-crop-frame"
-							data-crop-aspect={normalizedAspect(cropRect)}
-							className="relative overflow-hidden"
-							style={cropFrameStyle}
-						>
-							<div
-								ref={vncHostRef}
-								className="desktop-vnc-host"
-								style={crop.inner}
-							/>
-						</div>
-					</div>
-
-					{connected && (
-						<div className="absolute right-2 top-2 z-10 flex flex-wrap items-center gap-1 rounded-md border border-border/60 bg-black/60 p-1 backdrop-blur-sm">
-							<StatusChip
-								label={
-									path === "direct"
-										? "P2P 直连"
-										: path === "relay"
-											? "TURN 中继"
-											: "路径未知"
-								}
-								tone={path === "unknown" ? "warning" : "success"}
-							/>
-							{viewOnly && <StatusChip label="只读" tone="success" />}
-							<Button
-								type="button"
-								size="icon"
-								variant="ghost"
-								aria-label={isFullscreen ? "退出全屏" : "全屏"}
-								onClick={toggleFullscreen}
-							>
-								{isFullscreen ? (
-									<Minimize2 className="size-4" />
-								) : (
-									<Maximize2 className="size-4" />
-								)}
-							</Button>
-						</div>
-					)}
-				</div>
 
 				{blackWarning && (
 					<p
