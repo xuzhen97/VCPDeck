@@ -189,7 +189,8 @@ var require_pi = __commonJS({
   "../shared/dist/pi.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.PiProtocolError = exports2.PI_THINKING_LEVELS = exports2.PI_IMAGE_MIME_TYPES = exports2.MAX_PI_IMAGES_TOTAL_BYTES = exports2.MAX_PI_IMAGE_BYTES = exports2.MAX_PI_IMAGES_PER_PROMPT = exports2.PI_PROJECT_KEY_LENGTH = exports2.MAX_IMPORT_LIST_SESSIONS = exports2.MAX_IMPORT_SOURCE_NAMES = exports2.MAX_PREVIEW_CODE_POINTS = exports2.PI_IMPORT_REASON_CODES = exports2.PI_BUILTIN_TOOL_IDS = exports2.PI_TOOL_POLICY_BUCKETS = exports2.PI_BUNDLE_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = void 0;
+    exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.PiProtocolError = exports2.PI_THINKING_LEVELS = exports2.PI_IMAGE_MIME_TYPES = exports2.MAX_PI_IMAGES_TOTAL_BYTES = exports2.MAX_PI_IMAGE_BYTES = exports2.MAX_PI_IMAGES_PER_PROMPT = exports2.PI_PROJECT_KEY_LENGTH = exports2.MAX_IMPORT_LIST_SESSIONS = exports2.MAX_IMPORT_SOURCE_NAMES = exports2.MAX_PREVIEW_CODE_POINTS = exports2.PI_IMPORT_REASON_CODES = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_BUILTIN_TOOL_IDS = exports2.PI_TOOL_POLICY_BUCKETS = exports2.PI_BUNDLE_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = void 0;
+    exports2.isPiToolExecutionMode = isPiToolExecutionMode;
     exports2.emptyPiToolPolicy = emptyPiToolPolicy;
     exports2.parsePiToolPolicy = parsePiToolPolicy;
     exports2.assertSourceName = assertSourceName;
@@ -209,8 +210,10 @@ var require_pi = __commonJS({
     exports2.parsePiRuntimeSpecMessage = parsePiRuntimeSpecMessage;
     exports2.parsePiModelMetadata = parsePiModelMetadata;
     exports2.parsePiRuntimeSpecV3 = parsePiRuntimeSpecV3;
+    exports2.parsePiRuntimeSpecV4 = parsePiRuntimeSpecV4;
     exports2.parsePiCredentialLeaseV2 = parsePiCredentialLeaseV2;
     exports2.parsePiRuntimeSpecMessageV3 = parsePiRuntimeSpecMessageV3;
+    exports2.parsePiRuntimeSpecMessageV4 = parsePiRuntimeSpecMessageV4;
     exports2.parsePiCredentialLease = parsePiCredentialLease;
     exports2.parsePiRuntimeAck = parsePiRuntimeAck;
     exports2.isPiWorkerAction = isPiWorkerAction;
@@ -245,7 +248,7 @@ var require_pi = __commonJS({
     ];
     exports2.PI_SESSION_JOB_PROTOCOL_VERSION = 1;
     exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = 1;
-    exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = 3;
+    exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = 4;
     exports2.PI_BUNDLE_PROTOCOL_VERSION = 1;
     exports2.PI_TOOL_POLICY_BUCKETS = ["allow", "confirm", "deny"];
     exports2.PI_BUILTIN_TOOL_IDS = [
@@ -258,6 +261,10 @@ var require_pi = __commonJS({
       "find",
       "ls"
     ];
+    exports2.PI_TOOL_EXECUTION_MODES = ["approval", "auto", "yolo"];
+    function isPiToolExecutionMode(value2) {
+      return typeof value2 === "string" && exports2.PI_TOOL_EXECUTION_MODES.includes(value2);
+    }
     function emptyPiToolPolicy() {
       return { allow: [], confirm: [], deny: [] };
     }
@@ -1247,6 +1254,34 @@ var require_pi = __commonJS({
       const requiredBundle = value2.requiredBundle === void 0 ? void 0 : parsePiRequiredBundle(value2.requiredBundle);
       return { schemaVersion: 3, specId: value2.specId, profileId: value2.profileId, profileRevision, providers, modelPolicy: { defaultModel: { provider: defaultModel.provider, modelId: defaultModel.modelId }, allowedModels, defaultThinkingLevel: value2.modelPolicy.defaultThinkingLevel }, toolPolicy, ...requiredBundle ? { requiredBundle } : {}, runtimeRevision };
     }
+    var SPEC_V4_KEYS = /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "specId",
+      "profileId",
+      "profileRevision",
+      "providers",
+      "modelPolicy",
+      "toolPolicy",
+      "toolExecutionMode",
+      "requiredBundle",
+      "runtimeRevision"
+    ]);
+    function parsePiRuntimeSpecV4(value2) {
+      assertRecord(value2, "PiRuntimeSpecV4");
+      assertKeys(value2, SPEC_V4_KEYS, "PiRuntimeSpecV4");
+      if (value2.schemaVersion !== exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION) {
+        throw new PiProtocolError(`PiRuntimeSpecV4 schemaVersion \u4E0D\u652F\u6301: ${String(value2.schemaVersion)}`);
+      }
+      if (!("toolExecutionMode" in value2)) {
+        throw new PiProtocolError("PiRuntimeSpecV4 \u7F3A\u5C11\u5B57\u6BB5 toolExecutionMode");
+      }
+      if (!isPiToolExecutionMode(value2.toolExecutionMode)) {
+        throw new PiProtocolError(`PiRuntimeSpecV4 toolExecutionMode \u4E0D\u652F\u6301: ${String(value2.toolExecutionMode)}`);
+      }
+      const { toolExecutionMode, ...v3Shape } = value2;
+      const base = parsePiRuntimeSpecV3({ ...v3Shape, schemaVersion: 3 });
+      return { ...base, schemaVersion: 4, toolExecutionMode };
+    }
     function parsePiCredentialLeaseV2(value2) {
       assertRecord(value2, "PiCredentialLeaseV2");
       assertKeys(value2, LEASE_KEYS, "PiCredentialLeaseV2");
@@ -1273,6 +1308,16 @@ var require_pi = __commonJS({
       assertRecord(value2, "PiRuntimeSpecMessageV3");
       assertKeys(value2, /* @__PURE__ */ new Set(["spec", "credentials"]), "PiRuntimeSpecMessageV3");
       const spec = parsePiRuntimeSpecV3(value2.spec);
+      const credentials = parsePiCredentialLeaseV2(value2.credentials);
+      const providers = new Set(spec.providers.map((provider) => provider.providerId));
+      if (providers.size !== credentials.entries.length || credentials.entries.some((entry) => !providers.has(entry.providerId)))
+        throw new PiProtocolError("credentials \u4E0E providers \u4E0D\u5339\u914D");
+      return { spec, credentials };
+    }
+    function parsePiRuntimeSpecMessageV4(value2) {
+      assertRecord(value2, "PiRuntimeSpecMessageV4");
+      assertKeys(value2, /* @__PURE__ */ new Set(["spec", "credentials"]), "PiRuntimeSpecMessageV4");
+      const spec = parsePiRuntimeSpecV4(value2.spec);
       const credentials = parsePiCredentialLeaseV2(value2.credentials);
       const providers = new Set(spec.providers.map((provider) => provider.providerId));
       if (providers.size !== credentials.entries.length || credentials.entries.some((entry) => !providers.has(entry.providerId)))
@@ -2236,7 +2281,8 @@ var require_pi_admin = __commonJS({
       "enabled",
       "credentialIds",
       "enabledResourceIds",
-      "toolPolicy"
+      "toolPolicy",
+      "toolExecutionMode"
     ]);
     var DEFAULT_MODEL_KEYS = /* @__PURE__ */ new Set(["provider", "modelId"]);
     var MAX_RESOURCE_IDS = 64;
@@ -2529,7 +2575,16 @@ var require_pi_admin = __commonJS({
       if (value2.toolPolicy !== void 0) {
         input.toolPolicy = parseProfileToolPolicy(value2.toolPolicy);
       }
+      if (value2.toolExecutionMode !== void 0) {
+        input.toolExecutionMode = parseProfileToolExecutionMode(value2.toolExecutionMode);
+      }
       return input;
+    }
+    function parseProfileToolExecutionMode(value2) {
+      if (!(0, pi_js_1.isPiToolExecutionMode)(value2)) {
+        throw new PiAdminProtocolError("toolExecutionMode \u5FC5\u987B\u662F approval/auto/yolo");
+      }
+      return value2;
     }
     function parseProfileToolPolicy(value2) {
       try {
@@ -2578,6 +2633,9 @@ var require_pi_admin = __commonJS({
       }
       if (value2.toolPolicy !== void 0) {
         input.toolPolicy = parseProfileToolPolicy(value2.toolPolicy);
+      }
+      if (value2.toolExecutionMode !== void 0) {
+        input.toolExecutionMode = parseProfileToolExecutionMode(value2.toolExecutionMode);
       }
       if (Object.keys(input).length === 0) {
         throw new PiAdminProtocolError("Profile \u66F4\u65B0\u81F3\u5C11\u9700\u8981\u4E00\u4E2A\u5B57\u6BB5");
@@ -3433,8 +3491,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parsePiModelCatalogStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parsePiProviderDiscoveryInput = exports2.parsePiProfileUpdateInput = exports2.parsePiProfileCreateInput = exports2.parsePiCredentialUpdateInput = exports2.parsePiCredentialCreateInput = exports2.PiAdminProtocolError = exports2.safePiErrorMessage = exports2.parsePiRuntimeSpecV3 = exports2.parsePiRuntimeSpecV1 = exports2.parsePiRuntimeSpecMessageV3 = exports2.parsePiRuntimeSpecMessage = exports2.parsePiRuntimeAck = exports2.parsePiCredentialLeaseV2 = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
-    exports2.isPiWorkerAction = exports2.isPiReadAction = exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = exports2.parseTunnelClose = exports2.parseTunnelClientState = exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = void 0;
+    exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parsePiModelCatalogStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parsePiProviderDiscoveryInput = exports2.parsePiProfileUpdateInput = exports2.parsePiProfileCreateInput = exports2.parsePiCredentialUpdateInput = exports2.parsePiCredentialCreateInput = exports2.PiAdminProtocolError = exports2.safePiErrorMessage = exports2.parsePiRuntimeSpecV4 = exports2.parsePiRuntimeSpecV3 = exports2.parsePiRuntimeSpecV1 = exports2.parsePiRuntimeSpecMessageV4 = exports2.parsePiRuntimeSpecMessageV3 = exports2.parsePiRuntimeSpecMessage = exports2.parsePiRuntimeAck = exports2.parsePiCredentialLeaseV2 = exports2.parsePiAgentState = exports2.isPiToolExecutionMode = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.isPiWorkerAction = exports2.isPiReadAction = exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = exports2.parseTunnelClose = exports2.parseTunnelClientState = exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -3500,11 +3558,17 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "PI_THINKING_LEVELS", { enumerable: true, get: function() {
       return pi_js_1.PI_THINKING_LEVELS;
     } });
+    Object.defineProperty(exports2, "PI_TOOL_EXECUTION_MODES", { enumerable: true, get: function() {
+      return pi_js_1.PI_TOOL_EXECUTION_MODES;
+    } });
     Object.defineProperty(exports2, "isPiAgentIdle", { enumerable: true, get: function() {
       return pi_js_1.isPiAgentIdle;
     } });
     Object.defineProperty(exports2, "isPiThinkingLevel", { enumerable: true, get: function() {
       return pi_js_1.isPiThinkingLevel;
+    } });
+    Object.defineProperty(exports2, "isPiToolExecutionMode", { enumerable: true, get: function() {
+      return pi_js_1.isPiToolExecutionMode;
     } });
     Object.defineProperty(exports2, "parsePiAgentState", { enumerable: true, get: function() {
       return pi_js_1.parsePiAgentState;
@@ -3521,11 +3585,17 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parsePiRuntimeSpecMessageV3", { enumerable: true, get: function() {
       return pi_js_1.parsePiRuntimeSpecMessageV3;
     } });
+    Object.defineProperty(exports2, "parsePiRuntimeSpecMessageV4", { enumerable: true, get: function() {
+      return pi_js_1.parsePiRuntimeSpecMessageV4;
+    } });
     Object.defineProperty(exports2, "parsePiRuntimeSpecV1", { enumerable: true, get: function() {
       return pi_js_1.parsePiRuntimeSpecV1;
     } });
     Object.defineProperty(exports2, "parsePiRuntimeSpecV3", { enumerable: true, get: function() {
       return pi_js_1.parsePiRuntimeSpecV3;
+    } });
+    Object.defineProperty(exports2, "parsePiRuntimeSpecV4", { enumerable: true, get: function() {
+      return pi_js_1.parsePiRuntimeSpecV4;
     } });
     Object.defineProperty(exports2, "safePiErrorMessage", { enumerable: true, get: function() {
       return pi_js_1.safePiErrorMessage;
