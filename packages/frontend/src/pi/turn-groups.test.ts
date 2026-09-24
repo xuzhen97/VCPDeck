@@ -75,4 +75,37 @@ describe("buildTurnGroups", () => {
 		expect(groups[0]?.userMessage).toBeNull();
 		expect(groups[0]?.finalAssistant?.id).toBe("a1");
 	});
+
+	it("首条 user 之前的非 user 消息并入本回合，不单独成组建在提问之上", () => {
+		const groups = buildTurnGroups([
+			toolCall("t0", "read"),
+			user("u1", "q1"),
+			toolCall("t1", "bash"),
+			assistant("a1", "ans1"),
+		]);
+		expect(groups).toHaveLength(1);
+		expect(groups[0]?.userMessage?.id).toBe("u1");
+		// 前置消息按“本回合的中间过程”处理，渲染位置在提问气泡之后
+		expect(groups[0]?.processMessageCount).toBe(2);
+		expect(groups[0]?.toolCallCount).toBe(2);
+		expect(groups[0]?.finalAssistant?.id).toBe("a1");
+	});
+
+	it("多个前置消息只并入第一个回合，不影响后续回合", () => {
+		const groups = buildTurnGroups([
+			toolResult("t0"),
+			assistant("a0", "上一窗口的中间文本"),
+			user("u1", "q1"),
+			assistant("a1", "ans1"),
+			user("u2", "q2"),
+			assistant("a2", "ans2"),
+		]);
+		expect(groups).toHaveLength(2);
+		expect(groups[0]?.userMessage?.id).toBe("u1");
+		// 前置残段全部算本回合的中间过程（包括其中有文本的 assistant）
+		expect(groups[0]?.processMessageCount).toBe(2);
+		expect(groups[0]?.finalAssistant?.id).toBe("a1");
+		expect(groups[1]?.userMessage?.id).toBe("u2");
+		expect(groups[1]?.processMessageCount).toBe(0);
+	});
 });

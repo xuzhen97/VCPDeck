@@ -497,6 +497,77 @@ describe("usePiSession", () => {
 		expect(result.current.state.thinkingDurationMs).toBe(1234);
 	});
 
+	it("agent_settled 后清空实时 thinking（空闲不得留残影）", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const { result } = renderHook(() => usePiSession(pi));
+
+		await act(async () => {
+			await result.current.actions.createSession("c1", CWD);
+			await result.current.actions.send({ prompt: "hi" });
+		});
+		act(() => {
+			emit({ type: "agent_start", sessionId: "s1", runId: "j1" });
+			emit({
+				type: "thinking_progress",
+				sessionId: "s1",
+				runId: "j1",
+				stage: "start",
+			});
+			emit({
+				type: "thinking_progress",
+				sessionId: "s1",
+				runId: "j1",
+				stage: "delta",
+				text: "先查看项目结构",
+			});
+		});
+		expect(result.current.state.thinkingText).toBe("先查看项目结构");
+
+		act(() => {
+			emit({ type: "agent_settled", sessionId: "s1" });
+		});
+
+		expect(result.current.state.status).toBe("idle");
+		expect(result.current.state.thinkingText).toBe("");
+		expect(result.current.state.thinkingDurationMs).toBeNull();
+	});
+
+	it("prompt_error 后也清空实时 thinking", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const { result } = renderHook(() => usePiSession(pi));
+
+		await act(async () => {
+			await result.current.actions.createSession("c1", CWD);
+			await result.current.actions.send({ prompt: "hi" });
+		});
+		act(() => {
+			emit({ type: "agent_start", sessionId: "s1", runId: "j1" });
+			emit({
+				type: "thinking_progress",
+				sessionId: "s1",
+				runId: "j1",
+				stage: "delta",
+				text: "思考到一半就失败了",
+			});
+		});
+		expect(result.current.state.thinkingText).toBe("思考到一半就失败了");
+
+		act(() => {
+			emit({
+				type: "prompt_error",
+				sessionId: "s1",
+				runId: "j1",
+				code: "PI_RUNTIME_UNAVAILABLE",
+				message: "Pi runtime is unavailable",
+			});
+		});
+
+		expect(result.current.state.thinkingText).toBe("");
+		expect(result.current.state.thinkingDurationMs).toBeNull();
+	});
+
 	it("run_created 在 POST 前绑定 runId", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();

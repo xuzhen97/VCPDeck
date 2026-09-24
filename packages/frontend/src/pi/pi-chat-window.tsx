@@ -233,48 +233,53 @@ export function PiChatWindow({
 							开始一段新的 Pi 会话
 						</div>
 					)}
-				<LiveThinkingBlock state={state} />
-				{groups.map((group, gi) => (
-					<div key={group.userMessage?.id ?? `g${gi}`} className="space-y-2">
-						{group.userMessage && (
-							<div className="flex justify-end">
-								<div className="max-w-[85%]">
+				{groups.map((group, gi) => {
+					// 实时思考属于「当前回合」：紧跟在它的提问气泡之后，而不是时间线顶部。
+					const isLastTurn = gi === groups.length - 1;
+					return (
+						<div key={group.userMessage?.id ?? `g${gi}`} className="space-y-2">
+							{group.userMessage && (
+								<div className="flex justify-end">
+									<div className="max-w-[85%]">
+										<RenderedMessage
+											ctx={ctx}
+											message={group.userMessage}
+											toolResults={toolResultsMap}
+											fallback={<PiMessageView message={group.userMessage} />}
+										/>
+									</div>
+								</div>
+							)}
+							{isLastTurn && <LiveThinkingBlock state={state} />}
+							{group.processMessages.length > 0 && (
+								<ProcessDetails
+									ctx={ctx}
+									group={group}
+									toolResults={toolResults}
+									toolResultsMap={toolResultsMap}
+								/>
+							)}
+							{group.finalAssistant && (
+								<div className="max-w-[95%]">
 									<RenderedMessage
 										ctx={ctx}
-										message={group.userMessage}
+										message={group.finalAssistant}
 										toolResults={toolResultsMap}
-										fallback={<PiMessageView message={group.userMessage} />}
+										fallback={
+											<PiMessageView
+												message={group.finalAssistant}
+												toolResults={toolResults}
+												onImageLoad={onImageLoad}
+												imageUrls={imageUrls}
+											/>
+										}
 									/>
 								</div>
-							</div>
-						)}
-						{group.processMessages.length > 0 && (
-							<ProcessDetails
-								ctx={ctx}
-								group={group}
-								toolResults={toolResults}
-								toolResultsMap={toolResultsMap}
-							/>
-						)}
-						{group.finalAssistant && (
-							<div className="max-w-[95%]">
-								<RenderedMessage
-									ctx={ctx}
-									message={group.finalAssistant}
-									toolResults={toolResultsMap}
-									fallback={
-										<PiMessageView
-											message={group.finalAssistant}
-											toolResults={toolResults}
-											onImageLoad={onImageLoad}
-											imageUrls={imageUrls}
-										/>
-									}
-								/>
-							</div>
-						)}
-					</div>
-				))}
+							)}
+						</div>
+					);
+				})}
+				{groups.length === 0 && <LiveThinkingBlock state={state} />}
 				{state.status === "running" && (
 					<div
 						className="pi-chat-fade-in inline-flex items-center gap-2 rounded-full border border-border/70 bg-card/70 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur"

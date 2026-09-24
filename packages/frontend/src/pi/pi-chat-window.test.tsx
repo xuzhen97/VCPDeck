@@ -42,6 +42,42 @@ describe("PiChatWindow", () => {
 		expect(screen.getByText("先检查项目结构，再读取 README。")).toBeTruthy();
 	});
 
+	it("实时思考块渲染在本轮提问气泡之后，而不是时间线顶部", () => {
+		render(<PiChatWindow state={state()} info={null} onLoadMore={() => {}} />);
+
+		const thinking = screen.getByTestId("live-thinking-block");
+		const prompt = screen.getByText("question");
+		// 文档顺序必须是「提问 → 思考」；README 之前它在时间线最上方（截图 bug）。
+		expect(
+			prompt.compareDocumentPosition(thinking) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	it("尚无回合时（新会话首轮）思考块仍然可见", () => {
+		render(
+			<PiChatWindow
+				state={state({ messages: [] })}
+				info={null}
+				onLoadMore={() => {}}
+			/>,
+		);
+
+		expect(screen.getByTestId("live-thinking-block")).toBeTruthy();
+	});
+
+	it("无思考文本（已结算）时不渲染思考块", () => {
+		render(
+			<PiChatWindow
+				state={state({ thinkingText: "", thinkingDurationMs: null })}
+				info={null}
+				onLoadMore={() => {}}
+			/>,
+		);
+
+		expect(screen.queryByTestId("live-thinking-block")).toBeNull();
+	});
+
 	it("加载历史期间显示加载提示而非空状态", () => {
 		render(
 			<PiChatWindow
