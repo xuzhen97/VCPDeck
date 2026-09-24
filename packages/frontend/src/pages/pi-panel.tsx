@@ -306,7 +306,7 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 				{/* 右栏：桌面常驻，窄屏抽屉 */}
 				<aside
 					aria-label="运行详情"
-					className="hidden w-80 shrink-0 overflow-y-auto rounded border border-border p-3 lg:block"
+					className="hidden w-80 shrink-0 overflow-y-auto rounded border border-border p-3 xl:block 2xl:w-96"
 					data-testid="pi-right-panel"
 				>
 					<PiRunDetails
@@ -325,17 +325,17 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 			</div>
 
 			{/* 窄屏：左/右抽屉开关 */}
-			<div className="flex gap-2 lg:hidden">
+			<div className="flex gap-2">
 				<button
 					type="button"
-					className="rounded border border-border px-2 py-1 text-xs"
+					className="rounded border border-border px-2 py-1 text-xs lg:hidden"
 					onClick={() => setLeftOpen(true)}
 				>
 					项目与会话
 				</button>
 				<button
 					type="button"
-					className="rounded border border-border px-2 py-1 text-xs"
+					className="rounded border border-border px-2 py-1 text-xs xl:hidden"
 					onClick={() => setRightOpen(true)}
 				>
 					详情

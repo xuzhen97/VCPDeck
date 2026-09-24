@@ -3,6 +3,7 @@ import type {
 	AgentSession,
 	AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
+import { parsePiAgentState } from "@vcpdeck/shared";
 import type { PiClientEvent, PiThinkingLevel } from "@vcpdeck/shared";
 import { PiAgentSessionWrapperImpl } from "./agent-session.js";
 
@@ -247,6 +248,19 @@ describe("PiAgentSessionWrapperImpl", () => {
 		expect(wrapper.getState().pendingExtension).toBeUndefined();
 	});
 
+	it("pendingExtension 可通过 parsePiAgentState 严格校验（extensionId 非空）", async () => {
+		const { inner, wrapper } = makeWrapper();
+		await vi.waitFor(() => expect(inner.uiContext).not.toBeNull());
+		void (inner.uiContext!.confirm as Function)("Trust?", "继续吗？");
+		await vi.waitFor(() =>
+			expect(wrapper.getState().pendingExtension).toBeDefined(),
+		);
+		expect(() => parsePiAgentState(wrapper.getState())).not.toThrow();
+		const requestId = wrapper.getState().pendingExtension!.requestId;
+		await wrapper.send("extension.respond", { requestId, value: true });
+		expect(wrapper.getState().pendingExtension).toBeUndefined();
+	});
+
 	it("超时发出 timeout", async () => {
 		vi.useFakeTimers();
 		const { inner, wrapper } = makeWrapper();
@@ -446,30 +460,6 @@ describe("PiAgentSessionWrapperImpl", () => {
 		const { inner, wrapper } = makeWrapper();
 		await wrapper.send("agent.compact", { customInstructions: "summarize" });
 		expect(inner.compact).toHaveBeenCalledWith("summarize");
-	});
-
-	it("ensureProjectTrust 复用 confirm 且只执行一次 resolver", async () => {
-		const { inner, wrapper } = makeWrapper();
-		const resolver = vi.fn(async (ask: (message: string) => Promise<boolean>) =>
-			ask("信任？"),
-		);
-		wrapper.setProjectTrustResolver(resolver);
-		const pending = wrapper.ensureProjectTrust();
-		const requestId = wrapper.getState().pendingExtension!.requestId;
-		await wrapper.send("extension.respond", { requestId, confirmed: true });
-		await expect(pending).resolves.toBe(true);
-		await expect(wrapper.ensureProjectTrust()).resolves.toBe(true);
-		expect(resolver).toHaveBeenCalledOnce();
-		expect(inner.dispose).not.toHaveBeenCalled();
-	});
-
-	it("ensureProjectTrust 返回 false 时不要求重建", async () => {
-		const { wrapper } = makeWrapper();
-		const resolver = vi.fn(async () => false);
-		wrapper.setProjectTrustResolver(resolver);
-		await expect(wrapper.ensureProjectTrust()).resolves.toBe(false);
-		await expect(wrapper.ensureProjectTrust()).resolves.toBe(false);
-		expect(resolver).toHaveBeenCalledOnce();
 	});
 
 	it("shutdown 先发 session_shutdown 再 dispose", async () => {

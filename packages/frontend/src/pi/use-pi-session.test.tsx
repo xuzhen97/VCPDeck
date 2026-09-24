@@ -416,6 +416,50 @@ describe("usePiSession", () => {
 		expect(result.current.state.runId).toBe("j1");
 	});
 
+	it("prompt_error 结束运行态并展示错误（不卡运行中）", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => {
+			await result.current.actions.createSession("c1", CWD);
+		});
+		await act(async () => {
+			await result.current.actions.send({ prompt: "hello" });
+		});
+		act(() => {
+			emit({ type: "agent_start", sessionId: "s1", runId: "j1" });
+		});
+		expect(result.current.state.status).toBe("running");
+		act(() => {
+			emit({
+				type: "prompt_error",
+				sessionId: "s1",
+				runId: "j1",
+				code: "PI_RUNTIME_UNAVAILABLE",
+				message: "Pi runtime is unavailable",
+			});
+		});
+		expect(result.current.state.status).toBe("idle");
+		expect(result.current.state.runId).toBeNull();
+		expect(result.current.state.error).toContain("runtime");
+	});
+
+	it("openSession 的 open 失败落入 state.error（不向调用方抛出）", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+			new Error("Pi protocol input was invalid"),
+		);
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => {
+			await expect(
+				result.current.actions.openSession("c1", "s1", CWD),
+			).resolves.toBeUndefined();
+		});
+		expect(result.current.state.error).toContain("invalid");
+		expect(result.current.state.status).not.toBe("loading");
+	});
+
 	it("实时 thinking 文本进入当前 Session 内存状态", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();

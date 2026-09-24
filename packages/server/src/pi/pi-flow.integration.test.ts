@@ -146,7 +146,7 @@ function registration(clientId = "c1") {
 }
 
 function report(runs: PiStateReport["runs"] = []): PiStateReport {
-	return { clientId: "c1", runs };
+	return { clientId: "c1", runs, runtimeRevision: null, configState: "pending" };
 }
 
 function makeLoopback() {
@@ -159,6 +159,7 @@ function makeLoopback() {
 	const clientService = {
 		register: vi.fn(async () => {}),
 		markOfflineBySocketId: vi.fn(async () => {}),
+		bindSocket: vi.fn(async () => {}),
 		listOnline: vi.fn(async () => [
 			{
 				clientId: "c1",
@@ -210,6 +211,9 @@ function makeLoopback() {
 			onUpdateFailed: vi.fn(),
 		} as never,
 		{ bindEmitters: vi.fn() } as never,
+		undefined,
+		undefined,
+		{ bindSender: vi.fn(), onClientRegistered: vi.fn(), onDisconnected: vi.fn(), assertCompatible: vi.fn(), assertReady: vi.fn(), applyAck: vi.fn(), onState: vi.fn() } as never,
 	);
 	gateway.server = {
 		emit: vi.fn(),
@@ -230,6 +234,7 @@ function makeLoopback() {
 			completePromptUpload: vi.fn(),
 			deleteAttachment: vi.fn(),
 		} as never,
+		{ assertCompatible: vi.fn(), assertReady: vi.fn() } as never,
 	);
 
 	const addSocket = (id: string) => {

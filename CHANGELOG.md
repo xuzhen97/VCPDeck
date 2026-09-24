@@ -4,11 +4,55 @@
 
 ## [Unreleased]
 
+### Breaking
+
+- **远程 Pi 的配置、凭据与模型策略改为 Server 权威，Client 不再读取目标机器用户 Pi**：Server 新增 Pi Profile / Provider 凭据（AES-256-GCM 密文 + `VCPDECK_PI_CREDENTIAL_KEY_FILE` 根密钥）/ Client→Profile 绑定与 `PiRuntimeSpecV1` 下发（`PI_RUNTIME_SPEC` / `PI_RUNTIME_ACK`）；Client 使用 VCPDeck 专属数据根（`VCPDECK_CLIENT_DATA_DIR`）与显式 SessionDir，`agentDir`、settings（纯内存）与凭据（内存注入）均不再来自 `~/.pi`。
+- **项目本地 Pi 资源一律不加载**：移除项目信任交互与 `ProjectTrustStore` 使用；`.pi/extensions`、项目 settings、`.agents/skills` 不进入 VCPDeck 会话。
+- **Pi SDK 升级到 `0.86.0`**（`@earendil-works/pi-agent-core`、`@earendil-works/pi-coding-agent`），版本事实改为运行时 `VERSION` 导出。
+- **部署顺序要求 Server 先行**：新 Client 的 `PI_STATE` 会携带 `runtimeRevision` / `configState`，旧 Server 的严格 parser 会拒绝；跨隔离边界回退旧 Client 前必须禁用该 Client 的 Pi。
+- **Pi 不可用语义变化**：不再因「本机无已认证模型」禁用，改为 `PI_CONFIG_UNAVAILABLE` / `PI_CREDENTIAL_UNAVAILABLE` / `PI_RUNTIME_SPEC_INCOMPATIBLE`；未就绪时拒绝需要 Worker 的动作且不回退本机 Pi。
+- **Pi 模型元数据的权威改为 Client 运行时的 Pi 内置目录**：Provider 模型条目新增 `metadataSource`（`catalog` / `explicit`）。`catalog` 模型由 Client 用自身 SDK 目录按 `providerId + modelId` 解析真实上下文窗口、最大输出、成本、`compat`、`thinkingLevelMap` 与 `promptCache`；历史上写入的 `128000/8192/0` 占位元数据不再使用，它会直接篡改 Pi 的上下文压缩阈值与成本统计。自定义端点必须提供显式元数据与 Base URL，并在界面上标注为未确认。
+
+- **Pi 工具策略默认拒绝**：Profile 新增 `allow`/`confirm`/`deny` 三桶（互斥）。`allow ∪ confirm` 作为 SDK 原生工具白名单下发，`deny` 同时进入排除面；**未出现在任何桶的工具不可用**。因此未配置策略的历史 Profile 在补齐基线前 Pi 实际不可用（有意 fail closed）。
+- **RuntimeSpec 协议升到 v3，且只下发 v3**：新增 `toolPolicy` 与可选 `requiredBundle`。上报 `runtimeSpecProtocolVersion < 3` 的 Client **不下发任何 Spec**（Pi 明确不可用），需升级 Client 后恢复。
+- **`confirm` 的执行依赖随 Bundle 发布的策略扩展**：启用 `confirm` 的 Profile 必须同时启用 Bundle 资源 `vcp.tool-policy`，否则保存被拒绝。
+
 ### Added
 
 - **远程桌面新增显示源切换（UltraVNC `SetSW`）**：工具条提供「切换到下一屏」，向同一条 P2P DataChannel 写入 6 字节 RFB 客户端消息 `[10, 0, 0, 0, 0, 0]`，由目标机 VNC 服务端切换真实捕获源。实现只使用公开的 `RTCDataChannel.send`，不触碰 noVNC 私有字段；通道未 open 或会话已断开时不发送。
   - **使用前须知**：该状态属 winvnc **服务端共享**，一次切换会影响**其他正在查看同一台机器的会话**（已在面板上就地明示）。实测依据：在一条连接上切换会推送给所有已连客户端，新建连接也直接看到切换后的状态。
   - 同时由于同尺寸多屏无法区分是哪一块，本版**只提供循环式「下一屏」，不提供按屏幕编号选择**。
+
+- **修复 Windows dev 崩溃（退出码 3221226505 / 0xC0000409）**：前端 `dev` 脚本改为 `node --no-maglev ./node_modules/vite/bin/vite.js`，规避 V8 Maglev JIT 在 Windows 11 build 26200（Node 24）上的已知原生栈溢出崩溃（Node issue #62260）；`--no-maglev` 仅影响 JIT 层级，dev 性能无感。
+- **真实集成与浏览器实测修复集**（`pnpm test` + `pnpm dev:all` + Playwright 全链路实测发现）：① 修复 Server 两处启动级 DI 缺陷（`PiCredentialService`/`PiProviderService` 的测试注入参数缺 `@Optional()`，Nest bootstrap 直接失败，单测盲区）；② 修复机器级 `session.import.*` 在 Client supervisor 无路由（`resolveKey` 抛出 → 400 `PI_PROTOCOL_INVALID`），新增合成机器 entry 转发 + 非 Error 抛出不再丢失 message；③ 导入列表响应上限与 run 批量上限拆分（列表 `MAX_IMPORT_LIST_SESSIONS=2000`，真实 921 源不再 502；run 保持 ≤50）；④ **修复每次 Prompt 必失败**（凭据 lease 的 `ModelRuntime` 包络被当本体传给 SDK，`modelRuntime.refresh is not a function` → 新增包装解包 + wiring 测试强制真实 SDK 契约）；⑤ 前端 `prompt_error` 事件此前落入 default 分支导致永远卡"运行中"，现收敛为 idle + 错误展示；⑥ 扩展 UI 请求 `extensionId` 空串违反严格协议致 `agent/open` 400 无法打开会话，改用 `vcp.host-bridge` 并加 `parsePiAgentState` 契约测试，`openSession` 失败改为落 `state.error` 不外抛；⑦ 导入对话框列表 key 改用 `sourceLabel`（同名 `session.jsonl` 多目录会撞 key）。端到端实测：prompt → tool-policy 审批对话框 → 批准 → bash 执行 → 终答含原始输出，控制台零错误。
+- **Pi 会话时间轴渲染升级为 pi-web 渲染层（Plan 3 / 阶段 F，ADR-0032）**：`examples/pi-web` 的消息渲染层原样拷入 `packages/frontend/src/pi-web/`（消息、Markdown/GFM/数学公式、代码 diff 与 apply-patch 预览、工具调用与结果卡、thinking 折叠、图片预览、ANSI 文本），上游 `.test.mjs` 与 MIT LICENSE 随行（`scripts/port-pi-web-render.mjs` 可重跑同步）。经 Pi UI Adapter（`pi-render-adapter.ts`）把 Shared DTO 投影为渲染模型 —— 换渲染器不改变 REST/SSE/Owner/Run 与 Session Job 语义（移植子树零协议 import 有门禁）；消息体外包 `PiRenderBoundary` 降级护栏，渲染异常回落原纯文本渲染，不阻断会话。Composer、会话列表与连接管理保持不变。新增依赖含 mermaid、KaTeX、react-syntax-highlighter（**bundle 显著增大为既定取舍**，懒加载后续再做）；图片占位因 DTO 无字节退化为标注文本（已知限制）。
+- **旧会话显式导入（设计 §21.3 / ADR-0031）**：Pi 会话侧栏新增「导入旧会话」入口 —— 只读列出本机用户原生 Pi 会话的元数据摘要（不读正文、不改源、不跟随符号链接）→ 逐条显式预览（80 字符截断，带隐私提示）→ 勾选 + 二次确认 → 单向复制进 VCPDeck Session root（按同名文件幂等、副本可解析校验失败即清理）。新增三个 Pi action（`session.import.list/preview/run`，`sourceName` 只接受纯文件名防路径逃逸）、三条 REST 路由与三个 SDK 方法；Server 严格解析 Client 响应（不合法按 502、未就绪按 400）。零污染门禁扩展覆盖该链路。
+- **Pi Resource Bundle 随 Client Release 发布**：`<app-dir>/apps/<version>/pi-resources/` 内含 `manifest.json`（`protocolVersion`/`bundleVersion`/`piSdkVersion` + 逐资源 `sha256`）与 VCPDeck 自有扩展。Client 从自身模块位置定位、严格解析并逐资源校验（拒绝绝对路径、`..` 与符号链接逃逸），校验失败**不上报 Bundle 能力且不加载任何资源**；Client 在 REGISTER 上报 `capabilityDetails.pi.bundle`（仅版本事实与资源 ID），Server 只引用 resource ID 并仅向兼容 Bundle 的 Client 下发 Spec。
+- **Pi 工具策略与审批**：Bundle 资源 `vcp.tool-policy` 拦截 `tool_call` 执行 deny/allow，`confirm` 复用既有 Extension UI 审批链路**每次调用**审批；拒绝、取消与 30 分钟超时一律判定为拒绝并返回稳定错误码（`PI_TOOL_POLICY_DENIED` / `PI_TOOL_POLICY_REJECTED`），会话继续。策略经进程内 host bridge 传递，**不落盘、不进环境变量**（`bash` 派生子进程会继承环境变量）；桥接缺失或版本不符时阻塞所有工具调用（`PI_POLICY_UNAVAILABLE`）。本阶段不持久化审批审计。
+- **Pi Provider 一次接入**：管理界面只填 名称 / 协议 / Base URL / API Key，`Runtime Provider ID` 由名称派生（高级可改）；「拉取模型」列出远程 `/models` 的候选模型（可按 ID/名称搜索，滚动容器内展示），**只有勾选的模型**才进入 Provider 目录并保存，未勾选的不配置也不落库；元数据编辑器按需展开，默认不平铺。Provider + 模型 + 凭据在同一事务内创建，不再需要先建 Provider 再单独建凭据。凭据列表保留指纹展示与撤销。
+- **Pi 模型发现双路径**：`POST /api/pi/providers/discover-models` 对未持久化的目标做只读发现（API Key 只用于该次请求，不入库、不入响应、不入日志），`POST /api/pi/providers/:id/discover-models` 复用已保存 Provider 的加密凭据；两者返回建议元数据来源与 SDK 版本，依据 Client 注册时上报的内置 Provider ID 列表。
+- **Google 协议模型发现**：`google-generative-ai` 现在解析 `models/<id>` 形式的目录与 `displayName`（此前直接报「尚未实现」）。
+- Pi Profile / Credential / Client 绑定的 REST API、SDK 与「Pi」独立管理入口；凭据响应只含安全元数据，明文永不回显。
+- **Pi Profile 的 Provider 关系改为凭据驱动**：默认 Provider 只能从 Profile 已关联的有效凭据中选择；未关联凭据时禁止保存 Profile。
+- `PiRuntimeSpecV1` 严格 parser 与就绪门控（`PI_READ_ACTIONS` / `PI_WORKER_ACTIONS` 划分）、revision 换代（活跃 Run drain 后重建 Worker）。
+- native Pi 零污染门禁测试：预置用户 `~/.pi` 后全流程递归清单与内容 hash 保持 0 created / 0 modified / 0 deleted。
+
+### Fixed
+
+- **Pi 模型下拉为空（配置了模型也显示「暂无可用模型」）**：Client 的 `models.list` 返回模型数组，Server 控制器却按 `{ models: [...] }` 包壳取值，得到 `undefined` → 接口 200 空响应、前端静默拿到空列表。改为直通返回并补契约测试（同时修 Pi 运行时状态里 `providers` 恒为 `[]`：`setDesired` 会清空摘要，登记顺序颠倒）。
+- **选择盘符根（项目根的 `relativePath` 为空串）时所有 Pi 请求 400**：共享严格解析器要求 `cwdRef.relativePath` 非空，而前端项目根/盘符根一贯用空串表示、Client 侧解析也支持空串（等价 root 自身）。现在允许空串并补测试。
+
+- **机器 Pi 工作台右栏适配**：运行详情栏改为 ≥1280px（`xl`）显示、≥1536px（`2xl`）加宽，窄于 1280px 时收进「详情」抽屉，避免中窄屏下固定 280px 侧栏把对话区压到 180–460px；模型下拉在无可用模型时显示占位文案「（暂无可用模型）」并回显当前模型，不再是一个空白输入框。
+
+- **裸跑 `pnpm dev:all` 即可让 Pi 就绪**：新增 `scripts/ensure-dev-app-layout.cjs`（在 `.tmp/devapp/apps` 建到 `packages` 的链接）与 `scripts/dev-client.cjs`（以该目录作为 `VCPDECK_APP_DIR` 启动 Client），dev Client 的 `dev` 脚本接入两者。此前 dev 必须手工设置 `VCPDECK_APP_DIR` 并自建布局，否则 Client 上报不了 Bundle、需要资源的 Profile 一律未就绪；显式设置 `VCPDECK_APP_DIR` / `VCPDECK_CLIENT_DATA_DIR` 时仍以调用方为准，发布安装布局不受影响。
+
+- **Pi Client 运行时绑定「无响应」**：Profile 绑定成功后若目标 Client 未上报已校验的 Pi Resource Bundle（例如未按发布布局启动的 dev Client），Server 现在登记 `PI_BUNDLE_UNAVAILABLE` 并在 `/pi/runtime` 明确显示「目标机缺少所需资源 Bundle」；凭据集合不覆盖 Profile 时同理登记 `PI_CREDENTIAL_UNAVAILABLE`，不再只显示「未就绪（等待 Server 下发配置）」。
+- **重复 Client 连接不再让 Pi 卡死、也不再让 Client 从列表消失**：同一 clientId 存在多个连接（残留 Client 进程等）时，后注册者接管注册表；其断开时绑定切给存活连接、恢复该连接自身能力并重新下发，同时保持该 Client 在线（不再被同 ID 的幽灵连接置为离线导致界面无可用 Client）；只在最后一个连接断开时置离线并清空登记；切换时输出重复连接告警日志。
+
+- **不兼容 Client 的 Pi 状态不再被覆盖成「等待下发配置」**：协议版本不足的 Client 现在既不收到 Spec 也不登记 desired，保留注册时写入的 incompatible 原因，便于定位。
+- **绑定 Profile 后 RuntimeSpec 下发必然失败**：Server 的 `getRuntimeSnapshot()` 按表行 id 解析 `runtimeProviderId`，导致已落库的 Client→Profile 绑定在下发时抛 `Provider "…" 不存在`，界面只显示「绑定更新失败」（绑定已写入，下发未生效）。现在按 `runtimeProviderId` 解析，缺 Provider / Provider 未就绪时仍然 fail closed。
+- **Pi 保存失败时只显示通用文案，掩盖真实原因**：Provider / Profile / Client 运行时三处把服务端精确原因替换为通用提示（例如根密钥未配置被显示成「请检查协议、端点与 API Key」）。现在带稳定 `code` 的服务端脱敏 `message` 直接展示，仅网络错误回退中文兜底；同时修正 Provider 表单失败也清空 API Key、Profile 面板静默丢弃未配置模型行两个行为缺陷。
+- **`.env.example` 未记录 `VCPDECK_PI_CREDENTIAL_KEY_FILE`**：新环境无法发现该配置，首次保存 Provider 会以 `PI_CONFIG_UNAVAILABLE` fail closed。示例文件现在给出变量用途与密钥生成命令（不含真实密钥）。
 
 ## [0.10.5] - 2026-09-20
 

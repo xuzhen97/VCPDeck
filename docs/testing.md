@@ -153,6 +153,10 @@ AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明�
 - 真实 node-pty；
 - FRP E2E；
 - Pi Worker 集成、锁定 SDK 的 Session JSONL 打开/迁移与真实模型 smoke；
+- **Pi Resource Bundle 门禁**：- **导入专项门禁**：摘要响应不含正文与源文件完整绝对路径（canary）；预览文本 ≤ 80 字符且不进存储/Job/日志（canary）；源文件导入前后 hash 不变；二次导入幂等且目标内容不变；副本校验失败无半成品；`sourceName` 含路径逃逸字符时整请求被拒（400）。
+manifest 严格解析（路径逃逸/未知键/摘要格式）、逐资源 sha256 校验（篡改/缺失/符号链接逃逸/SDK 版本不符 → 不上报能力且不加载）、Client 二次校验 `requiredBundle`（缺资源 → `PI_BUNDLE_UNAVAILABLE`）、v3 契约与「上报 < 3 不下发」、SDK 内置工具名与工具目录一致性（SDK 新增工具时该测试失败，强制显式决定归属桶）、默认拒绝与审批三分支（批准/拒绝/超时）；
+- **native Pi 零污染门禁**：预置用户 `~/.pi` 后跑 capability、Session 新建/列表、Prompt 与 Client 重启，该目录递归清单与内容 hash 必须 0 created / 0 modified / 0 deleted（**含旧会话导入链路：列目录、预览、导入**）该目录递归清单与内容 hash 必须 0 created / 0 modified / 0 deleted，native-only Session 不可见、哨兵 Extension 未执行；未安装用户 Pi 的全新机器仍可用；
+- RuntimeSpec 门控与换代：未 ready 时 WORKER_ACTIONS 返回 `PI_CONFIG_UNAVAILABLE` 且不 fork Worker；活跃 Run 期间配置变更只 drain、Run 结束换代；Server 侧同一门控；
 - Launcher 更新/回退；
 - 从上一支持版本数据库升级；
 - 备份恢复 smoke；
@@ -167,7 +171,8 @@ Release 不得只凭构建成功发布。至少确认：
 - exec command/script、stdin、输出边界、timeout、进程树取消和断线对账；
 - 文件浏览、文本留痕、写/移/删覆盖、导入/导出、Local/Alibaba 完整性差异、取消/断线和 Storage；
 - Terminal attach/input/resync/close、snapshot/seq、控制权、Client/Server 重启、TTL/expired 和真实 PTY；
-- Pi Session CRUD/fork/clone、prompt/steer/follow-up/compact/abort、Extension/Trust、图片、SSE、Worker/Client/Server reconnect；
+- Pi Session CRUD/fork/clone、prompt/steer/follow-up/compact/abort、Extension 对话框、图片、SSE、Worker/Client/Server reconnect；
+- Pi 配置链路：Profile/Credential/绑定 CRUD、凭据只回安全元数据、RuntimeSpec 下发与 ACK、模型 scope 等于 allowedModels ∩ 凭据可用、Server 先行升级；
 - FRPS probe、单实例映射、frpc 退出/重启、删除孤儿和凭据不泄漏；
 - Windows/Linux 构件从上传到 Server 更新、Client 逐台更新、离线补更和失败回退的完整链路；Alibaba 后端必须证明上传/下载正文均不经过 Server；
 - 同一 Git Tag 的 Pi Skill 安装/升级与 SDK/Shared 仓库外安装；

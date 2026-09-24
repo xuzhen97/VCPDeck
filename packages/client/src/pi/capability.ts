@@ -1,33 +1,46 @@
-import { access, readFile } from "node:fs/promises";
-import { homedir, platform } from "node:os";
+import { access } from "node:fs/promises";
+import { platform } from "node:os";
 import { delimiter, join } from "node:path";
 import { fork } from "node:child_process";
 import {
+	PI_RUNTIME_SPEC_PROTOCOL_VERSION,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
 	type PiCapabilityStatus,
 } from "@vcpdeck/shared";
 import { isSupportedNodeVersion } from "./node-version.js";
+import {
+	ensureVcpPiRuntimeDirs,
+	resolveVcpPiRuntimePaths,
+} from "./runtime-paths.js";
+import { resolveVerifiedPiBundle, type VerifiedPiBundle } from "./bundle.js";
 
 /** probe-worker 的结果（不含路径/凭据） */
 export interface ProbeWorkerResult {
 	sdkVersion: string;
-	modelCount: number;
+	/** SDK 内置目录的 Provider ID（已去重）；探测失败或旧 Worker 可能为空。 */
+	providerIds: string[];
 	error: {
-		code: "PI_RUNTIME_UNAVAILABLE" | "PI_AUTH_UNAVAILABLE";
+		code: "PI_RUNTIME_UNAVAILABLE";
 		message: string;
 	} | null;
 }
 
-/** 探测环境抽象（测试注入） */
+/**
+ * 探测环境抽象（测试注入）。
+ *
+ * 注意这里刻意没有「读用户 Pi」的能力：
+ * 无 settings.json / auth.json / models.json / ProjectTrust 读取入口（设计 §9.4）。
+ */
 export interface ProbeEnv {
 	nodeVersion: string;
 	platform: NodeJS.Platform;
-	homedir: string;
-	readSettingsShellPath: () => Promise<string | null>;
 	existsGitBash: () => Promise<boolean>;
 	findBashInPath: () => Promise<boolean>;
 	forkProbeWorker: () => Promise<ProbeWorkerResult>;
-	readAgentDir: () => Promise<boolean>;
+	/** VCPDeck Pi 数据根是否可写；不可写时 Pi 不可用，不回退用户 Pi。 */
+	ensureDataRootWritable: () => Promise<boolean>;
+	/** 定位并校验随 Release 发布的 Bundle；无可用 Bundle 时返回 null。 */
+	resolveBundle: (sdkVersion: string) => Promise<VerifiedPiBundle | null>;
 }
 
 const GIT_BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
@@ -37,25 +50,6 @@ async function exists(p: string): Promise<boolean> {
 		() => true,
 		() => false,
 	);
-}
-
-/**
- * 读取 ~/.pi/agent/settings.json 的 shellPath（Windows 探测第一来源）。
- * 只返回是否配置，不返回真实路径。
- */
-async function readSettingsShellPath(home: string): Promise<string | null> {
-	try {
-		const raw = await readFile(
-			join(home, ".pi", "agent", "settings.json"),
-			"utf8",
-		);
-		const parsed = JSON.parse(raw) as { shellPath?: unknown };
-		return typeof parsed.shellPath === "string" && parsed.shellPath.length > 0
-			? parsed.shellPath
-			: null;
-	} catch {
-		return null;
-	}
 }
 
 /**
@@ -74,20 +68,61 @@ async function findBashInPath(): Promise<boolean> {
 
 /** 生成真实探测环境（生产路径） */
 export function createProbeEnv(): ProbeEnv {
-	const home = homedir();
 	return {
 		nodeVersion: process.versions.node,
 		platform: platform(),
-		homedir: home,
-		readSettingsShellPath: () => readSettingsShellPath(home),
 		existsGitBash: () => exists(GIT_BASH),
 		findBashInPath,
 		forkProbeWorker: () => forkProbeWorkerOnce(),
-		readAgentDir: () => {
-			const dir = process.env.PI_CODING_AGENT_DIR ?? join(home, ".pi", "agent");
-			return exists(dir);
+		ensureDataRootWritable: async () => {
+			try {
+				await ensureVcpPiRuntimeDirs(resolveVcpPiRuntimePaths());
+				return true;
+			} catch {
+				return false;
+			}
 		},
+		resolveBundle: (sdkVersion) => resolveAndCacheBundle(sdkVersion),
 	};
+}
+
+let bundleCache: {
+	sdkVersion: string;
+	bundle: VerifiedPiBundle | null;
+} | null = null;
+
+/**
+ * 定位并校验 Bundle，并把结果缓存在进程内（能力上报与 RuntimeSpec 接纳共用同一份）。
+ * Bundle 属于不可变版本目录，缓存一次即可；结果不写任何文件。
+ */
+async function resolveAndCacheBundle(
+	sdkVersion: string,
+): Promise<VerifiedPiBundle | null> {
+	const bundle = await resolveVerifiedPiBundle({
+		selfDir: __dirname,
+		appDir: process.env.VCPDECK_APP_DIR ?? process.cwd(),
+		sdkVersion,
+	});
+	bundleCache = { sdkVersion, bundle };
+	return bundle;
+}
+
+/**
+ * 读取已缓存的 Bundle 校验结果；未探测过时返回 null。
+ *
+ * 刻意不在此处触发探测：RuntimeSpec 接纳必须同步、无副作用（探测在 REGISTER 前已完成）。
+ * 未探测到 Bundle 时按「无可用 Bundle」处理，需要资源的 Spec 会在二次校验中 fail closed。
+ */
+export function getCachedClientBundle(): {
+	sdkVersion: string;
+	bundle: VerifiedPiBundle | null;
+} | null {
+	return bundleCache;
+}
+
+/** 重置缓存（仅测试用）。 */
+export function resetClientBundleCache(): void {
+	bundleCache = null;
 }
 
 let probeWorkerPromise: Promise<ProbeWorkerResult> | null = null;
@@ -110,7 +145,7 @@ function forkProbeWorker(): Promise<ProbeWorkerResult> {
 			child.kill();
 			resolve({
 				sdkVersion: "",
-				modelCount: 0,
+				providerIds: [],
 				error: {
 					code: "PI_RUNTIME_UNAVAILABLE",
 					message: "Pi probe worker timed out",
@@ -125,7 +160,9 @@ function forkProbeWorker(): Promise<ProbeWorkerResult> {
 			child.disconnect();
 			resolve({
 				sdkVersion: m.sdkVersion,
-				modelCount: typeof m.modelCount === "number" ? m.modelCount : 0,
+				providerIds: Array.isArray(m.providerIds)
+					? m.providerIds.filter((id): id is string => typeof id === "string")
+					: [],
 				error: m.error ?? null,
 			});
 		});
@@ -133,7 +170,7 @@ function forkProbeWorker(): Promise<ProbeWorkerResult> {
 			clearTimeout(timer);
 			resolve({
 				sdkVersion: "",
-				modelCount: 0,
+				providerIds: [],
 				error: {
 					code: "PI_RUNTIME_UNAVAILABLE",
 					message: "Pi probe worker failed to start",
@@ -147,8 +184,12 @@ function forkProbeWorker(): Promise<ProbeWorkerResult> {
 }
 
 /**
- * 轻量能力探测：Node 版本 → Bash（Windows 按 Pi 官方顺序）→ Agent 目录 → SDK Worker。
+ * 轻量能力探测：Node 版本 → Bash（Windows 按 Pi 官方顺序）→ VCPDeck data root 可写 → SDK 版本。
+ *
  * 探测失败只禁用 Pi 功能，不影响 exec/files/FRP。结果不含路径与凭据。
+ *
+ * 本机「已认证模型」不再参与判定：模型可用性由 Server 下发的 RuntimeSpec 决定
+ * （设计 §16）。`PI_AUTH_UNAVAILABLE` 仍保留在共享枚举中供旧 Client 上报。
  */
 export async function probePiCapability(
 	env: ProbeEnv = createProbeEnv(),
@@ -164,9 +205,7 @@ export async function probePiCapability(
 
 	let shellKind: "configured" | "git-bash" | "path" | "system" = "system";
 	if (env.platform === "win32") {
-		const configured = await env.readSettingsShellPath();
-		if (configured) shellKind = "configured";
-		else if (await env.existsGitBash()) shellKind = "git-bash";
+		if (await env.existsGitBash()) shellKind = "git-bash";
 		else if (await env.findBashInPath()) shellKind = "path";
 		else {
 			return {
@@ -184,11 +223,11 @@ export async function probePiCapability(
 		};
 	}
 
-	if (!(await env.readAgentDir())) {
+	if (!(await env.ensureDataRootWritable())) {
 		return {
 			available: false,
 			code: "PI_RUNTIME_UNAVAILABLE",
-			message: "Pi agent directory is not readable",
+			message: "VCPDeck Pi data root is not writable",
 		};
 	}
 
@@ -200,19 +239,30 @@ export async function probePiCapability(
 			message: worker.error.message,
 		};
 	}
-	if (worker.modelCount === 0) {
-		return {
-			available: false,
-			code: "PI_AUTH_UNAVAILABLE",
-			message: "Remote Pi has no authenticated model",
-			nodeVersion: env.nodeVersion,
-		};
-	}
+	// Bundle 校验：失败（无 Bundle / manifest 非法 / 摘要不符 / SDK 版本不符）时不上报该字段。
+	const bundle = worker.sdkVersion
+		? await env.resolveBundle(worker.sdkVersion)
+		: null;
 	return {
 		available: true,
 		sdkVersion: worker.sdkVersion,
 		nodeVersion: env.nodeVersion,
 		shellKind,
 		sessionJobProtocolVersion: PI_SESSION_JOB_PROTOCOL_VERSION,
+		runtimeSpecProtocolVersion: PI_RUNTIME_SPEC_PROTOCOL_VERSION,
+		configMode: "server-authoritative",
+		...(worker.providerIds.length > 0
+			? { modelCatalog: { sdkVersion: worker.sdkVersion, providerIds: worker.providerIds } }
+			: {}),
+		...(bundle
+			? {
+					bundle: {
+						protocolVersion: bundle.manifest.protocolVersion,
+						bundleVersion: bundle.manifest.bundleVersion,
+						piSdkVersion: bundle.manifest.piSdkVersion,
+						resourceIds: [...bundle.resourceIds],
+					},
+				}
+			: {}),
 	};
 }

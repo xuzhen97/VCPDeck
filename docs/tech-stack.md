@@ -16,7 +16,7 @@
 | 数据持久化 | SQLite、Prisma 7、libSQL adapter | 持久化机器、Job、身份、文件元数据、FRP、终端会话与发布记录 |
 | 实时通信 | Socket.IO 4、Server-Sent Events | Server ↔ Client 调度和终端使用 Socket.IO；远程 Pi 的浏览器事件流使用 SSE |
 | 远程终端 | node-pty、xterm.js / xterm-headless | Client 创建 PTY，Frontend 渲染终端，Server 代理会话并记录最小审计信息 |
-| 远程 Pi | `@earendil-works/pi-agent-core@0.84.0`、`@earendil-works/pi-coding-agent@0.84.0` | Client 通过 fork Worker 嵌入 Pi SDK，Server 代理请求/状态，Frontend 提供交互界面 |
+| 远程 Pi | `@earendil-works/pi-agent-core@0.86.0`、`@earendil-works/pi-coding-agent@0.86.0` | Client 通过 fork Worker 嵌入 Pi SDK，Server 集中管理模型策略与 Provider 凭据并下发 RuntimeSpec，Frontend 提供交互界面；Client 使用 VCPDeck 专属隔离数据根 |
 | FRP | frpc / frps | Client 管理 frpc 映射，Server 管理 FRPS 实例与映射元数据 |
 | P2P 隧道 | 浏览器 WebRTC、node-datachannel、coturn | Frontend 用 `RTCPeerConnection` 建 DataChannel，Client 用 `node-datachannel/polyfill` 接回环 TCP，coturn 作 TURN 兜底 |
 | SDK | Fetch API、TypeScript | Node.js 与浏览器共用的类型安全 REST 客户端 |

@@ -8,6 +8,7 @@ import type {
 	PiWorkerOutboundMessage,
 	PiWorkerRequestMessage as WorkerReq,
 } from "./worker-protocol.js";
+import type { PiRuntimeConfigState } from "./runtime-spec.js";
 
 function req(overrides: Partial<PiRequest>): PiRequest {
 	return {
@@ -99,6 +100,8 @@ function makeSupervisor(opts: {
 	autoRespond?: boolean;
 	roots?: string[];
 	requestOutcomes?: Partial<Record<PiRequest["action"], "timeout">>;
+	/** null = 不登记运行配置（用于门控用例） */
+	runtimeState?: PiRuntimeConfigState | null;
 } = {}) {
 	const handles: FakeHandle[] = [];
 	const supervisor = createPiSupervisor({
@@ -125,6 +128,35 @@ function makeSupervisor(opts: {
 			return h;
 		},
 	});
+	// WORKER_ACTIONS 需要 ready：除专门测试门控的用例外，默认登记一份就绪配置。
+	if (opts.runtimeState !== null) {
+		supervisor.setRuntimeConfig(
+			opts.runtimeState ?? {
+				configState: "ready",
+				runtimeRevision: "0123456789abcdef",
+				config: {
+					spec: {
+						schemaVersion: 3,
+						specId: "s1",
+						profileId: "p1",
+						profileRevision: 1,
+						providers: [{ providerId: "anthropic", name: "Anthropic", protocol: "anthropic-messages", headers: {}, models: [{ id: "claude-x", name: "Claude X", metadataSource: "catalog" }] }],
+						modelPolicy: {
+							defaultModel: { provider: "anthropic", modelId: "claude-x" },
+							allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+							defaultThinkingLevel: "medium",
+						},
+						toolPolicy: { allow: [], confirm: [], deny: [] },
+						runtimeRevision: "0123456789abcdef",
+					},
+					credentialEntries: [{ providerId: "anthropic", apiKey: "sk-test" }],
+					bundleExtensionPaths: [],
+					resolvedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+					unavailableModels: [],
+				},
+			},
+		);
+	}
 	return { supervisor, handles };
 }
 
@@ -369,11 +401,173 @@ describe("PiSupervisor", () => {
 		await expect(supervisor.request(prompt("run-2", CWD_REF_A))).resolves.toMatchObject({ ok: true });
 	});
 
+	it("未就绪时 WORKER_ACTION 被拒绝且不 fork Worker", async () => {
+		const { supervisor, handles } = makeSupervisor({ runtimeState: null });
+		const result = await supervisor.request(prompt("run-x", CWD_REF_A));
+		expect(result).toMatchObject({
+			ok: false,
+			error: { code: "PI_CONFIG_UNAVAILABLE" },
+		});
+		expect(handles).toHaveLength(0);
+		expect(() => supervisor.assertReady()).toThrow(/不可用|尚未/);
+	});
+
+	it("未就绪时导入动作（WORKER_ACTION）被拒绝且不 fork Worker", async () => {
+		const { supervisor, handles } = makeSupervisor({ runtimeState: null });
+		const result = await supervisor.request({
+			requestId: "i-import",
+			action: "session.import.run",
+			payload: { sourceNames: ["native.jsonl"] },
+		});
+		expect(result).toMatchObject({
+			ok: false,
+			error: { code: "PI_CONFIG_UNAVAILABLE" },
+		});
+		expect(handles).toHaveLength(0);
+	});
+
+	it("就绪时机器级 session.import.* 无 cwdRef/jobId 可达 Worker（合成机器 entry）", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		const list = await supervisor.request({
+			requestId: "i-list",
+			action: "session.import.list",
+		});
+		expect(list.ok).toBe(true);
+		expect(handles).toHaveLength(1);
+		const preview = await supervisor.request({
+			requestId: "i-prev",
+			action: "session.import.preview",
+			payload: { sourceName: "x.jsonl" },
+		});
+		expect(preview.ok).toBe(true);
+		// 复用同一机器 Worker，不再 fork
+		expect(handles).toHaveLength(1);
+	});
+
+	it("READ_ACTION 在未就绪时仍可用（project.resolve 不 fork Worker）", async () => {
+		const { supervisor, handles } = makeSupervisor({ runtimeState: null });
+		const result = await supervisor.request(
+			req({ action: "project.resolve", cwdRef: CWD_REF_A }),
+		);
+		expect(result.ok).toBe(true);
+		expect(handles).toHaveLength(0);
+	});
+
+	it("fork 后立即经 IPC 下发 runtime-init（凭据不出现在 argv/env）", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		const result = await supervisor.request(
+			req({ action: "sessions.list", cwdRef: CWD_REF_A }),
+		);
+		await vi.waitFor(() => expect(handles[0]?.sent.length).toBeGreaterThan(0));
+		const init = handles[0]!.sent[0];
+		expect(init).toMatchObject({ type: "runtime-init" });
+		if (init?.type === "runtime-init") {
+			expect(init.config?.credentialEntries).toEqual([
+				{ providerId: "anthropic", apiKey: "sk-test" },
+			]);
+		}
+		void result;
+	});
+
+	it("未就绪时 fork 出的 Worker 收到 config=null（不得用旧配置服务请求）", async () => {
+		const { supervisor, handles } = makeSupervisor({
+			runtimeState: null,
+			autoRespond: true,
+		});
+		await supervisor.request(req({ action: "sessions.list", cwdRef: CWD_REF_A }));
+		await vi.waitFor(() => expect(handles[0]?.sent.length).toBeGreaterThan(0));
+		expect(handles[0]!.sent[0]).toEqual({ type: "runtime-init", config: null });
+		expect(supervisor.isReady()).toBe(false);
+	});
+
+	it("活跃 Run 期间新 revision 只标记 drain，不终止 Worker", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		const promptRequest = prompt("run-1", CWD_REF_A);
+		const accepted = supervisor.request(promptRequest);
+		await vi.waitFor(() => expect(handles[0]?.sent.length).toBeGreaterThanOrEqual(2));
+		handles[0]!.emitMessage({
+			type: "response", requestId: promptRequest.requestId, ok: true,
+			data: { accepted: true },
+		});
+		await accepted;
+
+		supervisor.setRuntimeConfig({
+			configState: "ready",
+			runtimeRevision: "ffffffffffffffff",
+			config: null,
+		});
+		expect(handles[0]!.kill).not.toHaveBeenCalled();
+		expect(supervisor.activeRuntimeRevision()).toBe("0123456789abcdef");
+
+		// Run 结算后按换代语义关闭，下次动作用新 revision fork。
+		handles[0]!.emitMessage({
+			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			event: { type: "agent_settled", sessionId: "s1" },
+		});
+		await vi.waitFor(() => expect(handles[0]!.kill).toHaveBeenCalled());
+
+		await supervisor.request(req({ action: "sessions.list", cwdRef: CWD_REF_A }));
+		await vi.waitFor(() => expect(handles).toHaveLength(2));
+		expect(handles[1]!.sent[0]).toEqual({ type: "runtime-init", config: null });
+	});
+
+	it("空闲时新 revision 立即关闭 Worker，且相同 revision 重复下发不关闭", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(req({ action: "sessions.list", cwdRef: CWD_REF_A }));
+		await vi.waitFor(() => expect(handles).toHaveLength(1));
+
+		supervisor.setRuntimeConfig({
+			configState: "ready",
+			runtimeRevision: "0123456789abcdef",
+			config: null,
+		});
+		expect(handles[0]!.kill).not.toHaveBeenCalled();
+
+		supervisor.setRuntimeConfig({
+			configState: "ready",
+			runtimeRevision: "ffffffffffffffff",
+			config: null,
+		});
+		expect(handles[0]!.kill).toHaveBeenCalledTimes(1);
+	});
+
+	it("incompatible 配置下 WORKER_ACTION 报出具体原因码", async () => {
+		const { supervisor } = makeSupervisor({
+			runtimeState: {
+				configState: "incompatible",
+				reasonCode: "PI_CREDENTIAL_UNAVAILABLE",
+				runtimeRevision: "0123456789abcdef",
+				config: null,
+			},
+		});
+		const result = await supervisor.request(prompt("run-y", CWD_REF_A));
+		expect(result).toMatchObject({
+			ok: false,
+			error: { code: "PI_CONFIG_UNAVAILABLE" },
+		});
+		if (!result.ok) expect(result.error.message).toContain("PI_CREDENTIAL_UNAVAILABLE");
+	});
+
+	it("PI_STATE 上报携带真实 runtimeRevision 与 configState", async () => {
+		const { supervisor } = makeSupervisor();
+		expect(supervisor.getStateReport()).toMatchObject({
+			runtimeRevision: "0123456789abcdef",
+			configState: "ready",
+		});
+		const { supervisor: pending } = makeSupervisor({ runtimeState: null });
+		expect(pending.getStateReport()).toMatchObject({
+			runtimeRevision: null,
+			configState: "pending",
+		});
+	});
+
 	it("PI_STATE abort response 前 matching terminal 已清理时仍判定 allClosed", async () => {
 		const { supervisor, handles } = makeSupervisor();
 		const promptRequest = prompt("run-1", CWD_REF_A);
 		const accepted = supervisor.request(promptRequest);
-		await vi.waitFor(() => expect(handles[0]?.sent).toHaveLength(1));
+		const sentRequests = () =>
+			handles[0]!.sent.filter((message) => message.type === "request");
+		await vi.waitFor(() => expect(sentRequests()).toHaveLength(1));
 		handles[0]!.emitMessage({
 			type: "response", requestId: promptRequest.requestId, ok: true,
 			data: { accepted: true },
@@ -383,8 +577,8 @@ describe("PiSupervisor", () => {
 		const ack = supervisor.applyStateAck({
 			acceptedRunIds: [], closedRunIds: ["run-1"], reportAgain: false,
 		});
-		await vi.waitFor(() => expect(handles[0]!.sent).toHaveLength(2));
-		const abortMessage = handles[0]!.sent[1];
+		await vi.waitFor(() => expect(sentRequests()).toHaveLength(2));
+		const abortMessage = sentRequests()[1];
 		expect(abortMessage).toMatchObject({
 			type: "request", request: { action: "agent.abort", runId: "run-1" },
 		});

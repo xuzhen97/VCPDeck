@@ -95,4 +95,18 @@ describe("PiRunDetails", () => {
 			"Max",
 		]);
 	});
+
+	it("无候选模型时下拉框给出可见文案而不是空白", () => {
+		renderDetails({ models: [] });
+		const select = screen.getByRole("combobox", { name: "模型" });
+		expect(select).toBeDisabled();
+		// 已知当前模型时直接回显它，否则明确说明暂无可用模型。
+		expect(select.querySelectorAll("option")[0]?.textContent).toBe("p / m1");
+
+		renderDetails({ models: [], agentState: { ...agentState, model: undefined } });
+		const empty = screen.getAllByRole("combobox", { name: "模型" })[1];
+		expect(empty?.querySelectorAll("option")[0]?.textContent).toBe(
+			"（暂无可用模型）",
+		);
+	});
 });

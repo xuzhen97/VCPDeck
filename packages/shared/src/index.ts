@@ -22,6 +22,7 @@ export * from "./update.js";
 
 // ── 远程 Pi 协议 ──
 export * from "./pi.js";
+export * from "./pi-bundle.js";
 
 // ── 交互式终端协议 ──
 export * from "./terminal.js";
@@ -31,10 +32,33 @@ import type { FrpCapabilityStatus } from "./frp-runtime.js";
 import type { P2pTunnelCapabilityStatus } from "./tunnel.js";
 // 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
 export type {
+	PaginatedPiResult,
+	PiClientBindingInfo,
+	PiCredentialCreateInput,
+	PiCredentialInfo,
+	PiCredentialUpdateInput,
+	PiProfileCreateInput,
+	PiProfileInfo,
+	PiProfileUpdateInput,
+	PiProviderCreateInput,
+	PiProviderCredentialInput,
+	PiProviderDiscoveryInput,
+	PiProviderDiscoveryResult,
+	PiProviderInfo,
+	PiProviderUpdateInput,
+	PiRuntimeStatus,
+} from "./pi-admin.js";
+export * from "./pi-admin.js";
+export type {
 	PiAgentState,
 	PiAttachmentDescriptor,
 	PiCapabilityStatus,
 	PiClientEvent,
+	PiConfigState,
+	PiCredentialLease,
+	PiCredentialLeaseEntry,
+	PiCredentialLeaseEntryV2,
+	PiCredentialLeaseV2,
 	PiCwdRef,
 	PiErrorCode,
 	PiEvent,
@@ -42,11 +66,15 @@ export type {
 	PiImagePlaceholder,
 	PiMessage,
 	PiMessageContent,
+	PiModelRef,
 	PiPromptAccepted,
 	PiProjectKey,
 	PiRequest,
 	PiResponse,
 	PiRunSummary,
+	PiRuntimeAck,
+	PiRuntimeSpecMessage,
+	PiRuntimeSpecV1,
 	PiSessionCreated,
 	PiSessionJobSnapshot,
 	PiSessionJobStatus,
@@ -62,8 +90,12 @@ export type {
 	PiThinkingPlaceholder,
 	PiToolCallContent,
 	PiModelInfo,
+	PiProviderModelInfo,
+	PiProviderProtocol,
+	PiRuntimeProviderSpec,
+	PiRuntimeSpecMessageV3,
+	PiRuntimeSpecV3,
 } from "./pi.js";
-// update.ts 类型显式 re-export（同上：部分工具链不解析 export * 通配转发）
 export type {
 	ReleaseArchiveAvailableInfo,
 	ReleaseArchiveDeletingInfo,
@@ -101,13 +133,29 @@ export {
 } from "./update.js";
 export {
 	PI_ERROR_CODES,
+	PI_RUNTIME_SPEC_PROTOCOL_VERSION,
+	PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
 	PI_THINKING_LEVELS,
 	isPiAgentIdle,
 	isPiThinkingLevel,
 	parsePiAgentState,
+	parsePiCredentialLeaseV2,
+	parsePiRuntimeAck,
+	parsePiRuntimeSpecMessage,
+	parsePiRuntimeSpecMessageV3,
+	parsePiRuntimeSpecV1,
+	parsePiRuntimeSpecV3,
 	safePiErrorMessage,
 } from "./pi.js";
+export {
+	PiAdminProtocolError,
+	parsePiCredentialCreateInput,
+	parsePiCredentialUpdateInput,
+	parsePiProfileCreateInput,
+	parsePiProfileUpdateInput,
+	parsePiProviderDiscoveryInput,
+} from "./pi-admin.js";
 
 // ── Event names ──
 export const Events = {
@@ -127,6 +175,8 @@ export const Events = {
 	PI_RESPONSE: "pi:response",
 	PI_EVENT: "pi:event",
 	PI_STATE: "pi:state",
+	PI_RUNTIME_SPEC: "pi:runtime-spec",
+	PI_RUNTIME_ACK: "pi:runtime-ack",
 	TERMINAL_REQUEST: "terminal:request",
 	TERMINAL_RESPONSE: "terminal:response",
 	TERMINAL_OUTPUT: "terminal:output",
@@ -199,6 +249,7 @@ import {
 	getClientInstallationCompliance,
 	parseMachineInstallation,
 	parseMachineRegister,
+	parsePiModelCatalogStatus,
 	parsePrivilegedCapabilityStatus,
 } from "./machine-register.js";
 import type {
@@ -214,6 +265,7 @@ export {
 	getClientInstallationCompliance,
 	parseMachineInstallation,
 	parseMachineRegister,
+	parsePiModelCatalogStatus,
 	parsePrivilegedCapabilityStatus,
 	type ClientInstallationCompliance,
 	type MachineInstallationStatus,
@@ -1066,3 +1118,10 @@ export type {
 	TunnelSignal,
 	TunnelSdpDescription,
 } from "./tunnel.js";
+
+export {
+	PI_READ_ACTIONS,
+	PI_WORKER_ACTIONS,
+	isPiReadAction,
+	isPiWorkerAction,
+} from "./pi.js";

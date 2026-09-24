@@ -76,10 +76,14 @@ export interface PiSessionReader {
 	navigate(sessionId: string, leafId: string): Promise<PiSessionContextPage>;
 }
 
-/** 按 canonical cwd 创建 Session 读取器（不创建 AgentSession、不加载 extensions） */
+/**
+ * 按 canonical cwd 创建 Session 读取器（不创建 AgentSession、不加载 extensions）。
+ * `sessionDir` 必填：所有读写都必须限定在 VCPDeck 专属 Session 根内，
+ * 不得依赖 Pi SDK 默认目录（设计 §9.3 第二层隔离）。
+ */
 export function createPiSessionReader(
 	cwd: string,
-	sessionDir?: string,
+	sessionDir: string,
 ): PiSessionReader {
 	const pathCache = new Map<string, string>();
 	let listCache: PiSessionInfo[] | null = null;
@@ -270,7 +274,7 @@ export function createPiSessionReader(
 		cursor?: string | null,
 	): Promise<{ messages: PiMessage[]; nextCursor: string | null }> {
 		const path = await resolvePath(sessionId);
-		const sm = (await getSdk()).SessionManager.open(path);
+		const sm = (await getSdk()).SessionManager.open(path, sessionDir);
 		const entries = sm.getEntries() as unknown as SessionEntry[];
 		const byId = new Map<string, SessionEntry>();
 		for (const e of entries) byId.set(e.id, e);
@@ -322,7 +326,7 @@ export function createPiSessionReader(
 		},
 		async get(sessionId) {
 			const path = await resolvePath(sessionId);
-			const sm = (await getSdk()).SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path, sessionDir);
 			const header = sm.getHeader();
 			const leafId = sm.getLeafId();
 			const tree = sm.getTree() as unknown as Array<{
@@ -352,7 +356,7 @@ export function createPiSessionReader(
 		},
 		async state(sessionId) {
 			const path = await resolvePath(sessionId);
-			const entries = (await getSdk()).SessionManager.open(path).getBranch();
+			const entries = (await getSdk()).SessionManager.open(path, sessionDir).getBranch();
 			const model = [...entries].reverse().find(
 				(entry) => entry.type === "model_change",
 			) as Extract<SessionEntry, { type: "model_change" }> | undefined;
@@ -378,7 +382,7 @@ export function createPiSessionReader(
 		},
 		async entryContent(sessionId, entryId, blockIndex) {
 			const path = await resolvePath(sessionId);
-			const sm = (await getSdk()).SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path, sessionDir);
 			const entry = sm.getEntry(entryId);
 			if (!entry || entry.type !== "message") {
 				throw piError("PI_SESSION_NOT_FOUND", "Entry not found");
@@ -402,13 +406,13 @@ export function createPiSessionReader(
 			if (!trimmed)
 				throw piError("PI_PROTOCOL_INVALID", "Session name must not be empty");
 			const path = await resolvePath(sessionId);
-			const sm = (await getSdk()).SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path, sessionDir);
 			sm.appendSessionInfo(trimmed);
 			invalidateList();
 		},
 		async delete(sessionId) {
 			const path = await resolvePath(sessionId);
-			const sm = (await getSdk()).SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path, sessionDir);
 			const parentSessionPath = sm.getHeader()?.parentSession ?? null;
 			const dir = dirname(path);
 			const targetKey = pathKey(path);
@@ -450,7 +454,7 @@ export function createPiSessionReader(
 		},
 		async fork(sessionId, upToMessageId) {
 			const sourcePath = await resolvePath(sessionId);
-			const sm = (await getSdk()).SessionManager.open(sourcePath);
+			const sm = (await getSdk()).SessionManager.open(sourcePath, sessionDir);
 			const targetCwd = sm.getCwd() || cwd;
 			const dir = sm.getSessionDir();
 			const entries = sm.getEntries() as unknown as SessionEntry[];
@@ -486,7 +490,7 @@ export function createPiSessionReader(
 		},
 		async clone(sessionId) {
 			const path = await resolvePath(sessionId);
-			const sm = (await getSdk()).SessionManager.open(path);
+			const sm = (await getSdk()).SessionManager.open(path, sessionDir);
 			const leafId = sm.getLeafId();
 			if (!leafId) throw piError("PI_SESSION_NOT_FOUND", "Session has no leaf");
 			const newPath = sm.createBranchedSession(leafId);

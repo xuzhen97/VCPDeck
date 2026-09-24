@@ -110,12 +110,22 @@ function makeController(
 		prepareHistoryUpload: vi.fn(),
 		completeHistoryUpload: vi.fn(),
 	};
+	const runtime = {
+		assertCompatible: vi.fn(),
+		assertReady: vi.fn(),
+		status: vi.fn(() => ({
+			clientId: "c1", specId: null, desiredRuntimeRevision: null,
+			activeRuntimeRevision: null, configState: "pending", reasonCode: null,
+			piSdkVersion: null, runtimeSpecProtocolVersion: null, unavailableModels: [],
+		})),
+	};
 	const controller = new PiController(
 		requests as never,
 		events as never,
 		runs as never,
 		clients as never,
 		attachments as never,
+		runtime as never,
 	);
 	return { controller, requests, events, runs, clients, attachments };
 }
@@ -134,6 +144,23 @@ describe("PiController", () => {
 		]);
 		const result = await controller.capability("c1");
 		expect(result).toMatchObject({ code: "PI_CLIENT_UNSUPPORTED" });
+	});
+
+	it("models 直通返回 Client 的模型数组（不按 envelope 取 .models）", async () => {
+		const { controller, requests } = makeController();
+		const models = [{ provider: "axonhub", modelId: "mimo-v2.6-flash" }];
+		requests.request.mockResolvedValueOnce({ ok: true, data: models });
+
+		await expect(
+			controller.models("c1", cwdRef.rootDir, cwdRef.relativePath),
+		).resolves.toEqual(models);
+		expect(requests.request).toHaveBeenCalledWith(
+			expect.objectContaining({ clientId: "c1" }),
+			expect.objectContaining({
+				action: "models.list",
+				cwdRef: { rootDir: cwdRef.rootDir, relativePath: cwdRef.relativePath },
+			}),
+		);
 	});
 
 	it("newSession 创建同 ID Session Job", async () => {
@@ -1209,5 +1236,136 @@ describe("PiController", () => {
 		expect(result).toEqual([
 			{ jobId: "j1", runId: "j1", sessionId: "s1", status: "running" },
 		]);
+	});
+});
+
+describe("Pi 显式导入路由（list / preview / run）", () => {
+	const validList = {
+		sourceRoot: "/home/u/.pi/agent/sessions",
+		sessions: [
+			{
+				sourceName: "a.jsonl",
+				sourceLabel: "dir/a.jsonl",
+				startedAt: "2026-09-01T00:00:00.000Z",
+				entryCount: 2,
+				cwd: "/proj/a",
+				imported: false,
+				cwdNotAllowed: false,
+				unreadable: false,
+			},
+		],
+	};
+
+	it("list：转发 action 并严格解析 Client 响应", async () => {
+		const { controller, requests } = makeController();
+		requests.request.mockResolvedValueOnce({
+			requestId: "r1",
+			ok: true,
+			data: validList,
+		} as never);
+
+		await expect(controller.listImportable("c1")).resolves.toEqual(validList);
+		expect(requests.request).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ action: "session.import.list" }),
+		);
+	});
+
+	it("list：未知字段的上游响应按 502 拒绝（不回显上游数据）", async () => {
+		const { controller, requests } = makeController();
+		requests.request.mockResolvedValueOnce({
+			requestId: "r2",
+			ok: true,
+			data: {
+				sourceRoot: "/x",
+				sessions: [{ sourceName: "a.jsonl", body: "leak" }],
+			},
+		} as never);
+
+		const rejected = (await controller.listImportable("c1").catch((error: unknown) => error)) as {
+			status: number;
+			getResponse: () => { code: string };
+		};
+		expect(rejected.status).toBe(502);
+		expect(rejected.getResponse()).toMatchObject({ code: "PI_PROTOCOL_INVALID" });
+		expect(JSON.stringify(rejected)).not.toContain("leak");
+	});
+
+	it("preview：转发 payload；sourceName 非法在 envelope 层 400", async () => {
+		const { controller, requests } = makeController();
+		requests.request.mockResolvedValueOnce({
+			requestId: "r3",
+			ok: true,
+			data: { sourceName: "a.jsonl", previewText: "hi", truncated: false },
+		} as never);
+
+		await expect(controller.previewImportable("c1", "a.jsonl")).resolves.toEqual({
+			sourceName: "a.jsonl",
+			previewText: "hi",
+			truncated: false,
+		});
+		expect(requests.request).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				action: "session.import.preview",
+				payload: { sourceName: "a.jsonl" },
+			}),
+		);
+
+		const invalid = (await controller
+			.previewImportable("c1", "../etc/passwd")
+			.catch((error: unknown) => error)) as {
+			status: number;
+			getResponse: () => { code: string };
+		};
+		expect(invalid.status).toBe(400);
+		expect(invalid.getResponse()).toMatchObject({ code: "PI_PROTOCOL_INVALID" });
+	});
+
+	it("run：转发 sourceNames；非法 body 在 envelope 层 400", async () => {
+		const { controller, requests } = makeController();
+		requests.request.mockResolvedValueOnce({
+			requestId: "r4",
+			ok: true,
+			data: { results: [{ sourceName: "a.jsonl", status: "imported" }] },
+		} as never);
+
+		await expect(controller.importSessions("c1", { sourceNames: ["a.jsonl"] })).resolves.toEqual({
+			results: [{ sourceName: "a.jsonl", status: "imported" }],
+		});
+		expect(requests.request).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				action: "session.import.run",
+				payload: { sourceNames: ["a.jsonl"] },
+			}),
+		);
+
+		const badBody = (await controller
+			.importSessions("c1", { sourceNames: ["a/b.jsonl"] })
+			.catch((error: unknown) => error)) as {
+			status: number;
+			getResponse: () => { code: string };
+		};
+		expect(badBody.status).toBe(400);
+		expect(badBody.getResponse()).toMatchObject({ code: "PI_PROTOCOL_INVALID" });
+	});
+
+	it("未就绪（Client 侧 ok:false）按 400 + 稳定码映射", async () => {
+		const { controller, requests } = makeController();
+		requests.request.mockResolvedValueOnce({
+			requestId: "r5",
+			ok: false,
+			error: { code: "PI_CONFIG_UNAVAILABLE", message: "Pi 配置不可用或尚未就绪" },
+		} as never);
+
+		const notReady = (await controller
+			.listImportable("c1")
+			.catch((error: unknown) => error)) as {
+			status: number;
+			getResponse: () => { code: string };
+		};
+		expect(notReady.status).toBe(400);
+		expect(notReady.getResponse()).toMatchObject({ code: "PI_CONFIG_UNAVAILABLE" });
 	});
 });

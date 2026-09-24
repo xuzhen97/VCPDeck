@@ -11,10 +11,30 @@ import {
 	type PiErrorCode,
 	type PiRequest,
 } from "@vcpdeck/shared";
+import { join } from "node:path";
 import {
 	createPiSessionReader,
 	type PiSessionReader,
 } from "./session-reader.js";
+import { loadOrCreateInstallSecret, sessionNamespaceFor } from "./install-secret.js";
+import {
+	createModelRuntimeWithLease,
+	effectiveDefaultModel,
+	type PiRuntimeConfig,
+} from "./runtime-spec.js";
+import { canonicalPath } from "./project-path.js";
+import { existsSync } from "node:fs";
+import { discoverRoots } from "../filesystem-roots.js";
+import {
+	collectImportableSessions,
+	importNativeSessions,
+	nativeSessionRoot,
+	previewNativeSession,
+} from "./native-session-import.js";
+import {
+	ensureVcpPiRuntimeDirs,
+	resolveVcpPiRuntimePaths,
+} from "./runtime-paths.js";
 import {
 	startPiAgentSession,
 	type PiAgentSessionWrapper,
@@ -26,6 +46,7 @@ import type {
 } from "./worker-protocol.js";
 
 const cwd = process.argv[2] ?? "";
+
 if (!cwd) {
 	process.exit(1);
 }
@@ -38,8 +59,52 @@ function getSdk(): Promise<PiSdk> {
 	return sdkPromise;
 }
 
-const reader: PiSessionReader = createPiSessionReader(cwd);
+/**
+ * VCPDeck Pi 运行时与 Session reader：惰性初始化（CJS 不支持顶层 await）。
+ * sessionDir 由安装级 secret 派生的稳定 namespace 决定，绝不使用 SDK 默认目录。
+ */
+let runtimePromise: Promise<{
+	sessionDir: string;
+	reader: PiSessionReader;
+}> | null = null;
+
+function getRuntime(): Promise<{ sessionDir: string; reader: PiSessionReader }> {
+	if (!runtimePromise) {
+		runtimePromise = (async () => {
+			const paths = resolveVcpPiRuntimePaths();
+			await ensureVcpPiRuntimeDirs(paths);
+			const secret = await loadOrCreateInstallSecret(paths.installSecretPath);
+			const sessionDir = join(
+				paths.sessionsRoot,
+				sessionNamespaceFor(canonicalPath(cwd), secret),
+			);
+			return { sessionDir, reader: createPiSessionReader(cwd, sessionDir) };
+		})();
+	}
+	return runtimePromise;
+}
+
+/** Server 下发的运行配置与凭据 lease：只存在于本进程内存，不落盘、不入日志。 */
+let runtimeConfig: PiRuntimeConfig | null = null;
+/** 已注入的 ModelRuntime（与 runtimeConfig 同生命周期）。 */
+let modelRuntimePromise: Promise<unknown> | null = null;
 let wrapper: PiAgentSessionWrapper | null = null;
+
+/** 用 lease 惰性构造 ModelRuntime（凭据只在内存）。 */
+function getModelRuntime(): Promise<unknown> {
+	if (!modelRuntimePromise) {
+		const config = runtimeConfig;
+		if (!config) return Promise.reject(new Error("Pi runtime config is unavailable"));
+		modelRuntimePromise = createModelRuntimeWithLease(
+			{
+				issuedAt: new Date().toISOString(),
+				entries: config.credentialEntries,
+			},
+			config.spec.providers,
+		).then((created) => created.runtime);
+	}
+	return modelRuntimePromise;
+}
 interface ActivePrompt {
 	jobId: string;
 	runId: string;
@@ -73,13 +138,25 @@ const PI_ERROR_MESSAGES: Record<PiErrorCode, string> = {
 	PI_IMAGE_TOO_LARGE: "Pi image is too large",
 	PI_REQUEST_TIMEOUT: "Pi request timed out",
 	PI_STATE_PENDING: "Pi state is pending",
+	PI_CONFIG_UNAVAILABLE: "Pi configuration is unavailable",
+	PI_CREDENTIAL_UNAVAILABLE: "Pi credentials are unavailable",
+	PI_RUNTIME_SPEC_INCOMPATIBLE: "Pi runtime spec is incompatible",
+	PI_PROVIDER_VALIDATION_FAILED: "Pi provider validation failed",
+	PI_BUNDLE_UNAVAILABLE: "Pi resource bundle is unavailable",
+	PI_POLICY_UNAVAILABLE: "Pi tool policy is unavailable",
+	PI_TOOL_POLICY_DENIED: "Tool call was denied by policy",
+	PI_TOOL_POLICY_REJECTED: "Tool call was not approved",
 };
 
 function send(msg: PiWorkerOutboundMessage): void {
+
 	if (process.send) process.send(msg);
 }
 
-function normalizeError(err: unknown): { code: PiErrorCode; message: string } {
+function normalizeError(err: unknown): {
+	code: PiErrorCode;
+	message: string;
+} {
 	const rawCode =
 		typeof err === "object" && err !== null && "code" in err
 			? String((err as { code: unknown }).code)
@@ -100,14 +177,34 @@ async function ensureWrapper(
 		await wrapper.shutdown();
 		wrapper = null;
 	}
-	const sessions = await (await getSdk()).SessionManager.list(cwd);
+	if (!runtimeConfig || runtimeConfig.resolvedModels.length === 0) {
+		throw Object.assign(new Error("Pi runtime config is unavailable"), {
+			code: "PI_CONFIG_UNAVAILABLE",
+		});
+	}
+	const { sessionDir } = await getRuntime();
+	const sessions = await (await getSdk()).SessionManager.list(cwd, sessionDir);
 	const found = sessions.find((s) => s.id === sessionId);
 	if (!found) {
 		throw Object.assign(new Error("Session not found"), {
 			code: "PI_SESSION_NOT_FOUND",
 		});
 	}
-	wrapper = await startPiAgentSession({ cwd, sessionFile: found.path });
+	const defaultModel = effectiveDefaultModel(runtimeConfig);
+	wrapper = await startPiAgentSession({
+		cwd,
+		sessionDir,
+		agentDir: resolveVcpPiRuntimePaths().agentDir,
+		modelRuntime: await getModelRuntime(),
+		modelScope: runtimeConfig.resolvedModels.map((model) => ({
+			provider: model.provider,
+			modelId: model.modelId,
+		})),
+		toolPolicy: runtimeConfig.spec.toolPolicy,
+		bundleExtensionPaths: runtimeConfig.bundleExtensionPaths,
+		initialModel: defaultModel,
+		sessionFile: found.path,
+	});
 	return wrapper;
 }
 
@@ -211,24 +308,6 @@ async function runPrompt(run: ActivePrompt, request: PiRequest): Promise<void> {
 		if (wrapper === w) wrapper = null;
 		return;
 	}
-	const trusted = await w.ensureProjectTrust();
-	if (!isCurrentRun(run)) {
-		await w.shutdown();
-		if (wrapper === w) wrapper = null;
-		return;
-	}
-	if (trusted) {
-		await w.shutdown();
-		if (wrapper === w) wrapper = null;
-		if (!isCurrentRun(run)) return;
-		w = await ensureWrapper(run.sessionId);
-		bindWrapperEvents(w, run);
-		if (!isCurrentRun(run)) {
-			await w.shutdown();
-			if (wrapper === w) wrapper = null;
-			return;
-		}
-	}
 	const payload = { ...(request.payload ?? {}) };
 	if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
 		const downloaded = await downloadPromptImages(
@@ -245,6 +324,7 @@ async function runPrompt(run: ActivePrompt, request: PiRequest): Promise<void> {
 }
 
 async function dispatch(request: PiRequest): Promise<unknown> {
+	const { reader } = await getRuntime();
 	switch (request.action) {
 		case "capability.get":
 			return { available: true };
@@ -324,37 +404,59 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 				String(request.payload?.targetId ?? ""),
 			);
 		case "models.list": {
-			// 项目级模型列表：可用模型 ∩ enabledModels（无 session 依赖）
-			const settings = (await getSdk()).SettingsManager.create(
-				cwd,
-				(await getSdk()).getAgentDir(),
+			// 只返回 Spec 允许且凭据可用的模型；不得因本机 models.json 扩大（设计 §14）。
+			return (runtimeConfig?.resolvedModels ?? []).map((model) => ({
+				provider: model.provider,
+				modelId: model.modelId,
+				...(model.maxThinkingLevel
+					? { maxThinkingLevel: model.maxThinkingLevel }
+					: {}),
+			}));
+		}
+		case "session.import.list": {
+			// 源根固定（ADR-0031 决策 2）；只读列摘要，不读正文、不改源。
+			const paths = resolveVcpPiRuntimePaths();
+			return await collectImportableSessions({
+				sourceRoot: nativeSessionRoot(),
+				roots: await discoverRoots(),
+				isImported: async (sourceName, importedCwd) => {
+					if (!importedCwd) return false;
+					const secret = await loadOrCreateInstallSecret(
+						paths.installSecretPath,
+					);
+					return existsSync(
+						join(
+							paths.sessionsRoot,
+							sessionNamespaceFor(canonicalPath(importedCwd), secret),
+							sourceName,
+						),
+					);
+				},
+			});
+		}
+		case "session.import.preview": {
+			const preview = await previewNativeSession(
+				String(request.payload?.sourceName ?? ""),
+				{ sourceRoot: nativeSessionRoot() },
 			);
-			const runtime = await (await getSdk()).ModelRuntime.create();
-			const available = await runtime.getAvailable();
-			const enabled = settings.getEnabledModels();
-			if (!enabled || enabled.length === 0) {
-				return {
-					models: available.map((m) => ({
-						provider: m.provider,
-						modelId: m.id,
-					})),
-				};
+			if (!preview) {
+				throw Object.assign(new Error("source session not found"), {
+					code: "PI_SESSION_NOT_FOUND",
+				});
 			}
-			const { resolveModelScopeWithDiagnostics } = await import(
-				"@earendil-works/pi-coding-agent"
+			return preview;
+		}
+		case "session.import.run": {
+			const paths = resolveVcpPiRuntimePaths();
+			return await importNativeSessions(
+				(request.payload?.sourceNames as string[]) ?? [],
+				{
+					sourceRoot: nativeSessionRoot(),
+					roots: await discoverRoots(),
+					sessionsRoot: paths.sessionsRoot,
+					installSecretPath: paths.installSecretPath,
+				},
 			);
-			const { scopedModels } = await resolveModelScopeWithDiagnostics(
-				enabled,
-				runtime,
-			);
-			const allowed = new Set(
-				scopedModels.map((s) => `${s.model.provider}/${s.model.id}`),
-			);
-			return {
-				models: available
-					.filter((m) => allowed.has(`${m.provider}/${m.id}`))
-					.map((m) => ({ provider: m.provider, modelId: m.id })),
-			};
 		}
 		default: {
 			const sessionId = request.sessionId ?? active?.sessionId;
@@ -440,9 +542,25 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 	}
 }
 
+/** 应用 Server 下发的运行配置；revision 变化必须换代（关闭现有 wrapper）。 */
+function applyRuntimeConfig(config: PiRuntimeConfig | null): void {
+	const previousRevision = runtimeConfig?.spec.runtimeRevision ?? null;
+	const nextRevision = config?.spec.runtimeRevision ?? null;
+	runtimeConfig = config;
+	if (previousRevision === nextRevision) return;
+	modelRuntimePromise = null;
+	const stale = wrapper;
+	wrapper = null;
+	if (stale) void stale.shutdown().catch(() => {});
+}
+
 async function handleMessage(msg: PiWorkerRequestMessage): Promise<void> {
 	lastActivity = Date.now();
 	try {
+		if (msg.type === "runtime-init") {
+			applyRuntimeConfig(msg.config);
+			return;
+		}
 		if (msg.type === "request") {
 			const result = await dispatch(msg.request);
 			send({

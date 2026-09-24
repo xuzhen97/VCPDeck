@@ -6,6 +6,39 @@ import { attachPiBridge, type PiBridgeDeps } from "../index.js";
 import { createPiSupervisor } from "./supervisor.js";
 import type { PiWorkerOutboundMessage } from "./worker-protocol.js";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
+
+// 在 SDK 边界打桩：真实 evaluateRuntimeSpec / createModelRuntimeWithLease 照常运行，
+// 但不加载真实 SDK 目录、也不触碰用户配置。顺带断言凭据经内存注入。
+const setRuntimeApiKeyMock = vi.fn(async (_provider: string, _apiKey: string) => {});
+vi.mock("@earendil-works/pi-coding-agent", () => ({
+	ModelRuntime: class {
+		static async create() {
+			return new this();
+		}
+		/** 内置目录桩：catalog 来源模型的元数据由此解析。 */
+		getModel(providerId: string, modelId: string) {
+			if (providerId !== "anthropic" || modelId !== "claude-x") return undefined;
+			return {
+				id: "claude-x",
+				name: "Claude X",
+				api: "anthropic-messages",
+				reasoning: false,
+				input: ["text"],
+				contextWindow: 200000,
+				maxTokens: 8192,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			};
+		}
+		async registerProvider(_providerId: string, _config: Record<string, unknown>) {}
+		async setRuntimeApiKey(provider: string, apiKey: string) {
+			await setRuntimeApiKeyMock(provider, apiKey);
+		}
+		async getAvailable() {
+			return [{ provider: "anthropic", id: "claude-x" }];
+		}
+	},
+}));
+
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -86,7 +119,10 @@ function makeFakeHandle() {
 	};
 }
 
-async function makeDeps(overrides: Partial<PiBridgeDeps> = {}) {
+async function makeDeps(
+	overrides: Partial<PiBridgeDeps> = {},
+	opts: { runtimeReady?: boolean } = {},
+) {
 	const root = await mkdtemp(join(tmpdir(), `pi-bridge-${++seq}-`));
 	await mkdir(join(root, "proj"), { recursive: true });
 	roots.push(root);
@@ -96,6 +132,31 @@ async function makeDeps(overrides: Partial<PiBridgeDeps> = {}) {
 		clientId: "c1",
 		rootsProvider: async () => [root],
 		forkWorker: () => handle,
+	});
+	// WORKER_ACTIONS 需要 RuntimeSpec ready（设计 §7.5）；门控用例可显式关闭。
+	if (opts.runtimeReady !== false) supervisor.setRuntimeConfig({
+		configState: "ready",
+		runtimeRevision: "0123456789abcdef",
+		config: {
+			spec: {
+				schemaVersion: 3,
+				specId: "s1",
+				profileId: "p1",
+				profileRevision: 1,
+				providers: [{ providerId: "anthropic", name: "Anthropic", protocol: "anthropic-messages", headers: {}, models: [{ id: "claude-x", name: "Claude X", metadataSource: "catalog" }] }],
+			modelPolicy: {
+					defaultModel: { provider: "anthropic", modelId: "claude-x" },
+					allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+					defaultThinkingLevel: "medium",
+				},
+				toolPolicy: { allow: [], confirm: [], deny: [] },
+				runtimeRevision: "0123456789abcdef",
+			},
+			credentialEntries: [{ providerId: "anthropic", apiKey: "sk-test" }],
+			bundleExtensionPaths: [],
+			resolvedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+			unavailableModels: [],
+		},
 	});
 	const status: PiCapabilityStatus = {
 		available: true,
@@ -427,6 +488,96 @@ describe("attachPiBridge", () => {
 		fire(listeners, "ack", { event: Events.REGISTER });
 		expect(emitCalls.some((c) => c.event === Events.STATUS_REPORT)).toBe(true);
 		expect(emitCalls.some((c) => c.event === Events.PI_STATE)).toBe(true);
+	});
+});
+
+describe("RuntimeSpec 接纳与门控", () => {
+	const readySpec = {
+		spec: {
+			schemaVersion: 3,
+			specId: "spec-1",
+			profileId: "p1",
+			profileRevision: 1,
+			providers: [{ providerId: "anthropic", name: "Anthropic", protocol: "anthropic-messages", headers: {}, models: [{ id: "claude-x", name: "Claude X", metadataSource: "catalog" }] }],
+			modelPolicy: {
+				defaultModel: { provider: "anthropic", modelId: "claude-x" },
+				allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+				defaultThinkingLevel: "medium",
+			},
+			toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
+			runtimeRevision: "0123456789abcdef",
+		},
+		credentials: {
+			issuedAt: "2026-09-20T00:00:00.000Z",
+			entries: [{ providerId: "anthropic", apiKey: "sk-live-abc" }],
+		},
+	};
+
+	it("收到 Spec 后回 PI_RUNTIME_ACK，且 ACK 不携带 Secret", async () => {
+		const { socket, emitCalls, listeners } = fakeSocket();
+		const { deps } = await makeDeps();
+		attachPiBridge(socket, deps);
+		fire(listeners, Events.PI_RUNTIME_SPEC, readySpec);
+		await vi.waitFor(() =>
+			expect(emitCalls.some((c) => c.event === Events.PI_RUNTIME_ACK)).toBe(
+				true,
+			),
+		);
+		const ack = emitCalls.find((c) => c.event === Events.PI_RUNTIME_ACK)!;
+		const payload = ack.args[0] as Record<string, unknown>;
+		expect(payload).toMatchObject({
+			clientId: "c1",
+			specId: "spec-1",
+			runtimeRevision: "0123456789abcdef",
+			configState: expect.stringMatching(/ready|incompatible/),
+		});
+		expect(JSON.stringify(payload)).not.toContain("sk-live-abc");
+		// 凭据只经内存注入 ModelRuntime，不落盘、不进 argv/env。
+		expect(setRuntimeApiKeyMock).toHaveBeenCalledWith(
+			"anthropic",
+			"sk-live-abc",
+		);
+	});
+
+	it("非法 Spec 被判为 incompatible（fail closed，不放行）", async () => {
+		const { socket, emitCalls, listeners } = fakeSocket();
+		const { deps } = await makeDeps();
+		attachPiBridge(socket, deps);
+		fire(listeners, Events.PI_RUNTIME_SPEC, {
+			spec: { schemaVersion: 2 },
+			credentials: { issuedAt: "x", entries: [] },
+		});
+		await vi.waitFor(() =>
+			expect(emitCalls.some((c) => c.event === Events.PI_RUNTIME_ACK)).toBe(
+				true,
+			),
+		);
+		const payload = emitCalls.find((c) => c.event === Events.PI_RUNTIME_ACK)!
+			.args[0] as Record<string, unknown>;
+		expect(payload.configState).toBe("incompatible");
+		expect(payload.reasonCode).toBe("PI_RUNTIME_SPEC_INCOMPATIBLE");
+	});
+
+	it("未收到 Spec 时 WORKER_ACTION 被拒绝且不下发到 Worker", async () => {
+		const { socket, emitCalls, listeners } = fakeSocket();
+		const { deps } = await makeDeps({}, { runtimeReady: false });
+		attachPiBridge(socket, deps);
+		fire(listeners, Events.PI_REQUEST, {
+			requestId: "r-blocked",
+			action: "agent.prompt",
+			jobId: "s1",
+			runId: "run-1",
+			sessionId: "s1",
+			cwdRef: { rootDir: roots[0]!, relativePath: "proj" },
+			payload: { prompt: "hi" },
+		});
+		await vi.waitFor(() =>
+			expect(emitCalls.some((c) => c.event === Events.PI_RESPONSE)).toBe(true),
+		);
+		const response = emitCalls.find((c) => c.event === Events.PI_RESPONSE)!
+			.args[0] as { ok: boolean; error?: { code: string } };
+		expect(response.ok).toBe(false);
+		expect(response.error?.code).toBe("PI_CONFIG_UNAVAILABLE");
 	});
 });
 

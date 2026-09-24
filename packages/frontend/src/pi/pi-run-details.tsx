@@ -114,6 +114,14 @@ export function PiRunDetails({
 						if (provider && modelId) onModelChange(provider, modelId);
 					}}
 				>
+					{/* 无候选时也必须给出可见文案：否则空下拉框看起来像界面坏了。 */}
+					{models.length === 0 && (
+						<option value={modelValue(agentState?.model)}>
+							{agentState?.model
+								? `${agentState.model.provider} / ${agentState.model.modelId}`
+								: "（暂无可用模型）"}
+						</option>
+					)}
 					{models.map((model) => (
 						<option key={modelValue(model)} value={modelValue(model)}>
 							{model.provider} / {model.modelId}

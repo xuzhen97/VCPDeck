@@ -12,6 +12,7 @@ export function SettingsPage() {
 	const section = location.pathname.split("/")[2] || "profile";
 	if (section === "identities" && !identity?.isAdmin)
 		return <Navigate to="/settings/profile" replace />;
+	if (section === "pi") return <Navigate to="/pi" replace />;
 	if (!["profile", "tokens", "identities", "network"].includes(section))
 		return <Navigate to="/settings/profile" replace />;
 	return (

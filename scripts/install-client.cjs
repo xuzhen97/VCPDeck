@@ -1151,6 +1151,7 @@ async function runWindowsInstall(options) {
 		const envContent = [
 			"# 由 VCPDeck Client 一键安装器生成（敏感值请妥善保管）",
 			`VCPDECK_APP_DIR=${WINDOWS_APP_DIR}`,
+			`VCPDECK_CLIENT_DATA_DIR=${join(WINDOWS_APP_DIR, "data")}`,
 			"VCPDECK_ARTIFACT=client",
 			`VCPDECK_SERVER=${args.serverOrigin}`,
 			`VCPDECK_PSK=${bootstrap.psk}`,

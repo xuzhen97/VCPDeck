@@ -1,10 +1,12 @@
 import {
+	BadGatewayException,
 	BadRequestException,
 	ConflictException,
 	Controller,
 	Delete,
 	Get,
 	Inject,
+	Optional,
 	NotFoundException,
 	Param,
 	Patch,
@@ -16,15 +18,23 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
+	isPiWorkerAction,
 	isPiAgentIdle,
 	isPiThinkingLevel,
 	parsePiAgentState,
+	assertSourceName,
+	parsePiImportListResponse,
+	parsePiImportPreviewResponse,
+	parsePiImportRunRequest,
+	parsePiImportRunResponse,
 	PI_ERROR_CODES,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
 	type ActorContext,
 	type PiCwdRef,
 	type PiPromptAccepted,
 	type PiRequest,
+	type PiRuntimeStatus,
+	type PiResponse,
 	type PiSessionCreated,
 	type PiSessionJobSnapshot,
 	type PiSessionOpenResult,
@@ -37,6 +47,7 @@ import {
 	type PiGenerationLease,
 } from "./pi-request-broker.js";
 import { PiRunService } from "./pi-run.service.js";
+import { PiRuntimeService } from "./pi-runtime.service.js";
 import { PiAttachmentService } from "./pi-attachment.service.js";
 
 function badRequest(code: string, message: string): BadRequestException {
@@ -87,6 +98,10 @@ export class PiController {
 		@Inject(PiRunService) private readonly runs: PiRunService,
 		@Inject(ClientService) private readonly clients: ClientService,
 		@Inject(PiAttachmentService) private readonly attachments: PiAttachmentService,
+		// RuntimeSpec 就绪门控（可选注入：旧测试构造保持兼容）
+		@Optional()
+		@Inject(PiRuntimeService)
+		private readonly runtime?: PiRuntimeService,
 	) {}
 
 	// ── helpers ──
@@ -112,6 +127,25 @@ export class PiController {
 		}
 	}
 
+	/**
+	 * 上游（Client）响应的严格解析：失败按 502 稳定映射，
+	 * 不回显上游数据（跨信任边界出口必须严格校验）。
+	 */
+	private parseUpstream<T>(
+		what: string,
+		data: unknown,
+		parse: (value: unknown) => T,
+	): T {
+		try {
+			return parse(data);
+		} catch {
+			throw new BadGatewayException({
+				code: "PI_PROTOCOL_INVALID",
+				message: `${what} 返回了不合法的 Pi 响应`,
+			});
+		}
+	}
+
 	/** 在单一 ready generation 内执行 REST 编排，并稳定映射 broker/generation 错误。 */
 	private async withReconciledClient<T>(
 		clientId: string,
@@ -132,6 +166,7 @@ export class PiController {
 		lease: PiGenerationLease,
 		cwdRef: PiCwdRef,
 	): Promise<string> {
+		this.runtime?.assertCompatible(lease.clientId);
 		const response = await this.requests.request(lease, {
 			requestId: randomUUID(),
 			action: "project.resolve",
@@ -148,6 +183,14 @@ export class PiController {
 		request: PiRequest,
 	): Promise<unknown> {
 		try {
+			// 需要活跃 Worker 的动作必须先 ready（fail closed，不 fallback 本机 Pi）。
+			if (this.runtime) {
+				this.runtime.assertCompatible(lease.clientId);
+				if (isPiWorkerAction(request.action)) this.runtime.assertReady(lease.clientId);
+			} else {
+				// 旧 Server 不具备隔离运行时门控时，所有 Pi action 均拒绝。
+				throw badRequest("PI_CLIENT_UNSUPPORTED", "Pi 隔离运行时未启用");
+			}
 			const response = await this.requests.request(lease, request);
 			if (!response.ok) {
 				throw badRequest(response.error.code, response.error.message);
@@ -204,6 +247,26 @@ export class PiController {
 		}
 	}
 
+	// ── runtime 状态（诊断用，不需要 Pi ready） ──
+
+	@Get("runtime")
+	async runtimeStatus(@Param("clientId") clientId: string): Promise<PiRuntimeStatus> {
+		if (this.runtime) return this.runtime.status(clientId);
+		// 未注入（旧测试构造）时不得谎报 ready。
+		return {
+			clientId,
+			specId: null,
+			desiredRuntimeRevision: null,
+			activeRuntimeRevision: null,
+			configState: "pending",
+			reasonCode: null,
+			piSdkVersion: null,
+			runtimeSpecProtocolVersion: null,
+			providers: [],
+			unavailableModels: [],
+		};
+	}
+
 	// ── capability / models ──
 
 	@Get("capability")
@@ -241,7 +304,9 @@ export class PiController {
 			action: "models.list",
 			cwdRef: { rootDir, relativePath },
 		});
-		return (data as { models: unknown[] }).models;
+		// Client 的 models.list 直接返回模型数组（不是 { models: [...] } 包壳）；
+		// 按包壳取值会得到 undefined，导致 200 空响应、前端模型下拉永远为空。
+		return data;
 	}
 
 	// ── sessions ──
@@ -262,6 +327,59 @@ export class PiController {
 			cwdRef: { rootDir, relativePath },
 		});
 		return (data as { sessions: unknown[] }).sessions;
+	}
+
+	// ── 旧 Session 显式导入（ADR-0031；设计 §21.3）：
+	// 必须注册在 `sessions/:sessionId` 之前，否则该两段路径会被参数路由吞掉。
+
+	@Get("sessions/importable")
+	async listImportable(@Param("clientId") clientId: string) {
+		await this.requirePiClient(clientId);
+		const data = await this.requestForClient(clientId, {
+			requestId: randomUUID(),
+			action: "session.import.list",
+		});
+		return this.parseUpstream("Client", data, parsePiImportListResponse);
+	}
+
+	@Get("sessions/importable/:sourceName/preview")
+	async previewImportable(
+		@Param("clientId") clientId: string,
+		@Param("sourceName") sourceName: string,
+	) {
+		await this.requirePiClient(clientId);
+		let safeName: string;
+		try {
+			safeName = assertSourceName(sourceName, "sourceName");
+		} catch (err) {
+			throw badRequest("PI_PROTOCOL_INVALID", (err as Error).message);
+		}
+		const data = await this.requestForClient(clientId, {
+			requestId: randomUUID(),
+			action: "session.import.preview",
+			payload: { sourceName: safeName },
+		});
+		return this.parseUpstream("Client", data, parsePiImportPreviewResponse);
+	}
+
+	@Post("sessions/import")
+	async importSessions(
+		@Param("clientId") clientId: string,
+		@Body() body: unknown,
+	) {
+		await this.requirePiClient(clientId);
+		let parsed: { sourceNames: string[] };
+		try {
+			parsed = parsePiImportRunRequest(body);
+		} catch (err) {
+			throw badRequest("PI_PROTOCOL_INVALID", (err as Error).message);
+		}
+		const data = await this.requestForClient(clientId, {
+			requestId: randomUUID(),
+			action: "session.import.run",
+			payload: { sourceNames: parsed.sourceNames },
+		});
+		return this.parseUpstream("Client", data, parsePiImportRunResponse);
 	}
 
 	@Get("sessions/:sessionId")
@@ -369,7 +487,9 @@ export class PiController {
 		return this.withReconciledClient(clientId, async (lease) => {
 			await this.runs.ensureSession(actor, { clientId, sessionId });
 			const reservation = await this.runs.beginDelete(sessionId, actor.identityId);
-			let response;
+			this.runtime?.assertCompatible(lease.clientId);
+			this.runtime?.assertReady(lease.clientId);
+			let response: PiResponse;
 			try {
 				response = await this.requests.request(lease, {
 					requestId: randomUUID(), action: "session.delete", cwdRef, sessionId,
@@ -392,7 +512,7 @@ export class PiController {
 				throw badRequest(response.error.code, response.error.message);
 			}
 
-			let confirmation;
+			let confirmation: PiResponse;
 			try {
 				confirmation = await this.requests.request(lease, {
 					requestId: randomUUID(), action: "session.get", cwdRef, sessionId,
@@ -676,8 +796,11 @@ export class PiController {
 			});
 
 			let dispatchError: unknown;
+			this.runtime?.assertCompatible(lease.clientId);
+			this.runtime?.assertReady(lease.clientId);
+			let response: PiResponse;
 			try {
-				const response = await this.requests.request(lease, {
+				response = await this.requests.request(lease, {
 					requestId: randomUUID(),
 					action: "agent.prompt",
 					cwdRef: { rootDir, relativePath },
@@ -707,7 +830,7 @@ export class PiController {
 					await this.runs.markRunDisconnected(jobId, runId);
 				} else if (code === "PI_REQUEST_TIMEOUT") {
 					try {
-						const stateResponse = await this.requests.request(lease, {
+						const stateResponse: PiResponse = await this.requests.request(lease, {
 							requestId: randomUUID(), action: "agent.state",
 							cwdRef: { rootDir, relativePath }, sessionId, jobId, runId,
 						});

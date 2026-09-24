@@ -108,6 +108,14 @@ function safePiErrorMessage(code: string): string {
 		PI_IMAGE_TOO_LARGE: "Pi image is too large",
 		PI_REQUEST_TIMEOUT: "Pi request timed out",
 		PI_STATE_PENDING: "Pi client state reconciliation is pending",
+		PI_CONFIG_UNAVAILABLE: "Pi configuration is unavailable",
+		PI_CREDENTIAL_UNAVAILABLE: "Pi credentials are unavailable",
+		PI_RUNTIME_SPEC_INCOMPATIBLE: "Pi runtime spec is incompatible",
+	PI_PROVIDER_VALIDATION_FAILED: "Pi provider validation failed",
+	PI_BUNDLE_UNAVAILABLE: "Pi resource bundle is unavailable",
+	PI_POLICY_UNAVAILABLE: "Pi tool policy is unavailable",
+	PI_TOOL_POLICY_DENIED: "Tool call was denied by policy",
+	PI_TOOL_POLICY_REJECTED: "Tool call was not approved",
 	};
 	return messages[code as PiErrorCode] ?? "Pi session failed";
 }

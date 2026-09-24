@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
+    "target": "ES2023",
     "rootDir": "src",
     "outDir": "dist",
     "module": "ESNext",
@@ -13,6 +14,7 @@
     }
   },
   "include": ["src"],
+  "exclude": ["src/pi-web/components/ChatInput.tsx"],
   "references": [
     { "path": "./tsconfig.node.json" }
   ]

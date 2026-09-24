@@ -20,7 +20,9 @@ import {
 	type PiWorkerHandle,
 } from "./pi/supervisor.js";
 import type { PiWorkerRequestMessage } from "./pi/worker-protocol.js";
-import { probePiCapability } from "./pi/capability.js";
+import { getCachedClientBundle, probePiCapability } from "./pi/capability.js";
+import { resolveVcpPiRuntimePaths } from "./pi/runtime-paths.js";
+import { evaluateRuntimeSpec } from "./pi/runtime-spec.js";
 import {
 	detectInstallationInfo,
 	probePrivilegedCapability,
@@ -81,8 +83,16 @@ if (require.main === module) {
 
 /** 真实 fork 项目 Worker（cwd 通过 argv 传入） */
 function forkProjectWorker(cwd: string): PiWorkerHandle {
+	// 第一层隔离（防御性兜底）：Worker 环境指向 VCPDeck 数据根。
+	// 不提供 fallback：解析失败时本身 fail closed。
+	const paths = resolveVcpPiRuntimePaths();
 	const child = fork(join(__dirname, "pi", "worker.js"), [cwd], {
 		stdio: ["ignore", "ignore", "ignore", "ipc"],
+		env: {
+			...process.env,
+			PI_CODING_AGENT_DIR: paths.agentDir,
+			PI_SESSION_DIR: paths.sessionsRoot,
+		},
 	});
 	return {
 		send: (msg: PiWorkerRequestMessage) => child.send(msg),
@@ -158,6 +168,45 @@ export function attachPiBridge(
 		// supervisor 事件转发（断线期间不发送；Worker 继续运行）
 		deps.supervisor.onEvent((event: PiEvent) => {
 			if (socket.connected) socket.emit(Events.PI_EVENT, event);
+		});
+
+		// RuntimeSpec 接纳：严格解析 → 登记运行配置 → 回 ACK。
+		// 非 ready 时 supervisor 会拒绝 WORKER_ACTIONS（fail closed，不 fallback 本机 Pi）。
+		socket.on(Events.PI_RUNTIME_SPEC, (raw: unknown) => {
+			// Bundle 已在 REGISTER 前的探测中校验并缓存（只读，不再触发探测）；
+			// 需要资源但本地缺失时，evaluateRuntimeSpec 的二次校验会 fail closed。
+			const cachedBundle = getCachedClientBundle();
+			void evaluateRuntimeSpec(raw, {
+				bundleExtensionPaths: cachedBundle?.bundle?.extensionPaths ?? [],
+				bundleResourceIds: cachedBundle?.bundle?.resourceIds ?? [],
+			})
+				.then((state) => {
+					deps.supervisor.setRuntimeConfig(state);
+					if (!socket.connected) return;
+					socket.emit(Events.PI_RUNTIME_ACK, {
+						clientId: deps.clientId,
+						specId: state.config?.spec.specId ?? null,
+						runtimeRevision: state.runtimeRevision,
+						configState: state.configState,
+						...(state.reasonCode ? { reasonCode: state.reasonCode } : {}),
+						...(state.config
+							? {
+									resolvedModels: state.config.resolvedModels,
+									activeRuntimeRevision: deps.supervisor.activeRuntimeRevision(),
+									unavailableModels: state.config.unavailableModels,
+								}
+							: {}),
+					});
+				})
+				.catch(() => {
+					// 兜底：任何未预期异常都不得默认放行，登记为 incompatible。
+					deps.supervisor.setRuntimeConfig({
+						configState: "incompatible",
+						reasonCode: "PI_RUNTIME_SPEC_INCOMPATIBLE",
+						runtimeRevision: null,
+						config: null,
+					});
+				});
 		});
 	}
 

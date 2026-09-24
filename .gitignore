@@ -28,3 +28,7 @@ frps.log
 graphflow-out/
 # 各包构建产物（tsc/esbuild 输出，可重新构建，不入库）
 packages/*/dist/
+
+# dev 生成的 Pi Resource Bundle 与 Client 运行时数据（含 install-secret，不入库）
+packages/client/pi-resources/
+packages/client/data/

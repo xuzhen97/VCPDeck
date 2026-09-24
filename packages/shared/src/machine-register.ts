@@ -2,7 +2,11 @@ import {
 	parseFrpCapabilityStatus,
 	type FrpCapabilityStatus,
 } from "./frp-runtime.js";
-import type { PiCapabilityStatus } from "./pi.js";
+import type {
+	PiBundleCapability,
+	PiCapabilityStatus,
+	PiModelCatalogStatus,
+} from "./pi.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import {
 	parseP2pTunnelCapabilityStatus,
@@ -145,6 +149,192 @@ export function parsePrivilegedCapabilityStatus(
 	return { available, mode, nonInteractive, runAsUser: user };
 }
 
+/** Pi 能力摘要的已知字段（旧 Client 缺新字段必须仍能解析）。 */
+const PI_CAPABILITY_KEYS = new Set([
+	"available",
+	"sdkVersion",
+	"nodeVersion",
+	"shellKind",
+	"sessionJobProtocolVersion",
+	"runtimeSpecProtocolVersion",
+	"configMode",
+	"modelCatalog",
+	"bundle",
+	"code",
+	"message",
+]);
+
+/** Bundle 资源 ID 数量上限（防止异常注册消息撑爆内存与 UI） */
+const MAX_BUNDLE_RESOURCES = 64;
+
+const PI_CAPABILITY_FAILURE_CODES = [
+	"PI_CLIENT_UNSUPPORTED",
+	"PI_NODE_UNSUPPORTED",
+	"PI_BASH_NOT_FOUND",
+	"PI_RUNTIME_UNAVAILABLE",
+	"PI_AUTH_UNAVAILABLE",
+] as const;
+
+const PI_SHELL_KINDS = ["configured", "git-bash", "path", "system"] as const;
+
+const MAX_CATALOG_PROVIDERS = 256;
+
+/**
+ * 严格解析 Pi 内置模型目录摘要。
+ * 只接受 { sdkVersion, providerIds }；providerIds 去重后上限 256 项。
+ */
+export function parsePiModelCatalogStatus(
+	value: unknown,
+): PiModelCatalogStatus {
+	if (!isRecord(value) || Object.keys(value).length !== 2) {
+		throw new Error("pi.modelCatalog 必须且只能包含 sdkVersion/providerIds");
+	}
+	const sdkVersion = requireString(
+		value.sdkVersion,
+		"pi.modelCatalog.sdkVersion",
+		MAX_CAPABILITY,
+	);
+	if (
+		!Array.isArray(value.providerIds) ||
+		value.providerIds.length === 0 ||
+		value.providerIds.length > MAX_CATALOG_PROVIDERS
+	) {
+		throw new Error(
+			`pi.modelCatalog.providerIds 数量必须在 1-${MAX_CATALOG_PROVIDERS} 之间`,
+		);
+	}
+	const providerIds = value.providerIds.map((item, index) =>
+		requireString(
+			item,
+			`pi.modelCatalog.providerIds[${index}]`,
+			MAX_CAPABILITY,
+		),
+	);
+	if (new Set(providerIds).size !== providerIds.length) {
+		throw new Error("pi.modelCatalog.providerIds 存在重复项");
+	}
+	return { sdkVersion, providerIds };
+}
+
+function requirePositiveInt(value: unknown, what: string): number {
+	if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+		throw new Error(`${what} 必须为正整数`);
+	}
+	return value;
+}
+
+/**
+ * 严格解析 Pi 能力摘要（与 frp/privileged/p2pTunnel 同级）。
+ * 未知字段拒绝；旧 Client 缺 runtimeSpecProtocolVersion/configMode 视为未报告。
+ */
+export function parsePiCapabilityStatus(value: unknown): PiCapabilityStatus {
+	if (!isRecord(value)) throw new Error("pi 必须为对象");
+	for (const key of Object.keys(value)) {
+		if (!PI_CAPABILITY_KEYS.has(key)) throw new Error(`pi 含未知字段 ${key}`);
+	}
+
+	if (value.available === false) {
+		if (!PI_CAPABILITY_FAILURE_CODES.includes(value.code as never)) {
+			throw new Error("pi.code 必须为已知失败码");
+		}
+		const code = value.code as (typeof PI_CAPABILITY_FAILURE_CODES)[number];
+		const message = requireString(value.message, "pi.message", MAX_CAPABILITY);
+		const status: PiCapabilityStatus = { available: false, code, message };
+		if (value.nodeVersion !== undefined) {
+			status.nodeVersion = requireString(value.nodeVersion, "pi.nodeVersion", MAX_CAPABILITY);
+		}
+		return status;
+	}
+
+	if (value.available === true) {
+		const sdkVersion = requireString(value.sdkVersion, "pi.sdkVersion", MAX_CAPABILITY);
+		const nodeVersion = requireString(value.nodeVersion, "pi.nodeVersion", MAX_CAPABILITY);
+		if (!PI_SHELL_KINDS.includes(value.shellKind as never)) {
+			throw new Error("pi.shellKind 必须为 configured、git-bash、path 或 system");
+		}
+		const status: PiCapabilityStatus = {
+			available: true,
+			sdkVersion,
+			nodeVersion,
+			shellKind: value.shellKind as (typeof PI_SHELL_KINDS)[number],
+		};
+		if (value.sessionJobProtocolVersion !== undefined) {
+			status.sessionJobProtocolVersion = requirePositiveInt(
+				value.sessionJobProtocolVersion,
+				"pi.sessionJobProtocolVersion",
+			);
+		}
+		if (value.runtimeSpecProtocolVersion !== undefined) {
+			status.runtimeSpecProtocolVersion = requirePositiveInt(
+				value.runtimeSpecProtocolVersion,
+				"pi.runtimeSpecProtocolVersion",
+			);
+		}
+		if (value.configMode !== undefined) {
+			if (value.configMode !== "server-authoritative") {
+				throw new Error("pi.configMode 必须为 server-authoritative");
+			}
+			status.configMode = "server-authoritative";
+		}
+		if (value.modelCatalog !== undefined) {
+			status.modelCatalog = parsePiModelCatalogStatus(value.modelCatalog);
+		}
+		if (value.bundle !== undefined) {
+			status.bundle = parsePiBundleCapability(value.bundle);
+		}
+		return status;
+	}
+
+	throw new Error("pi.available 必须为 boolean");
+}
+
+/**
+ * 严格解析 Client 上报的 Bundle 能力。
+ * 只携带资源 ID 与版本事实，不含任何文件内容或路径。
+ */
+export function parsePiBundleCapability(value: unknown): PiBundleCapability {
+	if (!isRecord(value)) throw new Error("pi.bundle 必须为对象");
+	for (const key of Object.keys(value)) {
+		if (
+			!["protocolVersion", "bundleVersion", "piSdkVersion", "resourceIds"].includes(
+				key,
+			)
+		) {
+			throw new Error(`pi.bundle 含未知字段 ${key}`);
+		}
+	}
+	const protocolVersion = requirePositiveInt(
+		value.protocolVersion,
+		"pi.bundle.protocolVersion",
+	);
+	const bundleVersion = requireString(
+		value.bundleVersion,
+		"pi.bundle.bundleVersion",
+		MAX_CAPABILITY,
+	);
+	const piSdkVersion = requireString(
+		value.piSdkVersion,
+		"pi.bundle.piSdkVersion",
+		MAX_CAPABILITY,
+	);
+	if (
+		!Array.isArray(value.resourceIds) ||
+		value.resourceIds.length === 0 ||
+		value.resourceIds.length > MAX_BUNDLE_RESOURCES
+	) {
+		throw new Error(
+			`pi.bundle.resourceIds 数量必须在 1-${MAX_BUNDLE_RESOURCES} 之间`,
+		);
+	}
+	const resourceIds = value.resourceIds.map((item, index) =>
+		requireString(item, `pi.bundle.resourceIds[${index}]`, MAX_CAPABILITY),
+	);
+	if (new Set(resourceIds).size !== resourceIds.length) {
+		throw new Error("pi.bundle.resourceIds 存在重复项");
+	}
+	return { protocolVersion, bundleVersion, piSdkVersion, resourceIds };
+}
+
 /** 安装/特权合规不稳定的稳定原因（人工升级提示的单一事实来源，ADR-0027）。 */
 export const ClientInstallationComplianceReason = {
 	/** 显式上报旧 PM2 安装模式 */
@@ -270,7 +460,9 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 		}
 		const parsedDetails: MachineRegister["capabilityDetails"] = {};
 		// pi/terminal 沿用现有透传行为（Server 投影阶段同样宽松处理），frp 严格解析。
-		if (details.pi !== undefined) parsedDetails.pi = details.pi as PiCapabilityStatus;
+		if (details.pi !== undefined) {
+			parsedDetails.pi = parsePiCapabilityStatus(details.pi);
+		}
 		if (details.terminal !== undefined) {
 			parsedDetails.terminal = details.terminal as TerminalCapabilityStatus;
 		}

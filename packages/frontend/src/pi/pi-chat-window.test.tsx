@@ -77,3 +77,67 @@ describe("PiChatWindow", () => {
 		expect(screen.getByText("开始一段新的 Pi 会话")).toBeTruthy();
 	});
 });
+
+describe("消息体经 pi-web MessageView 渲染（带降级护栏）", () => {
+	it("assistant 消息带 data-message-role=assistant（pi-web 渲染器标记）", async () => {
+		render(
+			<PiChatWindow
+				state={state({
+					messages: [
+						{ id: "u1", role: "user", content: [{ type: "text", text: "提问" }] },
+						{
+							id: "a1",
+							role: "assistant",
+							content: [{ type: "text", text: "渲染管线接管这行文本" }],
+						},
+					],
+				})}
+				info={null}
+				onLoadMore={() => {}}
+			/>,
+		);
+		expect(await screen.findByText("渲染管线接管这行文本")).toBeDefined();
+		expect(
+			document.querySelector('[data-message-role="assistant"]'),
+		).not.toBeNull();
+	});
+});
+
+describe("工具输出经 toolResults map 内联在 assistant 卡（上游契约）", () => {
+	it("tool_result 不再独立渲染，其内容出现在 assistant 消息内且仅一次", async () => {
+		render(
+			<PiChatWindow
+				state={state({
+					messages: [
+						{ id: "u1", role: "user", content: [{ type: "text", text: "提问" }] },
+						{
+							id: "a1",
+							role: "assistant",
+							content: [
+								{
+									type: "tool_call",
+									toolCallId: "t1",
+									toolName: "bash",
+									input: { command: "ls" },
+								},
+								{ type: "text", text: "答案已生成" },
+							],
+						},
+						{
+							id: "r1",
+							role: "tool_result",
+							toolCallId: "t1",
+							content: [{ type: "text", text: "结果输出内容" }],
+						},
+					],
+				})}
+				info={null}
+				onLoadMore={() => {}}
+			/>,
+		);
+		// 结果仅在工具卡展开时渲染（上游 MessageView 语义）
+		await userEvent.click(await screen.findByRole("button", { name: /bash/ }));
+		const found = await screen.findAllByText("结果输出内容");
+		expect(found).toHaveLength(1);
+	});
+});

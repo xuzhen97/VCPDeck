@@ -188,3 +188,34 @@ describe("VcpDeckClient.pi", () => {
 		expect(fetcher.mock.calls[2]?.[1]?.method).toBe("DELETE");
 	});
 });
+
+describe("Pi 显式导入三方法（list / preview / run）", () => {
+	it("使用 client 作用域 URL；sourceName 走 URL 编码；import body 为 sourceNames", async () => {
+		const request = vi.fn(async () => ({}));
+		const pi = createPiApi({ request: request as never });
+
+		await pi.sessions.importable("c1");
+		expect(request).toHaveBeenLastCalledWith(
+			"GET",
+			"/api/clients/c1/pi/sessions/importable",
+			undefined,
+			undefined,
+		);
+
+		await pi.sessions.previewImportable("c1", "2026-09-01 10.00_a.jsonl");
+		expect(request).toHaveBeenLastCalledWith(
+			"GET",
+			"/api/clients/c1/pi/sessions/importable/2026-09-01%2010.00_a.jsonl/preview",
+			undefined,
+			undefined,
+		);
+
+		await pi.sessions.import("c1", ["a.jsonl", "b.jsonl"]);
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c1/pi/sessions/import",
+			{ sourceNames: ["a.jsonl", "b.jsonl"] },
+			undefined,
+		);
+	});
+});

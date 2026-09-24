@@ -28,7 +28,7 @@ describe("ConsoleShell", () => {
 		const navigation = within(
 			screen.getByRole("navigation", { name: "主导航" }),
 		);
-		for (const label of ["概览", "机器", "任务", "映射", "存储", "设置"]) {
+		for (const label of ["概览", "机器", "任务", "映射", "发版", "存储", "Pi", "设置"]) {
 			expect(navigation.getByRole("link", { name: label })).toBeVisible();
 		}
 		expect(

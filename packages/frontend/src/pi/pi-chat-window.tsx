@@ -1,12 +1,53 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { PiImagePlaceholder, PiMessage } from "@vcpdeck/shared";
+import "../pi-web/styles.css";
+import { I18nProvider } from "../pi-web/hooks/useI18n";
+import { MessageView as PiWebMessageView } from "../pi-web/components/MessageView";
+import { toRenderMessages } from "./pi-render-adapter.js";
+import { PiRenderBoundary } from "./pi-render-boundary.js";
+import type { ToolResultMessage } from "../pi-web/lib/types";
 import { PiMessageView } from "./pi-message-view.js";
 import { buildTurnGroups, type PiTurnGroup } from "./turn-groups.js";
 import type { PiSessionState } from "./use-pi-session.js";
 import { Button } from "@/components/ui/button";
 
+/** 渲染模型上下文（AssistantMessage 必填的 model/provider 标签，不可得时为空） */
+type RenderCtx = { model: string; provider: string };
+
+/** 消息体渲染：pi-web MessageView（经 Adapter）+ 降级护栏回落 PiMessageView（ADR-0032）。 */
+function RenderedMessage({
+	ctx,
+	message,
+	toolResults,
+	fallback,
+}: {
+	ctx: RenderCtx;
+	message: PiMessage;
+	toolResults?: Map<string, ToolResultMessage>;
+	fallback: ReactNode;
+}) {
+	const renderMessage = toRenderMessages([message], ctx)[0]!;
+	return (
+		<PiRenderBoundary fallback={fallback}>
+			<I18nProvider>
+				<PiWebMessageView message={renderMessage} toolResults={toolResults} />
+			</I18nProvider>
+		</PiRenderBoundary>
+	);
+}
+
 /** 中间过程折叠块（Process Details） */
-function ProcessDetails({ group }: { group: PiTurnGroup }) {
+function ProcessDetails({
+	ctx,
+	group,
+	toolResults,
+	toolResultsMap,
+}: {
+	ctx: RenderCtx;
+	group: PiTurnGroup;
+	toolResults: Record<string, string>;
+	toolResultsMap: Map<string, ToolResultMessage>;
+}) {
 	const [expanded, setExpanded] = useState(false);
 	const toolNames = useMemo(() => {
 		const names = new Set<string>();
@@ -41,7 +82,13 @@ function ProcessDetails({ group }: { group: PiTurnGroup }) {
 			{expanded && (
 				<div className="pi-chat-fade-in space-y-1.5 border-t border-border/60 bg-background/35 px-2.5 py-2">
 					{group.processMessages.map((m) => (
-						<PiMessageView key={m.id} message={m} />
+						<RenderedMessage
+							key={m.id}
+							ctx={ctx}
+							message={m}
+							toolResults={toolResultsMap}
+							fallback={<PiMessageView message={m} toolResults={toolResults} />}
+						/>
 					))}
 				</div>
 			)}
@@ -125,6 +172,20 @@ export function PiChatWindow({
 		() => toolResultsOf(state.messages),
 		[state.messages],
 	);
+	// 上游契约：独立 toolResult 由 MessageView 渲染为 null，内容经此 map 内联在 assistant 卡下（ChatWindow.tsx 的 toolResultsMap 等价物）
+	const toolResultsMap = useMemo(() => {
+		const map = new Map<string, ToolResultMessage>();
+		for (const m of state.messages) {
+			if (m.role !== "tool_result") continue;
+			const rendered = toRenderMessages([m], { model: "", provider: "" })[0]!;
+			if (rendered.role === "toolResult") map.set(m.toolCallId, rendered);
+		}
+		return map;
+	}, [state.messages]);
+	const ctx: RenderCtx = {
+		model: state.agentState?.model?.modelId ?? "",
+		provider: state.agentState?.model?.provider ?? "",
+	};
 
 	return (
 		<div className="flex h-full min-h-0 flex-col">
@@ -178,20 +239,37 @@ export function PiChatWindow({
 						{group.userMessage && (
 							<div className="flex justify-end">
 								<div className="max-w-[85%]">
-									<PiMessageView message={group.userMessage} />
+									<RenderedMessage
+										ctx={ctx}
+										message={group.userMessage}
+										toolResults={toolResultsMap}
+										fallback={<PiMessageView message={group.userMessage} />}
+									/>
 								</div>
 							</div>
 						)}
 						{group.processMessages.length > 0 && (
-							<ProcessDetails group={group} />
+							<ProcessDetails
+								ctx={ctx}
+								group={group}
+								toolResults={toolResults}
+								toolResultsMap={toolResultsMap}
+							/>
 						)}
 						{group.finalAssistant && (
 							<div className="max-w-[95%]">
-								<PiMessageView
+								<RenderedMessage
+									ctx={ctx}
 									message={group.finalAssistant}
-									toolResults={toolResults}
-									onImageLoad={onImageLoad}
-									imageUrls={imageUrls}
+									toolResults={toolResultsMap}
+									fallback={
+										<PiMessageView
+											message={group.finalAssistant}
+											toolResults={toolResults}
+											onImageLoad={onImageLoad}
+											imageUrls={imageUrls}
+										/>
+									}
 								/>
 							</div>
 						)}

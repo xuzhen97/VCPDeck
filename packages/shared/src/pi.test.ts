@@ -1,3 +1,4 @@
+import { isPiReadAction, isPiWorkerAction } from "./pi.js";
 import { describe, expect, it } from "vitest";
 import { JobStatus, JobType } from "./index.js";
 import {
@@ -236,6 +237,15 @@ describe("parsePiRequest", () => {
 			}),
 		).toThrow();
 	});
+
+	it("cwdRef.relativePath 允许空串（表示 root 自身）", () => {
+		const request = parsePiRequest({
+			requestId: "r1",
+			action: "sessions.list",
+			cwdRef: { rootDir: "D:\\", relativePath: "" },
+		});
+		expect(request.cwdRef).toEqual({ rootDir: "D:\\", relativePath: "" });
+	});
 });
 
 describe("parsePiAgentState", () => {
@@ -455,6 +465,34 @@ describe("parsePiStateReport", () => {
 		expect(report.runs).toEqual([]);
 	});
 
+	it("旧 Client 缺 runtimeRevision/configState 时按未就绪处理", () => {
+		const report = parsePiStateReport({ clientId: "c1", runs: [] });
+		expect(report.runtimeRevision).toBeNull();
+		expect(report.configState).toBe("pending");
+	});
+
+	it("携带 runtimeRevision 与 configState 的报告被解析", () => {
+		const report = parsePiStateReport({
+			clientId: "c1",
+			runs: [],
+			runtimeRevision: "0123456789abcdef",
+			configState: "ready",
+		});
+		expect(report).toMatchObject({
+			runtimeRevision: "0123456789abcdef",
+			configState: "ready",
+		});
+	});
+
+	it("拒绝非法 configState 与非法 runtimeRevision", () => {
+		expect(() =>
+			parsePiStateReport({ clientId: "c1", runs: [], configState: "ok" }),
+		).toThrow(/configState/);
+		expect(() =>
+			parsePiStateReport({ clientId: "c1", runs: [], runtimeRevision: "Z" }),
+		).toThrow(/runtimeRevision/);
+	});
+
 	it("接受活动状态、独立 runId 和无 projectKey 的 idle/error", () => {
 		const report = parsePiStateReport({
 			clientId: "c1",
@@ -537,5 +575,47 @@ describe("parsePiStateReport", () => {
 				})),
 			}),
 		).toThrow(/runs/);
+	});
+});
+
+describe("Pi 动作门控分类", () => {
+	it("每个 PiAction 必须且只能属于 read 或 worker 之一", () => {
+		const actions: string[] = [
+			"capability.get",
+			"models.list",
+			"project.resolve",
+			"sessions.list",
+			"session.get",
+			"session.context",
+			"session.entryContent",
+			"session.new",
+			"session.rename",
+			"session.delete",
+			"session.fork",
+			"session.clone",
+			"session.navigate",
+			"agent.state",
+			"agent.prompt",
+			"agent.steer",
+			"agent.followUp",
+			"agent.abort",
+			"agent.compact",
+			"agent.abortCompact",
+			"agent.commands",
+			"agent.stats",
+			"model.set",
+			"thinking.set",
+			"extension.respond",
+		];
+		for (const action of actions) {
+			const read = isPiReadAction(action);
+			const worker = isPiWorkerAction(action);
+			expect(`${action}:${read}:${worker}`).toMatch(/:(true:false|false:true)$/);
+		}
+	});
+
+	it("未分类动作不被悄悄放行（既非 read 也非 worker）", () => {
+		expect(isPiReadAction("session.explode")).toBe(false);
+		expect(isPiWorkerAction("session.explode")).toBe(false);
 	});
 });

@@ -189,7 +189,14 @@ var require_pi = __commonJS({
   "../shared/dist/pi.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.PiProtocolError = exports2.PI_THINKING_LEVELS = exports2.PI_IMAGE_MIME_TYPES = exports2.MAX_PI_IMAGES_TOTAL_BYTES = exports2.MAX_PI_IMAGE_BYTES = exports2.MAX_PI_IMAGES_PER_PROMPT = exports2.PI_PROJECT_KEY_LENGTH = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = void 0;
+    exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.PiProtocolError = exports2.PI_THINKING_LEVELS = exports2.PI_IMAGE_MIME_TYPES = exports2.MAX_PI_IMAGES_TOTAL_BYTES = exports2.MAX_PI_IMAGE_BYTES = exports2.MAX_PI_IMAGES_PER_PROMPT = exports2.PI_PROJECT_KEY_LENGTH = exports2.MAX_IMPORT_LIST_SESSIONS = exports2.MAX_IMPORT_SOURCE_NAMES = exports2.MAX_PREVIEW_CODE_POINTS = exports2.PI_IMPORT_REASON_CODES = exports2.PI_BUILTIN_TOOL_IDS = exports2.PI_TOOL_POLICY_BUCKETS = exports2.PI_BUNDLE_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = void 0;
+    exports2.emptyPiToolPolicy = emptyPiToolPolicy;
+    exports2.parsePiToolPolicy = parsePiToolPolicy;
+    exports2.assertSourceName = assertSourceName;
+    exports2.parsePiImportListResponse = parsePiImportListResponse;
+    exports2.parsePiImportPreviewResponse = parsePiImportPreviewResponse;
+    exports2.parsePiImportRunRequest = parsePiImportRunRequest;
+    exports2.parsePiImportRunResponse = parsePiImportRunResponse;
     exports2.isPiThinkingLevel = isPiThinkingLevel;
     exports2.isPiAgentIdle = isPiAgentIdle;
     exports2.safePiErrorMessage = safePiErrorMessage;
@@ -198,6 +205,16 @@ var require_pi = __commonJS({
     exports2.parsePiAgentState = parsePiAgentState2;
     exports2.parsePiEvent = parsePiEvent;
     exports2.parsePiStateReport = parsePiStateReport;
+    exports2.parsePiRuntimeSpecV1 = parsePiRuntimeSpecV1;
+    exports2.parsePiRuntimeSpecMessage = parsePiRuntimeSpecMessage;
+    exports2.parsePiModelMetadata = parsePiModelMetadata;
+    exports2.parsePiRuntimeSpecV3 = parsePiRuntimeSpecV3;
+    exports2.parsePiCredentialLeaseV2 = parsePiCredentialLeaseV2;
+    exports2.parsePiRuntimeSpecMessageV3 = parsePiRuntimeSpecMessageV3;
+    exports2.parsePiCredentialLease = parsePiCredentialLease;
+    exports2.parsePiRuntimeAck = parsePiRuntimeAck;
+    exports2.isPiWorkerAction = isPiWorkerAction;
+    exports2.isPiReadAction = isPiReadAction;
     exports2.PI_ERROR_CODES = [
       "PI_PROTOCOL_INVALID",
       "PI_CLIENT_UNSUPPORTED",
@@ -216,9 +233,234 @@ var require_pi = __commonJS({
       "PI_IMAGE_INVALID",
       "PI_IMAGE_TOO_LARGE",
       "PI_REQUEST_TIMEOUT",
-      "PI_STATE_PENDING"
+      "PI_STATE_PENDING",
+      "PI_CONFIG_UNAVAILABLE",
+      "PI_CREDENTIAL_UNAVAILABLE",
+      "PI_RUNTIME_SPEC_INCOMPATIBLE",
+      "PI_PROVIDER_VALIDATION_FAILED",
+      "PI_BUNDLE_UNAVAILABLE",
+      "PI_POLICY_UNAVAILABLE",
+      "PI_TOOL_POLICY_DENIED",
+      "PI_TOOL_POLICY_REJECTED"
     ];
     exports2.PI_SESSION_JOB_PROTOCOL_VERSION = 1;
+    exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = 1;
+    exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = 3;
+    exports2.PI_BUNDLE_PROTOCOL_VERSION = 1;
+    exports2.PI_TOOL_POLICY_BUCKETS = ["allow", "confirm", "deny"];
+    exports2.PI_BUILTIN_TOOL_IDS = [
+      "bash",
+      "powershell",
+      "read",
+      "edit",
+      "write",
+      "grep",
+      "find",
+      "ls"
+    ];
+    function emptyPiToolPolicy() {
+      return { allow: [], confirm: [], deny: [] };
+    }
+    function parsePiToolPolicy(value2, what = "toolPolicy") {
+      assertRecord(value2, what);
+      assertKeys(value2, new Set(exports2.PI_TOOL_POLICY_BUCKETS), what);
+      const seen = /* @__PURE__ */ new Map();
+      const parsed = { allow: [], confirm: [], deny: [] };
+      for (const bucket of exports2.PI_TOOL_POLICY_BUCKETS) {
+        const list = value2[bucket];
+        if (!Array.isArray(list)) {
+          throw new PiProtocolError(`${what}.${bucket} \u5FC5\u987B\u662F\u6570\u7EC4`);
+        }
+        for (const item of list) {
+          if (typeof item !== "string") {
+            throw new PiProtocolError(`${what}.${bucket} \u53EA\u80FD\u5305\u542B\u5B57\u7B26\u4E32`);
+          }
+          if (!exports2.PI_BUILTIN_TOOL_IDS.includes(item)) {
+            throw new PiProtocolError(`${what}.${bucket} \u542B\u672A\u77E5\u5DE5\u5177 ${item}`);
+          }
+          const previous = seen.get(item);
+          if (previous === bucket) {
+            throw new PiProtocolError(`${what}.${bucket} \u91CD\u590D\u5DE5\u5177 ${item}`);
+          }
+          if (previous) {
+            throw new PiProtocolError(`${what} \u7684 ${previous} \u4E0E ${bucket} \u5FC5\u987B\u4E92\u65A5\uFF1A${item}`);
+          }
+          seen.set(item, bucket);
+          parsed[bucket].push(item);
+        }
+      }
+      return parsed;
+    }
+    exports2.PI_IMPORT_REASON_CODES = [
+      "PI_PROJECT_NOT_ALLOWED",
+      "PI_SESSION_NOT_FOUND",
+      "PI_CONFIG_UNAVAILABLE"
+    ];
+    exports2.MAX_PREVIEW_CODE_POINTS = 80;
+    exports2.MAX_IMPORT_SOURCE_NAMES = 50;
+    exports2.MAX_IMPORT_LIST_SESSIONS = 2e3;
+    var MAX_SOURCE_NAME_LENGTH = 255;
+    function assertSourceName(value2, what = "sourceName") {
+      assertString(value2, what, MAX_SOURCE_NAME_LENGTH);
+      if (value2 === "." || value2 === "..") {
+        throw new PiProtocolError(`${what} \u4E0D\u5F97\u4E3A . \u6216 ..`);
+      }
+      if (value2.includes("/") || value2.includes("\\") || value2.includes("\0")) {
+        throw new PiProtocolError(`${what} \u542B\u8DEF\u5F84\u9003\u9038\u5B57\u7B26`);
+      }
+      return value2;
+    }
+    function assertRelativeLabel(value2, what) {
+      assertString(value2, what, MAX_SPEC_STRING);
+      if (value2.startsWith("/") || value2.includes("\\")) {
+        throw new PiProtocolError(`${what} \u5FC5\u987B\u662F\u4EE5\u6B63\u659C\u6760\u5206\u9694\u7684\u76F8\u5BF9\u8DEF\u5F84`);
+      }
+      for (const segment of value2.split("/")) {
+        if (segment.length === 0 || segment === "." || segment === "..") {
+          throw new PiProtocolError(`${what} \u542B\u9003\u9038\u6216\u7A7A\u8DEF\u5F84\u7247\u6BB5`);
+        }
+      }
+      return value2;
+    }
+    function parseOptionalIsoDate(value2, what) {
+      if (value2 === null || value2 === void 0)
+        return null;
+      assertString(value2, what, MAX_SPEC_STRING);
+      if (Number.isNaN(Date.parse(value2))) {
+        throw new PiProtocolError(`${what} \u4E0D\u662F\u53EF\u89E3\u6790\u65F6\u95F4`);
+      }
+      return value2;
+    }
+    function parseOptionalPath(value2, what) {
+      if (value2 === null || value2 === void 0)
+        return null;
+      assertString(value2, what, MAX_SPEC_STRING);
+      return value2;
+    }
+    function parseImportBool(value2, what) {
+      if (value2 !== true && value2 !== false) {
+        throw new PiProtocolError(`${what} \u5FC5\u987B\u662F\u5E03\u5C14`);
+      }
+      return value2;
+    }
+    var IMPORT_SUMMARY_KEYS = /* @__PURE__ */ new Set([
+      "sourceName",
+      "sourceLabel",
+      "startedAt",
+      "entryCount",
+      "cwd",
+      "imported",
+      "cwdNotAllowed",
+      "unreadable"
+    ]);
+    var IMPORT_LIST_KEYS = /* @__PURE__ */ new Set(["sourceRoot", "sessions"]);
+    var IMPORT_PREVIEW_KEYS = /* @__PURE__ */ new Set(["sourceName", "previewText", "truncated"]);
+    var IMPORT_RUN_REQUEST_KEYS = /* @__PURE__ */ new Set(["sourceNames"]);
+    var IMPORT_RUN_RESPONSE_KEYS = /* @__PURE__ */ new Set(["results"]);
+    var IMPORT_RUN_RESULT_KEYS = /* @__PURE__ */ new Set(["sourceName", "status", "reasonCode"]);
+    var IMPORT_ITEM_STATUSES = /* @__PURE__ */ new Set([
+      "imported",
+      "alreadyImported",
+      "rejected"
+    ]);
+    var IMPORT_REASON_CODE_SET = new Set(exports2.PI_IMPORT_REASON_CODES);
+    function parsePiImportListResponse(value2) {
+      assertRecord(value2, "PiImportListResponse");
+      assertKeys(value2, IMPORT_LIST_KEYS, "PiImportListResponse");
+      assertString(value2.sourceRoot, "sourceRoot", MAX_SPEC_STRING);
+      if (!Array.isArray(value2.sessions)) {
+        throw new PiProtocolError("sessions \u5FC5\u987B\u662F\u6570\u7EC4");
+      }
+      if (value2.sessions.length > exports2.MAX_IMPORT_LIST_SESSIONS) {
+        throw new PiProtocolError(`sessions \u6570\u91CF\u4E0D\u80FD\u8D85\u8FC7 ${exports2.MAX_IMPORT_LIST_SESSIONS}`);
+      }
+      const sessions = value2.sessions.map((raw, index) => {
+        const what = `sessions[${index}]`;
+        assertRecord(raw, what);
+        assertKeys(raw, IMPORT_SUMMARY_KEYS, what);
+        return {
+          sourceName: assertSourceName(raw.sourceName, `${what}.sourceName`),
+          sourceLabel: assertRelativeLabel(raw.sourceLabel, `${what}.sourceLabel`),
+          startedAt: parseOptionalIsoDate(raw.startedAt, `${what}.startedAt`),
+          entryCount: parseImportEntryCount(raw.entryCount, `${what}.entryCount`),
+          cwd: parseOptionalPath(raw.cwd, `${what}.cwd`),
+          imported: parseImportBool(raw.imported, `${what}.imported`),
+          cwdNotAllowed: parseImportBool(raw.cwdNotAllowed, `${what}.cwdNotAllowed`),
+          unreadable: parseImportBool(raw.unreadable, `${what}.unreadable`)
+        };
+      });
+      return { sourceRoot: value2.sourceRoot, sessions };
+    }
+    function parseImportEntryCount(value2, what) {
+      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < 0 || value2 > 1e6) {
+        throw new PiProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570`);
+      }
+      return value2;
+    }
+    function parsePiImportPreviewResponse(value2) {
+      assertRecord(value2, "PiImportPreviewResponse");
+      assertKeys(value2, IMPORT_PREVIEW_KEYS, "PiImportPreviewResponse");
+      const sourceName = assertSourceName(value2.sourceName, "sourceName");
+      assertString(value2.previewText, "previewText", MAX_SPEC_STRING);
+      if ([...value2.previewText].length > exports2.MAX_PREVIEW_CODE_POINTS) {
+        throw new PiProtocolError(`previewText \u8D85\u8FC7 ${exports2.MAX_PREVIEW_CODE_POINTS} \u4E2A\u5B57\u7B26\uFF08\u5FC5\u987B\u5148\u622A\u65AD\uFF09`);
+      }
+      return {
+        sourceName,
+        previewText: value2.previewText,
+        truncated: parseImportBool(value2.truncated, "truncated")
+      };
+    }
+    function parsePiImportRunRequest(value2) {
+      assertRecord(value2, "PiImportRunRequest");
+      assertKeys(value2, IMPORT_RUN_REQUEST_KEYS, "PiImportRunRequest");
+      const rawNames = value2.sourceNames;
+      if (!Array.isArray(rawNames)) {
+        throw new PiProtocolError("sourceNames \u5FC5\u987B\u662F\u6570\u7EC4");
+      }
+      if (rawNames.length === 0) {
+        throw new PiProtocolError("sourceNames \u4E0D\u80FD\u4E3A\u7A7A");
+      }
+      if (rawNames.length > exports2.MAX_IMPORT_SOURCE_NAMES) {
+        throw new PiProtocolError(`sourceNames \u6570\u91CF\u4E0D\u80FD\u8D85\u8FC7 ${exports2.MAX_IMPORT_SOURCE_NAMES}`);
+      }
+      const names = rawNames.map((_, index) => assertSourceName(rawNames[index], `sourceNames[${index}]`));
+      return { sourceNames: [...new Set(names)] };
+    }
+    function parsePiImportRunResponse(value2) {
+      assertRecord(value2, "PiImportRunResponse");
+      assertKeys(value2, IMPORT_RUN_RESPONSE_KEYS, "PiImportRunResponse");
+      if (!Array.isArray(value2.results)) {
+        throw new PiProtocolError("results \u5FC5\u987B\u662F\u6570\u7EC4");
+      }
+      if (value2.results.length > exports2.MAX_IMPORT_SOURCE_NAMES) {
+        throw new PiProtocolError(`results \u6570\u91CF\u4E0D\u80FD\u8D85\u8FC7 ${exports2.MAX_IMPORT_SOURCE_NAMES}`);
+      }
+      const results = value2.results.map((raw, index) => {
+        const what = `results[${index}]`;
+        assertRecord(raw, what);
+        assertKeys(raw, IMPORT_RUN_RESULT_KEYS, what);
+        const sourceName = assertSourceName(raw.sourceName, `${what}.sourceName`);
+        if (typeof raw.status !== "string" || !IMPORT_ITEM_STATUSES.has(raw.status)) {
+          throw new PiProtocolError(`${what}.status \u4E0D\u53D7\u652F\u6301`);
+        }
+        if (raw.reasonCode !== void 0) {
+          if (typeof raw.reasonCode !== "string" || !IMPORT_REASON_CODE_SET.has(raw.reasonCode)) {
+            throw new PiProtocolError(`${what}.reasonCode \u53EA\u80FD\u662F\u4E09\u4E2A\u7A33\u5B9A\u7801\u4E4B\u4E00`);
+          }
+          return {
+            sourceName,
+            status: raw.status,
+            reasonCode: raw.reasonCode
+          };
+        }
+        return {
+          sourceName,
+          status: raw.status
+        };
+      });
+      return { results };
+    }
     exports2.PI_PROJECT_KEY_LENGTH = 64;
     exports2.MAX_PI_IMAGES_PER_PROMPT = 10;
     exports2.MAX_PI_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -277,7 +519,10 @@ var require_pi = __commonJS({
       "agent.stats",
       "model.set",
       "thinking.set",
-      "extension.respond"
+      "extension.respond",
+      "session.import.list",
+      "session.import.preview",
+      "session.import.run"
     ]);
     var REQUEST_KEYS = /* @__PURE__ */ new Set([
       "requestId",
@@ -483,6 +728,24 @@ var require_pi = __commonJS({
       }
       if (input.action === "agent.prompt" && input.cwdRef === void 0)
         throw new PiProtocolError("agent.prompt \u7F3A cwdRef");
+      if (input.action === "session.import.list") {
+        if (input.payload !== void 0) {
+          assertRecord(input.payload, "payload");
+          assertKeys(input.payload, /* @__PURE__ */ new Set(), "payload");
+        }
+      } else if (input.action === "session.import.preview") {
+        if (input.payload === void 0)
+          throw new PiProtocolError("session.import.preview \u7F3A payload");
+        assertRecord(input.payload, "payload");
+        assertKeys(input.payload, /* @__PURE__ */ new Set(["sourceName"]), "payload");
+        input.payload = {
+          sourceName: assertSourceName(input.payload.sourceName, "payload.sourceName")
+        };
+      } else if (input.action === "session.import.run") {
+        if (input.payload === void 0)
+          throw new PiProtocolError("session.import.run \u7F3A payload");
+        input.payload = parsePiImportRunRequest(input.payload);
+      }
       if (input.payload !== void 0) {
         assertRecord(input.payload, "payload");
         if (input.payload.attachments !== void 0) {
@@ -638,7 +901,12 @@ var require_pi = __commonJS({
       }
       return input;
     }
-    var STATE_KEYS = /* @__PURE__ */ new Set(["clientId", "runs"]);
+    var STATE_KEYS = /* @__PURE__ */ new Set([
+      "clientId",
+      "runs",
+      "runtimeRevision",
+      "configState"
+    ]);
     function parsePiStateReport(input) {
       assertRecord(input, "PiStateReport");
       assertKeys(input, STATE_KEYS, "PiStateReport");
@@ -676,7 +944,574 @@ var require_pi = __commonJS({
           projectKey: item.projectKey
         });
       }
-      return { clientId: input.clientId, runs };
+      return { clientId: input.clientId, runs, ...parseReportRuntimeState(input) };
+    }
+    function parseReportRuntimeState(input) {
+      let runtimeRevision = null;
+      if (input.runtimeRevision !== void 0 && input.runtimeRevision !== null) {
+        runtimeRevision = requireRuntimeRevision(input.runtimeRevision, "runtimeRevision");
+      }
+      let configState = "pending";
+      if (input.configState !== void 0) {
+        if (typeof input.configState !== "string" || !CONFIG_STATES.has(input.configState)) {
+          throw new PiProtocolError("configState \u5FC5\u987B\u4E3A pending/ready/incompatible/stale");
+        }
+        configState = input.configState;
+      }
+      return { runtimeRevision, configState };
+    }
+    var SPEC_KEYS = /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "specId",
+      "profileId",
+      "profileRevision",
+      "modelPolicy",
+      "runtimeRevision"
+    ]);
+    var MODEL_POLICY_KEYS = /* @__PURE__ */ new Set([
+      "defaultModel",
+      "allowedModels",
+      "defaultThinkingLevel"
+    ]);
+    var MODEL_REF_KEYS = /* @__PURE__ */ new Set(["provider", "modelId", "maxThinkingLevel"]);
+    var LEASE_KEYS = /* @__PURE__ */ new Set(["issuedAt", "entries"]);
+    var LEASE_ENTRY_KEYS = /* @__PURE__ */ new Set(["provider", "apiKey"]);
+    var ACK_KEYS = /* @__PURE__ */ new Set([
+      "clientId",
+      "specId",
+      "runtimeRevision",
+      "configState",
+      "reasonCode",
+      "resolvedModels",
+      "unavailableModels",
+      "activeRuntimeRevision"
+    ]);
+    var UNAVAILABLE_MODEL_KEYS = /* @__PURE__ */ new Set(["provider", "modelId", "reason"]);
+    var CONFIG_STATES = /* @__PURE__ */ new Set([
+      "pending",
+      "ready",
+      "incompatible",
+      "stale"
+    ]);
+    var MAX_ALLOWED_MODELS = 64;
+    var MAX_LEASE_ENTRIES = 16;
+    var MAX_PROVIDER_MODELS = 256;
+    var MAX_API_KEY_LENGTH = 4096;
+    var MAX_SPEC_STRING = 256;
+    var RUNTIME_REVISION_PATTERN = /^[0-9a-f]{16}$/;
+    var PROVIDER_PROTOCOLS = /* @__PURE__ */ new Set([
+      "openai-completions",
+      "openai-responses",
+      "anthropic-messages",
+      "google-generative-ai"
+    ]);
+    function requireRuntimeRevision(v, what) {
+      assertString(v, what, MAX_SPEC_STRING);
+      if (!RUNTIME_REVISION_PATTERN.test(v)) {
+        throw new PiProtocolError(`${what} \u5FC5\u987B\u4E3A 16 \u4F4D\u5C0F\u5199 hex`);
+      }
+      return v;
+    }
+    function requirePositiveInt(v, what) {
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 1) {
+        throw new PiProtocolError(`${what} \u5FC5\u987B\u4E3A\u6B63\u6574\u6570`);
+      }
+      return v;
+    }
+    function parsePiModelRef(value2, label) {
+      assertRecord(value2, label);
+      assertKeys(value2, MODEL_REF_KEYS, label);
+      assertString(value2.provider, `${label}.provider`, MAX_SPEC_STRING);
+      assertString(value2.modelId, `${label}.modelId`, MAX_SPEC_STRING);
+      const ref = {
+        provider: value2.provider,
+        modelId: value2.modelId
+      };
+      if (value2.maxThinkingLevel !== void 0) {
+        assertString(value2.maxThinkingLevel, `${label}.maxThinkingLevel`, MAX_SPEC_STRING);
+        if (!isPiThinkingLevel(value2.maxThinkingLevel)) {
+          throw new PiProtocolError(`${label}.maxThinkingLevel \u975E\u6CD5`);
+        }
+        ref.maxThinkingLevel = value2.maxThinkingLevel;
+      }
+      return ref;
+    }
+    function parsePiRuntimeSpecV1(value2) {
+      assertRecord(value2, "PiRuntimeSpecV1");
+      assertKeys(value2, SPEC_KEYS, "PiRuntimeSpecV1");
+      if (value2.schemaVersion !== exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION) {
+        throw new PiProtocolError(`PiRuntimeSpecV1 schemaVersion \u4E0D\u652F\u6301: ${String(value2.schemaVersion)}`);
+      }
+      assertString(value2.specId, "specId", MAX_SPEC_STRING);
+      assertString(value2.profileId, "profileId", MAX_SPEC_STRING);
+      const runtimeRevision = requireRuntimeRevision(value2.runtimeRevision, "runtimeRevision");
+      const profileRevision = requirePositiveInt(value2.profileRevision, "profileRevision");
+      const policy = value2.modelPolicy;
+      assertRecord(policy, "modelPolicy");
+      assertKeys(policy, MODEL_POLICY_KEYS, "modelPolicy");
+      const defaultModelRaw = policy.defaultModel;
+      assertRecord(defaultModelRaw, "modelPolicy.defaultModel");
+      assertKeys(defaultModelRaw, MODEL_REF_KEYS, "modelPolicy.defaultModel");
+      const defaultModelRef = parsePiModelRef(defaultModelRaw, "modelPolicy.defaultModel");
+      if (defaultModelRef.maxThinkingLevel !== void 0) {
+        throw new PiProtocolError("modelPolicy.defaultModel \u4E0D\u63A5\u53D7 maxThinkingLevel");
+      }
+      if (!Array.isArray(policy.allowedModels) || policy.allowedModels.length === 0 || policy.allowedModels.length > MAX_ALLOWED_MODELS) {
+        throw new PiProtocolError(`allowedModels \u6570\u91CF\u5FC5\u987B\u5728 1-${MAX_ALLOWED_MODELS} \u4E4B\u95F4`);
+      }
+      const allowedModels = policy.allowedModels.map((item, index) => parsePiModelRef(item, `allowedModels[${index}]`));
+      if (new Set(allowedModels.map((m) => `${m.provider}/${m.modelId}`)).size !== allowedModels.length) {
+        throw new PiProtocolError("allowedModels \u5B58\u5728\u91CD\u590D\u9879");
+      }
+      assertString(policy.defaultThinkingLevel, "modelPolicy.defaultThinkingLevel", MAX_SPEC_STRING);
+      if (!isPiThinkingLevel(policy.defaultThinkingLevel)) {
+        throw new PiProtocolError("modelPolicy.defaultThinkingLevel \u975E\u6CD5");
+      }
+      return {
+        schemaVersion: exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION,
+        specId: value2.specId,
+        profileId: value2.profileId,
+        profileRevision,
+        modelPolicy: {
+          defaultModel: {
+            provider: defaultModelRef.provider,
+            modelId: defaultModelRef.modelId
+          },
+          allowedModels,
+          defaultThinkingLevel: policy.defaultThinkingLevel
+        },
+        runtimeRevision
+      };
+    }
+    function parsePiRuntimeSpecMessage(value2) {
+      assertRecord(value2, "PiRuntimeSpecMessage");
+      assertKeys(value2, /* @__PURE__ */ new Set(["spec", "credentials"]), "PiRuntimeSpecMessage");
+      return {
+        spec: parsePiRuntimeSpecV1(value2.spec),
+        credentials: parsePiCredentialLease(value2.credentials)
+      };
+    }
+    function parsePiModelMetadata(value2, label) {
+      assertRecord(value2, label);
+      assertKeys(value2, /* @__PURE__ */ new Set(["id", "name", "api", "reasoning", "input", "contextWindow", "maxTokens", "cost", "compat"]), label);
+      assertString(value2.id, `${label}.id`, MAX_SPEC_STRING);
+      assertString(value2.name, `${label}.name`, MAX_SPEC_STRING);
+      if (value2.api !== void 0 && !PROVIDER_PROTOCOLS.has(value2.api))
+        throw new PiProtocolError(`${label}.api \u4E0D\u53D7\u652F\u6301`);
+      if (typeof value2.reasoning !== "boolean")
+        throw new PiProtocolError(`${label}.reasoning \u5FC5\u987B\u662F\u5E03\u5C14`);
+      if (!Array.isArray(value2.input) || value2.input.length === 0 || value2.input.some((item) => item !== "text" && item !== "image"))
+        throw new PiProtocolError(`${label}.input \u975E\u6CD5`);
+      if (typeof value2.contextWindow !== "number" || !Number.isInteger(value2.contextWindow) || value2.contextWindow < 1)
+        throw new PiProtocolError(`${label}.contextWindow \u975E\u6CD5`);
+      if (typeof value2.maxTokens !== "number" || !Number.isInteger(value2.maxTokens) || value2.maxTokens < 1)
+        throw new PiProtocolError(`${label}.maxTokens \u975E\u6CD5`);
+      assertRecord(value2.cost, `${label}.cost`);
+      assertKeys(value2.cost, /* @__PURE__ */ new Set(["input", "output", "cacheRead", "cacheWrite"]), `${label}.cost`);
+      const cost = {};
+      for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
+        const raw = value2.cost[key];
+        if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0)
+          throw new PiProtocolError(`${label}.cost.${key} \u975E\u6CD5`);
+        cost[key] = raw;
+      }
+      if (value2.compat !== void 0)
+        assertRecord(value2.compat, `${label}.compat`);
+      return {
+        id: value2.id,
+        name: value2.name,
+        ...value2.api !== void 0 ? { api: value2.api } : {},
+        reasoning: value2.reasoning,
+        input: [...value2.input],
+        contextWindow: value2.contextWindow,
+        maxTokens: value2.maxTokens,
+        cost,
+        ...value2.compat !== void 0 ? { compat: value2.compat } : {}
+      };
+    }
+    function parsePiProviderModel(value2, label) {
+      assertRecord(value2, label);
+      assertKeys(value2, /* @__PURE__ */ new Set(["id", "name", "metadataSource", "metadata"]), label);
+      assertString(value2.id, `${label}.id`, MAX_SPEC_STRING);
+      assertString(value2.name, `${label}.name`, MAX_SPEC_STRING);
+      if (value2.metadataSource === "catalog") {
+        if (value2.metadata !== void 0)
+          throw new PiProtocolError(`${label} catalog \u6A21\u578B\u4E0D\u5F97\u643A\u5E26 metadata`);
+        return { id: value2.id, name: value2.name, metadataSource: "catalog" };
+      }
+      if (value2.metadataSource !== "explicit")
+        throw new PiProtocolError(`${label}.metadataSource \u4E0D\u53D7\u652F\u6301`);
+      const metadata = parsePiModelMetadata(value2.metadata, `${label}.metadata`);
+      if (metadata.id !== value2.id)
+        throw new PiProtocolError(`${label}.metadata.id \u4E0E id \u4E0D\u4E00\u81F4`);
+      return { id: value2.id, name: value2.name, metadataSource: "explicit", metadata };
+    }
+    var MAX_BUNDLE_RESOURCE_IDS = 64;
+    function parsePiRequiredBundle(value2) {
+      assertRecord(value2, "requiredBundle");
+      assertKeys(value2, /* @__PURE__ */ new Set(["protocolVersion", "bundleVersion", "resourceIds"]), "requiredBundle");
+      if (value2.protocolVersion !== exports2.PI_BUNDLE_PROTOCOL_VERSION) {
+        throw new PiProtocolError(`requiredBundle.protocolVersion \u4E0D\u652F\u6301\uFF1A${String(value2.protocolVersion)}`);
+      }
+      assertString(value2.bundleVersion, "requiredBundle.bundleVersion", MAX_SPEC_STRING);
+      if (!Array.isArray(value2.resourceIds) || value2.resourceIds.length === 0 || value2.resourceIds.length > MAX_BUNDLE_RESOURCE_IDS) {
+        throw new PiProtocolError("requiredBundle.resourceIds \u6570\u91CF\u975E\u6CD5");
+      }
+      const resourceIds = [];
+      for (const [index, item] of value2.resourceIds.entries()) {
+        assertString(item, `requiredBundle.resourceIds[${index}]`, MAX_SPEC_STRING);
+        resourceIds.push(item);
+      }
+      if (new Set(resourceIds).size !== resourceIds.length) {
+        throw new PiProtocolError("requiredBundle.resourceIds \u5B58\u5728\u91CD\u590D\u9879");
+      }
+      return {
+        protocolVersion: exports2.PI_BUNDLE_PROTOCOL_VERSION,
+        bundleVersion: value2.bundleVersion,
+        resourceIds
+      };
+    }
+    function parsePiRuntimeSpecV3(value2) {
+      assertRecord(value2, "PiRuntimeSpecV3");
+      assertKeys(value2, /* @__PURE__ */ new Set(["schemaVersion", "specId", "profileId", "profileRevision", "providers", "modelPolicy", "toolPolicy", "requiredBundle", "runtimeRevision"]), "PiRuntimeSpecV3");
+      if (value2.schemaVersion !== 3)
+        throw new PiProtocolError(`PiRuntimeSpecV3 schemaVersion \u4E0D\u652F\u6301: ${String(value2.schemaVersion)}`);
+      if (!("toolPolicy" in value2))
+        throw new PiProtocolError("PiRuntimeSpecV3 \u7F3A\u5C11\u5B57\u6BB5 toolPolicy");
+      assertString(value2.specId, "specId", MAX_SPEC_STRING);
+      assertString(value2.profileId, "profileId", MAX_SPEC_STRING);
+      const profileRevision = requirePositiveInt(value2.profileRevision, "profileRevision");
+      const runtimeRevision = requireRuntimeRevision(value2.runtimeRevision, "runtimeRevision");
+      if (!Array.isArray(value2.providers) || value2.providers.length === 0 || value2.providers.length > MAX_LEASE_ENTRIES)
+        throw new PiProtocolError("providers \u6570\u91CF\u975E\u6CD5");
+      const providerIds = /* @__PURE__ */ new Set();
+      const providers = value2.providers.map((raw, index) => {
+        const label = `providers[${index}]`;
+        assertRecord(raw, label);
+        assertKeys(raw, /* @__PURE__ */ new Set(["providerId", "name", "protocol", "baseUrl", "headers", "models"]), label);
+        assertString(raw.providerId, `${label}.providerId`, MAX_SPEC_STRING);
+        if (providerIds.has(raw.providerId))
+          throw new PiProtocolError("providers \u5B58\u5728\u91CD\u590D providerId");
+        providerIds.add(raw.providerId);
+        assertString(raw.name, `${label}.name`, MAX_SPEC_STRING);
+        if (!PROVIDER_PROTOCOLS.has(raw.protocol))
+          throw new PiProtocolError(`${label}.protocol \u4E0D\u53D7\u652F\u6301`);
+        if (raw.baseUrl !== void 0) {
+          assertString(raw.baseUrl, `${label}.baseUrl`, MAX_SPEC_STRING * 8);
+          try {
+            const url2 = new URL(raw.baseUrl);
+            if (!["http:", "https:"].includes(url2.protocol) || url2.username || url2.password || url2.search || url2.hash)
+              throw new Error();
+          } catch {
+            throw new PiProtocolError(`${label}.baseUrl \u975E\u6CD5`);
+          }
+        }
+        assertRecord(raw.headers, `${label}.headers`);
+        for (const [header, headerValue] of Object.entries(raw.headers)) {
+          if (/authorization|x-api-key|api-key|token|secret|password/i.test(header))
+            throw new PiProtocolError(`${label}.headers \u542B\u79D8\u5BC6\u5B57\u6BB5`);
+          assertString(headerValue, `${label}.headers.${header}`, MAX_API_KEY_LENGTH);
+        }
+        if (!Array.isArray(raw.models) || raw.models.length === 0 || raw.models.length > MAX_PROVIDER_MODELS)
+          throw new PiProtocolError(`${label}.models \u6570\u91CF\u975E\u6CD5`);
+        const modelIds = /* @__PURE__ */ new Set();
+        const models = raw.models.map((model, modelIndex) => {
+          const parsed = parsePiProviderModel(model, `${label}.models[${modelIndex}]`);
+          if (modelIds.has(parsed.id))
+            throw new PiProtocolError(`${label}.models \u5B58\u5728\u91CD\u590D\u9879`);
+          modelIds.add(parsed.id);
+          return parsed;
+        });
+        return { providerId: raw.providerId, name: raw.name, protocol: raw.protocol, ...raw.baseUrl !== void 0 ? { baseUrl: raw.baseUrl } : {}, headers: { ...raw.headers }, models };
+      });
+      assertRecord(value2.modelPolicy, "modelPolicy");
+      assertKeys(value2.modelPolicy, MODEL_POLICY_KEYS, "modelPolicy");
+      const defaultModel = parsePiModelRef(value2.modelPolicy.defaultModel, "modelPolicy.defaultModel");
+      if (defaultModel.maxThinkingLevel !== void 0)
+        throw new PiProtocolError("defaultModel \u4E0D\u63A5\u53D7 maxThinkingLevel");
+      if (!Array.isArray(value2.modelPolicy.allowedModels) || value2.modelPolicy.allowedModels.length === 0 || value2.modelPolicy.allowedModels.length > MAX_ALLOWED_MODELS)
+        throw new PiProtocolError("allowedModels \u6570\u91CF\u975E\u6CD5");
+      const allowedModels = value2.modelPolicy.allowedModels.map((item, index) => parsePiModelRef(item, `allowedModels[${index}]`));
+      if (new Set(allowedModels.map((model) => `${model.provider}/${model.modelId}`)).size !== allowedModels.length)
+        throw new PiProtocolError("allowedModels \u5B58\u5728\u91CD\u590D\u9879");
+      const catalog = new Set(providers.flatMap((provider) => provider.models.map((model) => `${provider.providerId}/${model.id}`)));
+      for (const model of [defaultModel, ...allowedModels])
+        if (!catalog.has(`${model.provider}/${model.modelId}`))
+          throw new PiProtocolError(`\u6A21\u578B ${model.provider}/${model.modelId} \u4E0D\u5728 Provider \u76EE\u5F55`);
+      assertString(value2.modelPolicy.defaultThinkingLevel, "modelPolicy.defaultThinkingLevel", MAX_SPEC_STRING);
+      if (!isPiThinkingLevel(value2.modelPolicy.defaultThinkingLevel))
+        throw new PiProtocolError("modelPolicy.defaultThinkingLevel \u975E\u6CD5");
+      const toolPolicy = parsePiToolPolicy(value2.toolPolicy);
+      const requiredBundle = value2.requiredBundle === void 0 ? void 0 : parsePiRequiredBundle(value2.requiredBundle);
+      return { schemaVersion: 3, specId: value2.specId, profileId: value2.profileId, profileRevision, providers, modelPolicy: { defaultModel: { provider: defaultModel.provider, modelId: defaultModel.modelId }, allowedModels, defaultThinkingLevel: value2.modelPolicy.defaultThinkingLevel }, toolPolicy, ...requiredBundle ? { requiredBundle } : {}, runtimeRevision };
+    }
+    function parsePiCredentialLeaseV2(value2) {
+      assertRecord(value2, "PiCredentialLeaseV2");
+      assertKeys(value2, LEASE_KEYS, "PiCredentialLeaseV2");
+      assertString(value2.issuedAt, "issuedAt", MAX_SPEC_STRING);
+      if (Number.isNaN(Date.parse(value2.issuedAt)))
+        throw new PiProtocolError("issuedAt \u5FC5\u987B\u662F\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u7B26\u4E32");
+      if (!Array.isArray(value2.entries) || value2.entries.length > MAX_LEASE_ENTRIES)
+        throw new PiProtocolError("credentials.entries \u6570\u91CF\u975E\u6CD5");
+      const ids = /* @__PURE__ */ new Set();
+      const entries = value2.entries.map((item, index) => {
+        const label = `entries[${index}]`;
+        assertRecord(item, label);
+        assertKeys(item, /* @__PURE__ */ new Set(["providerId", "apiKey"]), label);
+        assertString(item.providerId, `${label}.providerId`, MAX_SPEC_STRING);
+        if (ids.has(item.providerId))
+          throw new PiProtocolError("credentials.entries \u5B58\u5728\u91CD\u590D providerId");
+        ids.add(item.providerId);
+        assertString(item.apiKey, `${label}.apiKey`, MAX_API_KEY_LENGTH);
+        return { providerId: item.providerId, apiKey: item.apiKey };
+      });
+      return { issuedAt: value2.issuedAt, entries };
+    }
+    function parsePiRuntimeSpecMessageV3(value2) {
+      assertRecord(value2, "PiRuntimeSpecMessageV3");
+      assertKeys(value2, /* @__PURE__ */ new Set(["spec", "credentials"]), "PiRuntimeSpecMessageV3");
+      const spec = parsePiRuntimeSpecV3(value2.spec);
+      const credentials = parsePiCredentialLeaseV2(value2.credentials);
+      const providers = new Set(spec.providers.map((provider) => provider.providerId));
+      if (providers.size !== credentials.entries.length || credentials.entries.some((entry) => !providers.has(entry.providerId)))
+        throw new PiProtocolError("credentials \u4E0E providers \u4E0D\u5339\u914D");
+      return { spec, credentials };
+    }
+    function parsePiCredentialLease(value2) {
+      assertRecord(value2, "PiCredentialLease");
+      assertKeys(value2, LEASE_KEYS, "PiCredentialLease");
+      assertString(value2.issuedAt, "issuedAt", MAX_SPEC_STRING);
+      if (Number.isNaN(Date.parse(value2.issuedAt)))
+        throw new PiProtocolError("issuedAt \u5FC5\u987B\u662F\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u7B26\u4E32");
+      if (!Array.isArray(value2.entries) || value2.entries.length > MAX_LEASE_ENTRIES)
+        throw new PiProtocolError(`credentials.entries \u6570\u91CF\u4E0D\u5F97\u5927\u4E8E ${MAX_LEASE_ENTRIES}`);
+      const entries = value2.entries.map((item, index) => {
+        const label = `entries[${index}]`;
+        assertRecord(item, label);
+        assertKeys(item, LEASE_ENTRY_KEYS, label);
+        assertString(item.provider, `${label}.provider`, MAX_SPEC_STRING);
+        assertString(item.apiKey, `${label}.apiKey`, MAX_API_KEY_LENGTH);
+        return { provider: item.provider, apiKey: item.apiKey };
+      });
+      return { issuedAt: value2.issuedAt, entries };
+    }
+    function parsePiRuntimeAck(value2) {
+      assertRecord(value2, "PiRuntimeAck");
+      assertKeys(value2, ACK_KEYS, "PiRuntimeAck");
+      assertString(value2.clientId, "clientId", MAX_SPEC_STRING);
+      const specId = value2.specId === null ? null : (() => {
+        assertString(value2.specId, "specId", MAX_SPEC_STRING);
+        return value2.specId;
+      })();
+      const runtimeRevision = value2.runtimeRevision === null ? null : requireRuntimeRevision(value2.runtimeRevision, "runtimeRevision");
+      if (typeof value2.configState !== "string" || !CONFIG_STATES.has(value2.configState)) {
+        throw new PiProtocolError("configState \u5FC5\u987B\u4E3A pending/ready/incompatible/stale");
+      }
+      const ack = {
+        clientId: value2.clientId,
+        specId,
+        runtimeRevision,
+        configState: value2.configState
+      };
+      if (value2.reasonCode !== void 0) {
+        if (typeof value2.reasonCode !== "string" || !ERROR_CODES.has(value2.reasonCode)) {
+          throw new PiProtocolError("reasonCode \u5FC5\u987B\u4E3A\u5DF2\u77E5\u9519\u8BEF\u7801");
+        }
+        ack.reasonCode = value2.reasonCode;
+      }
+      if (value2.resolvedModels !== void 0) {
+        if (!Array.isArray(value2.resolvedModels) || value2.resolvedModels.length > MAX_ALLOWED_MODELS) {
+          throw new PiProtocolError("resolvedModels \u5FC5\u987B\u4E3A\u6709\u754C\u6570\u7EC4");
+        }
+        ack.resolvedModels = value2.resolvedModels.map((item, index) => parsePiModelRef(item, `resolvedModels[${index}]`));
+      }
+      if (value2.unavailableModels !== void 0) {
+        if (!Array.isArray(value2.unavailableModels) || value2.unavailableModels.length > MAX_ALLOWED_MODELS) {
+          throw new PiProtocolError("unavailableModels \u5FC5\u987B\u4E3A\u6709\u754C\u6570\u7EC4");
+        }
+        ack.unavailableModels = value2.unavailableModels.map((item, index) => {
+          const label = `unavailableModels[${index}]`;
+          assertRecord(item, label);
+          assertKeys(item, UNAVAILABLE_MODEL_KEYS, label);
+          assertString(item.provider, `${label}.provider`, MAX_SPEC_STRING);
+          assertString(item.modelId, `${label}.modelId`, MAX_SPEC_STRING);
+          assertString(item.reason, `${label}.reason`, MAX_SPEC_STRING);
+          return {
+            provider: item.provider,
+            modelId: item.modelId,
+            reason: item.reason
+          };
+        });
+      }
+      if (value2.activeRuntimeRevision !== void 0) {
+        ack.activeRuntimeRevision = value2.activeRuntimeRevision === null ? null : requireRuntimeRevision(value2.activeRuntimeRevision, "activeRuntimeRevision");
+      }
+      return ack;
+    }
+    exports2.PI_READ_ACTIONS = [
+      "capability.get",
+      "project.resolve",
+      "sessions.list",
+      "session.get",
+      "session.context",
+      "session.entryContent",
+      "agent.state",
+      "agent.stats",
+      "agent.commands",
+      "models.list"
+    ];
+    exports2.PI_WORKER_ACTIONS = [
+      "session.new",
+      "session.rename",
+      "session.delete",
+      "session.fork",
+      "session.clone",
+      "session.navigate",
+      "agent.prompt",
+      "agent.steer",
+      "agent.followUp",
+      "agent.abort",
+      "agent.compact",
+      "agent.abortCompact",
+      "model.set",
+      "thinking.set",
+      "extension.respond",
+      "session.import.list",
+      "session.import.preview",
+      "session.import.run"
+    ];
+    var PI_READ_ACTION_SET = new Set(exports2.PI_READ_ACTIONS);
+    var PI_WORKER_ACTION_SET = new Set(exports2.PI_WORKER_ACTIONS);
+    function isPiWorkerAction(action) {
+      return PI_WORKER_ACTION_SET.has(action);
+    }
+    function isPiReadAction(action) {
+      return PI_READ_ACTION_SET.has(action);
+    }
+  }
+});
+
+// ../shared/dist/parse-internal.js
+var require_parse_internal = __commonJS({
+  "../shared/dist/parse-internal.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.assertRecord = assertRecord;
+    exports2.assertExactKeys = assertExactKeys;
+    exports2.assertNonEmptyString = assertNonEmptyString;
+    var pi_js_1 = require_pi();
+    function assertRecord(value2, what) {
+      if (typeof value2 !== "object" || value2 === null || Array.isArray(value2)) {
+        throw new pi_js_1.PiProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+      }
+    }
+    function assertExactKeys(value2, allowed, what) {
+      const allowedSet = new Set(allowed);
+      for (const key of Object.keys(value2)) {
+        if (!allowedSet.has(key))
+          throw new pi_js_1.PiProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      for (const key of allowed) {
+        if (!(key in value2))
+          throw new pi_js_1.PiProtocolError(`${what} \u7F3A\u5C11\u5B57\u6BB5 ${key}`);
+      }
+    }
+    function assertNonEmptyString(value2, what) {
+      if (typeof value2 !== "string" || value2.length === 0) {
+        throw new pi_js_1.PiProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      }
+    }
+  }
+});
+
+// ../shared/dist/pi-bundle.js
+var require_pi_bundle = __commonJS({
+  "../shared/dist/pi-bundle.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.PI_BUNDLE_RESOURCE_KINDS = exports2.PI_BUNDLE_PROTOCOL_VERSION = void 0;
+    exports2.parsePiBundleManifest = parsePiBundleManifest;
+    var pi_js_1 = require_pi();
+    Object.defineProperty(exports2, "PI_BUNDLE_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return pi_js_1.PI_BUNDLE_PROTOCOL_VERSION;
+    } });
+    var parse_internal_js_1 = require_parse_internal();
+    exports2.PI_BUNDLE_RESOURCE_KINDS = [
+      "extension",
+      "skill",
+      "prompt"
+    ];
+    var MANIFEST_KEYS = [
+      "protocolVersion",
+      "bundleVersion",
+      "piSdkVersion",
+      "resources"
+    ];
+    var RESOURCE_KEYS = ["id", "kind", "version", "path", "sha256"];
+    var RESOURCE_ID_PATTERN = /^[a-z0-9]+(?:\.[a-z0-9-]+)*$/;
+    var SHA256_PATTERN = /^[0-9a-f]{64}$/;
+    function assertRelativeResourcePath(value2, what) {
+      (0, parse_internal_js_1.assertNonEmptyString)(value2, what);
+      if (value2.startsWith("/") || value2.includes("\\")) {
+        throw new pi_js_1.PiProtocolError(`${what} \u5FC5\u987B\u662F\u4EE5\u6B63\u659C\u6760\u5206\u9694\u7684\u76F8\u5BF9\u8DEF\u5F84`);
+      }
+      const segments = value2.split("/");
+      for (const segment of segments) {
+        if (segment.length === 0 || segment === "." || segment === "..") {
+          throw new pi_js_1.PiProtocolError(`${what} \u542B\u9003\u9038\u6216\u7A7A\u8DEF\u5F84\u7247\u6BB5`);
+        }
+      }
+      return value2;
+    }
+    function parseBundleResource(value2, index) {
+      const what = `manifest.resources[${index}]`;
+      (0, parse_internal_js_1.assertRecord)(value2, what);
+      (0, parse_internal_js_1.assertExactKeys)(value2, RESOURCE_KEYS, what);
+      if (typeof value2.id !== "string" || !RESOURCE_ID_PATTERN.test(value2.id)) {
+        throw new pi_js_1.PiProtocolError(`${what}.id \u975E\u6CD5\uFF1A${String(value2.id)}`);
+      }
+      if (typeof value2.kind !== "string" || !exports2.PI_BUNDLE_RESOURCE_KINDS.includes(value2.kind)) {
+        throw new pi_js_1.PiProtocolError(`${what}.kind \u4E0D\u652F\u6301\uFF1A${String(value2.kind)}`);
+      }
+      (0, parse_internal_js_1.assertNonEmptyString)(value2.version, `${what}.version`);
+      const path = assertRelativeResourcePath(value2.path, `${what}.path`);
+      if (typeof value2.sha256 !== "string" || !SHA256_PATTERN.test(value2.sha256)) {
+        throw new pi_js_1.PiProtocolError(`${what}.sha256 \u5FC5\u987B\u662F 64 \u4F4D\u5C0F\u5199\u5341\u516D\u8FDB\u5236`);
+      }
+      return {
+        id: value2.id,
+        kind: value2.kind,
+        version: value2.version,
+        path,
+        sha256: value2.sha256
+      };
+    }
+    function parsePiBundleManifest(value2) {
+      (0, parse_internal_js_1.assertRecord)(value2, "PiBundleManifest");
+      (0, parse_internal_js_1.assertExactKeys)(value2, MANIFEST_KEYS, "PiBundleManifest");
+      if (value2.protocolVersion !== pi_js_1.PI_BUNDLE_PROTOCOL_VERSION) {
+        throw new pi_js_1.PiProtocolError(`PiBundleManifest protocolVersion \u4E0D\u652F\u6301\uFF1A${String(value2.protocolVersion)}`);
+      }
+      (0, parse_internal_js_1.assertNonEmptyString)(value2.bundleVersion, "PiBundleManifest.bundleVersion");
+      (0, parse_internal_js_1.assertNonEmptyString)(value2.piSdkVersion, "PiBundleManifest.piSdkVersion");
+      if (!Array.isArray(value2.resources)) {
+        throw new pi_js_1.PiProtocolError("PiBundleManifest.resources \u5FC5\u987B\u662F\u6570\u7EC4");
+      }
+      const seen = /* @__PURE__ */ new Set();
+      const resources = value2.resources.map((resource, index) => {
+        const parsed = parseBundleResource(resource, index);
+        if (seen.has(parsed.id)) {
+          throw new pi_js_1.PiProtocolError(`PiBundleManifest \u91CD\u590D\u8D44\u6E90 id\uFF1A${parsed.id}`);
+        }
+        seen.add(parsed.id);
+        return parsed;
+      });
+      return {
+        protocolVersion: value2.protocolVersion,
+        bundleVersion: value2.bundleVersion,
+        piSdkVersion: value2.piSdkVersion,
+        resources
+      };
     }
   }
 });
@@ -1317,6 +2152,465 @@ var require_terminal = __commonJS({
   }
 });
 
+// ../shared/dist/pi-admin.js
+var require_pi_admin = __commonJS({
+  "../shared/dist/pi-admin.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.PiAdminProtocolError = void 0;
+    exports2.parsePiProviderDiscoveryInput = parsePiProviderDiscoveryInput;
+    exports2.parsePiProviderCreateInput = parsePiProviderCreateInput;
+    exports2.parsePiProviderUpdateInput = parsePiProviderUpdateInput;
+    exports2.parsePiProfileCreateInput = parsePiProfileCreateInput;
+    exports2.parsePiProfileUpdateInput = parsePiProfileUpdateInput;
+    exports2.parsePiCredentialCreateInput = parsePiCredentialCreateInput;
+    exports2.parsePiCredentialUpdateInput = parsePiCredentialUpdateInput;
+    var pi_js_1 = require_pi();
+    var PiAdminProtocolError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "PiAdminProtocolError";
+      }
+    };
+    exports2.PiAdminProtocolError = PiAdminProtocolError;
+    var MAX_NAME = 128;
+    var MAX_ID = 128;
+    var MAX_API_KEY = 4096;
+    var MAX_BASE_URL = 2048;
+    var MAX_HEADERS = 32;
+    var MAX_HEADER_VALUE = 4096;
+    var MAX_PROVIDER_MODELS = 256;
+    var PROVIDER_PROTOCOLS = [
+      "openai-completions",
+      "openai-responses",
+      "anthropic-messages",
+      "google-generative-ai"
+    ];
+    var PROVIDER_KEYS = /* @__PURE__ */ new Set([
+      "name",
+      "runtimeProviderId",
+      "protocol",
+      "baseUrl",
+      "headers",
+      "models",
+      "enabled",
+      "credential"
+    ]);
+    var PROVIDER_CREDENTIAL_KEYS = /* @__PURE__ */ new Set(["name", "apiKey"]);
+    var PROVIDER_MODEL_KEYS = /* @__PURE__ */ new Set([
+      "id",
+      "name",
+      "metadataSource",
+      "metadata"
+    ]);
+    var PROVIDER_MODEL_METADATA_KEYS = /* @__PURE__ */ new Set([
+      "id",
+      "name",
+      "api",
+      "reasoning",
+      "input",
+      "contextWindow",
+      "maxTokens",
+      "cost",
+      "compat"
+    ]);
+    var DISCOVERY_KEYS = /* @__PURE__ */ new Set([
+      "protocol",
+      "baseUrl",
+      "headers",
+      "apiKey",
+      "runtimeProviderId"
+    ]);
+    var MODEL_COST_KEYS = /* @__PURE__ */ new Set(["input", "output", "cacheRead", "cacheWrite"]);
+    var MAX_ALLOWED_MODELS = 64;
+    var MAX_CREDENTIAL_IDS = 16;
+    var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "max"];
+    var MODEL_REF_KEYS = /* @__PURE__ */ new Set(["provider", "modelId", "maxThinkingLevel"]);
+    var PROFILE_CREATE_KEYS = /* @__PURE__ */ new Set([
+      "name",
+      "defaultModel",
+      "allowedModels",
+      "defaultThinkingLevel",
+      "enabled",
+      "credentialIds",
+      "enabledResourceIds",
+      "toolPolicy"
+    ]);
+    var DEFAULT_MODEL_KEYS = /* @__PURE__ */ new Set(["provider", "modelId"]);
+    var MAX_RESOURCE_IDS = 64;
+    var PROFILE_UPDATE_KEYS = PROFILE_CREATE_KEYS;
+    var CREDENTIAL_CREATE_KEYS = /* @__PURE__ */ new Set(["name", "providerConfigId", "apiKey"]);
+    var CREDENTIAL_UPDATE_KEYS = /* @__PURE__ */ new Set(["name", "apiKey"]);
+    function isRecord2(v) {
+      return typeof v === "object" && v !== null && !Array.isArray(v);
+    }
+    function requireString(v, what, max = MAX_NAME) {
+      if (typeof v !== "string" || v.length === 0) {
+        throw new PiAdminProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      }
+      if (v.length > max) {
+        throw new PiAdminProtocolError(`${what} \u957F\u5EA6\u8D85\u8FC7\u4E0A\u9650 ${max}`);
+      }
+      return v;
+    }
+    function requireOptionalString(v, what, max = MAX_NAME) {
+      if (v === void 0)
+        return void 0;
+      return requireString(v, what, max);
+    }
+    function rejectUnknownKeys(value2, allowed, what) {
+      for (const key of Object.keys(value2)) {
+        if (!allowed.has(key)) {
+          throw new PiAdminProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function parseProviderProtocol(value2, what) {
+      const protocol4 = requireString(value2, what, MAX_NAME);
+      if (!PROVIDER_PROTOCOLS.includes(protocol4)) {
+        throw new PiAdminProtocolError(`${what} \u4E0D\u53D7\u652F\u6301`);
+      }
+      return protocol4;
+    }
+    function parseProviderBaseUrl(value2) {
+      if (value2 === void 0 || value2 === null || value2 === "")
+        return null;
+      const baseUrl = requireString(value2, "baseUrl", MAX_BASE_URL);
+      if (/[\u0000-\u0020]/.test(baseUrl)) {
+        throw new PiAdminProtocolError("baseUrl \u542B\u63A7\u5236\u5B57\u7B26\u6216\u7A7A\u767D");
+      }
+      let parsed;
+      try {
+        parsed = new URL(baseUrl);
+      } catch {
+        throw new PiAdminProtocolError("baseUrl \u5FC5\u987B\u662F\u5408\u6CD5 URL");
+      }
+      if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+        throw new PiAdminProtocolError("baseUrl \u53EA\u5141\u8BB8\u65E0\u51ED\u636E\u7684 http(s) URL");
+      }
+      return baseUrl.replace(/\/$/, "");
+    }
+    function parseProviderHeaders(value2) {
+      if (value2 === void 0)
+        return {};
+      if (!isRecord2(value2) || Object.keys(value2).length > MAX_HEADERS) {
+        throw new PiAdminProtocolError(`headers \u5FC5\u987B\u662F\u6700\u591A ${MAX_HEADERS} \u9879\u7684\u5BF9\u8C61`);
+      }
+      const out = {};
+      for (const [name, raw] of Object.entries(value2)) {
+        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /authorization|x-api-key|api-key|token|secret|password/i.test(name)) {
+          throw new PiAdminProtocolError(`Header ${name} \u542B\u79D8\u5BC6\u5B57\u6BB5\u6216\u683C\u5F0F\u975E\u6CD5`);
+        }
+        out[name] = requireString(raw, `headers.${name}`, MAX_HEADER_VALUE);
+      }
+      return out;
+    }
+    function parseProviderModelMetadata(value2, label) {
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError(`${label} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      rejectUnknownKeys(value2, PROVIDER_MODEL_METADATA_KEYS, label);
+      const id = requireString(value2.id, `${label}.id`, MAX_ID);
+      const name = value2.name === void 0 ? id : requireString(value2.name, `${label}.name`);
+      const api = value2.api === void 0 ? void 0 : parseProviderProtocol(value2.api, `${label}.api`);
+      if (typeof value2.reasoning !== "boolean")
+        throw new PiAdminProtocolError(`${label}.reasoning \u5FC5\u987B\u4E3A boolean`);
+      if (!Array.isArray(value2.input) || value2.input.length === 0 || value2.input.some((item) => item !== "text" && item !== "image")) {
+        throw new PiAdminProtocolError(`${label}.input \u975E\u6CD5`);
+      }
+      const positive = (raw, field) => {
+        if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1)
+          throw new PiAdminProtocolError(`${label}.${field} \u5FC5\u987B\u4E3A\u6B63\u6574\u6570`);
+        return raw;
+      };
+      if (!isRecord2(value2.cost))
+        throw new PiAdminProtocolError(`${label}.cost \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      rejectUnknownKeys(value2.cost, MODEL_COST_KEYS, `${label}.cost`);
+      const cost = Object.fromEntries(["input", "output", "cacheRead", "cacheWrite"].map((key) => {
+        const raw = value2.cost[key];
+        if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0)
+          throw new PiAdminProtocolError(`${label}.cost.${key} \u975E\u6CD5`);
+        return [key, raw];
+      }));
+      const compat = value2.compat === void 0 ? {} : value2.compat;
+      if (!isRecord2(compat))
+        throw new PiAdminProtocolError(`${label}.compat \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      return {
+        id,
+        name,
+        ...api ? { api } : {},
+        reasoning: value2.reasoning,
+        input: [...value2.input],
+        contextWindow: positive(value2.contextWindow, "contextWindow"),
+        maxTokens: positive(value2.maxTokens, "maxTokens"),
+        cost,
+        compat: { ...compat }
+      };
+    }
+    function parseProviderModel(value2, index) {
+      const label = `models[${index}]`;
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError(`${label} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      rejectUnknownKeys(value2, PROVIDER_MODEL_KEYS, label);
+      const id = requireString(value2.id, `${label}.id`, MAX_ID);
+      const name = value2.name === void 0 ? id : requireString(value2.name, `${label}.name`);
+      if (value2.metadataSource === "catalog") {
+        if (value2.metadata !== void 0) {
+          throw new PiAdminProtocolError(`${label} catalog \u6A21\u578B\u4E0D\u5F97\u643A\u5E26 metadata`);
+        }
+        return { id, name, metadataSource: "catalog" };
+      }
+      if (value2.metadataSource !== "explicit") {
+        throw new PiAdminProtocolError(`${label}.metadataSource \u5FC5\u987B\u662F catalog \u6216 explicit`);
+      }
+      const metadata = parseProviderModelMetadata(value2.metadata, `${label}.metadata`);
+      if (metadata.id !== id) {
+        throw new PiAdminProtocolError(`${label}.metadata.id \u4E0E id \u4E0D\u4E00\u81F4`);
+      }
+      return { id, name, metadataSource: "explicit", metadata };
+    }
+    function parseProviderModels(value2) {
+      if (value2 === void 0)
+        return [];
+      if (!Array.isArray(value2) || value2.length > MAX_PROVIDER_MODELS)
+        throw new PiAdminProtocolError(`models \u5FC5\u987B\u662F\u6700\u591A ${MAX_PROVIDER_MODELS} \u9879\u7684\u6570\u7EC4`);
+      const models = value2.map((item, index) => parseProviderModel(item, index));
+      if (new Set(models.map((model) => model.id)).size !== models.length)
+        throw new PiAdminProtocolError("models \u5B58\u5728\u91CD\u590D\u9879");
+      return models;
+    }
+    function parseProviderCredential(value2) {
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError("credential \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      rejectUnknownKeys(value2, PROVIDER_CREDENTIAL_KEYS, "credential");
+      const input = {
+        apiKey: requireString(value2.apiKey, "credential.apiKey", MAX_API_KEY)
+      };
+      if (value2.name !== void 0) {
+        input.name = requireString(value2.name, "credential.name", MAX_NAME);
+      }
+      return input;
+    }
+    function parsePiProviderDiscoveryInput(value2) {
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError("\u53D1\u73B0\u8BF7\u6C42\u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      rejectUnknownKeys(value2, DISCOVERY_KEYS, "\u53D1\u73B0\u8BF7\u6C42");
+      const baseUrl = parseProviderBaseUrl(value2.baseUrl);
+      if (!baseUrl)
+        throw new PiAdminProtocolError("baseUrl \u4E3A\u5FC5\u586B");
+      const input = {
+        protocol: parseProviderProtocol(value2.protocol, "protocol"),
+        baseUrl,
+        apiKey: requireString(value2.apiKey, "apiKey", MAX_API_KEY)
+      };
+      if (value2.headers !== void 0)
+        input.headers = parseProviderHeaders(value2.headers);
+      if (value2.runtimeProviderId !== void 0) {
+        input.runtimeProviderId = requireString(value2.runtimeProviderId, "runtimeProviderId", MAX_ID);
+      }
+      return input;
+    }
+    function parseProviderInput(value2, partial) {
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError("Provider \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      rejectUnknownKeys(value2, PROVIDER_KEYS, "Provider");
+      const input = {};
+      if (value2.name !== void 0)
+        input.name = requireString(value2.name, "name");
+      if (value2.runtimeProviderId !== void 0)
+        input.runtimeProviderId = requireString(value2.runtimeProviderId, "runtimeProviderId", MAX_ID);
+      if (value2.protocol !== void 0)
+        input.protocol = parseProviderProtocol(value2.protocol, "protocol");
+      if (value2.baseUrl !== void 0)
+        input.baseUrl = parseProviderBaseUrl(value2.baseUrl);
+      if (value2.headers !== void 0)
+        input.headers = parseProviderHeaders(value2.headers);
+      if (value2.models !== void 0)
+        input.models = parseProviderModels(value2.models);
+      if (value2.credential !== void 0) {
+        if (partial)
+          throw new PiAdminProtocolError("Provider \u66F4\u65B0\u4E0D\u63A5\u53D7 credential");
+        input.credential = parseProviderCredential(value2.credential);
+      }
+      if (value2.enabled !== void 0) {
+        if (typeof value2.enabled !== "boolean")
+          throw new PiAdminProtocolError("enabled \u5FC5\u987B\u4E3A boolean");
+        input.enabled = value2.enabled;
+      }
+      if (!partial) {
+        if (!input.name || !input.runtimeProviderId || !input.protocol)
+          throw new PiAdminProtocolError("Provider \u7F3A\u5C11\u5FC5\u586B\u5B57\u6BB5");
+        input.baseUrl ??= null;
+        input.headers ??= {};
+        input.models ??= [];
+      }
+      if (partial && Object.keys(input).length === 0)
+        throw new PiAdminProtocolError("Provider \u66F4\u65B0\u81F3\u5C11\u9700\u8981\u4E00\u4E2A\u5B57\u6BB5");
+      return input;
+    }
+    function parsePiProviderCreateInput(value2) {
+      return parseProviderInput(value2, false);
+    }
+    function parsePiProviderUpdateInput(value2) {
+      return parseProviderInput(value2, true);
+    }
+    function parseAllowedModels(value2) {
+      if (!Array.isArray(value2) || value2.length === 0 || value2.length > MAX_ALLOWED_MODELS) {
+        throw new PiAdminProtocolError(`allowedModels \u6570\u91CF\u5FC5\u987B\u5728 1-${MAX_ALLOWED_MODELS} \u4E4B\u95F4`);
+      }
+      const models = value2.map((item, index) => {
+        const label = `allowedModels[${index}]`;
+        if (!isRecord2(item))
+          throw new PiAdminProtocolError(`${label} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+        rejectUnknownKeys(item, MODEL_REF_KEYS, label);
+        const ref = {
+          provider: requireString(item.provider, `${label}.provider`),
+          modelId: requireString(item.modelId, `${label}.modelId`)
+        };
+        if (item.maxThinkingLevel !== void 0) {
+          const level = requireString(item.maxThinkingLevel, `${label}.maxThinkingLevel`);
+          if (!THINKING_LEVELS.includes(level)) {
+            throw new PiAdminProtocolError(`${label}.maxThinkingLevel \u975E\u6CD5`);
+          }
+          ref.maxThinkingLevel = level;
+        }
+        return ref;
+      });
+      if (new Set(models.map((m) => `${m.provider}/${m.modelId}`)).size !== models.length) {
+        throw new PiAdminProtocolError("allowedModels \u5B58\u5728\u91CD\u590D\u9879");
+      }
+      return models;
+    }
+    function parseThinkingLevel(value2) {
+      const level = requireString(value2, "defaultThinkingLevel");
+      if (!THINKING_LEVELS.includes(level)) {
+        throw new PiAdminProtocolError("defaultThinkingLevel \u975E\u6CD5");
+      }
+      return level;
+    }
+    function parseCredentialIds(value2) {
+      if (!Array.isArray(value2) || value2.length > MAX_CREDENTIAL_IDS) {
+        throw new PiAdminProtocolError(`credentialIds \u5FC5\u987B\u4E3A\u957F\u5EA6 0-${MAX_CREDENTIAL_IDS} \u7684\u6570\u7EC4`);
+      }
+      return value2.map((id, index) => requireString(id, `credentialIds[${index}]`, MAX_ID));
+    }
+    function parseDefaultModel(value2) {
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError("defaultModel \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      rejectUnknownKeys(value2, DEFAULT_MODEL_KEYS, "defaultModel");
+      return {
+        provider: requireString(value2.provider, "defaultModel.provider"),
+        modelId: requireString(value2.modelId, "defaultModel.modelId")
+      };
+    }
+    function parsePiProfileCreateInput(value2) {
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError("Profile \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      rejectUnknownKeys(value2, PROFILE_CREATE_KEYS, "Profile");
+      const input = {
+        name: requireString(value2.name, "name"),
+        defaultModel: parseDefaultModel(value2.defaultModel),
+        allowedModels: parseAllowedModels(value2.allowedModels),
+        defaultThinkingLevel: parseThinkingLevel(value2.defaultThinkingLevel)
+      };
+      if (value2.enabled !== void 0) {
+        if (typeof value2.enabled !== "boolean") {
+          throw new PiAdminProtocolError("enabled \u5FC5\u987B\u4E3A boolean");
+        }
+        input.enabled = value2.enabled;
+      }
+      if (value2.credentialIds !== void 0) {
+        input.credentialIds = parseCredentialIds(value2.credentialIds);
+      }
+      if (value2.enabledResourceIds !== void 0) {
+        input.enabledResourceIds = parseResourceIds(value2.enabledResourceIds);
+      }
+      if (value2.toolPolicy !== void 0) {
+        input.toolPolicy = parseProfileToolPolicy(value2.toolPolicy);
+      }
+      return input;
+    }
+    function parseProfileToolPolicy(value2) {
+      try {
+        return (0, pi_js_1.parsePiToolPolicy)(value2);
+      } catch (error) {
+        throw new PiAdminProtocolError(error.message);
+      }
+    }
+    function parseResourceIds(value2) {
+      if (!Array.isArray(value2) || value2.length > MAX_RESOURCE_IDS) {
+        throw new PiAdminProtocolError(`enabledResourceIds \u6570\u91CF\u5FC5\u987B\u5728 0-${MAX_RESOURCE_IDS} \u4E4B\u95F4`);
+      }
+      const ids = value2.map((item, index) => requireString(item, `enabledResourceIds[${index}]`));
+      if (new Set(ids).size !== ids.length) {
+        throw new PiAdminProtocolError("enabledResourceIds \u5B58\u5728\u91CD\u590D\u9879");
+      }
+      return ids;
+    }
+    function parsePiProfileUpdateInput(value2) {
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError("Profile \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      rejectUnknownKeys(value2, PROFILE_UPDATE_KEYS, "Profile");
+      const input = {};
+      if (value2.name !== void 0)
+        input.name = requireString(value2.name, "name");
+      if (value2.defaultModel !== void 0) {
+        input.defaultModel = parseDefaultModel(value2.defaultModel);
+      }
+      if (value2.allowedModels !== void 0) {
+        input.allowedModels = parseAllowedModels(value2.allowedModels);
+      }
+      if (value2.defaultThinkingLevel !== void 0) {
+        input.defaultThinkingLevel = parseThinkingLevel(value2.defaultThinkingLevel);
+      }
+      if (value2.enabled !== void 0) {
+        if (typeof value2.enabled !== "boolean") {
+          throw new PiAdminProtocolError("enabled \u5FC5\u987B\u4E3A boolean");
+        }
+        input.enabled = value2.enabled;
+      }
+      if (value2.credentialIds !== void 0) {
+        input.credentialIds = parseCredentialIds(value2.credentialIds);
+      }
+      if (value2.enabledResourceIds !== void 0) {
+        input.enabledResourceIds = parseResourceIds(value2.enabledResourceIds);
+      }
+      if (value2.toolPolicy !== void 0) {
+        input.toolPolicy = parseProfileToolPolicy(value2.toolPolicy);
+      }
+      if (Object.keys(input).length === 0) {
+        throw new PiAdminProtocolError("Profile \u66F4\u65B0\u81F3\u5C11\u9700\u8981\u4E00\u4E2A\u5B57\u6BB5");
+      }
+      return input;
+    }
+    function parsePiCredentialCreateInput(value2) {
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError("Credential \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      rejectUnknownKeys(value2, CREDENTIAL_CREATE_KEYS, "Credential");
+      return {
+        name: requireString(value2.name, "name"),
+        providerConfigId: requireString(value2.providerConfigId, "providerConfigId", MAX_ID),
+        apiKey: requireString(value2.apiKey, "apiKey", MAX_API_KEY)
+      };
+    }
+    function parsePiCredentialUpdateInput(value2) {
+      if (!isRecord2(value2))
+        throw new PiAdminProtocolError("Credential \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      rejectUnknownKeys(value2, CREDENTIAL_UPDATE_KEYS, "Credential");
+      const input = {};
+      const name = requireOptionalString(value2.name, "name");
+      if (name !== void 0)
+        input.name = name;
+      if (value2.apiKey !== void 0) {
+        input.apiKey = requireString(value2.apiKey, "apiKey", MAX_API_KEY);
+      }
+      if (Object.keys(input).length === 0) {
+        throw new PiAdminProtocolError("Credential \u66F4\u65B0\u81F3\u5C11\u9700\u8981\u4E00\u4E2A\u5B57\u6BB5");
+      }
+      return input;
+    }
+  }
+});
+
 // ../shared/dist/frp-runtime.js
 var require_frp_runtime = __commonJS({
   "../shared/dist/frp-runtime.js"(exports2) {
@@ -1834,6 +3128,9 @@ var require_machine_register = __commonJS({
     exports2.ClientInstallationComplianceReason = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = void 0;
     exports2.parseMachineInstallation = parseMachineInstallation;
     exports2.parsePrivilegedCapabilityStatus = parsePrivilegedCapabilityStatus;
+    exports2.parsePiModelCatalogStatus = parsePiModelCatalogStatus;
+    exports2.parsePiCapabilityStatus = parsePiCapabilityStatus;
+    exports2.parsePiBundleCapability = parsePiBundleCapability;
     exports2.getClientInstallationCompliance = getClientInstallationCompliance;
     exports2.parseMachineRegister = parseMachineRegister;
     var frp_runtime_js_1 = require_frp_runtime();
@@ -1899,6 +3196,122 @@ var require_machine_register = __commonJS({
         throw new Error("privileged.mode=unavailable \u5FC5\u987B nonInteractive=false");
       }
       return { available, mode, nonInteractive, runAsUser: user };
+    }
+    var PI_CAPABILITY_KEYS = /* @__PURE__ */ new Set([
+      "available",
+      "sdkVersion",
+      "nodeVersion",
+      "shellKind",
+      "sessionJobProtocolVersion",
+      "runtimeSpecProtocolVersion",
+      "configMode",
+      "modelCatalog",
+      "bundle",
+      "code",
+      "message"
+    ]);
+    var MAX_BUNDLE_RESOURCES = 64;
+    var PI_CAPABILITY_FAILURE_CODES = [
+      "PI_CLIENT_UNSUPPORTED",
+      "PI_NODE_UNSUPPORTED",
+      "PI_BASH_NOT_FOUND",
+      "PI_RUNTIME_UNAVAILABLE",
+      "PI_AUTH_UNAVAILABLE"
+    ];
+    var PI_SHELL_KINDS = ["configured", "git-bash", "path", "system"];
+    var MAX_CATALOG_PROVIDERS = 256;
+    function parsePiModelCatalogStatus(value2) {
+      if (!isRecord2(value2) || Object.keys(value2).length !== 2) {
+        throw new Error("pi.modelCatalog \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B sdkVersion/providerIds");
+      }
+      const sdkVersion = requireString(value2.sdkVersion, "pi.modelCatalog.sdkVersion", MAX_CAPABILITY);
+      if (!Array.isArray(value2.providerIds) || value2.providerIds.length === 0 || value2.providerIds.length > MAX_CATALOG_PROVIDERS) {
+        throw new Error(`pi.modelCatalog.providerIds \u6570\u91CF\u5FC5\u987B\u5728 1-${MAX_CATALOG_PROVIDERS} \u4E4B\u95F4`);
+      }
+      const providerIds = value2.providerIds.map((item, index) => requireString(item, `pi.modelCatalog.providerIds[${index}]`, MAX_CAPABILITY));
+      if (new Set(providerIds).size !== providerIds.length) {
+        throw new Error("pi.modelCatalog.providerIds \u5B58\u5728\u91CD\u590D\u9879");
+      }
+      return { sdkVersion, providerIds };
+    }
+    function requirePositiveInt(value2, what) {
+      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < 1) {
+        throw new Error(`${what} \u5FC5\u987B\u4E3A\u6B63\u6574\u6570`);
+      }
+      return value2;
+    }
+    function parsePiCapabilityStatus(value2) {
+      if (!isRecord2(value2))
+        throw new Error("pi \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      for (const key of Object.keys(value2)) {
+        if (!PI_CAPABILITY_KEYS.has(key))
+          throw new Error(`pi \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      if (value2.available === false) {
+        if (!PI_CAPABILITY_FAILURE_CODES.includes(value2.code)) {
+          throw new Error("pi.code \u5FC5\u987B\u4E3A\u5DF2\u77E5\u5931\u8D25\u7801");
+        }
+        const code = value2.code;
+        const message = requireString(value2.message, "pi.message", MAX_CAPABILITY);
+        const status = { available: false, code, message };
+        if (value2.nodeVersion !== void 0) {
+          status.nodeVersion = requireString(value2.nodeVersion, "pi.nodeVersion", MAX_CAPABILITY);
+        }
+        return status;
+      }
+      if (value2.available === true) {
+        const sdkVersion = requireString(value2.sdkVersion, "pi.sdkVersion", MAX_CAPABILITY);
+        const nodeVersion = requireString(value2.nodeVersion, "pi.nodeVersion", MAX_CAPABILITY);
+        if (!PI_SHELL_KINDS.includes(value2.shellKind)) {
+          throw new Error("pi.shellKind \u5FC5\u987B\u4E3A configured\u3001git-bash\u3001path \u6216 system");
+        }
+        const status = {
+          available: true,
+          sdkVersion,
+          nodeVersion,
+          shellKind: value2.shellKind
+        };
+        if (value2.sessionJobProtocolVersion !== void 0) {
+          status.sessionJobProtocolVersion = requirePositiveInt(value2.sessionJobProtocolVersion, "pi.sessionJobProtocolVersion");
+        }
+        if (value2.runtimeSpecProtocolVersion !== void 0) {
+          status.runtimeSpecProtocolVersion = requirePositiveInt(value2.runtimeSpecProtocolVersion, "pi.runtimeSpecProtocolVersion");
+        }
+        if (value2.configMode !== void 0) {
+          if (value2.configMode !== "server-authoritative") {
+            throw new Error("pi.configMode \u5FC5\u987B\u4E3A server-authoritative");
+          }
+          status.configMode = "server-authoritative";
+        }
+        if (value2.modelCatalog !== void 0) {
+          status.modelCatalog = parsePiModelCatalogStatus(value2.modelCatalog);
+        }
+        if (value2.bundle !== void 0) {
+          status.bundle = parsePiBundleCapability(value2.bundle);
+        }
+        return status;
+      }
+      throw new Error("pi.available \u5FC5\u987B\u4E3A boolean");
+    }
+    function parsePiBundleCapability(value2) {
+      if (!isRecord2(value2))
+        throw new Error("pi.bundle \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      for (const key of Object.keys(value2)) {
+        if (!["protocolVersion", "bundleVersion", "piSdkVersion", "resourceIds"].includes(key)) {
+          throw new Error(`pi.bundle \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      const protocolVersion = requirePositiveInt(value2.protocolVersion, "pi.bundle.protocolVersion");
+      const bundleVersion = requireString(value2.bundleVersion, "pi.bundle.bundleVersion", MAX_CAPABILITY);
+      const piSdkVersion = requireString(value2.piSdkVersion, "pi.bundle.piSdkVersion", MAX_CAPABILITY);
+      if (!Array.isArray(value2.resourceIds) || value2.resourceIds.length === 0 || value2.resourceIds.length > MAX_BUNDLE_RESOURCES) {
+        throw new Error(`pi.bundle.resourceIds \u6570\u91CF\u5FC5\u987B\u5728 1-${MAX_BUNDLE_RESOURCES} \u4E4B\u95F4`);
+      }
+      const resourceIds = value2.resourceIds.map((item, index) => requireString(item, `pi.bundle.resourceIds[${index}]`, MAX_CAPABILITY));
+      if (new Set(resourceIds).size !== resourceIds.length) {
+        throw new Error("pi.bundle.resourceIds \u5B58\u5728\u91CD\u590D\u9879");
+      }
+      return { protocolVersion, bundleVersion, piSdkVersion, resourceIds };
     }
     exports2.ClientInstallationComplianceReason = {
       /** 显式上报旧 PM2 安装模式 */
@@ -1972,8 +3385,9 @@ var require_machine_register = __commonJS({
           }
         }
         const parsedDetails = {};
-        if (details.pi !== void 0)
-          parsedDetails.pi = details.pi;
+        if (details.pi !== void 0) {
+          parsedDetails.pi = parsePiCapabilityStatus(details.pi);
+        }
         if (details.terminal !== void 0) {
           parsedDetails.terminal = details.terminal;
         }
@@ -2017,8 +3431,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.safePiErrorMessage = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
-    exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = exports2.parseTunnelClose = exports2.parseTunnelClientState = void 0;
+    exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parsePiModelCatalogStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parsePiProviderDiscoveryInput = exports2.parsePiProfileUpdateInput = exports2.parsePiProfileCreateInput = exports2.parsePiCredentialUpdateInput = exports2.parsePiCredentialCreateInput = exports2.PiAdminProtocolError = exports2.safePiErrorMessage = exports2.parsePiRuntimeSpecV3 = exports2.parsePiRuntimeSpecV1 = exports2.parsePiRuntimeSpecMessageV3 = exports2.parsePiRuntimeSpecMessage = exports2.parsePiRuntimeAck = exports2.parsePiCredentialLeaseV2 = exports2.parsePiAgentState = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.isPiWorkerAction = exports2.isPiReadAction = exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = exports2.parseTunnelClose = exports2.parseTunnelClientState = exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -2040,7 +3454,9 @@ var require_dist = __commonJS({
     } });
     __exportStar(require_update(), exports2);
     __exportStar(require_pi(), exports2);
+    __exportStar(require_pi_bundle(), exports2);
     __exportStar(require_terminal(), exports2);
+    __exportStar(require_pi_admin(), exports2);
     var update_js_1 = require_update();
     Object.defineProperty(exports2, "ReleaseClientState", { enumerable: true, get: function() {
       return update_js_1.ReleaseClientState;
@@ -2070,6 +3486,12 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "PI_ERROR_CODES", { enumerable: true, get: function() {
       return pi_js_1.PI_ERROR_CODES;
     } });
+    Object.defineProperty(exports2, "PI_RUNTIME_SPEC_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return pi_js_1.PI_RUNTIME_SPEC_PROTOCOL_VERSION;
+    } });
+    Object.defineProperty(exports2, "PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return pi_js_1.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION;
+    } });
     Object.defineProperty(exports2, "PI_SESSION_JOB_PROTOCOL_VERSION", { enumerable: true, get: function() {
       return pi_js_1.PI_SESSION_JOB_PROTOCOL_VERSION;
     } });
@@ -2085,8 +3507,45 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parsePiAgentState", { enumerable: true, get: function() {
       return pi_js_1.parsePiAgentState;
     } });
+    Object.defineProperty(exports2, "parsePiCredentialLeaseV2", { enumerable: true, get: function() {
+      return pi_js_1.parsePiCredentialLeaseV2;
+    } });
+    Object.defineProperty(exports2, "parsePiRuntimeAck", { enumerable: true, get: function() {
+      return pi_js_1.parsePiRuntimeAck;
+    } });
+    Object.defineProperty(exports2, "parsePiRuntimeSpecMessage", { enumerable: true, get: function() {
+      return pi_js_1.parsePiRuntimeSpecMessage;
+    } });
+    Object.defineProperty(exports2, "parsePiRuntimeSpecMessageV3", { enumerable: true, get: function() {
+      return pi_js_1.parsePiRuntimeSpecMessageV3;
+    } });
+    Object.defineProperty(exports2, "parsePiRuntimeSpecV1", { enumerable: true, get: function() {
+      return pi_js_1.parsePiRuntimeSpecV1;
+    } });
+    Object.defineProperty(exports2, "parsePiRuntimeSpecV3", { enumerable: true, get: function() {
+      return pi_js_1.parsePiRuntimeSpecV3;
+    } });
     Object.defineProperty(exports2, "safePiErrorMessage", { enumerable: true, get: function() {
       return pi_js_1.safePiErrorMessage;
+    } });
+    var pi_admin_js_1 = require_pi_admin();
+    Object.defineProperty(exports2, "PiAdminProtocolError", { enumerable: true, get: function() {
+      return pi_admin_js_1.PiAdminProtocolError;
+    } });
+    Object.defineProperty(exports2, "parsePiCredentialCreateInput", { enumerable: true, get: function() {
+      return pi_admin_js_1.parsePiCredentialCreateInput;
+    } });
+    Object.defineProperty(exports2, "parsePiCredentialUpdateInput", { enumerable: true, get: function() {
+      return pi_admin_js_1.parsePiCredentialUpdateInput;
+    } });
+    Object.defineProperty(exports2, "parsePiProfileCreateInput", { enumerable: true, get: function() {
+      return pi_admin_js_1.parsePiProfileCreateInput;
+    } });
+    Object.defineProperty(exports2, "parsePiProfileUpdateInput", { enumerable: true, get: function() {
+      return pi_admin_js_1.parsePiProfileUpdateInput;
+    } });
+    Object.defineProperty(exports2, "parsePiProviderDiscoveryInput", { enumerable: true, get: function() {
+      return pi_admin_js_1.parsePiProviderDiscoveryInput;
     } });
     exports2.Events = {
       REGISTER: "register",
@@ -2105,6 +3564,8 @@ var require_dist = __commonJS({
       PI_RESPONSE: "pi:response",
       PI_EVENT: "pi:event",
       PI_STATE: "pi:state",
+      PI_RUNTIME_SPEC: "pi:runtime-spec",
+      PI_RUNTIME_ACK: "pi:runtime-ack",
       TERMINAL_REQUEST: "terminal:request",
       TERMINAL_RESPONSE: "terminal:response",
       TERMINAL_OUTPUT: "terminal:output",
@@ -2184,6 +3645,9 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "parseMachineRegister", { enumerable: true, get: function() {
       return machine_register_js_1.parseMachineRegister;
+    } });
+    Object.defineProperty(exports2, "parsePiModelCatalogStatus", { enumerable: true, get: function() {
+      return machine_register_js_1.parsePiModelCatalogStatus;
     } });
     Object.defineProperty(exports2, "parsePrivilegedCapabilityStatus", { enumerable: true, get: function() {
       return machine_register_js_1.parsePrivilegedCapabilityStatus;
@@ -2389,6 +3853,19 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "parseTunnelSessionCreateRequest", { enumerable: true, get: function() {
       return tunnel_js_1.parseTunnelSessionCreateRequest;
+    } });
+    var pi_js_2 = require_pi();
+    Object.defineProperty(exports2, "PI_READ_ACTIONS", { enumerable: true, get: function() {
+      return pi_js_2.PI_READ_ACTIONS;
+    } });
+    Object.defineProperty(exports2, "PI_WORKER_ACTIONS", { enumerable: true, get: function() {
+      return pi_js_2.PI_WORKER_ACTIONS;
+    } });
+    Object.defineProperty(exports2, "isPiReadAction", { enumerable: true, get: function() {
+      return pi_js_2.isPiReadAction;
+    } });
+    Object.defineProperty(exports2, "isPiWorkerAction", { enumerable: true, get: function() {
+      return pi_js_2.isPiWorkerAction;
     } });
   }
 });
@@ -2693,6 +4170,9 @@ function createPiApi(client) {
     capability: (clientId, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/capability`, void 0, signal),
     models: (clientId, cwdRef, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/models?${cwdQuery(cwdRef)}`, void 0, signal),
     sessions: {
+      importable: (clientId, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/sessions/importable`, void 0, signal),
+      previewImportable: (clientId, sourceName, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/sessions/importable/${enc(sourceName)}/preview`, void 0, signal),
+      import: (clientId, sourceNames, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/sessions/import`, { sourceNames }, signal),
       list: (clientId, cwdRef, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/sessions?${cwdQuery(cwdRef)}`, void 0, signal),
       get: (clientId, sessionId, cwdRef, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/sessions/${enc(sessionId)}?${cwdQuery(cwdRef)}`, void 0, signal),
       context: (clientId, sessionId, cwdRef, options, signal) => {
@@ -2774,8 +4254,46 @@ function createPiApi(client) {
       complete: (clientId, attachmentId, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/attachments/${enc(attachmentId)}/complete`, void 0, signal),
       delete: (clientId, attachmentId) => client.request("DELETE", `/api/clients/${enc(clientId)}/pi/attachments/${enc(attachmentId)}`)
     },
-    running: (clientId, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/running`, void 0, signal)
+    running: (clientId, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/running`, void 0, signal),
+    runtime: (clientId, signal) => client.request("GET", `/api/clients/${enc(clientId)}/pi/runtime`, void 0, signal),
+    providers: {
+      list: (options, signal) => client.request("GET", `/api/pi/providers${listQuery(options)}`, void 0, signal),
+      get: (id, signal) => client.request("GET", `/api/pi/providers/${enc(id)}`, void 0, signal),
+      create: (input, signal) => client.request("POST", "/api/pi/providers", input, signal),
+      update: (id, input, signal) => client.request("PATCH", `/api/pi/providers/${enc(id)}`, input, signal),
+      remove: (id, signal) => client.request("DELETE", `/api/pi/providers/${enc(id)}`, void 0, signal),
+      validate: (id, signal) => client.request("POST", `/api/pi/providers/${enc(id)}/validate`, {}, signal),
+      discoverModels: (id, signal) => client.request("POST", `/api/pi/providers/${enc(id)}/discover-models`, {}, signal),
+      discover: (input, signal) => client.request("POST", "/api/pi/providers/discover-models", input, signal)
+    },
+    profiles: {
+      list: (options, signal) => client.request("GET", `/api/pi/profiles${listQuery(options)}`, void 0, signal),
+      get: (id, signal) => client.request("GET", `/api/pi/profiles/${enc(id)}`, void 0, signal),
+      create: (input, signal) => client.request("POST", "/api/pi/profiles", input, signal),
+      update: (id, input, signal) => client.request("PATCH", `/api/pi/profiles/${enc(id)}`, input, signal),
+      remove: (id, signal) => client.request("DELETE", `/api/pi/profiles/${enc(id)}`, void 0, signal)
+    },
+    credentials: {
+      list: (options, signal) => client.request("GET", `/api/pi/credentials${listQuery(options)}`, void 0, signal),
+      create: (input, signal) => client.request("POST", "/api/pi/credentials", input, signal),
+      update: (id, input, signal) => client.request("PATCH", `/api/pi/credentials/${enc(id)}`, input, signal),
+      revoke: (id, signal) => client.request("DELETE", `/api/pi/credentials/${enc(id)}`, void 0, signal)
+    },
+    bindings: {
+      list: (signal) => client.request("GET", "/api/pi/client-bindings", void 0, signal),
+      set: (clientId, profileId, signal) => client.request("PUT", `/api/pi/client-bindings/${enc(clientId)}`, { profileId }, signal),
+      clear: (clientId, signal) => client.request("DELETE", `/api/pi/client-bindings/${enc(clientId)}`, void 0, signal)
+    }
   };
+}
+function listQuery(options) {
+  const params = new URLSearchParams();
+  if (options?.page)
+    params.set("page", String(options.page));
+  if (options?.pageSize)
+    params.set("pageSize", String(options.pageSize));
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
 }
 var import_shared2;
 var init_pi = __esm({

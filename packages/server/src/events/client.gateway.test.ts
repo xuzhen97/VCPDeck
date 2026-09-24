@@ -36,6 +36,7 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		register: vi.fn(async () => {}),
 		getClientIdBySocketId: vi.fn(async () => "c1"),
 		markOfflineBySocketId: vi.fn(async () => {}),
+		bindSocket: vi.fn(async () => {}),
 		expireStaleClients: vi.fn(
 			async (): Promise<Array<{ clientId: string; socketId: string | null }>> => [],
 		),
@@ -157,7 +158,12 @@ function makeGateway(reconciliation = makeReconciliation()) {
 	};
 }
 
-const report: PiStateReport = { clientId: "c1", runs: [] };
+const report: PiStateReport = {
+	clientId: "c1",
+	runs: [],
+	runtimeRevision: null,
+	configState: "pending",
+};
 
 const event: PiEvent = {
 	clientId: "c1",
@@ -367,6 +373,32 @@ describe("ClientGateway Pi generation routing", () => {
 		expect(piRequests.disconnect).toHaveBeenCalledWith("socket-1");
 		expect(piRuns.disconnectGeneration).toHaveBeenCalledWith("c1", "socket-1");
 		expect(order).toEqual(["request-disconnected", "generation-disconnected"]);
+	});
+
+	it("同一 Client 仍有存活连接时不置离线，只把 socket lease 切给存活连接", async () => {
+		const { gateway, clientService } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		gateway["trackSocket"]("c1", "socket-9");
+
+		await gateway.handleDisconnect(socket);
+
+		expect(clientService.markOfflineBySocketId).not.toHaveBeenCalled();
+		expect(clientService.bindSocket).toHaveBeenCalledWith("c1", "socket-9");
+		expect(gateway["survivingSocketId"]("c1")).toBe("socket-9");
+	});
+
+	it("最后一个连接断开时置离线并清空连接记账", async () => {
+		const { gateway, clientService } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		gateway["trackSocket"]("c1", socket.id);
+
+		await gateway.handleDisconnect(socket);
+
+		expect(clientService.markOfflineBySocketId).toHaveBeenCalledWith("socket-1");
+		expect(clientService.bindSocket).not.toHaveBeenCalled();
+		expect(gateway["survivingSocketId"]("c1")).toBeNull();
 	});
 });
 

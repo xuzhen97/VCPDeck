@@ -112,7 +112,7 @@ function setup() {
 }
 
 function report(runs: PiStateReport["runs"]): PiStateReport {
-	return { clientId: "c1", runs };
+	return { clientId: "c1", runs, runtimeRevision: null, configState: "pending" };
 }
 
 function activeReport(
@@ -666,6 +666,8 @@ describe("PiRunService generation reconcile", () => {
 			};
 			await service.reconcileGeneration("client-A", "socket-A", {
 				clientId: "client-A",
+				runtimeRevision: null,
+				configState: "pending",
 				runs:
 					status === "duplicate"
 						? [

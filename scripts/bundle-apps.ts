@@ -63,6 +63,25 @@ export const CLIENT_EXTERNAL = [
 ];
 
 /**
+ * Pi Resource Bundle 策略扩展：打成**自包含 ESM 单文件**。
+ *
+ * 两个约束（都来自实测）：
+ * - 必须 ESM：Pi 的扩展加载器用 `jiti.import(path, { default: true })` 取工厂，
+ *   esbuild 的 CJS 包装（`exports.default`）在该取法下取不到工厂，而 `export default` 可以；
+ * - 必须自包含：不 external 任何依赖，避免依赖目标机上 node_modules 的布局。
+ */
+export async function bundlePiExtension(outfile: string): Promise<void> {
+	await build({
+		...baseOptions("packages/client/tsconfig.json", []),
+		format: "esm",
+		entryPoints: [
+			resolve(ROOT, "packages/client/src/pi-bundle/tool-policy/index.ts"),
+		],
+		outfile,
+	});
+}
+
+/**
  * Client：主进程 + pi/probe 两个 fork worker 各自打包。
  * 外部保留 Pi SDK（含动态 import 与子进程加载）与 @lydell/node-pty / node-datachannel 平台包。
  */

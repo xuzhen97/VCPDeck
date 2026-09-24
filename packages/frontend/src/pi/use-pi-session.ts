@@ -360,6 +360,22 @@ export function usePiSession(
 								// 权威收敛上一 run 并接受下一条 Prompt。
 								scheduleGrace();
 								return;
+							case "prompt_error":
+								// 运行失败：与 agent_settled 同样收尾，并把错误浮到界面（否则永远卡在运行中）
+								clearGrace();
+								activeRunIdRef.current = null;
+								setState((s) => ({
+									...s,
+									status: "idle",
+									runId: null,
+									job: s.job
+										? { ...s.job, status: "idle", runId: null }
+										: null,
+									error: event.message,
+								}));
+								void reloadHistory();
+								void refreshState();
+								return;
 							case "agent_settled":
 								clearGrace();
 								if (runId) retiredRunIdsRef.current.add(runId);
@@ -485,15 +501,30 @@ export function usePiSession(
 					}));
 					return null;
 				});
-			const [openResult, , models] = await Promise.all([
-				pi.agent.open(
-					clientId,
-					sessionId,
-					cwdRef,
-				) as Promise<PiSessionOpenResult>,
-				reloadHistory(),
-				modelsPromise,
-			]);
+			let openResult: PiSessionOpenResult;
+			let modelsResult: Awaited<typeof modelsPromise> | null = null;
+			let models: Awaited<typeof modelsPromise> | null = null;
+			try {
+				[openResult, , modelsResult] = await Promise.all([
+					pi.agent.open(
+						clientId,
+						sessionId,
+						cwdRef,
+					) as Promise<PiSessionOpenResult>,
+					reloadHistory(),
+					modelsPromise,
+				]);
+			} catch (err) {
+				// /open 失败（严格校验 400 等）：落入 error 展示，不让调用方抛出导致页面卡 loading
+				if (sessionGenerationRef.current !== sessionGeneration) return;
+				setState((s) => ({
+					...s,
+					status: "idle",
+					error: err instanceof Error ? err.message : String(err),
+				}));
+				return;
+			}
+			models = modelsResult;
 			if (sessionGenerationRef.current !== sessionGeneration) return;
 			const { job, agentState } = openResult;
 			activeRunIdRef.current = job.runId;

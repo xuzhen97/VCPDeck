@@ -274,3 +274,99 @@ model TerminalAuditEvent {
   @@index([clientId, createdAt])
   @@index([sessionId, createdAt])
 }
+
+// ── 远程 Pi 集中配置（Plan 1：Profile / Credential / Binding） ──
+// 权威边界见 docs/design/remote-pi-control-plane.md §6 与 ADR-0029：
+// Profile/Credential/Binding 只由 Server 持久化，Client 不落盘；
+// Credential 只存密文与安全元数据，明文不得进入普通 API、日志或审计。
+model PiProfile {
+  id                   String   @id
+  name                 String   @unique
+  enabled              Boolean  @default(true)
+  defaultProvider      String
+  defaultModelId       String
+  allowedModels        String   @default("[]") // JSON: [{ provider, modelId, maxThinkingLevel? }]
+  defaultThinkingLevel String   @default("medium")
+  // JSON: [resourceId]；NULL = 未配置（无 Bundle 资源需求）
+  enabledResourceIds   String?
+  // JSON: { allow, confirm, deny }；NULL = 未配置（等价空策略，未列出工具全部拒绝）
+  toolPolicyJson       String?
+  revision             Int      @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  credentials PiProfileCredential[]
+  bindings    PiClientBinding[]
+}
+
+model PiProvider {
+  id                String   @id
+  name              String   @unique
+  runtimeProviderId String   @unique
+  protocol          String?
+  baseUrl           String?
+  headers           String   @default("{}")
+  enabled           Boolean  @default(true)
+  revision          Int      @default(1)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  models      PiProviderModel[]
+  credentials PiCredential[]
+}
+
+model PiProviderModel {
+  id         String   @id
+  providerId String
+  modelId    String
+  name       String
+  /// NULL = 元数据由 Client 侧 Pi 内置目录解析；非 NULL = 显式元数据 JSON。
+  metadata   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  provider PiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, modelId])
+  @@index([providerId])
+}
+
+
+
+model PiCredential {
+  id               String      @id
+  name             String      @unique
+  provider         String
+  providerConfigId String
+  providerConfig   PiProvider  @relation(fields: [providerConfigId], references: [id])
+  ciphertext       String // base64(iv || tag || ciphertext)
+  keyVersion       Int         @default(1)
+  fingerprint      String // sha256(明文) hex，仅用于人工比对
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  lastUsedAt       DateTime?
+  revokedAt        DateTime?
+
+  profiles PiProfileCredential[]
+
+  @@index([provider])
+  @@index([providerConfigId])
+}
+
+model PiProfileCredential {
+  profileId    String
+  credentialId String
+  profile      PiProfile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  credential   PiCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, credentialId])
+}
+
+model PiClientBinding {
+  clientId  String   @id
+  profileId String
+  profile   PiProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  updatedAt DateTime @updatedAt
+
+  @@index([profileId])
+}

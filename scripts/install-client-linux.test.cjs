@@ -108,7 +108,7 @@ test("真实 adapter 的 sudoers 临时文件与目标目录同文件系统", ()
 	assert.equal(createRealAdapter().mktemp(), `/etc/sudoers.d/.vcpdeck-sudoers-${process.pid}.tmp`);
 });
 
-test("buildEnvContent 只写固定 6 个键，且 0640 root:vcpdeck 语义", () => {
+test("buildEnvContent 只写固定 7 个键，且 0640 root:vcpdeck 语义", () => {
 	const env = buildEnvContent({
 		serverOrigin: "https://a.example.com:3001",
 		psk: "SECRET_PSK",
@@ -122,6 +122,7 @@ test("buildEnvContent 只写固定 6 个键，且 0640 root:vcpdeck 语义", () 
 		lines.map((l) => l.split("=")[0]),
 		[
 			"VCPDECK_APP_DIR",
+			"VCPDECK_CLIENT_DATA_DIR",
 			"VCPDECK_ARTIFACT",
 			"VCPDECK_SERVER",
 			"VCPDECK_PSK",
@@ -129,6 +130,8 @@ test("buildEnvContent 只写固定 6 个键，且 0640 root:vcpdeck 语义", () 
 			"VCPDECK_INSTALLATION_MODE",
 		],
 	);
+	// Pi 数据根必须在版本目录之外，否则 Release 回滚会带走 Session。
+	assert.ok(lines.some((l) => l === "VCPDECK_CLIENT_DATA_DIR=/var/lib/vcpdeck-client"));
 	assert.ok(lines.some((l) => l === "VCPDECK_SERVER=https://a.example.com:3001"));
 	assert.ok(lines.some((l) => l === "VCPDECK_CLIENT_ID=abc-123"));
 	assert.ok(

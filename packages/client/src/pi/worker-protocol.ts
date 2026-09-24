@@ -1,7 +1,13 @@
 import type { PiClientEvent, PiRequest, PiStateReport } from "@vcpdeck/shared";
+import type { PiRuntimeConfig } from "./runtime-spec.js";
 
-/** Parent → Worker 请求消息 */
+/**
+ * Parent → Worker 请求消息。
+ * `runtime-init` 承载 Server 下发的运行配置与凭据 lease：
+ * **只允许经 IPC 传递**，禁止写入 argv / env / 磁盘（设计 §8.1）。
+ */
 export type PiWorkerRequestMessage =
+	| { type: "runtime-init"; config: PiRuntimeConfig | null }
 	| { type: "request"; projectKey: string; request: PiRequest }
 	| { type: "shutdown" }
 	| { type: "ack-terminal"; runIds: string[] };

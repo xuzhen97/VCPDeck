@@ -46,6 +46,8 @@ pnpm dev
 pnpm dev:all
 ```
 
+`pnpm dev:all` 无需额外环境变量：Client 定位 Pi Resource Bundle 依赖发布布局（`<app-dir>/apps/<version>/pi-resources/`，ADR-0030），dev 由此自动引导（`scripts/ensure-dev-app-layout.cjs` 维护 `.tmp/devapp/apps` 链接，`scripts/dev-client.cjs` 注入 appDir）。
+
 生产构件统一为 zip，每次发版产出两份按平台分开的包（详见 [ADR-0012](./adr/0012-bundled-release-artifacts.md)）：
 
 ```bash
@@ -72,6 +74,7 @@ pnpm release --version=x.y.z
 | `DATABASE_URL` | `file:./prisma/dev.db` | SQLite URL；相对路径依赖 Server 工作目录 |
 | `VCPDECK_RELEASES_DIR` | `./data/releases`（install 引导默认 `<app-dir>/releases`） | **Local 后端**的发布构件目录；必须为**版本目录外绝对路径**，否则自更新切换版本后目录漂移、构件丢失。配置外部存储后端（OSS/网盘）后，发布包转存 Provider，此目录不再承载新构件 |
 | `VCPDECK_PSK` | `vcpdeck-dev-psk` | `/client` PSK，生产必须随机替换 |
+| `VCPDECK_PI_CREDENTIAL_KEY_FILE` | 未设 = Pi 配置不可用 | Pi Provider 凭据的加密根密钥（文件内容为 base64 的 32 字节）。**必须位于 Server 进程外**（如 `/etc/vcpdeck/pi-credential.key`，`0640 root:serverUser`）；缺失或长度不符时凭据写入与 RuntimeSpec 组装 fail closed，Server 启动与其他能力不受影响 |
 | `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | `/client` Gateway CORS Origin |
 | `VCPDECK_PORT` | `3001` | Server 监听端口（1–65535 整数）；改端口时必须同步配置 Client `VCPDECK_SERVER` 与 Server Launcher `VCPDECK_PROBE_URL` |
 | `PUBLIC_SHARE_BASE_URL` | 空（回退 `SERVER_URL`） | VCPDeckBridge 公开分享链接基地址；只接受 HTTP(S)，反向代理部署时应配置为外部公开地址 |
@@ -246,7 +249,9 @@ sudo bash "./install-coturn.sh" \
 - `data/releases` 或 `VCPDECK_RELEASES_DIR`；Release 清理只删除归档正文，不删除 Release 审计行和 `clientStates`；
 - Launcher `VCPDECK_APP_DIR`；其中 `apps/retention.json` 记录成功切换历史，状态损坏时 Launcher 会暂停本地旧版本自动删除；
 - Client 身份：Windows/旧版 Linux 在 `~/.vcpdeck/client-id`；**Linux A2** 在 `/var/lib/vcpdeck-client/client-id`（迁移时从旧目录保留）；Linux A2 专用账户 HOME 在 `/var/lib/vcpdeck-client/home`；
-- 远程用户的 Pi 配置和 Session 目录；
+- **Pi Resource Bundle**：随 Client Release 位于版本目录内 `<app-dir>/apps/<version>/pi-resources/`（`manifest.json` + `extensions/`），**不放数据根**：更新与回滚天然与版本一致，Session 不会被带走；Client 按自身模块路径定位并逐资源校验 sha256，校验失败即不上报 Bundle 能力且不加载任何资源；Profile 启用资源后，只有上报兼容 Bundle 的 Client 才会收到 RuntimeSpec；
+- **VCPDeck Pi 数据根**（`VCPDECK_CLIENT_DATA_DIR`，由安装器写入 Client env）：Windows SYSTEM 为 `C:\ProgramData\VCPDeck\Client\data`，Linux A2 为 `/var/lib/vcpdeck-client`，通用部署回退 `<VCPDECK_APP_DIR>/data`；其下 `pi/` 保存 agentDir、`sessions/<namespace>/`、cache、tmp、diagnostics 与 `install-secret`。**它必须位于版本目录之外**，Release 切换与回滚不会移动或删除它；
+- Pi Provider 凭据密文（Server SQLite）与 `VCPDECK_PI_CREDENTIAL_KEY_FILE` 指向的根密钥文件（Client 侧不保存任何凭据）；
 - frpc 工作目录（需要恢复映射运行信息时）。
 
 持久数据必须位于版本目录之外，否则 Launcher 切换版本会造成数据丢失。

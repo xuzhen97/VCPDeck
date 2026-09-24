@@ -29,11 +29,17 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { ZipArchive } from "archiver";
-import { bundleClient, bundleLauncher, bundleServer } from "./bundle-apps.js";
+import {
+	bundleClient,
+	bundleLauncher,
+	bundlePiExtension,
+	bundleServer,
+} from "./bundle-apps.js";
+import { buildBundleManifest } from "../packages/client/src/pi-bundle/manifest.js";
 import { copyInstallerAsset } from "./release-installer-assets.js";
 
 const ROOT = resolve(__dirname, "..");
@@ -199,6 +205,58 @@ function resolveExternalDeps(
 		deps[name] = spec;
 	}
 	return deps;
+}
+
+/** Pi SDK 版本事实：取源码 package.json 声明（与打包外部保留依赖同源）。 */
+function piSdkVersionFromClientPackage(): string {
+	const pkg = readPkgJson(join(ROOT, "packages", "client", "package.json"));
+	const declared = pkg.dependencies?.["@earendil-works/pi-coding-agent"];
+	if (!declared) {
+		throw new Error(
+			"[pack-release] packages/client 未声明 @earendil-works/pi-coding-agent",
+		);
+	}
+	return declared;
+}
+
+/**
+ * 构建 Pi Resource Bundle（随 Client Release 发布，docs/adr/0030 决策 1）：
+ * 只打包 VCPDeck 自有的工具策略扩展，并生成带 sha256 的 manifest。
+ *
+ * 位置：版本目录**根**（`apps/<version>/pi-resources/`，与 `client/` 并列）。
+ * 选版本级而非 client/ 内，是为了让 Client 只凭「自己在版本目录内」即可定位 Bundle
+ * （`resolveVerifiedPiBundle`），不依赖构件子目录命名；回滚/更新与版本天然一致。
+ */
+async function buildPiResourceBundle(
+	versionDir: string,
+	releaseVersion: string,
+): Promise<void> {
+	const piRoot = join(versionDir, "pi-resources");
+	const resourcePath = "extensions/vcp-tool-policy/index.js";
+	const outfile = join(piRoot, resourcePath);
+	mkdirSync(dirname(outfile), { recursive: true });
+	await bundlePiExtension(outfile);
+	const manifest = buildBundleManifest({
+		bundleVersion: releaseVersion,
+		piSdkVersion: piSdkVersionFromClientPackage(),
+		resources: [
+			{
+				id: "vcp.tool-policy",
+				kind: "extension",
+				version: "1",
+				path: resourcePath,
+				content: readFileSync(outfile),
+			},
+		],
+	});
+	writeFileSync(
+		join(piRoot, "manifest.json"),
+		`${JSON.stringify(manifest, null, 2)}
+`,
+	);
+	console.log(
+		`[pack-release] Pi Resource Bundle: ${manifest.resources.length} 个资源，bundleVersion=${releaseVersion}`,
+	);
 }
 
 /** 组装单个构件的生产部署目录（esbuild 单文件 + frp + 外部依赖精简安装） */
@@ -516,6 +574,8 @@ async function main(): Promise<void> {
 		await bundleLauncher(join(stagingDir, "launcher", "dist", "main.js"));
 		await stagePackage("server", stagingDir);
 		await stagePackage("client", stagingDir);
+		// Pi Resource Bundle 随 Release 发布在版本目录根（与 client/ 并列，docs/adr/0030）
+		await buildPiResourceBundle(stagingDir, args.version);
 		writeFileSync(
 			join(stagingDir, "manifest.json"),
 			JSON.stringify(

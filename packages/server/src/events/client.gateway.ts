@@ -15,6 +15,7 @@ import { FrpReconciliationService } from "../frp/frp-reconciliation.service.js";
 import { PiRequestBroker } from "../pi/pi-request-broker.js";
 import { PiEventBroker } from "../pi/pi-event-broker.js";
 import { PiRunService } from "../pi/pi-run.service.js";
+import { PiRuntimeService } from "../pi/pi-runtime.service.js";
 import { TerminalService } from "../terminal/terminal.service.js";
 import { TerminalRequestBroker } from "../terminal/terminal-request-broker.js";
 import { ReleaseOrchestrator } from "../release/release.orchestrator.js";
@@ -25,6 +26,7 @@ import {
   JobStatus,
   parsePiEvent,
   parsePiResponse,
+  parsePiRuntimeAck,
   parsePiStateReport,
   parseTerminalClientResponse,
   parseTerminalExitReport,
@@ -65,6 +67,8 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   @WebSocketServer()
   server!: Server;
   private staleClientTimer: ReturnType<typeof setInterval> | null = null;
+  /** clientId → 已 REGISTER 的存活 socket（同一 Client 重复连接时逐个记账）。 */
+  private readonly trackedSockets = new Map<string, Set<string>>();
 
   constructor(
     @Inject(ClientService) private readonly clientService: ClientService,
@@ -90,6 +94,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(TunnelSessionService)
     private readonly tunnelSessions?: TunnelSessionService,
+    // Pi RuntimeSpec 下发（可选注入：旧测试构造保持兼容）
+    @Optional()
+    @Inject(PiRuntimeService)
+    private readonly piRuntime?: PiRuntimeService,
   ) {}
 
   onModuleInit() {
@@ -112,6 +120,9 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     );
     this.piRequests.bindEmitter((socketId, request) => {
       this.server.to(socketId).emit(Events.PI_REQUEST, request);
+    });
+    this.piRuntime?.bindSender((socketId, message) => {
+      this.server.to(socketId).emit(Events.PI_RUNTIME_SPEC, message);
     });
     this.terminalBroker.bindEmitter((socketId, request) => {
       this.server.to(socketId).emit(Events.TERMINAL_REQUEST, request);
@@ -144,6 +155,14 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     const clientId = client.data.clientId as string | undefined;
     if (clientId) {
       await this.cleanupClientConnection(clientId, client.id);
+      // 同一 Client 可能仍有其它存活连接（残留/重复 Client 进程）：此时不能把 Client
+      // 标记离线，只把存储的 socket lease 切给存活连接，否则界面会看不到在线的 Client。
+      const survivor = this.survivingSocketId(clientId);
+      if (survivor) {
+        await this.clientService.bindSocket(clientId, survivor);
+        console.log(`[ws] duplicate connection kept online: ${clientId}`);
+        return;
+      }
     } else {
       // 未完成 REGISTER 的 socket 也可能持有 broker pending request。
       this.piRequests.disconnect(client.id);
@@ -151,6 +170,26 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     }
     await this.clientService.markOfflineBySocketId(client.id);
     console.log(`[ws] disconnected: ${clientId ?? client.id}`);
+  }
+
+  /** 记录已 REGISTER 的连接（同一 Client 的重复连接需分别记账）。 */
+  private trackSocket(clientId: string, socketId: string): void {
+    const sockets = this.trackedSockets.get(clientId) ?? new Set<string>();
+    sockets.add(socketId);
+    this.trackedSockets.set(clientId, sockets);
+  }
+
+  private untrackSocket(clientId: string, socketId: string): void {
+    const sockets = this.trackedSockets.get(clientId);
+    if (!sockets) return;
+    sockets.delete(socketId);
+    if (sockets.size === 0) this.trackedSockets.delete(clientId);
+  }
+
+  /** 该 Client 仍在线的其它 socket；没有则返回 null。 */
+  private survivingSocketId(clientId: string): string | null {
+    const sockets = this.trackedSockets.get(clientId);
+    return sockets && sockets.size > 0 ? ([...sockets][0] ?? null) : null;
   }
 
   /** 扫描并收敛停止心跳的 Client；数据库先以 socket lease 原子摘除，避免误伤新连接。 */
@@ -163,6 +202,7 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   private async cleanupClientConnection(clientId: string, socketId: string): Promise<void> {
+    this.untrackSocket(clientId, socketId);
     // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
     this.piRequests.disconnect(socketId);
     this.terminalBroker.disconnect(socketId);
@@ -173,6 +213,7 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       await this.jobService.markDisconnected(clientId);
       await this.frpService.markInactiveByClientId(clientId);
     }
+    await this.piRuntime?.onDisconnected(clientId, socketId);
     await this.terminalService.handleClientDisconnect(clientId, socketId);
   }
 
@@ -193,10 +234,17 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     }
     await this.clientService.register(register, client.id);
     client.data.clientId = register.clientId;
+    this.trackSocket(register.clientId, client.id);
     client.join(register.clientId);
     await this.piRuns.markReconcilePending(register.clientId, client.id);
     await this.terminalService.handleClientRegistered(register.clientId, client.id);
     this.orchestrator.onClientRegistered(register.clientId, register.clientVersion);
+    // 注册后立即下发 RuntimeSpec；无绑定时登记 desired=null（Pi 不可用）。
+    await this.piRuntime?.onClientRegistered(
+      register.clientId,
+      register.capabilityDetails?.pi,
+      client.id,
+    );
     client.emit("ack", { event: Events.REGISTER });
     console.log(`[ws] registered: ${register.clientId} (${register.hostname})`);
     return { ok: true };
@@ -284,6 +332,24 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  @SubscribeMessage(Events.PI_RUNTIME_ACK)
+  async handlePiRuntimeAck(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId) return { ok: false };
+    try {
+      const ack = parsePiRuntimeAck(data);
+      if (ack.clientId !== clientId) return { ok: false }; // 身份绑定
+      this.piRuntime?.applyAck(ack, client.id);
+      return { ok: true };
+    } catch {
+      // 非法 ACK 忽略：不改变任何状态，Pi 保持未就绪（fail closed）。
+      return { ok: false };
+    }
+  }
+
   @SubscribeMessage(Events.PI_STATE)
   async handlePiState(
     @ConnectedSocket() client: Socket,
@@ -295,6 +361,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       const parsed = parsePiStateReport(data);
       if (parsed.clientId !== clientId) return; // 身份绑定
       const result = await this.piRuns.reconcileGeneration(clientId, client.id, parsed);
+      this.piRuntime?.onState(clientId, {
+        runtimeRevision: parsed.runtimeRevision,
+        configState: parsed.configState,
+      }, client.id);
       return result;
     } catch {
       // 非法报告忽略

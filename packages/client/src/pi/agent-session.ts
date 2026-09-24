@@ -12,8 +12,11 @@ import {
 	type PiAgentState,
 	type PiClientEvent,
 	type PiExtensionUiRequest,
+	type PiToolPolicy,
 } from "@vcpdeck/shared";
 import { projectPiEvent } from "./event-projector.js";
+import { toolSetsFor } from "./runtime-spec.js";
+import { installToolPolicyBridge } from "./tool-policy-bridge.js";
 
 /**
  * Pi SDK 是 ESM-only；Client 编译为 CJS，静态 import 会触发
@@ -38,16 +41,47 @@ const IDLE_RESET_EVENT_TYPES = new Set([
 	"compaction_end",
 ]);
 
+/**
+ * Bundle 资源加载面：只加载已校验的 Bundle 扩展，并彻底关闭项目/用户资源发现。
+ *
+ * SDK 语义（已由 `bundle-extension.integration.test.ts` 用真实 SDK 锁定）：
+ * `noExtensions: true` 只丢弃「发现来的」扩展，仍保留 `additionalExtensionPaths`。
+ * 没有扩展时也不传 `additionalExtensionPaths`（等价于完全不加载扩展）。
+ */
+export function bundleLoaderOptions(
+	extensionPaths: readonly string[],
+): Record<string, unknown> {
+	const base = {
+		noExtensions: true,
+		noSkills: true,
+		noPromptTemplates: true,
+		noContextFiles: true,
+	};
+	return extensionPaths.length > 0
+		? { ...base, additionalExtensionPaths: [...extensionPaths] }
+		: base;
+}
+
 export interface PiAgentSessionOptions {
 	cwd: string;
+	/** VCPDeck 专属 Session 根（必填，禁用 SDK 默认目录） */
+	sessionDir: string;
+	/** VCPDeck 专属 agentDir（必填，禁用 SDK 默认 ~/.pi/agent） */
+	agentDir: string;
+	/**
+	 * 注入的 ModelRuntime（必填）：凭据由 VCPDeck 内存注入，
+	 * 不读用户 auth.json / models.json（设计 §8.1）。
+	 */
+	modelRuntime: unknown;
+	/** Server 允许且凭据可用的模型集合（Spec 的 resolvedModels） */
+	modelScope: Array<{ provider: string; modelId: string }>;
+	/** Server 下发的工具策略（v3 Spec 必带）：决定 tools/excludeTools 与审批面。 */
+	toolPolicy: PiToolPolicy;
+	/** 已校验通过的 Bundle 扩展入口（为空表示不加载任何 Bundle 资源）。 */
+	bundleExtensionPaths?: string[];
 	sessionFile?: string;
 	initialModel?: { provider: string; modelId: string };
 	thinkingLevel?: ThinkingLevel;
-	/** 项目信任决策（默认：ProjectTrustStore + Owner confirm） */
-	trustResolver?: (
-		cwd: string,
-		ask: (message: string) => Promise<boolean>,
-	) => Promise<boolean>;
 }
 
 export interface PiAgentSessionWrapper {
@@ -57,7 +91,6 @@ export interface PiAgentSessionWrapper {
 	onEvent(listener: (event: PiClientEvent) => void): () => void;
 	send(action: PiAction, payload?: Record<string, unknown>): Promise<unknown>;
 	getState(): PiAgentState;
-	ensureProjectTrust(): Promise<boolean>;
 	shutdown(): Promise<void>;
 	destroy(): void;
 }
@@ -74,38 +107,52 @@ export function startPiAgentSession(
 	options: PiAgentSessionOptions,
 ): Promise<PiAgentSessionWrapper> {
 	return (async () => {
-		const agentDir = (await getSdk()).getAgentDir();
+		const agentDir = options.agentDir;
 		const sessionManager = options.sessionFile
-			? (await getSdk()).SessionManager.open(options.sessionFile, undefined)
-			: (await getSdk()).SessionManager.create(options.cwd, undefined);
+			? (await getSdk()).SessionManager.open(
+					options.sessionFile,
+					options.sessionDir,
+				)
+			: (await getSdk()).SessionManager.create(
+					options.cwd,
+					options.sessionDir,
+				);
 
 		const sdk = await getSdk();
-		const trustStore = new sdk.ProjectTrustStore(agentDir);
 		let wrapper: PiAgentSessionWrapperImpl | null = null;
+		// 策略必须在绑定扩展之前进入进程内桥接：Bundle 扩展在 factory 阶段读它。
+		installToolPolicyBridge(options.toolPolicy);
+		const { tools, excludeTools } = toolSetsFor(options.toolPolicy);
 		const services = await (await getSdk()).createAgentSessionServices({
 			cwd: sessionManager.getCwd(),
 			agentDir,
+			modelRuntime: options.modelRuntime as never,
+			// VCPDeck 不持久化 Pi settings，也不读用户 settings.json。
+			settingsManager: sdk.SettingsManager.inMemory(),
+			// 只加载已校验的 Bundle 扩展；项目/用户资源恒关。
+			resourceLoaderOptions: bundleLoaderOptions(
+				options.bundleExtensionPaths ?? [],
+			),
 			resourceLoaderReloadOptions: {
-				// 未决定信任时先创建不加载项目资源的受限 Session。
-				resolveProjectTrust: async () =>
-					trustStore.get(sessionManager.getCwd()) === true,
+				// Plan 1：项目本地资源一律不加载，不做信任交互，不读写用户 trust store。
+				resolveProjectTrust: async () => false,
 			},
 		});
 
-		// 模型 scope：可用模型 ∩ enabledModels（委托 SDK resolver，不自行匹配）
-		const available = await services.modelRuntime.getAvailable();
-		const enabled = services.settingsManager.getEnabledModels();
-		let scopedModels: Array<{ model: unknown; thinkingLevel?: ThinkingLevel }> =
-			[];
-		if (enabled && enabled.length > 0) {
-			const { scopedModels: resolved } = await (
-				await getSdk()
-			).resolveModelScopeWithDiagnostics(enabled, services.modelRuntime);
-			scopedModels = resolved as Array<{
-				model: unknown;
-				thinkingLevel?: ThinkingLevel;
-			}>;
+		// 模型 scope：只允许 RuntimeSpec 允许且凭据可用的模型。
+		// 不读本机 settings/models.json，也不因本机配置扩大范围（设计 §14）。
+		const scopedModels: Array<{
+			model: unknown;
+			thinkingLevel?: ThinkingLevel;
+		}> = [];
+		for (const ref of options.modelScope) {
+			const model = services.modelRuntime.getModel(ref.provider, ref.modelId);
+			if (!model) continue;
+			scopedModels.push({ model });
 		}
+		const available = scopedModels.map(
+			(entry) => entry.model as { provider: string; id: string },
+		);
 
 		const branch = sessionManager.getBranch();
 		const hasExistingMessages = branch.some(
@@ -121,6 +168,7 @@ export function startPiAgentSession(
 			.find((entry) => entry.type === "thinking_level_change") as
 			| Extract<SessionEntry, { type: "thinking_level_change" }>
 			| undefined;
+		// 历史记录的模型若已不在当前 policy/凭据内则不恢复（Session 仍可读）。
 		const restoredModel = persistedModel
 			? available.find(
 					(model) =>
@@ -151,6 +199,9 @@ export function startPiAgentSession(
 		).createAgentSessionFromServices({
 			services,
 			sessionManager,
+			// 工具策略：白名单只启用 allow ∪ confirm，deny 同时进排除面（纵深防御）。
+			tools,
+			excludeTools,
 			...(initial.model ? { model: initial.model as never } : {}),
 			...(initial.thinkingLevel
 				? { thinkingLevel: initial.thinkingLevel }
@@ -163,19 +214,6 @@ export function startPiAgentSession(
 		});
 
 		wrapper = new PiAgentSessionWrapperImpl(inner);
-		wrapper.setProjectTrustResolver(async (ask) => {
-			const projectCwd = sessionManager.getCwd();
-			const existing = trustStore.get(projectCwd);
-			if (existing !== null) return false;
-			if (!sdk.hasTrustRequiringProjectResources(projectCwd)) return false;
-			const confirmed = options.trustResolver
-				? await options.trustResolver(projectCwd, ask)
-				: await ask(
-						`此项目包含本地扩展/Skills（.pi/extensions 或 .agents/skills），是否信任并加载？`,
-					);
-			trustStore.set(projectCwd, confirmed);
-			return confirmed;
-		});
 		wrapper.start();
 		return wrapper;
 	})();
@@ -220,10 +258,6 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	private idleTimer: ReturnType<typeof setTimeout> | null = null;
 	private onDestroyCallback: (() => void) | null = null;
 	private shutdownPromise: Promise<void> | null = null;
-	private projectTrustResolver:
-		| ((ask: (message: string) => Promise<boolean>) => Promise<boolean>)
-		| null = null;
-	private projectTrustPromise: Promise<boolean> | null = null;
 	private _alive = true;
 
 	constructor(public readonly inner: AgentSession) {}
@@ -726,7 +760,8 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	}): void {
 		const ui: PiExtensionUiRequest = {
 			requestId: randomUUID(),
-			extensionId: "",
+			// 宿主桥发出的 UI 请求：扩展调用方 ID 不可从 SDK 回调取得，用稳定的桥接标识满足协议非空约束
+			extensionId: "vcp.host-bridge",
 			kind: req.kind,
 			...(req.title ? { title: req.title } : {}),
 			...(req.message ? { message: req.message } : {}),
@@ -745,7 +780,7 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 		const timeoutMs = explicitTimeout ?? DEFAULT_UI_TIMEOUT_MS;
 		const ui: PiExtensionUiRequest = {
 			requestId,
-			extensionId: "",
+			extensionId: "vcp.host-bridge",
 			kind,
 			title,
 			...(typeof extra.message === "string" ? { message: extra.message } : {}),
@@ -830,33 +865,6 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 					? payload.value
 					: undefined,
 		);
-	}
-
-	setProjectTrustResolver(
-		resolver: (ask: (message: string) => Promise<boolean>) => Promise<boolean>,
-	): void {
-		this.projectTrustResolver = resolver;
-	}
-
-	async ensureProjectTrust(): Promise<boolean> {
-		if (!this.projectTrustResolver) return false;
-		if (!this.projectTrustPromise) {
-			this.projectTrustPromise = this.projectTrustResolver((message) =>
-				this.askConfirm(message),
-			);
-		}
-		return this.projectTrustPromise;
-	}
-
-	/** Project Trust confirm：通过 Extension UI 事件流交给 Owner */
-	async askConfirm(message: string): Promise<boolean> {
-		const value = await this.requestExtensionUi(
-			"confirm",
-			"Project Trust",
-			{ message },
-			undefined,
-		);
-		return value === true;
 	}
 
 	// ── 生命周期 ──

@@ -14,8 +14,10 @@
 
 ```bash
 pnpm dev       # Server + Frontend
-pnpm dev:all   # Server + Frontend + Client
+pnpm dev:all   # Server + Frontend + Client（自带 Pi Bundle 布局引导，无需额外环境变量）
 ```
+
+`dev:all` 里 Client 的 Pi Bundle 无需手工配置：Client 按发布规则要求 `<appDir>/apps/<version>/pi-resources/`（ADR-0030），dev 下由 `scripts/ensure-dev-app-layout.cjs` 维护 `<repo>/.tmp/devapp/apps -> packages` 链接，`scripts/dev-client.cjs` 再以该目录作为 `VCPDECK_APP_DIR` 启动 Client。显式设置 `VCPDECK_APP_DIR` / `VCPDECK_CLIENT_DATA_DIR` 时以调用方为准（发布安装不受影响）。
 
 构建后直接运行：
 

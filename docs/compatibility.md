@@ -11,7 +11,9 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | 维度 | 当前机制 | 保证 |
 | --- | --- | --- |
 | Server ↔ Client 通用协议 | Shared 事件与 DTO；Client 上报版本/capability | 没有独立通用协议版本；同版本最安全 |
-| Server ↔ Client Pi | `PI_SESSION_JOB_PROTOCOL_VERSION=1`；capabilityDetails 含 SDK/Node/shell 安全摘要 | 必须精确匹配，不匹配明确拒绝 Pi |
+| Server ↔ Client Pi（协议） | `PI_SESSION_JOB_PROTOCOL_VERSION=1`；capabilityDetails 含 SDK/Node/shell 安全摘要 | 必须精确匹配，不匹配明确拒绝 Pi |
+| Server ↔ Client Pi（运行配置） | `PI_RUNTIME_SPEC_PROTOCOL_VERSION=3`；Server 只下发 `PiRuntimeSpecV3`（含 `toolPolicy`，可选 `requiredBundle`）+ 运行期凭据 lease，Client 回 `PI_RUNTIME_ACK` | 未知字段或不支持的 `schemaVersion` fail closed；**上报 < 3 的 Client 一律不下发任何 Spec**（Pi 明确不可用，不回退用户本机 Pi） |
+| Pi Resource Bundle | `pi-resources/manifest.json` 的 `protocolVersion=1`，声明 `bundleVersion`（= Release 版本）、`piSdkVersion` 与逐资源 `sha256` | Client 逐资源校验；缺失/篡改/SDK 版本不符 → 不上报 Bundle 能力且不加载资源；Profile 需要资源而目标 Client 未上报兼容 Bundle → 不下发 Spec |
 | Server ↔ Client Terminal | `terminal.pty` capabilityDetails + Shared 严格运行时解析 | 无独立数字版本；缺能力时拒绝，seq/generation/state 变化需整套同版本发布 |
 | Server ↔ Client P2P 隧道 | `P2P_TUNNEL_PROTOCOL_VERSION=1`；capabilityDetails.p2pTunnel 摘要 | 版本不匹配或无能力时不执行数据面，UI 提示不支持；旧 Client 缺省视为 unsupported |
 | Server ↔ Frontend | REST/Socket.IO/SSE | Frontend 应与 Server 同一发布版本部署 |
@@ -34,6 +36,8 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | 旧 Server | 新 Client | 任意 | 不支持主动部署；Server 更新顺序必须在 Client 之前 |
 | 任意发布版本 | 未打 Tag 的工作区构建 | 任意 | 不支持 |
 | Pi 协议版本不同 | 任意 | 任意 | Pi 功能明确不可用，其他 capability 可继续评估 |
+| Pi Bundle 资源缺失 | 需要 Bundle 资源的 Profile | 未上报兼容 Bundle 的 Client | 不下发 RuntimeSpec；该 Client 的 Pi 保持不可用（不降级为「只加载部分资源」） |
+| Pi 显式导入（`session.import.list/preview/run`） | 新 Pi action + `sourceName` 纯文件名标识；请求 payload 与响应均严格解析 | 旧 Client 收到该 action → 未知 action 拒绝（400 `PI_PROTOCOL_INVALID`，仅该功能不可用）；旧 Server 无路由（404）；未就绪 → 400 `PI_CONFIG_UNAVAILABLE`；上游响应不合法 → 502 |
 
 “支持”表示进入发布验收矩阵，不表示所有历史版本永久兼容。
 
@@ -44,6 +48,16 @@ Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x
 **Linux A2 额外前提**：全新安装要求 root 或可用 sudo（安装器 `sudo -v` 验证），无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，不回退 PM2/用户服务；安装后的 `vcpdeck` 账户是 root 等价 Client（见 [`security.md`](./security.md) §4.5）。
 
 **系统级部署契约（ADR-0027）**：Client 注册上报 `installation.mode` 与 `capabilityDetails.privileged`。当前合规组合只有 `windows-system-task` + `windows-system`（Windows）与 `systemd-root-equivalent` + `sudo-all`（Linux）。旧 Client 缺字段、`legacy-pm2`、平台与模式不匹配、特权模式/可用性不满足都只记“未报告”或稳定不合规原因，**不猜测、不推断为合规**；`Shared` 的 `getClientInstallationCompliance` 是唯一判定入口。该判定**独立于业务 Release 版本**：`clientVersion` 已是最新仍可能提示“需要人工升级”。存量迁移不在 Server 上批量下发，需在目标机手动执行对应平台的安装命令。
+
+### 远程 Pi 升级顺序（强制 Server 先行）
+
+新 Client 的 `PI_STATE` 携带 `runtimeRevision` 与 `configState`，旧 Server 的严格 parser 会拒绝该消息。因此：
+
+1. 先升级 Server（可接受旧 Client：无隔离能力时禁用 Pi）；
+2. 再升级 Client；
+3. 禁止新 Client 配旧 Server。
+
+跨隔离边界回退旧 Client 会重新带回「读用户本机 Pi」的行为，必须先禁用该 Client 的 Pi，并在回退窗口不运行 Pi。
 
 ## 4. 升级顺序
 

@@ -513,6 +513,12 @@ test("Release 下载遇到瞬时 fetch failed 后重试", async () => {
 
 test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail closed 固定", () => {
 	const adapter = recordingAdapter();
+	// 捕获 launcher.env 内容以校验 Pi 稳定数据根已写入（不依赖 write: 记录顺序）。
+	let launcherEnv = "";
+	adapter.writeFile = (content, path) => {
+		adapter.records.push(`write:${path}`);
+		if (path.endsWith("launcher.env")) launcherEnv = content;
+	};
 	const run = installer.runWindowsInstall({
 		adapter,
 		args: {
@@ -581,6 +587,8 @@ test("Windows 安装状态机：完整材料就绪后才清理，顺序与 fail 
 			],
 		);
 		assert.ok(adapter.records.some((r) => r === "icacls:C:\\ProgramData\\VCPDeck\\Client\\launcher.env"));
+		// Pi 数据根固定为 ProgramData 安装根下的 data，位于 apps/<version> 之外。
+		assert.match(launcherEnv, /^VCPDECK_CLIENT_DATA_DIR=C:\\ProgramData\\VCPDeck\\Client\\data$/m);
 	});
 });
 

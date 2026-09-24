@@ -1,6 +1,6 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import type { IdentityInfo } from "@vcpdeck/shared";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -35,6 +35,67 @@ function renderSettings(isAdmin = true, path = "/settings/tokens") {
 			create: vi.fn(),
 			disable: vi.fn(),
 			enable: vi.fn(),
+		},
+		clients: { list: vi.fn().mockResolvedValue([]) },
+		pi: {
+			profiles: {
+				list: vi.fn().mockResolvedValue({
+					data: [],
+					total: 0,
+					page: 1,
+					pageSize: 20,
+					totalPages: 0,
+				}),
+			},
+				credentials: {
+					list: vi.fn().mockResolvedValue({
+						data: [
+						{
+							id: "cred-anthropic",
+							name: "Anthropic 主账号",
+							providerConfigId: "provider-anthropic",
+							providerName: "Anthropic",
+							runtimeProviderId: "anthropic",
+							protocol: "anthropic-messages",
+							configurationState: "ready",
+							fingerprint: "a1b2c3d4",
+							keyVersion: 1,
+							createdAt: "2026-07-26T00:00:00.000Z",
+							updatedAt: "2026-07-26T00:00:00.000Z",
+							lastUsedAt: null,
+							revokedAt: null,
+						},
+					],
+					total: 1,
+					page: 1,
+					pageSize: 20,
+					totalPages: 1,
+				}),
+			},
+			providers: {
+				list: vi.fn().mockResolvedValue({
+					data: [{
+						id: "provider-anthropic",
+						name: "Anthropic",
+						runtimeProviderId: "anthropic",
+						protocol: "anthropic-messages",
+						baseUrl: null,
+						headers: {},
+						enabled: true,
+						revision: 1,
+						models: [],
+						credentialIds: ["cred-anthropic"],
+						boundProfileIds: [],
+						configurationState: "ready",
+					}],
+					total: 1,
+					page: 1,
+					pageSize: 20,
+					totalPages: 1,
+				}),
+			},
+			bindings: { list: vi.fn().mockResolvedValue([]) },
+			runtime: vi.fn(),
 		},
 	} as unknown as VcpDeckClient;
 	render(
@@ -79,6 +140,63 @@ describe("SettingsPage", () => {
 		expect(tokens.revoke).not.toHaveBeenCalled();
 		await userEvent.click(screen.getByRole("button", { name: "确认撤销" }));
 		expect(tokens.revoke).toHaveBeenCalledWith("t1");
+	});
+
+	it("Pi 页面按功能切换 Tab，且只挂载当前面板", async () => {
+		renderSettings(true, "/pi/profile");
+		expect(await screen.findByRole("heading", { name: "Pi" })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("heading", { name: "Pi · Profile" }),
+		).toBeInTheDocument();
+		const provider = screen.getByRole("combobox", { name: "默认 Provider" });
+		expect(provider).toBeInTheDocument();
+		expect(provider).toHaveValue("");
+		expect(screen.queryByLabelText("pi-profile-provider")).not.toBeInTheDocument();
+		// 勾选凭据后，默认 Provider 下拉才会列出该凭据对应的 Provider（credential-driven）
+		await userEvent.click(screen.getByLabelText("Anthropic 主账号 (anthropic)"));
+		await waitFor(() => expect(provider).toHaveValue("anthropic"));
+		const tablist = screen.getByRole("tablist", { name: "Pi 功能" });
+		for (const label of ["Profile", "Provider", "Client 运行时"]) {
+			expect(within(tablist).getByRole("tab", { name: label })).toBeVisible();
+		}
+		expect(
+			screen.queryByRole("heading", { name: "Pi · Provider 凭据" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("heading", { name: "Pi · Client 运行时" }),
+		).not.toBeInTheDocument();
+		await userEvent.click(
+			within(tablist).getByRole("tab", { name: "Provider" }),
+		);
+		await waitFor(() =>
+			expect(screen.getByLabelText("当前位置")).toHaveTextContent(
+				"/pi/provider",
+			),
+		);
+		expect(
+			await screen.findByRole("heading", { name: "Pi · Provider" }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("heading", { name: "Pi · Profile" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("旧 Pi 设置地址重定向到独立页面", async () => {
+		renderSettings(true, "/settings/pi");
+		await waitFor(() =>
+			expect(screen.getByLabelText("当前位置")).toHaveTextContent(
+				"/pi/profile",
+			),
+		);
+	});
+	it("设置页不再包含 Pi 子导航", async () => {
+		renderSettings(true, "/settings/profile");
+		const settingsNavigation = within(
+			await screen.findByRole("navigation", { name: "设置导航" }),
+		);
+		expect(
+			settingsNavigation.queryByRole("link", { name: "Pi" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("hides and blocks identity management for non-admin users", async () => {

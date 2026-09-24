@@ -1,5 +1,6 @@
 import type { IdentityInfo } from "@vcpdeck/shared";
 import {
+	Bot,
 	Cable,
 	ChevronsLeft,
 	ChevronsRight,
@@ -32,6 +33,7 @@ const navigation = [
 	{ to: "/frp", label: "映射", icon: Cable },
 	{ to: "/releases", label: "发版", icon: Rocket },
 	{ to: "/storage", label: "存储", icon: Database },
+	{ to: "/pi", label: "Pi", icon: Bot },
 	{ to: "/settings/profile", label: "设置", icon: Settings },
 ];
 

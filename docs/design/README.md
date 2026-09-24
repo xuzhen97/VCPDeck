@@ -21,6 +21,12 @@
 | P2P 隧道验收 | [`p2p-tunnel-acceptance.md`](./p2p-tunnel-acceptance.md) | 直连/中继（两台跨网络机器）/凭据安全/负向的逐项验收步骤、判定与证据 |
 | Windows 桌面后端 | [`windows-ultravnc-setup.md`](./windows-ultravnc-setup.md) | 目标机 UltraVNC 的获取校验、静默安装、受控配置、验收判据、回滚与实测坑 |
 
+## 候选提案（不可作为当前运行事实）
+
+| 领域 | 文档 | 状态与用途 |
+| --- | --- | --- |
+| 远程 Pi 集中治理 | [`remote-pi-control-plane.md`](./remote-pi-control-plane.md) | 部分实现（Plan 1/1.1/2 已落地：集中 Profile/Credential/绑定与 Provider、RuntimeSpec v3 门控、Client 隔离数据根、受信 Resource Bundle 与逐资源校验、默认拒绝的工具策略与审批链路）；项目本地资源加载、Session 显式导入与 UI renderer 复用仍为 Proposal。|
+
 ## 新专题模板
 
 新文档应包含：

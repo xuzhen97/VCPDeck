@@ -6,6 +6,7 @@ import type {
 } from "@vcpdeck/shared";
 import type { PiApi } from "@vcpdeck/sdk";
 import { PiProjectPicker, type PiFilesApiLike } from "./pi-project-picker.js";
+import { PiImportDialog } from "./pi-import-dialog.js";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -93,6 +94,7 @@ export function PiSessionSidebar({
 	onCreated: (sessionId: string) => void;
 }) {
 	const [sessions, setSessions] = useState<SidebarSession[]>([]);
+	const [importOpen, setImportOpen] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [pending, setPending] = useState<
@@ -186,6 +188,21 @@ export function PiSessionSidebar({
 			>
 				+ 新建会话
 			</Button>
+
+			<Button
+				type="button"
+				variant="outline"
+				onClick={() => setImportOpen(true)}
+				className="w-full"
+			>
+				导入旧会话
+			</Button>
+			<PiImportDialog
+				pi={pi}
+				clientId={clientId}
+				open={importOpen}
+				onOpenChange={setImportOpen}
+			/>
 
 			<PiProjectPicker
 				files={files}

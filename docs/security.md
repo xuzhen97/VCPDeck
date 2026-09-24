@@ -135,13 +135,24 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 
 ### Pi
 
-- Owner 校验和 project lock 在 Server 执行；Owner 约束写控制，不构成多租户保密边界；
-- cwd 必须来自 Files roots 并由 Client realpath/canonicalize；projectKey 是进程级随机 secret 对 canonical cwd 的 HMAC，不泄露真实路径，Client 重启后变化；
-- 每个 run 使用 runId 隔离迟到事件，Socket payload 通过 Shared 严格 parser；
-- 图片附件受数量、单文件、总大小、MIME、SHA-256、魔数和 TTL 限制；
-- Pi 工具、Extensions、Skills 和项目构建拥有运行账户权限；Project Trust 只控制项目资源加载，不是工具权限或容器沙箱；
-- Extension UI 请求必须使用 allowlist 和超时；当前端到端只接受 `select/confirm/input/editor`，Client 生成的其他非阻塞 UI 会在 Server parser 被拒绝；正文、用户输入和本地路径不得进入 Job 或日志；
-- 当前没有平台级 tools allowlist、bash 审批策略、集中 Pi 资源分发或无人值守任务安全边界。
+- Owner 校验、project lock 与 Server 执行；Owner 约束写入限制，但不构成多租户隔离边界；
+- cwd 只来自 Files roots 并经 Client realpath/canonicalize；`projectKey` 是进程级随机 secret 对 canonical cwd 的 HMAC，不泄露真实路径，Client 重启后变化；
+- Session 目录名使用安装级持久 secret 派生的不透明 namespace，不含路径信息；
+- **Pi 配置与凭据的权威在 Server**：模型策略、thinking、Client→Profile 绑定持久化在 Server SQLite；Provider 凭据只以密文（AES-256-GCM + `keyVersion`）落库，根密钥来自 Server 进程外的 `VCPDECK_PI_CREDENTIAL_KEY_FILE`，不与密文同库形成等价明文；
+- 凭据明文只允许存在于 Server 受控解密窗口与 Client Worker 运行内存；凭据经 **IPC** 下发，禁止写入 argv、环境变量、磁盘、日志、Job payload/result、capability 或审计正文；
+- **Client 不读取用户原生 Pi**：不读 `~/.pi` 的 settings/models/auth/trust/Session，也不向其写入；VCPDeck Pi 与用户 Pi 唯一共享区域是用户选择的项目 cwd；
+- Pi 运行配置（RuntimeSpec）只接受 Client 能真正施加的字段，未知字段与不支持的 `schemaVersion` fail closed；未就绪时拒绝需要 Worker 的动作，不回退本机 Pi；
+- Pi 工具、Extensions、Skills 与项目构建都继承 Client OS 运行账户权限；**项目本地资源当前一律不加载**，不存在项目信任交互；
+- **工具策略默认拒绝**：`allow`/`confirm`/`deny` 三桶互斥，`allow ∪ confirm` 作为 SDK 原生工具白名单下发，`deny` 同时进入排除面；**未出现在任何桶的工具不可用**，新增工具（新 SDK 版本、新扩展注册的工具）不会自动获得可用面；
+- **`confirm` 每次调用审批**，复用既有 Extension UI 链路；拒绝、取消与 30 分钟超时一律判定为拒绝并返回稳定错误码（`PI_TOOL_POLICY_REJECTED`），会话继续而不中断 Run；策略决策本阶段不持久化审计；
+- **策略与 Bundle 资源不落盘、不进环境变量**：策略经进程内 host bridge 交给随 Release 发布的策略扩展（写盘会与「Client 不落盘 Server 下发的配置」冲突；环境变量会被 Pi 的 `bash` 工具派生子进程继承）；host bridge 缺失或版本不符时策略扩展阻塞所有工具调用（`PI_POLICY_UNAVAILABLE`）；
+- **Bundle 只从版本目录加载且逐资源校验 sha256**：校验失败不上报 Bundle 能力、不加载资源；Server 只保存与引用 resource ID，不下发资源内容；
+- **旧会话显式导入是唯一允许接触用户原生 Pi 的路径**（ADR-0031）：源根固定为 `~/.pi/agent/sessions` 且不可参数覆盖，只读 `*.jsonl`（不跟随符号链接）；传输标识只接受纯文件名（禁 `/`、`\`、`..`、NUL）；源文件不修改、不删除、不改名、不移动；导入是单向复制、按同名文件幂等、导入后只操作副本。
+- **预览是正文片段的唯一出口**：逐条显式确认后才读取、按 80 字符截断；正文与源文件完整绝对路径不得进入 Server 存储、Job payload/result、日志或审计（由 canary 测试守住）。
+- Extension UI 仍只接受 `select/confirm/input/editor` 四类交互式对话框；
+- 当前没有平台级 tools allowlist、bash 审批策略、受信资源签名/分发或沙箱边界。
+
+**native Pi 零污染门禁**：预置用户 `~/.pi` 后执行 capability、Session 新建/列表、Prompt 与 Client 重启，必须满足该目录递归清单与内容 hash「0 created / 0 modified / 0 deleted」，native-only Session 对 VCPDeck 不可见，哨兵 Extension 不被执行。
 
 ## 9. Release 与供应链
 
@@ -182,6 +193,9 @@ Alibaba Release 上传的数据面直接连接 Provider：Server 只签发/刷�
 | Storage/OAuth Token | Storage config | 最小权限；撤销后验证状态 |
 | Local signSecret | `StorageBackendConfig.config` | 自动生成后持久化；疑似泄露时轮换，旧 URL 随即失效 |
 | TURN shared secret | `VCPDECK_TURN_SECRET_FILE` 指向的 `root:serverUser` `0640` 文件 | 不进 DB/REST/Web；轮换后旧 24h 临时凭据到期自然失效 |
+| Pi Provider 凭据（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录） | 通过 UI/API 轮换或撤销；撤销后立即从 RuntimeSpec 组装中排除 |
+| Pi 凭据根密钥 | `VCPDECK_PI_CREDENTIAL_KEY_FILE` 指向的 Server 进程外文件 | 不进 DB/REST/Web/日志；缺失或非法时 Pi 配置写入与 Spec 组装 fail closed（Server 启动与其他能力不受影响）；轮换需要重新加密既有密文 |
+| Pi Session 数据根 secret | `<VCPDECK_CLIENT_DATA_DIR>/pi/install-secret`（0600） | 丢失会导致既有 Session 目录不可定位；删除前必须确认无历史 Session 依赖 |
 
 PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 Client → 更新 Server PSK并重启 → 更新各 Client → 验证注册。
 

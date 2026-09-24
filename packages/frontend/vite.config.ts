@@ -9,6 +9,10 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": sourceDir,
+			// vendored pi-web 渲染层的 node 内建适配（ADR-0032：本地文件功能不接线）
+			path: "path-browserify",
+			fs: fileURLToPath(new URL("./src/pi-web/shims/fs.ts", import.meta.url)),
+			crypto: fileURLToPath(new URL("./src/pi-web/shims/crypto.ts", import.meta.url)),
 		},
 	},
 	// noVNC 1.7 的 WebCodecs 能力探测使用顶层 await，dev 转换也需 es2022；

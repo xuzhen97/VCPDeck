@@ -36,6 +36,7 @@
 | [`adr/README.md`](./adr/README.md) | 架构决策记录及新增规则 |
 | [`roadmap.md`](./roadmap.md) | 已完成、近期候选和长期方向，不代表交付承诺 |
 | [`design/README.md`](./design/README.md) | 当前专题设计文档索引及权威性说明（含 [`design/cli.md`](./design/cli.md) 多环境 CLI、[`design/p2p-tunnel.md`](./design/p2p-tunnel.md) P2P 回环隧道与 coturn） |
+| [`design/remote-pi-control-plane.md`](./design/remote-pi-control-plane.md) | 部分实现：Plan 1/1.1/2 已落地（集中 Profile/Credential/绑定与 Provider、RuntimeSpec v3 门控、隔离数据根、受信 Resource Bundle 与逐资源校验、默认拒绝的工具策略与审批链路）；项目本地资源、Session 显式导入与 UI renderer 复用仍为 Proposal。
 | [`archive/README.md`](./archive/README.md) | 历史计划、过期设计和验证记录的归档规则 |
 
 ## 文档状态约定

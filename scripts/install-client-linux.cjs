@@ -128,11 +128,14 @@ function buildSudoersContent() {
 	return `Defaults:${ACCOUNT_NAME} !requiretty\n${ACCOUNT_NAME} ALL=(ALL:ALL) NOPASSWD: ALL\n`;
 }
 
-/** 生成敏感启动环境文件内容（仅固定 6 键）。 */
+/** 生成敏感启动环境文件内容（仅固定 7 键）。
+ * VCPDECK_CLIENT_DATA_DIR 是 VCPDeck Pi 的稳定数据根：位于版本目录之外，
+ * 不随 Release 切换/回滚移动。 */
 function buildEnvContent({ serverOrigin, psk, clientId }) {
 	const lines = [
 		"# 由 VCPDeck Linux A2 安装器生成（敏感值请妥善保管）",
 		`VCPDECK_APP_DIR=${APP_DIR}`,
+		`VCPDECK_CLIENT_DATA_DIR=${VAR_DIR}`,
 		"VCPDECK_ARTIFACT=client",
 		`VCPDECK_SERVER=${serverOrigin}`,
 		`VCPDECK_PSK=${psk}`,
