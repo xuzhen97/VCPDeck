@@ -666,7 +666,9 @@ var require_pi = __commonJS({
     function parseCwdRef(v) {
       assertRecord(v, "cwdRef");
       assertString(v.rootDir, "cwdRef.rootDir");
-      assertString(v.relativePath, "cwdRef.relativePath");
+      if (typeof v.relativePath !== "string") {
+        throw new PiProtocolError("cwdRef.relativePath \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
       return { rootDir: v.rootDir, relativePath: v.relativePath };
     }
     function parseAttachments(v) {
