@@ -25,7 +25,8 @@
 
 | 领域 | 文档 | 状态与用途 |
 | --- | --- | --- |
-| 远程 Pi 集中治理 | [`remote-pi-control-plane.md`](./remote-pi-control-plane.md) | 部分实现（Plan 1/1.1/2 已落地：集中 Profile/Credential/绑定与 Provider、RuntimeSpec v3 门控、Client 隔离数据根、受信 Resource Bundle 与逐资源校验、默认拒绝的工具策略与审批链路）；项目本地资源加载、Session 显式导入与 UI renderer 复用仍为 Proposal。|
+| 远程 Pi 集中治理 | [`remote-pi-control-plane.md`](./remote-pi-control-plane.md) | 部分实现（Plan 1/1.1/2/2.1/2.2 已落地：集中 Profile/Credential/绑定与 Provider、RuntimeSpec v3→v4 门控、Client 隔离数据根、受信 Resource Bundle 与逐资源校验、默认拒绝的工具策略与审批链路、Approval/Auto/YOLO 执行模式、Session 显式导入）；项目本地资源加载与 UI renderer 复用仍为 Proposal。|
+| Pi 工具执行模式 | [`pi-tool-approval-mode.md`](./pi-tool-approval-mode.md) | 已实现（Plan 2.2）：Profile 级 `approval / auto / yolo`；Approval/Auto 使用既有三桶策略，YOLO 跳过 Tool Policy 但不突破 Runtime/Resource/OS 边界；RuntimeSpec v4、bridge v2 与 resource v2 已落地。 |
 
 ## 新专题模板
 

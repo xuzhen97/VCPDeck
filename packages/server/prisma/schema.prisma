@@ -291,6 +291,8 @@ model PiProfile {
   enabledResourceIds   String?
   // JSON: { allow, confirm, deny }；NULL = 未配置（等价空策略，未列出工具全部拒绝）
   toolPolicyJson       String?
+  // approval | auto | yolo；旧行与省略输入均为 approval（ADR-0033）
+  toolExecutionMode    String   @default("approval")
   revision             Int      @default(1)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt

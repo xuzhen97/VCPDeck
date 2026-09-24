@@ -6,6 +6,11 @@
 
 ### Breaking
 
+- **Pi 工具执行模式（Profile 级 Approval / Auto / YOLO，ADR-0033）**：Profile 新增 `toolExecutionMode`。`approval`（升级前行为，也是数据库迁移与 API 缺省值）下 `confirm` 工具每次调用仍需人工批准；`auto` 下 `confirm` 直接执行，但 `deny` 与未配置工具仍被拒绝；`yolo` 跳过 Tool Policy 三桶判定，仅限当前 Runtime 已实际注册/加载的工具，且不加载未启用的 Bundle 资源、不绕过 Runtime 或 OS 权限。管理界面新增工具执行模式选择（新建 Profile 默认“自动执行”，YOLO 需显式选择并带风险提示），切模式不会改写策略三桶。
+- **RuntimeSpec 协议升到 v4，且只下发 v4**：`PiRuntimeSpecV4` 强制携带 `toolExecutionMode`。上报 `runtimeSpecProtocolVersion < 4` 的 Client **不下发任何 Spec**（Pi 明确不可用，含仍停留在 v3 的 Client），需升级 Client 后恢复。
+- **Tool Policy host bridge 与 `vcp.tool-policy` 资源升到 v2**：bridge 额外传递执行模式，Bundle 扩展按新的三模式决策矩阵执行；bridge 缺失、版本不符、模式缺失或非法时仍阻塞全部工具调用（`PI_POLICY_UNAVAILABLE`）。Bundle manifest 协议仍为 v1。
+- **回退限制**：回退到只支持 v3 的 Server/Client 后，行为回到“`confirm` 每次审批”，无法保留 Auto/YOLO。
+
 - **远程 Pi 的配置、凭据与模型策略改为 Server 权威，Client 不再读取目标机器用户 Pi**：Server 新增 Pi Profile / Provider 凭据（AES-256-GCM 密文 + `VCPDECK_PI_CREDENTIAL_KEY_FILE` 根密钥）/ Client→Profile 绑定与 `PiRuntimeSpecV1` 下发（`PI_RUNTIME_SPEC` / `PI_RUNTIME_ACK`）；Client 使用 VCPDeck 专属数据根（`VCPDECK_CLIENT_DATA_DIR`）与显式 SessionDir，`agentDir`、settings（纯内存）与凭据（内存注入）均不再来自 `~/.pi`。
 - **项目本地 Pi 资源一律不加载**：移除项目信任交互与 `ProjectTrustStore` 使用；`.pi/extensions`、项目 settings、`.agents/skills` 不进入 VCPDeck 会话。
 - **Pi SDK 升级到 `0.86.0`**（`@earendil-works/pi-agent-core`、`@earendil-works/pi-coding-agent`），版本事实改为运行时 `VERSION` 导出。
@@ -14,8 +19,7 @@
 - **Pi 模型元数据的权威改为 Client 运行时的 Pi 内置目录**：Provider 模型条目新增 `metadataSource`（`catalog` / `explicit`）。`catalog` 模型由 Client 用自身 SDK 目录按 `providerId + modelId` 解析真实上下文窗口、最大输出、成本、`compat`、`thinkingLevelMap` 与 `promptCache`；历史上写入的 `128000/8192/0` 占位元数据不再使用，它会直接篡改 Pi 的上下文压缩阈值与成本统计。自定义端点必须提供显式元数据与 Base URL，并在界面上标注为未确认。
 
 - **Pi 工具策略默认拒绝**：Profile 新增 `allow`/`confirm`/`deny` 三桶（互斥）。`allow ∪ confirm` 作为 SDK 原生工具白名单下发，`deny` 同时进入排除面；**未出现在任何桶的工具不可用**。因此未配置策略的历史 Profile 在补齐基线前 Pi 实际不可用（有意 fail closed）。
-- **RuntimeSpec 协议升到 v3，且只下发 v3**：新增 `toolPolicy` 与可选 `requiredBundle`。上报 `runtimeSpecProtocolVersion < 3` 的 Client **不下发任何 Spec**（Pi 明确不可用），需升级 Client 后恢复。
-- **`confirm` 的执行依赖随 Bundle 发布的策略扩展**：启用 `confirm` 的 Profile 必须同时启用 Bundle 资源 `vcp.tool-policy`，否则保存被拒绝。
+- **`confirm` 的执行依赖随 Bundle 发布的策略扩展**：启用 `confirm` 的 Profile 必须同时启用 Bundle 资源 `vcp.tool-policy`，否则保存被拒绝（与执行模式无关；策略三桶须在切回 Approval 时立即生效）。
 
 ### Added
 

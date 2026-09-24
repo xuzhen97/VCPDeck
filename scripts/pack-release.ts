@@ -243,7 +243,7 @@ async function buildPiResourceBundle(
 			{
 				id: "vcp.tool-policy",
 				kind: "extension",
-				version: "1",
+				version: "2",
 				path: resourcePath,
 				content: readFileSync(outfile),
 			},

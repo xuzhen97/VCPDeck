@@ -139,7 +139,7 @@ async function makeDeps(
 		runtimeRevision: "0123456789abcdef",
 		config: {
 			spec: {
-				schemaVersion: 3,
+				schemaVersion: 4,
 				specId: "s1",
 				profileId: "p1",
 				profileRevision: 1,
@@ -150,6 +150,7 @@ async function makeDeps(
 					defaultThinkingLevel: "medium",
 				},
 				toolPolicy: { allow: [], confirm: [], deny: [] },
+				toolExecutionMode: "auto",
 				runtimeRevision: "0123456789abcdef",
 			},
 			credentialEntries: [{ providerId: "anthropic", apiKey: "sk-test" }],
@@ -494,7 +495,7 @@ describe("attachPiBridge", () => {
 describe("RuntimeSpec 接纳与门控", () => {
 	const readySpec = {
 		spec: {
-			schemaVersion: 3,
+			schemaVersion: 4,
 			specId: "spec-1",
 			profileId: "p1",
 			profileRevision: 1,
@@ -505,6 +506,7 @@ describe("RuntimeSpec 接纳与门控", () => {
 				defaultThinkingLevel: "medium",
 			},
 			toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
+			toolExecutionMode: "approval",
 			runtimeRevision: "0123456789abcdef",
 		},
 		credentials: {

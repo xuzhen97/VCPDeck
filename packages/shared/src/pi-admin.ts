@@ -6,12 +6,14 @@
  * 所有跨信任边界输入（Controller 请求体）必须经此处 parser 严格校验。
  */
 import {
+	isPiToolExecutionMode,
 	parsePiToolPolicy,
 	type PiBundleCapability,
 	type PiModelRef,
 	type PiProviderModel,
 	type PiProviderModelInfo,
 	type PiProviderProtocol,
+	type PiToolExecutionMode,
 	type PiToolPolicy,
 } from "./pi.js";
 
@@ -36,6 +38,8 @@ export interface PiProfileInfo {
 	enabledResourceIds: string[];
 	/** 工具策略：未出现在任何桶的工具默认拒绝。 */
 	toolPolicy: PiToolPolicy;
+	/** 工具执行模式：Approval / Auto / YOLO（ADR-0033）。 */
+	toolExecutionMode: PiToolExecutionMode;
 	revision: number;
 	credentialIds: string[];
 	boundClientIds: string[];
@@ -168,6 +172,8 @@ export interface PiProfileCreateInput {
 	enabledResourceIds?: string[];
 	/** 省略 = 空策略（未列出工具全部拒绝）。 */
 	toolPolicy?: PiToolPolicy;
+	/** 省略 = Server 保守默认 approval（产品新建默认由 Frontend 显式提交）。 */
+	toolExecutionMode?: PiToolExecutionMode;
 }
 
 export type PiProfileUpdateInput = Partial<PiProfileCreateInput>;
@@ -253,6 +259,7 @@ const PROFILE_CREATE_KEYS = new Set([
 	"credentialIds",
 	"enabledResourceIds",
 	"toolPolicy",
+	"toolExecutionMode",
 ]);
 const DEFAULT_MODEL_KEYS = new Set(["provider", "modelId"]);
 /** 单个 Profile 可启用的 Bundle 资源数量上限 */
@@ -565,7 +572,23 @@ export function parsePiProfileCreateInput(value: unknown): PiProfileCreateInput 
 	if (value.toolPolicy !== undefined) {
 		input.toolPolicy = parseProfileToolPolicy(value.toolPolicy);
 	}
+	if (value.toolExecutionMode !== undefined) {
+		input.toolExecutionMode = parseProfileToolExecutionMode(value.toolExecutionMode);
+	}
 	return input;
+}
+
+/**
+ * 解析 Profile 的工具执行模式：未知值一律拒绝（400），不静默回退。
+ * 持久化与迁移的默认值由 Server 选择，不在协议层猜。
+ */
+function parseProfileToolExecutionMode(value: unknown): PiToolExecutionMode {
+	if (!isPiToolExecutionMode(value)) {
+		throw new PiAdminProtocolError(
+			"toolExecutionMode 必须是 approval/auto/yolo",
+		);
+	}
+	return value;
 }
 
 /**
@@ -625,6 +648,9 @@ export function parsePiProfileUpdateInput(value: unknown): PiProfileUpdateInput 
 	}
 	if (value.toolPolicy !== undefined) {
 		input.toolPolicy = parseProfileToolPolicy(value.toolPolicy);
+	}
+	if (value.toolExecutionMode !== undefined) {
+		input.toolExecutionMode = parseProfileToolExecutionMode(value.toolExecutionMode);
 	}
 	if (Object.keys(input).length === 0) {
 		throw new PiAdminProtocolError("Profile 更新至少需要一个字段");

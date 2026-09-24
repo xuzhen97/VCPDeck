@@ -14,7 +14,7 @@ import {
 	type PiCredentialLeaseV2,
 	type PiProviderInfo,
 	type PiRuntimeAck,
-	type PiRuntimeSpecMessageV3,
+	type PiRuntimeSpecMessageV4,
 	type PiRuntimeStatus,
 } from "@vcpdeck/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -23,14 +23,14 @@ import { PiProviderService } from "./pi-provider.service.js";
 import { PiProfileService } from "./pi-profile.service.js";
 import { PiRuntimeRegistry } from "./pi-runtime-registry.service.js";
 import {
-	buildPiRuntimeSpecV3,
+	buildPiRuntimeSpecV4,
 	type PiCredentialMeta,
 } from "./pi-runtime-spec.js";
 
 /** Server → Client 的 Spec 发送通道（由 ClientGateway.afterInit 绑定）。 */
 export type PiRuntimeSender = (
 	clientId: string,
-	message: PiRuntimeSpecMessageV3 | null,
+	message: PiRuntimeSpecMessageV4 | null,
 ) => void;
 
 @Injectable()
@@ -174,7 +174,7 @@ export class PiRuntimeService {
 			this.emit(clientId, null);
 			return;
 		}
-		const spec = buildPiRuntimeSpecV3(
+		const spec = buildPiRuntimeSpecV4(
 			profile,
 			providers,
 			metas,
@@ -238,7 +238,7 @@ export class PiRuntimeService {
 		}
 	}
 
-	private emit(clientId: string, message: PiRuntimeSpecMessageV3 | null): void {
+	private emit(clientId: string, message: PiRuntimeSpecMessageV4 | null): void {
 		if (!this.sender) return;
 		const socketId = this.registry.socketFor(clientId);
 		if (!socketId || !this.registry.isCompatible(clientId)) return;

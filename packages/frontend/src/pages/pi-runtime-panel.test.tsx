@@ -136,6 +136,7 @@ describe("PiRuntimePanel", () => {
 					defaultModel: { provider: "axonhub", modelId: "mimo-v2.6-flash" },
 					allowedModels: [{ provider: "axonhub", modelId: "mimo-v2.6-flash" }],
 					defaultThinkingLevel: "medium",
+					toolExecutionMode: "approval",
 					revision: 1,
 					credentialIds: ["c1"],
 					boundClientIds: [],

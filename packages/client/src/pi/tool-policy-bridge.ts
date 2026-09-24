@@ -13,10 +13,10 @@
  * Bundle 扩展自己实现同样的读取（它是自包含单文件，不能 import 本模块），契约由
  * `PI_TOOL_POLICY_BRIDGE_VERSION` 与 `docs/adr/0030` 固定。
  */
-import type { PiToolPolicy } from "@vcpdeck/shared";
+import type { PiToolExecutionMode, PiToolPolicy } from "@vcpdeck/shared";
 
 /** 桥接契约版本；Bundle 扩展与本模块必须一致，否则扩展 fail closed。 */
-export const PI_TOOL_POLICY_BRIDGE_VERSION = 1;
+export const PI_TOOL_POLICY_BRIDGE_VERSION = 2;
 
 /** 全局槽位名（Bundle 扩展按此名读取）。 */
 export const PI_TOOL_POLICY_BRIDGE_KEY = "__vcpdeckPiHost";
@@ -24,23 +24,32 @@ export const PI_TOOL_POLICY_BRIDGE_KEY = "__vcpdeckPiHost";
 export interface PiToolPolicyBridge {
 	bridgeVersion: number;
 	toolPolicy: PiToolPolicy;
+	toolExecutionMode: PiToolExecutionMode;
 }
 
 type BridgeTarget = Record<string, unknown>;
 
 function isBridge(value: unknown): value is PiToolPolicyBridge {
 	if (typeof value !== "object" || value === null) return false;
-	const candidate = value as { bridgeVersion?: unknown; toolPolicy?: unknown };
+	const candidate = value as {
+		bridgeVersion?: unknown;
+		toolPolicy?: unknown;
+		toolExecutionMode?: unknown;
+	};
 	return (
 		candidate.bridgeVersion === PI_TOOL_POLICY_BRIDGE_VERSION &&
 		typeof candidate.toolPolicy === "object" &&
-		candidate.toolPolicy !== null
+		candidate.toolPolicy !== null &&
+		(candidate.toolExecutionMode === "approval" ||
+			candidate.toolExecutionMode === "auto" ||
+			candidate.toolExecutionMode === "yolo")
 	);
 }
 
-/** 安装策略桥接；必须在加载 Bundle 扩展之前调用。 */
+/** 安装策略与模式桥接；必须在加载 Bundle 扩展之前调用。 */
 export function installToolPolicyBridge(
 	policy: PiToolPolicy,
+	mode: PiToolExecutionMode,
 	target: BridgeTarget = globalThis as unknown as BridgeTarget,
 ): void {
 	target[PI_TOOL_POLICY_BRIDGE_KEY] = {
@@ -50,10 +59,11 @@ export function installToolPolicyBridge(
 			confirm: [...policy.confirm],
 			deny: [...policy.deny],
 		},
+		toolExecutionMode: mode,
 	} satisfies PiToolPolicyBridge;
 }
 
-/** 读取策略桥接；未安装或版本不符返回 null（调用方必须据此 fail closed）。 */
+/** 读取策略与模式桥接；未安装或版本/形状不符返回 null（调用方必须据此 fail closed）。 */
 export function readToolPolicyBridge(
 	target: BridgeTarget = globalThis as unknown as BridgeTarget,
 ): PiToolPolicyBridge | null {
@@ -66,5 +76,6 @@ export function readToolPolicyBridge(
 			confirm: [...value.toolPolicy.confirm],
 			deny: [...value.toolPolicy.deny],
 		},
+		toolExecutionMode: value.toolExecutionMode,
 	};
 }

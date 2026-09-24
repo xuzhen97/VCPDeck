@@ -12,6 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { PI_BUILTIN_TOOL_IDS } from "@vcpdeck/shared";
 import { PI_TOOL_POLICY_BRIDGE_KEY, readToolPolicyBridge } from "./tool-policy-bridge.js";
 
 const captured = {
@@ -89,11 +90,30 @@ describe("startPiAgentSession 的策略与 Bundle 接线", () => {
 			modelRuntime: { refresh: vi.fn() },
 			modelScope: [{ provider: "anthropic", modelId: "claude-x" }],
 			toolPolicy: policy,
+			toolExecutionMode: "approval",
 		});
 
 		expect(captured.session[0]).toMatchObject({
 			tools: ["bash", "grep", "read"],
 			excludeTools: ["write"],
+		});
+		wrapper.destroy();
+	});
+
+	it("yolo 模式下 SDK 工具集合变为内置工具全集且不排除 deny", async () => {
+		const wrapper = await startPiAgentSession({
+			cwd: "/tmp/project",
+			sessionDir: "/tmp/sessions",
+			agentDir: "/tmp/agent",
+			modelRuntime: { refresh: vi.fn() },
+			modelScope: [{ provider: "anthropic", modelId: "claude-x" }],
+			toolPolicy: policy,
+			toolExecutionMode: "yolo",
+		});
+
+		expect(captured.session[0]).toMatchObject({
+			tools: [...PI_BUILTIN_TOOL_IDS].sort(),
+			excludeTools: [],
 		});
 		wrapper.destroy();
 	});
@@ -106,6 +126,7 @@ describe("startPiAgentSession 的策略与 Bundle 接线", () => {
 			modelRuntime: { refresh: vi.fn() },
 			modelScope: [{ provider: "anthropic", modelId: "claude-x" }],
 			toolPolicy: policy,
+			toolExecutionMode: "auto",
 			bundleExtensionPaths: ["/app/apps/0.11.0/pi-resources/extensions/vcp-tool-policy/index.js"],
 		});
 
@@ -130,6 +151,7 @@ describe("startPiAgentSession 的策略与 Bundle 接线", () => {
 			modelRuntime: { refresh: vi.fn() },
 			modelScope: [{ provider: "anthropic", modelId: "claude-x" }],
 			toolPolicy: policy,
+			toolExecutionMode: "auto",
 		});
 
 		const options = captured.services[0]?.resourceLoaderOptions as
@@ -147,9 +169,14 @@ describe("startPiAgentSession 的策略与 Bundle 接线", () => {
 			modelRuntime: { refresh: vi.fn() },
 			modelScope: [{ provider: "anthropic", modelId: "claude-x" }],
 			toolPolicy: policy,
+			toolExecutionMode: "approval",
 		});
 
-		expect(readToolPolicyBridge()).toEqual({ bridgeVersion: 1, toolPolicy: policy });
+		expect(readToolPolicyBridge()).toEqual({
+			bridgeVersion: 2,
+			toolPolicy: policy,
+			toolExecutionMode: "approval",
+		});
 		// 策略不得出现在环境变量里（bash 子进程会继承）
 		expect(JSON.stringify(process.env)).not.toContain("vcpdeckPiHost");
 		wrapper.destroy();

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PiProfileInfo } from "@vcpdeck/shared";
 import {
 	buildPiRuntimeSpec,
+	buildPiRuntimeSpecV4,
 	computeRuntimeRevision,
 	parseAllowedModelsColumn,
 } from "./pi-runtime-spec.js";
@@ -18,6 +19,7 @@ const profile: PiProfileInfo = {
 	defaultThinkingLevel: "medium",
 	enabledResourceIds: [],
 	toolPolicy: { allow: [], confirm: [], deny: [] },
+	toolExecutionMode: "auto",
 	revision: 3,
 	credentialIds: ["c1"],
 	boundClientIds: ["client-1"],
@@ -101,6 +103,59 @@ describe("buildPiRuntimeSpec", () => {
 		const b = buildPiRuntimeSpec(profile, []);
 		expect(a.specId).not.toBe(b.specId);
 		expect(a.runtimeRevision).toBe(b.runtimeRevision);
+	});
+});
+
+describe("buildPiRuntimeSpecV4", () => {
+	const providers = [
+		{
+			id: "provider-1",
+			name: "Anthropic",
+			runtimeProviderId: "anthropic",
+			protocol: "anthropic-messages" as const,
+			baseUrl: null,
+			headers: {},
+			enabled: true,
+			revision: 1,
+			models: [
+				{ id: "claude-x", name: "Claude X", metadataSource: "catalog" as const },
+			],
+			credentialIds: ["c1"],
+			boundProfileIds: ["p1"],
+			configurationState: "ready" as const,
+		},
+	];
+	const credentials = [{ id: "c1", updatedAt: new Date("2026-09-20T00:00:00Z") }];
+
+	it("构造 v4 Spec：携带模式、策略与 requiredBundle，且不含 Secret", () => {
+		const spec = buildPiRuntimeSpecV4(
+			{
+				...profile,
+				toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
+				toolExecutionMode: "yolo",
+				enabledResourceIds: ["vcp.tool-policy"],
+			},
+			providers,
+			credentials,
+			"0.11.0",
+		);
+		expect(spec).toMatchObject({
+			schemaVersion: 4,
+			toolExecutionMode: "yolo",
+			toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
+			requiredBundle: {
+				protocolVersion: 1,
+				bundleVersion: "0.11.0",
+				resourceIds: ["vcp.tool-policy"],
+			},
+		});
+		expect(JSON.stringify(spec)).not.toContain("sk-");
+	});
+
+	it("无资源需求时不构造 requiredBundle", () => {
+		const spec = buildPiRuntimeSpecV4(profile, providers, credentials);
+		expect(spec.requiredBundle).toBeUndefined();
+		expect(spec.toolExecutionMode).toBe("auto");
 	});
 });
 

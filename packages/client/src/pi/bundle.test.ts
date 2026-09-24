@@ -52,7 +52,7 @@ async function makeTree(
 			{
 				id: "vcp.tool-policy",
 				kind: "extension",
-				version: "1",
+				version: "2",
 				path: "extensions/vcp-tool-policy/index.js",
 				sha256: overrides.tamper ? "0".repeat(64) : digest,
 			},

@@ -607,6 +607,29 @@ Tool Policy 不是 OS sandbox。
 
 > **落地状态（Plan 2）**：已实现，且策略默认拒绝。`allow ∪ confirm` 作为 SDK 原生 `tools` 白名单下发、`deny` 同时进入 `excludeTools`，**未出现在任何桶的工具不可用**；`confirm` 由 Bundle 资源 `vcp.tool-policy` 拦截 `tool_call`，经既有 Extension UI 链路每次调用审批，拒绝/取消/30 分钟超时一律判定为拒绝并返回 `PI_TOOL_POLICY_REJECTED`（会话继续）。策略经进程内 host bridge 传给扩展：**不落盘、不进环境变量**（`bash` 工具派生的子进程会继承环境变量）；桥接缺失或版本不符时扩展阻塞所有工具调用（`PI_POLICY_UNAVAILABLE`）。本阶段不持久化审批审计。未见 `allow` 项的历史 Profile 因此默认不可用，需在界面套用基线策略。
 
+> **落地状态（Plan 2.2 / ADR-0033）**：上述“`confirm` 每次调用审批”现仅适用于 `approval` 模式（存量 Profile 与 API 缺省的默认值）；`auto` 下 `confirm` 直接执行（`deny`/未列出仍阻塞），`yolo` 跳过三桶判定。详见 §14.1 与 [`pi-tool-approval-mode.md`](./pi-tool-approval-mode.md)。
+
+### 14.1 已实现：Tool Execution Mode（Plan 2.2）
+
+Profile 级执行模式已按 [ADR-0033](../adr/0033-pi-tool-approval-mode.md) 落地：
+
+```text
+toolExecutionMode = approval | auto | yolo
+```
+
+Tool Policy 与 Execution Mode 分层：Approval/Auto 继续使用 `allow / confirm / deny`；YOLO 则显式跳过 Tool Policy，只信任当前 Runtime 实际注册/加载的工具。固定语义：
+
+| Policy | Approval | Auto | YOLO |
+| --- | --- | --- | --- |
+| allow | execute | execute | execute |
+| confirm | approve each call | execute | execute |
+| deny | reject | reject | execute |
+| unknown/unlisted | reject | reject | execute if registered by Runtime |
+
+Auto 不改变 SDK 工具白名单，仍保持 `tools = allow ∪ confirm`、`excludeTools = deny`。YOLO 则不再按三桶缩小工具集合，但仍受已启用受信 Resource、Runtime/平台可用性、Provider/Model Policy、VCPDeck 隔离和 Client OS 权限约束。该变化以 RuntimeSpec v4、host bridge v2 和 `vcp.tool-policy` resource v2 显式版本化并已实现；既有 Profile 迁移为 `approval` 保持旧行为，新建 UI Profile 默认 `auto`，YOLO 只能显式选择。
+
+完整版本、数据迁移、兼容、Frontend 与测试设计见 [`pi-tool-approval-mode.md`](./pi-tool-approval-mode.md) 和 [ADR-0033](../adr/0033-pi-tool-approval-mode.md)。
+
 ## 15. Project Resources 与 Trust
 
 第一阶段即使项目存在：
@@ -922,6 +945,7 @@ flowchart LR
 | Plan 1.1「Provider 接入与模型目录来源」 | B 的配置面收敛 + §7 模型条目来源语义 | 一次接入（名称/协议/Base URL/API Key）完成 Provider + 模型 + 凭据原子创建；远程 `/models` 自动拉取；模型元数据来源判别联合 `catalog \| explicit` | 内置目录可解析的模型必须拿到真实上下文窗口与成本（不写占位值）；自定义端点必须显式元数据且标注未确认；无可用模型不注册 Provider |
 | Plan 2「受信资源与策略」 | D Bundle + E Tool/Resource policy | `pi-resources/` + manifest + hash 随 Release 发布；allow/confirm/deny（默认拒绝、每次调用审批、超时即拒绝）；项目资源继续默认关闭 | Bundle 缺失或不匹配 fail closed；Project 本地 Extension 永不加载；策略与资源不落盘不进环境变量 |
 | Plan 2.1「旧 Session 显式导入」 | §21.3 显式导入（从 Plan 2 拆出） | 用户主动选择源 Session → 只读打开 → 校验 cwd → 复制到 VCPDeck Session root，源文件不动 | 不自动搬运、不迁移凭据；导入后只操作副本 |
+| Plan 2.2「工具执行模式」 | §14.1 Execution Mode | Profile 增加 `approval / auto / yolo`；RuntimeSpec v4、bridge v2、`vcp.tool-policy` v2；既有 Profile 安全迁移 | 已实现：Auto 保持策略能力面但取消 `confirm` 交互；YOLO 跳过 Tool Policy、仅限当前 Runtime 已注册工具；活跃 Run 不热切换 |
 | Plan 3「展示层复用」 | F UI renderer | VCPDeck Pi UI Adapter + 从 `examples/pi-web` 移植展示组件 | 替换 renderer 不改变 REST/SSE/Owner/Run 与 Session Job 语义（§18） |
 
 硬约束：Plan 1 不得只发布 Client 侧隔离；Plan 1 完成前，任何 Client Release 都不得引入「没有 RuntimeSpec 也启动 Pi Worker」的路径。

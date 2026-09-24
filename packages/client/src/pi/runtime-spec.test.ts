@@ -3,8 +3,9 @@ import type {
 	PiCredentialLeaseV2,
 	PiModelRef,
 	PiRuntimeProviderSpec,
-	PiRuntimeSpecMessageV3,
+	PiRuntimeSpecMessageV4,
 } from "@vcpdeck/shared";
+import { PI_BUILTIN_TOOL_IDS } from "@vcpdeck/shared";
 import {
 	effectiveDefaultModel,
 	evaluateRuntimeSpec,
@@ -74,10 +75,10 @@ function message(overrides: {
 	defaultModel?: { provider: string; modelId: string };
 	allowedModels?: PiModelRef[];
 	entries?: Array<{ providerId: string; apiKey: string }>;
-} = {}): PiRuntimeSpecMessageV3 {
+} = {}): PiRuntimeSpecMessageV4 {
 	return {
 		spec: {
-			schemaVersion: 3,
+			schemaVersion: 4,
 			specId: "s1",
 			profileId: "p1",
 			profileRevision: 3,
@@ -91,6 +92,7 @@ function message(overrides: {
 				defaultThinkingLevel: "medium",
 			},
 			toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
+			toolExecutionMode: "auto",
 			runtimeRevision: "0123456789abcdef",
 		},
 		credentials: {
@@ -242,8 +244,19 @@ describe("evaluateRuntimeSpec", () => {
 		expect(await evaluateRuntimeSpec(null)).toMatchObject({ configState: "pending", config: null, runtimeRevision: null });
 	});
 
-	it("v1 或畸形 Spec → incompatible", async () => {
+	it("v3 或畸形 Spec → incompatible（v4 硬切换，不回退）", async () => {
 		expect(await evaluateRuntimeSpec({ spec: { schemaVersion: 1 }, credentials: {} })).toMatchObject({
+			configState: "incompatible",
+			reasonCode: "PI_RUNTIME_SPEC_INCOMPATIBLE",
+		});
+		const legacy = message();
+		const { toolExecutionMode: _mode, ...withoutMode } = legacy.spec;
+		expect(
+			await evaluateRuntimeSpec({
+				...legacy,
+				spec: { ...withoutMode, schemaVersion: 3 },
+			}),
+		).toMatchObject({
 			configState: "incompatible",
 			reasonCode: "PI_RUNTIME_SPEC_INCOMPATIBLE",
 		});
@@ -317,35 +330,48 @@ describe("createModelRuntimeWithLease 与 SDK 目录交互", () => {
 	});
 });
 
-describe("toolSetsFor（默认拒绝的工具映射）", () => {
-	it("tools = allow ∪ confirm 去重排序，excludeTools = deny", () => {
-		expect(
-			toolSetsFor({
-				allow: ["read", "grep"],
-				confirm: ["bash", "read"],
-				deny: ["write"],
-			}),
-		).toEqual({
-			tools: ["bash", "grep", "read"],
-			excludeTools: ["write"],
-		});
+describe("toolSetsFor（策略与执行模式的工具映射）", () => {
+	it("approval/auto：tools = allow ∪ confirm 去重排序，excludeTools = deny", () => {
+		for (const mode of ["approval", "auto"] as const) {
+			expect(
+				toolSetsFor(
+					{
+						allow: ["read", "grep"],
+						confirm: ["bash", "read"],
+						deny: ["write"],
+					},
+					mode,
+				),
+			).toEqual({
+				tools: ["bash", "grep", "read"],
+				excludeTools: ["write"],
+			});
+		}
 	});
 
-	it("空策略得到空白名单（未列出工具全部不可用）", () => {
-		expect(toolSetsFor({ allow: [], confirm: [], deny: [] })).toEqual({
+	it("approval/auto：空策略得到空白名单（未列出工具全部不可用）", () => {
+		expect(toolSetsFor({ allow: [], confirm: [], deny: [] }, "auto")).toEqual({
 			tools: [],
 			excludeTools: [],
 		});
 	});
 
-	it("未列出的工具既不进 tools 也不进 excludeTools", () => {
-		const { tools, excludeTools } = toolSetsFor({
-			allow: ["read"],
-			confirm: [],
-			deny: [],
-		});
+	it("approval/auto：未列出的工具既不进 tools 也不进 excludeTools", () => {
+		const { tools, excludeTools } = toolSetsFor(
+			{ allow: ["read"], confirm: [], deny: [] },
+			"approval",
+		);
 		expect(tools).not.toContain("bash");
 		expect(excludeTools).not.toContain("bash");
+	});
+
+	it("yolo：暴露当前 Runtime 的内置工具全集，且不应用 deny", () => {
+		expect(
+			toolSetsFor({ allow: [], confirm: [], deny: ["bash"] }, "yolo"),
+		).toEqual({
+			tools: [...PI_BUILTIN_TOOL_IDS].sort(),
+			excludeTools: [],
+		});
 	});
 });
 

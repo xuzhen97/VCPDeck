@@ -191,6 +191,113 @@ describe("PiProfilesPanel", () => {
 	});
 });
 
+describe("PiProfilesPanel 的工具执行模式", () => {
+	const listProfile = (mode: string) => ({
+		id: "p1",
+		name: "已有配置",
+		enabled: true,
+		defaultModel: { provider: "axonhub", modelId: "mimo-v2.6-flash" },
+		allowedModels: [{ provider: "axonhub", modelId: "mimo-v2.6-flash" }],
+		defaultThinkingLevel: "medium",
+		toolExecutionMode: mode,
+		enabledResourceIds: ["vcp.tool-policy"],
+		toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
+		revision: 1,
+		credentialIds: ["cred-1"],
+		boundClientIds: [],
+	});
+
+	it("新建默认为自动执行，切换模式不改写三桶，并提交所选模式", async () => {
+		const user = userEvent.setup();
+		const { client, create } = makeSdk();
+		create.mockResolvedValueOnce({ ...listProfile("yolo"), name: "测试" });
+		renderPanel(client);
+
+		// 产品默认：新建 Profile 显式使用 auto（Server 缺省仍是 approval）
+		expect(await screen.findByLabelText("自动执行")).toBeChecked();
+
+		await user.click(screen.getByLabelText("YOLO"));
+		// 切换模式不得改动策略桶（切回受控模式时才能恢复原分类）
+		expect(screen.getByLabelText("策略-allow-read")).toBeChecked();
+		expect(screen.getByLabelText("策略-confirm-bash")).toBeChecked();
+		expect(screen.getByLabelText("策略-confirm-write")).toBeChecked();
+
+		await fillBasics(user);
+		await user.type(screen.getByLabelText("默认模型 ID"), "mimo-v2.6-flash");
+		await user.type(screen.getByLabelText(ALLOWED_LABEL), "axonhub/mimo-v2.6-flash");
+		await user.click(screen.getByLabelText("资源-vcp.tool-policy"));
+		await user.click(screen.getByRole("button", { name: "创建 Profile" }));
+
+		expect(create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				toolExecutionMode: "yolo",
+				toolPolicy: {
+					allow: ["read", "grep", "find", "ls"],
+					confirm: ["write", "edit", "bash"],
+					deny: [],
+				},
+			}),
+		);
+	});
+
+	it("编辑已有 Profile 时回显其模式（旧 Profile 为审批模式）", async () => {
+		const user = userEvent.setup();
+		const { client } = makeSdk();
+		(client.pi.profiles.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			data: [listProfile("approval")],
+			total: 1,
+			page: 1,
+			pageSize: 20,
+			totalPages: 1,
+		});
+		renderPanel(client);
+
+		await user.click(await screen.findByRole("button", { name: "编辑" }));
+
+		expect(screen.getByLabelText("审批模式")).toBeChecked();
+		expect(screen.getByLabelText("自动执行")).not.toBeChecked();
+	});
+
+	it("说明文案明确各模式的能力与安全边界", async () => {
+		const user = userEvent.setup();
+		const { client } = makeSdk();
+		renderPanel(client);
+
+		// 默认（自动执行）：confirm 不弹窗，但 deny 与未配置工具仍禁止
+		expect(
+			await screen.findByText(/deny 和未配置工具仍然禁止/),
+		).toBeInTheDocument();
+
+		await user.click(screen.getByLabelText("审批模式"));
+		expect(
+			screen.getByText(/confirm 工具每次调用需要批准/),
+		).toBeInTheDocument();
+
+		await user.click(screen.getByLabelText("YOLO"));
+		expect(screen.getByText(/忽略 Tool Policy/)).toBeInTheDocument();
+		expect(
+			screen.getByText(/不加载未启用的资源，也不绕过 Runtime 或 OS 权限/),
+		).toBeInTheDocument();
+	});
+
+	it("列表显示当前模式标签并标记 YOLO", async () => {
+		const { client } = makeSdk();
+		(client.pi.profiles.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			data: [listProfile("yolo"), { ...listProfile("auto"), id: "p2", name: "自动配置" }],
+			total: 2,
+			page: 1,
+			pageSize: 20,
+			totalPages: 1,
+		});
+		renderPanel(client);
+
+		expect(await screen.findByText("已有配置")).toBeInTheDocument();
+		// 单选控件与列表标签同名，因此列表项里必须至少各有一个
+		expect(screen.getAllByText("YOLO").length).toBeGreaterThanOrEqual(2);
+		expect(screen.getAllByText("自动执行").length).toBeGreaterThanOrEqual(2);
+	});
+});
+
 describe("PiProfilesPanel 的工具策略与 Bundle 资源", () => {
 	it("新建 Profile 预填基线策略：读类放行、写与执行类需审批", async () => {
 		const { client } = makeSdk();

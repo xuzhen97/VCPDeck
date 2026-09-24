@@ -91,3 +91,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0030](./0030-pi-resource-bundle-and-tool-policy.md) | Proposed | Pi Bundle 位于版本目录并由 Client 逐资源校验；工具策略默认拒绝、审批超时即拒绝；策略经进程内桥接传递，不落盘不进环境变量 |
 | [0031](./0031-native-pi-session-explicit-import.md) | Proposed | 用户原生 Pi Session 的显式导入是唯一允许接触用户 Pi 的路径：只读、单向、只操作副本，源根不可覆盖，预览正文受限不落盘 |
 | [0032](./0032-pi-web-renderer-vendoring.md) | Proposed | Pi Web 消息渲染层原样拷入 `packages/frontend/src/pi-web/`（vendored，MIT 随行）；Shared DTO 与渲染模型只经 Pi UI Adapter 翻译，移植子树零协议 import，上游手动 cherry-pick |
+| [0033](./0033-pi-tool-approval-mode.md) | Accepted | Tool Policy 与 Execution Mode 分层：Approval 逐次审批、Auto 受策略自动执行、YOLO 跳过 Tool Policy 但只信任当前 Runtime 已加载工具；RuntimeSpec v4 / bridge v2 |

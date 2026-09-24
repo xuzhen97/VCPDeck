@@ -25,7 +25,7 @@ describe("probePiCapability", () => {
 			nodeVersion: "22.19.0",
 			shellKind: "git-bash",
 			sessionJobProtocolVersion: 1,
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 			configMode: "server-authoritative",
 		});
 	});

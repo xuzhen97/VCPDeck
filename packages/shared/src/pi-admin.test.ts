@@ -346,6 +346,25 @@ describe("Profile 的工具策略与 Bundle 资源字段", () => {
 		expect(parsed.toolPolicy).toEqual({ allow: [], confirm: [], deny: ["bash"] });
 	});
 
+	it("创建/更新时可提交工具执行模式，非法值按协议错误拒绝", () => {
+		expect(
+			parsePiProfileCreateInput({ ...base, toolExecutionMode: "auto" })
+				.toolExecutionMode,
+		).toBe("auto");
+		expect(parsePiProfileUpdateInput({ toolExecutionMode: "yolo" })).toEqual({
+			toolExecutionMode: "yolo",
+		});
+		expect("toolExecutionMode" in parsePiProfileCreateInput(base)).toBe(false);
+		expect(() =>
+			parsePiProfileCreateInput({ ...base, toolExecutionMode: "unsafe" }),
+		).toThrow(PiAdminProtocolError);
+		for (const mode of ["approval", "auto", "yolo"]) {
+			expect(
+				parsePiProfileUpdateInput({ toolExecutionMode: mode }).toolExecutionMode,
+			).toBe(mode);
+		}
+	});
+
 	it("更新时未知字段仍拒绝", () => {
 		expect(() => parsePiProfileUpdateInput({ nope: 1 })).toThrow(/未知字段/);
 	});

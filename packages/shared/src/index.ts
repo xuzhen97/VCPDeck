@@ -74,7 +74,9 @@ export type {
 	PiRunSummary,
 	PiRuntimeAck,
 	PiRuntimeSpecMessage,
+	PiRuntimeSpecMessageV4,
 	PiRuntimeSpecV1,
+	PiRuntimeSpecV4,
 	PiSessionCreated,
 	PiSessionJobSnapshot,
 	PiSessionJobStatus,
@@ -95,6 +97,7 @@ export type {
 	PiRuntimeProviderSpec,
 	PiRuntimeSpecMessageV3,
 	PiRuntimeSpecV3,
+	PiToolExecutionMode,
 } from "./pi.js";
 export type {
 	ReleaseArchiveAvailableInfo,
@@ -137,15 +140,19 @@ export {
 	PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
 	PI_THINKING_LEVELS,
+	PI_TOOL_EXECUTION_MODES,
 	isPiAgentIdle,
 	isPiThinkingLevel,
+	isPiToolExecutionMode,
 	parsePiAgentState,
 	parsePiCredentialLeaseV2,
 	parsePiRuntimeAck,
 	parsePiRuntimeSpecMessage,
 	parsePiRuntimeSpecMessageV3,
+	parsePiRuntimeSpecMessageV4,
 	parsePiRuntimeSpecV1,
 	parsePiRuntimeSpecV3,
+	parsePiRuntimeSpecV4,
 	safePiErrorMessage,
 } from "./pi.js";
 export {

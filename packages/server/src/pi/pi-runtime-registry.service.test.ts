@@ -22,7 +22,7 @@ describe("PiRuntimeRegistry", () => {
 		const registry = new PiRuntimeRegistry();
 		registry.setCapability("c1", {
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 			configMode: "server-authoritative",
 		});
 		registry.setDesired("c1", { specId: "s1", runtimeRevision: "0123456789abcdef" });
@@ -108,7 +108,7 @@ describe("PiRuntimeRegistry", () => {
 		const registry = new PiRuntimeRegistry();
 		registry.setCapability("c1", {
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 			configMode: "server-authoritative",
 		});
 		registry.setDesired("c1", { specId: "s1", runtimeRevision: "0123456789abcdef" });
@@ -131,11 +131,11 @@ describe("PiRuntimeRegistry", () => {
 		const registry = new PiRuntimeRegistry();
 		registry.setCapability("c1", {
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 		});
 		expect(registry.status("c1")).toMatchObject({
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 		});
 	});
 
@@ -145,7 +145,7 @@ describe("PiRuntimeRegistry", () => {
 		registry.bindSocket("c1", "socket-1");
 		registry.setCapability("c1", {
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 			configMode: "server-authoritative",
 		});
 		registry.setBundle("c1", {
@@ -159,7 +159,7 @@ describe("PiRuntimeRegistry", () => {
 		registry.bindSocket("c1", "socket-2");
 		registry.setCapability("c1", {
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 			configMode: "server-authoritative",
 		});
 		expect(registry.bundleFor("c1")).toBeNull();
@@ -185,7 +185,7 @@ describe("PiRuntimeRegistry", () => {
 		registry.bindSocket("c1", "socket-1");
 		registry.setCapability("c1", {
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 			configMode: "server-authoritative",
 		});
 		registry.clear("c1");

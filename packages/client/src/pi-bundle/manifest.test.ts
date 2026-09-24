@@ -6,7 +6,7 @@ const resources = [
 	{
 		id: "vcp.tool-policy",
 		kind: "extension" as const,
-		version: "1",
+		version: "2",
 		path: "extensions/vcp-tool-policy/index.js",
 		content: Buffer.from("export default function () {}\n"),
 	},

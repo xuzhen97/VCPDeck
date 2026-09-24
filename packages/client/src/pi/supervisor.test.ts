@@ -136,7 +136,7 @@ function makeSupervisor(opts: {
 				runtimeRevision: "0123456789abcdef",
 				config: {
 					spec: {
-						schemaVersion: 3,
+						schemaVersion: 4,
 						specId: "s1",
 						profileId: "p1",
 						profileRevision: 1,
@@ -147,6 +147,7 @@ function makeSupervisor(opts: {
 							defaultThinkingLevel: "medium",
 						},
 						toolPolicy: { allow: [], confirm: [], deny: [] },
+						toolExecutionMode: "auto",
 						runtimeRevision: "0123456789abcdef",
 					},
 					credentialEntries: [{ providerId: "anthropic", apiKey: "sk-test" }],

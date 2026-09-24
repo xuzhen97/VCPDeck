@@ -12,7 +12,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | --- | --- | --- |
 | Server ↔ Client 通用协议 | Shared 事件与 DTO；Client 上报版本/capability | 没有独立通用协议版本；同版本最安全 |
 | Server ↔ Client Pi（协议） | `PI_SESSION_JOB_PROTOCOL_VERSION=1`；capabilityDetails 含 SDK/Node/shell 安全摘要 | 必须精确匹配，不匹配明确拒绝 Pi |
-| Server ↔ Client Pi（运行配置） | `PI_RUNTIME_SPEC_PROTOCOL_VERSION=3`；Server 只下发 `PiRuntimeSpecV3`（含 `toolPolicy`，可选 `requiredBundle`）+ 运行期凭据 lease，Client 回 `PI_RUNTIME_ACK` | 未知字段或不支持的 `schemaVersion` fail closed；**上报 < 3 的 Client 一律不下发任何 Spec**（Pi 明确不可用，不回退用户本机 Pi） |
+| Server ↔ Client Pi（运行配置） | `PI_RUNTIME_SPEC_PROTOCOL_VERSION=4`；Server 只下发 `PiRuntimeSpecV4`（含 `toolPolicy` 与必填 `toolExecutionMode`，可选 `requiredBundle`）+ 运行期凭据 lease，Client 回 `PI_RUNTIME_ACK` | 未知字段或不支持的 `schemaVersion` fail closed；**上报 < 4 的 Client 一律不下发任何 Spec**（Pi 明确不可用，不回退用户本机 Pi），禁用 v3/v4 双协议回退 |
 | Pi Resource Bundle | `pi-resources/manifest.json` 的 `protocolVersion=1`，声明 `bundleVersion`（= Release 版本）、`piSdkVersion` 与逐资源 `sha256` | Client 逐资源校验；缺失/篡改/SDK 版本不符 → 不上报 Bundle 能力且不加载资源；Profile 需要资源而目标 Client 未上报兼容 Bundle → 不下发 Spec |
 | Server ↔ Client Terminal | `terminal.pty` capabilityDetails + Shared 严格运行时解析 | 无独立数字版本；缺能力时拒绝，seq/generation/state 变化需整套同版本发布 |
 | Server ↔ Client P2P 隧道 | `P2P_TUNNEL_PROTOCOL_VERSION=1`；capabilityDetails.p2pTunnel 摘要 | 版本不匹配或无能力时不执行数据面，UI 提示不支持；旧 Client 缺省视为 unsupported |

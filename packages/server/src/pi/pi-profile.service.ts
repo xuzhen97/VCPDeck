@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
 	emptyPiToolPolicy,
+	isPiToolExecutionMode,
 	parsePiToolPolicy,
 	type PaginatedResult,
 	type PiClientBindingInfo,
@@ -15,6 +16,7 @@ import {
 	type PiProfileCreateInput,
 	type PiProfileInfo,
 	type PiProfileUpdateInput,
+	type PiToolExecutionMode,
 	type PiToolPolicy,
 } from "@vcpdeck/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -38,7 +40,25 @@ interface PiProfileRow {
 	defaultThinkingLevel: string;
 	enabledResourceIds: string | null;
 	toolPolicyJson: string | null;
+	toolExecutionMode: string;
 	revision: number;
+}
+
+/** 迁移与 API 缺省的保守默认（ADR-0033 决策 7）。 */
+const DEFAULT_TOOL_EXECUTION_MODE: PiToolExecutionMode = "approval";
+
+/**
+ * 读取执行模式列：只接受三个合法值；未知值抛 PI_CONFIG_UNAVAILABLE，不静默回退为默认，
+ * 否则损坏数据会被解释成“更宽松”或“更保守”的权限语义而不被察觉。
+ */
+function parseToolExecutionModeColumn(raw: string | null | undefined): PiToolExecutionMode {
+	if (!isPiToolExecutionMode(raw)) {
+		throw piError(
+			"PI_CONFIG_UNAVAILABLE",
+			`Profile 工具执行模式列非法：${String(raw)}`,
+		);
+	}
+	return raw;
 }
 
 /**
@@ -129,6 +149,7 @@ export class PiProfileService {
 			defaultThinkingLevel: row.defaultThinkingLevel,
 			enabledResourceIds: parseResourceIdsColumn(row.enabledResourceIds),
 			toolPolicy: parseToolPolicyColumn(row.toolPolicyJson),
+			toolExecutionMode: parseToolExecutionModeColumn(row.toolExecutionMode),
 			revision: row.revision,
 			credentialIds: links.map((link) => link.credentialId),
 			boundClientIds: bindings.map((binding) => binding.clientId),
@@ -149,6 +170,7 @@ export class PiProfileService {
 					defaultModelId: input.defaultModel.modelId,
 					allowedModels: JSON.stringify(input.allowedModels),
 					defaultThinkingLevel: input.defaultThinkingLevel,
+					toolExecutionMode: input.toolExecutionMode ?? DEFAULT_TOOL_EXECUTION_MODE,
 					enabledResourceIds:
 						enabledResourceIds.length > 0
 							? JSON.stringify(enabledResourceIds)
@@ -183,6 +205,7 @@ export class PiProfileService {
 			}
 			if (input.allowedModels !== undefined) data.allowedModels = JSON.stringify(input.allowedModels);
 			if (input.defaultThinkingLevel !== undefined) data.defaultThinkingLevel = input.defaultThinkingLevel;
+			if (input.toolExecutionMode !== undefined) data.toolExecutionMode = input.toolExecutionMode;
 			const next = {
 				defaultModel: input.defaultModel ?? { provider: existing.defaultProvider, modelId: existing.defaultModelId },
 				allowedModels: input.allowedModels ?? parseAllowedModelsColumn(existing.allowedModels),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PiProfileInfo, PiProviderInfo, PiRuntimeSpecMessageV3 } from "@vcpdeck/shared";
+import type { PiProfileInfo, PiProviderInfo, PiRuntimeSpecMessageV4 } from "@vcpdeck/shared";
 import { PiRuntimeRegistry } from "./pi-runtime-registry.service.js";
 import { PiRuntimeService } from "./pi-runtime.service.js";
 
@@ -44,6 +44,7 @@ const profile: PiProfileInfo = {
 	defaultThinkingLevel: "medium",
 	enabledResourceIds: [],
 	toolPolicy: { allow: [], confirm: [], deny: [] },
+	toolExecutionMode: "auto",
 	revision: 2,
 	credentialIds: ["c1"],
 	boundClientIds: ["client-1"],
@@ -56,7 +57,7 @@ function makeService(
 		bindings?: Array<{ clientId: string; profileId: string }>;
 	} = {},
 ) {
-	const sent: Array<{ socketId: string; message: PiRuntimeSpecMessageV3 | null }> = [];
+	const sent: Array<{ socketId: string; message: PiRuntimeSpecMessageV4 | null }> = [];
 	const revoked: string[] = [];
 	const snapshotCalls: string[][] = [];
 	const registry = new PiRuntimeRegistry();
@@ -98,14 +99,14 @@ function makeService(
 	});
 	registry.setCapability("client-1", {
 		piSdkVersion: "0.86.0",
-		runtimeSpecProtocolVersion: 3,
+		runtimeSpecProtocolVersion: 4,
 		configMode: "server-authoritative",
 	});
 	registry.bindSocket("client-1", "client-1");
 	for (const binding of options.bindings ?? []) {
 		registry.setCapability(binding.clientId, {
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 			configMode: "server-authoritative",
 		});
 		registry.bindSocket(binding.clientId, binding.clientId);
@@ -139,11 +140,12 @@ describe("PiRuntimeService", () => {
 		const message = sent[0]?.message;
 		expect(message).not.toBeNull();
 		expect(message?.spec).toMatchObject({
-			schemaVersion: 3,
+			schemaVersion: 4,
 			profileId: "p1",
 			profileRevision: 2,
-			// 策略必须随 Spec 下发，即使三桶为空（空策略 = 未列出工具全部拒绝）
+			// 策略与执行模式必须随 Spec 下发（ADR-0033）
 			toolPolicy: { allow: [], confirm: [], deny: [] },
+			toolExecutionMode: "auto",
 		});
 		expect(message?.credentials.entries).toEqual([
 			{ providerId: "anthropic", apiKey: "sk-live-abc" },
@@ -194,13 +196,13 @@ describe("PiRuntimeService", () => {
 			sdkVersion: "0.86.0",
 			nodeVersion: "22.19.0",
 			shellKind: "git-bash",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 			configMode: "server-authoritative",
 		}, "socket-1");
 		expect(sent).toHaveLength(1);
 		expect(registry.status("client-1")).toMatchObject({
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 		});
 	});
 
@@ -225,7 +227,7 @@ describe("PiRuntimeService", () => {
 		});
 		service["registry"].setCapability("client-2", {
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 3,
+			runtimeSpecProtocolVersion: 4,
 			configMode: "server-authoritative",
 		});
 		service["registry"].bindSocket("client-2", "client-2");
@@ -317,12 +319,13 @@ describe("PiRuntimeService 的 Bundle 门控（fail closed）", () => {
 		expect(registry.status("client-1").reasonCode).toBe("PI_BUNDLE_UNAVAILABLE");
 	});
 
-	it("Bundle 覆盖时下发 v3 并带上 requiredBundle 与策略", async () => {
+	it("Bundle 覆盖时下发 v4 并带上 requiredBundle、策略与执行模式", async () => {
 		const { service, registry, sent } = makeService({
 			profile: {
 				...profile,
 				enabledResourceIds: ["vcp.tool-policy"],
 				toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
+				toolExecutionMode: "yolo",
 			},
 			entries: [{ providerId: "anthropic", apiKey: "sk-live-abc" }],
 		});
@@ -330,7 +333,8 @@ describe("PiRuntimeService 的 Bundle 门控（fail closed）", () => {
 		await service.pushTo("client-1");
 
 		const spec = sent[0]?.message?.spec;
-		expect(spec?.schemaVersion).toBe(3);
+		expect(spec?.schemaVersion).toBe(4);
+		expect(spec?.toolExecutionMode).toBe("yolo");
 		expect(spec?.toolPolicy).toEqual({ allow: ["read"], confirm: ["bash"], deny: [] });
 		expect(spec?.requiredBundle).toEqual({
 			protocolVersion: 1,
@@ -340,28 +344,28 @@ describe("PiRuntimeService 的 Bundle 门控（fail closed）", () => {
 		expect(registry.bundleFor("client-1")).toEqual(bundleCapability);
 	});
 
-	it("协议版本低于 3 的 Client 一律不下发任何 Spec", async () => {
-		const { service, registry, sent } = makeService({
-			profile,
-			entries: [{ providerId: "anthropic", apiKey: "sk-live-abc" }],
-		});
-		// 模拟升级前仍在运行的旧 Client（能力摘要上报 2）
-		registry.setCapability("client-1", {
-			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 2,
-			configMode: "server-authoritative",
-		});
-		await service.pushTo("client-1");
+	it("协议版本低于 4 的 Client 一律不下发任何 Spec（含 v3 Client）", async () => {
+		for (const legacyVersion of [2, 3]) {
+			const { service, registry, sent } = makeService({
+				profile,
+				entries: [{ providerId: "anthropic", apiKey: "sk-live-abc" }],
+			});
+			// 模拟升级前仍在运行的旧 Client
+			registry.setCapability("client-1", {
+				piSdkVersion: "0.86.0",
+				runtimeSpecProtocolVersion: legacyVersion,
+				configMode: "server-authoritative",
+			});
+			await service.pushTo("client-1");
 
-		// 不兼容的 Client 连空 Spec 也不发（emit 先校验 isCompatible），desired 登记为 null
-		expect(sent).toHaveLength(0);
-		expect(registry.isCompatible("client-1")).toBe(false);
-		expect(
-			registry.status("client-1").desiredRuntimeRevision,
-		).toBeNull();
+			// 不兼容的 Client 连空 Spec 也不发（emit 先校验 isCompatible），desired 登记为 null
+			expect(sent).toHaveLength(0);
+			expect(registry.isCompatible("client-1")).toBe(false);
+			expect(registry.status("client-1").desiredRuntimeRevision).toBeNull();
+		}
 	});
 
-	it("注册时上报协议 2 的 Client 被标记为不兼容，并给出原因", async () => {
+	it("注册时上报协议 3 的 Client 被标记为不兼容，并给出原因", async () => {
 		const { service, registry } = makeService({ profile });
 		await service.onClientRegistered(
 			"client-old",
@@ -370,7 +374,7 @@ describe("PiRuntimeService 的 Bundle 门控（fail closed）", () => {
 				sdkVersion: "0.86.0",
 				nodeVersion: "22.19.0",
 				shellKind: "system",
-				runtimeSpecProtocolVersion: 2,
+				runtimeSpecProtocolVersion: 3,
 				configMode: "server-authoritative",
 			},
 			"socket-old",

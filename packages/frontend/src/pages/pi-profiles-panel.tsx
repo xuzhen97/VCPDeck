@@ -7,6 +7,7 @@ import {
 	type PiProfileInfo,
 	type PiProviderInfo,
 	type PiRuntimeStatus,
+	type PiToolExecutionMode,
 	type PiToolPolicy,
 	type PiToolPolicyBucket,
 } from "@vcpdeck/shared";
@@ -28,6 +29,37 @@ const BASELINE_TOOL_POLICY: PiToolPolicy = {
 	allow: ["read", "grep", "find", "ls"],
 	confirm: ["write", "edit", "bash"],
 	deny: [],
+};
+
+/** 工具执行模式（ADR-0033）：新建默认 auto；Server 缺省仍是 approval。 */
+const DEFAULT_TOOL_EXECUTION_MODE: PiToolExecutionMode = "auto";
+
+const TOOL_EXECUTION_MODES: Array<{
+	mode: PiToolExecutionMode;
+	label: string;
+	hint: string;
+}> = [
+	{
+		mode: "approval",
+		label: "审批模式",
+		hint: "allow 工具直接执行；confirm 工具每次调用需要批准。",
+	},
+	{
+		mode: "auto",
+		label: "自动执行",
+		hint: "confirm 工具不再弹出人工确认；deny 和未配置工具仍然禁止。",
+	},
+	{
+		mode: "yolo",
+		label: "YOLO",
+		hint: "忽略 Tool Policy 的 allow/confirm/deny；但不加载未启用的资源，也不绕过 Runtime 或 OS 权限。",
+	},
+];
+
+const TOOL_EXECUTION_MODE_LABELS: Record<PiToolExecutionMode, string> = {
+	approval: "审批模式",
+	auto: "自动执行",
+	yolo: "YOLO",
 };
 
 /** 每行一个 `provider/modelId`（可带 `@thinkingLevel`）。 */
@@ -62,6 +94,9 @@ export function PiProfilesPanel() {
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [selectedCredentialIds, setSelectedCredentialIds] = useState<string[]>([]);
 	const [toolPolicy, setToolPolicy] = useState<PiToolPolicy>(BASELINE_TOOL_POLICY);
+	const [toolExecutionMode, setToolExecutionMode] = useState<PiToolExecutionMode>(
+		DEFAULT_TOOL_EXECUTION_MODE,
+	);
 	const [enabledResourceIds, setEnabledResourceIds] = useState<string[]>([]);
 	/** 已由 Client 上报的 Bundle 资源 ID 并集（空 = 尚无 Client 上报）。 */
 	const [availableResourceIds, setAvailableResourceIds] = useState<string[]>([]);
@@ -200,6 +235,7 @@ export function PiProfilesPanel() {
 				defaultThinkingLevel,
 				credentialIds: selectedCredentialIds,
 				toolPolicy,
+				toolExecutionMode,
 				enabledResourceIds,
 			};
 			const saved = editingId
@@ -214,6 +250,7 @@ export function PiProfilesPanel() {
 			setAllowedLines("");
 			setSelectedCredentialIds([]);
 			setToolPolicy(BASELINE_TOOL_POLICY);
+			setToolExecutionMode(DEFAULT_TOOL_EXECUTION_MODE);
 			setEnabledResourceIds([]);
 		} catch (error) {
 			setError(apiErrorMessage(error, "Profile 保存失败，请检查模型与 thinking 级别"));
@@ -334,6 +371,36 @@ export function PiProfilesPanel() {
 							))}
 						</div>
 					</div>
+					<div className="space-y-1.5" data-testid="pi-profile-execution-mode">
+						<Label>工具执行模式</Label>
+						<div className="space-y-2 rounded-md border border-border p-3 text-sm">
+							<div className="flex flex-wrap items-center gap-4">
+								{TOOL_EXECUTION_MODES.map((option) => (
+									<label
+										key={option.mode}
+										className="flex items-center gap-1"
+									>
+										<input
+											type="radio"
+											name="pi-profile-execution-mode"
+											checked={toolExecutionMode === option.mode}
+											onChange={() => setToolExecutionMode(option.mode)}
+										/>
+										<span>{option.label}</span>
+									</label>
+								))}
+							</div>
+							<p className="text-xs text-muted-foreground">
+								{
+									TOOL_EXECUTION_MODES.find((option) => option.mode === toolExecutionMode)
+										?.hint
+								}
+							</p>
+							<p className="text-xs text-muted-foreground">
+								切换模式不会修改下面的三桶；它们表达“切回审批模式时哪些工具需要人工确认”。
+							</p>
+						</div>
+					</div>
 					<div className="space-y-1.5" data-testid="pi-profile-tool-policy">
 						<Label>工具策略（未列出的工具默认拒绝）</Label>
 						<div className="space-y-2 rounded-md border border-border p-3 text-sm">
@@ -426,11 +493,16 @@ export function PiProfilesPanel() {
 									setAllowedLines(toLines(item.allowedModels));
 									setSelectedCredentialIds(item.credentialIds);
 									setToolPolicy(item.toolPolicy);
+									setToolExecutionMode(item.toolExecutionMode);
 									setEnabledResourceIds(item.enabledResourceIds);
 								}}>编辑</Button>
 								<StatusChip
 									label={item.enabled ? "启用" : "停用"}
 									tone={item.enabled ? "success" : "danger"}
+								/>
+								<StatusChip
+									label={TOOL_EXECUTION_MODE_LABELS[item.toolExecutionMode]}
+									tone={item.toolExecutionMode === "yolo" ? "danger" : "neutral"}
 								/>
 								<span className="font-medium">{item.name}</span>
 								<span className="text-muted-foreground">
@@ -446,6 +518,11 @@ export function PiProfilesPanel() {
 									凭据 {item.credentialIds.length} · 绑定 Client {item.boundClientIds.length}
 								</span>
 							</div>
+							{item.toolExecutionMode === "yolo" && (
+								<p className="text-xs text-destructive">
+									YOLO：忽略 Tool Policy 的 allow/confirm/deny，当前 Runtime 已注册/加载的工具直接执行；不加载未启用的资源，也不绕过 Runtime 或 OS 权限。
+								</p>
+							)}
 							<pre className="overflow-x-auto rounded bg-muted p-2 font-mono text-xs">
 								{toLines(item.allowedModels)}
 							</pre>

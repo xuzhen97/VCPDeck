@@ -54,7 +54,7 @@ flowchart LR
 | `PiRunService` | `agent.session` Job、runId CAS、连接 generation、项目锁和重连对账 | 解析 Session JSONL |
 | Request/Event Broker | 关联请求 ack、投影事件、SSE 扇出和结算检查 | 作为持久消息队列 |
 | Client Pi Supervisor | canonical cwd 校验、每项目 Worker、活动 Run、请求超时、PI_STATE 与 RuntimeSpec 接纳/换代 | 用户身份和持久业务状态 |
-| Server PiRuntimeService / Registry | 构建并下发 `PiRuntimeSpecV3`（含 `toolPolicy` 与可选 `requiredBundle`）与运行期凭据 lease，按 Client 上报的 Bundle 能力门控，维护 desired/active revision 与就绪门控 | 运行 Pi SDK、保存正文 |
+| Server PiRuntimeService / Registry | 构建并下发 `PiRuntimeSpecV4`（含 `toolPolicy`、必填 `toolExecutionMode` 与可选 `requiredBundle`）与运行期凭据 lease，按 Client 上报的 Bundle 能力门控，维护 desired/active revision 与就绪门控 | 运行 Pi SDK、保存正文 |
 | Pi Worker | 动态加载 Pi SDK、读取/修改 Session、运行 Agent、投影 SDK 事件 | 向 Server 暴露本地路径或凭据 |
 | Pi Session JSONL | 对话、分支、模型、thinking 和工具结果的正文事实来源 | 表达 Server Owner 和控制面生命周期 |
 
@@ -243,7 +243,7 @@ Client 的 Pi UI 适配器还会生成 `notify/setStatus/setWidget/setTitle/set_
 - 资源来源只允许 VCPDeck 自己控制的位置：受信 Resource Bundle 随 Client Release 发布在版本目录根（`apps/<version>/pi-resources/`），Client 按自身模块位置定位并逐资源校验 `sha256`，校验失败即不上报 Bundle 能力且不加载任何资源；
 - 项目 cwd 仍是双方唯一共享区域：VCPDeck Pi 与用户原生 Pi 可以同时修改项目源码，这不属于状态污染。
 
-工具策略当前**默认拒绝**：`allow ∪ confirm` 作为 SDK 原生工具白名单下发，`deny` 进入排除面，未出现在任何桶的工具不可用；`confirm` 由随 Bundle 发布的扩展拦截 `tool_call`，经既有 Extension UI 链路**每次调用**审批，拒绝/取消/超时一律判定为拒绝（`PI_TOOL_POLICY_REJECTED`）且会话继续；策略经进程内 host bridge 传递，不落盘、不进环境变量，桥接异常时阻塞全部工具调用。Pi 工具与 shell 仍以 Client 运行账户权限执行——**策略不是 OS 沙箱**，高风险任务必须在真实隔离边界中运行。
+工具策略当前**默认拒绝**：`approval` / `auto` 下 `allow ∪ confirm` 作为 SDK 原生工具白名单下发，`deny` 进入排除面，未出现在任何桶的工具不可用；Profile 级执行模式决定策略如何被执行（[ADR-0033](../adr/0033-pi-tool-approval-mode.md)）：`approval` 下 `confirm` 由随 Bundle 发布的扩展拦截 `tool_call`，经既有 Extension UI 链路**每次调用**审批，拒绝/取消/超时一律判定为拒绝（`PI_TOOL_POLICY_REJECTED`）且会话继续；`auto` 下 `confirm` 直接执行但 `deny`/未列出仍阻塞；`yolo` 跳过三桶判定，暴露当前 Runtime 已注册/加载的内置工具全集（不加载未启用资源、不绕过 Runtime 或 OS 权限）。策略与模式经进程内 host bridge（v2）传递，不落盘、不进环境变量，桥接缺失/版本不符/模式非法时阻塞全部工具调用；执行模式随 Profile revision 换代，一个 Run 内不热切换。Pi 工具与 shell 仍以 Client 运行账户权限执行——**策略不是 OS 沙箱**，高风险任务必须在真实隔离边界中运行。
 
 ## 9. 图片与实时投影
 
@@ -322,7 +322,7 @@ Pi 工具、Extensions、Skills、项目构建和 shell 都继承 Client OS 运�
 
 ## 12. 兼容、变更与测试门禁
 
-`PI_SESSION_JOB_PROTOCOL_VERSION` 与 `PI_RUNTIME_SPEC_PROTOCOL_VERSION` 当前均为 `1`。Session Job 协议要求 Server 与 Client 精确相等；RuntimeSpec 只接受 Client 能真正施加的字段，未知字段或不支持的 `schemaVersion` 一律 fail closed（[ADR-0029](../adr/0029-server-managed-isolated-pi-runtime.md) 决策 10）。Frontend 应与 Server 同版本部署，Pi SDK 两个包保持同一锁定版本。
+`PI_SESSION_JOB_PROTOCOL_VERSION` 为 `1`，`PI_RUNTIME_SPEC_PROTOCOL_VERSION` 为 `4`。Session Job 协议要求 Server 与 Client 精确相等；RuntimeSpec 只接受 Client 能真正施加的字段，未知字段或不支持的 `schemaVersion` 一律 fail closed（[ADR-0029](../adr/0029-server-managed-isolated-pi-runtime.md) 决策 10）；Server 只向上报 `runtimeSpecProtocolVersion=4` 的 Client 下发 Spec，v3 及更旧一律不下发（Pi 明确不可用，不回退本机 Pi）。Frontend 应与 Server 同版本部署，Pi SDK 两个包保持同一锁定版本。
 
 **部署顺序硬要求**：新 Client 的 `PI_STATE` 会携带 `runtimeRevision` / `configState`，旧 Server 的严格 parser 会拒绝该消息，因此必须 **Server 先行**升级，禁止新 Client 配旧 Server。
 

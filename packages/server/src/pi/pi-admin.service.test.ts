@@ -18,6 +18,7 @@ interface ProfileRow {
 	defaultThinkingLevel: string;
 	enabledResourceIds: string | null;
 	toolPolicyJson: string | null;
+	toolExecutionMode: string;
 	revision: number;
 	createdAt: Date;
 	updatedAt: Date;
@@ -84,6 +85,8 @@ function makePrisma() {
 					defaultThinkingLevel: data.defaultThinkingLevel ?? "medium",
 					enabledResourceIds: data.enabledResourceIds ?? null,
 					toolPolicyJson: data.toolPolicyJson ?? null,
+					// 与 Prisma `@default("approval")` 同口径，用于验证 API 缺省语义。
+					toolExecutionMode: data.toolExecutionMode ?? "approval",
 					revision: 1,
 					createdAt: new Date(),
 					updatedAt: new Date(),
@@ -545,5 +548,56 @@ describe("PiProfileService 的工具策略与 Bundle 资源校验", () => {
 			deny: [],
 		});
 		expect(updated.enabledResourceIds).toEqual(["vcp.tool-policy"]);
+	});
+});
+
+describe("PiProfileService 的工具执行模式", () => {
+	const baseInput = (extra: Record<string, unknown> = {}) => ({
+		name: "default",
+		defaultModel: { provider: "anthropic", modelId: "claude-x" },
+		allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+		defaultThinkingLevel: "medium" as const,
+		credentialIds: ["c1"],
+		...extra,
+	});
+
+	it("省略时保守默认为 approval，显式模式落库并可回读", async () => {
+		const s = makeServices();
+		const omitted = await s.profiles.create(baseInput());
+		expect(omitted.toolExecutionMode).toBe("approval");
+		expect(s.profileRows[0]?.toolExecutionMode).toBe("approval");
+
+		const explicit = await s.profiles.create(baseInput({ name: "auto", toolExecutionMode: "auto" }));
+		expect(explicit.toolExecutionMode).toBe("auto");
+		expect(s.profileRows[1]?.toolExecutionMode).toBe("auto");
+	});
+
+	it("更新模式递增 revision，并在未提交时保留原值", async () => {
+		const s = makeServices();
+		const created = await s.profiles.create(baseInput({ toolExecutionMode: "auto" }));
+		const renamed = await s.profiles.update(created.id, { name: "renamed" });
+		expect(renamed).toMatchObject({
+			toolExecutionMode: "auto",
+			revision: created.revision + 1,
+		});
+		const updated = await s.profiles.update(created.id, { toolExecutionMode: "yolo" });
+		expect(updated).toMatchObject({
+			toolExecutionMode: "yolo",
+			revision: renamed.revision + 1,
+		});
+	});
+
+	it("数据库中的非法模式 fail closed（PI_CONFIG_UNAVAILABLE）", async () => {
+		const s = makeServices();
+		const created = await s.profiles.create(baseInput());
+		await s.profiles.setBinding("client-1", created.id);
+		s.profileRows[0]!.toolExecutionMode = "unsafe";
+		await expect(s.profiles.get(created.id)).rejects.toMatchObject({
+			code: "PI_CONFIG_UNAVAILABLE",
+		});
+		// 绑定解析是下发路径的入口：损坏时也不得降级为可用 Profile
+		await expect(s.profiles.resolveBoundProfile("client-1")).rejects.toMatchObject({
+			code: "PI_CONFIG_UNAVAILABLE",
+		});
 	});
 });

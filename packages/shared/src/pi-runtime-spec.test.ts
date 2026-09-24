@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
 	PI_RUNTIME_SPEC_PROTOCOL_VERSION,
+	isPiToolExecutionMode,
 	parsePiCredentialLease,
 	parsePiCredentialLeaseV2,
 	parsePiRuntimeAck,
 	parsePiRuntimeSpecMessageV3,
+	parsePiRuntimeSpecMessageV4,
 	parsePiRuntimeSpecV1,
 	parsePiRuntimeSpecV3,
+	parsePiRuntimeSpecV4,
 } from "./pi.js";
 
 const validSpec = {
@@ -80,7 +83,6 @@ const validLeaseV2 = {
 describe("parsePiRuntimeSpecV3", () => {
 	it("接受 Provider 配置、模型目录与工具策略", () => {
 		expect(parsePiRuntimeSpecV3(validV3Spec)).toEqual(validV3Spec);
-		expect(PI_RUNTIME_SPEC_PROTOCOL_VERSION).toBe(3);
 	});
 
 	it("接受带 requiredBundle 的 Spec", () => {
@@ -272,6 +274,97 @@ describe("parsePiRuntimeSpecMessageV3", () => {
 			credentials: validLeaseV2,
 		});
 		expect(parsed.spec.toolPolicy).toEqual(validV3Spec.toolPolicy);
+	});
+});
+
+describe("parsePiRuntimeSpecV4（执行模式随协议升级）", () => {
+	const validV4Spec = {
+		...validV3Spec,
+		schemaVersion: 4,
+		toolExecutionMode: "auto",
+	};
+
+	it("接受严格 v4 Spec 并暴露当前协议版本 4", () => {
+		expect(parsePiRuntimeSpecV4(validV4Spec)).toEqual(validV4Spec);
+		expect(PI_RUNTIME_SPEC_PROTOCOL_VERSION).toBe(4);
+	});
+
+	it("模式判断函数只接受三种合法值", () => {
+		expect(isPiToolExecutionMode("approval")).toBe(true);
+		expect(isPiToolExecutionMode("auto")).toBe(true);
+		expect(isPiToolExecutionMode("yolo")).toBe(true);
+		expect(isPiToolExecutionMode("unsafe")).toBe(false);
+		expect(isPiToolExecutionMode(undefined)).toBe(false);
+		expect(isPiToolExecutionMode(3)).toBe(false);
+	});
+
+	it("缺少或非法 toolExecutionMode 时拒绝", () => {
+		const { toolExecutionMode: _mode, ...withoutMode } = validV4Spec;
+		expect(() => parsePiRuntimeSpecV4(withoutMode)).toThrow(/toolExecutionMode/);
+		expect(() =>
+			parsePiRuntimeSpecV4({ ...validV4Spec, toolExecutionMode: "unsafe" }),
+		).toThrow(/toolExecutionMode/);
+	});
+
+	it("拒绝 v3 输入与未知顶层字段", () => {
+		expect(() => parsePiRuntimeSpecV4(validV3Spec)).toThrow(/schemaVersion/);
+		expect(() => parsePiRuntimeSpecV4({ ...validV4Spec, extra: 1 })).toThrow(
+			/未知字段/,
+		);
+	});
+
+	it("v4 仍复用 Provider/模型/策略与 Bundle 严格校验", () => {
+		expect(() =>
+			parsePiRuntimeSpecV4({
+				...validV4Spec,
+				toolPolicy: { allow: ["bash"], confirm: ["bash"], deny: [] },
+			}),
+		).toThrow(/互斥/);
+		expect(() =>
+			parsePiRuntimeSpecV4({
+				...validV4Spec,
+				requiredBundle: {
+					protocolVersion: 1,
+					bundleVersion: "0.11.0",
+					resourceIds: ["vcp.tool-policy"],
+				},
+			}),
+		).not.toThrow();
+	});
+});
+
+describe("parsePiRuntimeSpecMessageV4", () => {
+	const spec = { ...validV3Spec, schemaVersion: 4, toolExecutionMode: "yolo" };
+
+	it("校验 lease 的 providerId 必须与 Spec 完全匹配", () => {
+		expect(
+			parsePiRuntimeSpecMessageV4({ spec, credentials: validLeaseV2 }),
+		).toMatchObject({ spec, credentials: validLeaseV2 });
+		expect(() =>
+			parsePiRuntimeSpecMessageV4({
+				spec,
+				credentials: {
+					...validLeaseV2,
+					entries: [{ providerId: "other", apiKey: "sk" }],
+				},
+			}),
+		).toThrow(/不匹配/);
+	});
+
+	it("拒绝未知顶层字段与 v3 spec", () => {
+		expect(() =>
+			parsePiRuntimeSpecMessageV4({
+				spec,
+				credentials: validLeaseV2,
+				extra: true,
+			}),
+		).toThrow(/未知字段/);
+		expect(() =>
+			parsePiRuntimeSpecMessageV4({
+				spec: validV3Spec,
+				credentials: validLeaseV2,
+			}),
+		).toThrow(/schemaVersion/);
 	});
 });
 

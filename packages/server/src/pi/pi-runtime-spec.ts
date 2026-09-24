@@ -1,4 +1,4 @@
-/** Pi RuntimeSpec v3 构建与 revision 计算（纯函数，无 IO）。 */
+/** Pi RuntimeSpec v4 构建与 revision 计算（纯函数，无 IO）。 */
 import { createHash, randomUUID } from "node:crypto";
 import {
 	PI_BUNDLE_PROTOCOL_VERSION,
@@ -7,7 +7,7 @@ import {
 	type PiProfileInfo,
 	type PiProviderInfo,
 	type PiRuntimeSpecV1,
-	type PiRuntimeSpecV3,
+	type PiRuntimeSpecV4,
 } from "@vcpdeck/shared";
 
 export interface PiCredentialMeta {
@@ -45,16 +45,16 @@ export function computeRuntimeRevision(input: {
 }
 
 /**
- * 构造 v3 RuntimeSpec：只输入非秘密 Provider、凭据元数据与目标 Client 的 Bundle 版本。
- * `requiredBundle` 仅在 Profile 启用了资源时出现；未提供 `bundleVersion` 时不构造该字段
- * （下发前的门控已保证需要资源时必然存在已上报的 Bundle 版本）。
+ * 构造 v4 RuntimeSpec：只输入非秘密 Provider、凭据元数据与目标 Client 的 Bundle 版本。
+ * 策略与执行模式均随 Spec 下发（ADR-0033）；`requiredBundle` 仅在 Profile 启用了资源时出现，
+ * 未提供 `bundleVersion` 时不构造该字段（下发前的门控已保证需要资源时必然存在已上报的 Bundle 版本）。
  */
-export function buildPiRuntimeSpecV3(
+export function buildPiRuntimeSpecV4(
 	profile: PiProfileInfo,
 	providers: PiProviderInfo[],
 	credentials: PiCredentialMeta[],
 	bundleVersion?: string,
-): PiRuntimeSpecV3 {
+): PiRuntimeSpecV4 {
 	const requiredBundle =
 		profile.enabledResourceIds.length > 0 && bundleVersion
 			? {
@@ -64,7 +64,7 @@ export function buildPiRuntimeSpecV3(
 				}
 			: undefined;
 	return {
-		schemaVersion: 3,
+		schemaVersion: 4,
 		specId: randomUUID(),
 		profileId: profile.id,
 		profileRevision: profile.revision,
@@ -86,6 +86,7 @@ export function buildPiRuntimeSpecV3(
 			confirm: [...profile.toolPolicy.confirm],
 			deny: [...profile.toolPolicy.deny],
 		},
+		toolExecutionMode: profile.toolExecutionMode,
 		...(requiredBundle ? { requiredBundle } : {}),
 		runtimeRevision: computeRuntimeRevision({
 			profileId: profile.id,
@@ -96,7 +97,7 @@ export function buildPiRuntimeSpecV3(
 	};
 }
 
-/** 保留 v1 builder，供既有读取测试和迁移诊断使用；新下发路径使用 v3。 */
+/** 保留 v1 builder，供既有读取测试和迁移诊断使用；新下发路径使用 v4。 */
 export function buildPiRuntimeSpec(
 	profile: PiProfileInfo,
 	credentials: PiCredentialMeta[],

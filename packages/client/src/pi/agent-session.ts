@@ -12,6 +12,7 @@ import {
 	type PiAgentState,
 	type PiClientEvent,
 	type PiExtensionUiRequest,
+	type PiToolExecutionMode,
 	type PiToolPolicy,
 } from "@vcpdeck/shared";
 import { projectPiEvent } from "./event-projector.js";
@@ -75,8 +76,10 @@ export interface PiAgentSessionOptions {
 	modelRuntime: unknown;
 	/** Server 允许且凭据可用的模型集合（Spec 的 resolvedModels） */
 	modelScope: Array<{ provider: string; modelId: string }>;
-	/** Server 下发的工具策略（v3 Spec 必带）：决定 tools/excludeTools 与审批面。 */
+	/** Server 下发的工具策略（v4 Spec 必带）：决定 tools/excludeTools 与审批面。 */
 	toolPolicy: PiToolPolicy;
+	/** Server 下发的工具执行模式（ADR-0033）：决定策略如何被执行。 */
+	toolExecutionMode: PiToolExecutionMode;
 	/** 已校验通过的 Bundle 扩展入口（为空表示不加载任何 Bundle 资源）。 */
 	bundleExtensionPaths?: string[];
 	sessionFile?: string;
@@ -120,9 +123,12 @@ export function startPiAgentSession(
 
 		const sdk = await getSdk();
 		let wrapper: PiAgentSessionWrapperImpl | null = null;
-		// 策略必须在绑定扩展之前进入进程内桥接：Bundle 扩展在 factory 阶段读它。
-		installToolPolicyBridge(options.toolPolicy);
-		const { tools, excludeTools } = toolSetsFor(options.toolPolicy);
+		// 策略与模式必须在绑定扩展之前进入进程内桥接：Bundle 扩展在 factory 阶段读它。
+		installToolPolicyBridge(options.toolPolicy, options.toolExecutionMode);
+		const { tools, excludeTools } = toolSetsFor(
+			options.toolPolicy,
+			options.toolExecutionMode,
+		);
 		const services = await (await getSdk()).createAgentSessionServices({
 			cwd: sessionManager.getCwd(),
 			agentDir,
@@ -199,7 +205,8 @@ export function startPiAgentSession(
 		).createAgentSessionFromServices({
 			services,
 			sessionManager,
-			// 工具策略：白名单只启用 allow ∪ confirm，deny 同时进排除面（纵深防御）。
+			// 工具集合：approval/auto 为策略白名单（allow ∪ confirm，deny 排除）；
+			// yolo 为当前 Runtime 已加载的内置工具全集（ADR-0033）。
 			tools,
 			excludeTools,
 			...(initial.model ? { model: initial.model as never } : {}),

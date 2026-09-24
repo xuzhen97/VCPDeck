@@ -201,6 +201,7 @@ async function ensureWrapper(
 			modelId: model.modelId,
 		})),
 		toolPolicy: runtimeConfig.spec.toolPolicy,
+		toolExecutionMode: runtimeConfig.spec.toolExecutionMode,
 		bundleExtensionPaths: runtimeConfig.bundleExtensionPaths,
 		initialModel: defaultModel,
 		sessionFile: found.path,

@@ -52,7 +52,7 @@
 - 可复用工作流、规则和自动触发；
 - VCPToolBox 双向桥接与 Agent 对话；
 - Client 侧自主 Pi Agent 子任务及单机/多机编排；
-- Pi 工具权限/审批策略与受信 Resource Bundle 通道已落地（Plan 2：`pi-resources/` 随 Release 发布、manifest sha256 校验、默认拒绝 + 每次调用审批）；**仍未实现**：项目本地资源加载（默认关闭）、Skills/Prompts 内容进 Bundle、Client 侧自主 Pi Agent 子任务与机群用量/审计；见 [`design/remote-pi-control-plane.md`](./design/remote-pi-control-plane.md)、[ADR-0029](./adr/0029-server-managed-isolated-pi-runtime.md) 与 [ADR-0030](./adr/0030-pi-resource-bundle-and-tool-policy.md)；**Session 显式导入已完成**（Plan 2.1：只读发现 + 显式预览 + 单向幂等复制）；
+- Pi 工具权限/审批策略与受信 Resource Bundle 通道已落地（Plan 2：`pi-resources/` 随 Release 发布、manifest sha256 校验、默认拒绝 + 每次调用审批）；**Profile 级 Approval/Auto/YOLO 执行模式已完成（Plan 2.2 / ADR-0033）**：RuntimeSpec v4、bridge v2 与 `vcp.tool-policy` v2 落地；Auto 保持三桶能力面但取消 `confirm` 交互，YOLO 跳过 Tool Policy 但只信任当前 Runtime 已注册/加载的工具，既有 Profile 迁移为 `approval`，见 [`design/pi-tool-approval-mode.md`](./design/pi-tool-approval-mode.md) 与 [ADR-0033](./adr/0033-pi-tool-approval-mode.md)；**仍未实现**：项目本地资源加载（默认关闭）、Skills/Prompts 内容进 Bundle、Session 级模式 override、Risk Guard 与机群用量/审计；见 [`design/remote-pi-control-plane.md`](./design/remote-pi-control-plane.md)、[ADR-0029](./adr/0029-server-managed-isolated-pi-runtime.md) 与 [ADR-0030](./adr/0030-pi-resource-bundle-and-tool-policy.md)；**Session 显式导入已完成**（Plan 2.1：只读发现 + 显式预览 + 单向幂等复制）；
 - **Pi 展示层复用已完成（Plan 3 / ADR-0032）**：前端消息时间轴按 `examples/pi-web` 原样拷入渲染层（`packages/frontend/src/pi-web/`）+ Pi UI Adapter 唯一翻译点 + 降级护栏，保留 VCPDeck Server/Owner/Run 控制语义与 Composer/会话列表/连接管理；
 - 主动监控巡检和异常任务生成；
 - 移动端或轻量只读端。

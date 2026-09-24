@@ -1,14 +1,16 @@
-/** Client 侧 RuntimeSpec v3 接纳与模型解析；不读用户 ~/.pi。 */
+/** Client 侧 RuntimeSpec v4 接纳与模型解析；不读用户 ~/.pi。 */
 import { join } from "node:path";
 import {
-	parsePiRuntimeSpecMessageV3,
+	PI_BUILTIN_TOOL_IDS,
+	parsePiRuntimeSpecMessageV4,
+	type PiToolExecutionMode,
 	type PiToolPolicy,
 	type PiConfigState,
 	type PiCredentialLeaseV2,
 	type PiErrorCode,
 	type PiModelRef,
-	type PiRuntimeSpecMessageV3,
-	type PiRuntimeSpecV3,
+	type PiRuntimeSpecMessageV4,
+	type PiRuntimeSpecV4,
 } from "@vcpdeck/shared";
 import { resolveVcpPiRuntimePaths } from "./runtime-paths.js";
 
@@ -42,14 +44,26 @@ export interface ModelRuntimeLike {
 }
 
 /**
- * 工具白名单计算（docs/adr/0030 决策 2）：
- * - `tools = allow ∪ confirm`（SDK 语义：只启用列出的工具，未列出即不可用）；
- * - `excludeTools = deny`（纵深防御：即使某工具意外进入白名单也会被排除）。
+ * 工具集合计算（docs/adr/0030 决策 2 + ADR-0033 执行模式）：
+ *
+ * - `approval` / `auto`：`tools = allow ∪ confirm`（SDK 语义：只启用列出的工具），
+ *   `excludeTools = deny`（纵深防御）；两者差别只在 Tool Policy 扩展是否询问操作者；
+ * - `yolo`：不再用策略三桶缩小内置工具集合，也不应用 `deny`，暴露当前 Runtime 实际支持的
+ *   内置工具全集。共享已知工具目录是上限，平台不存在的工具（如非 Windows 的 `powershell`）
+ *   由 SDK/平台自然不可用。
+ *
+ * YOLO 不扩大资源加载面：项目/用户资源与未启用 Bundle 仍由 `bundleLoaderOptions` 排除。
  */
-export function toolSetsFor(policy: PiToolPolicy): {
+export function toolSetsFor(
+	policy: PiToolPolicy,
+	mode: PiToolExecutionMode,
+): {
 	tools: string[];
 	excludeTools: string[];
 } {
+	if (mode === "yolo") {
+		return { tools: [...PI_BUILTIN_TOOL_IDS].sort(), excludeTools: [] };
+	}
 	return {
 		tools: [...new Set([...policy.allow, ...policy.confirm])].sort(),
 		excludeTools: [...new Set(policy.deny)].sort(),
@@ -63,7 +77,7 @@ export interface PiUnavailableModel {
 }
 
 export interface PiRuntimeConfig {
-	spec: PiRuntimeSpecV3;
+	spec: PiRuntimeSpecV4;
 	credentialEntries: PiCredentialLeaseV2["entries"];
 	resolvedModels: PiModelRef[];
 	unavailableModels: PiUnavailableModel[];
@@ -95,7 +109,7 @@ export function pendingRuntimeConfigState(): PiRuntimeConfigState {
  */
 export function resolveModelRegistrations(
 	runtime: ModelRuntimeLike,
-	providers: PiRuntimeSpecV3["providers"],
+	providers: PiRuntimeSpecV4["providers"],
 ): {
 	registers: Array<{ providerId: string; config: Record<string, unknown> }>;
 	missingCatalogModels: PiModelRef[];
@@ -141,7 +155,7 @@ export function resolveModelRegistrations(
 /** 使用 Server Provider 配置注册模型，再以内存 lease 注入 Key。 */
 export async function createModelRuntimeWithLease(
 	lease: PiCredentialLeaseV2,
-	providers: PiRuntimeSpecV3["providers"] = [],
+	providers: PiRuntimeSpecV4["providers"] = [],
 ): Promise<{
 	runtime: ModelRuntimeLike;
 	missingCatalogModels: PiModelRef[];
@@ -175,13 +189,13 @@ export function effectiveDefaultModel(
 	return first ? { provider: first.provider, modelId: first.modelId } : preferred;
 }
 
-/** 严格解析 v3；失败或模型无交集都 fail closed。 */
+/** 严格解析 v4；失败或模型无交集都 fail closed（v4 之前的协议不接纳）。 */
 export async function evaluateRuntimeSpec(
 	message: unknown,
 	deps: {
 		createModelRuntime?: (
 			lease: PiCredentialLeaseV2,
-			providers: PiRuntimeSpecV3["providers"],
+			providers: PiRuntimeSpecV4["providers"],
 		) => Promise<{
 			runtime: ModelRuntimeLike;
 			missingCatalogModels: PiModelRef[];
@@ -193,9 +207,9 @@ export async function evaluateRuntimeSpec(
 	} = {},
 ): Promise<PiRuntimeConfigState> {
 	if (message === null || message === undefined) return pendingRuntimeConfigState();
-	let envelope: PiRuntimeSpecMessageV3;
+	let envelope: PiRuntimeSpecMessageV4;
 	try {
-		envelope = parsePiRuntimeSpecMessageV3(message);
+		envelope = parsePiRuntimeSpecMessageV4(message);
 	} catch {
 		return { configState: "incompatible", reasonCode: "PI_RUNTIME_SPEC_INCOMPATIBLE", runtimeRevision: null, config: null };
 	}

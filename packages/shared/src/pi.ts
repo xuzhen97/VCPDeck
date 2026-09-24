@@ -43,7 +43,12 @@ export const PI_SESSION_JOB_PROTOCOL_VERSION = 1;
  */
 /** v1 parser 的固定版本；v2 使用 Provider 显式配置。 */
 export const PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = 1;
-export const PI_RUNTIME_SPEC_PROTOCOL_VERSION = 3;
+/**
+ * 当前 RuntimeSpec 协议版本。
+ * v4 在 v3 之上强制携带 `toolExecutionMode`（ADR-0033）；Server/Client 必须精确相等，
+ * 版本错位时 Pi 不可用而不是回退到旧语义。
+ */
+export const PI_RUNTIME_SPEC_PROTOCOL_VERSION = 4;
 
 /** Bundle manifest 协议版本（docs/adr/0030 决策 1）。 */
 export const PI_BUNDLE_PROTOCOL_VERSION = 1;
@@ -75,6 +80,27 @@ export interface PiToolPolicy {
 	allow: string[];
 	confirm: string[];
 	deny: string[];
+}
+
+/**
+ * Profile 级工具执行模式（ADR-0033）。
+ *
+ * - `approval`：执行策略允许的能力，`confirm` 每次调用请求人工批准；
+ * - `auto`：执行策略允许的能力，`confirm` 不再请求批准；
+ * - `yolo`：跳过 Tool Policy 三桶判定，只按当前 Runtime 实际注册/加载的工具执行。
+ */
+export const PI_TOOL_EXECUTION_MODES = ["approval", "auto", "yolo"] as const;
+
+export type PiToolExecutionMode = (typeof PI_TOOL_EXECUTION_MODES)[number];
+
+/** 判断值是否为受支持的工具执行模式；未知值一律拒绝（不猜默认值）。 */
+export function isPiToolExecutionMode(
+	value: unknown,
+): value is PiToolExecutionMode {
+	return (
+		typeof value === "string" &&
+		(PI_TOOL_EXECUTION_MODES as readonly string[]).includes(value)
+	);
 }
 
 /** 空策略：等于「所有工具都不可用」，用于未配置策略的历史 Profile。 */
@@ -583,6 +609,39 @@ export interface PiCredentialLeaseV2 {
 
 export interface PiRuntimeSpecMessageV3 {
 	spec: PiRuntimeSpecV3;
+	credentials: PiCredentialLeaseV2;
+}
+
+/**
+ * RuntimeSpec v4：在 v3 基础上强制携带 Profile 级工具执行模式（ADR-0033）。
+ * 模式会改变 Client 实际执行工具的行为，因此不能作为 v3 的可选字段下发。
+ */
+export interface PiRuntimeSpecV4 {
+	schemaVersion: 4;
+	specId: string;
+	profileId: string;
+	profileRevision: number;
+	providers: PiRuntimeProviderSpec[];
+	modelPolicy: {
+		defaultModel: { provider: string; modelId: string };
+		allowedModels: PiModelRef[];
+		defaultThinkingLevel: string;
+	};
+	/** 工具策略：未出现在任何桶的工具默认拒绝。 */
+	toolPolicy: PiToolPolicy;
+	/** 工具执行模式：决定 Tool Policy 如何被执行。 */
+	toolExecutionMode: PiToolExecutionMode;
+	/** 存在当且仅当 Profile 需要 Bundle 资源。 */
+	requiredBundle?: {
+		protocolVersion: number;
+		bundleVersion: string;
+		resourceIds: string[];
+	};
+	runtimeRevision: string;
+}
+
+export interface PiRuntimeSpecMessageV4 {
+	spec: PiRuntimeSpecV4;
 	credentials: PiCredentialLeaseV2;
 }
 
@@ -1906,6 +1965,48 @@ export function parsePiRuntimeSpecV3(value: unknown): PiRuntimeSpecV3 {
 	return { schemaVersion: 3, specId: value.specId, profileId: value.profileId, profileRevision, providers, modelPolicy: { defaultModel: { provider: defaultModel.provider, modelId: defaultModel.modelId }, allowedModels, defaultThinkingLevel: value.modelPolicy.defaultThinkingLevel }, toolPolicy, ...(requiredBundle ? { requiredBundle } : {}), runtimeRevision };
 }
 
+/** v4 顶层字段集合（v3 字段 + toolExecutionMode）。 */
+const SPEC_V4_KEYS = new Set([
+	"schemaVersion",
+	"specId",
+	"profileId",
+	"profileRevision",
+	"providers",
+	"modelPolicy",
+	"toolPolicy",
+	"toolExecutionMode",
+	"requiredBundle",
+	"runtimeRevision",
+]);
+
+/**
+ * 严格解析 RuntimeSpec v4。
+ *
+ * v4 = v3 的严格校验 + 必填且合法的 `toolExecutionMode`；因此这里先独立校验 v4 顶层键
+ * 与模式，再复用 v3 的 Provider/模型/策略/Bundle 校验，避免两套规则分叉。
+ * 缺失、非法模式或旧 schemaVersion 一律拒绝，不理会默认值。
+ */
+export function parsePiRuntimeSpecV4(value: unknown): PiRuntimeSpecV4 {
+	assertRecord(value, "PiRuntimeSpecV4");
+	assertKeys(value, SPEC_V4_KEYS, "PiRuntimeSpecV4");
+	if (value.schemaVersion !== PI_RUNTIME_SPEC_PROTOCOL_VERSION) {
+		throw new PiProtocolError(
+			`PiRuntimeSpecV4 schemaVersion 不支持: ${String(value.schemaVersion)}`,
+		);
+	}
+	if (!("toolExecutionMode" in value)) {
+		throw new PiProtocolError("PiRuntimeSpecV4 缺少字段 toolExecutionMode");
+	}
+	if (!isPiToolExecutionMode(value.toolExecutionMode)) {
+		throw new PiProtocolError(
+			`PiRuntimeSpecV4 toolExecutionMode 不支持: ${String(value.toolExecutionMode)}`,
+		);
+	}
+	const { toolExecutionMode, ...v3Shape } = value;
+	const base = parsePiRuntimeSpecV3({ ...v3Shape, schemaVersion: 3 });
+	return { ...base, schemaVersion: 4, toolExecutionMode };
+}
+
 /** 严格解析 v2 凭据 lease。 */
 export function parsePiCredentialLeaseV2(value: unknown): PiCredentialLeaseV2 {
 	assertRecord(value, "PiCredentialLeaseV2");
@@ -1932,6 +2033,17 @@ export function parsePiRuntimeSpecMessageV3(value: unknown): PiRuntimeSpecMessag
 	assertRecord(value, "PiRuntimeSpecMessageV3");
 	assertKeys(value, new Set(["spec", "credentials"]), "PiRuntimeSpecMessageV3");
 	const spec = parsePiRuntimeSpecV3(value.spec);
+	const credentials = parsePiCredentialLeaseV2(value.credentials);
+	const providers = new Set(spec.providers.map((provider) => provider.providerId));
+	if (providers.size !== credentials.entries.length || credentials.entries.some((entry) => !providers.has(entry.providerId))) throw new PiProtocolError("credentials 与 providers 不匹配");
+	return { spec, credentials };
+}
+
+/** 严格解析 v4 RuntimeSpec envelope，并校验 lease/provider 完全匹配。 */
+export function parsePiRuntimeSpecMessageV4(value: unknown): PiRuntimeSpecMessageV4 {
+	assertRecord(value, "PiRuntimeSpecMessageV4");
+	assertKeys(value, new Set(["spec", "credentials"]), "PiRuntimeSpecMessageV4");
+	const spec = parsePiRuntimeSpecV4(value.spec);
 	const credentials = parsePiCredentialLeaseV2(value.credentials);
 	const providers = new Set(spec.providers.map((provider) => provider.providerId));
 	if (providers.size !== credentials.entries.length || credentials.entries.some((entry) => !providers.has(entry.providerId))) throw new PiProtocolError("credentials 与 providers 不匹配");

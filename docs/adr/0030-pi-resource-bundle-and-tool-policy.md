@@ -3,7 +3,7 @@
 - 状态：Proposed
 - 日期：2026-09-22
 - 决策者：项目维护者
-- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[`docs/design/remote-pi-control-plane.md`](../design/remote-pi-control-plane.md)、[`docs/security.md`](../security.md)、[`docs/deployment.md`](../deployment.md)
+- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0033](./0033-pi-tool-approval-mode.md)、[`docs/design/remote-pi-control-plane.md`](../design/remote-pi-control-plane.md)、[`docs/security.md`](../security.md)、[`docs/deployment.md`](../deployment.md)
 
 ## 背景
 
@@ -34,6 +34,8 @@ Client 从**自身模块位置**推导版本目录（不读取 `apps/current` �
 `confirm` 的语义是**每次调用**都需要操作者明确批准，复用既有 Extension UI 审批链路；拒绝、取消与超时一律判定为**拒绝**，向 Pi 返回稳定错误码，会话继续而不中断 Run。策略不回显工具参数到持久化层；审批决策本阶段不持久化审计（后续可增量补充，不改变本决策的契约面）。
 
 `confirm` 的执行依赖随 Bundle 发布的策略扩展，因此启用 `confirm` 的 Profile 必须同时启用对应的 resource ID；这一依赖由 Server 写入校验保证，不能只靠界面提示。
+
+> 后续提案：[ADR-0033](./0033-pi-tool-approval-mode.md) 在本节之上增加独立的 `approval / auto / yolo` Execution Mode，**已实现**（RuntimeSpec v4 / host bridge v2 / `vcp.tool-policy` resource v2）：Auto 保留三桶能力边界但取消 `confirm` 交互，YOLO 则显式跳过 Tool Policy，只允许当前 Runtime 已实际注册/加载的工具直接执行。存量 Profile 迁移为 `approval`，因此本节“`confirm` 每次调用审批”仍是既有 Profile 的默认行为。
 
 ### 3. 策略经进程内 host bridge 传给 Bundle 资源；不落盘、不进环境变量
 

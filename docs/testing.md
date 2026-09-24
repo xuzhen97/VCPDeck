@@ -154,7 +154,7 @@ AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明�
 - FRP E2E；
 - Pi Worker 集成、锁定 SDK 的 Session JSONL 打开/迁移与真实模型 smoke；
 - **Pi Resource Bundle 门禁**：- **导入专项门禁**：摘要响应不含正文与源文件完整绝对路径（canary）；预览文本 ≤ 80 字符且不进存储/Job/日志（canary）；源文件导入前后 hash 不变；二次导入幂等且目标内容不变；副本校验失败无半成品；`sourceName` 含路径逃逸字符时整请求被拒（400）。
-manifest 严格解析（路径逃逸/未知键/摘要格式）、逐资源 sha256 校验（篡改/缺失/符号链接逃逸/SDK 版本不符 → 不上报能力且不加载）、Client 二次校验 `requiredBundle`（缺资源 → `PI_BUNDLE_UNAVAILABLE`）、v3 契约与「上报 < 3 不下发」、SDK 内置工具名与工具目录一致性（SDK 新增工具时该测试失败，强制显式决定归属桶）、默认拒绝与审批三分支（批准/拒绝/超时）；
+manifest 严格解析（路径逃逸/未知键/摘要格式）、逐资源 sha256 校验（篡改/缺失/符号链接逃逸/SDK 版本不符 → 不上报能力且不加载）、Client 二次校验 `requiredBundle`（缺资源 → `PI_BUNDLE_UNAVAILABLE`）、v4 契约与「上报 < 4 不下发」（含 v3 Client）、SDK 内置工具名与工具目录一致性（SDK 新增工具时该测试失败，强制显式决定归属桶）、默认拒绝与三模式完整矩阵（`approval`/`auto`/`yolo` × `allow`/`confirm`/`deny`/未列出，含审批、拒绝、超时与 UI 调用次数）、执行模式损坏列与 bridge v2 非法输入的 fail closed、YOLO 不扩大资源加载面；
 - **native Pi 零污染门禁**：预置用户 `~/.pi` 后跑 capability、Session 新建/列表、Prompt 与 Client 重启，该目录递归清单与内容 hash 必须 0 created / 0 modified / 0 deleted（**含旧会话导入链路：列目录、预览、导入**）该目录递归清单与内容 hash 必须 0 created / 0 modified / 0 deleted，native-only Session 不可见、哨兵 Extension 未执行；未安装用户 Pi 的全新机器仍可用；
 - RuntimeSpec 门控与换代：未 ready 时 WORKER_ACTIONS 返回 `PI_CONFIG_UNAVAILABLE` 且不 fork Worker；活跃 Run 期间配置变更只 drain、Run 结束换代；Server 侧同一门控；
 - Launcher 更新/回退；
