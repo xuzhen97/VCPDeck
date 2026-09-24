@@ -19,7 +19,7 @@
 
 1. 修正配置命名：统一 `VCPDECK_PSK`，更新示例并决定是否支持文件型 secret；
 2. 统一 REST 错误响应和稳定错误码，修复 Auth 普通 Error 落为 500；补齐 Auth/Identity strict parser、登录限速、Cookie Origin/CSRF、Credential 过期/lastUsed/清理、禁用/改密后的既有 Session/Socket 失效和最后 admin 防锁死；
-3. 建立生产数据库迁移流程，移除生产路径中的 `db push --accept-data-loss`；
+3. 建立生产数据库迁移流程：开发/启动脚本已改为不带 `--accept-data-loss` 的 `db push`，但仍需把生产升级从 `db push` 换成可审查的 Prisma migration；
 4. 按 ADR-0010 将 exec script 迁移到 Client runtime registry，补齐双端 parser、runtime capability、script/output 上限、cwd root 校验、稳定 timeout 和进程树取消；
 5. 修复远程文件边界：以 Client 认证 root/root ID 替代调用方自选 rootDir，修复 symlink/junction 与不存在目标父链校验，增加文件双端 parser、文本/传输上限、import SHA-256、跨平台覆盖/临时文件保证、running cancel/timeout、断线终局补报及 Socket/Job 归属校验；
 6. 修复文件 Job error 分支丢弃下一条 scheduler dispatch、Alibaba export 分片 URL 续期路由以及 `FileTransferResult.sha256` 与 Provider/传输方向实际能力的协议偏移；

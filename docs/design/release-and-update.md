@@ -341,7 +341,7 @@ Launcher 启动时：
 Launcher 的回退单位是应用版本目录，不是整个系统状态。涉及数据库变化时必须遵守：
 
 - 发布前备份 SQLite、Storage 和 Release archive；
-- 不能把开发用 `prisma db push --accept-data-loss` 当作生产迁移方案；
+- 不能把开发用 `prisma db push`（不带 `--accept-data-loss`，会丢数据的变更直接失败）当作生产迁移方案；
 - schema 变化采用 expand → migrate → contract，使旧 Server 在回退窗口内仍能读取；
 - preStart 成功但新 Server 探活失败时，数据库变化仍然存在；
 - 若旧 Server 已不能读取新 schema，必须恢复与旧应用匹配的数据备份，而不是只切 current；

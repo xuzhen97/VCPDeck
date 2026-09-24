@@ -133,7 +133,7 @@ FRP 恢复对账通过 capability `frp.reconcileProtocolVersion=1` 协商：新 
 
 - 升级前备份 SQLite 及 Storage/Release 数据；
 - 生产升级应审查 Prisma migration 或 preStart 行为；
-- 当前启动脚本包含 `prisma db push --accept-data-loss`，只适合受控开发环境，不应作为生产兼容保证；
+- 开发/启动脚本使用 `prisma db push`（不带 `--accept-data-loss`）：纯增量变更直接生效，会丢数据的变更直接失败而不静默放行；该方式仍只适合开发，不是生产迁移保证；
 - Launcher 回退应用版本不自动回退数据库 schema；涉及不可向后兼容迁移时，必须采用 expand/migrate/contract 多阶段方案；
 - 回滚前确认旧 Server 能读取已升级 schema，否则应从备份恢复整个数据集。
 

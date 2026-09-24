@@ -225,7 +225,7 @@ PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 
 4. REST 错误格式尚未完全统一；
 5. 无内建速率限制、登录锁定和完整安全审计；
 6. 示例 PSK 变量名与实现不一致；
-7. 开发启动使用 `db push --accept-data-loss`；
+7. 开发启动使用 `db push`（不带 `--accept-data-loss`，会丢数据的变更会直接失败），生产升级仍无独立迁移流程；
 8. 日志尚未全面结构化和自动脱敏；
 9. exec script 当前允许 arbitrary executable/args，缺少 runtime capability、大小上限、cwd root 校验和进程树取消；
 10. 远程文件 rootDir/symlink 边界不完整，文本内容可无硬上限进入 Job/SQLite，import 无 SHA-256，文件 Job 取消和断线补报不可靠；

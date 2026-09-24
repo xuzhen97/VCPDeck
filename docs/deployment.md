@@ -262,10 +262,10 @@ sudo bash "./install-coturn.sh" \
 
 ```text
 prisma generate
-prisma db push --accept-data-loss
+prisma db push
 ```
 
-该方式便于开发，但不适合作为生产迁移策略。生产部署应：
+不带 `--accept-data-loss`：新增列/表等增量变更直接同步，会丢数据的变更会让 `db push` 直接失败，必须由操作者显式决定，避免开发/升级路径静默销毁数据。该方式仍然便于开发，但不适合作为生产迁移策略。生产部署应：
 
 1. 停止写入或进入维护窗口；
 2. 备份数据库和 Storage；

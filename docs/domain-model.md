@@ -243,7 +243,7 @@ uploaded → updating_server → updating_clients → done
 
 1. 先更新领域不变量和 ADR（若为重大取舍）；
 2. 修改 Shared 协议和 Prisma schema；
-3. 为生产数据编写可审查迁移，不用 `db push --accept-data-loss` 代替发布迁移评审；
+3. 为生产数据编写可审查迁移，不用 `db push`（无论是否带 `--accept-data-loss`）代替发布迁移评审；
 4. 同步 SDK、Frontend、Client 和兼容策略；
 5. 为状态流转、重连和失败路径增加测试；
 6. 更新本文、`protocols.md`、`compatibility.md` 和 CHANGELOG。
