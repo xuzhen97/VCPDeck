@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-24
+
 ### Breaking
 
 - **Pi 工具执行模式（Profile 级 Approval / Auto / YOLO，ADR-0033）**：Profile 新增 `toolExecutionMode`。`approval`（升级前行为，也是数据库迁移与 API 缺省值）下 `confirm` 工具每次调用仍需人工批准；`auto` 下 `confirm` 直接执行，但 `deny` 与未配置工具仍被拒绝；`yolo` 跳过 Tool Policy 三桶判定，仅限当前 Runtime 已实际注册/加载的工具，且不加载未启用的 Bundle 资源、不绕过 Runtime 或 OS 权限。管理界面新增工具执行模式选择（新建 Profile 默认“自动执行”，YOLO 需显式选择并带风险提示），切模式不会改写策略三桶。
