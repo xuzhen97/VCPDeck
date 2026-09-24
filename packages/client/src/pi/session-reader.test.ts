@@ -118,6 +118,32 @@ describe("PiSessionReader", () => {
 		expect(assistant).toBeDefined();
 	});
 
+	it("entryContent 可按需取回 thinking 正文（不进入历史投影）", async () => {
+		const { cwd, sessionDir } = await makeDirs();
+		await writeSession(sessionDir, cwd, "s1", [
+			msg("m1", null, "user", [text("hi")]),
+			msg("m2", "m1", "assistant", [
+				thinking("秒回的推理正文"),
+				text("answer"),
+			]),
+		]);
+
+		const reader = createPiSessionReader(cwd, sessionDir);
+
+		// 下标按 JSONL 原始 content 数组（渲染层与图片走同一套寻址）
+		await expect(reader.entryContent("s1", "m2", 0)).resolves.toEqual({
+			thinking: "秒回的推理正文",
+		});
+		// 非 thinking/image 的块不伪装成正文
+		await expect(reader.entryContent("s1", "m2", 1)).rejects.toMatchObject({
+			code: "PI_IMAGE_INVALID",
+		});
+		// 越界下标同样拒绝
+		await expect(reader.entryContent("s1", "m2", 9)).rejects.toMatchObject({
+			code: "PI_IMAGE_INVALID",
+		});
+	});
+
 	it("超大 Tool Result 延迟加载", async () => {
 		const { cwd, sessionDir } = await makeDirs();
 		const huge = "x".repeat(300 * 1024);

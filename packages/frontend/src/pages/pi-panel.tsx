@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
 	ClientInfo,
 	PiAttachmentRef,
@@ -15,6 +15,7 @@ import { PiChatInput } from "../pi/pi-chat-input.js";
 import { PiRunDetails } from "../pi/pi-run-details.js";
 import { PiExtensionDialog } from "../pi/pi-extension-dialog.js";
 import { usePiSession } from "../pi/use-pi-session.js";
+import { setPiThinkingLoader } from "../pi/pi-thinking-loader.js";
 
 /** 机器工作区 Pi Tab：三栏 IDE 布局（左项目/会话、中对话、右详情） */
 export function PiPanel({ client }: { client: ClientInfo }) {
@@ -177,6 +178,37 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 		[sdk.pi, client.clientId, cwdRef, sessionId],
 	);
 
+	/**
+	 * 历史 thinking 惰性加载：pi-web 渲染层的思考块展开时经注入点取正文。
+	 * 只在用户展开某个思考块时触发一次 IPC，带缓存（失败不入缓存，可重试）。
+	 */
+	useEffect(() => {
+		if (!cwdRef || !sessionId) {
+			setPiThinkingLoader(null);
+			return;
+		}
+		const clientId = client.clientId;
+		const cache = new Map<string, Promise<string>>();
+		setPiThinkingLoader(async (targetSessionId, entryId, blockIndex) => {
+			const key = `${targetSessionId}:${entryId}:${blockIndex}`;
+			const cached = cache.get(key);
+			if (cached) return cached;
+			const request = sdk.pi.sessions
+				.entryContent(clientId, targetSessionId, entryId, cwdRef, blockIndex)
+				.then((raw) => {
+					const thinking = (raw as { thinking?: unknown } | null)?.thinking;
+					if (typeof thinking !== "string") {
+						throw new Error("thinking unavailable");
+					}
+					return thinking;
+				});
+			cache.set(key, request);
+			request.catch(() => cache.delete(key));
+			return request;
+		});
+		return () => setPiThinkingLoader(null);
+	}, [sdk.pi, client.clientId, cwdRef, sessionId]);
+
 	/** 文件 API 注入会话侧栏；仅依赖 sdk，必须置于条件早返回之前以保证 hook 顺序稳定 */
 	const filesApi = useMemo(
 		() => ({
@@ -267,6 +299,7 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 						<PiChatWindow
 							state={state}
 							info={info}
+							sessionId={sessionId}
 							onLoadMore={() => {
 								if (cwdRef && sessionId) void actions.loadMore();
 							}}

@@ -20,17 +20,24 @@ function RenderedMessage({
 	message,
 	toolResults,
 	fallback,
+	sessionId,
 }: {
 	ctx: RenderCtx;
 	message: PiMessage;
 	toolResults?: Map<string, ToolResultMessage>;
 	fallback: ReactNode;
+	sessionId?: string | null;
 }) {
 	const renderMessage = toRenderMessages([message], ctx)[0]!;
 	return (
 		<PiRenderBoundary fallback={fallback}>
 			<I18nProvider>
-				<PiWebMessageView message={renderMessage} toolResults={toolResults} />
+				<PiWebMessageView
+					message={renderMessage}
+					toolResults={toolResults}
+					// thinking 块惰性加载需要这两个参数（entryId = 消息 id，即 JSONL entry id）
+					{...(sessionId ? { sessionId, entryId: message.id } : {})}
+				/>
 			</I18nProvider>
 		</PiRenderBoundary>
 	);
@@ -42,11 +49,13 @@ function ProcessDetails({
 	group,
 	toolResults,
 	toolResultsMap,
+	sessionId,
 }: {
 	ctx: RenderCtx;
 	group: PiTurnGroup;
 	toolResults: Record<string, string>;
 	toolResultsMap: Map<string, ToolResultMessage>;
+	sessionId?: string | null;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const toolNames = useMemo(() => {
@@ -87,6 +96,7 @@ function ProcessDetails({
 							ctx={ctx}
 							message={m}
 							toolResults={toolResultsMap}
+							sessionId={sessionId}
 							fallback={<PiMessageView message={m} toolResults={toolResults} />}
 						/>
 					))}
@@ -96,11 +106,18 @@ function ProcessDetails({
 	);
 }
 
+/**
+ * 实时思考块：流式期间默认展开（正文随 delta 实时可见，而不是先看到一个折叠条），
+ * 结算后回到默认折叠、保留「已思考 N 秒」摘要；用户的展开/收起选择优先。
+ * 位置由调用方保证在本轮提问气泡之后。
+ */
 function LiveThinkingBlock({ state }: { state: PiSessionState }) {
-	const [expanded, setExpanded] = useState(false);
+	const streaming = state.thinkingDurationMs === null;
+	const [toggled, setToggled] = useState<boolean | null>(null);
 	if (!state.thinkingText) return null;
+	const expanded = toggled ?? streaming;
 	const label =
-		typeof state.thinkingDurationMs === "number"
+		state.thinkingDurationMs !== null
 			? `已思考 ${(state.thinkingDurationMs / 1000).toFixed(1)} 秒`
 			: "思考中…";
 	return (
@@ -111,7 +128,7 @@ function LiveThinkingBlock({ state }: { state: PiSessionState }) {
 			<button
 				type="button"
 				className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground transition hover:bg-secondary/45"
-				onClick={() => setExpanded((value) => !value)}
+				onClick={() => setToggled(!expanded)}
 			>
 				<span className="italic">{label}</span>
 				<span className="ml-auto text-primary">
@@ -119,7 +136,10 @@ function LiveThinkingBlock({ state }: { state: PiSessionState }) {
 				</span>
 			</button>
 			{expanded && (
-				<pre className="pi-chat-fade-in max-h-96 overflow-auto whitespace-pre-wrap break-words border-t border-border/60 bg-background/35 px-3 py-2 text-muted-foreground">
+				<pre
+					className="pi-chat-fade-in max-h-96 overflow-auto whitespace-pre-wrap break-words border-t border-border/60 bg-background/35 px-3 py-2 text-muted-foreground"
+					data-testid="live-thinking-text"
+				>
 					{state.thinkingText}
 				</pre>
 			)}
@@ -157,12 +177,15 @@ export function PiChatWindow({
 	onLoadMore,
 	onImageLoad,
 	imageUrls = {},
+	sessionId = null,
 }: {
 	state: PiSessionState;
 	info: { id: string; name: string; firstMessage: string | null } | null;
 	onLoadMore: () => void;
 	onImageLoad?: (block: PiImagePlaceholder) => void;
 	imageUrls?: Record<string, string>;
+	/** 历史 thinking 惰性加载所需；缺失时思考块回落为不可用提示 */
+	sessionId?: string | null;
 }) {
 	const groups = useMemo(
 		() => buildTurnGroups(state.messages),
@@ -245,6 +268,7 @@ export function PiChatWindow({
 											ctx={ctx}
 											message={group.userMessage}
 											toolResults={toolResultsMap}
+											sessionId={sessionId}
 											fallback={<PiMessageView message={group.userMessage} />}
 										/>
 									</div>
@@ -257,6 +281,7 @@ export function PiChatWindow({
 									group={group}
 									toolResults={toolResults}
 									toolResultsMap={toolResultsMap}
+									sessionId={sessionId}
 								/>
 							)}
 							{group.finalAssistant && (
@@ -265,6 +290,7 @@ export function PiChatWindow({
 										ctx={ctx}
 										message={group.finalAssistant}
 										toolResults={toolResultsMap}
+										sessionId={sessionId}
 										fallback={
 											<PiMessageView
 												message={group.finalAssistant}

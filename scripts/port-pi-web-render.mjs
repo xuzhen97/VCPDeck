@@ -68,10 +68,73 @@ function portFile(relPath) {
   const to = join(dst, relPath);
   mkdirSync(dirname(to), { recursive: true });
   const prefix = relPrefix(to);
-  const text = readFileSync(from, "utf8")
+  let text = readFileSync(from, "utf8")
     .replaceAll('"@/', `"${prefix}/`)
     .replaceAll("'@/", `'${prefix}/`);
+  text = applyVcpPatches(relPath, text);
   writeFileSync(to, text);
+}
+
+/**
+ * VCPDeck 补丁规则（ADR-0032：上游子树可重跑覆盖，因此补丁必须声明在这里，不能手改产物）。
+ *
+ * 每条规则必须命中，否则直接失败：上游改名/改结构时立刻暴露，而不是静默丢掉注入点。
+ */
+const VCP_PATCHES = {
+  "components/MessageView.tsx": [
+    {
+      // thinking 惰性取数：宿主未注入时回退上游自己的本地接口
+      insertBefore:
+        "function loadThinkingContent(sessionId: string, entryId: string, blockIndex: number): Promise<string> {",
+      text: `/** VCPDeck 补丁（scripts/port-pi-web-render.mjs）：把 thinking 取数交给宿主注入点。 */
+function vcpdeckThinkingRequest(sessionId: string, entryId: string, blockIndex: number): Promise<Response> {
+  const injected = (globalThis as { __vcpdeckLoadThinking?: (s: string, e: string, b: number) => Promise<string> })
+    .__vcpdeckLoadThinking;
+  if (!injected) {
+    return fetch(
+      \`/api/sessions/\${encodeURIComponent(sessionId)}/entries/\${encodeURIComponent(entryId)}/thinking?blockIndex=\${blockIndex}\`,
+    );
+  }
+  return injected(sessionId, entryId, blockIndex).then(
+    (thinking) => new Response(JSON.stringify({ thinking }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+}
+
+`,
+    },
+    {
+      find: [
+        "  const request = fetch(",
+        "    `/api/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/thinking?blockIndex=${blockIndex}`,",
+        "  ).then(async (response) => {",
+      ].join("\n"),
+      replace:
+        "  const request = vcpdeckThinkingRequest(sessionId, entryId, blockIndex).then(async (response) => {",
+    },
+  ],
+};
+
+function applyVcpPatches(relPath, text) {
+  const rules = VCP_PATCHES[relPath];
+  if (!rules) return text;
+  let out = text;
+  for (const rule of rules) {
+    if (rule.insertBefore) {
+      if (!out.includes(rule.insertBefore)) {
+        throw new Error(`[port-pi-web-render] 补丁锚点缺失: ${relPath} :: ${rule.insertBefore}`);
+      }
+      out = out.replace(rule.insertBefore, `${rule.text}${rule.insertBefore}`);
+      continue;
+    }
+    if (!out.includes(rule.find)) {
+      throw new Error(`[port-pi-web-render] 补丁目标缺失: ${relPath} :: ${rule.find}`);
+    }
+    out = out.replaceAll(rule.find, rule.replace);
+  }
+  return out;
 }
 
 for (const file of files) {

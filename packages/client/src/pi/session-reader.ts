@@ -65,7 +65,7 @@ export interface PiSessionReader {
 		sessionId: string,
 		entryId: string,
 		blockIndex: number,
-	): Promise<{ mimeType: string; data: string }>;
+	): Promise<{ mimeType: string; data: string } | { thinking: string }>;
 	rename(sessionId: string, name: string): Promise<void>;
 	delete(sessionId: string): Promise<void>;
 	fork(
@@ -393,6 +393,13 @@ export function createPiSessionReader(
 				throw piError("PI_IMAGE_INVALID", "Block is not an image");
 			}
 			const block = content[blockIndex];
+			// thinking：历史思考正文按需读取（前端惰性展开时调用），仍然只有本响应用于传输，
+			// 不进入列表/历史投影或任何持久化（docs/adr/0030 决策 2）。
+			if (block.type === "thinking") {
+				return {
+					thinking: typeof block.thinking === "string" ? block.thinking : "",
+				};
+			}
 			if (block.type !== "image" || typeof block.data !== "string") {
 				throw piError("PI_IMAGE_INVALID", "Block is not an image");
 			}

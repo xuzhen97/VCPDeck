@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { PiSessionState } from "./use-pi-session.js";
 import { PiChatWindow } from "./pi-chat-window.js";
+import { setPiThinkingLoader } from "./pi-thinking-loader.js";
 
 function state(overrides: Partial<PiSessionState> = {}): PiSessionState {
 	return {
@@ -41,7 +42,6 @@ describe("PiChatWindow", () => {
 		await user.click(screen.getByRole("button", { name: /展开思考/ }));
 		expect(screen.getByText("先检查项目结构，再读取 README。")).toBeTruthy();
 	});
-
 	it("实时思考块渲染在本轮提问气泡之后，而不是时间线顶部", () => {
 		render(<PiChatWindow state={state()} info={null} onLoadMore={() => {}} />);
 
@@ -52,6 +52,126 @@ describe("PiChatWindow", () => {
 			prompt.compareDocumentPosition(thinking) &
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+	});
+
+	it("流式期间思考正文默认展开、实时可见（不用先点展开）", () => {
+		// 未收到 thinking_end（thinkingDurationMs === null）= 正在思考
+		render(
+			<PiChatWindow
+				state={state({ thinkingDurationMs: null })}
+				info={null}
+				onLoadMore={() => {}}
+			/>,
+		);
+
+		expect(screen.getByTestId("live-thinking-text").textContent).toContain(
+			"先检查项目结构，再读取 README。",
+		);
+		expect(screen.getByText("思考中…")).toBeTruthy();
+	});
+
+	it("思考结束后默认折叠为摘要，仍可手动展开", async () => {
+		const user = userEvent.setup();
+		const { rerender } = render(
+			<PiChatWindow
+				state={state({ thinkingDurationMs: null })}
+				info={null}
+				onLoadMore={() => {}}
+			/>,
+		);
+
+		// 结束事件带 durationMs：默认收起（保留摘要，不消失）
+		rerender(
+			<PiChatWindow
+				state={state({ thinkingDurationMs: 1234 })}
+				info={null}
+				onLoadMore={() => {}}
+			/>,
+		);
+		expect(screen.queryByTestId("live-thinking-text")).toBeNull();
+		expect(screen.getByText("已思考 1.2 秒")).toBeTruthy();
+
+		await user.click(screen.getByRole("button", { name: /展开思考/ }));
+		expect(screen.getByTestId("live-thinking-text")).toBeTruthy();
+	});
+
+	describe("历史 thinking 经注入 loader 惰性加载", () => {
+		afterEach(() => setPiThinkingLoader(null));
+
+		it("展开历史思考块时显示正文", async () => {
+			const user = userEvent.setup();
+			const loader = vi.fn(async () => "历史会话里的推理正文");
+			setPiThinkingLoader(loader);
+			render(
+				<PiChatWindow
+					state={state({
+						thinkingText: "",
+						thinkingDurationMs: null,
+						messages: [
+							{ id: "u1", role: "user", content: [{ type: "text", text: "提问" }] },
+							{
+								id: "a1",
+								role: "assistant",
+								content: [
+									{ type: "thinking", deferred: true, durationMs: 2000 },
+									{ type: "text", text: "渲染管线接管这行文本" },
+								],
+							},
+						],
+					})}
+					info={null}
+					sessionId="s1"
+					onLoadMore={() => {}}
+				/>,
+			);
+
+			// 上游思考块的展开按钮 aria-label = i18n.thinking（测试环境按浏览器语言解析，故两种都接受）
+			const toggle = await screen.findByRole("button", {
+				name: /^(思考|Thinking)/,
+			});
+			if (toggle.getAttribute("aria-expanded") !== "true") {
+				await user.click(toggle);
+			}
+
+			expect(await screen.findByText("历史会话里的推理正文")).toBeTruthy();
+			expect(loader).toHaveBeenCalledWith("s1", "a1", expect.any(Number));
+		});
+
+		it("未注入 loader 时不伪造正文", async () => {
+			const user = userEvent.setup();
+			render(
+				<PiChatWindow
+					state={state({
+						thinkingText: "",
+						thinkingDurationMs: null,
+						messages: [
+							{
+								id: "a2",
+								role: "assistant",
+								content: [
+									{ type: "thinking", deferred: true },
+									{ type: "text", text: "答案" },
+								],
+							},
+						],
+					})}
+					info={null}
+					sessionId="s1"
+					onLoadMore={() => {}}
+				/>,
+			);
+
+			const toggle = await screen.findByRole("button", {
+				name: /^(思考|Thinking)/,
+			});
+			if (toggle.getAttribute("aria-expanded") !== "true") {
+				await user.click(toggle);
+			}
+
+			// 没有真正文就不得编造内容：正文不出现，页面仍可正常使用
+			expect(screen.queryByText("历史会话里的推理正文")).toBeNull();
+			expect(screen.getByText("答案")).toBeTruthy();
+		});
 	});
 
 	it("尚无回合时（新会话首轮）思考块仍然可见", () => {

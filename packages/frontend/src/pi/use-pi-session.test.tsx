@@ -497,7 +497,7 @@ describe("usePiSession", () => {
 		expect(result.current.state.thinkingDurationMs).toBe(1234);
 	});
 
-	it("agent_settled 后清空实时 thinking（空闲不得留残影）", async () => {
+	it("agent_settled 后保留实时 thinking（折叠为摘要，不消失）", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		const { result } = renderHook(() => usePiSession(pi));
@@ -529,11 +529,11 @@ describe("usePiSession", () => {
 		});
 
 		expect(result.current.state.status).toBe("idle");
-		expect(result.current.state.thinkingText).toBe("");
-		expect(result.current.state.thinkingDurationMs).toBeNull();
+		// 用户要求“能看到思考”，因此结算后保留摘要（位置已在回合内部，不再是顶部残影）
+		expect(result.current.state.thinkingText).toBe("先查看项目结构");
 	});
 
-	it("prompt_error 后也清空实时 thinking", async () => {
+	it("prompt_error 后也保留实时 thinking", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		const { result } = renderHook(() => usePiSession(pi));
@@ -564,8 +564,8 @@ describe("usePiSession", () => {
 			});
 		});
 
-		expect(result.current.state.thinkingText).toBe("");
-		expect(result.current.state.thinkingDurationMs).toBeNull();
+		expect(result.current.state.status).toBe("idle");
+		expect(result.current.state.thinkingText).toBe("思考到一半就失败了");
 	});
 
 	it("run_created 在 POST 前绑定 runId", async () => {

@@ -152,6 +152,23 @@ function SafeMarkdownBody({ children, className, ...props }: React.ComponentProp
 // push the conversation off screen; overflow scrolls inside the bubble.
 const USER_BUBBLE_MAX_HEIGHT = 300;
 
+/** VCPDeck 补丁（scripts/port-pi-web-render.mjs）：把 thinking 取数交给宿主注入点。 */
+function vcpdeckThinkingRequest(sessionId: string, entryId: string, blockIndex: number): Promise<Response> {
+  const injected = (globalThis as { __vcpdeckLoadThinking?: (s: string, e: string, b: number) => Promise<string> })
+    .__vcpdeckLoadThinking;
+  if (!injected) {
+    return fetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/thinking?blockIndex=${blockIndex}`,
+    );
+  }
+  return injected(sessionId, entryId, blockIndex).then(
+    (thinking) => new Response(JSON.stringify({ thinking }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+}
+
 function loadThinkingContent(sessionId: string, entryId: string, blockIndex: number): Promise<string> {
   const key = `${sessionId}:${entryId}:${blockIndex}`;
   const cached = thinkingContentCache.get(key);
@@ -161,9 +178,7 @@ function loadThinkingContent(sessionId: string, entryId: string, blockIndex: num
     return cached;
   }
 
-  const request = fetch(
-    `/api/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/thinking?blockIndex=${blockIndex}`,
-  ).then(async (response) => {
+  const request = vcpdeckThinkingRequest(sessionId, entryId, blockIndex).then(async (response) => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json() as { thinking?: unknown };
     if (typeof data.thinking !== "string") throw new Error("Invalid thinking response");

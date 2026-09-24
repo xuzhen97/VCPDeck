@@ -372,8 +372,6 @@ export function usePiSession(
 										? { ...s.job, status: "idle", runId: null }
 										: null,
 									error: event.message,
-									thinkingText: "",
-									thinkingDurationMs: null,
 								}));
 								void reloadHistory();
 								void refreshState();
@@ -388,9 +386,6 @@ export function usePiSession(
 									...s,
 									status: "idle",
 									runId: null,
-									// 结算后清空实时思考：否则「思考中…」会一直留在时间线上（甚至跨轮/跨会话）
-									thinkingText: "",
-									thinkingDurationMs: null,
 									job: s.job ? { ...s.job, status: "idle", runId: null } : null,
 								}));
 								void reloadHistory();

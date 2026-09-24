@@ -267,6 +267,13 @@ Pi 原生事件先在 Client 裁剪：
 
 SSE 实时内容只供当前订阅者使用。Browser 重新打开 Session 时从远程 JSONL 的安全投影恢复历史，不把短暂 thinking 流当作永久记录。
 
+thinking 正文的两条路径：
+
+1. **实时**：`thinking_progress`（`start`/`delta`/`end`）经 SSE 流式下发（单次 ≤ 16 KiB），前端在当前回合内默认展开实时显示；`end` 后折叠为「已思考 N 秒」摘要（正文保留在本轮块中，不写入任何持久化）。
+2. **历史**：`context` 投影只包含 deferred thinking 占位（`text` 不填充、正文不进入分页），正文只在用户展开该思考块时经 `session.entryContent` 按需取回一次（与历史图片同一寻址/惰性模式）；未注入取数实现或取数失败时显示不可用提示，不伪造内容。
+
+无论哪条路径，thinking 正文都不落盘到 Server、不进 Job payload/result、不进日志与审计。
+
 ## 10. 断线、重启与删除
 
 ### Browser/SSE 断线
