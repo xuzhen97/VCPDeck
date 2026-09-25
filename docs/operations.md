@@ -28,6 +28,8 @@ pnpm --filter @vcpdeck/client start
 
 长期环境优先由 Launcher 启动 Server/Client；也可用 PM2 等外部进程管理器守护 Launcher 本身（只托管 Launcher，不托管业务进程，见 [`deployment.md`](./deployment.md) §4.6）；停止 Launcher 前应确认没有进行中的 Release、Job、Terminal 或 Pi run。
 
+变更监管进程（Launcher 及其进程管理器，如 PM2）前必须先具备**不依赖 Server 的带外通道**（SSH、云控制台或本地救援脚本），并至少完成一次成功的只读检查（`pm2 ls`、`launcher.env` 可解析）。Server 是唯一控制通道，Launcher 又决定 Server 存活：用 VCPDeck 自身去重启 Launcher，一旦新进程未被接管就会同时失去修复通道。
+
 ### Windows Client 重启
 
 Windows 一键安装（ADR-0027）把 Client 安装到 `C:\ProgramData\VCPDeck\Client`，由 `NT AUTHORITY\SYSTEM` 下的 `\VCPDeck\Client` 开机任务守护，**不安装、不运行 PM2**，也不依赖任何用户登录或用户私有目录。
@@ -213,6 +215,29 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 - 若修改 `launcher.env` 后仍连接旧 Server，运行 `pm2 env <id>` 核对 PM2 是否缓存了旧 `VCPDECK_SERVER`。Node `--env-file` 不覆盖已存在的同名进程环境；新版一键安装器会生成 `launcher-env.cjs` preload（先清除继承的 `VCPDECK_*`，再主动读取 `launcher.env`）并在 ecosystem 中设置 `filter_env: ["VCPDECK_"]`。旧安装应更新这些文件后，以 `pm2 delete vcpdeck-client-launcher`、`pm2 start <app-dir>/ecosystem.config.cjs --only vcpdeck-client-launcher`、`pm2 save` 重建进程，确保 `launcher.env` 是 Launcher 配置权威；
 - 失败会保留现场供重跑：旧 Windows 用户安装保留 `~/.vcpdeck/client-install.json`、缓存、版本目录与 PM2 现场；Windows SYSTEM 安装保留 `C:\ProgramData\VCPDeck\Client`；Linux A2 保留 `/opt/vcpdeck/client` 与 `/etc/vcpdeck/client.env`；
 - `/releases` 的 Client 一键卸载命令只读取该安装状态：Windows SYSTEM 安装停用并删除 `\VCPDeck\Client` 任务、把 `client-id` 原子保留到 `C:\ProgramData\VCPDeck\client-id` 后删除运行目录；旧安装只删除对应 `vcpdeck-client-launcher`、Client 目录和约定的自启配置。两者都不删除 `client-id`（ProgramData 保留路径除外）、通用缓存、其他 PM2 应用或 Server 数据；找不到安装状态、任务 action 指向其他目录或同名 PM2 进程指向其他目录时会拒绝操作。
+
+### Server Launcher（PM2 托管）卡在 `online / pid N/A`
+
+- 现象：`pm2 ls` 里 `vcpdeck-server-launcher` 状态为 `online`，但 `pid` 是 `N/A`、`uptime` 虚高不增长；业务端口（默认 3001）无监听；日志停在 `[launcher] 收到停机信号，停止被守护进程`，之后没有新的 `守护中` 行；
+- 成因：`pm2 restart <app> --update-env` 让旧 Launcher 停机后新进程未被 PM2 接管，app 元数据与实际进程不一致。**该状态下 `pm2 restart` 是空操作**，不会自行恢复；
+- 恢复（不动业务数据、不动 `apps/<version>` 与数据库）：
+
+  ```bash
+  export PATH=/root/.nvm/versions/node/<node-ver>/bin:$PATH
+  pm2 delete vcpdeck-server-launcher
+  pm2 start /opt/vcpdeck/launcher/ecosystem.config.cjs --only vcpdeck-server-launcher
+  pm2 save
+  ```
+
+- 验收：`pm2 ls` 的 `pid` 是真实数字且 `↺` 计数不再增长；`ss -ltnp | grep :3001` 有监听；`curl -s http://127.0.0.1:3001/api/status` 返回版本号；日志出现新的 `守护中: server (control port …)`；
+- 排查手段自身的陷阱：`pm2`/`node` 不在 `sudo` 重置后的 PATH 中，必须用绝对路径或先 `export PATH`；通过 `vcpdeck jobs run` 远程执行时参数按空格拼接，内联 `sh -c`、变量与引号容易被破坏，应把命令写成脚本文件再执行（`vcpdeck jobs run <client> --wait -- sh /tmp/<script>.sh`）。
+
+### Launcher 配置来源、dump 快照与开机自启
+
+- `launcher.env` 由 Launcher **自己解析**（`<cwd>/launcher.env`，`cwd` 来自服务管理器的工作目录），且**同名环境变量优先**：PM2 `dump.pm2` 里保存的旧环境会覆盖文件中的新值。改动 `launcher.env` 后必须重启 Launcher 才生效；`node --env-file=` 只影响 Launcher 自身启动时的环境，不会在运行期重读文件；
+- 因此每次改完 `launcher.env` 或用 `--update-env` 重启后，都要 `pm2 save` 并核对落盘时间：`ls -l /root/.pm2/dump.pm2`（长时间不更新说明 save 未生效，重启会恢复旧环境）；
+- 冷启动链路是 systemd → `pm2 resurrect` → Launcher（`cwd` 与 `--env-file` 取自 dump）→ 业务 Server/Client。因此 dump 中该 app 的 `cwd` 必须是 Launcher 安装根目录，否则 Launcher 读不到 `launcher.env`，会因缺少 `VCPDECK_ARTIFACT` 拒绝启动；
+- 开机自启检查：`systemctl is-enabled pm2-root` 应为 `enabled`；`is-active` 显示 `inactive` **属正常**（`resurrect` 是启动即退出的进程，PM2 守护由自身常驻）。同时核对 unit 内 `ExecStart` 引用的 node/pm2 路径存在，nvm 版本变更后需重跑 `pm2 startup systemd -u root --hp /root`。
 
 ### Client PM2 进程丢失（旧安装）
 

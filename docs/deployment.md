@@ -147,6 +147,7 @@ FRPS Token 和 Dashboard 密码当前明文存入 SQLite、通过实例 REST 返
 - **只托管 Launcher**。若把 `apps/<version>/server/dist/main.js` 或 `client/dist/index.js` 交给 PM2，自更新时 Launcher 会主动停止业务进程再启动新版本，PM2 会将其误判为崩溃并强行拉起，破坏版本切换与失败回退；
 - 使用 **fork 模式、单一实例**：Server 是单控制面节点（默认 3001 端口，可用 `VCPDECK_PORT`/`--port` 覆盖，仍不支持多实例/cluster）；
 - 与安装时相同的运行账户和 `--app-dir`，保证 `launcher.env` / `control.json` / `apps/` 的读写权限一致。
+- **`launcher.env` 由 Launcher 自己解析，且同名变量优先**：改动文件后需重启 Launcher 并执行 `pm2 save` 同步快照，否则下次重启恢复的是 `dump.pm2` 里的旧环境；`pm2 restart --update-env` 在 app 状态不一致时可能不生效，恢复步骤与自启检查见 [`operations.md`](./operations.md) §8。
 
 `ecosystem.config.cjs` 示例（路径替换为实际绝对路径；Windows 用 `C:/...`，Linux 用 `/opt/vcpdeck/...`）：
 

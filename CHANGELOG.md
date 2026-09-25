@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 文档
+
+- **运维手册补充监管进程与配置来源规程**（`docs/operations.md`）：PM2 托管 Launcher 卡在 `online / pid N/A` 的成因与恢复（`pm2 delete` + `start`，该状态下 `pm2 restart` 是空操作）、`launcher.env` 与 PM2 快照的环境变量优先级与 `pm2 save` 落盘核对、开机自启单元检查（`is-active=inactive` 属正常）；`deployment.md` §4.6 同步补充约束，§2 增加「变更监管进程前必须具备带外通道并完成只读检查」的前置规则。
+
 ## [0.11.1] - 2026-09-25
 
 ### 修复
