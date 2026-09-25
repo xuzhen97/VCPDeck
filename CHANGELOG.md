@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-25
+
+### 修复
+
+- **明文 HTTP 部署下 Pi 面板发送消息无响应**：`crypto.randomUUID` 只在安全上下文（HTTPS / localhost）可用，此前发送路径直接调用它，在 `http://<ip>:3001` 下抛 `TypeError: crypto.randomUUID is not a function`，消息发不出去。现统一走 `@/lib/utils` 的 `randomUUID()`，缺失时退回 `getRandomValues` 按 UUID v4 规则拼装。
+- **明文 HTTP 部署下复制按钮失效**：`navigator.clipboard` 同样只在安全上下文可用，FRP 映射公网地址与 Client 安装命令的复制按钮在 IP 访问时直接抛错。现统一走 `@/lib/clipboard` 的 `copyText()`，缺失时退回隐藏 textarea + `execCommand("copy")`（失败仍抛出，不假装复制成功）。远程桌面的“发送本地剪贴板”在不可读取时改为明确提示需 HTTPS 或 localhost 手动粘贴。
+
 ## [0.11.0] - 2026-09-24
 
 ### Breaking

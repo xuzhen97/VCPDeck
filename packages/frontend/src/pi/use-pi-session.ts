@@ -11,6 +11,7 @@ import type {
 	PiThinkingLevel,
 } from "@vcpdeck/shared";
 import type { PiApi } from "@vcpdeck/sdk";
+import { randomUUID } from "@/lib/utils";
 import { openPiEventStream, type PiEventStream } from "./pi-stream.js";
 
 /** 事件后到 history/state 对账的 debounce（30 秒 grace 对齐） */
@@ -591,7 +592,7 @@ export function usePiSession(
 				: null;
 			promptGenerationRef.current += 1;
 			const generation = promptGenerationRef.current;
-			const submissionId = crypto.randomUUID();
+			const submissionId = randomUUID();
 			pendingSubmissionsRef.current.set(submissionId, generation);
 			clearGrace();
 			setState((s) => ({ ...s, status: "running", error: null }));

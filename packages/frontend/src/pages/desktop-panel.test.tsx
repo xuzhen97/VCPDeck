@@ -555,6 +555,27 @@ describe("DesktopPanel", () => {
 		await waitFor(() => expect(vnc.sendCtrlAltDel).toHaveBeenCalled());
 	});
 
+	it("非安全上下文（无 navigator.clipboard）时提示手动粘贴，不静默失败", async () => {
+		const tunnel = makeTunnel();
+		const vnc = makeVnc();
+		mockOpen(tunnel);
+		vi.mocked(createVncSession).mockResolvedValue(vnc as never);
+		const { client: sdkClient } = makeSdk();
+		renderPanel(p2pClient, sdkClient);
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: "连接" }));
+		await waitFor(() => expect(createVncSession).toHaveBeenCalled());
+		vi.mocked(createVncSession).mock.calls[0][2]?.onState?.("connected" as never);
+
+		Object.defineProperty(navigator, "clipboard", {
+			value: undefined,
+			configurable: true,
+		});
+		await user.click(await screen.findByTestId("desktop-clipboard-send"));
+		expect(await screen.findByText(/不支持读取剪贴板/)).toBeTruthy();
+		expect(vnc.sendClipboard).not.toHaveBeenCalled();
+	});
+
 	it("不再渲染「左半/右半」控件与裁剪包裹层", async () => {
 		const tunnel = makeTunnel();
 		const vnc = makeVnc();

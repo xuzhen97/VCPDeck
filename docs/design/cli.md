@@ -1,6 +1,6 @@
 # CLI 与多环境配置设计
 
-> 状态：Current｜维护责任：CLI/SDK 维护者｜最后核验：2026-09-24｜适用版本：`0.11.0` / 当前 `main`
+> 状态：Current｜维护责任：CLI/SDK 维护者｜最后核验：2026-09-25｜适用版本：`0.11.1` / 当前 `main`
 
 本文描述当前 VCPDeck CLI 的职责、环境配置、安全边界和已落地命令。长期取舍见 [ADR-0017](../adr/0017-cli-multi-environment-configuration.md)；REST 与认证语义见 [`protocols.md`](../protocols.md) 和 [`design/identity-and-authentication.md`](./identity-and-authentication.md)。
 
@@ -275,7 +275,7 @@ vcpdeck storage status [--env=<name>] [--json]
 正式版本通过 Pi 用户级 Git package 安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.11.0
+pi install git:github.com/xuzhen97/VCPDeck@v0.11.1
 ```
 
 Pi 克隆整个仓库，从 `skills/vcpdeck/SKILL.md` 发现 Skill；同目录 `vcpdeck.cjs` 是随 Tag 提交的 CLI 单文件构件。所有项目共享这一份安装。升级到新 Tag 时再次执行 `pi install ...@vX.Y.Z`，固定 Tag 不会由 `pi update --extensions` 自动推进。
@@ -293,8 +293,8 @@ pnpm \
   --allow-build="@vcpdeck/sdk" \
   --allow-build="@vcpdeck/shared" \
   add \
-  "github:xuzhen97/VCPDeck#v0.11.0&path:/packages/sdk" \
-  "github:xuzhen97/VCPDeck#v0.11.0&path:/packages/shared"
+  "github:xuzhen97/VCPDeck#v0.11.1&path:/packages/sdk" \
+  "github:xuzhen97/VCPDeck#v0.11.1&path:/packages/shared"
 ```
 
 两个包必须锁定相同 Tag；pnpm 会把 Git commit 和构建许可记录到目标项目。Git 获取阶段运行包的 `prepare` 构建 `dist`，VCPDeck 仓库不提交 SDK/Shared `dist`。目标项目可分别导入 `@vcpdeck/sdk` 与 `@vcpdeck/shared`，再自行用 esbuild 等工具打成只依赖 Node.js 的 `.mjs`。

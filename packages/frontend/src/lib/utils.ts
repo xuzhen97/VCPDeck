@@ -5,6 +5,24 @@ export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
 }
 
+/**
+ * 生成 UUID v4。
+ *
+ * `crypto.randomUUID` 只在安全上下文（HTTPS / localhost）可用；VCPDeck 以明文 HTTP
+ * 部署时它是 `undefined`，直接调用会抛错。此处退回 `getRandomValues`（非安全上下文
+ * 同样可用）按 v4 规则拼装。
+ */
+export function randomUUID(): string {
+	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+		return crypto.randomUUID();
+	}
+	const bytes = crypto.getRandomValues(new Uint8Array(16));
+	bytes[6] = (bytes[6] & 0x0f) | 0x40;
+	bytes[8] = (bytes[8] & 0x3f) | 0x80;
+	const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /** 机器详情 tab 定义：路由 key + 中文标签（机器列表卡片快速跳转与详情页导航共用） */
 export const MACHINE_TABS = [
 	["overview", "概览"],

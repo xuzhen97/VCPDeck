@@ -14,6 +14,7 @@ import {
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
 import { ConfirmTargetDialog } from "@/components/confirm-target-dialog";
+import { copyText } from "@/lib/clipboard";
 import { ErrorState, LoadingState } from "@/components/async-state";
 import { StatusChip } from "@/components/status-chip";
 import { Button } from "@/components/ui/button";
@@ -169,7 +170,7 @@ export function FrpPanel({ clientId }: { clientId?: string }) {
 	async function copyPublicUrl(mapping: FrpMappingInfo) {
 		if (!mapping.publicUrl) return;
 		try {
-			await navigator.clipboard.writeText(mapping.publicUrl);
+			await copyText(mapping.publicUrl);
 			setCopiedId(mapping.id);
 			setCopyErrorId("");
 		} catch {

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
+import { copyText } from "@/lib/clipboard";
 import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
 import { Button } from "@/components/ui/button";
@@ -419,7 +420,7 @@ function InstallerCard({
 	windowsUninstallCommand: string;
 	onToggle: (enabled: boolean) => Promise<void>;
 }) {
-	const copy = async (value: string) => navigator.clipboard.writeText(value);
+	const copy = async (value: string) => copyText(value);
 	return (
 		<div className="space-y-4">
 		<Card>

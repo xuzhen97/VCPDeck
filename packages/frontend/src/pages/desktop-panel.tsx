@@ -437,6 +437,13 @@ export function DesktopPanel({
 	// 把本地剪贴板文本发到远端（需要浏览器授权，失败只提示不中断会话）
 	async function sendLocalClipboard(): Promise<void> {
 		try {
+			// 非安全上下文（明文 HTTP）下浏览器不提供任何读取途径，先明说再动手
+			if (!navigator.clipboard?.readText) {
+				setError(
+					"当前访问方式不支持读取剪贴板（需 HTTPS 或 localhost），请在远端手动粘贴",
+				);
+				return;
+			}
 			const text = await navigator.clipboard.readText();
 			if (!text) {
 				setError("本地剪贴板为空");
