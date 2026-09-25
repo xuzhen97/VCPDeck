@@ -116,10 +116,11 @@ describe("MachinesPage", () => {
 			"href",
 			"/machines/client-1/jobs",
 		);
-		expect(screen.getByRole("link", { name: "Pi" })).toHaveAttribute(
+		expect(screen.getByRole("link", { name: "Agent 对话" })).toHaveAttribute(
 			"href",
-			"/machines/client-1/pi",
+			"/agent/chat?client=client-1",
 		);
+		expect(screen.queryByRole("link", { name: "Pi" })).not.toBeInTheDocument();
 		expect(screen.getByRole("link", { name: "终端" })).toHaveAttribute(
 			"href",
 			"/machines/client-1/terminal",

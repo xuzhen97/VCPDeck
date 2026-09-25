@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
 import { AuthProvider } from "@/auth-context";
-import { StoragePage } from "./storage-page";
+import { StoragePanel } from "./storage-panel";
 
 const identity: IdentityInfo = {
 	id: "i1",
@@ -82,7 +82,7 @@ function renderPage(options: RenderOptions = {}) {
 		<MemoryRouter>
 			<SdkProvider client={client}>
 				<AuthProvider>
-					<StoragePage />
+					<StoragePanel />
 				</AuthProvider>
 			</SdkProvider>
 		</MemoryRouter>,
@@ -100,7 +100,7 @@ function renderPage(options: RenderOptions = {}) {
 	};
 }
 
-describe("StoragePage", () => {
+describe("StoragePanel", () => {
 	it("shows the server-selected backend and only safe status", async () => {
 		const { client, backendStatus, status } = renderPage();
 		expect(await screen.findByText("当前激活的存储")).toBeVisible();

@@ -30,7 +30,6 @@ export const MACHINE_TABS = [
 	["files", "文件"],
 	["frp", "映射"],
 	["jobs", "任务记录"],
-	["pi", "Pi"],
 	["terminal", "终端"],
 	["tunnel", "隧道"],
 	["desktop", "远程桌面"],

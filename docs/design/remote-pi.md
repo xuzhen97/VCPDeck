@@ -48,7 +48,7 @@ flowchart LR
 
 | 组件 | 当前职责 | 不负责 |
 | --- | --- | --- |
-| Frontend Pi Panel | 项目/Session 选择、三栏对话界面、SSE 消费、Owner 控件和 Extension 对话 | 保存权威 Session、直接连接 Client |
+| Frontend Agent 面板 | 在全局 `Agent` 模块的「对话」二级项内：先选择目标机器（必须在线且 Pi 能力可用，否则不可选并标出原因），再进行项目/Session 选择、三栏对话、SSE 消费、Owner 控件和 Extension 对话；配置面（Profile / Provider / Client 运行时）同属该模块 | 保存权威 Session、直接连接 Client |
 | SDK `pi` API | 封装 Pi REST；提供 session 级 SSE path | 管理 EventSource 重连和 Server 状态机 |
 | Server `PiController` | 认证后的 REST、Owner 校验、项目锁编排、请求/响应映射 | 运行 Pi SDK、保存完整正文 |
 | `PiRunService` | `agent.session` Job、runId CAS、连接 generation、项目锁和重连对账 | 解析 Session JSONL |

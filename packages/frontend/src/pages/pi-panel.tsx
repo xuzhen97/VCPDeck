@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
 	ClientInfo,
 	PiAttachmentRef,
@@ -17,8 +17,19 @@ import { PiExtensionDialog } from "../pi/pi-extension-dialog.js";
 import { usePiSession } from "../pi/use-pi-session.js";
 import { setPiThinkingLoader } from "../pi/pi-thinking-loader.js";
 
-/** 机器工作区 Pi Tab：三栏 IDE 布局（左项目/会话、中对话、右详情） */
-export function PiPanel({ client }: { client: ClientInfo }) {
+/**
+ * 机器工作区 / Agent 对话视图：三栏 IDE 布局（左项目/会话、中对话、右详情）。
+ *
+ * `leftSlot` 供宿主在左栏顶部注入上下文选择器（如 Agent 模块的机器选择器）；
+ * 不传时行为与改动前完全一致。
+ */
+export function PiPanel({
+	client,
+	leftSlot,
+}: {
+	client: ClientInfo;
+	leftSlot?: ReactNode;
+}) {
 	const sdk = useSdk();
 	const capability: PiCapabilityStatus | null = useMemo(() => {
 		const pi = client.capabilityDetails?.pi;
@@ -276,6 +287,7 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 					className="hidden w-72 shrink-0 overflow-y-auto rounded border border-border p-3 lg:block"
 					data-testid="pi-left-panel"
 				>
+					{leftSlot}
 					<PiSessionSidebar
 						pi={sdk.pi}
 						files={filesApi}
@@ -380,6 +392,7 @@ export function PiPanel({ client }: { client: ClientInfo }) {
 				title="项目与会话"
 				side="left"
 			>
+				{leftSlot}
 				<PiSessionSidebar
 					pi={sdk.pi}
 					files={filesApi}

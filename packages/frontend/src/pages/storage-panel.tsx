@@ -16,7 +16,6 @@ import {
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
-import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,7 +31,8 @@ import { Label } from "@/components/ui/label";
 const tabs = ["backend", "aliyun"] as const;
 type StorageTab = (typeof tabs)[number];
 
-export function StoragePage() {
+/** 存储设置面板：文件传输后端、连接配置与云盘授权（挂在设置模块的「存储」二级项下）。 */
+export function StoragePanel() {
 	const sdk = useSdk();
 	const backendLoad = useCallback(
 		(signal: AbortSignal) => sdk.storage.getBackendConfig(signal),
@@ -170,16 +170,17 @@ export function StoragePage() {
 		setOauthError("");
 		try {
 			const result = await sdk.aliyundrive.startOAuth();
-			const authorizationUrl = safeAuthorizationUrl(
+			// 仅当目标为 https 且与配置的 OpenAPI origin 完全一致时才放行（见 safeAuthorizationUrl）
+			const validatedAuthorizationUrl = safeAuthorizationUrl(
 				result.authorizationUrl,
 				aliyunResource.data?.openapiBase,
 			);
-			if (!authorizationUrl) {
+			if (!validatedAuthorizationUrl) {
 				setOauthError("授权地址不安全");
 				return;
 			}
 			setState(result.state);
-			window.open(authorizationUrl, "_blank", "noopener,noreferrer");
+			window.open(validatedAuthorizationUrl, "_blank", "noopener,noreferrer");
 		} catch (error) {
 			setOauthError(error instanceof Error ? error.message : "无法开始授权");
 		} finally {
@@ -250,10 +251,6 @@ export function StoragePage() {
 	const aliyun = aliyunResource.data;
 	return (
 		<div className="space-y-6">
-			<PageHeading
-				title="存储"
-				description="管理文件传输后端、连接配置与云盘授权。"
-			/>
 			<p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
 				当前接口非 admin-only，请仅向可信身份开放；页面不会读取或回填原始密钥。
 			</p>

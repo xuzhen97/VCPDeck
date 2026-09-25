@@ -23,7 +23,6 @@ import { ExecutePanel } from "@/pages/execute-panel";
 import { FilesPanel } from "@/pages/files-panel";
 import { FrpPanel } from "@/pages/frp-panel";
 import { JobsPage } from "@/pages/jobs-page";
-import { PiPanel } from "@/pages/pi-panel";
 import { TerminalPanel } from "@/pages/terminal-panel";
 import { TunnelPanel } from "@/pages/tunnel-panel";
 import { DesktopPanel } from "@/pages/desktop-panel";
@@ -241,7 +240,6 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				{tab === "files" && <FilesPanel clientId={client.clientId} />}
 				{tab === "frp" && <FrpPanel clientId={client.clientId} />}
 				{tab === "jobs" && <JobsPage clientId={client.clientId} />}
-				{tab === "pi" && <PiPanel client={client} />}
 				{tab === "terminal" && <TerminalPanel clientId={client.clientId} />}
 				{tab === "tunnel" && <TunnelPanel client={client} />}
 				{tab === "desktop" && <DesktopPanel client={client} />}
@@ -251,7 +249,6 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 					"files",
 					"frp",
 					"jobs",
-					"pi",
 					"terminal",
 					"tunnel",
 					"desktop",

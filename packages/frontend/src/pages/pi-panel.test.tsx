@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { PiPanel } from "./pi-panel.js";
@@ -145,10 +146,14 @@ function makeSdk() {
 	return sdk;
 }
 
-function renderPanel(client: ClientInfo, sdk = makeSdk()) {
+function renderPanel(
+	client: ClientInfo,
+	sdk = makeSdk(),
+	leftSlot?: ReactNode,
+) {
 	const view = render(
 		<SdkProvider client={sdk}>
-			<PiPanel client={client} />
+			<PiPanel client={client} leftSlot={leftSlot} />
 		</SdkProvider>,
 	);
 	return { sdk, view };
@@ -505,5 +510,19 @@ describe("PiPanel", () => {
 
 		// 输入框已被禁用（无 active session）。
 		expect(screen.getByRole("textbox", { name: "Pi 输入" })).toBeDisabled();
+	});
+
+	it("renders the host-provided left slot above the session sidebar", () => {
+		renderPanel(
+			makeClient(),
+			makeSdk(),
+			<p data-testid="host-slot">机器选择器</p>,
+		);
+
+		const left = screen.getByTestId("pi-left-panel");
+		const slot = within(left).getByTestId("host-slot");
+		expect(slot).toHaveTextContent("机器选择器");
+		// 必须是左栏第一个子元素，即渲染在会话侧栏之上
+		expect(left.firstElementChild).toBe(slot);
 	});
 });

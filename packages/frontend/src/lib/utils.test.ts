@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { randomUUID } from "./utils";
+import { MACHINE_TABS, randomUUID } from "./utils";
 
 const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -15,6 +15,26 @@ function hideRandomUUID(): () => void {
 		else Reflect.deleteProperty(crypto, "randomUUID");
 	};
 }
+
+describe("MACHINE_TABS", () => {
+	it("不再包含 Pi 入口（已并入全局 Agent 模块的对话视图）", () => {
+		expect(MACHINE_TABS.map(([key]) => key)).not.toContain("pi");
+		expect(MACHINE_TABS.map(([, label]) => label)).not.toContain("Pi");
+	});
+
+	it("保留其余机器工作区 tab 与顺序", () => {
+		expect(MACHINE_TABS.map(([key]) => key)).toEqual([
+			"overview",
+			"execute",
+			"files",
+			"frp",
+			"jobs",
+			"terminal",
+			"tunnel",
+			"desktop",
+		]);
+	});
+});
 
 describe("randomUUID", () => {
 	it("非安全上下文（无 crypto.randomUUID）下仍返回 v4 UUID 且不重复", () => {

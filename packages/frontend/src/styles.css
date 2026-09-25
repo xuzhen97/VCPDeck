@@ -109,6 +109,8 @@
 	.vcpdeck-mobile-nav { @apply flex h-12 gap-5 overflow-x-auto border-b border-border/70 px-4 text-sm text-muted-foreground; }
 	.vcpdeck-mobile-nav a { @apply flex shrink-0 items-center; }
 	.vcpdeck-mobile-nav a.active { @apply text-primary; }
+	/* 二级状态下横向导航首项是「返回」按钮（一级状态整个元素不渲染） */
+	.vcpdeck-mobile-nav button { @apply flex shrink-0 items-center font-semibold text-primary; }
 	.storage-tab-panel { animation: storage-tab-in 160ms ease-out; }
 	.storage-status-card { animation: storage-status-in 180ms ease-out; }
 	.pi-chat-fade-in { animation: pi-chat-fade-in 180ms ease-out; }

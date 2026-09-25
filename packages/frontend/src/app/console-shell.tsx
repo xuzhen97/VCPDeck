@@ -1,23 +1,15 @@
 import type { IdentityInfo } from "@vcpdeck/shared";
-import {
-	Bot,
-	Cable,
-	ChevronsLeft,
-	ChevronsRight,
-	Database,
-	LayoutDashboard,
-	ListTodo,
-	LogOut,
-	MonitorCog,
-	Moon,
-	Rocket,
-	Settings,
-	Sun,
-} from "lucide-react";
-import { useState, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { ChevronLeft, ChevronsLeft, ChevronsRight, LogOut, Moon, Sun } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notification-bell";
+import {
+	isFullBleed,
+	MODULES,
+	resolveModule,
+	visibleSubItems,
+} from "./navigation";
 import {
 	applyTheme,
 	readSidebarCollapsed,
@@ -26,17 +18,12 @@ import {
 	type Theme,
 } from "./theme";
 
-const navigation = [
-	{ to: "/dashboard", label: "概览", icon: LayoutDashboard },
-	{ to: "/machines", label: "机器", icon: MonitorCog },
-	{ to: "/jobs", label: "任务", icon: ListTodo },
-	{ to: "/frp", label: "映射", icon: Cable },
-	{ to: "/releases", label: "发版", icon: Rocket },
-	{ to: "/storage", label: "存储", icon: Database },
-	{ to: "/pi", label: "Pi", icon: Bot },
-	{ to: "/settings/profile", label: "设置", icon: Settings },
-];
-
+/**
+ * 应用外壳：左侧 Drill-down 侧栏 + 顶部工具条 + 主内容区。
+ *
+ * 导航层级完全由 URL 派生——当前路径命中带二级的模块时，侧栏**原位**切换为该模块的
+ * 二级导航（一级与二级永不并排），并在左下角提供「返回全局导航」；一级状态下不渲染该按钮。
+ */
 export function ConsoleShell({
 	identity,
 	onLogout,
@@ -46,6 +33,31 @@ export function ConsoleShell({
 	onLogout: () => void | Promise<void>;
 	children: ReactNode;
 }) {
+	const location = useLocation();
+	const navigate = useNavigate();
+	// 收敛成三态，避免 hasSub 为 true 时 TS 仍把 module 视为 undefined
+	const activeModule = resolveModule(location.pathname);
+	const subItems = visibleSubItems(activeModule, identity.isAdmin === true);
+	const subNav =
+		activeModule && subItems.length > 0
+			? { module: activeModule, items: subItems }
+			: null;
+	const hasSub = subNav !== null;
+	const ModuleIcon = subNav?.module.icon;
+	const fullBleed = isFullBleed(location.pathname);
+
+	// Back 目标：最近一个「不渲染二级导航」的**目标**路径。
+	// 记来源路径会让来源为模块页时指向模块路径，点击等于原地不动，用户被困。
+	const lastGlobalRef = useRef<string | null>(null);
+	const currentPath = `${location.pathname}${location.search}`;
+	useEffect(() => {
+		if (!hasSub) lastGlobalRef.current = currentPath;
+	}, [hasSub, currentPath]);
+
+	function handleBack() {
+		navigate(lastGlobalRef.current ?? "/dashboard");
+	}
+
 	const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
 	const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 	const [theme, setTheme] = useState<Theme>(readTheme);
@@ -103,21 +115,62 @@ export function ConsoleShell({
 							<ChevronsLeft className="size-4" />
 						</Button>
 					</div>
-					<nav aria-label="主导航" className="mt-6 space-y-1">
-						{navigation.map(({ to, label, icon: Icon }) => (
-							<NavLink
-								key={to}
-								to={to}
-								className={({ isActive }) =>
-									`vcpdeck-nav-link ${isActive ? "active" : ""}`
-								}
+					{subNav ? (
+						<>
+							<div
+								data-testid="sidebar-module-title"
+								className="mt-6 flex min-h-11 items-center gap-3 px-3 font-semibold"
 							>
-								<Icon className="size-4" />
-								<span className="vcpdeck-sidebar-label">{label}</span>
-							</NavLink>
-						))}
-					</nav>
+								{ModuleIcon && <ModuleIcon className="size-4" />}
+								<span className="vcpdeck-sidebar-label">
+									{subNav.module.label}
+								</span>
+							</div>
+							<nav aria-label="模块导航" className="space-y-1">
+								{subNav.items.map(({ path, label, icon: Icon }) => (
+									<NavLink
+										key={path}
+										to={path}
+										className={({ isActive }) =>
+											`vcpdeck-nav-link ${isActive ? "active" : ""}`
+										}
+									>
+										<Icon className="size-4" />
+										<span className="vcpdeck-sidebar-label">{label}</span>
+									</NavLink>
+								))}
+							</nav>
+						</>
+					) : (
+						<nav aria-label="主导航" className="mt-6 space-y-1">
+							{MODULES.map(({ id, path, label, icon: Icon }) => (
+								<NavLink
+									key={path}
+									to={path}
+									className={({ isActive }) =>
+										`vcpdeck-nav-link ${isActive || activeModule?.id === id ? "active" : ""}`
+									}
+								>
+									<Icon className="size-4" />
+									<span className="vcpdeck-sidebar-label">{label}</span>
+								</NavLink>
+							))}
+						</nav>
+					)}
 					<div data-testid="sidebar-footer" className="mt-auto space-y-2">
+						{/* 一级状态整个元素不渲染：不用 hidden 属性——CSS display:flex 会覆盖它 */}
+						{hasSub && (
+							<button
+								type="button"
+								data-testid="sidebar-back"
+								onClick={handleBack}
+								aria-label="返回全局导航"
+								className="vcpdeck-nav-link w-full"
+							>
+								<ChevronLeft className="size-4" />
+								<span className="vcpdeck-sidebar-label">返回全局导航</span>
+							</button>
+						)}
 						<div className="border-t border-border/70 pt-3 text-sm">
 							<p className="vcpdeck-sidebar-label truncate font-medium">
 								{identity.displayName}
@@ -194,13 +247,35 @@ export function ConsoleShell({
 						</div>
 					</header>
 					<nav aria-label="移动导航" className="vcpdeck-mobile-nav lg:hidden">
-						{navigation.map(({ to, label }) => (
-							<NavLink key={to} to={to}>
-								{label}
-							</NavLink>
-						))}
+						{subNav && (
+							<button
+								type="button"
+								data-testid="mobile-nav-back"
+								onClick={handleBack}
+								aria-label="返回全局导航"
+							>
+								‹ 返回
+							</button>
+						)}
+						{subNav
+							? subNav.items.map(({ path, label }) => (
+									<NavLink key={path} to={path}>
+										{label}
+									</NavLink>
+								))
+							: MODULES.map(({ path, label }) => (
+									<NavLink key={path} to={path}>
+										{label}
+									</NavLink>
+								))}
 					</nav>
-					<main className="h-[calc(100dvh-7rem)] overflow-y-auto p-4 sm:p-6 lg:h-[calc(100dvh-4rem)]">
+					<main
+						className={
+							fullBleed
+								? "h-[calc(100dvh-7rem)] overflow-hidden lg:h-[calc(100dvh-4rem)]"
+								: "h-[calc(100dvh-7rem)] overflow-y-auto p-4 sm:p-6 lg:h-[calc(100dvh-4rem)]"
+						}
+					>
 						{children}
 					</main>
 				</section>

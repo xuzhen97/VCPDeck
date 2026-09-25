@@ -1,12 +1,12 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import type { IdentityInfo } from "@vcpdeck/shared";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
 import { AuthProvider } from "@/auth-context";
-import { AppRoutes } from "@/app/routes";
+import { SettingsPage } from "./settings-page";
 
 const identity = (isAdmin: boolean): IdentityInfo => ({
 	id: "i1",
@@ -21,10 +21,15 @@ function LocationProbe() {
 	return <output aria-label="当前位置">{useLocation().pathname}</output>;
 }
 
-function renderSettings(isAdmin = true, path = "/settings/tokens") {
+function renderSettings(
+	isAdmin = true,
+	path = "/settings/tokens",
+	options: { tokens?: unknown[] } = {},
+) {
 	const token = { id: "t1", token: "vcp_secret_once", label: "CLI" };
 	const tokens = {
-		list: vi.fn().mockResolvedValue([]),
+		// 直接渲染 SettingsPage 时面板同步挂载，列表必须在渲染前就位
+		list: vi.fn().mockResolvedValue(options.tokens ?? []),
 		create: vi.fn().mockResolvedValue(token),
 		revoke: vi.fn().mockResolvedValue({ ok: true }),
 	};
@@ -37,6 +42,36 @@ function renderSettings(isAdmin = true, path = "/settings/tokens") {
 			enable: vi.fn(),
 		},
 		clients: { list: vi.fn().mockResolvedValue([]) },
+		storage: {
+			getBackendConfig: vi
+				.fn()
+				.mockResolvedValue({ kind: "local", updatedAt: null }),
+			setBackend: vi
+				.fn()
+				.mockResolvedValue({ kind: "local", updatedAt: null }),
+		},
+		aliyundrive: {
+			status: vi.fn().mockResolvedValue({
+				configured: false,
+				authorized: false,
+				hasAuth: false,
+				isExpired: false,
+				clientId: null,
+				openapiBase: "https://openapi.alipan.com",
+				transferFolder: "VCPDeck",
+				driveId: null,
+				expiresAt: null,
+			}),
+			configure: vi.fn(),
+			startOAuth: vi.fn(),
+			completeOAuth: vi.fn(),
+			revoke: vi.fn(),
+			verify: vi.fn().mockResolvedValue({
+				valid: false,
+				checkedAt: "2026-07-31T12:00:00.000Z",
+				reason: "not_configured",
+			}),
+		},
 		pi: {
 			profiles: {
 				list: vi.fn().mockResolvedValue({
@@ -102,7 +137,7 @@ function renderSettings(isAdmin = true, path = "/settings/tokens") {
 		<MemoryRouter initialEntries={[path]}>
 			<SdkProvider client={client}>
 				<AuthProvider>
-					<AppRoutes />
+					<SettingsPage />
 					<LocationProbe />
 				</AuthProvider>
 			</SdkProvider>
@@ -123,17 +158,18 @@ describe("SettingsPage", () => {
 	});
 
 	it("requires confirmation before revoking a token", async () => {
-		const { tokens } = renderSettings();
-		tokens.list.mockResolvedValue([
-			{
-				id: "t1",
-				label: "CLI",
-				lastUsedAt: null,
-				expiresAt: null,
-				revokedAt: null,
-				createdAt: "2026-07-26T00:00:00.000Z",
-			},
-		]);
+		const { tokens } = renderSettings(true, "/settings/tokens", {
+			tokens: [
+				{
+					id: "t1",
+					label: "CLI",
+					lastUsedAt: null,
+					expiresAt: null,
+					revokedAt: null,
+					createdAt: "2026-07-26T00:00:00.000Z",
+				},
+			],
+		});
 		await userEvent.click(
 			await screen.findByRole("button", { name: "撤销 Token" }),
 		);
@@ -142,61 +178,32 @@ describe("SettingsPage", () => {
 		expect(tokens.revoke).toHaveBeenCalledWith("t1");
 	});
 
-	it("Pi 页面按功能切换 Tab，且只挂载当前面板", async () => {
-		renderSettings(true, "/pi/profile");
-		expect(await screen.findByRole("heading", { name: "Pi" })).toBeInTheDocument();
-		expect(
-			await screen.findByRole("heading", { name: "Pi · Profile" }),
-		).toBeInTheDocument();
-		const provider = screen.getByRole("combobox", { name: "默认 Provider" });
-		expect(provider).toBeInTheDocument();
-		expect(provider).toHaveValue("");
-		expect(screen.queryByLabelText("pi-profile-provider")).not.toBeInTheDocument();
-		// 勾选凭据后，默认 Provider 下拉才会列出该凭据对应的 Provider（credential-driven）
-		await userEvent.click(screen.getByLabelText("Anthropic 主账号 (anthropic)"));
-		await waitFor(() => expect(provider).toHaveValue("anthropic"));
-		const tablist = screen.getByRole("tablist", { name: "Pi 功能" });
-		for (const label of ["Profile", "Provider", "Client 运行时"]) {
-			expect(within(tablist).getByRole("tab", { name: label })).toBeVisible();
-		}
-		expect(
-			screen.queryByRole("heading", { name: "Pi · Provider 凭据" }),
-		).not.toBeInTheDocument();
-		expect(
-			screen.queryByRole("heading", { name: "Pi · Client 运行时" }),
-		).not.toBeInTheDocument();
-		await userEvent.click(
-			within(tablist).getByRole("tab", { name: "Provider" }),
-		);
-		await waitFor(() =>
-			expect(screen.getByLabelText("当前位置")).toHaveTextContent(
-				"/pi/provider",
-			),
-		);
-		expect(
-			await screen.findByRole("heading", { name: "Pi · Provider" }),
-		).toBeInTheDocument();
-		expect(
-			screen.queryByRole("heading", { name: "Pi · Profile" }),
-		).not.toBeInTheDocument();
-	});
-
-	it("旧 Pi 设置地址重定向到独立页面", async () => {
+	it("旧 Pi 设置地址重定向到 Agent 模块的 Profile", async () => {
 		renderSettings(true, "/settings/pi");
 		await waitFor(() =>
 			expect(screen.getByLabelText("当前位置")).toHaveTextContent(
-				"/pi/profile",
+				"/agent/profile",
 			),
 		);
 	});
-	it("设置页不再包含 Pi 子导航", async () => {
-		renderSettings(true, "/settings/profile");
-		const settingsNavigation = within(
-			await screen.findByRole("navigation", { name: "设置导航" }),
-		);
+
+	it("renders the storage panel as a settings section", async () => {
+		renderSettings(true, "/settings/storage");
+
+		expect(await screen.findByText("当前激活的存储")).toBeVisible();
+		expect(screen.getByRole("tablist", { name: "存储设置" })).toBeVisible();
 		expect(
-			settingsNavigation.queryByRole("link", { name: "Pi" }),
-		).not.toBeInTheDocument();
+			screen.getByRole("heading", { name: "设置" }),
+		).toBeInTheDocument();
+	});
+
+	it("falls back to profile for an unknown settings section", async () => {
+		renderSettings(true, "/settings/unknown");
+		await waitFor(() =>
+			expect(screen.getByLabelText("当前位置")).toHaveTextContent(
+				"/settings/profile",
+			),
+		);
 	});
 
 	it("hides and blocks identity management for non-admin users", async () => {

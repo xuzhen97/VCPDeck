@@ -165,6 +165,13 @@ describe("MachineWorkspace overview", () => {
 		expect(
 			within(workspaceNav).queryByRole("link", { name: "FRP" }),
 		).not.toBeInTheDocument();
+		// Pi tab 已并入全局 Agent 模块的对话视图
+		expect(
+			within(workspaceNav).queryByRole("link", { name: "Pi" }),
+		).not.toBeInTheDocument();
+		expect(
+			within(workspaceNav).getByRole("link", { name: "终端" }),
+		).toHaveAttribute("href", "/machines/c1/terminal");
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 

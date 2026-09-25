@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **左侧导航改为 Drill-down 层级**：一级全局导航与模块二级导航在侧栏**原位互斥**（不再并排），层级完全由 URL 派生；一级状态不显示「返回全局导航」，进入模块后才出现，窄屏横向导航以同一入口为首项。
+- **`Pi` 更名为 `Agent` 并上移到「概览」之下**，机器详情的 `Pi` tab 与独立的 `Pi` 配置页合并为该模块的「对话 / Profile / Provider / Client 运行时」四项；机器卡片保留「Agent 对话」快捷入口。对话需先选择机器（离线或 Pi 能力不可用的机器不可选并标出原因），选择结果写入 URL，刷新与深链可保持。
+- **「存储」并入「设置」模块**，成为其二级项（`/settings/storage`）。
+- 旧链接 `/pi/*`、`/storage`、`/machines/:id/pi` 自动重定向到对应新位置；`/settings/tokens` 等既有路径不变。
+
 ### 文档
 
 - **运维手册补充监管进程与配置来源规程**（`docs/operations.md`）：PM2 托管 Launcher 卡在 `online / pid N/A` 的成因与恢复（`pm2 delete` + `start`，该状态下 `pm2 restart` 是空操作）、`launcher.env` 与 PM2 快照的环境变量优先级与 `pm2 save` 落盘核对、开机自启单元检查（`is-active=inactive` 属正常）；`deployment.md` §4.6 同步补充约束，§2 增加「变更监管进程前必须具备带外通道并完成只读检查」的前置规则。
