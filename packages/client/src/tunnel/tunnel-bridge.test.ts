@@ -96,16 +96,24 @@ function makeTcp() {
 			listeners[ev].push(cb);
 		},
 		emitData(d: Uint8Array) {
-			listeners.data.forEach((l) => l(d));
+			listeners.data.forEach((l) => {
+				l(d);
+			});
 		},
 		emitDrain() {
-			listeners.drain.forEach((l) => l());
+			listeners.drain.forEach((l) => {
+				l();
+			});
 		},
 		emitError(err: { code?: string }) {
-			listeners.error.forEach((l) => l(err));
+			listeners.error.forEach((l) => {
+				l(err);
+			});
 		},
 		emitClose() {
-			listeners.close.forEach((l) => l());
+			listeners.close.forEach((l) => {
+				l();
+			});
 		},
 	};
 	return tcp;

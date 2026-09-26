@@ -66,6 +66,11 @@ export function toRenderMessages(
 				};
 			case "custom":
 				return { role: "custom", customType: message.kind, content: "", display: true };
+			default: {
+				// 未知 role 不得静默产出 undefined：显式失败，由渲染层降级护栏回落纯文本
+				const unknown = message as { role?: string };
+				throw new Error(`unsupported Pi message role: ${String(unknown.role)}`);
+			}
 		}
 	});
 }

@@ -314,7 +314,8 @@ function parseProviderProtocol(value: unknown, what: string): PiProviderProtocol
 function parseProviderBaseUrl(value: unknown): string | null {
 	if (value === undefined || value === null || value === "") return null;
 	const baseUrl = requireString(value, "baseUrl", MAX_BASE_URL);
-	if(/[\u0000-\u0020]/.test(baseUrl)) {
+	// 拒绝含控制字符或空白的 baseUrl（语义等价于原 /[\u0000-\u0020]/，以下扫描不写控制字符转义）
+	if ([...baseUrl].some((ch) => (ch.codePointAt(0) ?? 0) <= 0x20)) {
 		throw new PiAdminProtocolError("baseUrl 含控制字符或空白");
 	}
 	let parsed: URL;

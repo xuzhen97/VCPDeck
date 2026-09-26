@@ -172,6 +172,18 @@ describe("parsePiProvider*Input", () => {
 		).toThrow(/重复/);
 	});
 
+	it("拒绝含控制字符或空白的 baseUrl", () => {
+		for (const baseUrl of [
+			"https://llm.example.test/v1\n",
+			"https://llm.example.test/v1 ",
+			"https://llm.example.test/v\u0000",
+		]) {
+			expect(() =>
+				parsePiProviderCreateInput({ ...validProvider, baseUrl }),
+			).toThrow(/baseUrl/);
+		}
+	});
+
 	it("更新请求允许部分 Provider 字段", () => {
 		expect(parsePiProviderUpdateInput({ protocol: "openai-completions" })).toEqual({
 			protocol: "openai-completions",

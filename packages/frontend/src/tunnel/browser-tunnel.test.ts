@@ -9,18 +9,26 @@ function makeSocket() {
 	const socket = {
 		connected: true,
 		emit: vi.fn((event: string, _payload?: unknown, ack?: (...a: unknown[]) => void) => {
-			if (ack) (emitCallbacks[event] ??= []).push(ack);
+			if (ack) {
+				emitCallbacks[event] ??= [];
+				emitCallbacks[event].push(ack);
+			}
 		}),
 		off: vi.fn(),
 		on(event: string, handler: (...a: unknown[]) => void) {
-			(handlers[event] ??= []).push(handler);
+			handlers[event] ??= [];
+			handlers[event].push(handler);
 			return socket;
 		},
 		emitServer(event: string, payload?: unknown) {
-			(handlers[event] ?? []).forEach((h) => h(payload));
+			(handlers[event] ?? []).forEach((h) => {
+				h(payload);
+			});
 		},
 		emitAck(event: string, payload?: unknown) {
-			(emitCallbacks[event] ?? []).forEach((h) => h(payload));
+			(emitCallbacks[event] ?? []).forEach((h) => {
+				h(payload);
+			});
 		},
 	};
 	return socket as unknown as Socket & {
@@ -39,7 +47,8 @@ function makeChannel() {
 		send: vi.fn(),
 		close: vi.fn(),
 		addEventListener(type: string, fn: (e?: unknown) => void) {
-			(listeners[type] ??= []).push(fn);
+			listeners[type] ??= [];
+			listeners[type].push(fn);
 		},
 		removeEventListener(type: string, fn: (e?: unknown) => void) {
 			listeners[type] = (listeners[type] ?? []).filter((f) => f !== fn);

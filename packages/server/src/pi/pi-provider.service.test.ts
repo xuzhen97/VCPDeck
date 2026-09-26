@@ -133,9 +133,8 @@ describe("PiProviderService 模型发现", () => {
 		).resolves.toMatchObject({
 			models: [{ id: "claude-x", name: "Claude X" }],
 		});
-		expect((anthropicFetch.mock.calls[0]?.[1] as RequestInit).headers).toMatchObject({
-			"x-api-key": "sk-ant",
-			"anthropic-version": "2023-06-01",
+		expect(anthropicFetch.mock.calls[0]?.[1]).toMatchObject({
+			headers: { "x-api-key": "sk-ant", "anthropic-version": "2023-06-01" },
 		});
 
 		const googleFetch = vi.fn<typeof fetch>().mockResolvedValue(
@@ -159,8 +158,8 @@ describe("PiProviderService 模型发现", () => {
 				{ id: "gemini-y", name: "gemini-y" },
 			],
 		});
-		expect((googleFetch.mock.calls[0]?.[1] as RequestInit).headers).toMatchObject({
-			"x-goog-api-key": "goog-key",
+		expect(googleFetch.mock.calls[0]?.[1]).toMatchObject({
+			headers: { "x-goog-api-key": "goog-key" },
 		});
 	});
 
