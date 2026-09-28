@@ -256,7 +256,7 @@ describe("attachPiBridge", () => {
 			sessionId: "s1",
 			jobId: "j1",
 			runId: "j1",
-			payload: { prompt: "hi" },
+			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval" },
 		});
 		expect(result).toMatchObject({ ok: true });
 
@@ -290,7 +290,7 @@ describe("attachPiBridge", () => {
 			sessionId: "s1",
 			jobId: "j1",
 			runId: "j1",
-			payload: { prompt: "hi" },
+			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval" },
 		});
 		expect(result).toMatchObject({ ok: true });
 		emitMessage({
@@ -571,7 +571,7 @@ describe("RuntimeSpec 接纳与门控", () => {
 			runId: "run-1",
 			sessionId: "s1",
 			cwdRef: { rootDir: roots[0]!, relativePath: "proj" },
-			payload: { prompt: "hi" },
+			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval" },
 		});
 		await vi.waitFor(() =>
 			expect(emitCalls.some((c) => c.event === Events.PI_RESPONSE)).toBe(true),

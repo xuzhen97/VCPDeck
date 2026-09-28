@@ -122,6 +122,16 @@ export class PiRuntimeService {
 		return this.registry.status(clientId);
 	}
 
+	/** 返回 ready RuntimeSpec 对应的 Profile 默认执行模式；不可用时 fail closed。 */
+	async effectiveExecutionMode(clientId: string): Promise<import("@vcpdeck/shared").PiToolExecutionMode> {
+		this.registry.assertReady(clientId);
+		const profile = await this.profiles.resolveBoundProfile(clientId);
+		if (!profile || !profile.enabled || profile.allowedModels.length === 0) {
+			throw Object.assign(new Error("Pi Profile is unavailable"), { code: "PI_CONFIG_UNAVAILABLE" });
+		}
+		return profile.toolExecutionMode;
+	}
+
 	/** 未就绪时抛 PI_CONFIG_UNAVAILABLE。 */
 	assertReady(clientId: string): void {
 		this.registry.assertReady(clientId);

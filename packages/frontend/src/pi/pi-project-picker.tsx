@@ -129,13 +129,23 @@ export function PiProjectPicker({
 	clientId,
 	value,
 	onSelect,
+	open: controlledOpen,
+	onOpenChange,
 }: {
 	files: PiFilesApiLike;
 	clientId: string;
 	value: PiCwdRef | null;
 	onSelect: (ref: PiCwdRef) => void;
+	open?: boolean;
+	onOpenChange?: (open: boolean) => void;
 }) {
-	const [open, setOpen] = useState(false);
+	const [internalOpen, setInternalOpen] = useState(false);
+	const open = controlledOpen ?? internalOpen;
+	const setOpen = (next: boolean | ((current: boolean) => boolean)) => {
+		const value = typeof next === "function" ? next(open) : next;
+		if (controlledOpen === undefined) setInternalOpen(value);
+		onOpenChange?.(value);
+	};
 	const [recent, setRecent] = useState<RecentProject[]>(() => loadRecent());
 	const [dismissed, setDismissed] = useState<string[]>(() => loadDismissed());
 	const [roots, setRoots] = useState<string[]>([]);
@@ -143,6 +153,7 @@ export function PiProjectPicker({
 	const [mode, setMode] = useState<"list" | "browse" | "custom">("list");
 	const [customInput, setCustomInput] = useState("");
 	const [customError, setCustomError] = useState<string | null>(null);
+	const filterInputRef = useRef<HTMLInputElement | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 
 	// 打开时拉 roots
@@ -159,6 +170,13 @@ export function PiProjectPicker({
 			});
 		return () => ac.abort();
 	}, [open, clientId, files]);
+
+	// 首次打开候选列表后聚焦筛选框；不使用 autoFocus 避免双挂载时争抢焦点。
+	useEffect(() => {
+		if (!open || mode !== "list") return;
+		const timer = window.setTimeout(() => filterInputRef.current?.focus(), 0);
+		return () => window.clearTimeout(timer);
+	}, [open, mode]);
 
 	// 点击外部关闭
 	useEffect(() => {
@@ -324,14 +342,14 @@ export function PiProjectPicker({
 				>
 					{mode === "list" && (
 						<>
-							<Input
-								autoFocus
-								value={filter}
-								onChange={(e) => setFilter(e.target.value)}
-								placeholder="筛选项目..."
-								className="h-9 text-xs"
-								aria-label="筛选项目"
-							/>
+								<Input
+									ref={filterInputRef}
+									value={filter}
+									onChange={(e) => setFilter(e.target.value)}
+									placeholder="筛选项目..."
+									className="h-9 text-xs"
+									aria-label="筛选项目"
+								/>
 							<div className="mt-1 max-h-56 space-y-0.5 overflow-y-auto">
 								{filtered.length === 0 && (
 									<div className="px-2 py-3 text-center text-xs text-muted-foreground">

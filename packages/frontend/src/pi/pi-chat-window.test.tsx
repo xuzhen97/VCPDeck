@@ -210,7 +210,7 @@ describe("PiChatWindow", () => {
 		const loading = screen.getByTestId("pi-history-loading");
 		expect(loading.textContent).toContain("正在加载历史消息");
 		expect(loading.querySelectorAll(".pi-chat-loading-dot")).toHaveLength(3);
-		expect(screen.queryByText("开始一段新的 Pi 会话")).toBeNull();
+		expect(screen.queryByText(/开始一段新的 Pi 会话/)).toBeNull();
 	});
 
 	it("运行中状态显示动画处理提示", () => {
@@ -230,7 +230,7 @@ describe("PiChatWindow", () => {
 			/>,
 		);
 
-		expect(screen.getByText("开始一段新的 Pi 会话")).toBeTruthy();
+		expect(screen.getByText(/开始一段新的 Pi 会话/)).toBeTruthy();
 	});
 });
 

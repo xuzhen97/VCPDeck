@@ -165,3 +165,107 @@ describe("PiAttachmentService", () => {
 		expect(storage.createDownloadToken).toHaveBeenCalledWith("k-hist.png");
 	});
 });
+
+/** prompt 图片引用：只在完成、未过期且属于同一 client 时接受，且不信任调用方元数据。 */
+describe("PiAttachmentService.validatePromptRefs", () => {
+	const completed = (overrides: Record<string, unknown> = {}) => ({
+		id: "f1",
+		key: "k1",
+		clientId: "c1",
+		filename: "a.png",
+		mimeType: "image/png",
+		size: 1024,
+		sha256: "sha-1",
+		status: "completed",
+		purpose: "pi_prompt",
+		expiresAt: new Date(Date.now() + 60_000),
+		...overrides,
+	});
+	const ref = (overrides: Record<string, unknown> = {}) => ({
+		fileId: "f1",
+		sha256: "sha-1",
+		size: 1024,
+		mimeType: "image/png",
+		url: "https://evil.test/forged",
+		expiresAt: Date.now() + 60_000,
+		...overrides,
+	});
+
+	it("接受同 client 的已完成图片并换成服务端签发的下载凭证", async () => {
+		const { service, addFile, storage } = makeService();
+		addFile(completed());
+
+		const [descriptor] = await service.validatePromptRefs("c1", [ref()]);
+
+		expect(descriptor).toMatchObject({
+			fileId: "f1",
+			sha256: "sha-1",
+			size: 1024,
+			mimeType: "image/png",
+		});
+		expect(descriptor?.url).toContain("/api/storage/download/");
+		expect(descriptor?.url).not.toContain("evil.test");
+		expect(storage.createDownloadToken).toHaveBeenCalledWith("k1");
+	});
+
+	it.each([
+		["空数组", []],
+		["非数组", "f1"],
+		["缺 fileId", [ref({ fileId: undefined })]],
+		["未知字段", [{ ...ref(), extra: true }]],
+		["非白名单 MIME", [ref({ mimeType: "image/svg+xml" })]],
+		["负数 size", [ref({ size: -1 })]],
+		["超过 10 张", Array.from({ length: 11 }, (_, i) => ref({ fileId: `f${i}` }))],
+	])("%s 直接拒绝", async (_name, refs) => {
+		const { service, prisma } = makeService();
+		await expect(service.validatePromptRefs("c1", refs)).rejects.toMatchObject({
+			code: "PI_IMAGE_INVALID",
+		});
+		expect(prisma.file.findUnique).not.toHaveBeenCalled();
+	});
+
+	it("单图超过 10 MiB 拒绝", async () => {
+		const { service } = makeService();
+		await expect(
+			service.validatePromptRefs("c1", [ref({ size: 11 * 1024 * 1024 })]),
+		).rejects.toMatchObject({ code: "PI_IMAGE_TOO_LARGE" });
+	});
+
+	it.each([
+		["未完成上传", completed({ status: "pending" })],
+		["过期", completed({ expiresAt: new Date(Date.now() - 1) })],
+		["属于其他 client", completed({ clientId: "c2" })],
+		["非 prompt 用途", completed({ purpose: "pi_history" })],
+	])("%s 拒绝", async (_name, row) => {
+		const { service, addFile } = makeService();
+		addFile(row);
+		await expect(service.validatePromptRefs("c1", [ref()])).rejects.toMatchObject({
+			code: "PI_IMAGE_INVALID",
+		});
+	});
+
+	it("文件不存在、重复 fileId 或元数据与 DB 不一致都拒绝", async () => {
+		const missing = makeService();
+		await expect(missing.service.validatePromptRefs("c1", [ref()])).rejects.toMatchObject({
+			code: "PI_IMAGE_INVALID",
+		});
+
+		for (const overrides of [
+			{ sha256: "forged" },
+			{ mimeType: "image/webp" },
+			{ size: 2048 },
+		]) {
+			const { service, addFile } = makeService();
+			addFile(completed());
+			await expect(
+				service.validatePromptRefs("c1", [ref(overrides)]),
+			).rejects.toMatchObject({ code: "PI_IMAGE_INVALID" });
+		}
+
+		const { service, addFile } = makeService();
+		addFile(completed());
+		await expect(
+			service.validatePromptRefs("c1", [ref(), ref()]),
+		).rejects.toMatchObject({ code: "PI_IMAGE_INVALID" });
+	});
+});

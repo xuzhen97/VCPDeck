@@ -34,7 +34,7 @@ export const PI_ERROR_CODES = [
 export type PiErrorCode = (typeof PI_ERROR_CODES)[number];
 
 /** Session Job 协议版本；Server 与新 Client 必须精确匹配。 */
-export const PI_SESSION_JOB_PROTOCOL_VERSION = 1;
+export const PI_SESSION_JOB_PROTOCOL_VERSION = 2;
 
 /**
  * PiRuntimeSpec 协议版本。
@@ -439,10 +439,41 @@ export interface PiSessionJobSnapshot {
 	sessionId: string;
 	status: PiSessionJobStatus;
 	runId: string | null;
+	executionModeOverride: PiToolExecutionMode | null;
+	effectiveExecutionMode: PiToolExecutionMode | null;
 	ownerName: string | null;
 	isOwner: boolean;
 	errorCode?: PiErrorCode;
 	errorMessage?: string;
+}
+
+/** 严格解析 Server 返回的 Session Job 快照。 */
+export function parsePiSessionJobSnapshot(value: unknown): PiSessionJobSnapshot {
+	assertRecord(value, "PiSessionJobSnapshot");
+	assertKeys(value, new Set([
+		"jobId", "sessionId", "status", "runId", "executionModeOverride",
+		"effectiveExecutionMode", "ownerName", "isOwner", "errorCode", "errorMessage",
+	]), "PiSessionJobSnapshot");
+	assertString(value.jobId, "jobId", 256);
+	assertString(value.sessionId, "sessionId", 256);
+	if (typeof value.status !== "string" || ![
+		"idle", "pending", "running", "waiting_input", "done", "disconnected", "error", "cancelled",
+	].includes(value.status)) throw new PiProtocolError("status 不受支持");
+	if (value.runId !== null) assertString(value.runId, "runId", 256);
+	for (const field of ["executionModeOverride", "effectiveExecutionMode"] as const) {
+		if (value[field] !== null && !isPiToolExecutionMode(value[field])) {
+			throw new PiProtocolError(`${field} 不受支持`);
+		}
+	}
+	if (value.ownerName !== null) assertString(value.ownerName, "ownerName", 256);
+	if (typeof value.isOwner !== "boolean") throw new PiProtocolError("isOwner 必须是布尔");
+	if (value.errorCode !== undefined && (typeof value.errorCode !== "string" || !PI_ERROR_CODES.includes(value.errorCode as PiErrorCode))) {
+		throw new PiProtocolError("errorCode 不受支持");
+	}
+	if (value.errorMessage !== undefined) assertString(value.errorMessage, "errorMessage", MAX_TEXT_CHARS);
+	// SAFETY: exact key validation and runtime refinement above establish every required field and
+	// restrict status, modes, error code, and optional strings before exposing the shared type.
+	return value as unknown as PiSessionJobSnapshot;
 }
 
 export interface PiSessionCreated {
@@ -1258,6 +1289,8 @@ function parseExtensionUi(
 	) {
 		throw new PiProtocolError(`${what}.timeoutMs 必须是非负数字`);
 	}
+	// SAFETY: `assertRecord`/`assertKeys` above establish the object shape; every required string,
+	// supported kind, and optional field is validated before this boundary cast.
 	return value as unknown as PiExtensionUiRequest;
 }
 
@@ -1334,8 +1367,30 @@ export function parsePiRequest(input: unknown): PiRequest {
 	if (input.action === "agent.prompt" && input.cwdRef === undefined)
 		throw new PiProtocolError("agent.prompt 缺 cwdRef");
 
-	// 旧 Session 显式导入：payload 在 envelope 层严格校验（跨信任边界，ADR-0031）。
-	if (input.action === "session.import.list") {
+	if (input.action === "agent.prompt") {
+		if (input.payload === undefined) {
+			throw new PiProtocolError("agent.prompt 缺 payload");
+		}
+		assertRecord(input.payload, "payload");
+		assertKeys(
+			input.payload,
+			new Set(["prompt", "submissionId", "attachments", "executionMode"]),
+			"payload",
+		);
+		if (typeof input.payload.prompt !== "string" || input.payload.prompt.length > MAX_TEXT_CHARS) {
+			throw new PiProtocolError("payload.prompt 必须是长度合法的字符串");
+		}
+		assertString(input.payload.submissionId, "payload.submissionId", 256);
+		if (!isPiToolExecutionMode(input.payload.executionMode)) {
+			throw new PiProtocolError("payload.executionMode 必须是受支持的模式");
+		}
+		const attachments = input.payload.attachments === undefined
+			? [] : parseAttachments(input.payload.attachments);
+		if (input.payload.prompt.trim() === "" && attachments.length === 0) {
+			throw new PiProtocolError("payload.prompt 或图片不能为空");
+		}
+		if (input.payload.attachments !== undefined) input.payload.attachments = attachments;
+	} else if (input.action === "session.import.list") {
 		if (input.payload !== undefined) {
 			assertRecord(input.payload, "payload");
 			assertKeys(input.payload, new Set(), "payload");
@@ -1356,10 +1411,12 @@ export function parsePiRequest(input: unknown): PiRequest {
 
 	if (input.payload !== undefined) {
 		assertRecord(input.payload, "payload");
-		if (input.payload.attachments !== undefined) {
+		if (input.action !== "agent.prompt" && input.payload.attachments !== undefined) {
 			input.payload.attachments = parseAttachments(input.payload.attachments);
 		}
 	}
+	// SAFETY: request envelope keys/IDs, action-specific requirements, and each action payload
+	// (including agent.prompt executionMode) are validated above before exposing the typed request.
 	return input as unknown as PiRequest;
 }
 
@@ -1451,6 +1508,8 @@ export function parsePiAgentState(input: unknown): PiAgentState {
 			"pendingExtension",
 			true,
 		);
+	// SAFETY: all top-level keys and nested state fields, statuses, queues, and optional values
+	// were checked above; this cast only reflects those runtime refinements to TypeScript.
 	return input as unknown as PiAgentState;
 }
 
@@ -1556,6 +1615,8 @@ export function parsePiEvent(input: unknown): PiEvent {
 			assertString(input.event.status, "event.status", MAX_TEXT_CHARS);
 			break;
 	}
+	// SAFETY: event envelope and the discriminated event payload were validated by the exhaustive
+	// event-type switch above before returning the protocol type.
 	return input as unknown as PiEvent;
 }
 

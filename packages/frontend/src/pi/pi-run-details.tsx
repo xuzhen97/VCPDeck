@@ -6,7 +6,8 @@ import type {
 import { Button } from "@/components/ui/button";
 import type { PiThinkingSelection } from "./use-pi-session.js";
 
-const THINKING_OPTIONS: ReadonlyArray<readonly [PiThinkingSelection, string]> =
+/** 思考等级候选：右栏与 Agent 输入区共用，避免两处枚举漂移。 */
+export const THINKING_OPTIONS: ReadonlyArray<readonly [PiThinkingSelection, string]> =
 	[
 		["auto", "Auto"],
 		["off", "Off"],

@@ -6,10 +6,13 @@
 import {
 	PI_ERROR_CODES,
 	safePiErrorMessage,
+	isPiToolExecutionMode,
+	parsePiRequest,
 	type PiAttachmentDescriptor,
 	type PiClientEvent,
 	type PiErrorCode,
 	type PiRequest,
+	type PiToolExecutionMode,
 } from "@vcpdeck/shared";
 import { join } from "node:path";
 import {
@@ -89,6 +92,7 @@ let runtimeConfig: PiRuntimeConfig | null = null;
 /** 已注入的 ModelRuntime（与 runtimeConfig 同生命周期）。 */
 let modelRuntimePromise: Promise<unknown> | null = null;
 let wrapper: PiAgentSessionWrapper | null = null;
+let wrapperExecutionMode: PiToolExecutionMode | null = null;
 
 /** 用 lease 惰性构造 ModelRuntime（凭据只在内存）。 */
 function getModelRuntime(): Promise<unknown> {
@@ -169,13 +173,15 @@ function normalizeError(err: unknown): {
 
 async function ensureWrapper(
 	sessionId: string,
+	executionMode: PiToolExecutionMode = runtimeConfig?.spec.toolExecutionMode ?? "approval",
 ): Promise<PiAgentSessionWrapper> {
-	if (wrapper && wrapper.sessionId === sessionId && wrapper.isAlive()) {
+	if (wrapper && wrapper.sessionId === sessionId && wrapper.isAlive() && wrapperExecutionMode === executionMode) {
 		return wrapper;
 	}
 	if (wrapper) {
 		await wrapper.shutdown();
 		wrapper = null;
+		wrapperExecutionMode = null;
 	}
 	if (!runtimeConfig || runtimeConfig.resolvedModels.length === 0) {
 		throw Object.assign(new Error("Pi runtime config is unavailable"), {
@@ -201,11 +207,12 @@ async function ensureWrapper(
 			modelId: model.modelId,
 		})),
 		toolPolicy: runtimeConfig.spec.toolPolicy,
-		toolExecutionMode: runtimeConfig.spec.toolExecutionMode,
+		toolExecutionMode: executionMode,
 		bundleExtensionPaths: runtimeConfig.bundleExtensionPaths,
 		initialModel: defaultModel,
 		sessionFile: found.path,
 	});
+	wrapperExecutionMode = executionMode;
 	return wrapper;
 }
 
@@ -302,7 +309,12 @@ function emitPromptError(run: ActivePrompt, error: unknown): void {
 }
 
 async function runPrompt(run: ActivePrompt, request: PiRequest): Promise<void> {
-	let w = await ensureWrapper(run.sessionId);
+	if (!isPiToolExecutionMode(request.payload?.executionMode)) {
+		throw Object.assign(new Error("Execution mode is required"), {
+			code: "PI_PROTOCOL_INVALID",
+		});
+	}
+	let w = await ensureWrapper(run.sessionId, request.payload.executionMode);
 	bindWrapperEvents(w, run);
 	if (!isCurrentRun(run)) {
 		await w.shutdown();
@@ -323,8 +335,12 @@ async function runPrompt(run: ActivePrompt, request: PiRequest): Promise<void> {
 	}
 	if (isCurrentRun(run)) await w.send("agent.prompt", payload);
 }
-
 async function dispatch(request: PiRequest): Promise<unknown> {
+	if (request.action === "agent.prompt" && !isPiToolExecutionMode(request.payload?.executionMode)) {
+		throw Object.assign(new Error("Execution mode is required"), {
+			code: "PI_PROTOCOL_INVALID",
+		});
+	}
 	const { reader } = await getRuntime();
 	switch (request.action) {
 		case "capability.get":
@@ -478,6 +494,11 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 				}
 			}
 			if (request.action === "agent.prompt") {
+				if (!isPiToolExecutionMode(request.payload?.executionMode)) {
+					throw Object.assign(new Error("Execution mode is required"), {
+						code: "PI_PROTOCOL_INVALID",
+					});
+				}
 				if (active)
 					throw Object.assign(new Error("Pi project is busy"), {
 						code: "PI_PROJECT_BUSY",
@@ -563,7 +584,8 @@ async function handleMessage(msg: PiWorkerRequestMessage): Promise<void> {
 			return;
 		}
 		if (msg.type === "request") {
-			const result = await dispatch(msg.request);
+			const request = parsePiRequest(msg.request);
+			const result = await dispatch(request);
 			send({
 				type: "response",
 				requestId: msg.request.requestId,

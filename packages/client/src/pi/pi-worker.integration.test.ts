@@ -170,9 +170,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 
 		// 在 VCPDeck 数据根的 namespace 目录创建 Session（create 延迟写盘，需手动 flush header）
 		process.env.PI_CODING_AGENT_DIR = agentDir;
-		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
 		const sessionDir = await prepareVcpSessionDir(cwd);
-		const sm = SessionManager.create(cwd, sessionDir);
 		const timestamp = new Date().toISOString();
 		await writeFile(
 			join(sessionDir, `${timestamp.replace(/[:.]/g, "-")}_test-session.jsonl`),
@@ -317,10 +315,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 			"utf8",
 		);
 		process.env.PI_CODING_AGENT_DIR = agentDir;
-
-		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
 		const sessionDir = await prepareVcpSessionDir(cwd);
-		const sm = SessionManager.create(cwd, sessionDir);
 		const sessionFile = join(
 			sessionDir,
 			`${new Date().toISOString().replace(/[:.]/g, "-")}_restore.jsonl`,
@@ -383,7 +378,36 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 		});
 	});
 
+	it("agent.prompt rejects missing or invalid execution modes before starting a run", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
+		const cwd = join(agentDir, "project");
+		await mkdir(cwd, { recursive: true });
+		roots.push(agentDir);
+		const sessionDir = await prepareVcpSessionDir(cwd);
+		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+		const session = SessionManager.create(cwd, sessionDir);
+		const sessionId = session.getSessionId();
+		await writeFile(session.getSessionFile()!, `${JSON.stringify(session.getHeader())}\n`, "utf8");
+		const child = spawnWorker(cwd, { PI_CODING_AGENT_DIR: agentDir });
+		const request = (requestId: string, executionMode?: string | null) => ({
+			requestId, action: "agent.prompt", jobId: sessionId, sessionId,
+			runId: requestId, cwdRef: { rootDir: agentDir, relativePath: "project" },
+			payload: { prompt: "hello", submissionId: requestId, ...(executionMode !== undefined ? { executionMode } : {}) },
+		});
+		const missing = await requestOnce(child, request("missing-mode", null));
+		expect(missing).toMatchObject({ ok: false, error: { code: "PI_PROTOCOL_INVALID" } });
+		const invalid = await requestOnce(child, request("invalid-mode", "unsafe"));
+		expect(invalid).toMatchObject({ ok: false, error: { code: "PI_PROTOCOL_INVALID" } });
+		for (const prompt of ["", " \t"]) {
+			const empty = await requestOnce(child, { ...request(`empty-${prompt.length}`, "approval"), payload: { prompt, submissionId: "empty", executionMode: "approval" } });
+			expect(empty).toMatchObject({ ok: false, error: { code: "PI_PROTOCOL_INVALID" } });
+		}
+		child.kill();
+	}, 30_000);
+
 	it("只有模型与思考记录的 Session 也保留持久化偏好", async () => {
+
+
 		const agentDir = await mkdtemp(join(tmpdir(), `pi-agent-${++seq}-`));
 		const cwd = join(agentDir, "project");
 		await mkdir(cwd, { recursive: true });
@@ -416,9 +440,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 			"utf8",
 		);
 		process.env.PI_CODING_AGENT_DIR = agentDir;
-		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
 		const sessionDir = await prepareVcpSessionDir(cwd);
-		const sm = SessionManager.create(cwd, sessionDir);
 		const sessionFile = join(
 			sessionDir,
 			`${new Date().toISOString().replace(/[:.]/g, "-")}_prefs-only.jsonl`,
@@ -518,7 +540,8 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 			jobId: sessionId,
 			sessionId,
 			runId: "run-1",
-			payload: { prompt: "hello" },
+			cwdRef: { rootDir: cwd, relativePath: "" },
+			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "approval" },
 		});
 		await settled;
 
@@ -654,7 +677,8 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 			jobId: sessionId,
 			sessionId,
 			runId: "run-1",
-			payload: { prompt: "hello" },
+			cwdRef: { rootDir: fakeHome, relativePath: "project" },
+			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "approval" },
 		});
 		await settled;
 
@@ -736,7 +760,197 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 });
 
 describe("Pi Worker prompt pipeline seam", () => {
+	it("同项目跨 Run 按模式重建 wrapper，活跃 Run 不换代", async () => {
+		vi.resetModules();
+		type EventListener = (event: { type: string; sessionId: string }) => void;
+		const makeWrapper = () => {
+			const stub = {
+				sessionId: "session-1",
+				alive: true,
+				listeners: [] as EventListener[],
+				send: vi.fn().mockResolvedValue(null),
+				getState: vi.fn(() => ({ status: "running" })),
+				shutdown: vi.fn(async () => { stub.alive = false; }),
+				isAlive: () => stub.alive,
+				onEvent: (listener: EventListener) => {
+					stub.listeners.push(listener);
+					return () => {
+						const index = stub.listeners.indexOf(listener);
+						if (index !== -1) stub.listeners.splice(index, 1);
+					};
+				},
+			};
+			return stub;
+		};
+		const wrappers: Array<ReturnType<typeof makeWrapper>> = [];
+		const startedModes: Array<string | undefined> = [];
+		const startPiAgentSession = vi.fn(
+			async (options: { toolExecutionMode?: string }) => {
+				const stub = makeWrapper();
+				wrappers.push(stub);
+				startedModes.push(options.toolExecutionMode);
+				return stub;
+			},
+		);
+		vi.doMock("@earendil-works/pi-coding-agent", () => ({
+			SessionManager: {
+				list: vi.fn().mockResolvedValue([{ id: "session-1", path: "session.jsonl" }]),
+			},
+		}));
+		vi.doMock("./agent-session.js", () => ({ startPiAgentSession }));
+		vi.doMock("./session-reader.js", () => ({
+			createPiSessionReader: () => ({ state: vi.fn().mockResolvedValue({ status: "idle" }) }),
+		}));
+		vi.doMock("./images.js", () => ({
+			downloadPromptImages: vi.fn().mockResolvedValue([]),
+			toSdkImages: vi.fn(() => []),
+		}));
+		vi.doMock("./runtime-spec.js", async () => {
+			const actual = await vi.importActual<typeof import("./runtime-spec.js")>(
+				"./runtime-spec.js",
+			);
+			return {
+				...actual,
+				createModelRuntimeWithLease: vi.fn(async () => ({
+					getAvailable: async () => [],
+				})),
+			};
+		});
+
+		const sent: PiWorkerOutboundMessage[] = [];
+		const originalArg = process.argv[2];
+		const originalSend = process.send;
+		const beforeMessageListeners = new Set(process.listeners("message"));
+		process.argv[2] = "/tmp/pi-worker-mode";
+		process.env.VCPDECK_CLIENT_DATA_DIR = dataRootFor("/tmp/pi-worker-mode");
+		Object.defineProperty(process, "send", {
+			configurable: true,
+			value: vi.fn((message: PiWorkerOutboundMessage) => sent.push(message)),
+		});
+		await import("./worker.js");
+		const workerListener = process
+			.listeners("message")
+			.find((listener) => !beforeMessageListeners.has(listener));
+		expect(workerListener).toBeDefined();
+
+		(workerListener as (message: unknown) => void)?.({
+			type: "runtime-init",
+			config: {
+				spec: {
+					schemaVersion: 1,
+					specId: "s1",
+					profileId: "p1",
+					profileRevision: 1,
+					toolExecutionMode: "approval",
+					modelPolicy: {
+						defaultModel: { provider: "anthropic", modelId: "claude-x" },
+						allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+						defaultThinkingLevel: "medium",
+					},
+					runtimeRevision: "0123456789abcdef",
+				},
+				credentialEntries: [{ provider: "anthropic", apiKey: "sk-test" }],
+				resolvedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+				unavailableModels: [],
+			} as never,
+		});
+
+		let requestSeq = 0;
+		const prompt = async (runId: string, executionMode: string) => {
+			const requestId = `mode-${++requestSeq}`;
+			workerListener?.({
+				type: "request",
+				projectKey: "project",
+				request: {
+					requestId,
+					action: "agent.prompt",
+					jobId: "session-1",
+					sessionId: "session-1",
+					runId,
+					cwdRef: { rootDir: "C:\\repo", relativePath: "" },
+					payload: { prompt: "hi", submissionId: requestId, executionMode },
+				},
+			} as never, {} as never);
+			await vi.waitFor(() =>
+				expect(
+					sent.some(
+						(message) =>
+							message.type === "response" && message.requestId === requestId,
+					),
+				).toBe(true),
+			);
+			return sent.find(
+				(message) =>
+					message.type === "response" && message.requestId === requestId,
+			)!;
+		};
+		const settle = async (index: number) => {
+			await vi.waitFor(() => expect(wrappers[index]?.listeners.length).toBe(1));
+			wrappers[index]!.listeners[0]!({
+				type: "agent_settled",
+				sessionId: "session-1",
+			});
+		};
+
+		try {
+			// 首个 Run 使用 approval：按当前 wrapper 模式建立工具集合。
+			await expect(prompt("run-approval", "approval")).resolves.toMatchObject({
+				ok: true,
+				data: { accepted: true },
+			});
+			await vi.waitFor(() =>
+				expect(wrappers[0]?.send).toHaveBeenCalledWith("agent.prompt", expect.anything()),
+			);
+			expect(startedModes).toEqual(["approval"]);
+			await settle(0);
+
+			// 空闲时模式改为 yolo：同项目必须关闭旧 wrapper 并重建。
+			await expect(prompt("run-yolo", "yolo")).resolves.toMatchObject({ ok: true });
+			await vi.waitFor(() => expect(wrappers.length).toBe(2));
+			expect(startedModes).toEqual(["approval", "yolo"]);
+			expect(wrappers[0]!.shutdown).toHaveBeenCalledOnce();
+			await vi.waitFor(() =>
+				expect(wrappers[1]?.send).toHaveBeenCalledWith("agent.prompt", expect.anything()),
+			);
+			await settle(1);
+
+			// 模式不变时复用同一 wrapper，不重复换代。
+			await expect(prompt("run-yolo-again", "yolo")).resolves.toMatchObject({ ok: true });
+			await vi.waitFor(() =>
+				expect(wrappers.length).toBe(2),
+			);
+			await vi.waitFor(() =>
+				expect(
+					wrappers[1]!.send.mock.calls.filter(([action]) => action === "agent.prompt"),
+				).toHaveLength(2),
+			);
+			expect(wrappers[1]!.shutdown).not.toHaveBeenCalled();
+
+			// 活跃 Run 期间不得换届：返回忙碌且不触碰在跑的 wrapper。
+			await expect(prompt("run-active", "auto")).resolves.toMatchObject({
+				ok: false,
+				error: { code: "PI_PROJECT_BUSY" },
+			});
+			expect(wrappers.length).toBe(2);
+			expect(wrappers[1]!.shutdown).not.toHaveBeenCalled();
+		} finally {
+			if (workerListener) process.removeListener("message", workerListener);
+			process.argv[2] = originalArg;
+			Object.defineProperty(process, "send", {
+				configurable: true,
+				value: originalSend,
+			});
+			vi.doUnmock("@earendil-works/pi-coding-agent");
+			vi.doUnmock("./agent-session.js");
+			vi.doUnmock("./session-reader.js");
+			vi.doUnmock("./images.js");
+			vi.doUnmock("./runtime-spec.js");
+		}
+	}, 30_000);
+
 	it("覆盖 wrapper/附件/旧事件/abort retry 的竞态矩阵", async () => {
+		// 本文件可能已有其他用例导入过 worker.js；清空模块缓存才能拿到本用例自己的 message 监听器。
+		vi.resetModules();
 		type EventListener = (event: {
 			type: string;
 			sessionId: string;
@@ -872,7 +1086,8 @@ describe("Pi Worker prompt pipeline seam", () => {
 						jobId: "session-1",
 						sessionId: "session-1",
 						runId,
-						...(payload ? { payload } : {}),
+						cwdRef: { rootDir: "C:\\repo", relativePath: "" },
+						payload: action === "agent.prompt" ? { submissionId: requestId, executionMode: "approval", ...(payload ?? {}) } : payload,
 					},
 				},
 				{} as never,
@@ -906,7 +1121,8 @@ describe("Pi Worker prompt pipeline seam", () => {
 						jobId: "session-1",
 						sessionId: "session-1",
 						runId,
-						...(payload ? { payload } : {}),
+						cwdRef: { rootDir: "C:\\repo", relativePath: "" },
+						payload: action === "agent.prompt" ? { submissionId: requestId, executionMode: "approval", ...(payload ?? {}) } : payload,
 					},
 				},
 				{} as never,
@@ -961,6 +1177,7 @@ describe("Pi Worker prompt pipeline seam", () => {
 				prompt: "never",
 				attachments: [
 					{
+						fileId: "f-attachment",
 						url: "https://invalid",
 						mimeType: "image/png",
 						size: 1,

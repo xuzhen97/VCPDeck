@@ -10,6 +10,7 @@ import { ClientGateway } from "../events/client.gateway.js";
 import { PiController } from "./pi.controller.js";
 import { PiEventBroker } from "./pi-event-broker.js";
 import { PiRequestBroker } from "./pi-request-broker.js";
+import { PiAttachmentService } from "./pi-attachment.service.js";
 import { PiRunService } from "./pi-run.service.js";
 
 const actor = {
@@ -63,6 +64,8 @@ function makePrismaMemory() {
 				errorMessage: null,
 				startedAt: null,
 				finishedAt: null,
+				toolExecutionModeOverride: null,
+				runExecutionMode: null,
 				...args.data,
 			};
 			jobs.push(created);
@@ -112,7 +115,14 @@ function makePrismaMemory() {
 			},
 		),
 	};
-	return { job, jobs, calls };
+	const files: Array<Record<string, unknown>> = [];
+	const file = {
+		findUnique: vi.fn(
+			async (args: { where: { id: string } }) =>
+				files.find((candidate) => candidate.id === args.where.id) ?? null,
+		),
+	};
+	return { job, jobs, calls, file, files };
 }
 
 function makeSocket(id: string): Socket {
@@ -139,7 +149,7 @@ function registration(clientId = "c1") {
 				sdkVersion: "1",
 				nodeVersion: "22.18.0",
 				shellKind: "path" as const,
-				sessionJobProtocolVersion: 1,
+				sessionJobProtocolVersion: 2,
 			},
 		},
 	};
@@ -151,7 +161,22 @@ function report(runs: PiStateReport["runs"] = []): PiStateReport {
 
 function makeLoopback() {
 	const prisma = makePrismaMemory();
-	const runs = new PiRunService(prisma as never);
+	/** prompt 附件的 File 行：用真实 PiAttachmentService 校验，而不是重写一遍规则。 */
+	const attachmentFiles = prisma.files;
+	const attachments = new PiAttachmentService(
+		{ createPending: vi.fn(), delete: vi.fn() } as never,
+		{
+			createDownloadToken: vi.fn(async (key: string) => ({
+				url: `/api/storage/download/${key}?sig=x`,
+				expiresAt: Date.now() + 600_000,
+			})),
+		} as never,
+		prisma as never,
+	);
+	const runs = new PiRunService(prisma as never, {
+		assertReady: vi.fn(),
+		effectiveExecutionMode: vi.fn(async () => "approval"),
+	} as never);
 	const requests = new PiRequestBroker();
 	const events = new PiEventBroker(requests, runs);
 	const sockets = new Map<string, Socket>();
@@ -165,7 +190,7 @@ function makeLoopback() {
 				clientId: "c1",
 				capabilities: ["agent.pi"],
 				capabilityDetails: {
-					pi: { available: true, sessionJobProtocolVersion: 1 },
+					pi: { available: true, sessionJobProtocolVersion: 2 },
 				},
 			},
 		]),
@@ -229,11 +254,7 @@ function makeLoopback() {
 		events,
 		runs,
 		clientService as never,
-		{
-			createPromptUploads: vi.fn(),
-			completePromptUpload: vi.fn(),
-			deleteAttachment: vi.fn(),
-		} as never,
+		attachments,
 		{ assertCompatible: vi.fn(), assertReady: vi.fn() } as never,
 	);
 
@@ -284,6 +305,7 @@ function makeLoopback() {
 		gateway,
 		controller,
 		jobService,
+		attachmentFiles,
 		requestHandlers,
 		addSocket,
 		respond,
@@ -629,6 +651,7 @@ describe("Pi Gateway loopback 集成", () => {
 		const newSocket = loop.addSocket("socket-2");
 		await loop.register(oldSocket);
 		await loop.reconcile(oldSocket);
+		await loop.runs.ensureSession(actor, { clientId: "c1", sessionId: "session-legacy" });
 		const emitted: PiRequest[] = [];
 		loop.requestHandlers.set(oldSocket.id, (request) => emitted.push(request));
 
@@ -668,7 +691,8 @@ describe("Pi Gateway loopback 集成", () => {
 			data: { projectKey: PROJECT_KEY },
 		});
 		await flush();
-		expect(emitted[1]?.action).toBe("agent.prompt");
+		await vi.waitFor(() => expect(emitted[1]?.action).toBe("agent.prompt"));
+		expect(emitted[1]?.payload?.executionMode).toBe("approval");
 		const promptRequest = emitted[1]!;
 		await loop.respond(newSocket, {
 			requestId: promptRequest.requestId,
@@ -692,5 +716,115 @@ describe("Pi Gateway loopback 集成", () => {
 		await loop.gateway.handleDisconnect(oldSocket);
 		expect(loop.jobService.markDisconnected).not.toHaveBeenCalled();
 		expect(loop.prisma.jobs[0]).toEqual(beforeDisconnect);
+	});
+
+	it("纯图片 prompt 通过真实附件校验下发服务端描述符，无内容请求不创建 Run", async () => {
+		const loop = makeLoopback();
+		const socket = loop.addSocket("socket-1");
+		await loop.register(socket);
+		await loop.reconcile(socket);
+		loop.attachmentFiles.push({
+			id: "f1",
+			key: "k1",
+			clientId: "c1",
+			filename: "a.png",
+			mimeType: "image/png",
+			size: 1024,
+			sha256: "sha-1",
+			status: "completed",
+			purpose: "pi_prompt",
+			expiresAt: new Date(Date.now() + 60_000),
+			storageKind: "local",
+			createdAt: new Date(),
+		});
+		const emitted: PiRequest[] = [];
+		loop.requestHandlers.set(socket.id, (request) => {
+			emitted.push(request);
+			const data =
+				request.action === "project.resolve"
+					? { projectKey: PROJECT_KEY }
+					: { accepted: true };
+			queueMicrotask(
+				() =>
+					void loop.respond(socket, {
+						requestId: request.requestId,
+						ok: true,
+						data,
+					}),
+			);
+		});
+		const image = {
+			fileId: "f1",
+			sha256: "sha-1",
+			size: 1024,
+			mimeType: "image/png",
+			url: "https://evil.test/forged",
+			expiresAt: Date.now() + 60_000,
+		};
+		const jobsBefore = loop.prisma.jobs.length;
+
+		await loop.controller.prompt(
+			"c1",
+			"session-image",
+			{
+				rootDir: "D:\\",
+				relativePath: "repo",
+				type: "prompt",
+				submissionId: "submission-image",
+				prompt: "",
+				images: [image],
+			},
+			actor,
+		);
+
+		const dispatched = emitted.find(
+			(request) => request.action === "agent.prompt",
+		);
+		expect(dispatched?.payload).toMatchObject({
+			prompt: "",
+			attachments: [
+				{
+					fileId: "f1",
+					sha256: "sha-1",
+					size: 1024,
+					mimeType: "image/png",
+				},
+			],
+		});
+		expect(JSON.stringify(emitted)).not.toContain("evil.test");
+		expect(loop.prisma.jobs.length).toBe(jobsBefore + 1);
+
+		// 无内容与无效引用都必须在创建 Run 之前被拒。
+		const jobsAfterValid = loop.prisma.jobs.length;
+		await expect(
+			loop.controller.prompt(
+				"c1",
+				"session-empty",
+				{
+					rootDir: "D:\\",
+					relativePath: "repo",
+					type: "prompt",
+					submissionId: "submission-empty",
+					prompt: "   ",
+				},
+				actor,
+			),
+		).rejects.toMatchObject({ response: { code: "PI_PROTOCOL_INVALID" } });
+		await expect(
+			loop.controller.prompt(
+				"c1",
+				"session-stale",
+				{
+					rootDir: "D:\\",
+					relativePath: "repo",
+					type: "prompt",
+					submissionId: "submission-stale",
+					prompt: "",
+					images: [{ ...image, fileId: "missing" }],
+				},
+				actor,
+			),
+		).rejects.toMatchObject({ response: { code: "PI_IMAGE_INVALID" } });
+		expect(loop.prisma.jobs.length).toBe(jobsAfterValid);
 	});
 });

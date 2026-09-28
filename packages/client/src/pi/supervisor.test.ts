@@ -25,7 +25,7 @@ function prompt(runId: string, cwdRef?: PiCwdRef): PiRequest {
 		runId,
 		sessionId: "s1",
 		cwdRef: cwdRef ?? { rootDir: "D:\\", relativePath: "a" },
-		payload: { prompt: "hi" },
+		payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval" },
 	});
 }
 

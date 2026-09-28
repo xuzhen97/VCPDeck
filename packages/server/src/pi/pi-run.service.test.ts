@@ -42,6 +42,8 @@ function prismaMock() {
 				errorMessage: null,
 				startedAt: null,
 				finishedAt: null,
+				runExecutionMode: null,
+				toolExecutionModeOverride: null,
 				createdAt: new Date(),
 				...args.data,
 			};
@@ -93,9 +95,13 @@ function prismaMock() {
 	return { job, _jobs: jobs };
 }
 
-function setup() {
+function setup(profileMode: "approval" | "auto" | "yolo" = "approval") {
 	const prisma = prismaMock();
-	const service = new PiRunService(prisma as never);
+	const runtime = {
+		assertReady: vi.fn(),
+		effectiveExecutionMode: vi.fn(async () => profileMode),
+	};
+	const service = new PiRunService(prisma as never, runtime as never);
 	const current = () => prisma._jobs.find((job) => job.id === "s1")!;
 	const ensure = () =>
 		service.ensureSession(actor, { clientId: "c1", sessionId: "s1" });
@@ -108,7 +114,7 @@ function setup() {
 		expect(await service.accept(run.jobId, run.runId)).toBe(true);
 		return run;
 	};
-	return { prisma, service, current, ensure, start, running };
+	return { prisma, service, current, ensure, start, running, runtime };
 }
 
 function report(runs: PiStateReport["runs"]): PiStateReport {
@@ -124,19 +130,72 @@ function activeReport(
 }
 
 describe("PiRunService session CAS", () => {
+	it("mode snapshot uses the current Profile default until an override is saved", async () => {
+		const { service, ensure, runtime, current } = setup();
+		await ensure();
+		expect(await service.snapshot("s1", actor.identityId)).toMatchObject({
+			executionModeOverride: null,
+			effectiveExecutionMode: "approval",
+		});
+
+		await service.setExecutionMode(actor, { ...input, mode: "yolo" });
+		expect(current().toolExecutionModeOverride).toBe("yolo");
+		expect(await service.snapshot("s1", actor.identityId)).toMatchObject({
+			executionModeOverride: "yolo",
+			effectiveExecutionMode: "yolo",
+		});
+
+		runtime.effectiveExecutionMode.mockResolvedValue("auto");
+		await service.setExecutionMode(actor, { ...input, mode: null });
+		expect(current().toolExecutionModeOverride).toBeNull();
+		expect(await service.snapshot("s1", actor.identityId)).toMatchObject({
+			executionModeOverride: null,
+			effectiveExecutionMode: "auto",
+		});
+	});
+
+	it("only Owner can change the mode and an active run makes it immutable", async () => {
+		const { service, ensure, running } = setup();
+		await ensure();
+		await expect(service.setExecutionMode(otherActor, { ...input, mode: "auto" }))
+			.rejects.toMatchObject({ code: "PI_CONTROL_FORBIDDEN" });
+		const run = await running();
+		await expect(service.setExecutionMode(actor, { ...input, mode: "yolo" }))
+			.rejects.toMatchObject({ code: "PI_PROJECT_BUSY" });
+		await service.finishRun(run.jobId, run.runId);
+	});
+
+	it("serializes mode changes with run acceptance and persists the accepted mode", async () => {
+		const { service, ensure, current } = setup();
+		await ensure();
+		const changed = service.setExecutionMode(actor, { ...input, mode: "yolo" });
+		const runPromise = service.startRun(actor, input);
+		await changed;
+		const run = await runPromise;
+		expect(run.executionMode).toBe("yolo");
+		expect(current()).toMatchObject({
+			status: "pending",
+			toolExecutionModeOverride: "yolo",
+			runExecutionMode: "yolo",
+		});
+	});
+
+	it("fails closed if the runtime/Profile mode cannot be verified", async () => {
+		const prisma = prismaMock();
+		const service = new PiRunService(prisma as never);
+		await service.ensureSession(actor, { clientId: "c1", sessionId: "s1" });
+		await expect(service.startRun(actor, input)).rejects.toMatchObject({ code: "PI_CONFIG_UNAVAILABLE" });
+		expect(prisma._jobs[0]).toMatchObject({ status: "idle", payload: "{}" });
+	});
+
 	it("ensureSession 以 sessionId 幂等创建 idle agent.session", async () => {
 		const { prisma, ensure } = setup();
 		await ensure();
 		await ensure();
 		expect(prisma._jobs).toHaveLength(1);
 		expect(prisma._jobs[0]).toMatchObject({
-			id: "s1",
-			clientId: "c1",
-			type: "agent.session",
-			status: "idle",
-			payload: "{}",
-			progress: null,
-			createdByIdentityId: "user-1",
+			id: "s1", clientId: "c1", type: "agent.session", status: "idle",
+			payload: "{}", progress: null, createdByIdentityId: "user-1",
 		});
 	});
 
@@ -162,8 +221,10 @@ describe("PiRunService session CAS", () => {
 	});
 
 	it("每次 startRun 保持 jobId 并生成新 runId", async () => {
-		const { service, start } = setup();
+		const { service, start, current } = setup();
 		const first = await start();
+		expect(first.executionMode).toBe("approval");
+		expect(current().runExecutionMode).toBe("approval");
 		await service.finishRun(first.jobId, first.runId);
 		const second = await service.startRun(actor, input);
 		expect(first.jobId).toBe("s1");
@@ -181,6 +242,8 @@ describe("PiRunService session CAS", () => {
 			runId,
 			ownerName: "User",
 			isOwner: false,
+			executionModeOverride: null,
+			effectiveExecutionMode: "approval",
 		});
 	});
 
@@ -190,11 +253,7 @@ describe("PiRunService session CAS", () => {
 		expect(await service.waitForInput(run.jobId, run.runId)).toBe(true);
 		expect(await service.resume(run.jobId, run.runId)).toBe(true);
 		expect(await service.finishRun(run.jobId, run.runId)).toBe(true);
-		expect(current()).toMatchObject({
-			status: "idle",
-			payload: "{}",
-			progress: null,
-		});
+		expect(current()).toMatchObject({ status: "idle", payload: "{}", progress: null });
 		const next = await service.startRun(actor, input);
 		expect(current()).toMatchObject({
 			status: "pending",
@@ -215,9 +274,7 @@ describe("PiRunService session CAS", () => {
 		await expect(service.startRun(actor, input)).resolves.toBeDefined();
 		const runId = JSON.parse(String(current().payload)).runId as string;
 		await service.failSession("s1", runId, "PI_WORKER_EXITED");
-		await expect(service.startRun(actor, input)).rejects.toMatchObject({
-			code: "PI_PROJECT_BUSY",
-		});
+		await expect(service.startRun(actor, input)).rejects.toMatchObject({ code: "PI_PROJECT_BUSY" });
 	});
 
 	it("重复 complete 保持首次 finishedAt 不变", async () => {
@@ -647,7 +704,7 @@ describe("PiRunService generation reconcile", () => {
 
 	it("跨 client 的 duplicate/done/error 报告不收敛他人 Job 或释放锁", async () => {
 		for (const status of ["duplicate", "done", "error"] as const) {
-			const { prisma, service } = setup();
+			const { prisma, service } = await setup();
 			await service.ensureSession(actor, {
 				clientId: "client-B",
 				sessionId: "b-session",

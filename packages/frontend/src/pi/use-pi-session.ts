@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
 	PiAgentState,
+	PiAttachmentRef,
 	PiCwdRef,
 	PiMessage,
 	PiModelInfo,
@@ -29,6 +30,9 @@ export type PiSessionStatus =
 	| "error";
 
 export type PiThinkingSelection = "auto" | PiThinkingLevel;
+
+/** prompt 接纳结果：上层据此决定是否丢弃附件草稿。 */
+export type PiSendResult = "accepted" | "rejected";
 
 export interface PiSessionState {
 	messages: PiMessage[];
@@ -63,7 +67,8 @@ export interface PiSessionActions {
 	): Promise<void>;
 	/** 加载更早的历史消息（追加到消息列表头部）。 */
 	loadMore(): Promise<void>;
-	send(input: { prompt: string; images?: unknown[] }): Promise<void>;
+	/** 返回是否被接纳；`rejected` 时调用方应保留草稿。 */
+	send(input: { prompt: string; images?: PiAttachmentRef[] }): Promise<PiSendResult>;
 	steer(message: string): Promise<void>;
 	followUp(message: string): Promise<void>;
 	abort(): Promise<void>;
@@ -71,6 +76,7 @@ export interface PiSessionActions {
 	abortCompact(): Promise<void>;
 	setModel(provider: string, modelId: string): Promise<void>;
 	setThinking(level: PiThinkingSelection): Promise<void>;
+	setExecutionMode(mode: import("@vcpdeck/shared").PiToolExecutionMode | null): Promise<void>;
 	extensionResponse(
 		requestId: string,
 		value?: string,
@@ -560,13 +566,13 @@ export function usePiSession(
 	);
 
 	const send = useCallback(
-		async (input: { prompt: string; images?: unknown[] }) => {
+		async (input: { prompt: string; images?: PiAttachmentRef[] }): Promise<PiSendResult> => {
 			const clientId = clientIdRef.current;
 			const sessionId = sessionIdRef.current;
 			const cwdRef = cwdRefRef.current;
 			if (!clientId || !sessionId || !cwdRef) {
 				setState((s) => ({ ...s, error: "尚未打开会话" }));
-				return;
+				return "rejected";
 			}
 			if (
 				!isOwnerRef.current ||
@@ -577,15 +583,15 @@ export function usePiSession(
 				) &&
 					!graceTimerRef.current)
 			)
-				return;
+				return "rejected";
 			const stream = streamRef.current;
 			if (!stream) {
 				setState((s) => ({ ...s, error: "事件流未就绪" }));
-				return;
+				return "rejected";
 			}
 			const sessionGeneration = sessionGenerationRef.current;
 			await stream.connected();
-			if (sessionGenerationRef.current !== sessionGeneration) return;
+			if (sessionGenerationRef.current !== sessionGeneration) return "rejected";
 
 			const settlingRunId = graceTimerRef.current
 				? activeRunIdRef.current
@@ -650,11 +656,13 @@ export function usePiSession(
 											}
 										: s.job,
 								}
-							: { status: "idle" as const }),
+								: { status: "idle" as const }),
 						error: err instanceof Error ? err.message : String(err),
 					}));
 				}
+				return "rejected";
 			}
+			return "accepted";
 		},
 		[pi, clearGrace, scheduleGrace],
 	);
@@ -768,6 +776,22 @@ export function usePiSession(
 							error: err instanceof Error ? err.message : String(err),
 						}));
 					}
+					throw err;
+				}
+			},
+			setExecutionMode: async (mode) => {
+				const clientId = clientIdRef.current;
+				const sessionId = sessionIdRef.current;
+				const cwdRef = cwdRefRef.current;
+				if (!clientId || !sessionId || !cwdRef || !isOwnerRef.current) return;
+				if (stateRef.current.status !== "idle" && stateRef.current.status !== "done") return;
+				const generation = sessionGenerationRef.current;
+				try {
+					const job = await pi.agent.setExecutionMode(clientId, sessionId, cwdRef, mode);
+					if (sessionGenerationRef.current !== generation) return;
+					setState((s) => ({ ...s, job, error: null }));
+				} catch (err) {
+					if (sessionGenerationRef.current === generation) setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
 					throw err;
 				}
 			},

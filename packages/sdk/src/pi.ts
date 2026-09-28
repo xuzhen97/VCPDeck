@@ -1,7 +1,9 @@
 import {
 	parsePiAgentState,
+	parsePiSessionJobSnapshot,
 	type PaginatedResult,
 	type PiAgentState,
+	type PiAttachmentRef,
 	type PiClientBindingInfo,
 	type PiCredentialCreateInput,
 	type PiCredentialInfo,
@@ -25,6 +27,7 @@ import {
 	type PiSessionJobSnapshot,
 	type PiSessionOpenResult,
 	type PiThinkingLevel,
+	type PiToolExecutionMode,
 } from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
 
@@ -124,6 +127,12 @@ export interface PiAgentApi {
 		runId?: string,
 		signal?: AbortSignal,
 	): Promise<PiSessionJobSnapshot>;
+	setExecutionMode(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		mode: PiToolExecutionMode | null,
+	): Promise<PiSessionJobSnapshot>;
 	state(
 		clientId: string,
 		sessionId: string,
@@ -134,7 +143,7 @@ export interface PiAgentApi {
 		clientId: string,
 		sessionId: string,
 		cwdRef: PiCwdRef,
-		input: { submissionId: string; prompt: string; images?: unknown[] },
+		input: { submissionId: string; prompt: string; images?: PiAttachmentRef[] },
 		signal?: AbortSignal,
 	): Promise<PiPromptAccepted>;
 	steer(
@@ -454,6 +463,12 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 					runId === undefined ? {} : { runId },
 					signal,
 				),
+			setExecutionMode: async (clientId, sessionId, cwdRef, mode) =>
+				parsePiSessionJobSnapshot(await client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/execution-mode`,
+					{ ...cwdRef, mode },
+				)),
 			state: async (clientId, sessionId, cwdRef, signal) =>
 				parsePiAgentState(await client.request(
 					"GET",

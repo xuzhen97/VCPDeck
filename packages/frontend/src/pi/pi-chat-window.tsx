@@ -178,6 +178,7 @@ export function PiChatWindow({
 	onImageLoad,
 	imageUrls = {},
 	sessionId = null,
+	hideSessionTitle = false,
 }: {
 	state: PiSessionState;
 	info: { id: string; name: string; firstMessage: string | null } | null;
@@ -186,6 +187,8 @@ export function PiChatWindow({
 	imageUrls?: Record<string, string>;
 	/** 历史 thinking 惰性加载所需；缺失时思考块回落为不可用提示 */
 	sessionId?: string | null;
+	/** Agent 布局由外层标题栏展示会话名，避免重复一行小字 */
+	hideSessionTitle?: boolean;
 }) {
 	const groups = useMemo(
 		() => buildTurnGroups(state.messages),
@@ -213,10 +216,10 @@ export function PiChatWindow({
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<div
-				className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
+				className="mx-auto min-h-0 w-full max-w-4xl flex-1 space-y-3 overflow-y-auto px-5 py-4"
 				data-testid="pi-chat-window"
 			>
-				{info && (
+				{info && !hideSessionTitle && (
 					<div className="text-center text-xs text-muted-foreground">
 						{info.name || info.firstMessage || "新会话"}
 					</div>
@@ -252,8 +255,17 @@ export function PiChatWindow({
 				{state.status !== "loading" &&
 					state.messages.length === 0 &&
 					!state.error && (
-						<div className="py-16 text-center text-sm text-muted-foreground">
-							开始一段新的 Pi 会话
+						<div className="pi-chat-fade-in flex flex-col items-center gap-3 py-16 text-center">
+							<div
+								aria-hidden="true"
+								className="flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/60 text-2xl"
+							>
+								✦
+							</div>
+							<p className="text-lg font-medium">今天想做点什么？</p>
+							<p className="max-w-md text-sm text-muted-foreground">
+								开始一段新的 Pi 会话；可以直接粘贴图片，或从左侧选择已有会话。
+							</p>
 						</div>
 					)}
 				{groups.map((group, gi) => {

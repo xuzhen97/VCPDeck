@@ -1,6 +1,6 @@
 # VCPDeck API 与通信协议
 
-> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-09-25｜适用版本：`0.11.1` / 当前 `main`｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
+> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-09-28｜适用版本：`0.12.0` / 当前 `main`｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
 
 本文维护协议语义和兼容规则，不复制全部 DTO。字段级事实以 `@vcpdeck/shared` 导出、SDK 和 Controller 实现为准。
 
@@ -248,7 +248,9 @@ SSE：
 - 事件用于实时投影，不是持久消息队列；
 - 断线恢复应重新读取 Session detail/context 和权威 Agent state，不能仅依赖补收事件。
 
-Pi 使用精确协议版本 `PI_SESSION_JOB_PROTOCOL_VERSION = 1`。不匹配时 Server 返回 `PI_CLIENT_UNSUPPORTED`，不得尝试猜测兼容。
+Pi 使用精确协议版本 `PI_SESSION_JOB_PROTOCOL_VERSION = 2`。不匹配时 Server 返回 `PI_CLIENT_UNSUPPORTED`，不得尝试猜测兼容。
+
+自 v2 起，`agent.prompt` 必须携带 `executionMode`（`approval | auto | yolo`）且拒绝未知 payload 字段，缺失或非法时 Client 立即 fail closed；Session Job 快照新增 `executionModeOverride`（会话覆盖值，空表示跟随 Profile）与 `effectiveExecutionMode`（本次 Run 固化的实际模式）。v1 Client 不理解这些字段，因此不允许与 v2 Server 混用，也不允许静默回退到 Profile 模式（[ADR-0034](adr/0034-pi-session-execution-mode-override.md)）。
 
 当前协议不变量：
 
@@ -257,9 +259,9 @@ Pi 使用精确协议版本 `PI_SESSION_JOB_PROTOCOL_VERSION = 1`。不匹配时
 - cwd 以 Files roots 的 `{rootDir,relativePath}` 表达，由 Client realpath/canonicalize 并拒绝 symlink 越界；
 - 同一 Client 的同一 projectKey 只允许一个活动 Run，Client 重启后 projectKey 重新生成；
 - 新 Socket generation 必须先完成 PI_STATE 对账；此前控制请求返回 `PI_STATE_PENDING`；
-- Session Job 只保存 Owner、状态、当前 runId 和安全错误，不保存 prompt、正文、thinking、真实 cwd 或 Extension 输入；
+- Session Job 只保存 Owner、状态、当前 runId、可空的会话执行模式覆盖值和安全错误，不保存 prompt、正文、thinking、真实 cwd 或 Extension 输入；每个 Run 在接纳时固化实际模式，运行中不热切换；
 - 只有 `select/confirm/input/editor` Extension 请求进入 `waiting_input`；
-- 图片最多 10 张、单张 10 MiB、总量 100 MiB，临时上传引用 TTL 15 分钟；
+- 图片最多 10 张、单张 10 MiB、总量 100 MiB，临时上传引用 TTL 15 分钟；`prompt` 为空或仅空白仅在携带至少一张通过服务端校验的图片时合法，否则不创建 Run（[ADR-0035](adr/0035-pi-image-only-prompt.md)）；
 - SSE 和 Broker 都不是持久队列，断线期间增量可能丢失，必须从远程 Session/context 和权威 state 恢复。
 
 完整当前行为见 [`design/remote-pi.md`](./design/remote-pi.md)。

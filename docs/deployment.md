@@ -1,6 +1,6 @@
 # VCPDeck 部署指南
 
-> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-25｜适用版本：`0.11.1` / 当前 `main`
+> 状态：Current｜维护责任：发布/运维维护者｜最后核验：2026-09-28｜适用版本：`0.12.0` / 当前 `main`
 
 本文描述当前可验证的部署边界。项目暂未提供容器镜像；Linux Client A2 已提供 systemd 系统级安装器，Windows Client 一键安装使用 `NT AUTHORITY\SYSTEM` 开机任务（ADR-0027），Server 系统服务仍由运维准备。发布 zip 含 Launcher，并由安装脚本自动部署。
 
@@ -74,7 +74,7 @@ pnpm release --version=x.y.z
 | `DATABASE_URL` | `file:./prisma/dev.db` | SQLite URL；相对路径依赖 Server 工作目录 |
 | `VCPDECK_RELEASES_DIR` | `./data/releases`（install 引导默认 `<app-dir>/releases`） | **Local 后端**的发布构件目录；必须为**版本目录外绝对路径**，否则自更新切换版本后目录漂移、构件丢失。配置外部存储后端（OSS/网盘）后，发布包转存 Provider，此目录不再承载新构件 |
 | `VCPDECK_PSK` | `vcpdeck-dev-psk` | `/client` PSK，生产必须随机替换 |
-| `VCPDECK_PI_CREDENTIAL_KEY_FILE` | 未设 = Pi 配置不可用 | Pi Provider 凭据的加密根密钥（文件内容为 base64 的 32 字节）。**必须位于 Server 进程外**（如 `/etc/vcpdeck/pi-credential.key`，`0640 root:serverUser`）；缺失或长度不符时凭据写入与 RuntimeSpec 组装 fail closed，Server 启动与其他能力不受影响 |
+| `VCPDECK_PI_CREDENTIAL_KEY_FILE` | 未设 = Pi 配置不可用（**本地 dev 例外**：`pnpm dev` / `pnpm dev:all` 会自动生成 `.tmp/dev-secrets/pi-credential.key` 并写入 `packages/server/.env`） | Pi Provider 凭据的加密根密钥（文件内容为 base64 的 32 字节）。**生产必须位于 Server 进程外**（如 `/etc/vcpdeck/pi-credential.key`，`0640 root:serverUser`）；缺失或长度不符时凭据写入与 RuntimeSpec 组装 fail closed，Server 启动与其他能力不受影响 |
 | `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | `/client` Gateway CORS Origin |
 | `VCPDECK_PORT` | `3001` | Server 监听端口（1–65535 整数）；改端口时必须同步配置 Client `VCPDECK_SERVER` 与 Server Launcher `VCPDECK_PROBE_URL` |
 | `PUBLIC_SHARE_BASE_URL` | 空（回退 `SERVER_URL`） | VCPDeckBridge 公开分享链接基地址；只接受 HTTP(S)，反向代理部署时应配置为外部公开地址 |

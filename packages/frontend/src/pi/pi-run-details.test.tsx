@@ -12,11 +12,13 @@ const agentState = {
 	model: { provider: "p", modelId: "m1" },
 	queuedMessages: { steering: [], followUp: [] },
 };
-const idleJob = {
+const idleJob: import("@vcpdeck/shared").PiSessionJobSnapshot = {
 	jobId: "s1",
 	sessionId: "s1",
 	status: "idle" as const,
 	runId: null,
+	executionModeOverride: null,
+	effectiveExecutionMode: "approval",
 	ownerName: "User",
 	isOwner: true,
 };

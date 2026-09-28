@@ -1,6 +1,6 @@
 # ADR-0033：Pi Tool Policy 与 Execution Mode 分层
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0034
 - 日期：2026-09-24
 - 决策者：项目维护者
 - 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0030](./0030-pi-resource-bundle-and-tool-policy.md)、[`docs/design/pi-tool-approval-mode.md`](../design/pi-tool-approval-mode.md)、[`docs/design/remote-pi-control-plane.md`](../design/remote-pi-control-plane.md)

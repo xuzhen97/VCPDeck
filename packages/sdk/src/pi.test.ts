@@ -127,6 +127,31 @@ describe("VcpDeckClient.pi", () => {
 		);
 	});
 
+	it("agent.prompt 允许空文本搭配图片，且不补造任何提示词", async () => {
+		const { client, fetcher } = makeClient();
+		await client.pi.agent.prompt(
+			"c1",
+			"s1",
+			{ rootDir: "D:\\", relativePath: "r" },
+			{
+				submissionId: "sub-image",
+				prompt: "",
+				images: [
+					{
+						fileId: "f1",
+						sha256: "sha",
+						size: 42,
+						mimeType: "image/png",
+						url: "/api/storage/download/k1",
+						expiresAt: Date.now() + 60_000,
+					},
+				],
+			},
+		);
+		const body = String(fetcher.mock.calls[0]?.[1]?.body);
+		expect(JSON.parse(body)).toMatchObject({ prompt: "", images: [{ fileId: "f1" }] });
+	});
+
 	it("sessions.rename/delete/fork 使用正确 method", async () => {
 		const { client, fetcher } = makeClient();
 		const cwdRef = { rootDir: "D:\\", relativePath: "r" };
@@ -148,9 +173,53 @@ describe("VcpDeckClient.pi", () => {
 		expect(fetcher.mock.calls.every((c) => c[1]?.method === "GET")).toBe(true);
 	});
 
+	it("agent.setExecutionMode 支持设置与清除会话覆盖", async () => {
+		const snapshot = {
+			jobId: "s/1",
+			sessionId: "s/1",
+			status: "idle",
+			runId: null,
+			executionModeOverride: "yolo",
+			effectiveExecutionMode: "yolo",
+			ownerName: "User",
+			isOwner: true,
+		};
+		const request = vi.fn(async () => snapshot);
+		const pi = createPiApi({ request: request as never });
+		const cwdRef = { rootDir: "D:\\\\", relativePath: "repo" };
+		await expect(pi.agent.setExecutionMode("c/1", "s/1", cwdRef, "yolo")).resolves.toEqual(snapshot);
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c%2F1/pi/agent/s%2F1/execution-mode",
+			{ ...cwdRef, mode: "yolo" },
+		);
+		await pi.agent.setExecutionMode("c/1", "s/1", cwdRef, null);
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c%2F1/pi/agent/s%2F1/execution-mode",
+			{ ...cwdRef, mode: null },
+		);
+	});
+
+	it("agent.setExecutionMode 拒绝字段非法或未知的执行模式响应", async () => {
+		const cwdRef = { rootDir: "D:\\\\", relativePath: "repo" };
+		const malformed = vi.fn(async () => ({ effectiveExecutionMode: "turbo" }));
+		await expect(
+			createPiApi({ request: malformed as never }).agent.setExecutionMode("c1", "s1", cwdRef, "auto"),
+		).rejects.toThrow();
+		const unknownField = vi.fn(async () => ({
+			jobId: "s1", sessionId: "s1", status: "idle", runId: null,
+			executionModeOverride: null, effectiveExecutionMode: null,
+			ownerName: null, isOwner: true, injected: true,
+		}));
+		await expect(
+			createPiApi({ request: unknownField as never }).agent.setExecutionMode("c1", "s1", cwdRef, "auto"),
+		).rejects.toThrow();
+	});
+
 	it("agent.setModel/setThinking 使用当前 session endpoint", async () => {
 		const { client, fetcher } = makeClient();
-		const cwdRef = { rootDir: "D:\\", relativePath: "repo" };
+		const cwdRef = { rootDir: "D:\\\\", relativePath: "repo" };
 
 		await client.pi.agent.setModel("c1", "s1", cwdRef, "provider", "model");
 		await client.pi.agent.setThinking("c1", "s1", cwdRef, "high");

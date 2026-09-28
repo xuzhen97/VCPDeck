@@ -1,15 +1,17 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import type {
-	ActorContext,
-	PiAgentState,
-	PiErrorCode,
-	PiSessionJobSnapshot,
-	PiStateAck,
-	PiStateReport,
+import {
+	isPiToolExecutionMode,
+	type ActorContext,
+	type PiAgentState,
+	type PiErrorCode,
+		type PiSessionJobSnapshot,
+	type PiStateAck,
+	type PiStateReport,
+	type PiToolExecutionMode,
 } from "@vcpdeck/shared";
-import { JobStatus } from "@vcpdeck/shared";
-import { isPiAgentIdle } from "@vcpdeck/shared";
+import { JobStatus, isPiAgentIdle } from "@vcpdeck/shared";
+import { PiRuntimeService } from "./pi-runtime.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 interface ProjectLock {
@@ -44,6 +46,8 @@ type JobRecord = {
 	createdByIdentityId?: string | null;
 	createdByName?: string | null;
 	finishedAt?: Date | null;
+	toolExecutionModeOverride?: string | null;
+	runExecutionMode?: string | null;
 };
 
 const SETTLEMENT_GRACE_MS = 30_000;
@@ -57,6 +61,14 @@ const ACTIVE_STATUSES = [
 
 function piError(code: string, message: string): Error {
 	return Object.assign(new Error(message), { code });
+}
+
+function parseStoredExecutionMode(raw: unknown): import("@vcpdeck/shared").PiToolExecutionMode | null {
+	if (raw === null || raw === undefined) return null;
+	if (!isPiToolExecutionMode(raw)) {
+		throw piError("PI_CONFIG_UNAVAILABLE", "Session execution mode is invalid");
+	}
+	return raw;
 }
 
 function parsePayload(raw: string): RunPayload {
@@ -111,11 +123,11 @@ function safePiErrorMessage(code: string): string {
 		PI_CONFIG_UNAVAILABLE: "Pi configuration is unavailable",
 		PI_CREDENTIAL_UNAVAILABLE: "Pi credentials are unavailable",
 		PI_RUNTIME_SPEC_INCOMPATIBLE: "Pi runtime spec is incompatible",
-	PI_PROVIDER_VALIDATION_FAILED: "Pi provider validation failed",
-	PI_BUNDLE_UNAVAILABLE: "Pi resource bundle is unavailable",
-	PI_POLICY_UNAVAILABLE: "Pi tool policy is unavailable",
-	PI_TOOL_POLICY_DENIED: "Tool call was denied by policy",
-	PI_TOOL_POLICY_REJECTED: "Tool call was not approved",
+		PI_PROVIDER_VALIDATION_FAILED: "Pi provider validation failed",
+		PI_BUNDLE_UNAVAILABLE: "Pi resource bundle is unavailable",
+		PI_POLICY_UNAVAILABLE: "Pi tool policy is unavailable",
+		PI_TOOL_POLICY_DENIED: "Tool call was denied by policy",
+		PI_TOOL_POLICY_REJECTED: "Tool call was not approved",
 	};
 	return messages[code as PiErrorCode] ?? "Pi session failed";
 }
@@ -127,8 +139,23 @@ export class PiRunService {
 	private readonly settlementTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private readonly generations = new Map<string, ClientGeneration>();
 	private readonly queues = new Map<string, Promise<void>>();
+	private readonly executionModeQueues = new Map<string, Promise<void>>();
+	private readonly profileForClient: (clientId: string) => Promise<PiToolExecutionMode>;
+	private readonly runtimeReady: (clientId: string) => void;
 
-	constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+	constructor(
+		@Inject(PrismaService) private readonly prisma: PrismaService,
+		@Optional() @Inject(PiRuntimeService) runtimeSource?: PiRuntimeService,
+	) {
+		this.profileForClient = async (clientId) => {
+			if (!runtimeSource) throw piError("PI_CONFIG_UNAVAILABLE", "Pi execution mode is unavailable");
+			return runtimeSource.effectiveExecutionMode(clientId);
+		};
+		this.runtimeReady = (clientId) => {
+			if (!runtimeSource) throw piError("PI_CONFIG_UNAVAILABLE", "Pi execution mode is unavailable");
+			runtimeSource.assertReady(clientId);
+		};
+	}
 
 	private lockKey(clientId: string, projectKey: string): string {
 		return `${clientId}:${projectKey}`;
@@ -159,6 +186,21 @@ export class PiRunService {
 			throw piError("PI_STATE_PENDING", safePiErrorMessage("PI_STATE_PENDING"));
 		}
 		return generation;
+	}
+
+	private async withExecutionModeQueue<T>(clientId: string, operation: () => Promise<T>): Promise<T> {
+		const previous = this.executionModeQueues.get(clientId) ?? Promise.resolve();
+		let release!: () => void;
+		const current = new Promise<void>((resolve) => { release = resolve; });
+		const tail = previous.then(() => current);
+		this.executionModeQueues.set(clientId, tail);
+		await previous;
+		try {
+			return await operation();
+		} finally {
+			release();
+			if (this.executionModeQueues.get(clientId) === tail) this.executionModeQueues.delete(clientId);
+		}
 	}
 
 	private async findSession(jobId: string): Promise<JobRecord> {
@@ -221,27 +263,83 @@ export class PiRunService {
 	async snapshot(sessionId: string, identityId: string): Promise<PiSessionJobSnapshot> {
 		const job = await this.findSession(sessionId);
 		const payload = parsePayload(job.payload);
+		const active = ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number]);
+		const executionModeOverride = parseStoredExecutionMode(job.toolExecutionModeOverride);
+		let effectiveExecutionMode = active
+			? parseStoredExecutionMode(job.runExecutionMode)
+			: executionModeOverride;
+		if (!active && effectiveExecutionMode === null) {
+			try {
+				effectiveExecutionMode = await this.profileForClient(job.clientId);
+			} catch (error) {
+				if (!(error instanceof Error && "code" in error && error.code === "PI_CONFIG_UNAVAILABLE")) throw error;
+			}
+		}
 		return {
 			jobId: job.id,
 			sessionId: job.id,
 			status: job.status as PiSessionJobSnapshot["status"],
-			runId: ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])
-				&& typeof payload.runId === "string" ? payload.runId : null,
+			runId: active && typeof payload.runId === "string" ? payload.runId : null,
 			ownerName: job.createdByName ?? null,
 			isOwner: job.createdByIdentityId === identityId,
+			executionModeOverride,
+			effectiveExecutionMode,
 			...(job.errorCode ? { errorCode: job.errorCode as PiErrorCode } : {}),
 			...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
 		};
 	}
 
+	async setExecutionMode(
+		actor: ActorContext,
+		input: { clientId: string; sessionId: string; mode: PiToolExecutionMode | null },
+	): Promise<PiSessionJobSnapshot> {
+		if (input.mode !== null && !isPiToolExecutionMode(input.mode)) {
+			throw piError("PI_PROTOCOL_INVALID", "Execution mode is invalid");
+		}
+		return this.withExecutionModeQueue(input.clientId, async () => {
+			this.runtimeReady(input.clientId);
+			const current = await this.findSession(input.sessionId);
+			if (current.clientId !== input.clientId || current.createdByIdentityId !== actor.identityId) {
+				throw piError("PI_CONTROL_FORBIDDEN", "Only the session owner can change execution mode");
+			}
+			if (!([JobStatus.IDLE, JobStatus.DONE] as string[]).includes(current.status)
+				|| current.payload !== EMPTY_SESSION_PAYLOAD) {
+				throw piError("PI_PROJECT_BUSY", "Execution mode can only change while the session is idle");
+			}
+			await this.profileForClient(input.clientId);
+			const changed = await this.prisma.job.updateMany({
+				where: {
+					id: input.sessionId,
+					clientId: input.clientId,
+					type: "agent.session",
+					status: { in: [JobStatus.IDLE, JobStatus.DONE] },
+					payload: EMPTY_SESSION_PAYLOAD,
+					createdByIdentityId: actor.identityId,
+				},
+				data: { toolExecutionModeOverride: input.mode },
+			});
+			if (!Number.isSafeInteger(changed.count) || changed.count !== 1) throw piError("PI_PROJECT_BUSY", "Session changed while updating execution mode");
+			return this.snapshot(input.sessionId, actor.identityId);
+		});
+	}
+
 	async startRun(
 		actor: ActorContext,
 		input: { clientId: string; sessionId: string; projectKey: string },
-	): Promise<{ jobId: string; runId: string }> {
-		const runId = randomUUID();
-		const key = this.lockKey(input.clientId, input.projectKey);
-		if (this.locks.has(key)) throw piError("PI_PROJECT_BUSY", "Project has an active run");
-		this.setLock(input.clientId, input.projectKey, input.sessionId, runId);
+	): Promise<{ jobId: string; runId: string; executionMode: PiToolExecutionMode }> {
+		const run = await this.withExecutionModeQueue(input.clientId, async () => {
+			this.runtimeReady(input.clientId);
+			const profileMode = await this.profileForClient(input.clientId);
+			const session = await this.findSession(input.sessionId);
+			if (session.clientId !== input.clientId || session.createdByIdentityId !== actor.identityId) {
+				throw piError("PI_CONTROL_FORBIDDEN", "Only the session owner can start a run");
+			}
+			const override = parseStoredExecutionMode(session.toolExecutionModeOverride);
+			const mode = override ?? profileMode;
+			const runId = randomUUID();
+			const key = this.lockKey(input.clientId, input.projectKey);
+			if (this.locks.has(key)) throw piError("PI_PROJECT_BUSY", "Project has an active run");
+			this.setLock(input.clientId, input.projectKey, input.sessionId, runId);
 		try {
 			const updated = await this.prisma.job.updateMany({
 				where: {
@@ -255,6 +353,7 @@ export class PiRunService {
 				data: {
 					status: JobStatus.PENDING,
 					payload: runPayload(runId),
+					runExecutionMode: mode,
 					progress: null,
 					result: null,
 					startedAt: null,
@@ -263,12 +362,20 @@ export class PiRunService {
 					errorMessage: null,
 				},
 			});
-			if (updated.count === 0) throw piError("PI_PROJECT_BUSY", "Session is not idle");
-			return { jobId: input.sessionId, runId };
-		} catch (error) {
-			this.releaseLock(input.sessionId, runId);
-			throw error;
-		}
+			if (!Number.isSafeInteger(updated.count) || updated.count !== 1) {
+				throw piError("PI_PROJECT_BUSY", "Session is not idle");
+			}
+			return {
+				jobId: input.sessionId,
+				runId,
+				executionMode: mode,
+			};
+			} catch (error) {
+				this.releaseLock(input.sessionId, runId);
+				throw error;
+			}
+		});
+		return run;
 	}
 
 	async accept(jobId: string, runId: string): Promise<boolean> {

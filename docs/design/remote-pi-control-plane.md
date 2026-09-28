@@ -1,6 +1,6 @@
 # 远程 Pi 集中配置、隔离运行时与扩展分发设计
 
-> 状态：部分实现（Plan 1 = 阶段 A+B+C 已落地）｜维护责任：Pi/Client/Server 维护者｜最后核验：2026-09-20
+> 状态：部分实现（Plan 1 = 阶段 A+B+C 已落地）｜维护责任：Pi/Client/Server 维护者｜最后核验：2026-09-28
 >
 > - **已落地**：Server 集中 Profile/Credential/Client 绑定（§6）、`PiRuntimeSpecV1` 下发与就绪门控（§7、§8）、Client 隔离数据根与两层 Session 隔离（§9）、stable Client data root（§9.1）、Session Store 位置（§10）、Server 边界 API（§17）、Pi SDK 0.86.0（§28.4）。
 > - **仍为 Proposal**：Pi Resource Bundle（§12）、Tool Policy 与项目资源（§14、§15）、旧 Session 显式导入（§21.3）、Frontend renderer 复用（§18）。
@@ -263,6 +263,8 @@ interface PiProfile {
 Credential 与 Profile 分开。建议保存 `id`、`provider`、`name`、`ciphertext`、`encryptionKeyVersion`、安全 fingerprint、时间戳、`lastUsedAt`、`revokedAt`。
 
 加密根密钥必须来自 Server 进程外部安全配置，不与 ciphertext 同库形成等价明文。
+
+> **落地状态**：根密钥由 `VCPDECK_PI_CREDENTIAL_KEY_FILE` 指向的文件提供（base64 的 32 字节），缺失或长度不符时凭据写入与 RuntimeSpec 组装 fail closed（`PI_CONFIG_UNAVAILABLE`），Server 启动与其它能力不受影响。**本地 dev 例外**：`pnpm dev` / `pnpm dev:all` 会先跑 `scripts/ensure-dev-pi-credential-key.cjs`，在 `.tmp/dev-secrets/pi-credential.key` 自动生成密钥并写入 git-ignored 的 `packages/server/.env`（已有密钥复用、不覆盖），使集成测试无需手工配置；生产仍必须显式提供进程外密钥文件（[`deployment.md`](../deployment.md)）。
 
 ### 6.3 PiProfileCredentialBinding
 
@@ -629,6 +631,33 @@ Tool Policy 与 Execution Mode 分层：Approval/Auto 继续使用 `allow / conf
 Auto 不改变 SDK 工具白名单，仍保持 `tools = allow ∪ confirm`、`excludeTools = deny`。YOLO 则不再按三桶缩小工具集合，但仍受已启用受信 Resource、Runtime/平台可用性、Provider/Model Policy、VCPDeck 隔离和 Client OS 权限约束。该变化以 RuntimeSpec v4、host bridge v2 和 `vcp.tool-policy` resource v2 显式版本化并已实现；既有 Profile 迁移为 `approval` 保持旧行为，新建 UI Profile 默认 `auto`，YOLO 只能显式选择。
 
 完整版本、数据迁移、兼容、Frontend 与测试设计见 [`pi-tool-approval-mode.md`](./pi-tool-approval-mode.md) 和 [ADR-0033](../adr/0033-pi-tool-approval-mode.md)。
+
+### 14.2 已实现：会话级执行模式覆盖（ADR-0034）与 Agent Chat 布局
+
+在 Profile 级默认之上，Server 的 Session Job 现可保存**可空**的会话覆盖值（[ADR-0034](../adr/0034-pi-session-execution-mode-override.md)）：
+
+```text
+executionModeOverride = approval | auto | yolo | null   // null = 动态跟随当前绑定 Profile
+```
+
+权威与生命周期：
+
+- 覆盖值存于既有 Session Job 控制面（`Job.toolExecutionModeOverride`），不进入 Run 锁身份 payload；每个 Run 在接纳时把实际生效模式固化到 `Job.runExecutionMode`，并把该值随 `agent.prompt` 下发，因此同一个 Run 内不热切换。
+- 有效模式由 Server 解析：会话覆盖值优先，否则读取目标 Client 当前绑定且**已就绪**的 Profile 默认模式；Runtime/Profile 无法确认时拒绝接纳 Run（不静默使用默认值）。
+- 修改入口 `POST /api/clients/:clientId/pi/agent/:sessionId/execution-mode` 仅限 Owner，且要求会话静态空闲（`idle`/`done`/`cancelled`）、无活跃 Run 换代冲突；请求必须携带该会话的项目目录引用，Server 先确认该 Session 确属该目录。Observer/运行中一律拒绝。
+- 模式写入与 Run 接纳共用按 clientId 串行的窄队列，避免“设置成功但下一个 Run 用旧模式”。
+- Client 侧 `PI_SESSION_JOB_PROTOCOL_VERSION` 升到 v2：`agent.prompt` 缺 `executionMode` 或值非法即 `PI_PROTOCOL_INVALID`；`ensureWrapper()` 比较当前 wrapper 模式与请求模式，空闲时不一致就先关闭旧 wrapper 再按新模式重建，使 SDK 工具集与 Tool Policy bridge 同源；活跃 Run 期间不同模式的 Prompt 返回 `PI_PROJECT_BUSY`。
+
+`/agent/chat` 页面据此改为「机器 → 多项目 → 会话 → 宽屏聊天」：项目列表只存在当前浏览器的 `clientId` 分区（置顶/移除仅改本地索引，可损坏时恢复为空列表），项目行可直接新建任务并立即打开空会话。会话参数（模型、思考等级、执行模式）收在 composer 底部操作行内，菜单展示服务端确认的覆盖值与有效模式（「跟随 Profile」表示清除覆盖），YOLO 显示风险提示。布局沿用全局导航：Agent 左栏是不套卡片的平整项目/会话导航（二级操作为图标按钮，保留可访问名称），中栏只保留一条会话标题栏与居中空态，机器工作区 `/machines/:id` 的 Pi 入口沿用原有会话树、重命名/删除与 Owner 限制，不因共享组件改变行为。
+
+### 14.3 已实现：纯图片 Prompt 与粘贴上传（ADR-0035）
+
+`agent.prompt` 的 `prompt` 仍是字符串，但**空文本仅在同时携带至少一张有效图片时合法**（[ADR-0035](../adr/0035-pi-image-only-prompt.md)）：
+
+- Server 在创建 Run、发布事件之前校验组合与图片引用：引用以 `File` 行为权威（同 client、`purpose=pi_prompt`、`completed`、未过期，且 sha256/size/mimeType 与 DB 一致），调用方提交的 `url` 一律丢弃并换成服务端即时签发的下载凭证；空文本无图、仅空白文本无图、上传未完成、过期或元数据不符均以 `PI_IMAGE_INVALID`/`PI_PROTOCOL_INVALID` 拒绝，不会留下孤立 Run。
+- Shared 的 Server → Client 请求解析器校验同一组合，Client Worker 在跨信任边界再次调用 `parsePiRequest`，不假定 Server 已校验。真实 Pi SDK 已用集成测试验证：`prompt("", { images })` 产生「空文本 + image」用户消息，并可从 Session JSONL 回放；不通过时不得自动补造提示词。
+- 浏览器端选图与 Ctrl+V 粘贴共用同一上传通道（create → Storage PUT → complete）；草稿按稳定 `id` 更新与移除（同名文件不串位），切会话/移除后晚到的完成结果因 id 已不在草稿列表而被丢弃，上传中/失败的草稿会阻止发送并给出提示。
+- 旧的同代 Client 不认识该组合时会以 `PI_PROTOCOL_INVALID` 明确拒绝（fail closed），线格式与 `PI_SESSION_JOB_PROTOCOL_VERSION` 不变。
 
 ## 15. Project Resources 与 Trust
 

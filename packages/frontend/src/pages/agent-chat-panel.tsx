@@ -4,7 +4,6 @@ import { useSearchParams } from "react-router-dom";
 import { useSdk } from "@/api/context";
 import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
-import { Label } from "@/components/ui/label";
 import { PiPanel } from "@/pages/pi-panel";
 
 /** 机器不可用于 Agent 对话的原因；可用于对话时返回 null。 */
@@ -47,13 +46,12 @@ export function AgentChatPanel() {
 
 	const picker = (
 		<div className="space-y-1.5">
-			{/* 用 label 包裹控件建立隐式关联：同一 slot 会被渲染两次（桌面左栏 + 常驻抽屉），
-			    用 id/htmlFor 会产生重复 id 并让标签聚焦到隐藏控件 */}
-			<Label className="block">
-				<span className="mb-1.5 block">机器</span>
-				<select
-					aria-label="机器"
-					className="min-h-9 w-full rounded-md border border-input bg-background/60 px-2 text-sm"
+			{/* 不用 label/htmlFor：同一 slot 会被渲染两次（桌面左栏 + 常驻抽屉），
+			    id 关联会产生重复 id；直接用 aria-label 提供可访问名称 */}
+			<select
+				aria-label="机器"
+					title="离线与不支持 Pi 的机器不可选；项目与会话在目标机器上。"
+					className="min-h-9 w-full rounded-lg border border-input bg-background/60 px-2 text-sm"
 					value={selected?.clientId ?? ""}
 					onChange={(event) => select(event.target.value)}
 				>
@@ -69,13 +67,9 @@ export function AgentChatPanel() {
 								{client.name}（{client.hostname}）
 								{reason ? ` · ${reason}` : ""}
 							</option>
-						);
-					})}
-				</select>
-			</Label>
-			<p className="text-xs text-muted-foreground">
-				离线与不支持 Pi 的机器不可选；项目与会话在目标机器上。
-			</p>
+							);
+						})}
+			</select>
 		</div>
 	);
 
@@ -114,5 +108,5 @@ export function AgentChatPanel() {
 		);
 	}
 
-	return <PiPanel client={selected} leftSlot={picker} />;
+	return <PiPanel client={selected} leftSlot={picker} agentChatLayout />;
 }

@@ -190,6 +190,7 @@ var require_pi = __commonJS({
     exports2.parsePiImportPreviewResponse = parsePiImportPreviewResponse;
     exports2.parsePiImportRunRequest = parsePiImportRunRequest;
     exports2.parsePiImportRunResponse = parsePiImportRunResponse;
+    exports2.parsePiSessionJobSnapshot = parsePiSessionJobSnapshot2;
     exports2.isPiThinkingLevel = isPiThinkingLevel;
     exports2.isPiAgentIdle = isPiAgentIdle;
     exports2.safePiErrorMessage = safePiErrorMessage;
@@ -238,7 +239,7 @@ var require_pi = __commonJS({
       "PI_TOOL_POLICY_DENIED",
       "PI_TOOL_POLICY_REJECTED"
     ];
-    exports2.PI_SESSION_JOB_PROTOCOL_VERSION = 1;
+    exports2.PI_SESSION_JOB_PROTOCOL_VERSION = 2;
     exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = 1;
     exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = 4;
     exports2.PI_BUNDLE_PROTOCOL_VERSION = 1;
@@ -459,6 +460,51 @@ var require_pi = __commonJS({
         };
       });
       return { results };
+    }
+    function parsePiSessionJobSnapshot2(value) {
+      assertRecord(value, "PiSessionJobSnapshot");
+      assertKeys(value, /* @__PURE__ */ new Set([
+        "jobId",
+        "sessionId",
+        "status",
+        "runId",
+        "executionModeOverride",
+        "effectiveExecutionMode",
+        "ownerName",
+        "isOwner",
+        "errorCode",
+        "errorMessage"
+      ]), "PiSessionJobSnapshot");
+      assertString(value.jobId, "jobId", 256);
+      assertString(value.sessionId, "sessionId", 256);
+      if (typeof value.status !== "string" || ![
+        "idle",
+        "pending",
+        "running",
+        "waiting_input",
+        "done",
+        "disconnected",
+        "error",
+        "cancelled"
+      ].includes(value.status))
+        throw new PiProtocolError("status \u4E0D\u53D7\u652F\u6301");
+      if (value.runId !== null)
+        assertString(value.runId, "runId", 256);
+      for (const field of ["executionModeOverride", "effectiveExecutionMode"]) {
+        if (value[field] !== null && !isPiToolExecutionMode(value[field])) {
+          throw new PiProtocolError(`${field} \u4E0D\u53D7\u652F\u6301`);
+        }
+      }
+      if (value.ownerName !== null)
+        assertString(value.ownerName, "ownerName", 256);
+      if (typeof value.isOwner !== "boolean")
+        throw new PiProtocolError("isOwner \u5FC5\u987B\u662F\u5E03\u5C14");
+      if (value.errorCode !== void 0 && (typeof value.errorCode !== "string" || !exports2.PI_ERROR_CODES.includes(value.errorCode))) {
+        throw new PiProtocolError("errorCode \u4E0D\u53D7\u652F\u6301");
+      }
+      if (value.errorMessage !== void 0)
+        assertString(value.errorMessage, "errorMessage", MAX_TEXT_CHARS);
+      return value;
     }
     exports2.PI_PROJECT_KEY_LENGTH = 64;
     exports2.MAX_PI_IMAGES_PER_PROMPT = 10;
@@ -729,7 +775,26 @@ var require_pi = __commonJS({
       }
       if (input.action === "agent.prompt" && input.cwdRef === void 0)
         throw new PiProtocolError("agent.prompt \u7F3A cwdRef");
-      if (input.action === "session.import.list") {
+      if (input.action === "agent.prompt") {
+        if (input.payload === void 0) {
+          throw new PiProtocolError("agent.prompt \u7F3A payload");
+        }
+        assertRecord(input.payload, "payload");
+        assertKeys(input.payload, /* @__PURE__ */ new Set(["prompt", "submissionId", "attachments", "executionMode"]), "payload");
+        if (typeof input.payload.prompt !== "string" || input.payload.prompt.length > MAX_TEXT_CHARS) {
+          throw new PiProtocolError("payload.prompt \u5FC5\u987B\u662F\u957F\u5EA6\u5408\u6CD5\u7684\u5B57\u7B26\u4E32");
+        }
+        assertString(input.payload.submissionId, "payload.submissionId", 256);
+        if (!isPiToolExecutionMode(input.payload.executionMode)) {
+          throw new PiProtocolError("payload.executionMode \u5FC5\u987B\u662F\u53D7\u652F\u6301\u7684\u6A21\u5F0F");
+        }
+        const attachments = input.payload.attachments === void 0 ? [] : parseAttachments(input.payload.attachments);
+        if (input.payload.prompt.trim() === "" && attachments.length === 0) {
+          throw new PiProtocolError("payload.prompt \u6216\u56FE\u7247\u4E0D\u80FD\u4E3A\u7A7A");
+        }
+        if (input.payload.attachments !== void 0)
+          input.payload.attachments = attachments;
+      } else if (input.action === "session.import.list") {
         if (input.payload !== void 0) {
           assertRecord(input.payload, "payload");
           assertKeys(input.payload, /* @__PURE__ */ new Set(), "payload");
@@ -749,7 +814,7 @@ var require_pi = __commonJS({
       }
       if (input.payload !== void 0) {
         assertRecord(input.payload, "payload");
-        if (input.payload.attachments !== void 0) {
+        if (input.action !== "agent.prompt" && input.payload.attachments !== void 0) {
           input.payload.attachments = parseAttachments(input.payload.attachments);
         }
       }
@@ -2316,7 +2381,7 @@ var require_pi_admin = __commonJS({
       if (value === void 0 || value === null || value === "")
         return null;
       const baseUrl = requireString(value, "baseUrl", MAX_BASE_URL);
-      if (/[\u0000-\u0020]/.test(baseUrl)) {
+      if ([...baseUrl].some((ch) => (ch.codePointAt(0) ?? 0) <= 32)) {
         throw new PiAdminProtocolError("baseUrl \u542B\u63A7\u5236\u5B57\u7B26\u6216\u7A7A\u767D");
       }
       let parsed;
@@ -4239,6 +4304,7 @@ function createPiApi(client) {
       newSession: (clientId, cwdRef, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/new`, { ...cwdRef }, signal),
       open: (clientId, sessionId, cwdRef, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/open`, cwdRef, signal),
       complete: (clientId, sessionId, runId, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/complete`, runId === void 0 ? {} : { runId }, signal),
+      setExecutionMode: async (clientId, sessionId, cwdRef, mode) => (0, import_shared2.parsePiSessionJobSnapshot)(await client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/execution-mode`, { ...cwdRef, mode })),
       state: async (clientId, sessionId, cwdRef, signal) => (0, import_shared2.parsePiAgentState)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}?${cwdQuery(cwdRef)}`, void 0, signal)),
       prompt: (clientId, sessionId, cwdRef, input, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}`, {
         ...cwdRef,

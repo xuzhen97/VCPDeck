@@ -4,14 +4,32 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-28
+
+### Breaking
+
+- **Pi Session Job 协议升到 v2 并要求 Run 携带执行模式（[ADR-0034](./docs/adr/0034-pi-session-execution-mode-override.md)）**：`PI_SESSION_JOB_PROTOCOL_VERSION` 由 1 升到 2。`agent.prompt` 现在必须携带合法 `executionMode`（`approval | auto | yolo`）且拒绝未知 payload 字段；Session Job 快照新增 `executionModeOverride`（会话覆盖值，空表示跟随 Profile）与 `effectiveExecutionMode`。仍停留在 v1 的 Client 不理解这些字段，必须与 Server 同步升级，不得静默回退到 Profile 模式。
+
 ### 变更
 
+- **Agent 对话可直接粘贴图片，并支持纯图片消息（[ADR-0035](./docs/adr/0035-pi-image-only-prompt.md)）**：输入框内 Ctrl+V 粘贴图片与「添加图片」共用同一上传通道，草稿带缩略图、上传/失败状态与移除入口；**文本为空时只发图片**，界面不会偷偷补一句提示词。服务端在创建 Run 之前校验图片引用（同一 Client、`pi_prompt`、已完成、未过期且 sha256/大小/MIME 与库内一致，客户端提交的下载链接一律废弃换成即时签发的临时凭证），空文本无图、上传中、失败、过期或超限都会被拒绝且不产生孤立 Run。同名图片各自独立，切换会话后晚到的上传结果不会写入新会话草稿。线格式与协议版本不变：同代旧 Client 遇到纯图片请求会以 `PI_PROTOCOL_INVALID` 明确拒绝，Server/Client 同步升级后该能力才可用。
+- **Agent 对话页面重新排版**：左栏改为不套卡片的平整项目/会话导航（添项目、新建任务、置顶、移除、删除会话、添加图片、发送全部改为图标按钮，保留悬停提示与无障碍名称）；中栏去掉重复边框，新增一条会话标题栏与居中的空态，消息列限制最大宽度；模型/思考等级/执行模式从输入框上方那条设置栏收进 composer 底部操作行，YOLO 风险提示仍在选中时可见。全局导航与机器工作区的会话树、重命名/删除与 Owner 限制不变。
+
+- **本地 dev 自动生成 Pi 凭据根密钥（`pnpm dev` / `pnpm dev:all`）**：Pi Provider 凭据的根密钥此前必须手工生成文件并配 `VCPDECK_PI_CREDENTIAL_KEY_FILE`，否则保存 Provider 直接以 `PI_CONFIG_UNAVAILABLE` fail closed，无法做 Agent 对话的本地集成测试。现在两个 dev 入口会先跑 `scripts/ensure-dev-pi-credential-key.cjs`：未配置时在 `.tmp/dev-secrets/pi-credential.key` 生成 base64 的 32 字节密钥（POSIX 0600）并写入 git-ignored 的 `packages/server/.env`（缺该文件时先从 `.env.example` 复制）。**已有密钥一律复用、绝不覆盖**；`.env` 指向其它路径时只告警不猜不改；显式环境变量优先。生产仍必须提供 Server 进程外的密钥文件，安全校验未放松。
+
+- **`/agent/chat` 改为「机器 → 多项目 → 会话 → 宽屏聊天」**：左栏为当前浏览器按机器隔离的最近项目索引（可折叠/展开、置顶、移除，仅改本地列表，不删除远程目录或会话），项目行可直接新建任务并立即打开空会话；展开项目按「今天 / 最近 7 天 / 更早」加载该项目的会话并按修改时间倒序，删除会话需确认；切换项目/会话/机器会清理旧草稿、附件与订阅以避免串上下文。
+- **会话级执行模式覆盖**：会话参数控件整合模型、思考等级与执行模式，菜单显示服务端确认的覆盖值与有效模式，「跟随 Profile」表示清除本会话覆盖；Owner 可在会话空闲时切换，运行中、断线或状态不可确认时一律拒绝；YOLO 显示跳过 Tool Policy 的风险提示。选择结果跨刷新保留，Profile 默认变更只影响未覆盖会话。
+- **输入区与布局**：Agent 对话的对话区占主要宽度，运行状态、队列与标识仍通过「详情」按需查看；窄屏左右内容继续由抽屉进入。机器工作区 `/machines/:id` 的 Pi 入口保持原有会话树、重命名/删除与 Owner 限制不变。
 - **左侧导航改为 Drill-down 层级**：一级全局导航与模块二级导航在侧栏**原位互斥**（不再并排），层级完全由 URL 派生；一级状态不显示「返回全局导航」，进入模块后才出现，窄屏横向导航以同一入口为首项。
 - **`Pi` 更名为 `Agent` 并上移到「概览」之下**，机器详情的 `Pi` tab 与独立的 `Pi` 配置页合并为该模块的「对话 / Profile / Provider / Client 运行时」四项；机器卡片保留「Agent 对话」快捷入口。对话需先选择机器（离线或 Pi 能力不可用的机器不可选并标出原因），选择结果写入 URL，刷新与深链可保持。
 - **「存储」并入「设置」模块**，成为其二级项（`/settings/storage`）。
 - 旧链接 `/pi/*`、`/storage`、`/machines/:id/pi` 自动重定向到对应新位置；`/settings/tokens` 等既有路径不变。
 
 ### 文档
+
+- **纯图片 Prompt、粘贴上传与 Agent 布局落进 Current 文档**：新增 [ADR-0035](./docs/adr/0035-pi-image-only-prompt.md)，`docs/design/remote-pi-control-plane.md` 新增 §14.3（纯图片组合校验、服务端权威引用、SDK 验证与 fail-closed 语义）并更新 §14.2 的布局说明，`docs/protocols.md` 与 `docs/compatibility.md` 同步图片组合规则与混合版本行为。
+
+- **会话级执行模式覆盖与 Agent Chat 布局落进 Current 文档**：新增 [ADR-0034](./docs/adr/0034-pi-session-execution-mode-override.md)，`docs/design/remote-pi-control-plane.md` 增加 §14.2（覆盖值权威、Owner/空闲门槛、Run 固化、Client wrapper 换代），`docs/compatibility.md` 与 `docs/protocols.md` 同步 Session Job 协议 v2。
 
 - **运维手册补充监管进程与配置来源规程**（`docs/operations.md`）：PM2 托管 Launcher 卡在 `online / pid N/A` 的成因与恢复（`pm2 delete` + `start`，该状态下 `pm2 restart` 是空操作）、`launcher.env` 与 PM2 快照的环境变量优先级与 `pm2 save` 落盘核对、开机自启单元检查（`is-active=inactive` 属正常）；`deployment.md` §4.6 同步补充约束，§2 增加「变更监管进程前必须具备带外通道并完成只读检查」的前置规则。
 

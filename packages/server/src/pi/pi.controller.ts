@@ -27,9 +27,11 @@ import {
 	parsePiImportPreviewResponse,
 	parsePiImportRunRequest,
 	parsePiImportRunResponse,
+	isPiToolExecutionMode,
 	PI_ERROR_CODES,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
 	type ActorContext,
+	type PiAttachmentDescriptor,
 	type PiCwdRef,
 	type PiPromptAccepted,
 	type PiRequest,
@@ -38,6 +40,7 @@ import {
 	type PiSessionCreated,
 	type PiSessionJobSnapshot,
 	type PiSessionOpenResult,
+	type PiToolExecutionMode,
 } from "@vcpdeck/shared";
 import { Actor } from "../auth/actor.decorator.js";
 import { ClientService } from "../client/client.service.js";
@@ -204,10 +207,25 @@ export class PiController {
 		}
 	}
 
-	private requestForClient(clientId: string, request: PiRequest): Promise<unknown> {
-		return this.withReconciledClient(clientId, (lease) =>
+	private requestForClient(clientId: string, request: PiRequest): Promise<unknown> {		return this.withReconciledClient(clientId, (lease) =>
 			this.requestOnce(lease, request),
 		);
+	}
+
+	/**
+	 * 校验 prompt 携带的图片引用（File 行是权威），并把服务层稳定码映射为 HTTP 400。
+	 * 调用方提供的 url/sha256 不回显、不信任。
+	 */
+	private async validatePromptImages(
+		clientId: string,
+		refs: unknown,
+	): Promise<PiAttachmentDescriptor[]> {
+		try {
+			return await this.attachments.validatePromptRefs(clientId, refs);
+		} catch (err) {
+			if (isPiError(err)) throw badRequest(err.code, err.message);
+			throw err;
+		}
 	}
 
 	private async assertSessionOwner(jobId: string, actor: ActorContext): Promise<void> {
@@ -684,6 +702,45 @@ export class PiController {
 		});
 	}
 
+	@Post("agent/:sessionId/execution-mode")
+	async setExecutionMode(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Body() body: unknown,
+		@Actor() actor: ActorContext,
+	): Promise<PiSessionJobSnapshot> {
+		await this.requirePiClient(clientId);
+		requireObject(body);
+		if (typeof body.rootDir !== "string" || typeof body.relativePath !== "string") {
+			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
+		}
+		if (body.mode !== null && !isPiToolExecutionMode(body.mode)) {
+			throw badRequest("PI_PROTOCOL_INVALID", "mode must be approval, auto, yolo, or null");
+		}
+		return this.withReconciledClient(clientId, async (lease) => {
+			if (Object.keys(body).some((key) => !["rootDir", "relativePath", "mode"].includes(key))) {
+				throw badRequest("PI_PROTOCOL_INVALID", "unknown execution-mode field");
+			}
+			const cwdRef = { rootDir: body.rootDir as string, relativePath: body.relativePath as string };
+			const projectKey = await this.resolveProjectKey(lease, cwdRef);
+			await this.assertIdle(clientId, projectKey);
+			const response = await this.requestOnce(lease, {
+				requestId: randomUUID(), action: "session.get", cwdRef, sessionId,
+			});
+			if (!response || typeof response !== "object" || !("info" in response)
+				|| typeof response.info !== "object" || response.info === null
+				|| !("id" in response.info) || response.info.id !== sessionId) {
+				throw new NotFoundException({ code: "PI_SESSION_NOT_FOUND", message: "Pi session was not found in the selected project" });
+			}
+			await this.runs.ensureSession(actor, { clientId, sessionId });
+			const session = await this.runs.snapshot(sessionId, actor.identityId);
+			if (!session.isOwner) throw badRequest("PI_CONTROL_FORBIDDEN", "Only the session owner can change execution mode");
+			return this.runs.setExecutionMode(actor, {
+				clientId, sessionId, mode: body.mode as PiToolExecutionMode | null,
+			});
+		});
+	}
+
 	@Post("agent/:sessionId/complete")
 	async completeSession(
 		@Param("clientId") clientId: string,
@@ -754,8 +811,16 @@ export class PiController {
 		if (typeof submissionId !== "string" || submissionId.length === 0) {
 			throw badRequest("PI_PROTOCOL_INVALID", "submissionId required");
 		}
-		if (typeof body.prompt !== "string" || body.prompt.trim() === "") {
+		if (typeof body.prompt !== "string") {
 			throw badRequest("PI_PROTOCOL_INVALID", "prompt required");
+		}
+		// 图片引用以 Server 侧的 File 行为权威；空文本只有在至少一张有效图片时才合法（ADR-0035），
+		// 且调用方提供的描述符一律换成服务端签发值。校验必须在创建 Run 之前完成。
+		const images = body.images === undefined
+			? []
+			: await this.validatePromptImages(clientId, body.images);
+		if (body.prompt.trim() === "" && images.length === 0) {
+			throw badRequest("PI_PROTOCOL_INVALID", "prompt or images required");
 		}
 
 		return this.withReconciledClient(clientId, async (lease) => {
@@ -763,7 +828,8 @@ export class PiController {
 				this.resolveProjectKey(lease, { rootDir, relativePath }),
 				this.runs.ensureSession(actor, { clientId, sessionId }),
 			]);
-			let run: { jobId: string; runId: string };
+			await this.assertIdle(clientId, projectKey);
+			let run: { jobId: string; runId: string; executionMode: PiToolExecutionMode };
 			try {
 				run = await this.runs.startRun(actor, { clientId, sessionId, projectKey });
 			} catch (err) {
@@ -810,9 +876,8 @@ export class PiController {
 					payload: {
 						prompt: body.prompt,
 						submissionId,
-						...(Array.isArray(body.images) && body.images.length > 0
-							? { attachments: body.images }
-							: {}),
+						executionMode: run.executionMode,
+						...(images.length > 0 ? { attachments: images } : {}),
 					},
 				});
 				if (!response.ok) {

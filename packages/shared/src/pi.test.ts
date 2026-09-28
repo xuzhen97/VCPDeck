@@ -74,12 +74,29 @@ describe("Session Job 协议", () => {
 	it("导出协议版本和 Job 枚举", () => {
 		expect(JobType.AGENT_SESSION).toBe("agent.session");
 		expect(JobStatus.IDLE).toBe("idle");
-		expect(PI_SESSION_JOB_PROTOCOL_VERSION).toBe(1);
+		expect(PI_SESSION_JOB_PROTOCOL_VERSION).toBe(2);
 		expect(PI_ERROR_CODES).toContain("PI_STATE_PENDING");
 	});
 });
 
 describe("parsePiRequest", () => {
+	it("只允许空文本与有效图片组合，拒绝无内容 prompt", () => {
+		const base = {
+			requestId: "r1", action: "agent.prompt", cwdRef: { rootDir: "D:\\\\", relativePath: "repo" },
+			sessionId: "s1", jobId: "s1", runId: "run1",
+		};
+		const image = { fileId: "f1", sha256: "sha", size: 42, mimeType: "image/png", url: "https://example.test/image" };
+		const payload = { submissionId: "sub1", executionMode: "auto" };
+		expect(parsePiRequest({ ...base, payload: { ...payload, prompt: "", attachments: [image] } }).payload?.prompt).toBe("");
+		expect(parsePiRequest({ ...base, payload: { ...payload, prompt: " \t", attachments: [image] } }).payload?.prompt).toBe(" \t");
+		for (const prompt of ["", " \t"]) {
+			for (const attachments of [undefined, []]) {
+				expect(() => parsePiRequest({ ...base, payload: { ...payload, prompt, attachments } })).toThrow();
+			}
+		}
+		expect(() => parsePiRequest({ ...base, payload: { ...payload, prompt: "", attachments: [{ ...image, size: 11 * 1024 * 1024 }] } })).toThrow();
+	});
+
 	it("允许 Session Job 使用独立 Prompt runId", () => {
 		const request = parsePiRequest({
 			requestId: "request-1",
@@ -88,7 +105,7 @@ describe("parsePiRequest", () => {
 			sessionId: "session-1",
 			jobId: "session-1",
 			runId: "run-1",
-			payload: { prompt: "hello" },
+			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "approval" },
 		});
 		expect(request.jobId).toBe("session-1");
 		expect(request.runId).toBe("run-1");
@@ -103,7 +120,7 @@ describe("parsePiRequest", () => {
 				sessionId: "session-1",
 				jobId: "other-job",
 				runId: "run-1",
-				payload: { prompt: "hello" },
+				payload: { prompt: "hello", submissionId: "sub-1", executionMode: "approval" },
 			}),
 		).toThrow(/jobId.*sessionId/);
 	});
@@ -129,6 +146,34 @@ describe("parsePiRequest", () => {
 
 	it("拒绝缺失 requestId", () => {
 		expect(() => parsePiRequest({ action: "agent.state" })).toThrow();
+	});
+
+	it("agent.prompt 要求严格且明确的执行模式", () => {
+		const base = {
+			requestId: "r1",
+			action: "agent.prompt",
+			cwdRef: { rootDir: "D:\\\\", relativePath: "repo" },
+			sessionId: "s1",
+			jobId: "s1",
+			runId: "run1",
+		};
+		expect(
+			parsePiRequest({
+				...base,
+				payload: {
+					prompt: "hello",
+					submissionId: "sub1",
+					executionMode: "yolo",
+				},
+			}).payload?.executionMode,
+		).toBe("yolo");
+		for (const payload of [
+			{ prompt: "hello", submissionId: "sub1", executionMode: "unsafe" },
+			{ prompt: "hello", submissionId: "sub1" },
+			{ prompt: "hello", submissionId: "sub1", executionMode: "auto", extra: true },
+		]) {
+			expect(() => parsePiRequest({ ...base, payload })).toThrow();
+		}
 	});
 
 	it("拒绝 prompt 缺 session/job/run 关联 ID", () => {
@@ -180,7 +225,7 @@ describe("parsePiRequest", () => {
 				sessionId: "s1",
 				jobId: "j1",
 				runId: "j1",
-				payload: { prompt: "hi", attachments },
+				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval", attachments },
 			}),
 		).toThrow();
 	});
@@ -201,7 +246,7 @@ describe("parsePiRequest", () => {
 				sessionId: "s1",
 				jobId: "j1",
 				runId: "j1",
-				payload: { prompt: "hi", attachments },
+				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval", attachments },
 			}),
 		).toThrow();
 	});
@@ -223,7 +268,7 @@ describe("parsePiRequest", () => {
 				sessionId: "s1",
 				jobId: "j1",
 				runId: "j1",
-				payload: { prompt: "hi", attachments },
+				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval", attachments },
 			}),
 		).toThrow();
 	});

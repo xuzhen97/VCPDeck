@@ -22,6 +22,8 @@ const idleSnapshot: PiSessionJobSnapshot = {
 	sessionId: "s1",
 	status: "idle",
 	runId: null,
+	executionModeOverride: null,
+	effectiveExecutionMode: null,
 	ownerName: "User",
 	isOwner: true,
 };
@@ -38,7 +40,7 @@ const actor = {
 
 function makeController(
 	overrides: Partial<
-		Record<"requests" | "events" | "runs" | "clients", unknown>
+		Record<"requests" | "events" | "runs" | "clients" | "attachments", unknown>
 	> = {},
 ) {
 	const requests = {
@@ -60,6 +62,7 @@ function makeController(
 		...((overrides.events as object) ?? {}),
 	};
 	const runs = {
+		setExecutionMode: vi.fn(async () => ({ ...idleSnapshot, executionModeOverride: "yolo", effectiveExecutionMode: "yolo" })),
 		ensureSession: vi.fn(async () => {}),
 		snapshot: vi.fn(async () => idleSnapshot),
 		startRun: vi.fn(async () => ({ jobId: "s1", runId: "run-1" })),
@@ -97,18 +100,36 @@ function makeController(
 				clientId: "c1",
 				capabilities: ["agent.pi"],
 				capabilityDetails: {
-					pi: { available: true, sessionJobProtocolVersion: 1 },
+					pi: { available: true, sessionJobProtocolVersion: 2 },
 				},
 			},
 		]),
 		...((overrides.clients as object) ?? {}),
-	};
-	const attachments = {
+	};	const attachments = {
 		createPromptUploads: vi.fn(async () => []),
 		completePromptUpload: vi.fn(),
 		deleteAttachment: vi.fn(async () => {}),
 		prepareHistoryUpload: vi.fn(),
 		completeHistoryUpload: vi.fn(),
+		/** 默认视引用为已校验的规范描述符；单个用例可覆盖为拒绝。 */
+		validatePromptRefs: vi.fn(async (_clientId: string, refs: unknown) =>
+			(Array.isArray(refs) ? refs : []).map((item) => {
+				const ref = item as {
+					fileId?: string;
+					sha256?: string;
+					size?: number;
+					mimeType?: string;
+				};
+				return {
+					fileId: ref.fileId ?? "f1",
+					sha256: ref.sha256 ?? "sha",
+					size: ref.size ?? 42,
+					mimeType: ref.mimeType ?? "image/png",
+					url: "/api/storage/download/canonical",
+				};
+			}),
+		),
+		...((overrides.attachments as object) ?? {}),
 	};
 	const runtime = {
 		assertCompatible: vi.fn(),
@@ -144,6 +165,65 @@ describe("PiController", () => {
 		]);
 		const result = await controller.capability("c1");
 		expect(result).toMatchObject({ code: "PI_CLIENT_UNSUPPORTED" });
+	});
+
+	it("execution mode 仅接受严格请求、确认 cwd 所属与 idle owner 并保存清除操作", async () => {
+		const { controller, requests, runs } = makeController();
+		requests.request.mockImplementation(async (_lease, req: { action: string }) => {
+			if (req.action === "project.resolve") return { ok: true, data: { projectKey: "p".repeat(64) } };
+			if (req.action === "session.get") return { ok: true, data: { info: { id: "s1" } } };
+			return { ok: true, data: {} };
+		});
+
+		await expect(controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "yolo" }, actor))
+			.resolves.toMatchObject({ executionModeOverride: "yolo", effectiveExecutionMode: "yolo" });
+		expect(runs.assertIdleMutation).toHaveBeenCalledWith("c1", "p".repeat(64));
+		expect(runs.setExecutionMode).toHaveBeenCalledWith(actor, { clientId: "c1", sessionId: "s1", mode: "yolo" });
+
+		await controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: null }, actor);
+		expect(runs.setExecutionMode).toHaveBeenLastCalledWith(actor, { clientId: "c1", sessionId: "s1", mode: null });
+	});
+
+	it.each([
+		[{ ...cwdRef, mode: "unsafe" }, "PI_PROTOCOL_INVALID"],
+		[{ ...cwdRef, mode: "auto", extra: true }, "PI_PROTOCOL_INVALID"],
+		[{ rootDir: cwdRef.rootDir, mode: "auto" }, "PI_PROTOCOL_INVALID"],
+	])("execution mode rejects malformed request %#", async (body, code) => {
+		const { controller, requests, runs } = makeController();
+		await expect(controller.setExecutionMode("c1", "s1", body, actor)).rejects.toMatchObject({ response: { code } });
+		expect(requests.request).not.toHaveBeenCalled();
+		expect(runs.setExecutionMode).not.toHaveBeenCalled();
+	});
+
+	it("execution mode 拒绝错误项目中的 Session、非 owner 与运行中项目", async () => {
+		const wrongSession = makeController({ requests: { request: vi.fn(async () => ({ ok: true, data: { info: { id: "other" } } })) } });
+		await expect(wrongSession.controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "auto" }, actor))
+			.rejects.toMatchObject({ response: { code: "PI_SESSION_NOT_FOUND" } });
+
+		const observer = makeController({ runs: { snapshot: vi.fn(async () => ({ ...idleSnapshot, isOwner: false })) } });
+		observer.requests.request.mockImplementation(async (_lease, req: { action: string }) => req.action === "session.get"
+			? { ok: true, data: { info: { id: "s1" } } } : { ok: true, data: { projectKey: "p".repeat(64) } });
+		await expect(observer.controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "auto" }, actor))
+			.rejects.toMatchObject({ response: { code: "PI_CONTROL_FORBIDDEN" } });
+
+		const busy = makeController({ runs: { assertIdleMutation: vi.fn(async () => { throw Object.assign(new Error("busy"), { code: "PI_PROJECT_BUSY" }); }) } });
+		busy.requests.request.mockResolvedValue({ ok: true, data: { projectKey: "p".repeat(64) } });
+		await expect(busy.controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "auto" }, actor))
+			.rejects.toMatchObject({ response: { code: "PI_PROJECT_BUSY" } });
+		expect(busy.runs.setExecutionMode).not.toHaveBeenCalled();
+	});
+
+	it("execution mode 在没有 Runtime service 时 fail closed", async () => {
+		const { runs, clients } = makeController();
+		const withoutRuntime = new PiController(
+			{ request: vi.fn(async () => ({ ok: true, data: {} })), bindEmitter: vi.fn() } as never,
+			{ publish: vi.fn(), stream: vi.fn() } as never,
+			{ ...runs, assertSessionOwner: vi.fn(), assertCurrentRunOwner: vi.fn() } as never,
+			clients as never,
+			{} as never,
+			undefined,
+		);
+		await expect(withoutRuntime.setExecutionMode("c1", "s1", { ...cwdRef, mode: "auto" }, actor)).rejects.toMatchObject({ response: { code: "PI_CLIENT_UNSUPPORTED" } });
 	});
 
 	it("models 直通返回 Client 的模型数组（不按 envelope 取 .models）", async () => {
@@ -224,13 +304,13 @@ describe("PiController", () => {
 	});
 
 	it("没有活动 run 的 open 使用只读 agent.state", async () => {
-		const { controller, requests, runs } = makeController();
+		const { controller, requests } = makeController();
 		requests.request
 			.mockResolvedValueOnce({ ok: true, data: { sessionId: "s1" } })
 			.mockResolvedValueOnce({ ok: true, data: idleAgentState });
 
-		await controller.openSession("c1", "s1", cwdRef, actor);
-		expect(runs.reconcileOpen).not.toHaveBeenCalled();
+		const sessionOpen = await controller.openSession("c1", "s1", cwdRef, actor);
+		expect(sessionOpen.job).toEqual(idleSnapshot);
 		expect(requests.request).toHaveBeenLastCalledWith(
 			{ clientId: "c1", socketId: "socket-1" },
 			expect.objectContaining({
@@ -516,7 +596,9 @@ describe("PiController", () => {
 				return { ok: true, data: { accepted: true } };
 			},
 		);
-		const result = await controller.prompt(
+		const runWithMode = { jobId: "s1", runId: "run-1", executionMode: "yolo" as const };
+		runs.startRun = vi.fn(async () => runWithMode);
+		await controller.prompt(
 			"c1",
 			"s1",
 			{
@@ -548,7 +630,13 @@ describe("PiController", () => {
 				}),
 			}),
 		);
-		expect(result).toEqual({ jobId: "s1", runId: "run-1", sessionId: "s1" });
+		expect(requests.request).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				action: "agent.prompt",
+				payload: expect.objectContaining({ executionMode: "yolo" }),
+			}),
+		);
 	});
 
 	it("pending generation 映射为稳定 PI_STATE_PENDING HTTP 错误且不创建 Job", async () => {
@@ -1367,5 +1455,102 @@ describe("Pi 显式导入路由（list / preview / run）", () => {
 		};
 		expect(notReady.status).toBe(400);
 		expect(notReady.getResponse()).toMatchObject({ code: "PI_CONFIG_UNAVAILABLE" });
+	});
+
+	it("纯图片 prompt：空文本加有效图片可接纳 Run 并下发服务端签发的描述符", async () => {
+		const { controller, requests, runs, attachments } = makeController();
+		requests.request.mockImplementation(async (_lease, req: { action: string }) =>
+			req.action === "project.resolve"
+				? { ok: true, data: { projectKey: "k".repeat(64) } }
+				: { ok: true, data: { accepted: true } },
+		);
+		const image = {
+			fileId: "f1",
+			sha256: "sha",
+			size: 42,
+			mimeType: "image/png",
+			url: "https://evil.test/forged",
+		};
+
+		await controller.prompt(
+			"c1",
+			"s1",
+			{
+				rootDir: "D:\\",
+				relativePath: "repo",
+				type: "prompt",
+				submissionId: "sub-1",
+				prompt: "",
+				images: [image],
+			},
+			actor,
+		);
+
+		expect(attachments.validatePromptRefs).toHaveBeenCalledWith("c1", [image]);
+		expect(runs.startRun).toHaveBeenCalled();
+		expect(requests.request).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				action: "agent.prompt",
+				payload: expect.objectContaining({
+					prompt: "",
+					attachments: [
+						expect.objectContaining({
+							fileId: "f1",
+							url: "/api/storage/download/canonical",
+						}),
+					],
+				}),
+			}),
+		);
+		expect(JSON.stringify(requests.request.mock.calls)).not.toContain("evil.test");
+	});
+
+	it.each([
+		["空文本且无图片", { prompt: "" }],
+		["空白文本且空图片数组", { prompt: "  ", images: [] }],
+		["缺 prompt 字段", { images: [{ fileId: "f1" }] }],
+	])("%s 拒绝且不创建 Run", async (_name, body) => {
+		const { controller, requests, runs, events } = makeController();
+		await expect(
+			controller.prompt(
+				"c1",
+				"s1",
+				{ rootDir: "D:\\", relativePath: "repo", type: "prompt", submissionId: "sub-1", ...body },
+				actor,
+			),
+		).rejects.toMatchObject({ response: { code: "PI_PROTOCOL_INVALID" } });
+		expect(requests.request).not.toHaveBeenCalled();
+		expect(runs.startRun).not.toHaveBeenCalled();
+		expect(events.publish).not.toHaveBeenCalled();
+	});
+
+	it("非法/过期图片引用在创建 Run 前拒绝", async () => {
+		const attachments = {
+			validatePromptRefs: vi.fn(async () => {
+				throw Object.assign(new Error("Attachment not found"), {
+					code: "PI_IMAGE_INVALID",
+				});
+			}),
+		};
+		const { controller, requests, runs, events } = makeController({ attachments });
+		await expect(
+			controller.prompt(
+				"c1",
+				"s1",
+				{
+					rootDir: "D:\\",
+					relativePath: "repo",
+					type: "prompt",
+					submissionId: "sub-1",
+					prompt: "",
+					images: [{ fileId: "stale" }],
+				},
+				actor,
+			),
+		).rejects.toMatchObject({ response: { code: "PI_IMAGE_INVALID" } });
+		expect(requests.request).not.toHaveBeenCalled();
+		expect(runs.startRun).not.toHaveBeenCalled();
+		expect(events.publish).not.toHaveBeenCalled();
 	});
 });

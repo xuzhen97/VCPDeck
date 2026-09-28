@@ -1,9 +1,10 @@
-import type { ComponentProps } from "react";
+import { forwardRef, type ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
-export function Input({ className, ...props }: ComponentProps<"input">) {
+export const Input = forwardRef<HTMLInputElement, ComponentProps<"input">>(function Input({ className, ...props }, ref) {
 	return (
 		<input
+			ref={ref}
 			className={cn(
 				"h-11 w-full rounded-lg border border-input bg-background/60 px-3 text-sm outline-none transition placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30",
 				className,
@@ -11,4 +12,4 @@ export function Input({ className, ...props }: ComponentProps<"input">) {
 			{...props}
 		/>
 	);
-}
+});

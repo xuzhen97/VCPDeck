@@ -1,21 +1,137 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
 	ClientInfo,
 	PiAttachmentRef,
 	PiCapabilityStatus,
 	PiCwdRef,
 	PiImagePlaceholder,
+	PiModelInfo,
 } from "@vcpdeck/shared";
 import { useSdk } from "@/api/context";
 import { uploadFile } from "@/api/upload-file";
 import { Drawer } from "@/components/ui/drawer";
 import { PiSessionSidebar } from "../pi/pi-session-sidebar.js";
 import { PiChatWindow } from "../pi/pi-chat-window.js";
-import { PiChatInput } from "../pi/pi-chat-input.js";
-import { PiRunDetails } from "../pi/pi-run-details.js";
+import { PiChatInput, type PiChatAttachmentDraft } from "../pi/pi-chat-input.js";
+import { PiRunDetails, THINKING_OPTIONS } from "../pi/pi-run-details.js";
 import { PiExtensionDialog } from "../pi/pi-extension-dialog.js";
-import { usePiSession } from "../pi/use-pi-session.js";
+import { usePiSession, type PiThinkingSelection } from "../pi/use-pi-session.js";
 import { setPiThinkingLoader } from "../pi/pi-thinking-loader.js";
+import type { PiToolExecutionMode, PiSessionJobSnapshot } from "@vcpdeck/shared";
+import {
+	MAX_PI_IMAGE_BYTES,
+	MAX_PI_IMAGES_PER_PROMPT,
+	MAX_PI_IMAGES_TOTAL_BYTES,
+	PI_IMAGE_MIME_TYPES,
+} from "@vcpdeck/shared";
+
+/** 附件草稿：`id` 稳定跨上传完成，`ref` 是服务端确认的短期引用。 */
+type AttachmentDraft = PiChatAttachmentDraft & { ref?: PiAttachmentRef; size: number };
+
+/** 上传前的本地校验；返回错误文案或 null。都使用与 Server 相同的上限（ADR-0035）。 */
+function validateAttachments(
+	existing: AttachmentDraft[],
+	files: File[],
+): string | null {
+	if (existing.length + files.length > MAX_PI_IMAGES_PER_PROMPT) {
+		return `一次最多 ${MAX_PI_IMAGES_PER_PROMPT} 张图片。`;
+	}
+	for (const file of files) {
+		if (!(PI_IMAGE_MIME_TYPES as readonly string[]).includes(file.type)) {
+			return "仅支持 PNG、JPEG、GIF、WebP 图片。";
+		}
+		if (file.size > MAX_PI_IMAGE_BYTES) {
+			return "单张图片不能超过 10 MiB。";
+		}
+	}
+	const total = [...existing.map((draft) => draft.size ?? 0), ...files.map((file) => file.size)];
+	if (total.reduce((sum, size) => sum + size, 0) > MAX_PI_IMAGES_TOTAL_BYTES) {
+		return "图片总量不能超过 100 MiB。";
+	}
+	return null;
+}
+
+/**
+ * Agent 布局的会话参数控件：模型、思考等级、执行模式的紧凑内联版本，
+ * 直接放进 composer 操作行，不再单独占一条设置栏。
+ *
+ * 语义与右栏 PiRunDetails 完全一致：只在 Owner 且会话空闲时可用；执行模式菜单展示服务端确认的
+ * 有效值与来源，`profile` 表示清除本会话覆盖、动态跟随当前绑定 Profile。
+ * 参数名仅保留给无障碍层（aria-label），避免重复文字噪声。
+ */
+function AgentSessionSettings({
+	job,
+	models,
+	model,
+	thinkingSelection,
+	disabled,
+	onModelChange,
+	onThinkingChange,
+	onExecutionModeChange,
+}: {
+	job: PiSessionJobSnapshot | null;
+	models: PiModelInfo[];
+	model: PiModelInfo | null;
+	thinkingSelection: PiThinkingSelection;
+	disabled: boolean;
+	onModelChange: (provider: string, modelId: string) => void;
+	onThinkingChange: (level: PiThinkingSelection) => void;
+	onExecutionModeChange: (mode: PiToolExecutionMode | null) => void;
+}) {
+	const mode = job?.effectiveExecutionMode;
+	const modelValue = model ? `${model.provider}\u0000${model.modelId}` : "";
+	const compactSelect =
+		"h-8 max-w-32 truncate rounded-lg border-0 bg-transparent px-1 text-xs text-muted-foreground outline-none transition hover:bg-secondary/70 focus:bg-secondary/70 disabled:opacity-50";
+	return <div
+		className="flex min-w-0 items-center gap-0.5"
+		data-testid="agent-session-settings"
+	>
+		<select
+			aria-label="会话模型"
+			className={`${compactSelect} max-w-40`}
+			disabled={disabled || !job?.isOwner || models.length === 0}
+			value={modelValue}
+			onChange={(event) => {
+				const [provider, modelId] = event.target.value.split("\u0000");
+				if (provider && modelId) onModelChange(provider, modelId);
+			}}
+		>
+			{/* 无候选时必须给出可见文案，否则空下拉框看起来像界面坏了。 */}
+			{models.length === 0 && <option value={modelValue}>{model ? `${model.provider} / ${model.modelId}` : "（暂无可用模型）"}</option>}
+			{models.map((item) => <option key={`${item.provider}\u0000${item.modelId}`} value={`${item.provider}\u0000${item.modelId}`}>{item.provider} / {item.modelId}</option>)}
+		</select>
+		<select
+			aria-label="会话思考等级"
+			className={compactSelect}
+			disabled={disabled || !job?.isOwner}
+			value={thinkingSelection}
+			onChange={(event) => onThinkingChange(event.target.value as PiThinkingSelection)}
+		>
+			{THINKING_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+		</select>
+		<select
+			aria-label="会话执行模式"
+			className={compactSelect}
+			value={job?.executionModeOverride ?? "profile"}
+			disabled={disabled || !job?.isOwner || !mode}
+			onChange={(event) => onExecutionModeChange(event.target.value === "profile" ? null : event.target.value as PiToolExecutionMode)}
+		>
+			<option value="profile">跟随 Profile{mode ? ` · ${mode}` : " · 未知"}</option>
+			<option value="approval">审批模式</option>
+			<option value="auto">自动执行</option>
+			<option value="yolo">YOLO（跳过工具策略限制）</option>
+		</select>
+		{mode === "yolo" && (
+			<span
+				role="status"
+				className="shrink-0 text-xs text-destructive"
+				title="YOLO 会跳过 Tool Policy，但仍受 Runtime 与操作系统权限限制。"
+			>
+				⚠ YOLO 会跳过 Tool Policy，但仍受 Runtime 与操作系统权限限制。
+			</span>
+		)}
+	</div>;
+}
 
 /**
  * 机器工作区 / Agent 对话视图：三栏 IDE 布局（左项目/会话、中对话、右详情）。
@@ -26,9 +142,11 @@ import { setPiThinkingLoader } from "../pi/pi-thinking-loader.js";
 export function PiPanel({
 	client,
 	leftSlot,
+	agentChatLayout = false,
 }: {
 	client: ClientInfo;
 	leftSlot?: ReactNode;
+	agentChatLayout?: boolean;
 }) {
 	const sdk = useSdk();
 	const capability: PiCapabilityStatus | null = useMemo(() => {
@@ -45,125 +163,181 @@ export function PiPanel({
 	} | null>(null);
 	const [leftOpen, setLeftOpen] = useState(false);
 	const [rightOpen, setRightOpen] = useState(false);
-	const [attachments, setAttachments] = useState<
-		Array<{
-			name: string;
-			status: "uploading" | "ready" | "error";
-			ref?: PiAttachmentRef;
-		}>
-	>([]);
+	const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
+	/** 草稿列表的逻辑权威：ref 同步更新，避免陈旧闭包把晚到结果写错上下文。 */
+	const attachmentsRef = useRef<AttachmentDraft[]>([]);
+	const [attachmentError, setAttachmentError] = useState<string | null>(null);
+	const [sending, setSending] = useState(false);
 	const [loadedImages, setLoadedImages] = useState<Record<string, string>>({});
+	const [sessionError, setSessionError] = useState<string | null>(null);
+	const contextGeneration = useRef(0);
 
 	const { state, actions } = usePiSession(sdk.pi);
 
+	const mutateAttachments = useCallback(
+		(fn: (current: AttachmentDraft[]) => AttachmentDraft[]) => {
+			const next = fn(attachmentsRef.current);
+			attachmentsRef.current = next;
+			setAttachments(next);
+		},
+		[],
+	);
+
+	const revokeDrafts = useCallback((drafts: AttachmentDraft[]) => {
+		for (const draft of drafts) {
+			if (draft.previewUrl) URL.revokeObjectURL(draft.previewUrl);
+		}
+	}, []);
+
+	const clearAttachments = useCallback(() => {
+		revokeDrafts(attachmentsRef.current);
+		mutateAttachments(() => []);
+		setAttachmentError(null);
+	}, [mutateAttachments, revokeDrafts]);
+
+	const removeAttachment = useCallback(
+		(id: string) => {
+			const target = attachmentsRef.current.find((item) => item.id === id);
+			if (target) revokeDrafts([target]);
+			mutateAttachments((current) => current.filter((item) => item.id !== id));
+			setAttachmentError(null);
+		},
+		[mutateAttachments, revokeDrafts],
+	);
+
+	// 卸载时释放对象 URL，避免草稿预览泄漏。
+	useEffect(
+		() => () => revokeDrafts(attachmentsRef.current),
+		[revokeDrafts],
+	);
+
 	const openSession = useCallback(
-		async (sid: string) => {
-			if (!cwdRef) return;
+		async (sid: string, project: PiCwdRef) => {
+			const generation = ++contextGeneration.current;
+			setCwdRef(project);
 			setSessionId(sid);
-			await actions.openSession(client.clientId, sid, cwdRef);
+			setInfo(null);
+			setSessionError(null);
+			clearAttachments();
+			setLoadedImages({});
 			try {
-				const detail = (await sdk.pi.sessions.get(
-					client.clientId,
-					sid,
-					cwdRef,
-				)) as {
+				await actions.openSession(client.clientId, sid, project);
+				const detail = (await sdk.pi.sessions.get(client.clientId, sid, project)) as {
 					info: { id: string; name: string; firstMessage: string | null };
 				};
+				if (contextGeneration.current !== generation) return;
 				setInfo(detail.info);
-			} catch {
+				setLeftOpen(false);
+			} catch (cause) {
+				if (contextGeneration.current !== generation) return;
 				setInfo(null);
+				setSessionError(cause instanceof Error ? cause.message : "打开会话失败");
 			}
 		},
-		[actions, cwdRef, client.clientId, sdk.pi],
+		[actions, client.clientId, sdk.pi],
 	);
 
 	const handleCreated = useCallback(
-		(sid: string) => {
-			setSessionId(sid);
-			void openSession(sid);
-			setLeftOpen(false);
-		},
+		(sid: string, project: PiCwdRef) => { void openSession(sid, project); },
 		[openSession],
 	);
 
 	const handleCwdChange = useCallback(
 		(ref: PiCwdRef) => {
+			contextGeneration.current++;
 			setCwdRef(ref);
 			setSessionId(null);
 			setInfo(null);
-			setAttachments([]);
+			setSessionError(null);
+			clearAttachments();
 			setLoadedImages({});
 			actions.close();
 		},
-		[actions],
+		[actions, clearAttachments],
 	);
 
 	/** 删除当前 active session 后：清空所有会话绑定状态，关闭事件流。cwd 不动。 */
 	const handleDeselect = useCallback(() => {
+		contextGeneration.current++;
 		setSessionId(null);
 		setInfo(null);
-		setAttachments([]);
+		setSessionError(null);
+		clearAttachments();
 		setLoadedImages({});
 		actions.reset();
 		actions.close();
-	}, [actions]);
+	}, [actions, clearAttachments]);
 
 	const handleSelectSession = useCallback(
-		(sid: string | null) => {
+		(sid: string | null, project?: PiCwdRef) => {
 			if (sid === null) handleDeselect();
-			else void openSession(sid);
+			else if (project) void openSession(sid, project);
+			else if (cwdRef) void openSession(sid, cwdRef);
 		},
-		[handleDeselect, openSession],
+		[handleDeselect, openSession, cwdRef],
 	);
 
 	/** 选图 → create upload → XHR PUT → complete → refs */
+	/** 选图/粘贴共用：本地校验 → create upload → XHR PUT → complete → 写入草稿 */
 	const handlePickFiles = useCallback(
-		async (files: FileList) => {
-			const list = Array.from(files);
-			if (attachments.length + list.length > 10) return;
-			const pending = list.map((f) => ({
-				name: f.name,
+		(files: File[]) => {
+			const invalid = validateAttachments(attachmentsRef.current, files);
+			if (invalid) {
+				setAttachmentError(invalid);
+				return;
+			}
+			setAttachmentError(null);
+			const pending: AttachmentDraft[] = files.map((file) => ({
+				id: crypto.randomUUID(),
+				name: file.name,
 				status: "uploading" as const,
+				size: file.size,
+				previewUrl: URL.createObjectURL(file),
 			}));
-			setAttachments((prev) => [...prev, ...pending]);
-			for (const file of list) {
-				try {
-					const [session] = (await sdk.pi.attachments.create(client.clientId, [
-						{
-							filename: file.name,
-							size: file.size,
-							mimeType: file.type || "image/png",
-						},
-					])) as Array<{
-						fileId: string;
-						uploadUrl: string;
-						expiresAt: number;
-					}>;
-					if (!session) throw new Error("create failed");
-					await uploadFile(session.uploadUrl, file);
-					const ref = (await sdk.pi.attachments.complete(
-						client.clientId,
-						session.fileId,
-					)) as PiAttachmentRef;
-					setAttachments((prev) =>
-						prev.map((a) =>
-							a.name === file.name && a.status === "uploading"
-								? { name: a.name, status: "ready" as const, ref }
-								: a,
-						),
-					);
-				} catch {
-					setAttachments((prev) =>
-						prev.map((a) =>
-							a.name === file.name
-								? { name: a.name, status: "error" as const }
-								: a,
-						),
-					);
-				}
+			mutateAttachments((current) => [...current, ...pending]);
+			// 各文件并行上传：一张图卡住不应阻塞其余图片。
+			for (const [index, file] of files.entries()) {
+				const draft = pending[index]!;
+				void (async () => {
+					try {
+						const [session] = (await sdk.pi.attachments.create(client.clientId, [
+							{
+								filename: file.name,
+								size: file.size,
+								mimeType: file.type || "image/png",
+							},
+						])) as Array<{
+							fileId: string;
+							uploadUrl: string;
+							expiresAt: number;
+						}>;
+						if (!session) throw new Error("create failed");
+						await uploadFile(session.uploadUrl, file);
+						const ref = (await sdk.pi.attachments.complete(
+							client.clientId,
+							session.fileId,
+						)) as PiAttachmentRef;
+						// 只写入仍在列表中的 id：切会话/移除草稿后列表已无该 id，晚到结果自然丢弃。
+						mutateAttachments((current) =>
+							current.map((item) =>
+								item.id === draft.id
+									? { ...item, status: "ready" as const, ref }
+									: item,
+							),
+						);
+					} catch {
+						mutateAttachments((current) =>
+							current.map((item) =>
+								item.id === draft.id
+									? { ...item, status: "error" as const }
+									: item,
+							),
+						);
+					}
+				})();
 			}
 		},
-		[attachments.length, client.clientId, sdk.pi],
+		[client.clientId, mutateAttachments, sdk.pi],
 	);
 
 	/** 历史图片惰性加载（entryContent → data URL） */
@@ -281,64 +455,120 @@ export function PiPanel({
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-2">
 			<div className="flex min-h-0 flex-1 gap-3">
-				{/* 左栏：桌面常驻，窄屏抽屉 */}
+				{/* 左栏：桌面常驻（Agent 宽屏为项目导航器），窄屏由抽屉提供 */}
 				<aside
 					aria-label="项目与会话"
-					className="hidden w-72 shrink-0 overflow-y-auto rounded border border-border p-3 lg:block"
+					className={agentChatLayout ? "hidden w-72 shrink-0 lg:block" : "hidden w-72 shrink-0 overflow-y-auto rounded border border-border p-3 lg:block"}
 					data-testid="pi-left-panel"
 				>
-					{leftSlot}
-					<PiSessionSidebar
-						pi={sdk.pi}
-						files={filesApi}
-						clientId={client.clientId}
-						cwdRef={cwdRef}
-						onCwdChange={handleCwdChange}
-						activeSessionId={sessionId}
-						mutableSessionIds={mutableSessionIds}
-						onSelectSession={handleSelectSession}
-						onCreated={handleCreated}
-					/>
+					{agentChatLayout ? (
+						// 不套卡片：Agent 宽屏下项目/会话就是一块平整导航，跟左侧全局导航视觉相连。
+						<div className="hidden h-full min-h-0 flex-col gap-2 overflow-y-auto border-r border-border/60 px-3 py-3 lg:flex">
+							{leftSlot}
+							<PiSessionSidebar
+								pi={sdk.pi} files={filesApi} clientId={client.clientId} cwdRef={cwdRef}
+								onCwdChange={handleCwdChange} activeSessionId={sessionId} mutableSessionIds={mutableSessionIds}
+								onSelectSession={(sid, project) => handleSelectSession(sid, project ?? cwdRef ?? undefined)}
+								onCreated={(sid, project) => { const target = project ?? cwdRef; if (target) handleCreated(sid, target); }}
+								agentChatLayout
+							/>
+						</div>
+					) : (
+						<>
+							{leftSlot}
+							<PiSessionSidebar
+								pi={sdk.pi} files={filesApi} clientId={client.clientId} cwdRef={cwdRef}
+								onCwdChange={handleCwdChange} activeSessionId={sessionId} mutableSessionIds={mutableSessionIds}
+								onSelectSession={(sid) => handleSelectSession(sid)}
+								onCreated={(sid) => { if (cwdRef) handleCreated(sid, cwdRef); }}
+							/>
+						</>
+					)}
 				</aside>
 
 				{/* 中栏：对话时间线 */}
 				<main
 					aria-label="Pi 对话"
-					className="flex min-h-0 min-w-0 flex-1 flex-col rounded border border-border"
+					className={agentChatLayout ? "flex min-h-0 min-w-0 flex-1 flex-col" : "flex min-h-0 min-w-0 flex-1 flex-col rounded border border-border"}
 					data-testid="pi-center-panel"
 				>
-					<div className="min-h-0 flex-1">
-						<PiChatWindow
-							state={state}
-							info={info}
-							sessionId={sessionId}
-							onLoadMore={() => {
-								if (cwdRef && sessionId) void actions.loadMore();
-							}}
-							onImageLoad={(block) => void handleImageLoad(block)}
-							imageUrls={loadedImages}
-						/>
-					</div>
+					{agentChatLayout ? (
+						<div className="flex min-h-0 flex-1 flex-col">
+							{sessionId ? (
+								<>
+									<div className="flex items-center gap-2 border-b border-border/60 px-5 py-2.5">
+										<p className="min-w-0 flex-1 truncate text-sm font-medium">
+											{info?.name || info?.firstMessage || "新会话"}
+										</p>
+										<span className="shrink-0 text-xs text-muted-foreground">
+											{cwdRef?.relativePath || cwdRef?.rootDir}
+										</span>
+									</div>
+									<PiChatWindow state={state} info={info} hideSessionTitle sessionId={sessionId} onLoadMore={() => void actions.loadMore()} onImageLoad={(block) => void handleImageLoad(block)} imageUrls={loadedImages} />
+								</>
+							) : (
+								<div className="m-auto flex flex-col items-center gap-2 px-6 text-center">
+									<p className="text-base font-medium">选择一个项目开始</p>
+									<p className="max-w-sm text-sm text-muted-foreground">
+										从左侧选择项目，或新建任务；项目与会话都在目标机器上。
+									</p>
+								</div>
+							)}
+						</div>
+					) : (
+						<div className="min-h-0 flex-1"><PiChatWindow state={state} info={info} sessionId={sessionId} onLoadMore={() => { if (cwdRef && sessionId) void actions.loadMore(); }} onImageLoad={(block) => void handleImageLoad(block)} imageUrls={loadedImages} /></div>
+					)}
+					{sessionError && <p role="alert" className="px-5 text-sm text-destructive">{sessionError}</p>}
 					<PiChatInput
+						/* 上下文变化时重挂载：草稿文本与 prompt/steer/followUp 模式属于单个会话，
+						   否则切项目/会话后残留草稿会被发到错误的会话。 */
+						key={`${client.clientId}\u0000${cwdRef?.rootDir ?? ""}\u0000${cwdRef?.relativePath ?? ""}\u0000${sessionId ?? "none"}`}
 						status={state.status}
+						composerClassName={agentChatLayout ? "mx-auto w-full max-w-4xl px-5 pb-5" : undefined}
 						disabled={!cwdRef || !sessionId || isObserver}
+						sendPending={sending}
+						{...(agentChatLayout
+							? {
+									settingsSlot: (
+										<AgentSessionSettings
+											job={state.job}
+											models={state.models}
+											model={state.agentState?.model ?? null}
+											thinkingSelection={state.thinkingSelection}
+											disabled={settingsDisabled || state.status === "disconnected"}
+											onModelChange={(provider, modelId) => void actions.setModel(provider, modelId)}
+											onThinkingChange={(level) => void actions.setThinking(level)}
+											onExecutionModeChange={(mode) => void actions.setExecutionMode(mode)}
+										/>
+									),
+								}
+							: {})}
 						attachments={attachments.map((a) => ({
+							id: a.id,
 							name: a.name,
 							status: a.status,
+							...(a.previewUrl ? { previewUrl: a.previewUrl } : {}),
 						}))}
-						onPickFiles={(files) => void handlePickFiles(files)}
-						onRemoveAttachment={(index) =>
-							setAttachments((prev) => prev.filter((_, i) => i !== index))
-						}
-						onSend={(prompt) => {
-							const refs = attachments
+						attachmentError={attachmentError}
+						onPickFiles={handlePickFiles}
+						onRemoveAttachment={removeAttachment}
+						onSend={async (prompt) => {
+							const refs = attachmentsRef.current
 								.filter((a) => a.status === "ready" && a.ref)
 								.map((a) => a.ref!);
-							setAttachments([]);
-							void actions.send({
-								prompt,
-								images: refs.length > 0 ? refs : undefined,
-							});
+							setSending(true);
+							try {
+								const result = await actions.send({
+									prompt,
+									...(refs.length > 0 ? { images: refs } : {}),
+								});
+								// 只有被接受才丢弃草稿；被拒时保留，让用户能重试。
+								if (result !== "accepted") return false;
+								clearAttachments();
+								return true;
+							} finally {
+								setSending(false);
+							}
 						}}
 						onSteer={(message) => void actions.steer(message)}
 						onFollowUp={(message) => void actions.followUp(message)}
@@ -351,7 +581,7 @@ export function PiPanel({
 				{/* 右栏：桌面常驻，窄屏抽屉 */}
 				<aside
 					aria-label="运行详情"
-					className="hidden w-80 shrink-0 overflow-y-auto rounded border border-border p-3 xl:block 2xl:w-96"
+					className={agentChatLayout ? "hidden" : "hidden w-80 shrink-0 overflow-y-auto rounded border border-border p-3 xl:block 2xl:w-96"}
 					data-testid="pi-right-panel"
 				>
 					<PiRunDetails
@@ -380,7 +610,7 @@ export function PiPanel({
 				</button>
 				<button
 					type="button"
-					className="rounded border border-border px-2 py-1 text-xs xl:hidden"
+					className={`rounded border border-border px-2 py-1 text-xs ${agentChatLayout ? "" : "xl:hidden"}`}
 					onClick={() => setRightOpen(true)}
 				>
 					详情
@@ -392,18 +622,16 @@ export function PiPanel({
 				title="项目与会话"
 				side="left"
 			>
-				{leftSlot}
-				<PiSessionSidebar
-					pi={sdk.pi}
-					files={filesApi}
-					clientId={client.clientId}
-					cwdRef={cwdRef}
-					onCwdChange={handleCwdChange}
-					activeSessionId={sessionId}
-					mutableSessionIds={mutableSessionIds}
-					onSelectSession={handleSelectSession}
-					onCreated={handleCreated}
-				/>
+				{/* 关闭时条件渲染：抽屉只做位移隐藏，无条件渲染会让导航器与输入控件重复挂载。 */}
+				{leftOpen && <div className="flex min-h-0 flex-1 flex-col">
+					{leftSlot}
+					<PiSessionSidebar
+						pi={sdk.pi} files={filesApi} clientId={client.clientId} cwdRef={cwdRef}
+						onCwdChange={handleCwdChange} activeSessionId={sessionId} mutableSessionIds={mutableSessionIds}
+						onSelectSession={(sid, project) => handleSelectSession(sid, project ?? cwdRef ?? undefined)}
+						onCreated={(sid, project) => { const target = project ?? cwdRef; if (target) handleCreated(sid, target); }} agentChatLayout={agentChatLayout}
+					/>
+				</div>}
 			</Drawer>
 			<Drawer
 				open={rightOpen}
