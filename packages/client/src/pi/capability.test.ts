@@ -1,12 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
 import { probePiCapability, type ProbeEnv } from "./capability.js";
+import type { PiShellResolution } from "./shell.js";
+
+/** Windows 只有 PowerShell、没有 bash（实测事故机器 gs-local/gs-shanxi 的环境）。 */
+const WINDOWS_NO_BASH: PiShellResolution = {
+	bash: null,
+	bashSource: null,
+	powershell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+	pathDirs: ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0"],
+};
+
+function bashFrom(
+	source: "git-bash" | "path" | "system",
+	path: string,
+): ProbeEnv["resolveShells"] {
+	return async () => ({
+		bash: path,
+		bashSource: source,
+		powershell: null,
+		pathDirs: [],
+	});
+}
 
 function fakeEnv(overrides: Partial<ProbeEnv> = {}): ProbeEnv {
 	return {
 		nodeVersion: "22.19.0",
 		platform: "win32",
-		existsGitBash: async () => false,
-		findBashInPath: async () => false,
+		resolveShells: bashFrom("git-bash", "C:\\Program Files\\Git\\bin\\bash.exe"),
 		forkProbeWorker: async () => ({ sdkVersion: "0.86.0", providerIds: ["anthropic", "openai"], error: null }),
 		ensureDataRootWritable: async () => true,
 		resolveBundle: async () => null,
@@ -16,9 +36,7 @@ function fakeEnv(overrides: Partial<ProbeEnv> = {}): ProbeEnv {
 
 describe("probePiCapability", () => {
 	it("Windows 全满足时返回 available + git-bash 来源 + 隔离模式字段", async () => {
-		const result = await probePiCapability(
-			fakeEnv({ existsGitBash: async () => true }),
-		);
+		const result = await probePiCapability(fakeEnv());
 		expect(result).toMatchObject({
 			available: true,
 			sdkVersion: "0.86.0",
@@ -32,34 +50,34 @@ describe("probePiCapability", () => {
 
 	it("PATH bash 作为最后来源", async () => {
 		const result = await probePiCapability(
-			fakeEnv({ findBashInPath: async () => true }),
+			fakeEnv({ resolveShells: bashFrom("path", "D:\\tools\\bash.exe") }),
 		);
 		expect(result).toMatchObject({ available: true, shellKind: "path" });
 	});
 
-	it("Linux 使用 system bash（bash 在 PATH）", async () => {
+	it("Linux 使用 system bash", async () => {
 		const result = await probePiCapability(
 			fakeEnv({
 				platform: "linux",
-				existsGitBash: async () => true,
-				findBashInPath: async () => true,
+				resolveShells: bashFrom("system", "/bin/bash"),
 			}),
 		);
 		expect(result).toMatchObject({ available: true, shellKind: "system" });
 	});
 
-	it("Linux 无 bash 返回 PI_BASH_NOT_FOUND", async () => {
+	// 以下两条是本次修复的核心语义：shell 缺失只影响 shell 工具，不是整机门禁。
+	it("Windows 无 bash（只有 PowerShell）仍可用——不再误判为不支持", async () => {
 		const result = await probePiCapability(
-			fakeEnv({
-				platform: "linux",
-				existsGitBash: async () => true,
-				findBashInPath: async () => false,
-			}),
+			fakeEnv({ resolveShells: async () => WINDOWS_NO_BASH }),
 		);
-		expect(result).toMatchObject({
-			available: false,
-			code: "PI_BASH_NOT_FOUND",
-		});
+		expect(result).toMatchObject({ available: true, shellKind: "system" });
+	});
+
+	it("Linux 无 bash 仍可用（SDK 在 POSIX 会退到 sh）", async () => {
+		const result = await probePiCapability(
+			fakeEnv({ platform: "linux", resolveShells: async () => WINDOWS_NO_BASH }),
+		);
+		expect(result).toMatchObject({ available: true, shellKind: "system" });
 	});
 
 	it("Node 过旧返回 PI_NODE_UNSUPPORTED", async () => {
@@ -71,19 +89,10 @@ describe("probePiCapability", () => {
 		});
 	});
 
-	it("Windows 找不到 Bash 返回 PI_BASH_NOT_FOUND", async () => {
-		const result = await probePiCapability(fakeEnv({}));
-		expect(result).toMatchObject({
-			available: false,
-			code: "PI_BASH_NOT_FOUND",
-		});
-		expect(result).not.toHaveProperty("sessionJobProtocolVersion");
-	});
-
 	it("Worker 失败返回 PI_RUNTIME_UNAVAILABLE", async () => {
 		const result = await probePiCapability(
 			fakeEnv({
-				existsGitBash: async () => true,
+				resolveShells: async () => WINDOWS_NO_BASH,
 				forkProbeWorker: async () => ({
 					sdkVersion: "",
 					providerIds: [],
@@ -102,10 +111,7 @@ describe("probePiCapability", () => {
 
 	it("VCPDeck data root 不可写返回 PI_RUNTIME_UNAVAILABLE，且不回退用户 Pi", async () => {
 		const result = await probePiCapability(
-			fakeEnv({
-				existsGitBash: async () => true,
-				ensureDataRootWritable: async () => false,
-			}),
+			fakeEnv({ ensureDataRootWritable: async () => false }),
 		);
 		expect(result).toMatchObject({
 			available: false,
@@ -120,17 +126,13 @@ describe("probePiCapability", () => {
 			providerIds: ["anthropic", "openai"],
 			error: null,
 		}));
-		const result = await probePiCapability(
-			fakeEnv({ existsGitBash: async () => true, forkProbeWorker }),
-		);
+		const result = await probePiCapability(fakeEnv({ forkProbeWorker }));
 		expect(result.available).toBe(true);
 		expect(forkProbeWorker).toHaveBeenCalledOnce();
 	});
 
 	it("结果字段集合固定，不含路径或凭据", async () => {
-		const result = await probePiCapability(
-			fakeEnv({ existsGitBash: async () => true }),
-		);
+		const result = await probePiCapability(fakeEnv());
 		expect(Object.keys(result).sort()).toEqual([
 			"available",
 			"configMode",
@@ -171,7 +173,7 @@ describe("probePiCapability 的 Bundle 能力上报", () => {
 		const status = await probePiCapability(
 			fakeEnv({
 				platform: "linux",
-				findBashInPath: async () => true,
+				resolveShells: bashFrom("system", "/bin/bash"),
 				resolveBundle: async () => verified,
 			}),
 		);
@@ -191,7 +193,7 @@ describe("probePiCapability 的 Bundle 能力上报", () => {
 		const status = await probePiCapability(
 			fakeEnv({
 				platform: "linux",
-				findBashInPath: async () => true,
+				resolveShells: bashFrom("system", "/bin/bash"),
 				resolveBundle: async () => null,
 			}),
 		);
@@ -206,7 +208,7 @@ describe("probePiCapability 的 Bundle 能力上报", () => {
 		const status = await probePiCapability(
 			fakeEnv({
 				platform: "linux",
-				findBashInPath: async () => true,
+				resolveShells: bashFrom("system", "/bin/bash"),
 				forkProbeWorker: async () => ({
 					sdkVersion: "",
 					providerIds: [],

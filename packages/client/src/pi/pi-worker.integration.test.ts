@@ -634,8 +634,12 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 		const capability = await probePiCapability({
 			nodeVersion: process.versions.node,
 			platform: process.platform,
-			existsGitBash: async () => true,
-			findBashInPath: async () => true,
+			resolveShells: async () => ({
+				bash: "/bin/bash",
+				bashSource: "system",
+				powershell: null,
+				pathDirs: [],
+			}),
 			forkProbeWorker: async () => ({ sdkVersion: "0.86.0", providerIds: ["anthropic"], error: null }),
 			ensureDataRootWritable: async () => true,
 			resolveBundle: async () => null,

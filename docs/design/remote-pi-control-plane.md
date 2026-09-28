@@ -689,7 +689,9 @@ interface PiCapabilityStatus {
 }
 ```
 
-新的本地 capability 只检查 Node、Bash、Release 内 Pi SDK、VCPDeck data root 和 Bundle manifest。“至少一个已认证模型”迁移到 RuntimeSpec ready 阶段。
+新的本地 capability 只检查 Node、Release 内 Pi SDK（能否加载）、VCPDeck data root 和 Bundle manifest。“至少一个已认证模型”迁移到 RuntimeSpec ready 阶段。
+
+> **落地修订（ADR-0036）**：Bash **不是**整机门禁。shell 缺失只决定 `shellKind` 与工具集合——Windows 上 Pi 的 PowerShell 工具是并列的一等能力（SDK 的 `bash` 与 `powershell` 同为内置工具，POSIX 无 bash 时还会退到 `sh`），因此无 Git Bash 的机器仍可完整使用 Pi，只是没有 `bash` 工具。Release 的 Pi SDK 以**单文件产物**发布（`client/node_modules/@earendil-works/pi-coding-agent/`），不再安装真依赖树。
 
 ## 17. Server API 与管理界面
 

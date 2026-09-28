@@ -37,6 +37,7 @@ import {
 	bundleClient,
 	bundleLauncher,
 	bundlePiExtension,
+	bundlePiSdk,
 	bundleServer,
 } from "./bundle-apps.js";
 import { buildBundleManifest } from "../packages/client/src/pi-bundle/manifest.js";
@@ -107,9 +108,9 @@ export const EXTERNAL_DEPS: Record<"server" | "client", string[]> = {
 		"@libsql/linux-x64-gnu",
 		"prisma",
 	],
+	// Pi SDK 不在此列：它以单文件产物直接写入 node_modules（见 bundlePiSdk），
+	// 安装真依赖树会退回「按文件数计费」的首开成本。
 	client: [
-		"@earendil-works/pi-agent-core",
-		"@earendil-works/pi-coding-agent",
 		"@lydell/node-pty",
 		"@lydell/node-pty-win32-x64",
 		"@lydell/node-pty-linux-x64",
@@ -419,6 +420,16 @@ async function stagePackage(
 		throw new Error(
 			`${pkgName} 外部依赖安装失败: ${e instanceof Error ? e.message : String(e)}`,
 		);
+	}
+
+	// Pi SDK 单文件产物写到 node_modules 下（按包名解析），使 src 里的
+	// `import("@earendil-works/pi-coding-agent")` 无需改动即可命中（见 bundlePiSdk）。
+	// 必须在依赖安装**之后**：pnpm install 会清掉不在依赖图里的 node_modules 条目。
+	if (pkgName === "client") {
+		const sdkEntry = await bundlePiSdk(
+			join(target, "node_modules", "@earendil-works", "pi-coding-agent"),
+		);
+		console.log(`[pack-release] Pi SDK 单文件: ${sdkEntry}`);
 	}
 }
 

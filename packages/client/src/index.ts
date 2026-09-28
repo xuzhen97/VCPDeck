@@ -20,7 +20,8 @@ import {
 	type PiWorkerHandle,
 } from "./pi/supervisor.js";
 import type { PiWorkerRequestMessage } from "./pi/worker-protocol.js";
-import { getCachedClientBundle, probePiCapability } from "./pi/capability.js";
+import { getCachedClientBundle, probePiCapability, PROBE_WORKER_TIMEOUT_MS } from "./pi/capability.js";
+import { applyShellPathDirs, resolvePiShells } from "./pi/shell.js";
 import { resolveVcpPiRuntimePaths } from "./pi/runtime-paths.js";
 import { evaluateRuntimeSpec } from "./pi/runtime-spec.js";
 import {
@@ -73,7 +74,23 @@ export function isMigrationVerifyOnly(env: NodeJS.ProcessEnv = process.env): boo
 }
 
 function main() {
-	connect();
+	void installPiShellPath().finally(() => connect());
+}
+
+/**
+ * 启动时把解析到的 shell 目录前置到进程 PATH。
+ *
+ * 原因：Pi SDK 解析 PowerShell 只走 `findExecutableOnPath`（内部 `where`/`which`），
+ * 而 Client 以 SYSTEM 计划任务运行时 PATH 可能被裁剪。在这里统一修正后，主进程及其所有
+ * 子进程（Pi worker、exec Job、PTY）都继承同一份 PATH，SDK 的解析结果不再随环境漂移。
+ * 非致命：解析失败不影响连接与其它能力。
+ */
+async function installPiShellPath(): Promise<void> {
+	try {
+		applyShellPathDirs(await resolvePiShells());
+	} catch {
+		// 探测失败：保持原环境，Pi 的 shell 工具会在调用时报稳定错误。
+	}
 }
 
 // Auto-run when executed directly: node dist/index.js
@@ -266,11 +283,16 @@ export function attachPiBridge(
 				reportState(generation);
 			};
 			currentRegistered = onRegistered;
-			// probe 最多等待 3 秒：超时降级为无 Pi 能力，不阻塞注册
+			// Pi 探测预算：单文件 SDK 产物的真实成本约百毫秒级（见 capability.ts
+			// PROBE_WORKER_TIMEOUT_MS），这里比 worker 上限多留 4s，保证 worker 自己
+			// 的失败原因（崩溃 / 卡死）能回传到 REGISTER，而不是被降级成「无 Pi 字段」。
 			const piStatus = await Promise.race([
 				deps.getPiStatus(),
 				new Promise<undefined>((resolve) =>
-					setTimeout(() => resolve(undefined), 3000),
+					setTimeout(
+						() => resolve(undefined),
+						PROBE_WORKER_TIMEOUT_MS + 4_000,
+					),
 				),
 			]).catch(() => undefined);
 			const terminalStatus = await deps.getTerminalStatus().catch(() => undefined);
@@ -374,15 +396,16 @@ export function connect(): Socket {
 		return terminalReady;
 	}
 
-	// 能力探测统一 3s 上限：原生后端加载异常慢时不得阻塞 REGISTER（超时/失败按不可用降级，由桥内 .catch 兜底）。
-	function probeWithTimeout<T>(probe: () => Promise<T>): Promise<T> {
+	// 能力探测上限：终端/特权探测保持 3s；Pi 探测需覆盖 SDK worker 加载，单独放宽
+	//（见下方 getPiStatus），两者都不得阻塞 REGISTER 超过各自上限。
+	function probeWithTimeout<T>(probe: () => Promise<T>, timeoutMs = 3000): Promise<T> {
 		return new Promise<T>((resolve, reject) => {
 			let settled = false;
 			const timer = setTimeout(() => {
 				if (settled) return;
 				settled = true;
 				reject(new Error("capability probe timeout"));
-			}, 3000);
+			}, timeoutMs);
 			(timer as { unref?: () => void }).unref?.();
 			probe()
 				.then((value) => {
@@ -405,7 +428,7 @@ export function connect(): Socket {
 		{
 		clientId: CLIENT_ID,
 		supervisor,
-		getPiStatus: () => probeWithTimeout(probePiCapability),
+		getPiStatus: () => probeWithTimeout(probePiCapability, PROBE_WORKER_TIMEOUT_MS + 4_000),
 		getTerminalStatus: () => probeWithTimeout(probeTerminalCapability),
 		// 特权探测仅 Linux；非 Linux 两项均为 undefined → 整体未报告（保持 Windows 原语义）。
 		// sudo 探测包统一 3s 超时：超时可视为非交互 sudo 不可用，失败关闭且不阻塞 REGISTER。

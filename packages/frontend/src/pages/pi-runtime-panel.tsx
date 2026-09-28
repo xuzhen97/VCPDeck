@@ -19,6 +19,10 @@ const CONFIG_STATE_COPY: Record<PiRuntimeStatus["configState"], string> = {
 
 /** 原因码 → 可诊断中文说明；未知码原样展示（不猜测含义）。 */
 const REASON_COPY: Record<string, string> = {
+	PI_CLIENT_UNSUPPORTED: "此 Client 版本不支持 Pi（协议版本不匹配或未上报能力）",
+	PI_NODE_UNSUPPORTED: "目标机 Node 版本过低（需 >= 22.19.0）",
+	PI_BASH_NOT_FOUND: "目标机缺少 Pi 可用的 Bash",
+	PI_RUNTIME_UNAVAILABLE: "目标机 Pi 运行时不可用（SDK 加载失败或数据目录不可写）",
 	PI_CONFIG_UNAVAILABLE: "缺少绑定或 Server 凭据密钥未配置",
 	PI_CREDENTIAL_UNAVAILABLE: "凭据不可用（缺失、撤销或 provider 不覆盖）",
 	PI_RUNTIME_SPEC_INCOMPATIBLE: "运行配置与当前 Client 不兼容",

@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **Pi 不再因目标机器环境差异被永久禁用（[ADR-0036](./docs/adr/0036-pi-sdk-single-file-and-shell-capability.md)）**：带实时扫描的目标机上每个文件首次打开约 19.6ms，而 Release 的 Pi SDK 是真 `node_modules`（约 2,400 个 ESM 文件），冷加载达 47.8s，稳定超出探测上限，机器被记为 `PI_CLIENT_UNSUPPORTED` 且绑定后无法恢复。现在 Pi SDK 以**单文件产物**发布（`define PI_BUNDLED_NODE=true`，自带 package.json；扩展与插件运行时 `import` Pi SDK / `typebox` 解析到内存模块，不依赖目标机 node_modules），探测只付一次文件打开，实测 0.36–0.5s。
+- **缺 Git Bash 不再等于不能用 Pi**：Windows 上 Pi 的 `powershell` 与 `bash` 是并列内置工具，此前缺 bash 会整机禁用（实测影响 2 台机器）。现在 shell 缺失只影响 `shellKind` 与会话工具集合：Windows 默认可用 PowerShell，检测到 Git Bash 才额外提供 `bash`；shell 由 VCPDeck 自己做绝对路径解析（补上 `%ProgramFiles(x86)%\Git` 与 `%SystemRoot%\System32\WindowsPowerShell\v1.0`），启动时前置到进程 PATH 并把 bash 路径注入 Pi 内存 settings，不再依赖被裁剪的 PATH。
+- **Pi 探测失败不再粘滞，且保留真实原因**：worker 失败结果不进入进程内缓存（此前一次抖动会持续到进程重启）；子进程崩溃、启动失败与超时现在是三个不同消息（此前崩溃伪装成超时）；Server 不再把 Client 上报的 `PI_NODE_UNSUPPORTED` / `PI_BASH_NOT_FOUND` / `PI_RUNTIME_UNAVAILABLE` 统一覆盖成 `PI_CLIENT_UNSUPPORTED`，`/agent/runtime` 页面也会显示对应中文说明。
+
 ## [0.12.0] - 2026-09-28
 
 ### Breaking

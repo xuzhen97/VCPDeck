@@ -17,6 +17,7 @@ import {
 } from "@vcpdeck/shared";
 import { projectPiEvent } from "./event-projector.js";
 import { toolSetsFor } from "./runtime-spec.js";
+import { filterShellTools, resolvePiShells } from "./shell.js";
 import { installToolPolicyBridge } from "./tool-policy-bridge.js";
 
 /**
@@ -129,12 +130,21 @@ export function startPiAgentSession(
 			options.toolPolicy,
 			options.toolExecutionMode,
 		);
+		// shell 解析一次，同时用于两处：
+		// 1. `Settings.shellPath`：SDK 构造 bash 工具时读它（`createAllToolDefinitions` →
+		//    `bash: { shellPath }`），因此 bash 工具用绝对路径，不依赖宿主 PATH；
+		// 2. 工具集合按平台可用性过滤：Windows 无 bash 时不能把 bash 留给模型（每次调用都报错）。
+		const shells = await resolvePiShells();
+		const availableTools = filterShellTools(tools, shells, process.platform);
 		const services = await (await getSdk()).createAgentSessionServices({
 			cwd: sessionManager.getCwd(),
 			agentDir,
 			modelRuntime: options.modelRuntime as never,
-			// VCPDeck 不持久化 Pi settings，也不读用户 settings.json。
-			settingsManager: sdk.SettingsManager.inMemory(),
+			// VCPDeck 不持久化 Pi settings，也不读用户 settings.json；但会把本机解析到的
+			// bash 绝对路径注入内存 settings（SDK 的 bash 工具会直接采用）。
+			settingsManager: sdk.SettingsManager.inMemory(
+				shells.bash ? { shellPath: shells.bash } : {},
+			),
 			// 只加载已校验的 Bundle 扩展；项目/用户资源恒关。
 			resourceLoaderOptions: bundleLoaderOptions(
 				options.bundleExtensionPaths ?? [],
@@ -207,7 +217,7 @@ export function startPiAgentSession(
 			sessionManager,
 			// 工具集合：approval/auto 为策略白名单（allow ∪ confirm，deny 排除）；
 			// yolo 为当前 Runtime 已加载的内置工具全集（ADR-0033）。
-			tools,
+			tools: availableTools,
 			excludeTools,
 			...(initial.model ? { model: initial.model as never } : {}),
 			...(initial.thinkingLevel

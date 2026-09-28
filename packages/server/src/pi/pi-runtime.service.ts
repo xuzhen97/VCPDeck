@@ -67,7 +67,15 @@ export class PiRuntimeService {
 			supported.runtimeSpecProtocolVersion !== PI_RUNTIME_SPEC_PROTOCOL_VERSION ||
 			supported.configMode !== "server-authoritative"
 		) {
-			this.registry.setUnavailable(clientId, "PI_CLIENT_UNSUPPORTED");
+			// 保留 Client 上报的真实原因码（缺 bash / Node 过旧 / SDK 加载失败 …），
+			// 统一写成 PI_CLIENT_UNSUPPORTED 会把「环境问题」误导成「版本问题」，
+			// 并丢掉唯一的远程诊断线索（只能登机器现查）。
+			this.registry.setUnavailable(
+				clientId,
+				supported?.available === false
+					? supported.code
+					: "PI_CLIENT_UNSUPPORTED",
+			);
 			return;
 		}
 		this.registry.setCapability(clientId, {

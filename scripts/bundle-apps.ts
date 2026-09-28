@@ -9,7 +9,9 @@
  *  - 保留 tsc 构建作为类型检查门禁，esbuild 不负责类型检查。
  */
 import { build, type BuildOptions } from "esbuild";
-import { resolve } from "node:path";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOT = resolve(__dirname, "..");
 
@@ -51,8 +53,156 @@ export async function bundleServer(outfile: string): Promise<void> {
 }
 
 /**
- * Client 业务构件外部保留的依赖：Pi SDK（含动态 import 与子进程加载）、
- * @lydell/node-pty 与 node-datachannel 原生平台包（不打包，运行时从 node_modules 解析）。
+ * Pi 运行所需的最小依赖树：SDK 已单独打成单文件（`bundlePiSdk`），
+ * 其余 pi-* 包全部内联其中，因此不再作为外部依赖安装。
+ */
+export const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
+
+/**
+ * Pi SDK 单文件产物（`define PI_BUNDLED_NODE=true`）。
+ *
+ * 为什么必须打包（实测数据）：未打包时 Client 发布件是真 `node_modules`（14,688 文件 /
+ * 162 MB），SDK 的 ESM 图约 2,400 个文件；在带实时扫描的机器上**每个文件首次打开 ~19.6ms**
+ * （同为 NVMe SSD 上重读仅 0.41ms，已排除存储层），冷加载因此达 47.8s，稳定超时。
+ * 打包后只付 1 次文件打开 + 解析（实测 ≈0.5s）。
+ *
+ * 两个关键开关：
+ * - `define: { PI_BUNDLED_NODE: "true" }`：启 SDK 自带的「嵌入模块」路径（`virtual-modules.js`），
+ *   使扩展（插件）运行时 `import "@earendil-works/pi-coding-agent"` 解析到内存模块，
+ *   不依赖目标机 node_modules；
+ * - `banner` 注入 `createRequire`：CJS 依赖（cross-spawn 等）会做动态 require，
+ *   ESM 产物里必须提供 require。
+ *
+ * 输出目录必须自带 `package.json`（SDK 从 `import.meta.url` 上推读自身版本，
+ * 用于 `VERSION` 与 Bundle 的 piSdkVersion 一致性）。
+ */
+export async function bundlePiSdk(outDir: string): Promise<string> {
+	const clientPkg = JSON.parse(
+		readFileSync(resolve(ROOT, "packages/client/package.json"), "utf8"),
+	) as { dependencies?: Record<string, string> };
+	const version = clientPkg.dependencies?.[PI_SDK_PACKAGE];
+	if (!version) {
+		throw new Error(
+			`[bundle-apps] packages/client 未声明 ${PI_SDK_PACKAGE}`,
+		);
+	}
+	mkdirSync(outDir, { recursive: true });
+	const outfile = join(outDir, "index.mjs");
+	await build({
+		bundle: true,
+		platform: "node",
+		format: "esm",
+		target: "node24",
+		tsconfig: resolve(ROOT, "packages/client/tsconfig.json"),
+		absWorkingDir: ROOT,
+		stdin: {
+			contents: `export * from "${PI_SDK_PACKAGE}";\n`,
+			resolveDir: resolve(ROOT, "packages/client"),
+			loader: "ts",
+			sourcefile: "pi-sdk-entry.ts",
+		},
+		outfile,
+		define: { PI_BUNDLED_NODE: "true" },
+		banner: {
+			js: 'import { createRequire as __vcpCreateRequire } from "node:module"; const require = __vcpCreateRequire(import.meta.url);',
+		},
+		// 原生模块不在 Pi SDK 图内；显式保留以防御未来新增的绑定包。
+		external: ["*.node"],
+		sourcemap: false,
+		minify: false,
+		logLevel: "warning",
+	});
+	writeFileSync(
+		join(outDir, "package.json"),
+		`${JSON.stringify(
+			{
+				name: PI_SDK_PACKAGE,
+				version,
+				type: "module",
+				main: "./index.mjs",
+				exports: { ".": "./index.mjs" },
+			},
+			null,
+			2,
+		)}\n`,
+	);
+	await verifyPiSdkBundle(outfile, version);
+	return outfile;
+}
+
+/**
+ * 构建期自检：分两次失败都很贵（探测误判、插件加载断裂），因此在打包现场就验证。
+ * 断言三件与 SDK 升级强相关的事实：
+ * 1. `VERSION` 可从 `import.meta.url` 上推的 `package.json` 读到（与 Bundle manifest 比对用）；
+ * 2. 会话/模型/扩展加载入口确实导出（树摇或环境分支变化会在此暴露）；
+ * 3. 扩展（插件）运行时 `import "<SDK 包名>"` 能解析——这是 `PI_BUNDLED_NODE` 嵌入模块分支
+ *    生效的直接证据，也是「插件系统不受影响」的唯一可自动验证点。
+ */
+async function verifyPiSdkBundle(
+	outfile: string,
+	expectedVersion: string,
+): Promise<void> {
+	const mod = (await import(pathToFileURL(outfile).href)) as Record<
+		string,
+		unknown
+	>;
+	if (mod.VERSION !== expectedVersion) {
+		throw new Error(
+			`[bundle-apps] Pi SDK 产物 VERSION=${String(mod.VERSION)} 与声明 ${expectedVersion} 不一致（package.json 定位失败？）`,
+		);
+	}
+	for (const name of [
+		"ModelRuntime",
+		"SessionManager",
+		"SettingsManager",
+		"createAgentSessionServices",
+		"createAgentSessionFromServices",
+		"discoverAndLoadExtensions",
+	]) {
+		if (typeof mod[name] !== "function") {
+			throw new Error(`[bundle-apps] Pi SDK 产物缺少导出 ${name}`);
+		}
+	}
+	const probe = join(dirname(outfile), ".plugin-probe.mjs");
+	writeFileSync(
+		probe,
+		`import * as sdk from ${JSON.stringify(PI_SDK_PACKAGE)};\n` +
+			`import * as typebox from "typebox";\n` +
+			`export default function () {\n` +
+			`\tglobalThis.__vcpPiSdkProbe = { sdk: typeof sdk.VERSION === "string", typebox: typeof typebox.Type === "object" };\n` +
+			`}\n`,
+	);
+	try {
+		// 必须经 SDK 自己的扩展加载器：它才是把 SDK 包名与 typebox 映射到嵌入模块的那一层。
+		// 直接 import 探针文件会因磁盘上不存在这些包而失败（这正是本决策要验证的反面）。
+		interface ProbeGlobal {
+			__vcpPiSdkProbe?: { sdk?: boolean; typebox?: boolean };
+		}
+		const globals = globalThis as ProbeGlobal;
+		delete globals.__vcpPiSdkProbe;
+		const loader = mod.discoverAndLoadExtensions as (
+			paths: string[],
+			cwd: string,
+		) => Promise<{ extensions: unknown[] }>;
+		const loaded = await loader([probe], process.cwd());
+		const observed = globals.__vcpPiSdkProbe;
+		if (loaded.extensions.length === 0 || observed?.sdk !== true || observed?.typebox !== true) {
+			throw new Error(
+				`探针未在嵌入模块下解析（扩展数=${loaded.extensions.length}, sdk=${String(observed?.sdk)}, typebox=${String(observed?.typebox)}）`,
+			);
+		}
+	} catch (error) {
+		throw new Error(
+			`[bundle-apps] 插件运行时无法从内存模块解析 ${PI_SDK_PACKAGE} / typebox（PI_BUNDLED_NODE 嵌入模块分支失效？）：${error instanceof Error ? error.message : String(error)}`,
+		);
+	} finally {
+		rmSync(probe, { force: true });
+	}
+}
+
+/**
+ * Client 业务构件外部保留的依赖：`@lydell/node-pty` 与 node-datachannel 原生平台包、
+ * 以及 Pi SDK（其产物为单文件 `dist/pi-sdk/`，运行时按包名解析到那里）。
  */
 export const CLIENT_EXTERNAL = [
 	"@earendil-works/*",

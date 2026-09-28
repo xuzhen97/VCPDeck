@@ -250,6 +250,12 @@ SSE：
 
 Pi 使用精确协议版本 `PI_SESSION_JOB_PROTOCOL_VERSION = 2`。不匹配时 Server 返回 `PI_CLIENT_UNSUPPORTED`，不得尝试猜测兼容。
 
+Pi 本地能力（`capabilityDetails.pi`）的语义（[ADR-0036](adr/0036-pi-sdk-single-file-and-shell-capability.md)）：
+
+- `available:false` 只表示 Node 版本不足、Release 内 Pi SDK 无法加载或 VCPDeck data root 不可写；
+- **缺 Bash 不是不可用**。`shellKind` 只是诊断值：Windows 上 `bash` 与 `powershell` 是并列的内置工具，无 Git Bash 时仅 `bash` 工具从集合中移除（POSIX 无 bash 时 SDK 自身退到 `sh`）；
+- Client 上报的真实原因码（`PI_NODE_UNSUPPORTED` / `PI_BASH_NOT_FOUND` / `PI_RUNTIME_UNAVAILABLE`）必须保留到 `PiRuntimeStatus.reasonCode`，不得统一覆盖成 `PI_CLIENT_UNSUPPORTED`；后者只用于「未上报能力」与「协议版本/`configMode` 不匹配」。
+
 自 v2 起，`agent.prompt` 必须携带 `executionMode`（`approval | auto | yolo`）且拒绝未知 payload 字段，缺失或非法时 Client 立即 fail closed；Session Job 快照新增 `executionModeOverride`（会话覆盖值，空表示跟随 Profile）与 `effectiveExecutionMode`（本次 Run 固化的实际模式）。v1 Client 不理解这些字段，因此不允许与 v2 Server 混用，也不允许静默回退到 Profile 模式（[ADR-0034](adr/0034-pi-session-execution-mode-override.md)）。
 
 当前协议不变量：

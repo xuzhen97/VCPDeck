@@ -1,6 +1,5 @@
-import { access } from "node:fs/promises";
 import { platform } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { fork } from "node:child_process";
 import {
 	PI_RUNTIME_SPEC_PROTOCOL_VERSION,
@@ -13,6 +12,11 @@ import {
 	resolveVcpPiRuntimePaths,
 } from "./runtime-paths.js";
 import { resolveVerifiedPiBundle, type VerifiedPiBundle } from "./bundle.js";
+import {
+	createPiShellEnv,
+	resolvePiShells,
+	type PiShellResolution,
+} from "./shell.js";
 
 /** probe-worker 的结果（不含路径/凭据） */
 export interface ProbeWorkerResult {
@@ -34,8 +38,8 @@ export interface ProbeWorkerResult {
 export interface ProbeEnv {
 	nodeVersion: string;
 	platform: NodeJS.Platform;
-	existsGitBash: () => Promise<boolean>;
-	findBashInPath: () => Promise<boolean>;
+	/** 解析本机可用 shell（绝对路径优先）。缺 bash 不算失败，见 shell.ts。 */
+	resolveShells: () => Promise<PiShellResolution>;
 	forkProbeWorker: () => Promise<ProbeWorkerResult>;
 	/** VCPDeck Pi 数据根是否可写；不可写时 Pi 不可用，不回退用户 Pi。 */
 	ensureDataRootWritable: () => Promise<boolean>;
@@ -43,36 +47,12 @@ export interface ProbeEnv {
 	resolveBundle: (sdkVersion: string) => Promise<VerifiedPiBundle | null>;
 }
 
-const GIT_BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
-
-async function exists(p: string): Promise<boolean> {
-	return access(p).then(
-		() => true,
-		() => false,
-	);
-}
-
-/**
- * 在 PATH 中查找 bash（跨平台：Windows 找 bash.exe，POSIX 找 bash）。
- * PATH 分隔符使用 path.delimiter（Windows `;`、Linux/macOS `:`）。
- */
-async function findBashInPath(): Promise<boolean> {
-	const isWin = platform() === "win32";
-	const name = isWin ? "bash.exe" : "bash";
-	const dirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
-	for (const dir of dirs) {
-		if (await exists(join(dir, name))) return true;
-	}
-	return false;
-}
-
 /** 生成真实探测环境（生产路径） */
 export function createProbeEnv(): ProbeEnv {
 	return {
 		nodeVersion: process.versions.node,
 		platform: platform(),
-		existsGitBash: () => exists(GIT_BASH),
-		findBashInPath,
+		resolveShells: () => resolvePiShells(createPiShellEnv()),
 		forkProbeWorker: () => forkProbeWorkerOnce(),
 		ensureDataRootWritable: async () => {
 			try {
@@ -127,35 +107,57 @@ export function resetClientBundleCache(): void {
 
 let probeWorkerPromise: Promise<ProbeWorkerResult> | null = null;
 
-/** fork 探测 Worker 并收集结果（进程内缓存） */
+/**
+ * fork 探测 Worker 并收集结果（仅缓存成功）。
+ *
+ * **失败不缓存**：进程内缓存一次失败会把一次性抖动（磁盘/杀软首开慢）放大成整个
+ * Client 生命周期的「Pi 不支持」，且只能靠重启进程恢复（实测事故见 syc 机器）。
+ */
 export function forkProbeWorkerOnce(): Promise<ProbeWorkerResult> {
 	if (!probeWorkerPromise) {
-		probeWorkerPromise = forkProbeWorker();
+		probeWorkerPromise = forkProbeWorker().then((result) => {
+			if (result.error) probeWorkerPromise = null;
+			return result;
+		});
 	}
 	return probeWorkerPromise;
 }
 
+/**
+ * Worker 上限。Release 里 Pi SDK 是**单文件**产物（见 scripts/bundle-apps.ts `bundlePiSdk`），
+ * 加载只付一次文件打开 + 解析（实测 ≈0.5s，未打包时要按 2,400 次文件打开计），
+ * 因此这个上限只用于兜住「卡死」，不再承担「首开慢」的代价。
+ * 实测事故：未打包时某机器每次文件首次打开 19.6ms，冷加载 47.8s，稳定超过限额被误判为不支持。
+ */
+export const PROBE_WORKER_TIMEOUT_MS = 15_000;
+
 function forkProbeWorker(): Promise<ProbeWorkerResult> {
 	return new Promise((resolve) => {
+		let settled = false;
+		const fail = (message: string): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve({
+				sdkVersion: "",
+				providerIds: [],
+				error: { code: "PI_RUNTIME_UNAVAILABLE", message },
+			});
+		};
 		const child = fork(join(__dirname, "probe-worker.js"), {
 			stdio: ["ignore", "ignore", "ignore", "ipc"],
 		});
 		child.send({ type: "probe" });
 		const timer = setTimeout(() => {
 			child.kill();
-			resolve({
-				sdkVersion: "",
-				providerIds: [],
-				error: {
-					code: "PI_RUNTIME_UNAVAILABLE",
-					message: "Pi probe worker timed out",
-				},
-			});
-		}, 15_000);
+			fail("Pi probe worker timed out");
+		}, PROBE_WORKER_TIMEOUT_MS);
 
 		child.on("message", (msg: unknown) => {
 			const m = msg as Partial<ProbeWorkerResult>;
 			if (typeof m?.sdkVersion !== "string") return;
+			if (settled) return;
+			settled = true;
 			clearTimeout(timer);
 			child.disconnect();
 			resolve({
@@ -166,27 +168,25 @@ function forkProbeWorker(): Promise<ProbeWorkerResult> {
 				error: m.error ?? null,
 			});
 		});
-		child.on("error", () => {
-			clearTimeout(timer);
-			resolve({
-				sdkVersion: "",
-				providerIds: [],
-				error: {
-					code: "PI_RUNTIME_UNAVAILABLE",
-					message: "Pi probe worker failed to start",
-				},
-			});
+		child.on("error", (err) => {
+			fail(
+				`Pi probe worker failed to start: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		});
-		child.on("exit", () => {
-			clearTimeout(timer);
+		// 子进程静默退出（import 抛错、缺依赖、OOM）必须显式收敛：只 clearTimeout 会让
+		// 崩溃伪装成 30s 超时，无法与「加载慢」区分（实测事故的根因之一）。
+		child.on("exit", (code) => {
+			fail(`Pi probe worker exited before reporting (code=${code ?? "null"})`);
 		});
 	});
 }
 
 /**
- * 轻量能力探测：Node 版本 → Bash（Windows 按 Pi 官方顺序）→ VCPDeck data root 可写 → SDK 版本。
+ * 轻量能力探测：Node 版本 → shell 解析 → VCPDeck data root 可写 → SDK 加载与版本。
  *
  * 探测失败只禁用 Pi 功能，不影响 exec/files/FRP。结果不含路径与凭据。
+ *
+ * 注意「缺 bash」**不是**失败原因：它只影响 bash 工具是否可用（见 shell.ts）。
  *
  * 本机「已认证模型」不再参与判定：模型可用性由 Server 下发的 RuntimeSpec 决定
  * （设计 §16）。`PI_AUTH_UNAVAILABLE` 仍保留在共享枚举中供旧 Client 上报。
@@ -203,25 +203,12 @@ export async function probePiCapability(
 		};
 	}
 
-	let shellKind: "configured" | "git-bash" | "path" | "system" = "system";
-	if (env.platform === "win32") {
-		if (await env.existsGitBash()) shellKind = "git-bash";
-		else if (await env.findBashInPath()) shellKind = "path";
-		else {
-			return {
-				available: false,
-				code: "PI_BASH_NOT_FOUND",
-				message: "Pi-compatible Bash not found on Windows",
-			};
-		}
-	} else if (!(await env.findBashInPath())) {
-		// Linux/macOS：Pi 同样需要 bash（bash 不在 PATH 时降级）
-		return {
-			available: false,
-			code: "PI_BASH_NOT_FOUND",
-			message: "Bash not found in PATH",
-		};
-	}
+	// shell 只影响「哪些 shell 工具可用」，不再是整机门禁：
+	// Windows 上 Pi 的 PowerShell 工具是并列的一等能力，缺 Git Bash 完全可用
+	//（SDK 的 POSIX 分支在无 bash 时还会退到 `sh`）。缺 bash 的机器以前会被整机禁用。
+	const shells = await env.resolveShells();
+	const shellKind: "configured" | "git-bash" | "path" | "system" =
+		shells.bashSource ?? "system";
 
 	if (!(await env.ensureDataRootWritable())) {
 		return {

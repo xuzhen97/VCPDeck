@@ -94,3 +94,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0033](./0033-pi-tool-approval-mode.md) | Superseded by ADR-0034 | Tool Policy 与 Execution Mode 分层：Approval 逐次审批、Auto 受策略自动执行、YOLO 跳过 Tool Policy 但只信任当前 Runtime 已加载工具；RuntimeSpec v4 / bridge v2 |
 | [0034](./0034-pi-session-execution-mode-override.md) | Accepted | Owner 可为单个 Session 持久覆盖 `approval / auto / yolo`；未覆盖跟随 Profile 默认，每个 Run 固化模式且 Client fail closed |
 | [0035](./0035-pi-image-only-prompt.md) | Accepted | Pi Prompt 允许空文本仅当携带有效图片；Server 在接纳 Run 前校验，Client 再验证；不自动补词 |
+| [0036](./0036-pi-sdk-single-file-and-shell-capability.md) | Accepted | Pi SDK 以单文件产物发布（依赖 SDK 嵌入模块分支，扩展/插件运行时导入不依赖 node_modules）；Bash 不再作整机门禁，shell 由 VCPDeck 绝对路径解析并注入；探测失败不缓存且保留真实原因码 |
