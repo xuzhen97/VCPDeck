@@ -369,6 +369,28 @@ describe("PiSupervisor", () => {
 		).toBe(false);
 	});
 
+	it("只收到 prompt_done（无 agent_settled）也释放锁：与 Server 的收敛触发集对齐", async () => {
+		// 实测复现：gs-local 上第一条消息正常回答后，第二条稳定拿到
+		// PI_PROJECT_BUSY。Server 的 SETTLEMENT_TRIGGERS 包含 prompt_done，
+		// 因此它会收敛并放行；客户端若只认 agent_settled 就会永久持锁。
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(prompt("job-a", CWD_REF_A));
+
+		handles[0].emitMessage({
+			type: "event",
+			sessionId: "s1",
+			jobId: "s1",
+			runId: "job-a",
+			event: { type: "prompt_done", sessionId: "s1" },
+		});
+
+		const next = await supervisor.request(prompt("job-b", CWD_REF_A));
+		expect(next).toMatchObject({ ok: true });
+		expect(
+			supervisor.getStateReport().runs.some((r) => r.runId === "job-a" && r.status === "done"),
+		).toBe(true);
+	});
+
 	it("项目锁与 worker 状态不一致时自愈：陈旧锁被回收、下一条 prompt 被接纳", async () => {
 		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
 		await supervisor.request(prompt("job-a", CWD_REF_A));

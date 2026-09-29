@@ -271,8 +271,17 @@ function bindWrapperEvents(w: PiAgentSessionWrapper, run: ActivePrompt): void {
 	run.unsubscribe?.();
 	run.unsubscribe = w.onEvent((rawEvent) => {
 		if (rawEvent.sessionId !== run.sessionId) return;
+		// 终态集合必须与 Server 的 SETTLEMENT_TRIGGERS 对齐（`prompt_done` + `agent_settled`）：
+		// SDK 的 `_runAgentPrompt` 在正常路径上先发 `agent_settled`，随后 wrapper 在
+		// `inner.prompt()` resolve 后补 `prompt_done`；但 SDK 在若干早退路径（扩展命令、
+		// input handler 接管、`messages` 为空）根本不发 `agent_settled`，此时只有 prompt_done。
+		// 若客户端只认 agent_settled，Server 按 prompt_done 收敛并放行下一条消息，客户端却
+		// 一直持锁 → 用户看到 `Project has an active turn`，直到 Worker 空闲 10 分钟关闭
+		// （实测 gs-local：第一条正常回答，第二条被这样拒掉，且稳定复现）。
 		const terminal =
-			rawEvent.type === "agent_settled" || rawEvent.type === "prompt_error";
+			rawEvent.type === "agent_settled" ||
+			rawEvent.type === "prompt_done" ||
+			rawEvent.type === "prompt_error";
 		const event: PiClientEvent =
 			rawEvent.type === "prompt_error"
 				? {

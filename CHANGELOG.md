@@ -2,6 +2,14 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.13.1] - 2026-09-29
+
+### 修复
+
+- **Pi 会话在同一项目里第二次发送不再被错误拒绝（`PI_PROJECT_BUSY Project has an active turn`）**：客户端 supervisor 的 per-project 锁只在收到 Worker 的 `agent_settled`/`prompt_error` 且 jobId+runId 匹配时释放，而 Server 的收敛触发集是 `prompt_done + agent_settled`。回合正常结束后若只有 `prompt_done` 到达，Server 会收敛并将会话置为 idle（界面与 CLI 据此放行下一条消息），客户端却仍持锁，并要等 Worker 空闲 10 分钟关闭才自愈。实测在 gs-local 上稳定复现：第一条消息正常回答后，紧接着的第二条直接被拒。
+  - 客户端终态集合与 Worker/Server 对齐：`agent_settled`、`prompt_done`、`prompt_error` 均释放项目锁；
+  - 因 `activeRun` 拒绝新 prompt 之前先向 Worker 求证该 run 的权威状态：Worker 明确空闲或已不认识该 run 时回收陈旧锁（并补一份终态摘要供 Server 对账），仅在 Worker 确认仍在运行时才拒绝；Worker 超时未答时保守不抢回合。
+
 ## [0.13.0] - 2026-09-29
 
 ### 修复

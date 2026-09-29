@@ -217,11 +217,12 @@ export function createPiSupervisor(options: {
 	/**
 	 * 回收与权威状态不一致的项目锁；返回 true 表示可以继续接纳新 prompt。
 	 *
-	 * `entry.activeRun` 只是客户端缓存：它只在 Worker 的 `agent_settled`/`prompt_error` 到达
-	 * **且 jobId+runId 匹配**时才释放，而同一事件是**无条件**转发给 Server 的。一旦两边不同步，
-	 * 界面按 Server 的权威状态放行下一条消息，客户端却回 `PI_PROJECT_BUSY Project has an active turn`，
-	 * 而且 `applyStateAck` 只在 Server 明确 `closedRunIds` 时才清锁 —— 锁会一直留到 Worker 空闲
-	 * 10 分钟关闭才自愈（实测事故：gs-local 上第一轮正常回答后，第二条消息被这样拒掉）。
+	 * `entry.activeRun` 只是客户端缓存：它只在 Worker 的终态事件（`agent_settled` /
+	 * `prompt_done` / `prompt_error`）到达 **且 jobId+runId 匹配**时才释放，而同一事件是
+	 * **无条件**转发给 Server 的。一旦两边不同步，界面按 Server 的权威状态放行下一条消息，
+	 * 客户端却回 `PI_PROJECT_BUSY Project has an active turn`，而且 `applyStateAck` 只在
+	 * Server 明确 `closedRunIds` 时才清锁 —— 锁会一直留到 Worker 空闲 10 分钟关闭才自愈
+	 * （实测事故：gs-local 上第一轮正常回答后，第二条消息被这样拒掉，稳定复现）。
 	 *
 	 * 因此拒绝之前先向 Worker 求证：
 	 * - Worker 仍认识该 run 且并非空闲 → 真忙，继续拒绝；
@@ -326,7 +327,12 @@ export function createPiSupervisor(options: {
 					) {
 						run.status = "running";
 					}
-					if (msg.event.type === "agent_settled") {
+					// 终态集合与 Worker / Server 对齐（见 worker.ts 的说明）：
+					// 只认 agent_settled 会在缺该事件的路径上永久持锁。
+					if (
+						msg.event.type === "agent_settled" ||
+						msg.event.type === "prompt_done"
+					) {
 						entry.terminals.push({
 							jobId: run.jobId,
 							runId: run.runId,
