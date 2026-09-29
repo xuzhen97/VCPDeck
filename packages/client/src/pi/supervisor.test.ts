@@ -84,6 +84,66 @@ function autoRespond(handle: FakeHandle): void {
 	};
 }
 
+/**
+ * 让 worker 对 `agent.state` 返回指定结果（供陈旧项目锁自愈用例）；其它请求仍走默认应答。
+ * 直接记入 `sent` 并自行应答，避免与 autoRespond 重复响应。
+ */
+function interceptAgentState(
+	handle: FakeHandle,
+	state: "idle" | "running" | "unknown" | "timeout",
+): void {
+	const idleState = {
+		status: "idle",
+		streaming: false,
+		prompting: false,
+		compacting: false,
+		thinkingLevel: "medium",
+		queuedMessages: { steering: [], followUp: [] },
+	};
+	const inner = handle.send;
+	handle.send = (msg) => {
+		if (msg.type === "request" && msg.request.action === "agent.state") {
+			handle.sent.push(msg);
+			const requestId = msg.request.requestId;
+			const reply: PiWorkerOutboundMessage =
+				state === "timeout"
+					? {
+							type: "response",
+							requestId,
+							ok: false,
+							error: { code: "PI_REQUEST_TIMEOUT", message: "timeout" },
+						}
+					: state === "unknown"
+						? {
+								type: "response",
+								requestId,
+								ok: false,
+								error: {
+									code: "PI_CONTROL_FORBIDDEN",
+									message: "No matching active run",
+								},
+							}
+						: {
+								type: "response",
+								requestId,
+								ok: true,
+								data:
+									state === "running"
+										? {
+												...idleState,
+												status: "running",
+												streaming: true,
+												prompting: true,
+											}
+										: idleState,
+							};
+			queueMicrotask(() => handle.emitMessage(reply));
+			return;
+		}
+		inner(msg);
+	};
+}
+
 let CWD_REF_A: PiCwdRef;
 let CWD_REF_B: PiCwdRef;
 let roots: string[] = [];
@@ -309,8 +369,53 @@ describe("PiSupervisor", () => {
 		).toBe(false);
 	});
 
-	it("prompt_error 后释放锁并标记 error", async () => {
-		const { supervisor, handles } = makeSupervisor({ autoRespond: true });		await supervisor.request(prompt("job-a", CWD_REF_A));
+	it("项目锁与 worker 状态不一致时自愈：陈旧锁被回收、下一条 prompt 被接纳", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(prompt("job-a", CWD_REF_A));
+		// 模拟实测事故：worker 已不再认识该 run（agent_settled 未匹配上），但客户端锁还在，
+		// Server 与界面已按权威状态放行下一条消息。
+		interceptAgentState(handles[0], "idle");
+
+		const next = await supervisor.request(prompt("job-b", CWD_REF_A));
+		expect(next).toMatchObject({ ok: true });
+		// 陈旧 run 补一份终态摘要，让 Server 侧对账也能收敛。
+		const report = supervisor.getStateReport();
+		expect(report.runs.some((r) => r.runId === "job-a" && r.status === "done")).toBe(true);
+		expect(report.runs.some((r) => r.runId === "job-b" && r.status === "running")).toBe(true);
+	});
+
+	it("worker 仍不认识该 run（无匹配活动回合）时同样自愈", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(prompt("job-a", CWD_REF_A));
+		interceptAgentState(handles[0], "unknown");
+		expect(await supervisor.request(prompt("job-b", CWD_REF_A))).toMatchObject({ ok: true });
+	});
+
+	it("worker 确认仍在运行时仍拒绝，不抢活跃回合", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(prompt("job-a", CWD_REF_A));
+		interceptAgentState(handles[0], "running");
+
+		const next = await supervisor.request(prompt("job-b", CWD_REF_A));
+		expect(next).toMatchObject({
+			ok: false,
+			error: { code: "PI_PROJECT_BUSY", message: "Project has an active turn" },
+		});
+		const report = supervisor.getStateReport();
+		expect(report.runs.some((r) => r.runId === "job-a" && r.status === "running")).toBe(true);
+	});
+
+	it("worker 超时不应答时保守拒绝（不能区分忙与卡）", async () => {
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(prompt("job-a", CWD_REF_A));
+		interceptAgentState(handles[0], "timeout");
+		expect(await supervisor.request(prompt("job-b", CWD_REF_A))).toMatchObject({
+			ok: false,
+			error: { code: "PI_PROJECT_BUSY" },
+		});
+	});
+
+	it("prompt_error 后释放锁并标记 error", async () => {		const { supervisor, handles } = makeSupervisor({ autoRespond: true });		await supervisor.request(prompt("job-a", CWD_REF_A));
 
 		handles[0].emitMessage({
 			type: "event",

@@ -10,6 +10,7 @@ import type {
 	PiStateReport,
 } from "@vcpdeck/shared";
 import { isPiWorkerAction } from "@vcpdeck/shared";
+import { isPiAgentIdle, parsePiAgentState } from "@vcpdeck/shared";
 import { discoverRoots } from "../filesystem-roots.js";
 import {
 	canonicalPath,
@@ -27,6 +28,9 @@ import {
 
 /** 单个请求等待 Worker 响应的上限 */
 const REQUEST_TIMEOUT_MS = 15_000;
+
+/** 核实项目锁是否已陈旧时的等待上限：短于普通请求，避免每次重试都拖慢用户消息。 */
+const STALE_LOCK_PROBE_TIMEOUT_MS = 5_000;
 
 /** Worker 进程句柄（测试注入） */
 export interface PiWorkerHandle {
@@ -208,6 +212,65 @@ export function createPiSupervisor(options: {
 					? `Pi 运行配置不可用（${desired.reasonCode ?? "unknown"}）`
 					: "Pi 运行配置尚未就绪",
 		};
+	}
+
+	/**
+	 * 回收与权威状态不一致的项目锁；返回 true 表示可以继续接纳新 prompt。
+	 *
+	 * `entry.activeRun` 只是客户端缓存：它只在 Worker 的 `agent_settled`/`prompt_error` 到达
+	 * **且 jobId+runId 匹配**时才释放，而同一事件是**无条件**转发给 Server 的。一旦两边不同步，
+	 * 界面按 Server 的权威状态放行下一条消息，客户端却回 `PI_PROJECT_BUSY Project has an active turn`，
+	 * 而且 `applyStateAck` 只在 Server 明确 `closedRunIds` 时才清锁 —— 锁会一直留到 Worker 空闲
+	 * 10 分钟关闭才自愈（实测事故：gs-local 上第一轮正常回答后，第二条消息被这样拒掉）。
+	 *
+	 * 因此拒绝之前先向 Worker 求证：
+	 * - Worker 仍认识该 run 且并非空闲 → 真忙，继续拒绝；
+	 * - Worker 明确空闲，或已不认识该 run（如换代关闭）→ 陈旧锁，回收并补一份终态摘要，
+	 *   使 Server 侧对账也能收敛；
+	 * - Worker 无响应（超时）→ 保守视为仍在运行，不抢活跃回合。
+	 */
+	async function reclaimStaleRun(entry: ProjectEntry): Promise<boolean> {
+		const run = entry.activeRun;
+		if (!run) return true;
+		const response = await requestViaWorker(
+			entry,
+			run.projectKey,
+			{
+				requestId: randomUUID(),
+				action: "agent.state",
+				sessionId: run.sessionId,
+				jobId: run.jobId,
+				runId: run.runId,
+			},
+			STALE_LOCK_PROBE_TIMEOUT_MS,
+		);
+		if (response.ok) {
+			try {
+				if (!isPiAgentIdle(parsePiAgentState(response.data))) return false;
+			} catch {
+				// 状态不可解析时不得猜：按仍在运行处理，与旧行为一致。
+				return false;
+			}
+		} else if (response.error.code === "PI_REQUEST_TIMEOUT") {
+			// Worker 未在时限内应答：不能区分「忙」与「卡」，保守不抢回合。
+			return false;
+		}
+		if (entry.activeRun !== run) return true;
+		entry.terminals.push({
+			jobId: run.jobId,
+			runId: run.runId,
+			sessionId: run.sessionId,
+			status: "done",
+			projectKey: run.projectKey,
+		});
+		terminalCwd.set(run.runId, {
+			cwd: entry.cwd,
+			jobId: run.jobId,
+			sessionId: run.sessionId,
+		});
+		entry.activeRun = null;
+		closeIfDraining(entry);
+		return true;
 	}
 
 	function entryFor(key: string, cwd: string): ProjectEntry {
@@ -404,7 +467,7 @@ export function createPiSupervisor(options: {
 				}
 
 				if (request.action === "agent.prompt") {
-					if (entry.activeRun) {
+					if (entry.activeRun && !(await reclaimStaleRun(entry))) {
 						return piError(
 							request.requestId,
 							"PI_PROJECT_BUSY",
