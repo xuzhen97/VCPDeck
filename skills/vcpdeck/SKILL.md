@@ -173,9 +173,9 @@ node "<vcpdeck-cli>" clients list [--env=<name>] [--json]
 
 ### 功能语义与状态权威
 
-`clients list` 通过 SDK 请求 Server `GET /api/clients`，返回所有已注册 Client 的安全摘要：名称（全局唯一别名）、hostname、OS、在线状态、CPU/内存使用率、磁盘、版本和 capability 摘要。在线状态与心跳由 Server 维护，CLI 不做本地推断；输出反映的是查询时刻的快照。
+`clients list` 通过 SDK 请求 Server `GET /api/clients`，返回**当前在线**Client 的安全摘要（Server 侧为 `listOnline()`，只含 `online` 已在线的机器）：名称（全局唯一别名）、hostname、OS、在线状态、CPU/内存使用率、磁盘、版本和 capability 摘要。在线状态与心跳由 Server 维护，CLI 不做本地推断；输出反映的是查询时刻的快照。
 
-默认输出人类可读表格（在线优先、按名称排序），并附总数/在线/离线汇总。**Agent 解析时必须加 `--json`**：该模式跳过环境摘要，stdout 为纯 JSON `ClientInfo[]`，可直接 `JSON.parse`。
+默认输出人类可读表格（按名称稳定排序）并附总数/在线/离线汇总行。**注意汇总行对当前接口恒为「在线 = 总数、离线 = 0」**：离线机器根本不在响应里，因此不能用“没看到某台机器”判断它是否曾经注册过，也不能用它排查离线原因。**Agent 解析时必须加 `--json`**：该模式跳过环境摘要，stdout 为纯 JSON `ClientInfo[]`，可直接 `JSON.parse`。
 
 ### 认证与敏感信息
 
@@ -187,7 +187,7 @@ node "<vcpdeck-cli>" clients list [--env=<name>] [--json]
 
 ### 幂等性与失败处置
 
-GET 天然幂等，失败可直接重试；网络错误或非 2xx 时 CLI 非零退出并输出安全错误摘要。空列表输出“没有已注册的 Client。”，这是正常结果而非错误。离线 Client 仍会出现在列表中（`online: false`），其 CPU/内存等运行时字段可能为 `null`。
+GET 天然幂等，失败可直接重试；网络错误或非 2xx 时 CLI 非零退出并输出安全错误摘要。空列表输出“没有已注册的 Client。”，指**当前没有在线 Client**，这是正常结果而非错误。响应中 `online` 恒为 `true`（只含在线机器），因此离线或从未注册的机器不会出现；刚上线、心跳尚未上报时 CPU/内存等运行时字段可能为 `null`。需要看某台机器是否曾更新到哪个版本时用 Frontend 发版审计页的客户端更新明细（`release status` 只输出成功/失败/进行中/待更新的计数，**不含逐台明细**）。
 
 ### 成功判定与已知限制
 

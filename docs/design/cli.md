@@ -165,9 +165,9 @@ Bearer 环境直接通过 SDK Authorization 上传，是命名环境的推荐认
 vcpdeck clients list [--env=<name>] [--json]
 ```
 
-`list` 通过 SDK 请求 `/api/clients`，输出所有已注册 Client 的安全摘要（名称、hostname、OS、在线状态、CPU/内存使用率、版本）。在线状态与心跳由 Server 维护，CLI 不做本地推断，输出是查询时刻快照。
+`list` 通过 SDK 请求 `/api/clients`，输出**当前在线**Client 的安全摘要（名称、hostname、OS、在线状态、CPU/内存使用率、版本）。Server 侧该端点走 `listOnline()`，离线机器不在响应里，因此 `online` 恒为 `true`。在线状态与心跳由 Server 维护，CLI 不做本地推断，输出是查询时刻快照。
 
-默认输出人类可读表格（在线优先、按名称稳定排序）并附总数/在线/离线汇总；`--json` 跳过环境摘要，stdout 为纯 JSON `ClientInfo[]`，供 Agent 和脚本解析。空列表输出明确提示而非报错。
+默认输出人类可读表格（按名称稳定排序）并附总数/在线/离线汇总；`--json` 跳过环境摘要，stdout 为纯 JSON `ClientInfo[]`，供 Agent 和脚本解析。空列表指当前无在线 Client，输出明确提示而非报错。逐台更新结果看 Frontend 发版审计页的客户端更新明细（`release status` 只有计数）。
 
 本命令只支持命名环境（含 `--env` 临时覆盖），不提供 Release 那样的 `--server` 直连兼容模式。GET 幂等且无副作用，失败可直接重试。Server 端 `PATCH /api/clients/:id/name` 重命名尚未暴露为 CLI 命令。
 
