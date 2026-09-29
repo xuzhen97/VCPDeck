@@ -2,13 +2,17 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.13.2] - 2026-09-29
+
+### 修复
+
+- **Pi 活动回合启动期间不再误报空闲**：Worker 接纳 run 后，wrapper 创建、附件准备或 SDK 尚未置 `prompting` 的窗口里，`agent.state` 曾返回 `idle`（无 `runId` 的 CLI 查询直接读取磁盘，带当前 `runId` 的查询则读取尚未启动的 wrapper）。这可让 CLI 提前返回空回复，也可让 Server 在打开会话时将仍在运行的 Job 错误结算为 `idle`，允许前端发送下一条，随后被 Client 正确持有的项目锁以 `PI_PROJECT_BUSY` 拒绝。现在活动 run 的状态查询立即报告非空闲；历史/不匹配 run 的隔离不变。0.13.1 的终态锁回收修复没有消除此启动窗口问题。
+
 ## [0.13.1] - 2026-09-29
 
 ### 修复
 
-- **Pi 会话在同一项目里第二次发送不再被错误拒绝（`PI_PROJECT_BUSY Project has an active turn`）**：客户端 supervisor 的 per-project 锁只在收到 Worker 的 `agent_settled`/`prompt_error` 且 jobId+runId 匹配时释放，而 Server 的收敛触发集是 `prompt_done + agent_settled`。回合正常结束后若只有 `prompt_done` 到达，Server 会收敛并将会话置为 idle（界面与 CLI 据此放行下一条消息），客户端却仍持锁，并要等 Worker 空闲 10 分钟关闭才自愈。实测在 gs-local 上稳定复现：第一条消息正常回答后，紧接着的第二条直接被拒。
-  - 客户端终态集合与 Worker/Server 对齐：`agent_settled`、`prompt_done`、`prompt_error` 均释放项目锁；
-  - 因 `activeRun` 拒绝新 prompt 之前先向 Worker 求证该 run 的权威状态：Worker 明确空闲或已不认识该 run 时回收陈旧锁（并补一份终态摘要供 Server 对账），仅在 Worker 确认仍在运行时才拒绝；Worker 超时未答时保守不抢回合。
+- **Pi 项目锁终态处理与陈旧锁回收（`PI_PROJECT_BUSY`）**：客户端 supervisor 过去只在收到 `agent_settled`/`prompt_error` 且 jobId+runId 匹配时释放项目锁；现与 Worker/Server 对齐，将 `prompt_done` 也作为终态，并在拒绝新 prompt 前向 Worker 核实持锁 run 是否已经结束。**这只修正终态/陈旧锁路径，不保证消除所有第二条发送被拒的情况**：0.13.1 部署后的复测仍复现 `PI_PROJECT_BUSY`；后续排查发现活动 run 在启动窗口的 `agent.state` 可能误报 `idle`，见「未发布」修复。
 
 ## [0.13.0] - 2026-09-29
 

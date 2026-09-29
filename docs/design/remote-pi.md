@@ -189,6 +189,7 @@ sequenceDiagram
 - REST 承担有明确结果的控制和历史读取；
 - `/client` Socket.IO 承担 Server ↔ Client 的 `PI_REQUEST/PI_RESPONSE/PI_EVENT/PI_STATE`；
 - SSE 是 session 级实时投影，每 30 秒发送心跳，不是持久队列；
+- Worker 的 `agent.state` 在某项目已有活动 run 时必须报告非空闲，即使 wrapper 正在创建、附件正在准备，或 SDK 尚未把 `prompting` 置为 true；不带 `runId` 的 CLI 状态轮询与带当前 `runId` 的 Server `open`/settlement 查询均遵守此规则。旧 run 或其它会话仍按严格身份校验，不能据此读取/控制当前 run。否则 Server `open` 可把仍在进行的 Job 错误结算为 `idle`，放行下一条发送，但 Client 项目锁仍正确持有，返回 `PI_PROJECT_BUSY`；CLI 则可能提前返回空回复；
 - Server 先发布 `run_created(submissionId, runId)` 再派发，避免首个 Agent 事件早于 Browser 建立 run 关联；
 - `prompt_done` 或 `agent_settled` 触发 30 秒可取消 grace，之后重新查询权威 `agent.state`，只有确实空闲才结算为 `idle`；
 - 网络超时不代表 Prompt 未执行。Server 会尽量查询 state，调用方不能自动盲重试创建新 Run；

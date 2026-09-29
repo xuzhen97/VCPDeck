@@ -491,6 +491,17 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 					code: "PI_PROTOCOL_INVALID",
 				});
 			if (request.action === "agent.state") {
+				// 已接纳的 run 是运行态权威；wrapper 创建/附件准备期间还会报 idle，
+				// 不能让 CLI 提前结束，也不能让 Server 在 open 时误结算并放行下一轮。
+				if (active?.sessionId === sessionId &&
+					(!request.runId || matchesRequest(active, request))) {
+					const state = wrapper?.sessionId === sessionId
+						? wrapper.getState()
+						: await reader.state(sessionId);
+					return state.status === "idle"
+						? { ...state, status: "running", prompting: true }
+						: state;
+				}
 				if (!request.runId) return reader.state(sessionId);
 				const settled = settledRunIds.get(request.runId);
 				if (

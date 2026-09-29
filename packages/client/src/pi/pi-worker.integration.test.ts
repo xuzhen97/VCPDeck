@@ -1089,7 +1089,7 @@ describe("Pi Worker prompt pipeline seam", () => {
 						action,
 						jobId: "session-1",
 						sessionId: "session-1",
-						runId,
+						...(runId ? { runId } : {}),
 						cwdRef: { rootDir: "C:\\repo", relativePath: "" },
 						payload: action === "agent.prompt" ? { submissionId: requestId, executionMode: "approval", ...(payload ?? {}) } : payload,
 					},
@@ -1141,6 +1141,13 @@ describe("Pi Worker prompt pipeline seam", () => {
 			await expect(
 				request("agent.prompt", "run-wrapper", { prompt: "never" }),
 			).resolves.toMatchObject({ ok: true, data: { accepted: true } });
+			// wrapper 仍在创建：状态查询不得等待它，也不得把活动 run 误报为空闲。
+			await expect(request("agent.state", "run-wrapper")).resolves.toMatchObject({
+				ok: true, data: { status: "running", prompting: true },
+			});
+			await expect(request("agent.state", "")).resolves.toMatchObject({
+				ok: true, data: { status: "running", prompting: true },
+			});
 			await expect(
 				request("agent.prompt", "run-busy", { prompt: "never" }),
 			).resolves.toMatchObject({
@@ -1243,6 +1250,14 @@ describe("Pi Worker prompt pipeline seam", () => {
 
 			// 新 envelope 不清历史记录，旧 listener 不能清理/重标当前新 run。
 			await request("agent.prompt", "run-current", { prompt: "ok" });
+			attachmentWrapper.getState.mockReturnValue({ status: "idle" });
+			await expect(request("agent.state", "run-current")).resolves.toMatchObject({
+				ok: true, data: { status: "running" },
+			});
+			await expect(request("agent.state", "")).resolves.toMatchObject({
+				ok: true, data: { status: "running" },
+			});
+			attachmentWrapper.getState.mockReturnValue({ status: "running" });
 			settledListener({ type: "agent_settled", sessionId: "session-1" });
 			await expect(
 				request("agent.state", "run-current"),
