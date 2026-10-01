@@ -2,6 +2,17 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [未发布]
+
+### 新增
+
+- **Git SSH 共享密钥集中分发（[ADR-0037](./docs/adr/0037-server-managed-git-ssh-key-distribution.md) / [ADR-0038](./docs/adr/0038-git-ssh-distribution-under-shared-psk.md)）**：Server 生成一组 Git SSH 密钥对并以 AES-256-GCM 加密保存，操作者把公钥在 Git 服务登记**一次**，即可向选定 Client 一键分发；Client 在 VCPDeck 数据根（`<VCPDECK_CLIENT_DATA_DIR>/git-ssh`，跨 Release 保留）安装受限副本，并只让 VCPDeck 启动的 Job、Terminal、Pi 及其子进程使用该系统密钥（不改整机或用户 `~/.ssh`）。主机公钥使用 `accept-new`：首次连接自动记录，已记录主机公钥变化时拒绝连接。控制台入口为「设置 → Git 密钥」（`GET/POST/PUT /api/git-ssh*`）与 SDK `gitSsh`。
+
+### 变更
+
+- **Git SSH 分发在共享 PSK 下仅以 Client ID 作运维目标（ADR-0038）**：选机只控制正常运维分发，**不构成每机身份认证**：持有共享 PSK 的机器可以自报已选 Client ID 取得私钥。取消选机只清理本地受管副本，**不代表 Git 服务已撤销访问**；可靠排除需要在 Git 服务移除旧公钥、轮换新密钥并只向仍受信机器重新分发。Service 端不提供任何读取私钥的入口。
+- **新增 Server 环境变量 `VCPDECK_GIT_SSH_KEY_FILE`**：Git SSH 私钥的加密根密钥（base64 的 32 字节），必须位于 Server 进程外的受限文件（与 Pi 凭据根密钥分离）。缺失或非法时密钥生成与分发 fail closed，Server 启动与其它能力不受影响。
+
 ## [0.13.2] - 2026-09-29
 
 ### 修复

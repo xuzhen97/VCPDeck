@@ -34,6 +34,37 @@ describe("getRegisterInfo", () => {
 		expect(info.clientVersion).toBe(VERSION);
 	});
 
+	it("上报 gitSsh 能力；未提供时保持未报告（Server 因此不下发密钥）", () => {
+		const withGitSsh = getRegisterInfo(
+			undefined,
+			undefined,
+			undefined,
+			process.env,
+			undefined,
+			{ available: true, protocolVersion: 1 },
+		);
+		expect(withGitSsh.capabilityDetails?.gitSsh).toEqual({
+			available: true,
+			protocolVersion: 1,
+		});
+		expect(getRegisterInfo().capabilityDetails?.gitSsh).toBeUndefined();
+	});
+
+	it("能力不可用时的稳定原因码被原样上报", () => {
+		const info = getRegisterInfo(
+			undefined,
+			undefined,
+			undefined,
+			process.env,
+			undefined,
+			{ available: false, code: "GIT_SSH_UNAVAILABLE" },
+		);
+		expect(info.capabilityDetails?.gitSsh).toEqual({
+			available: false,
+			code: "GIT_SSH_UNAVAILABLE",
+		});
+	});
+
 	it("frpc 可用时声明 frp 能力与 protocol v1", () => {
 		const info = getRegisterInfo(undefined, undefined);
 		expect(info.capabilities).toContain("frp");

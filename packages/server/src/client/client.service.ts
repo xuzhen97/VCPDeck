@@ -4,6 +4,7 @@ import {
 	parseFrpCapabilityStatus,
 	parseMachineInstallation,
 	parseP2pTunnelCapabilityStatus,
+	parseGitSshCapability,
 	parsePrivilegedCapabilityStatus,
 	type MachineInstallationStatus,
 	type MachineRegister,
@@ -306,6 +307,7 @@ export class ClientService {
       frp?: FrpCapabilityStatus;
       privileged?: PrivilegedCapabilityStatus;
       p2pTunnel?: ClientInfo["capabilityDetails"]["p2pTunnel"];
+      gitSsh?: ClientInfo["capabilityDetails"]["gitSsh"];
     };
     installation: MachineInstallationStatus | null;
   } {
@@ -316,6 +318,7 @@ export class ClientService {
         frp?: FrpCapabilityStatus;
         privileged?: PrivilegedCapabilityStatus;
         p2pTunnel?: ClientInfo["capabilityDetails"]["p2pTunnel"];
+        gitSsh?: ClientInfo["capabilityDetails"]["gitSsh"];
       };
       installation: MachineInstallationStatus | null;
     } = { details: {}, installation: null };
@@ -354,6 +357,13 @@ export class ClientService {
         result.details.p2pTunnel = parseP2pTunnelCapabilityStatus(record.p2pTunnel);
       } catch {
         // p2pTunnel 摘要损坏：省略，UI 不声明协议支持。
+      }
+    }
+    if (record.gitSsh !== undefined) {
+      try {
+        result.details.gitSsh = parseGitSshCapability(record.gitSsh);
+      } catch {
+        // gitSsh 摘要损坏：省略，UI 按“未上报”处理，不推断支持状态。
       }
     }
     if (record.installation !== undefined) {

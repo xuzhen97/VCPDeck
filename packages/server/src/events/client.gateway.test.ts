@@ -120,6 +120,12 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		closeFromClient: vi.fn(async () => {}),
 		disconnectClient: vi.fn(),
 	};
+	const gitSsh = {
+		bindSender: vi.fn(),
+		onRegistered: vi.fn(async () => {}),
+		onDisconnected: vi.fn(async () => {}),
+		applyAck: vi.fn(async () => {}),
+	};
 	const gateway = new ClientGateway(
 		clientService as never,
 		jobService as never,
@@ -134,6 +140,9 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		updateChannel as never,
 		reconciliation as never,
 		tunnelSessions as never,
+		// 位置 14 = piRuntime（旧测试保持未注入）
+		undefined as never,
+		gitSsh as never,
 	);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
@@ -153,6 +162,7 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		updateChannel,
 		reconciliation,
 		tunnelSessions,
+		gitSsh,
 		emit,
 		to,
 	};
@@ -765,7 +775,7 @@ describe("ClientGateway FRP reconciliation", () => {
 	});
 
 	it("reconcile dispatch 精确发往 socketId，不使用 clientId room", () => {
-		const { gateway, reconciliation, to, emit } = makeGateway();
+		const { gateway, reconciliation } = makeGateway();
 		gateway.afterInit();
 		const dispatcher = reconciliation.bindDispatcher.mock.calls[0]?.[0];
 		expect(typeof dispatcher).toBe("function");
@@ -888,5 +898,105 @@ describe("ClientGateway P2P tunnel routing", () => {
 		const { gateway, tunnelSessions } = makeGateway();
 		await gateway.handleDisconnect(clientSocket());
 		expect(tunnelSessions.disconnectClient).toHaveBeenCalledWith("c1", "client-socket");
+	});
+});
+
+describe("ClientGateway Git SSH 分发（ADR-0037/0038）", () => {
+	const registerPayload = (gitSsh?: unknown) => ({
+		clientId: "c1",
+		hostname: "host",
+		os: "linux 6.11.0",
+		cpuModel: "cpu",
+		totalMemMB: 1024,
+		clientVersion: "1",
+		capabilities: ["exec"],
+		capabilityDetails: gitSsh === undefined ? {} : { gitSsh },
+	});
+
+	it("afterInit 绑定发送通道：按 socketId 精准发送 GIT_SSH_COMMAND", () => {
+		const { gateway, gitSsh, to, emit } = makeGateway();
+		gateway.afterInit();
+
+		const sender = gitSsh.bindSender.mock.calls[0]?.[0] as (
+			socketId: string,
+			command: unknown,
+		) => void;
+		sender("socket-9", { action: "clear" });
+
+		expect(to).toHaveBeenCalledWith("socket-9");
+		expect(emit).toHaveBeenCalledWith("git-ssh:command", { action: "clear" });
+	});
+
+	it("REGISTER 后把 gitSsh 能力交给分发服务对账", async () => {
+		const { gateway, gitSsh } = makeGateway();
+		const socket = makeSocket();
+
+		await gateway.handleRegister(
+			socket,
+			registerPayload({ available: true, protocolVersion: 1 }),
+		);
+
+		expect(gitSsh.onRegistered).toHaveBeenCalledWith("c1", "socket-1", {
+			available: true,
+			protocolVersion: 1,
+		});
+	});
+
+	it("旧 Client 未上报 gitSsh 时按未上报转交（能力由服务判定）", async () => {
+		const { gateway, gitSsh } = makeGateway();
+		await gateway.handleRegister(makeSocket(), registerPayload());
+		expect(gitSsh.onRegistered).toHaveBeenCalledWith("c1", "socket-1", undefined);
+	});
+
+	it("GIT_SSH_ACK 严格解析后交给分发服务；非法载荷与未注册 socket 忽略", async () => {
+		const { gateway, gitSsh } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+
+		await gateway.handleGitSshAck(socket, {
+			protocolVersion: 1,
+			operationId: "op-1",
+			version: 1,
+			state: "installed",
+		});
+		expect(gitSsh.applyAck).toHaveBeenCalledWith("c1", "socket-1", {
+			protocolVersion: 1,
+			operationId: "op-1",
+			version: 1,
+			state: "installed",
+		});
+
+		await gateway.handleGitSshAck(socket, { state: "installed" });
+		await gateway.handleGitSshAck(socket, {
+			protocolVersion: 1,
+			operationId: "op-1",
+			version: 1,
+			state: "bogus",
+		});
+		expect(gitSsh.applyAck).toHaveBeenCalledTimes(1);
+
+		const unregistered = makeSocket("socket-plain");
+		await gateway.handleGitSshAck(unregistered, {
+			protocolVersion: 1,
+			operationId: "op-1",
+			version: 1,
+			state: "installed",
+		});
+		expect(gitSsh.applyAck).toHaveBeenCalledTimes(1);
+	});
+
+	it("断线与心跳超时都按实际 socket 回收分发租约", async () => {
+		const { gateway, gitSsh, clientService } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+
+		await gateway.handleDisconnect(socket);
+		expect(gitSsh.onDisconnected).toHaveBeenCalledWith("c1", "socket-1");
+
+		clientService.expireStaleClients.mockResolvedValue([
+			{ clientId: "c1", socketId: "socket-7" },
+		]);
+		await gateway.sweepStaleClients();
+		expect(gitSsh.onDisconnected).toHaveBeenCalledWith("c1", "socket-7");
 	});
 });

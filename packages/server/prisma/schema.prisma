@@ -374,3 +374,29 @@ model PiClientBinding {
 
   @@index([profileId])
 }
+
+// ── Git SSH 共享密钥分发（ADR-0037 / ADR-0038） ──
+// 只保存密文与安全元数据；私钥明文只存在于 Server 受控解密窗口与 Client 运行内存。
+// 表结构变更随 Server 启动的 prisma db push 生效（本仓库既有升级方式）。
+model GitSshKey {
+  id          String   @id
+  version     Int      @unique
+  publicKey   String // 单行 ssh-ed25519，供人工登记到 Git 服务
+  fingerprint String // SHA256:<base64>，仅用于人工比对
+  ciphertext  String // base64(iv || tag || ciphertext)
+  keyVersion  Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model GitSshTarget {
+  clientId        String   @id
+  desiredVersion  Int? // null 表示已取消选机，等待清理确认
+  observedVersion Int?
+  state           String   @default("pending") // pending | installed | clear-pending | cleared | failed | ambiguous | unsupported
+  reasonCode      String?
+  operationId     String?
+  lastSentVersion Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

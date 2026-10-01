@@ -1,6 +1,7 @@
 import { io, type Socket } from "socket.io-client";
 import { Events } from "@vcpdeck/shared";
 import type {
+	GitSshCapability,
 	MachineRegister,
 	P2pTunnelCapabilityStatus,
 	PiCapabilityStatus,
@@ -45,6 +46,13 @@ import {
 } from "./terminal/protocol-bridge.js";
 import { killProcessTree } from "./terminal/process-tree.js";
 import { attachUpdateHandler } from "./update.js";
+import { attachGitSshBridge } from "./git-ssh/git-ssh-bridge.js";
+import {
+	applyGitSshEnv,
+	gitSshStoreOrNull,
+	probeGitSshCapabilityForClient,
+	refreshGitSshEnv,
+} from "./git-ssh/runtime.js";
 import {
 	getFrpRuntimeManager,
 	shutdownFrpRuntime,
@@ -105,11 +113,12 @@ function forkProjectWorker(cwd: string): PiWorkerHandle {
 	const paths = resolveVcpPiRuntimePaths();
 	const child = fork(join(__dirname, "pi", "worker.js"), [cwd], {
 		stdio: ["ignore", "ignore", "ignore", "ipc"],
-		env: {
+		// 受管 Git SSH 注入同样作用于 Pi Worker 及其子进程（不改 process.env 全局）。
+		env: applyGitSshEnv({
 			...process.env,
 			PI_CODING_AGENT_DIR: paths.agentDir,
 			PI_SESSION_DIR: paths.sessionsRoot,
-		},
+		}),
 	});
 	return {
 		send: (msg: PiWorkerRequestMessage) => child.send(msg),
@@ -136,6 +145,7 @@ export interface PiBridgeDeps {
 		piStatus: PiCapabilityStatus | undefined,
 		terminalStatus: TerminalCapabilityStatus | undefined,
 		runtimeSecurity: RuntimeSecurityInfo | undefined,
+		gitSshStatus: GitSshCapability | undefined,
 	) => MachineRegister;
 	getStatusReport: () => StatusReport;
 }
@@ -298,10 +308,13 @@ export function attachPiBridge(
 			const terminalStatus = await deps.getTerminalStatus().catch(() => undefined);
 			// 运行时安全摘要：探测超时/失败降级为未报告（deps 内部已包 3s 超时），不阻塞注册。
 			const runtimeSecurity = await deps.getRuntimeSecurity().catch(() => undefined);
+			// Git SSH 能力与注入结论必须在 REGISTER 前就绪：Server 只向已上报能力的 Client 下发密钥。
+			const gitSshStatus = await probeGitSshCapabilityForClient().catch(() => undefined);
+			await refreshGitSshEnv();
 			if (generation === connectionGeneration)
 				socket.emit(
 					Events.REGISTER,
-					deps.getRegister(piStatus, terminalStatus, runtimeSecurity),
+					deps.getRegister(piStatus, terminalStatus, runtimeSecurity, gitSshStatus),
 					onRegistered,
 				);
 		},
@@ -318,6 +331,25 @@ export function connect(): Socket {
 
 	// M1 迁移验证模式：仍注册/心跳，但不挂载任何 operational 处理器。
 	const verifyOnly = isMigrationVerifyOnly();
+
+	// Git SSH 受管密钥桥：只有 REGISTER ack 之后才处理 Server 下发的密钥指令；
+	// 数据根非法时既不挂载处理器也不上报能力（fail closed）。
+	const gitSshStore = gitSshStoreOrNull();
+	const gitSshBridge =
+		gitSshStore && !verifyOnly
+			? attachGitSshBridge(socket, {
+					store: gitSshStore,
+					// 安装/清理完成后立即重算注入结论，避免后续 Job 使用旧状态。
+					onAck: () => {
+						void refreshGitSshEnv();
+					},
+				})
+			: null;
+	socket.on("ack", (payload: { event?: string }) => {
+		if (payload?.event === Events.REGISTER) gitSshBridge?.markRegistered();
+	});
+	// 新连接必须重新注册才允许处理密钥指令。
+	socket.on("disconnect", () => gitSshBridge?.markUnregistered());
 
 	// 自更新：有界 drain + 本机 Launcher 两阶段更新；apply 前计划内释放 frpc。
 	attachUpdateHandler({
@@ -442,8 +474,15 @@ export function connect(): Socket {
 				if (installation !== undefined) info.installation = installation;
 				return info;
 			}),
-		getRegister: (piStatus, terminalStatus, runtimeSecurity) =>
-			getRegisterInfo(piStatus, terminalStatus, runtimeSecurity, process.env, p2pStatus ?? undefined),
+		getRegister: (piStatus, terminalStatus, runtimeSecurity, gitSshStatus) =>
+			getRegisterInfo(
+				piStatus,
+				terminalStatus,
+				runtimeSecurity,
+				process.env,
+				p2pStatus ?? undefined,
+				gitSshStatus,
+			),
 		getStatusReport: () => ({
 			clientId: CLIENT_ID,
 			jobs: getStatusReport(),

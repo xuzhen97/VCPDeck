@@ -28,6 +28,7 @@ import {
   parsePiResponse,
   parsePiRuntimeAck,
   parsePiStateReport,
+  parseGitSshAck,
   parseTerminalClientResponse,
   parseTerminalExitReport,
   parseTerminalOutputChunk,
@@ -59,6 +60,7 @@ import type {
   FrpRuntimeStateAck,
 } from "@vcpdeck/shared";
 import { clientPsk } from "../client/client-psk.js";
+import { GitSshService } from "../git-ssh/git-ssh.service.js";
 
 const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
 
@@ -98,6 +100,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(PiRuntimeService)
     private readonly piRuntime?: PiRuntimeService,
+    // Git SSH 共享密钥分发（可选注入：旧测试构造保持兼容）
+    @Optional()
+    @Inject(GitSshService)
+    private readonly gitSsh?: GitSshService,
   ) {}
 
   onModuleInit() {
@@ -123,6 +129,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     });
     this.piRuntime?.bindSender((socketId, message) => {
       this.server.to(socketId).emit(Events.PI_RUNTIME_SPEC, message);
+    });
+    // Git SSH 指令按 socketId 精准发送（绝不向 clientId room 广播私钥）。
+    this.gitSsh?.bindSender((socketId, command) => {
+      this.server.to(socketId).emit(Events.GIT_SSH_COMMAND, command);
     });
     this.terminalBroker.bindEmitter((socketId, request) => {
       this.server.to(socketId).emit(Events.TERMINAL_REQUEST, request);
@@ -214,6 +224,7 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       await this.frpService.markInactiveByClientId(clientId);
     }
     await this.piRuntime?.onDisconnected(clientId, socketId);
+    await this.gitSsh?.onDisconnected(clientId, socketId);
     await this.terminalService.handleClientDisconnect(clientId, socketId);
   }
 
@@ -244,6 +255,12 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       register.clientId,
       register.capabilityDetails?.pi,
       client.id,
+    );
+    // Git SSH 分发对账：能力缺失视为未上报，由分发服务 fail closed 不下发。
+    await this.gitSsh?.onRegistered(
+      register.clientId,
+      client.id,
+      register.capabilityDetails?.gitSsh,
     );
     client.emit("ack", { event: Events.REGISTER });
     console.log(`[ws] registered: ${register.clientId} (${register.hostname})`);
@@ -346,6 +363,28 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       return { ok: true };
     } catch {
       // 非法 ACK 忽略：不改变任何状态，Pi 保持未就绪（fail closed）。
+      return { ok: false };
+    }
+  }
+
+  /**
+   * Git SSH 安装/清理回执。
+   *
+   * 只表示 Client 本地受管副本状态，不代表 Git 服务已授权或已撤销；
+   * 非法回执一律忽略，不改变任何状态（fail closed）。
+   */
+  @SubscribeMessage(Events.GIT_SSH_ACK)
+  async handleGitSshAck(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId || !this.gitSsh) return { ok: false };
+    try {
+      const ack = parseGitSshAck(data);
+      await this.gitSsh.applyAck(clientId, client.id, ack);
+      return { ok: true };
+    } catch {
       return { ok: false };
     }
   }

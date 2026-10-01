@@ -9,6 +9,10 @@ import type {
 } from "./pi.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import {
+	parseGitSshCapability,
+	type GitSshCapability,
+} from "./git-ssh.js";
+import {
 	parseP2pTunnelCapabilityStatus,
 	type P2pTunnelCapabilityStatus,
 } from "./tunnel.js";
@@ -79,6 +83,8 @@ export interface MachineRegister {
 		privileged?: PrivilegedCapabilityStatus;
 		/** 可选：P2P 隧道能力摘要（ADR-0026 新 Client） */
 		p2pTunnel?: P2pTunnelCapabilityStatus;
+		/** 可选：Git SSH 受管密钥能力摘要（ADR-0037 新 Client）；旧 Client 缺省即未报告 */
+		gitSsh?: GitSshCapability;
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告） */
 	installation?: MachineInstallationStatus;
@@ -452,7 +458,7 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 	if (value.capabilityDetails !== undefined) {
 		const details = value.capabilityDetails;
 		if (!isRecord(details)) throw new Error("capabilityDetails 必须为对象");
-		const known = ["pi", "terminal", "frp", "privileged", "p2pTunnel"] as const;
+		const known = ["pi", "terminal", "frp", "privileged", "p2pTunnel", "gitSsh"] as const;
 		for (const key of Object.keys(details)) {
 			if (!known.includes(key as (typeof known)[number])) {
 				throw new Error(`capabilityDetails 含未知字段 ${key}`);
@@ -474,6 +480,9 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 		}
 		if (details.p2pTunnel !== undefined) {
 			parsedDetails.p2pTunnel = parseP2pTunnelCapabilityStatus(details.p2pTunnel);
+		}
+		if (details.gitSsh !== undefined) {
+			parsedDetails.gitSsh = parseGitSshCapability(details.gitSsh);
 		}
 		result.capabilityDetails = parsedDetails;
 	}

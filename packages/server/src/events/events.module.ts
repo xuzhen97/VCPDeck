@@ -12,6 +12,7 @@ import { PiModule } from "../pi/pi.module.js";
 import { TerminalModule } from "../terminal/terminal.module.js";
 import { ReleaseModule } from "../release/release.module.js";
 import { TunnelModule } from "../tunnel/tunnel.module.js";
+import { GitSshModule } from "../git-ssh/git-ssh.module.js";
 
 @Module({
 	imports: [
@@ -25,6 +26,7 @@ import { TunnelModule } from "../tunnel/tunnel.module.js";
 		PiModule,
 		TerminalModule,
 		TunnelModule,
+		GitSshModule,
 	],
 	providers: [ClientGateway, AppGateway],
 	exports: [ClientGateway],

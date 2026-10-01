@@ -95,3 +95,5 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0034](./0034-pi-session-execution-mode-override.md) | Accepted | Owner 可为单个 Session 持久覆盖 `approval / auto / yolo`；未覆盖跟随 Profile 默认，每个 Run 固化模式且 Client fail closed |
 | [0035](./0035-pi-image-only-prompt.md) | Accepted | Pi Prompt 允许空文本仅当携带有效图片；Server 在接纳 Run 前校验，Client 再验证；不自动补词 |
 | [0036](./0036-pi-sdk-single-file-and-shell-capability.md) | Accepted | Pi SDK 以单文件产物发布（依赖 SDK 嵌入模块分支，扩展/插件运行时导入不依赖 node_modules）；Bash 不再作整机门禁，shell 由 VCPDeck 绝对路径解析并注入；探测失败不缓存且保留真实原因码 |
+| [0037](./0037-server-managed-git-ssh-key-distribution.md) | Accepted（分发身份门槛由 ADR-0038 取代） | Server 加密保存共享 Git SSH 私钥并向选定 Client 分发；Job/Terminal/Pi 使用受管密钥，TOFU 校验主机；可靠单机排除须 Git 服务撤钥及轮换 |
+| [0038](./0038-git-ssh-distribution-under-shared-psk.md) | Accepted | 共享 PSK 下选定 Client ID 仅为运维分发范围，不构成每机身份认证；泄漏按整套 Git 密钥失陷处置 |

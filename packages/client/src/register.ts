@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
 	FrpCapabilityStatus,
+	GitSshCapability,
 	MachineRegister,
 	P2pTunnelCapabilityStatus,
 	PiCapabilityStatus,
@@ -37,6 +38,7 @@ export const CLIENT_ID =
  * @param terminalStatus 终端能力探测结果（可选）
  * @param runtimeSecurity 运行时安全摘要：非交互特权能力（capabilityDetails.privileged）
  *   与安装模式（顶层 installation）；缺省不上报，不新增可执行 capability 字符串。
+ * @param gitSshStatus Git SSH 受管密钥能力（ADR-0037）：缺省即未报告。
  */
 /**
  * M1 迁移验证专用模式（VCPDECK_MIGRATION_VERIFY_ONLY=1）：
@@ -54,6 +56,7 @@ export function getRegisterInfo(
 	runtimeSecurity?: RuntimeSecurityInfo,
 	env: NodeJS.ProcessEnv = process.env,
 	p2pTunnelStatus?: P2pTunnelCapabilityStatus,
+	gitSshStatus?: GitSshCapability,
 ): MachineRegister {
 	const verifyOnly = isMigrationVerifyOnly(env);
 	const cpus = os.cpus();
@@ -86,6 +89,10 @@ export function getRegisterInfo(
 		// P2P 隧道能力摘要：可用时携带 protocolVersion；不可用时上报稳定 code（不含 native 错误正文）。
 		if (p2pTunnelStatus !== undefined) {
 			capabilityDetails.p2pTunnel = p2pTunnelStatus;
+		}
+		// Git SSH 受管密钥分发能力（ADR-0037）：缺省即未报告，Server 因此不下发密钥。
+		if (gitSshStatus !== undefined) {
+			capabilityDetails.gitSsh = gitSshStatus;
 		}
 	}
 	// 运行时安全摘要两种模式都上报（M1 验证依赖 privileged 与 installation）；不含本地路径或凭据。

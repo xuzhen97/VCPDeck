@@ -475,6 +475,76 @@ describe("parseMachineRegister p2pTunnel 能力", () => {
 	});
 });
 
+describe("parseMachineRegister gitSsh 能力（ADR-0037/0038）", () => {
+	it("接受新 Client 上报的 gitSsh v1 能力", () => {
+		const parsed = parseMachineRegister(
+			validRegister({
+				capabilityDetails: {
+					frp: { available: true, reconcileProtocolVersion: 1 },
+					gitSsh: { available: true, protocolVersion: 1 },
+				},
+			}),
+		);
+		expect(parsed.capabilityDetails?.gitSsh).toEqual({
+			available: true,
+			protocolVersion: 1,
+		});
+	});
+
+	it("接受能力不可用的 gitSsh 摘要", () => {
+		const parsed = parseMachineRegister(
+			validRegister({
+				capabilityDetails: {
+					gitSsh: { available: false, code: "GIT_SSH_UNAVAILABLE" },
+				},
+			}),
+		);
+		expect(parsed.capabilityDetails?.gitSsh).toEqual({
+			available: false,
+			code: "GIT_SSH_UNAVAILABLE",
+		});
+	});
+
+	it("未知协议版本、未知失败码与未知字段均拒绝", () => {
+		expect(() =>
+			parseMachineRegister(
+				validRegister({
+					capabilityDetails: {
+						gitSsh: { available: true, protocolVersion: 2 } as never,
+					},
+				}),
+			),
+		).toThrow(/gitSsh/);
+		expect(() =>
+			parseMachineRegister(
+				validRegister({
+					capabilityDetails: {
+						gitSsh: { available: false, code: "NOPE" } as never,
+					},
+				}),
+			),
+		).toThrow(/gitSsh/);
+		expect(() =>
+			parseMachineRegister(
+				validRegister({
+					capabilityDetails: {
+						gitSsh: { available: true, protocolVersion: 1, extra: 1 } as never,
+					},
+				}),
+			),
+		).toThrow(/未知字段/);
+	});
+
+	it("旧 Client 缺省 gitSsh 时保持 undefined（未报告）", () => {
+		const parsed = parseMachineRegister(
+			validRegister({
+				capabilityDetails: { frp: { available: false, code: "FRPC_NOT_FOUND" } },
+			}),
+		);
+		expect(parsed.capabilityDetails?.gitSsh).toBeUndefined();
+	});
+});
+
 describe("parsePiCapabilityStatus 的 bundle 能力", () => {
 	const base = {
 		available: true,

@@ -4,6 +4,7 @@ import { PageHeading } from "@/components/page-heading";
 import { IdentitiesPanel } from "@/pages/identities-panel";
 import { ProfilePanel } from "@/pages/profile-panel";
 import { StoragePanel } from "@/pages/storage-panel";
+import { GitSshPanel } from "@/pages/git-ssh-panel";
 import { TokensPanel } from "@/pages/tokens-panel";
 import { TunnelSettingsPanel } from "@/pages/tunnel-settings-panel";
 
@@ -20,13 +21,13 @@ export function SettingsPage() {
 		return <Navigate to="/settings/profile" replace />;
 	// 兼容旧入口：Pi 设置已并入 Agent 模块
 	if (section === "pi") return <Navigate to="/agent/profile" replace />;
-	if (!["profile", "tokens", "network", "storage", "identities"].includes(section))
+	if (!["profile", "tokens", "network", "storage", "git-ssh", "identities"].includes(section))
 		return <Navigate to="/settings/profile" replace />;
 	return (
 		<div className="space-y-6">
 			<PageHeading
 				title="设置"
-				description="管理个人资料、访问 Token、网络与存储。"
+				description="管理个人资料、访问 Token、网络、存储与 Git 密钥。"
 			/>
 			<p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
 				普通身份拥有全部远程业务权限，请仅创建可信操作者身份。
@@ -34,6 +35,7 @@ export function SettingsPage() {
 			{section === "profile" && <ProfilePanel />}
 			{section === "tokens" && <TokensPanel />}
 			{section === "network" && <TunnelSettingsPanel />}
+			{section === "git-ssh" && <GitSshPanel />}
 			{section === "storage" && <StoragePanel />}
 			{section === "identities" && identity?.isAdmin && <IdentitiesPanel />}
 		</div>

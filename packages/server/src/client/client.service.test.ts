@@ -307,6 +307,48 @@ describe("ClientService ADR-0023 安装/特权摘要", () => {
 		expect(client?.installation).toEqual({ mode: "systemd-root-equivalent" });
 	});
 
+	it("listOnline 严格投影 gitSsh 能力摘要（ADR-0037）", async () => {
+		// 写入路径（register parser）接受 gitSsh，但读取路径的严格投影也必须保留它，
+		// 否则 Client 上报的能力在 /api/clients 上被静默丢弃。
+		const findMany = vi.fn().mockResolvedValue([
+			{
+				...clientRow,
+				capabilityDetails: JSON.stringify({
+					gitSsh: { available: true, protocolVersion: 1 },
+				}),
+			},
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+
+		const [client] = await service.listOnline();
+		expect(client?.capabilityDetails.gitSsh).toEqual({
+			available: true,
+			protocolVersion: 1,
+		});
+	});
+
+	it("gitSsh 摘要非法时省略该字段但保留其余详情（不推断支持状态）", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			{
+				...clientRow,
+				capabilityDetails: JSON.stringify({
+					terminal: { available: true, backend: "conpty" },
+					gitSsh: { available: "yes" },
+				}),
+			},
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+
+		const [client] = await service.listOnline();
+		expect(client?.capabilityDetails.gitSsh).toBeUndefined();
+		expect(client?.capabilityDetails.terminal).toEqual({
+			available: true,
+			backend: "conpty",
+		});
+	});
+
 	it("旧 Client 未报告时省略 installation 与 privileged（不推断）", async () => {
 		const prisma = prismaMock() as never;
 		const service = new ClientService(prisma);

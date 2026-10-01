@@ -184,6 +184,187 @@ var require_update = __commonJS({
   }
 });
 
+// ../shared/dist/git-ssh.js
+var require_git_ssh = __commonJS({
+  "../shared/dist/git-ssh.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.GIT_SSH_TARGET_STATES = exports2.GitSshProtocolError = exports2.GIT_SSH_FAILURE_CODES = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_PROTOCOL_VERSION = void 0;
+    exports2.isGitSshTargetState = isGitSshTargetState;
+    exports2.isGitSshFailureCode = isGitSshFailureCode;
+    exports2.parseGitSshCommand = parseGitSshCommand;
+    exports2.parseGitSshAck = parseGitSshAck;
+    exports2.parseGitSshCapability = parseGitSshCapability;
+    exports2.parseGitSshTargetInput = parseGitSshTargetInput;
+    exports2.GIT_SSH_PROTOCOL_VERSION = 1;
+    exports2.GIT_SSH_MAX_TARGETS = 200;
+    var MAX_PRIVATE_KEY_LENGTH = 8192;
+    var MAX_PUBLIC_KEY_LENGTH = 512;
+    var MAX_OPERATION_ID_LENGTH = 64;
+    var MAX_CLIENT_ID_LENGTH = 128;
+    exports2.GIT_SSH_FAILURE_CODES = [
+      "GIT_SSH_KEY_UNAVAILABLE",
+      "GIT_SSH_INSTALL_FAILED",
+      "GIT_SSH_CLEAR_FAILED",
+      "GIT_SSH_UNSUPPORTED"
+    ];
+    var GitSshProtocolError = class extends Error {
+      code = "GIT_SSH_PROTOCOL_INVALID";
+      constructor(message) {
+        super(message);
+        this.name = "GitSshProtocolError";
+      }
+    };
+    exports2.GitSshProtocolError = GitSshProtocolError;
+    function fail(message) {
+      throw new GitSshProtocolError(message);
+    }
+    function assertRecord(value2, what) {
+      if (typeof value2 !== "object" || value2 === null || Array.isArray(value2)) {
+        fail(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+      }
+    }
+    function assertExactKeys(value2, allowed, what) {
+      const allowedSet = new Set(allowed);
+      for (const key of Object.keys(value2)) {
+        if (!allowedSet.has(key))
+          fail(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      for (const key of allowed) {
+        if (!(key in value2))
+          fail(`${what} \u7F3A\u5C11\u5B57\u6BB5 ${key}`);
+      }
+    }
+    function requireBoundedString(value2, what, maxLength) {
+      if (typeof value2 !== "string" || value2.length === 0 || value2.length > maxLength) {
+        fail(`${what} \u5FC5\u987B\u4E3A\u957F\u5EA6 1-${maxLength} \u7684\u5B57\u7B26\u4E32`);
+      }
+      return value2;
+    }
+    function requirePositiveInt(value2, what) {
+      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < 1) {
+        fail(`${what} \u5FC5\u987B\u4E3A\u6B63\u6574\u6570`);
+      }
+      return value2;
+    }
+    function requireProtocolVersion(value2) {
+      if (value2 !== exports2.GIT_SSH_PROTOCOL_VERSION) {
+        fail(`protocolVersion \u4E0D\u652F\u6301\uFF1A${String(value2)}`);
+      }
+      return exports2.GIT_SSH_PROTOCOL_VERSION;
+    }
+    var OPENSSH_PRIVATE_KEY_PATTERN = /^-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]+-----END OPENSSH PRIVATE KEY-----\s*$/;
+    var OPENSSH_PUBLIC_KEY_PATTERN = /^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/;
+    exports2.GIT_SSH_TARGET_STATES = [
+      "pending",
+      "installed",
+      "clear-pending",
+      "cleared",
+      "failed",
+      "ambiguous",
+      "unsupported"
+    ];
+    function isGitSshTargetState(value2) {
+      return typeof value2 === "string" && exports2.GIT_SSH_TARGET_STATES.includes(value2);
+    }
+    function isGitSshFailureCode(value2) {
+      return typeof value2 === "string" && exports2.GIT_SSH_FAILURE_CODES.includes(value2);
+    }
+    function parseGitSshCommand(value2) {
+      assertRecord(value2, "gitSshCommand");
+      if (value2.action === "clear") {
+        assertExactKeys(value2, ["protocolVersion", "operationId", "version", "action"], "gitSshCommand");
+        return {
+          protocolVersion: requireProtocolVersion(value2.protocolVersion),
+          operationId: requireBoundedString(value2.operationId, "operationId", MAX_OPERATION_ID_LENGTH),
+          version: requirePositiveInt(value2.version, "version"),
+          action: "clear"
+        };
+      }
+      if (value2.action !== "install") {
+        fail(`unknown gitSshCommand action: ${String(value2.action)}`);
+      }
+      assertExactKeys(value2, ["protocolVersion", "operationId", "version", "action", "privateKey", "publicKey"], "gitSshCommand");
+      const { privateKey, publicKey } = value2;
+      if (typeof privateKey !== "string" || privateKey.length > MAX_PRIVATE_KEY_LENGTH || !OPENSSH_PRIVATE_KEY_PATTERN.test(privateKey)) {
+        fail("privateKey \u5FC5\u987B\u662F OpenSSH \u79C1\u94A5\u88C5\u7532\u6587\u672C");
+      }
+      if (typeof publicKey !== "string" || publicKey.length > MAX_PUBLIC_KEY_LENGTH || !OPENSSH_PUBLIC_KEY_PATTERN.test(publicKey)) {
+        fail("publicKey \u5FC5\u987B\u662F\u5355\u884C ssh-ed25519 \u516C\u94A5");
+      }
+      return {
+        protocolVersion: requireProtocolVersion(value2.protocolVersion),
+        operationId: requireBoundedString(value2.operationId, "operationId", MAX_OPERATION_ID_LENGTH),
+        version: requirePositiveInt(value2.version, "version"),
+        action: "install",
+        privateKey,
+        publicKey
+      };
+    }
+    function parseGitSshAck(value2) {
+      assertRecord(value2, "gitSshAck");
+      const state = value2.state;
+      if (state === "failed") {
+        assertExactKeys(value2, ["protocolVersion", "operationId", "version", "state", "code"], "gitSshAck");
+        if (!exports2.GIT_SSH_FAILURE_CODES.includes(value2.code)) {
+          fail("gitSshAck.code \u5FC5\u987B\u4E3A\u5DF2\u77E5\u5931\u8D25\u7801");
+        }
+        return {
+          protocolVersion: requireProtocolVersion(value2.protocolVersion),
+          operationId: requireBoundedString(value2.operationId, "operationId", MAX_OPERATION_ID_LENGTH),
+          version: requirePositiveInt(value2.version, "version"),
+          state: "failed",
+          code: value2.code
+        };
+      }
+      if (state !== "installed" && state !== "cleared") {
+        fail(`gitSshAck.state \u5FC5\u987B\u4E3A installed\u3001cleared \u6216 failed\uFF1A${String(state)}`);
+      }
+      assertExactKeys(value2, ["protocolVersion", "operationId", "version", "state"], "gitSshAck");
+      return {
+        protocolVersion: requireProtocolVersion(value2.protocolVersion),
+        operationId: requireBoundedString(value2.operationId, "operationId", MAX_OPERATION_ID_LENGTH),
+        version: requirePositiveInt(value2.version, "version"),
+        state
+      };
+    }
+    function parseGitSshCapability(value2) {
+      assertRecord(value2, "gitSsh");
+      if (value2.available === true) {
+        assertExactKeys(value2, ["available", "protocolVersion"], "gitSsh");
+        if (value2.protocolVersion !== exports2.GIT_SSH_PROTOCOL_VERSION) {
+          fail(`gitSsh.protocolVersion \u4E0D\u652F\u6301\uFF1A${String(value2.protocolVersion)}`);
+        }
+        return { available: true, protocolVersion: exports2.GIT_SSH_PROTOCOL_VERSION };
+      }
+      if (value2.available === false) {
+        assertExactKeys(value2, ["available", "code"], "gitSsh");
+        if (value2.code !== "GIT_SSH_UNAVAILABLE") {
+          fail("gitSsh.code \u5FC5\u987B\u4E3A GIT_SSH_UNAVAILABLE");
+        }
+        return { available: false, code: "GIT_SSH_UNAVAILABLE" };
+      }
+      fail("gitSsh.available \u5FC5\u987B\u4E3A boolean");
+    }
+    function parseGitSshTargetInput(value2) {
+      assertRecord(value2, "gitSshTargetInput");
+      assertExactKeys(value2, ["clientIds"], "gitSshTargetInput");
+      const raw = value2.clientIds;
+      if (!Array.isArray(raw)) {
+        fail("clientIds \u5FC5\u987B\u662F\u6570\u7EC4");
+      }
+      if (raw.length > exports2.GIT_SSH_MAX_TARGETS) {
+        fail(`clientIds \u6570\u91CF\u4E0D\u5F97\u8D85\u8FC7 ${exports2.GIT_SSH_MAX_TARGETS}`);
+      }
+      const clientIds = raw.map((item, index) => requireBoundedString(item, `clientIds[${index}]`, MAX_CLIENT_ID_LENGTH));
+      if (new Set(clientIds).size !== clientIds.length) {
+        fail("clientIds \u5B58\u5728\u91CD\u590D\u9879");
+      }
+      return { clientIds };
+    }
+  }
+});
+
 // ../shared/dist/pi.js
 var require_pi = __commonJS({
   "../shared/dist/pi.js"(exports2) {
@@ -3259,6 +3440,7 @@ var require_machine_register = __commonJS({
     exports2.getClientInstallationCompliance = getClientInstallationCompliance;
     exports2.parseMachineRegister = parseMachineRegister;
     var frp_runtime_js_1 = require_frp_runtime();
+    var git_ssh_js_1 = require_git_ssh();
     var tunnel_js_1 = require_tunnel();
     var MAX_CLIENT_ID = 128;
     var MAX_HOSTNAME = 256;
@@ -3503,7 +3685,7 @@ var require_machine_register = __commonJS({
         const details = value2.capabilityDetails;
         if (!isRecord2(details))
           throw new Error("capabilityDetails \u5FC5\u987B\u4E3A\u5BF9\u8C61");
-        const known = ["pi", "terminal", "frp", "privileged", "p2pTunnel"];
+        const known = ["pi", "terminal", "frp", "privileged", "p2pTunnel", "gitSsh"];
         for (const key of Object.keys(details)) {
           if (!known.includes(key)) {
             throw new Error(`capabilityDetails \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
@@ -3524,6 +3706,9 @@ var require_machine_register = __commonJS({
         }
         if (details.p2pTunnel !== void 0) {
           parsedDetails.p2pTunnel = (0, tunnel_js_1.parseP2pTunnelCapabilityStatus)(details.p2pTunnel);
+        }
+        if (details.gitSsh !== void 0) {
+          parsedDetails.gitSsh = (0, git_ssh_js_1.parseGitSshCapability)(details.gitSsh);
         }
         result.capabilityDetails = parsedDetails;
       }
@@ -3556,8 +3741,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parsePiModelCatalogStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parsePiProviderDiscoveryInput = exports2.parsePiProfileUpdateInput = exports2.parsePiProfileCreateInput = exports2.parsePiCredentialUpdateInput = exports2.parsePiCredentialCreateInput = exports2.PiAdminProtocolError = exports2.safePiErrorMessage = exports2.parsePiRuntimeSpecV4 = exports2.parsePiRuntimeSpecV3 = exports2.parsePiRuntimeSpecV1 = exports2.parsePiRuntimeSpecMessageV4 = exports2.parsePiRuntimeSpecMessageV3 = exports2.parsePiRuntimeSpecMessage = exports2.parsePiRuntimeAck = exports2.parsePiCredentialLeaseV2 = exports2.parsePiAgentState = exports2.isPiToolExecutionMode = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
-    exports2.isPiWorkerAction = exports2.isPiReadAction = exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = exports2.parseTunnelClose = exports2.parseTunnelClientState = exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = void 0;
+    exports2.Events = exports2.parsePiProviderDiscoveryInput = exports2.parsePiProfileUpdateInput = exports2.parsePiProfileCreateInput = exports2.parsePiCredentialUpdateInput = exports2.parsePiCredentialCreateInput = exports2.PiAdminProtocolError = exports2.safePiErrorMessage = exports2.parsePiRuntimeSpecV4 = exports2.parsePiRuntimeSpecV3 = exports2.parsePiRuntimeSpecV1 = exports2.parsePiRuntimeSpecMessageV4 = exports2.parsePiRuntimeSpecMessageV3 = exports2.parsePiRuntimeSpecMessage = exports2.parsePiRuntimeAck = exports2.parsePiCredentialLeaseV2 = exports2.parsePiAgentState = exports2.isPiToolExecutionMode = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.isPiWorkerAction = exports2.isPiReadAction = exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = exports2.parseTunnelClose = exports2.parseTunnelClientState = exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parsePiModelCatalogStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -3578,6 +3763,40 @@ var require_dist = __commonJS({
       return client_installer_js_1.parseClientInstallerPlatform;
     } });
     __exportStar(require_update(), exports2);
+    var git_ssh_js_1 = require_git_ssh();
+    Object.defineProperty(exports2, "GIT_SSH_FAILURE_CODES", { enumerable: true, get: function() {
+      return git_ssh_js_1.GIT_SSH_FAILURE_CODES;
+    } });
+    Object.defineProperty(exports2, "GIT_SSH_MAX_TARGETS", { enumerable: true, get: function() {
+      return git_ssh_js_1.GIT_SSH_MAX_TARGETS;
+    } });
+    Object.defineProperty(exports2, "GIT_SSH_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return git_ssh_js_1.GIT_SSH_PROTOCOL_VERSION;
+    } });
+    Object.defineProperty(exports2, "GIT_SSH_TARGET_STATES", { enumerable: true, get: function() {
+      return git_ssh_js_1.GIT_SSH_TARGET_STATES;
+    } });
+    Object.defineProperty(exports2, "GitSshProtocolError", { enumerable: true, get: function() {
+      return git_ssh_js_1.GitSshProtocolError;
+    } });
+    Object.defineProperty(exports2, "isGitSshFailureCode", { enumerable: true, get: function() {
+      return git_ssh_js_1.isGitSshFailureCode;
+    } });
+    Object.defineProperty(exports2, "isGitSshTargetState", { enumerable: true, get: function() {
+      return git_ssh_js_1.isGitSshTargetState;
+    } });
+    Object.defineProperty(exports2, "parseGitSshAck", { enumerable: true, get: function() {
+      return git_ssh_js_1.parseGitSshAck;
+    } });
+    Object.defineProperty(exports2, "parseGitSshCapability", { enumerable: true, get: function() {
+      return git_ssh_js_1.parseGitSshCapability;
+    } });
+    Object.defineProperty(exports2, "parseGitSshCommand", { enumerable: true, get: function() {
+      return git_ssh_js_1.parseGitSshCommand;
+    } });
+    Object.defineProperty(exports2, "parseGitSshTargetInput", { enumerable: true, get: function() {
+      return git_ssh_js_1.parseGitSshTargetInput;
+    } });
     __exportStar(require_pi(), exports2);
     __exportStar(require_pi_bundle(), exports2);
     __exportStar(require_terminal(), exports2);
@@ -3731,7 +3950,9 @@ var require_dist = __commonJS({
       TUNNEL_PREPARE: "tunnel:prepare",
       TUNNEL_SIGNAL: "tunnel:signal",
       TUNNEL_STATE: "tunnel:state",
-      TUNNEL_CLOSE: "tunnel:close"
+      TUNNEL_CLOSE: "tunnel:close",
+      GIT_SSH_COMMAND: "git-ssh:command",
+      GIT_SSH_ACK: "git-ssh:ack"
     };
     var JobType;
     (function(JobType2) {
@@ -4441,6 +4662,30 @@ var init_pi = __esm({
   }
 });
 
+// ../sdk/dist/git-ssh.js
+function createGitSshApi(client) {
+  return {
+    /**
+     * 当前密钥投影；未生成时返回 null。
+     *
+     * Server 在无密钥时返回 200 空 body，SDK `request` 会解析成 `undefined`；
+     * 这里归一化为 `null`，使运行时值与声明类型一致。
+     */
+    get: async (signal) => await client.request("GET", "/api/git-ssh", void 0, signal) ?? null,
+    /** 生成新一代密钥；公钥需人工登记到 Git 服务。 */
+    generate: (signal) => client.request("POST", "/api/git-ssh/generate", void 0, signal),
+    /** 密钥与每机分发状态。 */
+    status: (signal) => client.request("GET", "/api/git-ssh/status", void 0, signal),
+    /** 全量替换选机集合。 */
+    setTargets: (clientIds, signal) => client.request("PUT", "/api/git-ssh/targets", { clientIds }, signal)
+  };
+}
+var init_git_ssh = __esm({
+  "../sdk/dist/git-ssh.js"() {
+    "use strict";
+  }
+});
+
 // ../sdk/dist/releases.js
 function createReleasesApi(client) {
   return {
@@ -4614,6 +4859,7 @@ var init_client = __esm({
     init_frp();
     init_jobs();
     init_pi();
+    init_git_ssh();
     init_releases();
     init_storage();
     init_storage_shares();
@@ -4646,6 +4892,8 @@ var init_client = __esm({
       aliyundrive;
       frp;
       pi;
+      /** Git SSH 共享密钥管理（ADR-0037）。 */
+      gitSsh;
       releases;
       terminals;
       tunnels;
@@ -4667,6 +4915,7 @@ var init_client = __esm({
         this.aliyundrive = createAliyunDriveApi(this);
         this.frp = createFrpApi(this, this.jobs);
         this.pi = createPiApi(this);
+        this.gitSsh = createGitSshApi(this);
         this.releases = createReleasesApi(this);
         this.terminals = createTerminalsApi(this);
         this.tunnels = createTunnelsApi(this);
@@ -4728,6 +4977,7 @@ var init_dist = __esm({
     init_client_installer();
     init_files();
     init_frp();
+    init_git_ssh();
     init_jobs();
     init_pi();
     init_releases();

@@ -1,4 +1,5 @@
 import type { TerminalOutputChunk, TerminalStateReport, TerminalStateSession } from "@vcpdeck/shared";
+import { applyGitSshEnv } from "../git-ssh/runtime.js";
 import { TerminalLimits } from "@vcpdeck/shared";
 import { utf8ByteLength } from "@vcpdeck/shared";
 import type { ShellRegistryEntry } from "./shell-discovery.js";
@@ -107,10 +108,10 @@ export function createTerminalManager(options: TerminalManagerOptions) {
 		COLORTERM: "truecolor",
 	};
 
-	/** 继承进程环境（过滤 undefined 值）。 */
+	/** 继承进程环境（过滤 undefined 值）；含受管 Git SSH 注入。 */
 	function cleanEnv(): Record<string, string> {
 		const result: Record<string, string> = {};
-		for (const [key, value] of Object.entries(process.env)) {
+		for (const [key, value] of Object.entries(applyGitSshEnv())) {
 			if (typeof value === "string") result[key] = value;
 		}
 		return result;

@@ -10,6 +10,7 @@ import { TunnelModule } from "./tunnel/tunnel.module.js";
 import { PiModule } from "./pi/pi.module.js";
 import { ReleaseModule } from "./release/release.module.js";
 import { ClientInstallerModule } from "./client-installer/client-installer.module.js";
+import { GitSshModule } from "./git-ssh/git-ssh.module.js";
 
 @Module({
 	imports: [
@@ -24,6 +25,7 @@ import { ClientInstallerModule } from "./client-installer/client-installer.modul
 		PiModule,
 		ReleaseModule,
 		ClientInstallerModule,
+		GitSshModule,
 	],
 })
 export class AppModule {}

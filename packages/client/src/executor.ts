@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import type { Socket } from "socket.io-client";
 import { killProcessTree } from "./terminal/process-tree.js";
+import { applyGitSshEnv } from "./git-ssh/runtime.js";
 import { Events } from "@vcpdeck/shared";
 import type {
 	JobOutput,
@@ -63,6 +64,8 @@ export function executeExec(job: ExecJob, socket: Socket) {
 		child = spawn(cmd, {
 			shell: true,
 			cwd: job.cwd,
+			// 受管 Git SSH：只有 VCPDeck 启动的进程继承（不修改 process.env 全局）。
+			env: applyGitSshEnv(),
 			detached: process.platform !== "win32",
 			windowsHide: true,
 		});
@@ -70,6 +73,8 @@ export function executeExec(job: ExecJob, socket: Socket) {
 		child = spawn(job.executable, job.args, {
 			shell: false,
 			cwd: job.cwd,
+			// 受管 Git SSH：只有 VCPDeck 启动的进程继承（不修改 process.env 全局）。
+			env: applyGitSshEnv(),
 			detached: process.platform !== "win32",
 			windowsHide: true,
 		});

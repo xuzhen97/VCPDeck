@@ -201,6 +201,8 @@ Client 的长期要求是只接受 Shared 定义并经过运行时解析的消�
 
 ## 8. 数据归属
 
+**Git SSH 共享密钥（ADR-0037 / ADR-0038）**：私钥密文、版本与选机期望状态由 Server 权威保存（根密钥在 Server 进程外文件）；Client 只在自身数据根保留受管副本（`<VCPDECK_CLIENT_DATA_DIR>/git-ssh`，跨 Release 保留），并仅为 VCPDeck 启动的 Job、Terminal、Pi 注入受限 SSH 配置。管理面只投影公钥、指纹与分发状态，永不返回私钥。
+
 | 数据或资源 | 权威位置 | 持久性说明 |
 | --- | --- | --- |
 | 身份、Credential、登录会话 | Server / SQLite | 持久化；Token 以哈希形式校验 |
@@ -377,6 +379,8 @@ Frontend 构建产物随发布包分发并由 Server 同源托管（`server/publ
 Client 和 Server 都可以由 Launcher 守护。SQLite 与本地 Storage 应放在 Server 的持久化目录中，不应随版本目录切换而丢失。
 
 ## 11. 安全与故障边界
+
+**Git SSH 密钥分发边界**：选定 Client 只是运维分发范围，不是身份认证；持有共享 PSK 的机器可以冒用已选 Client ID 取得私钥，本地清理也不代表 Git 服务已撤销访问。可靠排除必须在 Git 服务删除旧公钥并轮换新密钥。受管密钥不修改整机/用户 SSH 配置，但同账户进程仍可读取它。
 
 ### 11.1 身份与连接
 

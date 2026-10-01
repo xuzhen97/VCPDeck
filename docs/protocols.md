@@ -152,6 +152,24 @@ Alibaba 模式下，预签名 URL 只在 `no-store` 响应和 CLI 内存中存�
 
 关闭开关返回 `CLIENT_INSTALLER_DISABLED`，不影响已安装 Client。未知字段、平台和空名称严格拒绝；PSK 不得进入 URL query、日志或错误。
 
+### 2.9 Git SSH 共享密钥 REST 协议
+
+| 端点 | 认证 | 语义 |
+| --- | --- | --- |
+| `GET /api/git-ssh` | Cookie/Bearer | 当前密钥投影 `{ version, publicKey, fingerprint }`；未生成时为 `null`。任何响应都不含私钥或密文 |
+| `POST /api/git-ssh/generate` | Cookie/Bearer | 生成新一代密钥并加密保存，并通知 Client 重新登记；根密钥缺失/非法时 `GIT_SSH_KEY_UNAVAILABLE`（400） |
+| `GET /api/git-ssh/status` | Cookie/Bearer | 密钥 + 每机分发状态 `{ key, targets[] }`，`targets[].state ∈ pending \| installed \| clear-pending \| cleared \| failed \| ambiguous \| unsupported` |
+| `PUT /api/git-ssh/targets` | Cookie/Bearer | 全量替换选机集合，body `{ clientIds: string[] }`；重复项、非法项或超上限 200 与未知字段 → `GIT_SSH_PROTOCOL_INVALID`（400） |
+
+`/client` 命名空间新增两个事件（协议版本 `GIT_SSH_PROTOCOL_VERSION=1`；严格解析，未知字段与不支持版本一律拒绝）：
+
+| 事件 | 方向 | 载荷 |
+| --- | --- | --- |
+| `git-ssh:command` | Server → Client | `{ protocolVersion, operationId, version, action: "install", privateKey, publicKey }` 或 `{ …, action: "clear" }`；只发往当前注册 socket，绝不像 clientId room 广播 |
+| `git-ssh:ack` | Client → Server | `{ protocolVersion, operationId, version, state: "installed" \| "cleared" \| "failed", code? }`；不含私钥与原始异常；Server 仅接受匹配当前 socket 租约与 operationId 的回执 |
+
+Client 只在收到本次 REGISTER ack、且已上报兼容 `capabilityDetails.gitSsh` 时处理指令；`installed`/`cleared` 只表示本地受管副本状态，不代表 Git 服务已授权或已撤销。
+
 ## 3. `/client` Socket.IO 协议
 
 Client 使用 `auth.psk` 建立连接。注册成功后，Server 将 Client room 标识绑定到 `clientId`。

@@ -5,6 +5,7 @@ export * from "./clients.js";
 export * from "./client-installer.js";
 export * from "./files.js";
 export * from "./frp.js";
+export * from "./git-ssh.js";
 export * from "./jobs.js";
 export * from "./pi.js";
 export * from "./releases.js";

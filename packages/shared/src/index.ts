@@ -20,6 +20,34 @@ export type {
 // ── 自更新协议 ──
 export * from "./update.js";
 
+// ── Git SSH 共享密钥分发协议（ADR-0037 / ADR-0038） ──
+export {
+	GIT_SSH_FAILURE_CODES,
+	GIT_SSH_MAX_TARGETS,
+	GIT_SSH_PROTOCOL_VERSION,
+	GIT_SSH_TARGET_STATES,
+	GitSshProtocolError,
+	isGitSshFailureCode,
+	isGitSshTargetState,
+	parseGitSshAck,
+	parseGitSshCapability,
+	parseGitSshCommand,
+	parseGitSshTargetInput,
+} from "./git-ssh.js";
+export type {
+	GitSshAck,
+	GitSshCapability,
+	GitSshClearCommand,
+	GitSshCommand,
+	GitSshFailureCode,
+	GitSshInstallCommand,
+	GitSshPublicInfo,
+	GitSshStatus,
+	GitSshTargetInput,
+	GitSshTargetState,
+	GitSshTargetStatus,
+} from "./git-ssh.js";
+
 // ── 远程 Pi 协议 ──
 export * from "./pi.js";
 export * from "./pi-bundle.js";
@@ -30,6 +58,7 @@ import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { PiCapabilityStatus } from "./pi.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
 import type { P2pTunnelCapabilityStatus } from "./tunnel.js";
+import type { GitSshCapability } from "./git-ssh.js";
 // 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
 export type {
 	PaginatedPiResult,
@@ -213,6 +242,8 @@ export const Events = {
 	TUNNEL_SIGNAL: "tunnel:signal",
 	TUNNEL_STATE: "tunnel:state",
 	TUNNEL_CLOSE: "tunnel:close",
+	GIT_SSH_COMMAND: "git-ssh:command",
+	GIT_SSH_ACK: "git-ssh:ack",
 } as const;
 
 // ── Job type ──
@@ -423,7 +454,7 @@ export interface ClientInfo {
 	totalMemMB: number;
 	clientVersion: string;
 	capabilities: string[];
-	/** 解析后的能力摘要（pi/terminal/frp/privileged；无探测/损坏时为 {}） */
+	/** 解析后的能力摘要（pi/terminal/frp/privileged/gitSsh；无探测/损坏时为 {}） */
 	capabilityDetails: {
 		pi?: PiCapabilityStatus;
 		terminal?: TerminalCapabilityStatus;
@@ -432,6 +463,12 @@ export interface ClientInfo {
 		privileged?: PrivilegedCapabilityStatus;
 		/** 可选：P2P 隧道能力摘要（ADR-0026，旧 Client 缺省） */
 		p2pTunnel?: P2pTunnelCapabilityStatus;
+		/**
+		 * 可选：Git SSH 受管密钥能力摘要（ADR-0037，旧 Client 缺省即未报告）。
+		 * 写入路径（register parser）与本读路径必须同时声明该字段，
+		 * 否则 Server 严格投影会把 Client 已上报的 gitSsh 能力静默丢弃。
+		 */
+		gitSsh?: GitSshCapability;
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告，不推断为任何模式） */
 	installation?: MachineInstallationStatus;

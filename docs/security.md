@@ -20,7 +20,8 @@ VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可
 - 命令、脚本、环境变量、路径、终端正文、Pi prompt/响应和文件内容；
 - Release 构件、上传分片 URL及下载路径；
 - Client 一键安装 bootstrap 响应和目标机 `launcher.env`；
-- SQLite 数据库和远程 Pi Session。
+- SQLite 数据库和远程 Pi Session；
+- **Git SSH 共享私钥及其加密根密钥**（Server 侧密文 + 获选 Client 的受管副本）；
 
 这些内容不得进入普通日志、遥测、截图、Agent 回复、Issue 或未经加密的备份。
 
@@ -30,6 +31,7 @@ VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可
 Browser / SDK / CLI ──身份认证──> Server
 外部消费者 ──长期 opaque Token──> Server 公开 Storage Share
 Client ──PSK──> Server /client
+Server ──受管密钥下发──> Client Git SSH 运行材料
 Server/Client ──本机随机 Token──> Launcher
 Browser/Client ──短期签名──> Storage
 Client frpc ──FRPS Token──> FRPS
@@ -68,6 +70,7 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 - Server/Client 实际读取 `VCPDECK_PSK`；示例中的 `VCPDECK_CLIENT_PSK` 当前无效；
 - Client 一键安装开关默认关闭。启用后，任何能访问 Server 安装入口的机器都可从 bootstrap 取得共享 PSK；命令和公开脚本本身不含 PSK，bootstrap 禁止缓存和普通日志记录；
 - 禁用安装入口只拒绝后续安装请求，不轮换 PSK、不断开已有 Client，也无法撤销已经取得的 PSK。
+- **Git SSH 受管密钥分发沿用上述共享 PSK**（ADR-0038）：选机、socket 绑定、重复连接标记与本地清理都只是运维机制。持有 PSK 的机器可以冒用已选 Client ID 领取私钥，因此「选定机器」不是保密或单机撤销保证；任一受信机器或 PSK 泄漏，都按**整套 Git 私钥失陷**处置（Git 服务撤销旧公钥 → 轮换新密钥并人工登记 → 只向仍受信机器分发 → 轮换 PSK）。
 
 ### 4.4 授权缺口
 
@@ -94,6 +97,7 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 - FRP 当前把 authToken/dashboardPassword 明文存入 SQLite 并通过 REST 返回，authToken 还进入 Job payload 和 Client TOML；同一 Client 单 frpc 与 Server 多实例模型不一致，详见 [`design/frp.md`](./design/frp.md)；
 - 文件路径长期必须防止 traversal、symlink/junction 越界和平台路径差异；当前普通文件 Job 的 `rootDir` 未绑定 `file.roots`，`resolveSafePath()` 还会吞掉 symlink 越界异常并缺少不存在目标父链校验，Files root 目前不是完整授权边界；
 - 未知事件、字段、状态和错误码应拒绝，不做宽松猜测。
+- **Git SSH 受管密钥不全局生效**：Client 只为 VCPDeck 自己创建的 Job、Terminal、Pi 子进程注入 `GIT_SSH_COMMAND`（指向受限 `ssh_config`），不修改整机或用户 SSH 配置，也不把私钥正文放进环境变量；未安装受管密钥时会移除继承来的 `GIT_SSH_COMMAND`。同账户进程仍可读取可用私钥，因此这不是同账户隔离。
 
 ## 6. 数据最小化
 
@@ -197,6 +201,8 @@ Alibaba Release 上传的数据面直接连接 Provider：Server 只签发/刷�
 | Pi Provider 凭据（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录） | 通过 UI/API 轮换或撤销；撤销后立即从 RuntimeSpec 组装中排除 |
 | Pi 凭据根密钥 | `VCPDECK_PI_CREDENTIAL_KEY_FILE` 指向的 Server 进程外文件 | 不进 DB/REST/Web/日志；缺失或非法时 Pi 配置写入与 Spec 组装 fail closed（Server 启动与其他能力不受影响）；轮换需要重新加密既有密文 |
 | Pi Session 数据根 secret | `<VCPDECK_CLIENT_DATA_DIR>/pi/install-secret`（0600） | 丢失会导致既有 Session 目录不可定位；删除前必须确认无历史 Session 依赖 |
+| Git SSH 共享私钥（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录）；获选 Client 的 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh/id_ed25519`（POSIX 0600；Windows 用 `icacls` 关闭继承并授权 SYSTEM、Administrators **与当前运行账户**，收紧后回读校验当前账户仍可写——Client 未必以 SYSTEM 运行，漏授权会把运行账户挡在目录外导致安装必然失败） | 轮换需在 Git 服务删除旧公钥并登记新公钥，再重新分发；本地清理不等于 Git 服务已撤销 |
+| Git SSH 根密钥 | `VCPDECK_GIT_SSH_KEY_FILE` 指向的 Server 进程外文件（与 Pi 凭据密钥分离） | 不进 DB/REST/Web/日志；缺失或非法时密钥生成/下发 fail closed（Server 启动与其他能力不受影响） |
 
 PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 Client → 更新 Server PSK并重启 → 更新各 Client → 验证注册。
 
