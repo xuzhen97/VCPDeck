@@ -97,6 +97,31 @@ describe("GitSshController", () => {
 		});
 	});
 
+	it("根密钥不可用时返回固定安全文案，不回显路径或原始 IO 错误", async () => {
+		// 自动生成的根密钥位于 Server 数据目录：文件故障的原始异常可能带出
+		// 绝对路径与账户信息，不得进入 Browser 响应。
+		const { controller } = makeController({
+			generate: vi.fn().mockRejectedValue(
+				Object.assign(new Error("EACCES: /opt/vcpdeck/data/git-ssh/root.key"), {
+					code: "GIT_SSH_KEY_UNAVAILABLE",
+				}),
+			),
+		});
+		const error = (await controller
+			.generate()
+			.then(() => null)
+			.catch((thrown: unknown) => thrown)) as HttpException | null;
+		expect(error?.getStatus()).toBe(400);
+		expect(error?.getResponse()).toEqual({
+			code: "GIT_SSH_KEY_UNAVAILABLE",
+			message: "Git SSH 根密钥不可用，请检查或恢复原密钥文件",
+		});
+		const serialized = JSON.stringify(error?.getResponse());
+		expect(serialized).not.toContain("root.key");
+		expect(serialized).not.toContain("EACCES");
+		expect(serialized).not.toContain("/opt/vcpdeck");
+	});
+
 	it("未知故障映射为 500 GIT_SSH_OPERATION_FAILED 且不回显原始异常", async () => {
 		const { controller } = makeController({
 			generate: vi.fn().mockRejectedValue(new Error("ECONNRESET at 10.0.0.1")),

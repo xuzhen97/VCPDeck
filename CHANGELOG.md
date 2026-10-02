@@ -2,6 +2,17 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [未发布]
+
+### 变更
+
+- **Git SSH 根密钥改为零配置自动生成（[ADR-0037](./docs/adr/0037-server-managed-git-ssh-key-distribution.md)）**：此前必须手工生成 base64 的 32 字节根密钥文件并配置 `VCPDECK_GIT_SSH_KEY_FILE`，否则「设置 → Git 密钥」的生成会直接以 `GIT_SSH_KEY_UNAVAILABLE` fail closed。现在首次生成时 Server 自动在**版本目录外**的数据根创建受限根密钥文件（`<VCPDECK_APP_DIR | Server 工作目录>/data/git-ssh/root.key`；POSIX 目录 `0700`/文件 `0600`，Windows 关闭继承并授权运行账户、SYSTEM 与 Administrators，收紧后回读校验当前账户仍可写），并发首次创建只产生一把密钥，重启与自更新后复用。显式 `VCPDECK_GIT_SSH_KEY_FILE` 仍然支持且**优先**，但只读，不可读时不自动回退也不另建。
+- **根密钥故障不再可能静默换钥**：已有密钥记录而根密钥文件缺失、损坏或与既有密文不匹配时，生成与换代一律以 `GIT_SSH_KEY_UNAVAILABLE` 拒绝，且不重建文件、不新增数据库行；只恢复数据库而缺少对应根密钥无法解密既有私钥，因此两者必须**配对备份**。管理面错误只返回固定安全文案，不回显数据目录路径或原始 IO 异常。
+
+### 安全
+
+- **AES-256-GCM 解密显式限定 128 位认证标签**：`createDecipheriv` 现在传入 `authTagLength: 16`，与既有的 16 字节标签存储布局一致（对合法密文行为不变），避免退化为接受短标签并消除 Node DEP0182 弃用告警。
+
 ## [0.14.0] - 2026-09-30
 
 ### 新增

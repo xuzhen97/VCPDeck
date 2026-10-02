@@ -23,10 +23,18 @@ import {
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
 	generateGitSshEd25519KeyPair,
+	gitSshCipherFromKey,
 	gitSshError,
 	loadGitSshKeyCipher,
 	type GeneratedGitSshKeyPair,
+	type GitSshKeyCipher,
 } from "./git-ssh-crypto.js";
+import {
+	createGitSshRootKey,
+	isExplicitGitSshRootKey,
+	readGitSshRootKey,
+	resolveGitSshRootKeyPath,
+} from "./git-ssh-root-key.js";
 import type {
 	GitSshKeyRow,
 	GitSshPrisma,
@@ -60,15 +68,53 @@ export class GitSshService {
 		this.sender?.(socketId, command);
 	}
 
-	private async keyCipher() {
-		const cipher = await loadGitSshKeyCipher(this.env, this.readFileImpl);
-		if (!cipher) {
-			throw gitSshError(
-				"GIT_SSH_KEY_UNAVAILABLE",
-				"Git SSH 密钥根密钥未配置或非法",
-			);
+	/** 统一安全文案：不暴露路径、密钥或原始 IO 细节。 */
+	private static readonly UNAVAILABLE = "Git SSH 根密钥不可用";
+
+	/** 受管根密钥位置（显式配置或数据根默认路径）。 */
+	private rootKeyPath(): string {
+		return resolveGitSshRootKeyPath(this.env, process.cwd());
+	}
+
+	/**
+	 * 只读解析根密钥 cipher；**不创建任何文件**。
+	 *
+	 * 返回 null 表示尚未创建或不可读，由调用方决定 fail closed 或跳过下发。
+	 */
+	private async readOnlyCipher(): Promise<GitSshKeyCipher | null> {
+		if (isExplicitGitSshRootKey(this.env)) {
+			return loadGitSshKeyCipher(this.env, this.readFileImpl);
 		}
-		return cipher;
+		let key: Buffer | null;
+		try {
+			key = await readGitSshRootKey(this.rootKeyPath());
+		} catch {
+			return null;
+		}
+		return key ? gitSshCipherFromKey(key) : null;
+	}
+
+	/**
+	 * 「生成」使用的 cipher。
+	 *
+	 * 显式配置只读；受管路径仅在**没有任何历史密钥记录**时首次创建，
+	 * 已有密文而根密钥缺失/损坏/错绑时必须 fail closed，绝不静默换钥。
+	 */
+	private async cipherForGenerate(hasHistory: boolean): Promise<GitSshKeyCipher> {
+		if (isExplicitGitSshRootKey(this.env)) {
+			const cipher = await loadGitSshKeyCipher(this.env, this.readFileImpl);
+			if (!cipher) {
+				throw gitSshError("GIT_SSH_KEY_UNAVAILABLE", GitSshService.UNAVAILABLE);
+			}
+			return cipher;
+		}
+		const path = this.rootKeyPath();
+		const existing = await readGitSshRootKey(path);
+		if (existing) return gitSshCipherFromKey(existing);
+		if (hasHistory) {
+			throw gitSshError("GIT_SSH_KEY_UNAVAILABLE", GitSshService.UNAVAILABLE);
+		}
+		return gitSshCipherFromKey(await createGitSshRootKey(path));
 	}
 
 	private async latestKey(): Promise<GitSshKeyRow | null> {
@@ -108,8 +154,19 @@ export class GitSshService {
 	 * 生成成功不等于 Git 服务已登记新公钥，管理面不得代替操作者声明授权完成。
 	 */
 	async generate(): Promise<GitSshPublicInfo> {
-		const cipher = await this.keyCipher();
 		const latest = await this.latestKey();
+		const cipher = await this.cipherForGenerate(latest !== null);
+		// 既有密文必须能被当前根密钥解开：否则换代会让旧私钥永久不可读。
+		if (latest) {
+			try {
+				cipher.decrypt(latest.ciphertext, latest.keyVersion);
+			} catch {
+				throw gitSshError(
+					"GIT_SSH_KEY_UNAVAILABLE",
+					"Git SSH 根密钥与既有密文不匹配",
+				);
+			}
+		}
 		const version = (latest?.version ?? 0) + 1;
 		const pair = this.keyGenerator();
 		const encrypted = cipher.encrypt(pair.privateKey);
@@ -282,7 +339,7 @@ export class GitSshService {
 		if (row.desiredVersion !== null) {
 			const key = await this.keyByVersion(row.desiredVersion);
 			if (!key) return;
-			const cipher = await loadGitSshKeyCipher(this.env, this.readFileImpl);
+			const cipher = await this.readOnlyCipher();
 			if (!cipher) return;
 			let privateKey: string;
 			try {

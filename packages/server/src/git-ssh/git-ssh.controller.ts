@@ -22,8 +22,12 @@ import {
 } from "@vcpdeck/shared";
 import { GitSshService } from "./git-ssh.service.js";
 
-/** 协议输入错误 → 400；密钥不可用 → 400；其余 → 500 且只回安全文案。 */
-function gitSshHttpError(error: unknown, fallbackMessage: string): HttpException {
+/** 协议输入错误 → 400；密钥不可用 → 400（固定安全文案）；其余 → 500 且只回安全文案。 */
+function gitSshHttpError(
+	error: unknown,
+	fallbackMessage: string,
+	unavailableMessage: string,
+): HttpException {
 	if (error instanceof GitSshProtocolError) {
 		return new BadRequestException({
 			code: "GIT_SSH_PROTOCOL_INVALID",
@@ -34,7 +38,8 @@ function gitSshHttpError(error: unknown, fallbackMessage: string): HttpException
 	if (failure.code === "GIT_SSH_KEY_UNAVAILABLE") {
 		return new BadRequestException({
 			code: failure.code,
-			message: failure.message ?? fallbackMessage,
+			// 不透明转发原始异常：根密钥文件故障会带出数据目录绝对路径与账户信息。
+			message: unavailableMessage,
 		});
 	}
 	return new HttpException(
@@ -59,7 +64,11 @@ export class GitSshController {
 		try {
 			return await this.gitSsh.generate();
 		} catch (error) {
-			throw gitSshHttpError(error, "Git SSH 密钥生成失败");
+			throw gitSshHttpError(
+				error,
+				"Git SSH 密钥生成失败",
+				"Git SSH 根密钥不可用，请检查或恢复原密钥文件",
+			);
 		}
 	}
 
@@ -70,7 +79,11 @@ export class GitSshController {
 			const { clientIds } = parseGitSshTargetInput(body);
 			return await this.gitSsh.setTargets(clientIds);
 		} catch (error) {
-			throw gitSshHttpError(error, "Git SSH 选机更新失败");
+			throw gitSshHttpError(
+				error,
+				"Git SSH 选机更新失败",
+				"尚未生成 Git SSH 密钥，请先在「设置 → Git 密钥」生成",
+			);
 		}
 	}
 

@@ -13,6 +13,10 @@ import {
 
 const key = randomBytes(32).toString("base64");
 
+/** 与实现一致的存储布局（iv 12 / tag 16），仅用于构造截断标签用例。 */
+const IV_BYTES = 12;
+const TAG_BYTES = 16;
+
 /** 注入式读取：密钥文件内容（可含尾随换行）。 */
 const readKey = (content: string) => async () => content;
 
@@ -70,6 +74,22 @@ describe("git-ssh 私钥加解密", () => {
 		expect(
 			await loadGitSshKeyCipher({ VCPDECK_GIT_SSH_KEY_FILE: "/missing" }, failing),
 		).toBeNull();
+	});
+
+	it("截断认证标签的密文一律不得被接受（128 位标签不变量）", () => {
+		// 本模块固定从存储布局切出 16 字节标签；此用例锁定该不变量，
+		// 并在解密侧显式限定 authTagLength（避免退化为接受短标签）。
+		const buf = Buffer.from(key, "base64");
+		const enc = encryptGitSshPrivateKey("secret", buf);
+		const raw = Buffer.from(enc.ciphertext, "base64");
+		const shortTag = Buffer.concat([
+			raw.subarray(0, IV_BYTES), // iv
+			raw.subarray(IV_BYTES, IV_BYTES + 4), // 被截断的 4 字节标签
+			raw.subarray(IV_BYTES + TAG_BYTES), // 密文正文
+		]);
+		expect(() =>
+			decryptGitSshPrivateKey(shortTag.toString("base64"), 1, buf),
+		).toThrow();
 	});
 
 	it("未知 keyVersion、错误密钥与篡改密文一律 fail closed", () => {

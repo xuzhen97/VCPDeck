@@ -90,12 +90,32 @@ export function decryptGitSshPrivateKey(
 	}
 	const iv = raw.subarray(0, IV_BYTES);
 	const tag = raw.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
-	const gcm = createDecipheriv("aes-256-gcm", key, iv);
+	// 显式要求 128 位认证标签：存储布局本就固定携带 16 字节标签，
+	// 因此这不是当前可达的漏洞修复，而是把该不变量写明；
+	// 同时避免 Node 对“未指定 authTagLength 的短标签”发出 DEP0182 弃用告警。
+	const gcm = createDecipheriv("aes-256-gcm", key, iv, {
+		authTagLength: TAG_BYTES,
+	});
 	gcm.setAuthTag(tag);
 	return Buffer.concat([
 		gcm.update(raw.subarray(IV_BYTES + TAG_BYTES)),
 		gcm.final(),
 	]).toString("utf8");
+}
+
+/**
+ * 由已有 32 字节根密钥构造 cipher。
+ *
+ * 供受管根密钥文件（git-ssh-root-key.ts）与显式配置读取复用，
+ * 使密钥来源与加解密职责分离；长度非法时 fail closed。
+ */
+export function gitSshCipherFromKey(key: Buffer): GitSshKeyCipher {
+	assertKey(key);
+	return {
+		encrypt: (plaintext) => encryptGitSshPrivateKey(plaintext, key),
+		decrypt: (ciphertext, keyVersion) =>
+			decryptGitSshPrivateKey(ciphertext, keyVersion, key),
+	};
 }
 
 /**
@@ -116,11 +136,7 @@ export async function loadGitSshKeyCipher(
 		return null;
 	}
 	if (key.length !== KEY_BYTES) return null;
-	return {
-		encrypt: (plaintext) => encryptGitSshPrivateKey(plaintext, key),
-		decrypt: (ciphertext, keyVersion) =>
-			decryptGitSshPrivateKey(ciphertext, keyVersion, key),
-	};
+	return gitSshCipherFromKey(key);
 }
 
 /** SSH wire format 的 uint32（大端）。 */

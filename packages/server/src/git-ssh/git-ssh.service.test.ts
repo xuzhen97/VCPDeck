@@ -1,10 +1,32 @@
 import { randomBytes } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { GitSshCommand } from "@vcpdeck/shared";
-import { describe, expect, it, vi } from "vitest";
-import { generateGitSshEd25519KeyPair } from "./git-ssh-crypto.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { generateGitSshEd25519KeyPair, gitSshCipherFromKey } from "./git-ssh-crypto.js";
 import { GitSshService } from "./git-ssh.service.js";
 
 const ROOT_KEY = randomBytes(32).toString("base64");
+
+const tempDirs: string[] = [];
+
+/** 每个用例一个临时 app-dir：避免测试污染真实的 packages/server/data。 */
+async function tempAppDir(): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "vcp-gitssh-svc-"));
+	tempDirs.push(dir);
+	return dir;
+}
+
+function managedKeyFile(appDir: string): string {
+	return join(appDir, "data", "git-ssh", "root.key");
+}
+
+afterEach(async () => {
+	while (tempDirs.length > 0) {
+		await rm(tempDirs.pop()!, { recursive: true, force: true });
+	}
+});
 
 const env = { VCPDECK_GIT_SSH_KEY_FILE: "/k" };
 const readFileImpl = async () => `${ROOT_KEY}\n`;
@@ -96,12 +118,18 @@ function makePrisma(seed: { keys?: KeyRow[]; targets?: TargetRow[] } = {}) {
 	return prisma;
 }
 
-function makeService(prisma: ReturnType<typeof makePrisma>) {
+function makeService(
+	prisma: ReturnType<typeof makePrisma>,
+	options: {
+		env?: NodeJS.ProcessEnv;
+		readFileImpl?: (path: string) => Promise<string>;
+	} = {},
+) {
 	let generated: ReturnType<typeof generateGitSshEd25519KeyPair> | null = null;
 	const service = new GitSshService(
 		prisma as never,
-		env,
-		readFileImpl,
+		options.env ?? env,
+		options.readFileImpl ?? readFileImpl,
 		() => {
 			generated = generateGitSshEd25519KeyPair();
 			return generated;
@@ -153,13 +181,136 @@ describe("GitSshService 密钥生成", () => {
 		);
 	});
 
-	it("根密钥缺失时 fail closed，不写入任何行", async () => {
+	it("受管根密钥损坏时生成 fail closed，且不覆盖既有文件", async () => {
+		const appDir = await tempAppDir();
+		const file = managedKeyFile(appDir);
+		const { mkdir } = await import("node:fs/promises");
+		await mkdir(join(appDir, "data", "git-ssh"), { recursive: true });
+		await writeFile(file, "broken\n");
 		const prisma = makePrisma();
-		const service = new GitSshService(prisma as never, {}, readFileImpl);
-		await expect(service.generate()).rejects.toMatchObject({
-			code: "GIT_SSH_KEY_UNAVAILABLE",
+		await expect(
+			new GitSshService(prisma as never, { VCPDECK_APP_DIR: appDir }).generate(),
+		).rejects.toMatchObject({ code: "GIT_SSH_KEY_UNAVAILABLE" });
+		expect(prisma.keys).toHaveLength(0);
+		expect(await readFile(file, "utf8")).toBe("broken\n");
+	});
+
+	it("无任何配置时首次生成自动创建受管根密钥，重启后可继续解密并换代", async () => {
+		const appDir = await tempAppDir();
+		const env = { VCPDECK_APP_DIR: appDir };
+		const prisma = makePrisma();
+
+		const first = await new GitSshService(prisma as never, env).generate();
+		expect(first.version).toBe(1);
+		expect(prisma.keys).toHaveLength(1);
+
+		const raw = await readFile(managedKeyFile(appDir), "utf8");
+		const key = Buffer.from(raw.trim(), "base64");
+		expect(key).toHaveLength(32);
+		// 重启（新实例、新 keyGenerator）后仍能用同一根密钥解开既有密文。
+		const cipher = gitSshCipherFromKey(key);
+		expect(cipher.decrypt(prisma.keys[0]!.ciphertext, 1)).toContain(
+			"BEGIN OPENSSH PRIVATE KEY",
+		);
+
+		const second = await new GitSshService(prisma as never, env).generate();
+		expect(second.version).toBe(2);
+		expect(prisma.keys.map((row) => row.version)).toEqual([1, 2]);
+	});
+
+	it("已有密文但根密钥文件丢失时拒绝生成，且不重新创建", async () => {
+		const appDir = await tempAppDir();
+		const env = { VCPDECK_APP_DIR: appDir };
+		const prisma = makePrisma();
+		await new GitSshService(prisma as never, env).generate();
+		await rm(managedKeyFile(appDir));
+
+		await expect(
+			new GitSshService(prisma as never, env).generate(),
+		).rejects.toMatchObject({ code: "GIT_SSH_KEY_UNAVAILABLE" });
+		expect(prisma.keys).toHaveLength(1);
+		// 绝不静默换一把根密钥：既有私钥会因此永久无法解密。
+		await expect(readFile(managedKeyFile(appDir), "utf8")).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+	});
+
+	it("根密钥与既有密文不匹配时拒绝换代", async () => {
+		const appDir = await tempAppDir();
+		const env = { VCPDECK_APP_DIR: appDir };
+		const prisma = makePrisma();
+		await new GitSshService(prisma as never, env).generate();
+		// 模拟“数据库回退到旧快照、文件来自另一安装”的错绑场景。
+		await writeFile(
+			managedKeyFile(appDir),
+			`${randomBytes(32).toString("base64")}\n`,
+		);
+
+		await expect(
+			new GitSshService(prisma as never, env).generate(),
+		).rejects.toMatchObject({ code: "GIT_SSH_KEY_UNAVAILABLE" });
+		expect(prisma.keys).toHaveLength(1);
+	});
+
+	it("显式配置优先，不可读时 fail closed 且不回退到受管路径", async () => {
+		const appDir = await tempAppDir();
+		const explicit = join(appDir, "explicit.key");
+		const prisma = makePrisma();
+		await expect(
+			new GitSshService(prisma as never, {
+				VCPDECK_APP_DIR: appDir,
+				VCPDECK_GIT_SSH_KEY_FILE: explicit,
+			}).generate(),
+		).rejects.toMatchObject({ code: "GIT_SSH_KEY_UNAVAILABLE" });
+		await expect(readFile(explicit, "utf8")).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+		await expect(readFile(managedKeyFile(appDir), "utf8")).rejects.toMatchObject({
+			code: "ENOENT",
 		});
 		expect(prisma.keys).toHaveLength(0);
+	});
+
+	it("只读的状态查询不创建根密钥", async () => {
+		const appDir = await tempAppDir();
+		const prisma = makePrisma();
+		const service = new GitSshService(prisma as never, {
+			VCPDECK_APP_DIR: appDir,
+		});
+		expect(await service.getPublicInfo()).toBeNull();
+		expect(await service.status()).toEqual({ key: null, targets: [] });
+		await expect(readFile(managedKeyFile(appDir), "utf8")).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+	});
+
+	it("根密钥缺失时注册、重连与下发都不创建根密钥，也不下发", async () => {
+		const appDir = await tempAppDir();
+		const prisma = makePrisma({
+			targets: [target({ clientId: "client-a", desiredVersion: 1 })],
+		});
+		const service = new GitSshService(prisma as never, {
+			VCPDECK_APP_DIR: appDir,
+		});
+		const sent: Array<{ socketId: string; command: GitSshCommand }> = [];
+		service.bindSender((socketId, command) => {
+			sent.push({ socketId, command });
+		});
+
+		await service.onRegistered("client-a", "socket-a", {
+			available: true,
+			protocolVersion: 1,
+		});
+		await service.onDisconnected("client-a", "socket-a");
+		await service.onRegistered("client-a", "socket-b", {
+			available: true,
+			protocolVersion: 1,
+		});
+
+		expect(sent).toHaveLength(0);
+		await expect(readFile(managedKeyFile(appDir), "utf8")).rejects.toMatchObject({
+			code: "ENOENT",
+		});
 	});
 
 	it("再次生成递增版本并保留历史行（可靠轮换）", async () => {

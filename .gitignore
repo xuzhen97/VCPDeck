@@ -18,6 +18,8 @@ CLAUDE.md
 dist-release/
 # Storage files
 packages/server/data/
+# Server 零配置自动生成的 Git SSH 根密钥：cwd 为仓库根时的受管路径（ADR-0037）
+/data/
 .superpowers/
 .playwright-mcp/
 .vscode/

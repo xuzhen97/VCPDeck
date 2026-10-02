@@ -75,7 +75,7 @@ pnpm release --version=x.y.z
 | `VCPDECK_RELEASES_DIR` | `./data/releases`（install 引导默认 `<app-dir>/releases`） | **Local 后端**的发布构件目录；必须为**版本目录外绝对路径**，否则自更新切换版本后目录漂移、构件丢失。配置外部存储后端（OSS/网盘）后，发布包转存 Provider，此目录不再承载新构件 |
 | `VCPDECK_PSK` | `vcpdeck-dev-psk` | `/client` PSK，生产必须随机替换 |
 | `VCPDECK_PI_CREDENTIAL_KEY_FILE` | 未设 = Pi 配置不可用（**本地 dev 例外**：`pnpm dev` / `pnpm dev:all` 会自动生成 `.tmp/dev-secrets/pi-credential.key` 并写入 `packages/server/.env`） | Pi Provider 凭据的加密根密钥（文件内容为 base64 的 32 字节）。**生产必须位于 Server 进程外**（如 `/etc/vcpdeck/pi-credential.key`，`0640 root:serverUser`）；缺失或长度不符时凭据写入与 RuntimeSpec 组装 fail closed，Server 启动与其他能力不受影响 |
-| `VCPDECK_GIT_SSH_KEY_FILE` | 未设 = Git SSH 密钥能力不可用 | Git SSH 共享私钥的加密根密钥（文件内容为 base64 的 32 字节）。**生产必须位于 Server 进程外**（如 `/etc/vcpdeck/git-ssh.key`，`0640 root:serverUser`），且与 Pi 凭据根密钥**分开**；缺失或非法的密钥生成/分发 fail closed（`GIT_SSH_KEY_UNAVAILABLE`）。Client 侧不保存根密钥，只在 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh` 保存受管私钥副本 |
+| `VCPDECK_GIT_SSH_KEY_FILE` | 未设 = Server 自行创建并管理根密钥 | Git SSH 共享私钥的加密根密钥（文件内容为 base64 的 32 字节）。**缺省无需配置**：首次在「设置 → Git 密钥」点击生成时，Server 自动在版本目录外的数据根创建受限文件 `<VCPDECK_APP_DIR | Server 工作目录>/data/git-ssh/root.key`（POSIX 目录 `0700`/文件 `0600`；Windows 关闭继承并授权运行账户、SYSTEM 与 Administrators），重启与自更新后复用，并发首次创建只产生一把密钥。仍可显式指定路径兼容旧部署（如 `/etc/vcpdeck/git-ssh.key`，`0640 root:serverUser`），显式路径**优先且只读**，不可读时直接 fail closed，**不自动回退也不另建**。必须与 Pi 凭据根密钥**分开**；密钥缺失/损坏/与既有密文不匹配时生成与分发 fail closed（`GIT_SSH_KEY_UNAVAILABLE`），**绝不静默换钥**，否则既有私钥将永久无法解密。该文件必须与 SQLite 配对备份。Client 侧不保存根密钥，只在 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh` 保存受管私钥副本 |
 | `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | `/client` Gateway CORS Origin |
 | `VCPDECK_PORT` | `3001` | Server 监听端口（1–65535 整数）；改端口时必须同步配置 Client `VCPDECK_SERVER` 与 Server Launcher `VCPDECK_PROBE_URL` |
 | `PUBLIC_SHARE_BASE_URL` | 空（回退 `SERVER_URL`） | VCPDeckBridge 公开分享链接基地址；只接受 HTTP(S)，反向代理部署时应配置为外部公开地址 |
@@ -254,7 +254,7 @@ sudo bash "./install-coturn.sh" \
 - **Pi Resource Bundle**：随 Client Release 位于版本目录内 `<app-dir>/apps/<version>/pi-resources/`（`manifest.json` + `extensions/`），**不放数据根**：更新与回滚天然与版本一致，Session 不会被带走；Client 按自身模块路径定位并逐资源校验 sha256，校验失败即不上报 Bundle 能力且不加载任何资源；Profile 启用资源后，只有上报兼容 Bundle 的 Client 才会收到 RuntimeSpec；
 - **VCPDeck Pi 数据根**（`VCPDECK_CLIENT_DATA_DIR`，由安装器写入 Client env）：Windows SYSTEM 为 `C:\ProgramData\VCPDeck\Client\data`，Linux A2 为 `/var/lib/vcpdeck-client`，通用部署回退 `<VCPDECK_APP_DIR>/data`；其下 `pi/` 保存 agentDir、`sessions/<namespace>/`、cache、tmp、diagnostics 与 `install-secret`。**它必须位于版本目录之外**，Release 切换与回滚不会移动或删除它；
 - Pi Provider 凭据密文（Server SQLite）与 `VCPDECK_PI_CREDENTIAL_KEY_FILE` 指向的根密钥文件（Client 侧不保存任何凭据）；
-- **Git SSH 共享私钥密文**（Server SQLite）与 `VCPDECK_GIT_SSH_KEY_FILE` 指向的根密钥文件——两者必须分开备份，且不得与密文放在同一介质；Client 侧受管副本（`<VCPDECK_CLIENT_DATA_DIR>/git-ssh`）不需要备份，丢失后重新分发即可；
+- **Git SSH 共享私钥密文**（Server SQLite）与根密钥文件（缺省为 `<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`，或 `VCPDECK_GIT_SSH_KEY_FILE` 指定的路径）——两者必须**同批次**备份且分开存放、不得与密文放在同一介质：只恢复数据库而缺少对应根密钥无法解密既有私钥。零配置启用不等于无需备份；Client 侧受管副本（`<VCPDECK_CLIENT_DATA_DIR>/git-ssh`）不需要备份，丢失后重新分发即可；
 - frpc 工作目录（需要恢复映射运行信息时）。
 
 持久数据必须位于版本目录之外，否则 Launcher 切换版本会造成数据丢失。
