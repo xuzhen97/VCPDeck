@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.15.1] - 2026-10-02
+
 ### 修复
 
 - **Windows 系统 OpenSSH 被误报为 Git SSH 不可用**：Client 版本探测现在识别 `OpenSSH_for_Windows_X.Y`（仍要求 >= 7.6 才允许 `accept-new`）；此前只有系统 OpenSSH、没有完整 Git for Windows 安装的机器即使受管私钥已落盘，也不会生成 `ssh_config` 或为 Job/Terminal/Pi 注入 `GIT_SSH_COMMAND`。修复后需更新并重新注册 Client 才会上报可用能力；Git 服务是否接受公钥仍须独立验收。
