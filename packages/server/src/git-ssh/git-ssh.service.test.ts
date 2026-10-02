@@ -401,6 +401,67 @@ describe("GitSshService 选机与下发", () => {
 		expect(prisma.targets[0]!.lastSentVersion).toBe(1);
 	});
 
+	it("先注册为不可用、后选机时不下发私钥，能力恢复后重注册会补发", async () => {
+		const prisma = makePrisma();
+		const { service, sent } = makeService(prisma);
+		await service.generate();
+		await service.onRegistered("client-a", "socket-a", {
+			available: false,
+			code: "GIT_SSH_UNAVAILABLE",
+		});
+		await service.setTargets(["client-a"]);
+		expect(sent).toHaveLength(0);
+		expect(prisma.targets[0]).toMatchObject({
+			state: "unsupported",
+			reasonCode: "GIT_SSH_UNSUPPORTED",
+		});
+		await service.onDisconnected("client-a", "socket-a");
+		await service.onRegistered("client-a", "socket-b", {
+			available: true,
+			protocolVersion: 1,
+		});
+		expect(sent).toHaveLength(1);
+		expect(sent[0]!.socketId).toBe("socket-b");
+		expect(sent[0]!.command.action).toBe("install");
+	});
+
+	it("已注册但未上报能力时也不得通过选机绕过门禁", async () => {
+		const prisma = makePrisma();
+		const { service, sent } = makeService(prisma);
+		await service.generate();
+		await service.onRegistered("client-a", "socket-a", undefined);
+		await service.setTargets(["client-a"]);
+		expect(sent).toHaveLength(0);
+		expect(prisma.targets[0]!.state).toBe("unsupported");
+	});
+
+	it("取消选机后即使能力不可用，重连仍发送不含私钥的 clear", async () => {
+		const prisma = makePrisma();
+		const { service, sent } = makeService(prisma);
+		await service.generate();
+		await service.setTargets(["client-a"]);
+		await service.setTargets([]);
+		await service.onRegistered("client-a", "socket-a", { available: false, code: "GIT_SSH_UNAVAILABLE" });
+		expect(sent).toHaveLength(1);
+		expect(sent[0]!.command.action).toBe("clear");
+		expect("privateKey" in sent[0]!.command).toBe(false);
+	});
+
+	it("不可用 Client 的取消选机仍下发不含私钥的 clear", async () => {
+		const prisma = makePrisma();
+		const { service, sent } = makeService(prisma);
+		await service.generate();
+		await service.onRegistered("client-a", "socket-a", {
+			available: false,
+			code: "GIT_SSH_UNAVAILABLE",
+		});
+		await service.setTargets(["client-a"]);
+		await service.setTargets([]);
+		expect(sent).toHaveLength(1);
+		expect(sent[0]!.command.action).toBe("clear");
+		expect("privateKey" in sent[0]!.command).toBe(false);
+	});
+
 	it("未上报兼容能力的 Client 标记 unsupported 且不下发密钥", async () => {
 		const prisma = makePrisma();
 		const { service, sent } = makeService(prisma);
@@ -415,6 +476,54 @@ describe("GitSshService 选机与下发", () => {
 			code: "GIT_SSH_UNAVAILABLE",
 		});
 		expect(sent).toHaveLength(0);
+	});
+
+	it("重复连接收敛时按幸存 socket 的能力判定，不能借用已断开 socket 的能力", async () => {
+		const prisma = makePrisma();
+		const { service, sent } = makeService(prisma);
+		await service.generate();
+		await service.setTargets(["client-a"]);
+		await service.onRegistered("client-a", "socket-good", { available: true, protocolVersion: 1 });
+		await service.onRegistered("client-a", "socket-bad", { available: false, code: "GIT_SSH_UNAVAILABLE" });
+		sent.length = 0;
+		await service.onDisconnected("client-a", "socket-good");
+		expect(sent).toHaveLength(0);
+		expect(prisma.targets[0]!.state).toBe("unsupported");
+
+		await service.onDisconnected("client-a", "socket-bad");
+		await service.onRegistered("client-a", "socket-new", { available: true, protocolVersion: 1 });
+		expect(sent).toHaveLength(1);
+		expect(sent[0]!.socketId).toBe("socket-new");
+	});
+
+	it("重复连接消退后可用幸存 socket 下发期间恢复 pending，而非继续显示 unsupported", async () => {
+		const prisma = makePrisma();
+		const { service, sent } = makeService(prisma);
+		await service.generate();
+		await service.setTargets(["client-a"]);
+		await service.onRegistered("client-a", "socket-bad", { available: false, code: "GIT_SSH_UNAVAILABLE" });
+		await service.onRegistered("client-a", "socket-good", { available: true, protocolVersion: 1 });
+		await service.onDisconnected("client-a", "socket-good");
+		expect(prisma.targets[0]!.state).toBe("unsupported");
+		await service.onRegistered("client-a", "socket-good-2", { available: true, protocolVersion: 1 });
+		await service.onDisconnected("client-a", "socket-bad");
+		expect(sent.at(-1)?.socketId).toBe("socket-good-2");
+		expect(prisma.targets[0]).toMatchObject({ state: "pending", reasonCode: null });
+	});
+
+	it("能力不可用的目标换钥时仍不下发，能力恢复后补发最新版本", async () => {
+		const prisma = makePrisma();
+		const { service, sent } = makeService(prisma);
+		await service.generate();
+		await service.onRegistered("client-a", "socket-a", { available: false, code: "GIT_SSH_UNAVAILABLE" });
+		await service.setTargets(["client-a"]);
+		await service.generate();
+		expect(sent).toHaveLength(0);
+		expect(prisma.targets[0]).toMatchObject({ desiredVersion: 2, state: "unsupported" });
+		await service.onDisconnected("client-a", "socket-a");
+		await service.onRegistered("client-a", "socket-b", { available: true, protocolVersion: 1 });
+		expect(sent).toHaveLength(1);
+		expect(sent[0]!.command.version).toBe(2);
 	});
 
 	it("重复 Client ID 标记 ambiguous 且不下发私钥", async () => {
@@ -564,6 +673,23 @@ describe("GitSshService 回执对账", () => {
 		const install = harness.sent[0]!.command;
 		return { prisma, ...harness, install };
 	}
+
+	it("不可用注册后的过期 install 回执不得将 unsupported 洗成 installed", async () => {
+		const prisma = makePrisma();
+		const { service, sent } = makeService(prisma);
+		await service.generate();
+		await service.setTargets(["client-a"]);
+		await service.onRegistered("client-a", "socket-a", { available: true, protocolVersion: 1 });
+		const operationId = sent[0]!.command.operationId;
+		await service.onRegistered("client-a", "socket-a", { available: false, code: "GIT_SSH_UNAVAILABLE" });
+		await service.applyAck("client-a", "socket-a", {
+			protocolVersion: 1,
+			operationId,
+			version: 1,
+			state: "installed",
+		});
+		expect(prisma.targets[0]!.state).toBe("unsupported");
+	});
 
 	it("合法回执更新 observedVersion 与 installed", async () => {
 		const { service, prisma, install } = await prepared();

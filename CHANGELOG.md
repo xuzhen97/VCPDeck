@@ -2,6 +2,13 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [未发布]
+
+### 修复
+
+- **Windows 系统 OpenSSH 被误报为 Git SSH 不可用**：Client 版本探测现在识别 `OpenSSH_for_Windows_X.Y`（仍要求 >= 7.6 才允许 `accept-new`）；此前只有系统 OpenSSH、没有完整 Git for Windows 安装的机器即使受管私钥已落盘，也不会生成 `ssh_config` 或为 Job/Terminal/Pi 注入 `GIT_SSH_COMMAND`。修复后需更新并重新注册 Client 才会上报可用能力；Git 服务是否接受公钥仍须独立验收。
+- **能力不可用仍能获发私钥并显示「已安装」**：Server 现在在新选机、换钥、断线收敛等所有 install 下发路径核对**当前 socket 的已注册 Git SSH 能力及协议版本**；未上报或不可用时不下发私钥并标记 `unsupported`，能力恢复并重注册后自动补发；清理指令不含私钥，仍允许下发。管理面遇旧状态「已安装」但 Client 上报能力不可用时，优先显示能力不可用；能力变化随轮询刷新，不重置操作者的选机草稿。
+
 ## [0.15.0] - 2026-10-01
 
 ### 变更

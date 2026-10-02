@@ -32,7 +32,7 @@ const UNSAFE_SHELL_PATH = /["$`\\\r\n]/;
 
 /** 解析 `ssh -V` 输出的 OpenSSH 版本。 */
 export function parseOpenSshVersion(output: string): [number, number] | null {
-	const match = /OpenSSH_(\d+)\.(\d+)/.exec(output);
+	const match = /OpenSSH_(?:for_Windows_)?(\d+)\.(\d+)/.exec(output);
 	if (!match) return null;
 	return [Number.parseInt(match[1]!, 10), Number.parseInt(match[2]!, 10)];
 }

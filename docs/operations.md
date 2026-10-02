@@ -127,7 +127,7 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 ### 5.1 Git SSH 共享密钥运维
 
 - **启用**：无需任何手工配置。「设置 → Git 密钥」直接生成密钥（首次生成时 Server 自动在版本目录外的数据根创建受限根密钥文件 `<VCPDECK_APP_DIR | Server 工作目录>/data/git-ssh/root.key`）→ 复制公钥并在 Git 服务登记（VCPDeck 不代管仓库权限）→ 勾选目标机器保存。离线机器在重连后自动同步；「待同步」表示尚未收到 Client 确认。旧部署显式指定 `VCPDECK_GIT_SSH_KEY_FILE` 时该路径优先且只读。
-- **观察**：`重复连接（已暂停下发）` 表示同一 Client ID 存在多个连接，先消除重复进程；`不支持` 表示目标机未上报兼容能力（缺 SSH、版本过旧或数据根不可写）。
+- **观察**：`重复连接（已暂停下发）` 表示同一 Client ID 存在多个连接，先消除重复进程；`不支持` 表示目标机未上报兼容能力（缺 SSH、版本过旧或数据根不可写）。Windows 系统 OpenSSH 的版本串为 `OpenSSH_for_Windows_X.Y`，Client 现能识别它并在版本 >= 7.6 时使用受管配置。Server 在新选机、换钥及重连下发私钥前均核对当前注册 socket 的能力；能力恢复并重注册后自动补发，取消选机仍可发送不含私钥的清理指令。`已安装` 仅代表本地私钥副本写入成功，不代表 Git 服务授权成功，仍需确认 Client 上报的 Git SSH 能力可用，并用**未覆盖 `core.sshCommand`** 的 VCPDeck Job/Terminal/Pi 验证实际访问。
 - **主机公钥变化**：Client 首次连接自动记录（TOFU）；已记录主机公钥变化时拒绝连接。核对 Git 服务真实指纹后，在目标机删除 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh/known_hosts` 中对应条目再重试；**不得**改为关闭主机校验。
 - **根密钥缺失、损坏或不匹配**：生成与换代一律以 `GIT_SSH_KEY_UNAVAILABLE` 拒绝，且**不会**自动重建（重建会让既有私钥永久不可读）。只能从备份恢复与该数据库**配对**的根密钥文件；若两者已同时丢失，需在 Git 服务撤销旧公钥、轮换新密钥并重新分发。
 - **取消某台机器**：从选机列表移除。这只清理该机本地受管副本；要真正阻断访问，必须在 Git 服务删除旧公钥并轮换。

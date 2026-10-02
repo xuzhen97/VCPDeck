@@ -49,6 +49,8 @@ export class GitSshService {
 	private sender: GitSshSender | null = null;
 	/** clientId → 当前已 REGISTER 的 socket 集合（进程内租约，不持久化）。 */
 	private readonly leases = new Map<string, Set<string>>();
+	/** socketId → 本次注册上报的 Git SSH 能力；缺失能力按不可用保存。 */
+	private readonly capabilities = new Map<string, GitSshCapability | null>();
 
 	constructor(
 		@Inject(PrismaService) private readonly prisma: GitSshPrisma,
@@ -337,6 +339,18 @@ export class GitSshService {
 		if (!row) return;
 
 		if (row.desiredVersion !== null) {
+			const capability = this.capabilities.get(socketId);
+			if (
+				!capability ||
+				capability.available !== true ||
+				capability.protocolVersion !== GIT_SSH_PROTOCOL_VERSION
+			) {
+				await this.prisma.gitSshTarget.update({
+					where: { clientId },
+					data: { state: "unsupported", reasonCode: "GIT_SSH_UNSUPPORTED" },
+				});
+				return;
+			}
 			const key = await this.keyByVersion(row.desiredVersion);
 			if (!key) return;
 			const cipher = await this.readOnlyCipher();
@@ -350,7 +364,11 @@ export class GitSshService {
 			const operationId = row.operationId ?? randomUUID();
 			await this.prisma.gitSshTarget.update({
 				where: { clientId },
-				data: { operationId, lastSentVersion: key.version },
+				data: {
+					...(row.state === "unsupported" ? { state: "pending", reasonCode: null } : {}),
+					operationId,
+					lastSentVersion: key.version,
+				},
 			});
 			this.send(socketId, {
 				protocolVersion: GIT_SSH_PROTOCOL_VERSION,
@@ -395,21 +413,27 @@ export class GitSshService {
 		const sockets = this.leases.get(clientId) ?? new Set<string>();
 		sockets.add(socketId);
 		this.leases.set(clientId, sockets);
+		this.capabilities.set(socketId, capability ?? null);
 
 		const row = await this.targetRow(clientId);
 		if (!row) return;
 
-		if (!capability || capability.available !== true) {
-			await this.prisma.gitSshTarget.update({
-				where: { clientId },
-				data: { state: "unsupported", reasonCode: "GIT_SSH_UNSUPPORTED" },
-			});
-			return;
-		}
 		if (sockets.size > 1) {
 			await this.prisma.gitSshTarget.update({
 				where: { clientId },
 				data: { state: "ambiguous" },
+			});
+			return;
+		}
+		if (
+			row.desiredVersion !== null &&
+			(!capability ||
+				capability.available !== true ||
+				capability.protocolVersion !== GIT_SSH_PROTOCOL_VERSION)
+		) {
+			await this.prisma.gitSshTarget.update({
+				where: { clientId },
+				data: { state: "unsupported", reasonCode: "GIT_SSH_UNSUPPORTED" },
 			});
 			return;
 		}
@@ -427,6 +451,7 @@ export class GitSshService {
 
 	/** Client 断开：清理租约；若收敛为唯一幸存 socket 则恢复下发。 */
 	async onDisconnected(clientId: string, socketId: string): Promise<void> {
+		this.capabilities.delete(socketId);
 		const sockets = this.leases.get(clientId);
 		if (sockets) {
 			sockets.delete(socketId);
@@ -436,12 +461,17 @@ export class GitSshService {
 
 		const row = await this.targetRow(clientId);
 		if (!row) return;
-		if (row.state === "unsupported") return;
+		if (row.state === "unsupported" && row.desiredVersion !== null) {
+			// 剩余 socket 的注册能力可能与断开的 socket 不同；重用 pushTarget 的门禁重新判定。
+			await this.pushTarget(clientId);
+			return;
+		}
 		if (row.state === "ambiguous") {
 			await this.prisma.gitSshTarget.update({
 				where: { clientId },
 				data: {
 					state: row.desiredVersion === null ? "clear-pending" : "pending",
+					reasonCode: null,
 				},
 			});
 		}
@@ -454,9 +484,18 @@ export class GitSshService {
 		socketId: string,
 		ack: GitSshAck,
 	): Promise<void> {
-		if (this.leaseFor(clientId) !== socketId) return;
+		if (this.leaseFor(clientId) !== socketId || this.leaseCount(clientId) !== 1) return;
 		const row = await this.targetRow(clientId);
 		if (!row || row.operationId !== ack.operationId) return;
+		// 旧 install 可能在 Client 重新注册为不可用后才回执；不得把 unsupported 洗成 installed。
+		if (row.desiredVersion !== null) {
+			const capability = this.capabilities.get(socketId);
+			if (
+				!capability ||
+				capability.available !== true ||
+				capability.protocolVersion !== GIT_SSH_PROTOCOL_VERSION
+			) return;
+		}
 
 		if (ack.state === "failed") {
 			await this.prisma.gitSshTarget.update({

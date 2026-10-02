@@ -65,13 +65,18 @@ export function GitSshPanel() {
 		void load();
 	}, [load]);
 
-	// 状态轮询：只刷新 status，不重置 selected，避免打断操作者的勾选。
-	// 分发是异步的（Client 回执、离线重连后补发），不轮询会让失败状态一直藏在“待同步”后面。
+	// 状态轮询：同步刷新分发状态与 Client 能力，但不重置 selected，避免打断勾选。
+	// Client 更新并重注册后能力会变化；只轮询 status 会让“能力不可用”提示长期滞留。
 	useEffect(() => {
 		const timer = setInterval(() => {
-			void sdk.gitSsh.status().then(setStatus).catch(() => {
-				// 轮询失败不弹错：避免瞬时抖动覆盖页面上的真实错误。
-			});
+			void Promise.all([sdk.gitSsh.status(), sdk.clients.list()])
+				.then(([current, clientList]) => {
+					setStatus(current);
+					setClients(clientList);
+				})
+				.catch(() => {
+					// 瞬时失败不弹错、不覆盖页面上的真实状态。
+				});
 		}, 3000);
 		return () => clearInterval(timer);
 	}, [sdk]);
@@ -216,15 +221,24 @@ export function GitSshPanel() {
 
 				{status && status.targets.length > 0 && (
 					<ul className="space-y-1 text-xs">
-						{status.targets.map((target) => (
-							<li key={target.clientId} data-testid={`git-ssh-state-${target.clientId}`}>
-								{target.clientId}：
-								{target.reasonCode
-									? (REASON_COPY[target.reasonCode] ?? target.reasonCode)
-									: STATE_COPY[target.state]}
-								{target.observedVersion !== null && `（第 ${target.observedVersion} 代）`}
-							</li>
-						))}
+						{status.targets.map((target) => {
+							const capabilityUnavailable =
+								target.desiredVersion !== null &&
+								(target.state === "installed" || target.state === "pending") &&
+								clients.find((client) => client.clientId === target.clientId)
+									?.capabilityDetails?.gitSsh?.available === false;
+							return (
+								<li key={target.clientId} data-testid={`git-ssh-state-${target.clientId}`}>
+									{target.clientId}：
+									{capabilityUnavailable
+										? "Git SSH 能力不可用（本地密钥可能已落盘，不能确认受管 SSH 已生效）"
+										: target.reasonCode
+											? (REASON_COPY[target.reasonCode] ?? target.reasonCode)
+											: STATE_COPY[target.state]}
+									{target.observedVersion !== null && `（第 ${target.observedVersion} 代）`}
+								</li>
+							);
+						})}
 					</ul>
 				)}
 			</CardContent>

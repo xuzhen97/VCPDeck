@@ -89,6 +89,52 @@ describe("GitSshPanel", () => {
 		expect(gitSsh.setTargets).toHaveBeenCalledWith(["c2"]);
 	});
 
+	it("目标已安装但 Client 上报能力不可用时，明确提示不能使用受管 Git SSH", async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		try {
+			const clients = [{ clientId: "c1", hostname: "host-1", name: "机器一",
+				capabilityDetails: { gitSsh: { available: false, code: "GIT_SSH_UNAVAILABLE" } } }];
+			const { client } = makeSdk(
+				makeStatus({
+					targets: [{ clientId: "c1", desiredVersion: 2, observedVersion: 2, state: "installed" }],
+				}),
+				clients,
+			);
+			renderPanel(client);
+			const row = await screen.findByTestId("git-ssh-state-c1");
+			expect(row).toHaveTextContent("能力不可用");
+			expect(row).not.toHaveTextContent("已安装");
+			vi.mocked(client.clients.list).mockResolvedValue([
+				{ clientId: "c1", hostname: "host-1", name: "机器一",
+					capabilityDetails: { gitSsh: { available: true, protocolVersion: 1 } } } as never,
+			]);
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(3000);
+			});
+			expect(row).toHaveTextContent("已安装");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("能力摘要不覆盖失败、重复连接或清理中的真实状态", async () => {
+		const clients = ["c1", "c2", "c3"].map((clientId) => ({
+			clientId,
+			hostname: clientId,
+			name: clientId,
+			capabilityDetails: { gitSsh: { available: false, code: "GIT_SSH_UNAVAILABLE" } },
+		}));
+		const { client } = makeSdk(makeStatus({ targets: [
+			{ clientId: "c1", desiredVersion: 2, observedVersion: null, state: "failed", reasonCode: "GIT_SSH_INSTALL_FAILED" },
+			{ clientId: "c2", desiredVersion: 2, observedVersion: null, state: "ambiguous" },
+			{ clientId: "c3", desiredVersion: null, observedVersion: 2, state: "clear-pending" },
+		] }), clients);
+		renderPanel(client);
+		expect(await screen.findByTestId("git-ssh-state-c1")).toHaveTextContent("目标机安装失败");
+		expect(screen.getByTestId("git-ssh-state-c2")).toHaveTextContent("重复连接");
+		expect(screen.getByTestId("git-ssh-state-c3")).toHaveTextContent("待清理");
+	});
+
 	it("状态展示区分待清理与重复连接，不表述为已撤销", async () => {
 		const { client } = makeSdk(
 			makeStatus({

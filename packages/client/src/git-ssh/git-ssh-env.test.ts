@@ -59,9 +59,14 @@ describe("parseOpenSshVersion / supportsAcceptNew", () => {
 			9, 6,
 		]);
 		expect(parseOpenSshVersion("OpenSSH_7.5p1, OpenSSL 1.0.2k")).toEqual([7, 5]);
+		// Windows 系统 OpenSSH 的真实输出：不能误报能力不可用。
+		expect(parseOpenSshVersion("OpenSSH_for_Windows_9.5p2, LibreSSL 3.8.2")).toEqual([9, 5]);
+		expect(parseOpenSshVersion("OpenSSH_for_Windows_7.5p1")).toEqual([7, 5]);
+		expect(parseOpenSshVersion("OpenSSH_for_Windows_broken")).toBeNull();
 		expect(parseOpenSshVersion("not-ssh-at-all")).toBeNull();
 
 		expect(supportsAcceptNew([9, 6])).toBe(true);
+		expect(supportsAcceptNew([9, 5])).toBe(true);
 		expect(supportsAcceptNew([7, 6])).toBe(true);
 		expect(supportsAcceptNew([7, 5])).toBe(false);
 		expect(supportsAcceptNew([6, 9])).toBe(false);
