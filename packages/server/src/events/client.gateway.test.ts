@@ -266,6 +266,35 @@ describe("ClientGateway Pi generation routing", () => {
 		expect(order).toEqual(["pending"]);
 	});
 
+	it("REGISTER 先回 ack 再下发 Git SSH，否则指令会被 Client 的未注册门禁丢弃", async () => {
+		// 契约：Client 的 Git SSH 桥只处理 REGISTER ack 之后的指令（fail closed）。
+		// Server 若先把 install 发出去再回 ack，这次 install 会静默丢失、永不产生回执，
+		// 目标状态就会永久卡在 pending。命令收发顺序是可见行为，必须锁住。
+		const { gateway, gitSsh } = makeGateway();
+		const socket = makeSocket();
+		const order: string[] = [];
+		(socket.emit as unknown as { mockImplementation: (fn: (event: string) => void) => void })
+			.mockImplementation((event: string) => {
+				if (event === "ack") order.push("ack");
+			});
+		gitSsh.onRegistered.mockImplementation(async () => {
+			order.push("gitSsh");
+		});
+
+		await gateway.handleRegister(socket, {
+			clientId: "c1",
+			hostname: "host",
+			os: "win32",
+			cpuModel: "cpu",
+			totalMemMB: 1024,
+			clientVersion: "1",
+			capabilities: ["exec"],
+			capabilityDetails: {},
+		});
+
+		expect(order).toEqual(["ack", "gitSsh"]);
+	});
+
 	it("REGISTER 含新字段（privileged + installation）时正常持久化", async () => {
 		const { gateway, clientService } = makeGateway();
 		const socket = makeSocket();

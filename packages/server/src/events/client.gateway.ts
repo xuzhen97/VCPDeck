@@ -256,13 +256,15 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       register.capabilityDetails?.pi,
       client.id,
     );
+    // 必须先回 REGISTER ack 再下发：Client 的 Git SSH 桥只处理 ack 之后的指令（fail closed），
+    // 顺序颠倒会让本次 install 被静默丢弃、永不产生回执，目标状态永久卡在 pending。
+    client.emit("ack", { event: Events.REGISTER });
     // Git SSH 分发对账：能力缺失视为未上报，由分发服务 fail closed 不下发。
     await this.gitSsh?.onRegistered(
       register.clientId,
       client.id,
       register.capabilityDetails?.gitSsh,
     );
-    client.emit("ack", { event: Events.REGISTER });
     console.log(`[ws] registered: ${register.clientId} (${register.hostname})`);
     return { ok: true };
   }
