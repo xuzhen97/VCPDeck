@@ -12,6 +12,7 @@ packages/server/prisma/.env
 .gitnexus/
 .claude/
 .pi-subagents/
+.pi/
 CLAUDE.md
 # Build artifacts
 .tmp/
