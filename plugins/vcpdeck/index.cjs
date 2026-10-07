@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.15.1";
+    exports2.VERSION = "0.16.0";
   }
 });
 
@@ -4885,8 +4885,8 @@ function createPiApi(client) {
       abortCompact: (clientId, sessionId, runId) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/abort-compact`, {
         runId
       }),
-      commands: async (clientId, sessionId, signal) => (0, import_shared2.parsePiExtensionCommands)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/commands`, void 0, signal)),
-      extensionUi: async (clientId, sessionId, signal) => (0, import_shared2.parsePiExtensionUiSnapshot)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/extension-ui`, void 0, signal)),
+      commands: async (clientId, sessionId, cwdRef, signal) => (0, import_shared2.parsePiExtensionCommands)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/commands?${cwdQuery(cwdRef)}`, void 0, signal)),
+      extensionUi: async (clientId, sessionId, cwdRef, signal) => (0, import_shared2.parsePiExtensionUiSnapshot)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/extension-ui?${cwdQuery(cwdRef)}`, void 0, signal)),
       executeCommand: (clientId, sessionId, cwdRef, submissionId, name, args) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/command`, {
         ...cwdRef,
         submissionId,
