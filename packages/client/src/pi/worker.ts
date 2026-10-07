@@ -117,7 +117,7 @@ interface ActivePrompt {
 	unsubscribe: (() => void) | null;
 }
 let active: ActivePrompt | null = null;
-let promptPipeline: Promise<void> | null = null;
+let promptPipeline: Promise<unknown> | null = null;
 const settledRunIds = new Map<string, { jobId: string; sessionId: string }>();
 const MAX_SETTLED_RUN_IDS = 32;
 let lastActivity = Date.now();
@@ -150,6 +150,10 @@ const PI_ERROR_MESSAGES: Record<PiErrorCode, string> = {
 	PI_POLICY_UNAVAILABLE: "Pi tool policy is unavailable",
 	PI_TOOL_POLICY_DENIED: "Tool call was denied by policy",
 	PI_TOOL_POLICY_REJECTED: "Tool call was not approved",
+	PI_EXECUTION_CONFIRMATION_REQUIRED: "Pi execution mode needs explicit confirmation",
+	PI_EXTENSION_COMMAND_NOT_FOUND: "Pi extension command was not found",
+	PI_EXTENSION_UNSUPPORTED: "Pi extension operation is unsupported",
+	PI_EXTENSION_UI_LIMIT_EXCEEDED: "Pi extension UI state exceeded limits",
 };
 
 function send(msg: PiWorkerOutboundMessage): void {
@@ -173,7 +177,7 @@ function normalizeError(err: unknown): {
 
 async function ensureWrapper(
 	sessionId: string,
-	executionMode: PiToolExecutionMode = runtimeConfig?.spec.toolExecutionMode ?? "approval",
+	executionMode: PiToolExecutionMode = runtimeConfig?.spec.toolExecutionMode ?? "supervised",
 ): Promise<PiAgentSessionWrapper> {
 	if (wrapper && wrapper.sessionId === sessionId && wrapper.isAlive() && wrapperExecutionMode === executionMode) {
 		return wrapper;
@@ -206,11 +210,12 @@ async function ensureWrapper(
 			provider: model.provider,
 			modelId: model.modelId,
 		})),
-		toolPolicy: runtimeConfig.spec.toolPolicy,
 		toolExecutionMode: executionMode,
 		bundleExtensionPaths: runtimeConfig.bundleExtensionPaths,
 		initialModel: defaultModel,
 		sessionFile: found.path,
+		runtimeInstanceId: runtimeConfig.spec.specId,
+		runtimeRevision: runtimeConfig.spec.runtimeRevision,
 	});
 	wrapperExecutionMode = executionMode;
 	return wrapper;
@@ -343,6 +348,43 @@ async function runPrompt(run: ActivePrompt, request: PiRequest): Promise<void> {
 		payload.images = toSdkImages(downloaded);
 	}
 	if (isCurrentRun(run)) await w.send("agent.prompt", payload);
+}
+
+/**
+ * 执行扩展命令（ADR-0040 决策 2）。
+ *
+ * 与 runPrompt 同生命周期：绑定事件 → 校验注册名 → 发送 → 由权威空闲结算。
+ * 区别在于命令处理器可能同步返回 `{ok:false}`（未注册命令），
+ * 该拒绝随响应带回给 Server 映射为 400，而不是靠事件回传。
+ */
+async function runCommand(
+	run: ActivePrompt,
+	request: PiRequest,
+): Promise<unknown> {
+	const name = request.payload?.name;
+	if (typeof name !== "string" || name.length === 0) {
+		throw Object.assign(new Error("name required"), {
+			code: "PI_PROTOCOL_INVALID",
+		});
+	}
+	const w = await ensureWrapper(run.sessionId, runtimeConfig?.spec.toolExecutionMode ?? "supervised");
+	bindWrapperEvents(w, run);
+	if (!isCurrentRun(run)) {
+		await w.shutdown();
+		if (wrapper === w) wrapper = null;
+		return null;
+	}
+	const result = (await w.send("agent.command", {
+		name,
+		args: typeof request.payload?.args === "string" ? request.payload.args : "",
+	})) as { ok?: boolean; error?: { code: string; message: string } } | null;
+	if (!isCurrentRun(run)) return null;
+	if (result && result.ok === false) {
+		// 未注册等拒绝：立即结算，避免留下悬挂 Run。
+		clearRun(run);
+		return result;
+	}
+	return { accepted: true };
 }
 async function dispatch(request: PiRequest): Promise<unknown> {
 	if (request.action === "agent.prompt" && !isPiToolExecutionMode(request.payload?.executionMode)) {
@@ -535,6 +577,43 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 				void promptPipeline.catch((error) => emitPromptError(run, error));
 				return { accepted: true };
 			}
+			// 扩展命令与 prompt 同生命周期（ADR-0040 决策 2）：
+			// 命令是启动新工作，必须由 Worker 建立 active run，复用项目互斥与结算；
+			// 不得要求“已有 active run”或接受调用方自带 runId（否则可绕过互斥）。
+			if (request.action === "agent.command") {
+				if (typeof request.payload?.name !== "string" || request.payload.name.length === 0) {
+					throw Object.assign(new Error("name required"), {
+						code: "PI_PROTOCOL_INVALID",
+					});
+				}
+				if (active)
+					throw Object.assign(new Error("Pi project is busy"), {
+						code: "PI_PROJECT_BUSY",
+					});
+				const run: ActivePrompt = {
+					jobId: request.jobId ?? "",
+					runId: request.runId ?? "",
+					sessionId,
+					cancelToken: { cancelled: false },
+					unsubscribe: null,
+				};
+				active = run;
+				promptPipeline = runCommand(run, request).then((result) => {
+					// 未注册命令：明确拒绝并立即结算，绝不退化为普通 Prompt。
+					return result ?? { ok: false as const, error: { code: "PI_EXTENSION_COMMAND_NOT_FOUND", message: "Unknown Pi command" } };
+				}).catch((error) => {
+					emitPromptError(run, error);
+					throw error;
+				});
+				const commandResult = (await promptPipeline) as
+					| { accepted: true }
+					| { ok: false; error: { code: string; message: string } }
+					| null;
+				if (commandResult !== null && "ok" in commandResult && commandResult.ok === false) {
+					return commandResult;
+				}
+				return { accepted: true };
+			}
 			// 空闲 idle mutation（model.set/thinking.set）不要求 active run；
 			// 带 runId 的异常请求仍走下方严格 envelope 校验。
 			if (
@@ -542,6 +621,21 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 				!request.runId
 			) {
 				if (active)
+					throw Object.assign(new Error("Pi project is busy"), {
+						code: "PI_PROJECT_BUSY",
+					});
+				const w = await ensureWrapper(sessionId);
+				return w.send(request.action, request.payload ?? {});
+			}
+			// 只读扩展投影（命令清单 / UI 快照）与 idle mutation 同类：
+			// 不要求活跃 Run，也不改变运行态；但**不得**在活跃 Run 属于其他会话时
+			// 触发 wrapper 换代（ensureWrapper 会关掉现有 wrapper，打断正在跑的回回合）。
+			if (
+				(request.action === "agent.commands" ||
+					request.action === "extension.ui.get") &&
+				!request.runId
+			) {
+				if (active && active.sessionId !== sessionId)
 					throw Object.assign(new Error("Pi project is busy"), {
 						code: "PI_PROJECT_BUSY",
 					});

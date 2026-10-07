@@ -1,8 +1,10 @@
 # Pi 工具 Approval / Auto / YOLO 执行模式设计
 
-> 状态：Current（Plan 2.2 已实现）｜维护责任：Pi/Client/Server/Frontend 维护者｜最后核验：2026-09-24
-> 目标版本：Pi RuntimeSpec v4 / `vcp.tool-policy` v2（已落地）
-> 关联：[ADR-0033](../adr/0033-pi-tool-approval-mode.md)、[ADR-0030](../adr/0030-pi-resource-bundle-and-tool-policy.md)、[`remote-pi-control-plane.md`](./remote-pi-control-plane.md)
+> 状态:**已被 ADR-0039 替代(仅作历史参考)**|维护责任:Pi/Client/Server/Frontend 维护者|最后核验:2026-10-07
+> 目标版本:Pi RuntimeSpec v4 / `vcp.tool-policy` v2(已落地,现已被 v5/v3 替代)
+> 关联:[ADR-0033](../adr/0033-pi-tool-approval-mode.md)、[ADR-0030](../adr/0030-pi-resource-bundle-and-tool-policy.md)、[ADR-0039](../adr/0039-pi-two-mode-execution.md)(现行语义)、[`remote-pi-control-plane.md`](./remote-pi-control-plane.md)
+>
+> **替代说明**:逐工具三桶(`allow/confirm/deny`)与 Approval/Auto/YOLO 三模式已由 ADR-0039 的两模式(`supervised/automatic`)替代;`vcp.tool-policy` 升为 resource v3,bridge v3,RuntimeSpec v5。本文仅保留作为旧版语义与迁移决策的历史参考,当前行为以代码与 [ADR-0039](../adr/0039-pi-two-mode-execution.md) 为准。
 
 ## 0. 落地状态
 

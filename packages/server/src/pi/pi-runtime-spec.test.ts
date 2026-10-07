@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PiProfileInfo } from "@vcpdeck/shared";
 import {
 	buildPiRuntimeSpec,
-	buildPiRuntimeSpecV4,
+	buildPiRuntimeSpecV5,
 	computeRuntimeRevision,
 	parseAllowedModelsColumn,
 } from "./pi-runtime-spec.js";
@@ -18,8 +18,8 @@ const profile: PiProfileInfo = {
 	],
 	defaultThinkingLevel: "medium",
 	enabledResourceIds: [],
-	toolPolicy: { allow: [], confirm: [], deny: [] },
-	toolExecutionMode: "auto",
+	executionConfiguration: { state: "ready", mode: "supervised" },
+	toolExecutionMode: "supervised",
 	revision: 3,
 	credentialIds: ["c1"],
 	boundClientIds: ["client-1"],
@@ -106,7 +106,7 @@ describe("buildPiRuntimeSpec", () => {
 	});
 });
 
-describe("buildPiRuntimeSpecV4", () => {
+describe("buildPiRuntimeSpecV5", () => {
 	const providers = [
 		{
 			id: "provider-1",
@@ -127,12 +127,12 @@ describe("buildPiRuntimeSpecV4", () => {
 	];
 	const credentials = [{ id: "c1", updatedAt: new Date("2026-09-20T00:00:00Z") }];
 
-	it("构造 v4 Spec：携带模式、策略与 requiredBundle，且不含 Secret", () => {
-		const spec = buildPiRuntimeSpecV4(
+	it("构造 v5 Spec：携带两模式与 requiredBundle，且不含 Secret 与逐工具策略", () => {
+		const spec = buildPiRuntimeSpecV5(
 			{
 				...profile,
-				toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
-				toolExecutionMode: "yolo",
+				executionConfiguration: { state: "ready", mode: "automatic" },
+				toolExecutionMode: "automatic",
 				enabledResourceIds: ["vcp.tool-policy"],
 			},
 			providers,
@@ -140,22 +140,42 @@ describe("buildPiRuntimeSpecV4", () => {
 			"0.11.0",
 		);
 		expect(spec).toMatchObject({
-			schemaVersion: 4,
-			toolExecutionMode: "yolo",
-			toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
+			schemaVersion: 5,
+			toolExecutionMode: "automatic",
 			requiredBundle: {
 				protocolVersion: 1,
 				bundleVersion: "0.11.0",
 				resourceIds: ["vcp.tool-policy"],
 			},
 		});
+		// v5 不再下发逐工具策略（ADR-0039）：能力面由运行时实际注册的工具决定。
+		expect(spec).not.toHaveProperty("toolPolicy");
 		expect(JSON.stringify(spec)).not.toContain("sk-");
 	});
 
+	it("待确认迁移的 Profile 不构造 Spec（不猜默认模式）", () => {
+		expect(() =>
+			buildPiRuntimeSpecV5(
+				{
+					...profile,
+					executionConfiguration: {
+						state: "needs_confirmation",
+						legacyMode: "auto",
+						legacyPolicy: { allow: ["read"], confirm: [], deny: [] },
+					},
+					toolExecutionMode: null,
+				},
+				providers,
+				credentials,
+				"0.11.0",
+			),
+		).toThrow(/确认/);
+	});
+
 	it("无资源需求时不构造 requiredBundle", () => {
-		const spec = buildPiRuntimeSpecV4(profile, providers, credentials);
+		const spec = buildPiRuntimeSpecV5(profile, providers, credentials);
 		expect(spec.requiredBundle).toBeUndefined();
-		expect(spec.toolExecutionMode).toBe("auto");
+		expect(spec.toolExecutionMode).toBe("supervised");
 	});
 });
 

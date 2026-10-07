@@ -42,6 +42,8 @@ class FakeInner {
 	resourceLoader = { getSkills: () => ({ skills: [] }) };
 	extensionRunner = {
 		getRegisteredCommands: () => [],
+		getCommand: (name: string) =>
+			name === "fixture_ok" ? { invocationName: name } : undefined,
 		setUIContext: vi.fn((ctx: unknown) => {
 			this.uiContext = ctx as Record<string, unknown>;
 		}),
@@ -88,6 +90,26 @@ class FakeInner {
 		this.listener?.(event);
 	}
 
+	/** 仅为 agent.command 路径：按注册名查询（未注册返回 undefined）。 */
+	getCommand = vi.fn((name: string) =>
+		name === "fixture_ok" ? { invocationName: name } : undefined,
+	);
+
+	/** 命令处理器返回后还要等权威空闲；本测试用可控 deferred 观察结算闸门。 */
+	waitForIdleCalls = 0;
+	private idleResolve: (() => void) | null = null;
+	waitForIdle = vi.fn(
+		() =>
+			new Promise<void>((resolve) => {
+				this.waitForIdleCalls++;
+				this.idleResolve = resolve;
+			}),
+	);
+
+	resolveIdle(): void {
+		this.idleResolve?.();
+	}
+
 	resolvePrompt(): void {
 		this.promptResolve?.();
 	}
@@ -109,6 +131,67 @@ function makeWrapper() {
 afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
+});
+
+describe("agent.command（扩展命令）", () => {
+it("未注册的调用名不触发任何 Prompt，返回稳定错误码", async () => {
+const { inner, wrapper } = makeWrapper();
+
+const result = (await wrapper.send("agent.command", {
+name: "fixture_missing",
+args: "",
+})) as { ok: boolean; error?: { code: string } };
+
+expect(result).toMatchObject({
+ok: false,
+error: { code: "PI_EXTENSION_COMMAND_NOT_FOUND" },
+});
+// 关键：不得回退为普通模型请求（真实 SDK 下那会变成缺凭据的模型调用）。
+expect(inner.prompt).not.toHaveBeenCalled();
+expect(wrapper.isRunning()).toBe(false);
+});
+
+it("已注册命令：waitForIdle 前不算完成，也不把 agent_settled 当终态", async () => {
+const { inner, wrapper } = makeWrapper();
+const events: string[] = [];
+wrapper.onEvent((e) => events.push(e.type));
+
+await wrapper.send("agent.command", { name: "fixture_ok", args: "a b" });
+expect(inner.prompt).toHaveBeenCalledWith(
+"/fixture_ok a b",
+expect.objectContaining({ source: "rpc" }),
+);
+// 处理器仍在执行期间必须视为运行中（否则项目锁会被提前释放）。
+expect(wrapper.isRunning()).toBe(true);
+
+// 命令自己启动的 Agent 工作结束会发 agent_settled；
+// 但命令尚未完成，不得据此对外宣称完成。
+inner.resolvePrompt();
+inner.emit({ type: "agent_settled" });
+await Promise.resolve();
+expect(events).not.toContain("prompt_done");
+expect(wrapper.isRunning()).toBe(true);
+
+inner.resolveIdle();
+await Promise.resolve();
+await Promise.resolve();
+expect(events).toContain("prompt_done");
+expect(wrapper.isRunning()).toBe(false);
+});
+
+it("命令抛错时发 prompt_error 并解除运行态", async () => {
+const { inner, wrapper } = makeWrapper();
+const events: string[] = [];
+wrapper.onEvent((e) => events.push(e.type));
+
+await wrapper.send("agent.command", { name: "fixture_ok", args: "" });
+inner.rejectPrompt(new Error("handler failed"));
+await Promise.resolve();
+await Promise.resolve();
+
+expect(events).toContain("prompt_error");
+expect(wrapper.isRunning()).toBe(false);
+});
 });
 
 describe("PiAgentSessionWrapperImpl", () => {

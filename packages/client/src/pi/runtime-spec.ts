@@ -1,16 +1,13 @@
-/** Client 侧 RuntimeSpec v4 接纳与模型解析；不读用户 ~/.pi。 */
+/** Client 侧 RuntimeSpec v5 接纳与模型解析；不读用户 ~/.pi。 */
 import { join } from "node:path";
 import {
-	PI_BUILTIN_TOOL_IDS,
-	parsePiRuntimeSpecMessageV4,
-	type PiToolExecutionMode,
-	type PiToolPolicy,
+	parsePiRuntimeSpecMessageV5,
 	type PiConfigState,
 	type PiCredentialLeaseV2,
 	type PiErrorCode,
 	type PiModelRef,
-	type PiRuntimeSpecMessageV4,
-	type PiRuntimeSpecV4,
+	type PiRuntimeSpecMessageV5,
+	type PiRuntimeSpecV5,
 } from "@vcpdeck/shared";
 import { resolveVcpPiRuntimePaths } from "./runtime-paths.js";
 
@@ -43,33 +40,6 @@ export interface ModelRuntimeLike {
 	setRuntimeApiKey?(providerId: string, apiKey: string): Promise<void>;
 }
 
-/**
- * 工具集合计算（docs/adr/0030 决策 2 + ADR-0033 执行模式）：
- *
- * - `approval` / `auto`：`tools = allow ∪ confirm`（SDK 语义：只启用列出的工具），
- *   `excludeTools = deny`（纵深防御）；两者差别只在 Tool Policy 扩展是否询问操作者；
- * - `yolo`：不再用策略三桶缩小内置工具集合，也不应用 `deny`，暴露当前 Runtime 实际支持的
- *   内置工具全集。共享已知工具目录是上限，平台不存在的工具（如非 Windows 的 `powershell`）
- *   由 SDK/平台自然不可用。
- *
- * YOLO 不扩大资源加载面：项目/用户资源与未启用 Bundle 仍由 `bundleLoaderOptions` 排除。
- */
-export function toolSetsFor(
-	policy: PiToolPolicy,
-	mode: PiToolExecutionMode,
-): {
-	tools: string[];
-	excludeTools: string[];
-} {
-	if (mode === "yolo") {
-		return { tools: [...PI_BUILTIN_TOOL_IDS].sort(), excludeTools: [] };
-	}
-	return {
-		tools: [...new Set([...policy.allow, ...policy.confirm])].sort(),
-		excludeTools: [...new Set(policy.deny)].sort(),
-	};
-}
-
 export interface PiUnavailableModel {
 	provider: string;
 	modelId: string;
@@ -77,7 +47,7 @@ export interface PiUnavailableModel {
 }
 
 export interface PiRuntimeConfig {
-	spec: PiRuntimeSpecV4;
+	spec: PiRuntimeSpecV5;
 	credentialEntries: PiCredentialLeaseV2["entries"];
 	resolvedModels: PiModelRef[];
 	unavailableModels: PiUnavailableModel[];
@@ -109,7 +79,7 @@ export function pendingRuntimeConfigState(): PiRuntimeConfigState {
  */
 export function resolveModelRegistrations(
 	runtime: ModelRuntimeLike,
-	providers: PiRuntimeSpecV4["providers"],
+	providers: PiRuntimeSpecV5["providers"],
 ): {
 	registers: Array<{ providerId: string; config: Record<string, unknown> }>;
 	missingCatalogModels: PiModelRef[];
@@ -155,13 +125,17 @@ export function resolveModelRegistrations(
 /** 使用 Server Provider 配置注册模型，再以内存 lease 注入 Key。 */
 export async function createModelRuntimeWithLease(
 	lease: PiCredentialLeaseV2,
-	providers: PiRuntimeSpecV4["providers"] = [],
+	providers: PiRuntimeSpecV5["providers"] = [],
 ): Promise<{
 	runtime: ModelRuntimeLike;
 	missingCatalogModels: PiModelRef[];
 }> {
 	const { ModelRuntime } = await getSdk();
 	const paths = resolveVcpPiRuntimePaths();
+	// SAFETY: `ModelRuntimeLike` 是本文件声明的最小结构契约，只列出 VCPDeck 实际调用的
+	// 四个成员（getAvailable/getModel/registerProvider/setRuntimeApiKey）；SDK 的 ModelRuntime
+	// 结构上满足它们，但 TS 无法在动态 import 的 ESM 类型与本地契约间自动归一，
+	// 因此此处断言仅用于收敛调用面，不改变运行时行为。
 	const runtime = (await ModelRuntime.create({
 		modelsPath: null,
 		authPath: join(paths.agentDir, "absent-auth.json"),
@@ -195,7 +169,7 @@ export async function evaluateRuntimeSpec(
 	deps: {
 		createModelRuntime?: (
 			lease: PiCredentialLeaseV2,
-			providers: PiRuntimeSpecV4["providers"],
+			providers: PiRuntimeSpecV5["providers"],
 		) => Promise<{
 			runtime: ModelRuntimeLike;
 			missingCatalogModels: PiModelRef[];
@@ -207,9 +181,9 @@ export async function evaluateRuntimeSpec(
 	} = {},
 ): Promise<PiRuntimeConfigState> {
 	if (message === null || message === undefined) return pendingRuntimeConfigState();
-	let envelope: PiRuntimeSpecMessageV4;
+	let envelope: PiRuntimeSpecMessageV5;
 	try {
-		envelope = parsePiRuntimeSpecMessageV4(message);
+		envelope = parsePiRuntimeSpecMessageV5(message);
 	} catch {
 		return { configState: "incompatible", reasonCode: "PI_RUNTIME_SPEC_INCOMPATIBLE", runtimeRevision: null, config: null };
 	}

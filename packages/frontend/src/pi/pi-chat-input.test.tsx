@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { PiChatInput, type PiChatAttachmentDraft } from "./pi-chat-input.js";
 
@@ -241,5 +242,208 @@ describe("PiChatInput", () => {
 		expect(
 			screen.getByRole("img", { name: "附件预览 shot.png" }),
 		).toHaveAttribute("src", "blob:preview-1");
+	});
+
+	describe("扩展斜杠命令", () => {
+		const commands = [
+			{ name: "review", description: "审查当前改动" },
+			{ name: "test", description: "运行测试" },
+		];
+
+		it("输入 / 列出已注册命令及描述", async () => {
+			const user = userEvent.setup();
+			renderInput({ commands, onCommand: vi.fn() });
+
+			await user.type(screen.getByRole("textbox", { name: "Pi 输入" }), "/");
+
+			expect(screen.getByRole("option", { name: /review/ })).toBeInTheDocument();
+			expect(screen.getByText("审查当前改动")).toBeInTheDocument();
+		});
+
+		it("选择命令后填入 /name 且不发送", async () => {
+			const user = userEvent.setup();
+			const onCommand = vi.fn();
+			const onSend = vi.fn();
+			renderInput({ commands, onCommand, onSend });
+
+			const box = screen.getByRole("textbox", { name: "Pi 输入" });
+			await user.type(box, "/");
+			await user.click(screen.getByRole("option", { name: /review/ }));
+
+			expect(box).toHaveValue("/review ");
+			expect(onCommand).not.toHaveBeenCalled();
+			expect(onSend).not.toHaveBeenCalled();
+		});
+
+		it("提交已注册命令走 command，绝不当作 Prompt 发出", async () => {
+			const user = userEvent.setup();
+			const onCommand = vi.fn(async () => true);
+			const onSend = vi.fn();
+			renderInput({ commands, onCommand, onSend });
+
+			const box = screen.getByRole("textbox", { name: "Pi 输入" });
+			await user.type(box, "/review src/pi");
+			await user.click(screen.getByRole("button", { name: "发送" }));
+
+			expect(onCommand).toHaveBeenCalledWith("review", "src/pi");
+			expect(onSend).not.toHaveBeenCalled();
+			expect(box).toHaveValue("");
+		});
+
+		it("无可用命令时敲 / 给出提示，而不是静默无反应", async () => {
+			// 唯一的受信扩展可以只做工具门控而不注册任何命令，
+			// 此时打 `/` 必须有可见反馈，否则用户以为界面坏了。
+			const user = userEvent.setup();
+			renderInput({ commands: [], onCommand: vi.fn() });
+
+			await user.type(screen.getByRole("textbox", { name: "Pi 输入" }), "/");
+
+			expect(
+				await screen.findByText(/没有可用的扩展命令/),
+			).toBeInTheDocument();
+		});
+
+		it("未知 slash 保留草稿并提示，不调用 Prompt", async () => {
+			const user = userEvent.setup();
+			const onCommand = vi.fn();
+			const onSend = vi.fn();
+			renderInput({ commands, onCommand, onSend });
+
+			const box = screen.getByRole("textbox", { name: "Pi 输入" });
+			await user.type(box, "/unknown");
+			await user.click(screen.getByRole("button", { name: "发送" }));
+
+			expect(onCommand).not.toHaveBeenCalled();
+			expect(onSend).not.toHaveBeenCalled();
+			// 草稿必须保留：用户不该丢输入。
+			expect(box).toHaveValue("/unknown");
+			expect(await screen.findByText(/未知扩展命令/)).toBeInTheDocument();
+		});
+
+		it("命令被拒绝时保留草稿", async () => {
+			const user = userEvent.setup();
+			const onCommand = vi.fn(async () => false);
+			renderInput({ commands, onCommand });
+
+			const box = screen.getByRole("textbox", { name: "Pi 输入" });
+			await user.type(box, "/review");
+			await user.click(screen.getByRole("button", { name: "发送" }));
+
+			expect(box).toHaveValue("/review");
+		});
+
+		it("运行中（steer/followUp）不提供命令选择", async () => {
+			const user = userEvent.setup();
+			const onCommand = vi.fn();
+			renderInput({ status: "running", commands, onCommand });
+
+			await user.click(screen.getByRole("button", { name: "Steer" }));
+			const box = screen.getByRole("textbox", { name: "Pi 输入" });
+			await user.type(box, "/review");
+
+			expect(screen.queryByRole("option", { name: /review/ })).toBeNull();
+		});
+
+		it("命令不允许带附件：阻止发送且附件不丢失", async () => {
+			const user = userEvent.setup();
+			const onCommand = vi.fn();
+			const onSend = vi.fn();
+			renderInput({
+				commands,
+				onCommand,
+				onSend,
+				attachments: [draft()],
+			});
+
+			const box = screen.getByRole("textbox", { name: "Pi 输入" });
+			await user.type(box, "/review");
+			await user.click(screen.getByRole("button", { name: "发送" }));
+
+			expect(await screen.findByText(/命令不支持附件/)).toBeInTheDocument();
+			expect(onCommand).not.toHaveBeenCalled();
+			expect(onSend).not.toHaveBeenCalled();
+			// 附件仍在，未被静默丢弃（渲染 chip 本体即可证明）。
+			expect(screen.getByTestId("pi-attachment-chip")).toBeInTheDocument();
+			expect(screen.getByText("shot.png")).toBeInTheDocument();
+		});
+
+		it("非斜杠文本不受影响，仍走 Prompt", async () => {
+			const user = userEvent.setup();
+			const onCommand = vi.fn();
+			const onSend = vi.fn(async () => true);
+			renderInput({ commands, onCommand, onSend });
+
+			const box = screen.getByRole("textbox", { name: "Pi 输入" });
+			await user.type(box, "普通消息");
+			await user.click(screen.getByRole("button", { name: "发送" }));
+
+			expect(onSend).toHaveBeenCalledWith("普通消息");
+			expect(onCommand).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("扩展编辑填充", () => {
+		it("非空草稿收到填充时不自动覆写，等待用户应用", async () => {
+			const user = userEvent.setup();
+			const onApplyEditorRequest = vi.fn();
+			renderInput({
+				editorRequest: { requestId: "r1", text: "扩展建议" },
+				onApplyEditorRequest,
+				onDismissEditorRequest: vi.fn(),
+			});
+
+			const box = screen.getByRole("textbox", { name: "Pi 输入" });
+			await user.type(box, "用户草稿");
+
+			// 提示已出现，且草稿未被覆写。
+			expect(await screen.findByText(/扩展建议/)).toBeInTheDocument();
+			expect(box).toHaveValue("用户草稿");
+			expect(onApplyEditorRequest).not.toHaveBeenCalled();
+		});
+
+		it("用户可显式应用填充", async () => {
+			const user = userEvent.setup();
+			const onApplyEditorRequest = vi.fn();
+			renderInput({
+				editorRequest: { requestId: "r1", text: "扩展建议" },
+				onApplyEditorRequest,
+				onDismissEditorRequest: vi.fn(),
+			});
+
+			await user.click(screen.getByRole("button", { name: "应用扩展填充" }));
+
+			expect(onApplyEditorRequest).toHaveBeenCalledWith("r1", "扩展建议");
+		});
+
+		it("用户可忽略填充，草稿与请求都不变", async () => {
+			const user = userEvent.setup();
+			const onApplyEditorRequest = vi.fn();
+			const onDismissEditorRequest = vi.fn();
+			renderInput({
+				editorRequest: { requestId: "r1", text: "扩展建议" },
+				onApplyEditorRequest,
+				onDismissEditorRequest,
+			});
+
+			await user.click(screen.getByRole("button", { name: "忽略扩展填充" }));
+
+			expect(onDismissEditorRequest).toHaveBeenCalledWith("r1");
+			expect(onApplyEditorRequest).not.toHaveBeenCalled();
+		});
+
+		it("填充内容作为纯文本展示，不解析 HTML", async () => {
+			renderInput({
+				editorRequest: {
+					requestId: "r1",
+					text: "<img src=x onerror=alert(1)>",
+				},
+				onApplyEditorRequest: vi.fn(),
+				onDismissEditorRequest: vi.fn(),
+			});
+			expect(
+				screen.getByText("<img src=x onerror=alert(1)>"),
+			).toBeInTheDocument();
+			expect(document.querySelector("img")).toBeNull();
+		});
 	});
 });

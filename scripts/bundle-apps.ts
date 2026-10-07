@@ -220,13 +220,15 @@ export const CLIENT_EXTERNAL = [
  *   esbuild 的 CJS 包装（`exports.default`）在该取法下取不到工厂，而 `export default` 可以；
  * - 必须自包含：不 external 任何依赖，避免依赖目标机上 node_modules 的布局。
  */
-export async function bundlePiExtension(outfile: string): Promise<void> {
+export async function bundlePiExtension(
+	outfile: string,
+	/** 入口源码路径（相对仓库根）；默认受信工具策略扩展。 */
+	entry = "packages/client/src/pi-bundle/tool-policy/index.ts",
+): Promise<void> {
 	await build({
 		...baseOptions("packages/client/tsconfig.json", []),
 		format: "esm",
-		entryPoints: [
-			resolve(ROOT, "packages/client/src/pi-bundle/tool-policy/index.ts"),
-		],
+		entryPoints: [resolve(ROOT, entry)],
 		outfile,
 	});
 }

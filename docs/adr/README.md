@@ -92,8 +92,10 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0031](./0031-native-pi-session-explicit-import.md) | Proposed | 用户原生 Pi Session 的显式导入是唯一允许接触用户 Pi 的路径：只读、单向、只操作副本，源根不可覆盖，预览正文受限不落盘 |
 | [0032](./0032-pi-web-renderer-vendoring.md) | Proposed | Pi Web 消息渲染层原样拷入 `packages/frontend/src/pi-web/`（vendored，MIT 随行）；Shared DTO 与渲染模型只经 Pi UI Adapter 翻译，移植子树零协议 import，上游手动 cherry-pick |
 | [0033](./0033-pi-tool-approval-mode.md) | Superseded by ADR-0034 | Tool Policy 与 Execution Mode 分层：Approval 逐次审批、Auto 受策略自动执行、YOLO 跳过 Tool Policy 但只信任当前 Runtime 已加载工具；RuntimeSpec v4 / bridge v2 |
-| [0034](./0034-pi-session-execution-mode-override.md) | Accepted | Owner 可为单个 Session 持久覆盖 `approval / auto / yolo`；未覆盖跟随 Profile 默认，每个 Run 固化模式且 Client fail closed |
+| [0034](./0034-pi-session-execution-mode-override.md) | Accepted（工具策略与模式语义由 ADR-0039 替代） | Server 保存 Session 覆盖，未覆盖跟随 Profile；Owner 空闲修改、每个 Run 固化模式且 Client fail closed；原三模式语义见历史正文 |
 | [0035](./0035-pi-image-only-prompt.md) | Accepted | Pi Prompt 允许空文本仅当携带有效图片；Server 在接纳 Run 前校验，Client 再验证；不自动补词 |
 | [0036](./0036-pi-sdk-single-file-and-shell-capability.md) | Accepted | Pi SDK 以单文件产物发布（依赖 SDK 嵌入模块分支，扩展/插件运行时导入不依赖 node_modules）；Bash 不再作整机门禁，shell 由 VCPDeck 绝对路径解析并注入；探测失败不缓存且保留真实原因码 |
 | [0037](./0037-server-managed-git-ssh-key-distribution.md) | Accepted（分发身份门槛由 ADR-0038 取代） | Server 加密保存共享 Git SSH 私钥并向选定 Client 分发；Job/Terminal/Pi 使用受管密钥，TOFU 校验主机；可靠单机排除须 Git 服务撤钥及轮换 |
 | [0038](./0038-git-ssh-distribution-under-shared-psk.md) | Accepted | 共享 PSK 下选定 Client ID 仅为运维分发范围，不构成每机身份认证；泄漏按整套 Git 密钥失陷处置 |
+| [0039](./0039-pi-two-mode-execution.md) | Accepted（尚未实现） | 删除逐工具三桶，采用 supervised/automatic；保留 Session 覆盖与 Run 固化，旧受限配置显式确认迁移 |
+| [0040](./0040-pi-extension-web-interaction.md) | Accepted（尚未实现） | 受信扩展命令复用 Owner/Run 控制；网页提供有限 UI 与 Client 内存状态恢复，不支持任意 TUI、Session 替换或 Runtime reload |

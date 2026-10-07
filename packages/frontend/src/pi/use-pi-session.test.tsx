@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { usePiSession } from "./use-pi-session.js";
+import { usePiSession, type PiSendResult } from "./use-pi-session.js";
 import type { PiApi } from "@vcpdeck/sdk";
 
 class MockEventSource {
@@ -127,6 +127,20 @@ function makePi() {
 			setModel: vi.fn(async () => ({})),
 			setThinking: vi.fn(async () => ({})),
 			extensionResponse: vi.fn(async () => ({})),
+			executeCommand: vi.fn(async () => ({})),
+			commands: vi.fn(async () => ({
+				runtimeInstanceId: "spec-1",
+				runtimeRevision: "rev-1",
+				commands: [{ name: "fixture_ok", description: "就绪探针" }],
+			})),
+			extensionUi: vi.fn(async () => ({
+				runtimeInstanceId: "spec-1",
+				runtimeRevision: "rev-1",
+				sequence: 0,
+				title: null,
+				statuses: [],
+				widgets: [],
+			})),
 			eventsPath: (clientId: string, sessionId: string) =>
 				`/api/clients/${clientId}/pi/agent/${sessionId}/events`,
 		},
@@ -1363,5 +1377,243 @@ describe("usePiSession", () => {
 		]);
 		// hasMore 不被对账重置回 true
 		expect(result.current.state.hasMore).toBe(false);
+	});
+
+	describe("扩展命令与持续 UI 状态", () => {
+		it("开流后拉取命令清单与 UI 快照", async () => {
+			const pi = makePi();
+			vi.stubGlobal("EventSource", MockEventSource);
+			const { result } = renderHook(() => usePiSession(pi));
+			await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+
+			await waitFor(() =>
+				expect(pi.agent.commands).toHaveBeenCalledWith("c1", "s1", CWD),
+			);
+			await waitFor(() =>
+				expect(pi.agent.extensionUi).toHaveBeenCalledWith("c1", "s1", CWD),
+			);
+			expect(result.current.state.commands?.commands[0]?.name).toBe("fixture_ok");
+			expect(result.current.state.extensionUi?.runtimeRevision).toBe("rev-1");
+		});
+
+		it("同换代但 sequence 更旧的快照被拒绝，不回滚状态", async () => {
+			const pi = makePi();
+			const ui = pi.agent.extensionUi as ReturnType<typeof vi.fn>;
+			ui.mockResolvedValue({
+				runtimeInstanceId: "spec-1",
+				runtimeRevision: "rev-1",
+				sequence: 5,
+				title: "新状态",
+				statuses: [],
+				widgets: [],
+			});
+			vi.stubGlobal("EventSource", MockEventSource);
+			const { result } = renderHook(() => usePiSession(pi));
+			await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+			await waitFor(() =>
+				expect(result.current.state.extensionUi?.title).toBe("新状态"),
+			);
+
+			// 迟到的旧快照不得覆盖新状态（ADR-0040 决策 4）。
+			ui.mockResolvedValue({
+				runtimeInstanceId: "spec-1",
+				runtimeRevision: "rev-1",
+				sequence: 2,
+				title: "旧状态",
+				statuses: [],
+				widgets: [],
+			});
+			await act(async () => {
+				await result.current.actions.refreshExtensionUi();
+			});
+			expect(result.current.state.extensionUi?.title).toBe("新状态");
+		});
+
+		it("换代后的权威快照可以替换同换代旧值", async () => {
+			const pi = makePi();
+			const ui = pi.agent.extensionUi as ReturnType<typeof vi.fn>;
+			ui.mockResolvedValue({
+				runtimeInstanceId: "spec-1",
+				runtimeRevision: "rev-1",
+				sequence: 5,
+				title: "旧换代",
+				statuses: [],
+				widgets: [],
+			});
+			vi.stubGlobal("EventSource", MockEventSource);
+			const { result } = renderHook(() => usePiSession(pi));
+			await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+			await waitFor(() =>
+				expect(result.current.state.extensionUi?.title).toBe("旧换代"),
+			);
+
+			ui.mockResolvedValue({
+				runtimeInstanceId: "spec-2",
+				runtimeRevision: "rev-2",
+				sequence: 0,
+				title: "新换代",
+				statuses: [],
+				widgets: [],
+			});
+			await act(async () => {
+				await result.current.actions.refreshExtensionUi();
+			});
+			expect(result.current.state.extensionUi?.title).toBe("新换代");
+		});
+
+		it("快照拉取失败不得用空值覆盖已有状态", async () => {
+			const pi = makePi();
+			const ui = pi.agent.extensionUi as ReturnType<typeof vi.fn>;
+			ui.mockResolvedValue({
+				runtimeInstanceId: "spec-1",
+				runtimeRevision: "rev-1",
+				sequence: 5,
+				title: "保留",
+				statuses: [],
+				widgets: [],
+			});
+			vi.stubGlobal("EventSource", MockEventSource);
+			const { result } = renderHook(() => usePiSession(pi));
+			await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+			await waitFor(() =>
+				expect(result.current.state.extensionUi?.title).toBe("保留"),
+			);
+
+			// 失败时绝不能用空快照覆写（否则重连抖动会让界面清空）。
+			ui.mockRejectedValue(new Error("offline"));
+			await act(async () => {
+				await result.current.actions.refreshExtensionUi();
+			});
+			expect(result.current.state.extensionUi?.title).toBe("保留");
+		});
+
+		it("command() 走 executeCommand（不传 runId），绝不当作普通 Prompt 发出", async () => {
+			const pi = makePi();
+			(pi.agent.executeCommand as ReturnType<typeof vi.fn>).mockResolvedValue({
+				jobId: "s1",
+				runId: "run-1",
+				sessionId: "s1",
+			});
+			vi.stubGlobal("EventSource", MockEventSource);
+			const { result } = renderHook(() => usePiSession(pi));
+			await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+
+			await act(async () => {
+				await result.current.actions.command("fixture_ok", "a b");
+			});
+
+			// Run 由 Server 接纳：前端不得自带 runId。
+			expect(pi.agent.executeCommand).toHaveBeenCalledWith(
+				"c1",
+				"s1",
+				CWD,
+				expect.any(String),
+				"fixture_ok",
+				"a b",
+			);
+			expect(pi.agent.prompt).not.toHaveBeenCalled();
+			// 接纳后绑定 run，后续事件才能对上。
+			expect(result.current.state.runId).toBe("run-1");
+		});
+
+		it("command() 被拒时返回 rejected，调用方应保留草稿", async () => {
+			const pi = makePi();
+			(pi.agent.executeCommand as ReturnType<typeof vi.fn>).mockRejectedValue(
+				Object.assign(new Error("Unknown Pi command"), {
+					code: "PI_EXTENSION_COMMAND_NOT_FOUND",
+				}),
+			);
+			vi.stubGlobal("EventSource", MockEventSource);
+			const { result } = renderHook(() => usePiSession(pi));
+			await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+
+			let outcome: PiSendResult | null = null;
+			await act(async () => {
+				outcome = await result.current.actions.command("nope", "");
+			});
+
+			expect(outcome).toBe("rejected");
+			expect(pi.agent.prompt).not.toHaveBeenCalled();
+			// 失败不得留下假 running。
+			expect(result.current.state.status).toBe("idle");
+			expect(result.current.state.error).toContain("Unknown Pi command");
+		});
+
+		it("运行中不执行斜杠命令", async () => {
+			const pi = makePi();
+			(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+				job: {
+					jobId: "s1",
+					sessionId: "s1",
+					status: "running",
+					runId: "run-1",
+					ownerName: "User",
+					isOwner: true,
+				},
+				agentState: {
+					status: "running",
+					streaming: true,
+					prompting: true,
+					compacting: false,
+					thinkingLevel: "off",
+					model: { provider: "p", modelId: "m1" },
+					queuedMessages: { steering: [], followUp: [] },
+				},
+			});
+			vi.stubGlobal("EventSource", MockEventSource);
+			const { result } = renderHook(() => usePiSession(pi));
+			await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+
+			let outcome: PiSendResult | null = null;
+			await act(async () => {
+				outcome = await result.current.actions.command("fixture_ok", "");
+			});
+
+			expect(outcome).toBe("rejected");
+			expect(pi.agent.executeCommand).not.toHaveBeenCalled();
+		});
+
+		it("reset 清空命令、UI 与待应用编辑填充", async () => {
+			const pi = makePi();
+			vi.stubGlobal("EventSource", MockEventSource);
+			const { result } = renderHook(() => usePiSession(pi));
+			await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+			await waitFor(() => expect(result.current.state.commands).not.toBeNull());
+
+			act(() => result.current.actions.reset());
+
+			expect(result.current.state.commands).toBeNull();
+			expect(result.current.state.extensionUi).toBeNull();
+			expect(result.current.state.editorRequest).toBeNull();
+		});
+
+		it("重连后重新拉取命令与 UI 快照（onConnected）", async () => {
+			const pi = makePi();
+			const ui = pi.agent.extensionUi as ReturnType<typeof vi.fn>;
+			ui.mockResolvedValue({
+				runtimeInstanceId: "spec-1",
+				runtimeRevision: "rev-1",
+				sequence: 0,
+				title: null,
+				statuses: [],
+				widgets: [],
+			});
+			vi.stubGlobal("EventSource", MockEventSource);
+			const { result } = renderHook(() => usePiSession(pi));
+			await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+			const callsAfterOpen = ui.mock.calls.length;
+
+			// 模拟 EventSource 自动重连：重新触发 onopen。
+			await act(async () => {
+				last().onopen?.();
+			});
+			await waitFor(() =>
+				expect(ui.mock.calls.length).toBeGreaterThan(callsAfterOpen),
+			);
+			// 重连后同样拉命令清单。
+			expect(
+				(pi.agent.commands as ReturnType<typeof vi.fn>).mock.calls.length,
+			).toBeGreaterThan(0);
+		});
 	});
 });

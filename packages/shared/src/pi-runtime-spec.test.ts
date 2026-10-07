@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	PI_RUNTIME_SPEC_PROTOCOL_VERSION,
+	isPiLegacyToolExecutionMode,
 	isPiToolExecutionMode,
 	parsePiCredentialLease,
 	parsePiCredentialLeaseV2,
@@ -277,25 +278,32 @@ describe("parsePiRuntimeSpecMessageV3", () => {
 	});
 });
 
-describe("parsePiRuntimeSpecV4（执行模式随协议升级）", () => {
+describe("parsePiRuntimeSpecV4（已被 v5 取代，仅保留诊断能力）", () => {
 	const validV4Spec = {
 		...validV3Spec,
 		schemaVersion: 4,
 		toolExecutionMode: "auto",
 	};
 
-	it("接受严格 v4 Spec 并暴露当前协议版本 4", () => {
+	it("接受严格 v4 Spec；v4 版本号固定为字面量 4，不跟随当前协议版本", () => {
 		expect(parsePiRuntimeSpecV4(validV4Spec)).toEqual(validV4Spec);
-		expect(PI_RUNTIME_SPEC_PROTOCOL_VERSION).toBe(4);
+		expect(PI_RUNTIME_SPEC_PROTOCOL_VERSION).toBe(5);
+		expect(() => parsePiRuntimeSpecV4({ ...validV4Spec, schemaVersion: 5 })).toThrow(
+			/schemaVersion/,
+		);
 	});
 
-	it("模式判断函数只接受三种合法值", () => {
-		expect(isPiToolExecutionMode("approval")).toBe(true);
-		expect(isPiToolExecutionMode("auto")).toBe(true);
-		expect(isPiToolExecutionMode("yolo")).toBe(true);
-		expect(isPiToolExecutionMode("unsafe")).toBe(false);
-		expect(isPiToolExecutionMode(undefined)).toBe(false);
-		expect(isPiToolExecutionMode(3)).toBe(false);
+	it("旧三模式不再被新协议接受（ADR-0039 删除）", () => {
+		for (const mode of ["supervised", "automatic"]) {
+			expect(isPiToolExecutionMode(mode)).toBe(true);
+		}
+		for (const mode of ["approval", "auto", "yolo", "unsafe", undefined, 3]) {
+			expect(isPiToolExecutionMode(mode)).toBe(false);
+		}
+		// 旧值仍能被诊断用的 v4 解析器识别，但不得进入新路径。
+		expect(isPiLegacyToolExecutionMode("approval")).toBe(true);
+		expect(isPiLegacyToolExecutionMode("auto")).toBe(true);
+		expect(isPiLegacyToolExecutionMode("yolo")).toBe(false);
 	});
 
 	it("缺少或非法 toolExecutionMode 时拒绝", () => {

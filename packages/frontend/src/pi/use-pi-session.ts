@@ -3,6 +3,8 @@ import type {
 	PiAgentState,
 	PiAttachmentRef,
 	PiCwdRef,
+	PiExtensionCommands,
+	PiExtensionUiSnapshot,
 	PiMessage,
 	PiModelInfo,
 	PiSessionContextPage,
@@ -56,6 +58,12 @@ export interface PiSessionState {
 	thinkingSelection: PiThinkingSelection;
 	thinkingText: string;
 	thinkingDurationMs: number | null;
+	/** 当前 Session/runtime 实际注册的扩展命令（绑定换代，不含本地路径）。 */
+	commands: PiExtensionCommands | null;
+	/** 持续 UI 状态快照（status/widget/title 的最新有界值）。 */
+	extensionUi: PiExtensionUiSnapshot | null;
+	/** 待处理的扩展编辑填充请求；由用户显式应用或忽略，UI 不自动发送。 */
+	editorRequest: { requestId: string; text: string } | null;
 }
 
 export interface PiSessionActions {
@@ -69,6 +77,17 @@ export interface PiSessionActions {
 	loadMore(): Promise<void>;
 	/** 返回是否被接纳；`rejected` 时调用方应保留草稿。 */
 	send(input: { prompt: string; images?: PiAttachmentRef[] }): Promise<PiSendResult>;
+	/**
+	 * 调用已注册的扩展斜杠命令。
+	 *
+	 * 绝不回退为普通 Prompt（未知命令必须明确拒绝）；命令不允许携带附件。
+	 * 返回 `rejected` 时调用方应保留草稿。
+	 */
+	command(name: string, args?: string): Promise<PiSendResult>;
+	/** 重新拉取持续 UI 快照（重连后读取最新值，不重放历史更新）。 */
+	refreshExtensionUi(): Promise<void>;
+	/** 丢弃待应用的编辑填充请求。 */
+	dismissEditorRequest(requestId: string): void;
 	steer(message: string): Promise<void>;
 	followUp(message: string): Promise<void>;
 	abort(): Promise<void>;
@@ -119,6 +138,9 @@ const INITIAL_STATE: PiSessionState = {
 	thinkingSelection: "auto",
 	thinkingText: "",
 	thinkingDurationMs: null,
+	commands: null,
+	extensionUi: null,
+	editorRequest: null,
 };
 
 /** 前端 Pi 会话状态机（参考 Pi Web useAgentSession 核心语义） */
@@ -277,6 +299,72 @@ export function usePiSession(
 			window.removeEventListener("online", onOnline);
 		};
 	}, [reloadHistory, refreshState]);
+	/**
+	 * 应用持续 UI 快照，按换代与 sequence 做新旧裁决。
+	 *
+	 * 同换代时只有更大的 sequence 能覆盖；换代变化则以本次权威查询结果为准。
+	 * 这样迟到的旧状态不会回滚界面（ADR-0040 决策 4）。
+	 */
+	const applyExtensionUi = useCallback((incoming: PiExtensionUiSnapshot) => {
+		setState((s) => {
+			const current = s.extensionUi;
+			const sameGeneration =
+				current !== null &&
+				current.runtimeInstanceId === incoming.runtimeInstanceId &&
+				current.runtimeRevision === incoming.runtimeRevision;
+			if (sameGeneration && incoming.sequence <= current.sequence) return s;
+			return { ...s, extensionUi: incoming };
+		});
+	}, []);
+
+	const refreshExtensionUi = useCallback(async () => {
+		const clientId = clientIdRef.current;
+		const sessionId = sessionIdRef.current;
+		const cwdRef = cwdRefRef.current;
+		if (!clientId || !sessionId || !cwdRef) return;
+		const sessionGeneration = sessionGenerationRef.current;
+		try {
+			const snapshot = await pi.agent.extensionUi(clientId, sessionId, cwdRef);
+			if (sessionGenerationRef.current !== sessionGeneration) return;
+			applyExtensionUi(snapshot);
+		} catch {
+			// 恢复快照失败不得用空值覆写已有状态（重连抖动不该清空界面）。
+		}
+	}, [pi, applyExtensionUi]);
+
+	const refreshCommands = useCallback(async () => {
+		const clientId = clientIdRef.current;
+		const sessionId = sessionIdRef.current;
+		// Client 端按 cwdRef 解析会话归属与项目；缺它会被 PI_PROTOCOL_INVALID 拒绝。
+		const cwdRef = cwdRefRef.current;
+		if (!clientId || !sessionId || !cwdRef) return;
+		const sessionGeneration = sessionGenerationRef.current;
+		try {
+			const commands = await pi.agent.commands(clientId, sessionId, cwdRef);
+			if (sessionGenerationRef.current !== sessionGeneration) return;
+			setState((s) => ({ ...s, commands }));
+		} catch {
+			// 清单拉取失败不阻断会话；下次重连再试。
+		}
+	}, [pi]);
+
+	const dismissEditorRequest = useCallback((requestId: string) => {
+		setState((s) =>
+			s.editorRequest?.requestId === requestId
+				? { ...s, editorRequest: null }
+				: s,
+		);
+	}, []);
+
+	/**
+	 * 调用已注册的扩展斜杠命令。
+	 *
+	 * 命令是**启动新工作**，因此与 prompt 一样由 Server 接纳 Run：
+	 * 前端不得自带 runId（否则会绕过项目互斥与结算）。
+	 * 只走 executeCommand：未知命令明确拒绝，**绝不**回退为普通 Prompt。
+	 * 返回 `rejected` 时调用方应保留草稿。
+	 */
+
 
 	const openStream = useCallback(
 		(
@@ -288,6 +376,8 @@ export function usePiSession(
 			) => void,
 		) => {
 			close();
+			// 本条流的首连标志：openSession 已统一拉取，重连时才需要刷新。
+			let firstOpen = true;
 			const stream = openPiEventStream(
 				pi.agent.eventsPath(clientId, sessionId),
 				{
@@ -399,12 +489,25 @@ export function usePiSession(
 								void refreshState();
 								return;
 							case "extension_request":
+								// 编辑填充是一次性请求：记下待应用项，由用户显式应用或忽略；
+								// UI 不得自动发送或静默覆写用户的草稿（ADR-0040 决策 3）。
+								if (event.ui.kind === "set_editor_text") {
+									setState((s) => ({
+										...s,
+										editorRequest: {
+											requestId: event.ui.requestId,
+											text: event.ui.message ?? "",
+										},
+									}));
+									return;
+								}
+								// notify/status/widget/title 属持续状态：统一由有界快照投影，
+								// 事件通道不得逐条覆写快照。
 								if (
 									event.ui.kind === "notify" ||
 									event.ui.kind === "setStatus" ||
 									event.ui.kind === "setWidget" ||
-									event.ui.kind === "setTitle" ||
-									event.ui.kind === "set_editor_text"
+									event.ui.kind === "setTitle"
 								) {
 									return;
 								}
@@ -463,12 +566,99 @@ export function usePiSession(
 							error: "连接已断开，等待自动重连",
 						}));
 					},
+					// 每次（重）连接都重新对账并拉取最新有界快照：
+					// ADR-0040 决策 4——重连读最新快照，不重放历史更新。
+					// 首次连接交给 openSession 的统一拉取，避免重复请求。
+					// 注意：不能拿 sessionGeneration 判断首连——重连时它不变，
+					// 否则同一条流的重连会被永久跳过。
+					onConnected: () => {
+						if (sessionGenerationRef.current !== streamGeneration) return;
+						if (firstOpen) {
+							firstOpen = false;
+							return;
+						}
+						void refreshCommands();
+						void refreshExtensionUi();
+						void refreshState();
+					},
 				},
 			);
 			streamRef.current = stream;
 			return stream;
 		},
-		[pi, close, clearGrace, scheduleGrace, scheduleReconcile],
+		[pi, close, clearGrace, scheduleGrace, scheduleReconcile, refreshState, refreshCommands, refreshExtensionUi],
+	);
+
+	const command = useCallback(
+		async (name: string, args = ""): Promise<PiSendResult> => {
+			const clientId = clientIdRef.current;
+			const sessionId = sessionIdRef.current;
+			const cwdRef = cwdRefRef.current;
+			if (!clientId || !sessionId || !cwdRef) {
+				setState((s) => ({ ...s, error: "尚未打开会话" }));
+				return "rejected";
+			}
+			// 运行中不得执行斜杠命令：复用现有 status 判定与宽限期语义。
+			if (
+				!isOwnerRef.current ||
+				!(["idle", "done"] as PiSessionStatus[]).includes(
+					stateRef.current.status,
+				) ||
+				graceTimerRef.current
+			) {
+				return "rejected";
+			}
+			const stream = streamRef.current;
+			if (!stream) {
+				setState((s) => ({ ...s, error: "事件流未就绪" }));
+				return "rejected";
+			}
+			const sessionGeneration = sessionGenerationRef.current;
+			await stream.connected();
+			if (sessionGenerationRef.current !== sessionGeneration) return "rejected";
+
+			promptGenerationRef.current += 1;
+			const generation = promptGenerationRef.current;
+			const submissionId = randomUUID();
+			pendingSubmissionsRef.current.set(submissionId, generation);
+			clearGrace();
+			setState((s) => ({ ...s, status: "running", error: null }));
+
+			try {
+				const accepted = await pi.agent.executeCommand(
+					clientId,
+					sessionId,
+					cwdRef,
+					submissionId,
+					name,
+					args,
+				);
+				if (
+					sessionGenerationRef.current === sessionGeneration &&
+					promptGenerationRef.current === generation &&
+					activeRunIdRef.current === null
+				) {
+					activeRunIdRef.current = accepted.runId;
+					setState((s) => ({ ...s, runId: accepted.runId }));
+				}
+				return "accepted";
+			} catch (err) {
+				pendingSubmissionsRef.current.delete(submissionId);
+				if (
+					sessionGenerationRef.current === sessionGeneration &&
+					promptGenerationRef.current === generation
+				) {
+					// 命令未获接纳：回到权威空闲，不得留下假 running。
+					setState((s) => ({
+						...s,
+						status: "idle" as const,
+						error: err instanceof Error ? err.message : String(err),
+					}));
+				}
+				return "rejected";
+			}
+		},
+		[pi, clearGrace],
 	);
 
 	const openSession = useCallback(
@@ -550,8 +740,21 @@ export function usePiSession(
 				...(models ? { models } : {}),
 				thinkingSelection: agentState.thinkingLevel,
 			}));
+
+			// 只在就绪且空闲时拉取扩展命令与 UI 快照：
+			// 避免为 Observer 的每次重连都启动 Worker factory（ADR-0040 决策 4）。
+			if (job.status === "idle" && !pendingExtension) {
+				await Promise.all([refreshCommands(), refreshExtensionUi()]);
+			}
 		},
-		[openStream, reloadHistory, refreshState, pi],
+		[
+			openStream,
+			reloadHistory,
+			refreshState,
+			refreshCommands,
+			refreshExtensionUi,
+			pi,
+		],
 	);
 
 	const createSession = useCallback(
@@ -722,6 +925,9 @@ export function usePiSession(
 			openSession,
 			loadMore,
 			send,
+			command,
+			refreshExtensionUi,
+			dismissEditorRequest,
 			steer: (message) =>
 				withRun((c, s, runId) => pi.agent.steer(c, s, runId, message)),
 			followUp: (message) =>
@@ -918,6 +1124,9 @@ export function usePiSession(
 			openSession,
 			loadMore,
 			send,
+			command,
+			refreshExtensionUi,
+			dismissEditorRequest,
 			withRun,
 			pi,
 			clearGrace,

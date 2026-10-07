@@ -59,6 +59,95 @@ describe("createPiApi", () => {
 		);
 	});
 
+	it("commands 走只读 endpoint 并严格解析，拒绝含本地来源路径的上游响应", async () => {
+		const cwdRef = { rootDir: "D:\\", relativePath: "repo" };
+		const request = vi.fn(async () => ({
+			runtimeInstanceId: "spec-1",
+			runtimeRevision: "rev-1",
+			commands: [{ name: "fixture_ok", description: "就绪探针" }],
+		}));
+		const pi = createPiApi({ request: request as never });
+
+		await expect(pi.agent.commands("c/1", "s/1", cwdRef)).resolves.toEqual({
+			runtimeInstanceId: "spec-1",
+			runtimeRevision: "rev-1",
+			commands: [{ name: "fixture_ok", description: "就绪探针" }],
+		});
+		expect(request).toHaveBeenLastCalledWith(
+			"GET",
+			"/api/clients/c%2F1/pi/agent/s%2F1/commands?rootDir=D%3A%5C&relativePath=repo",
+			undefined,
+			undefined,
+		);
+
+		// 上游夹带 sourceInfo（本地路径）必须被解析器拒绝。
+		request.mockResolvedValueOnce({
+			runtimeInstanceId: "spec-1",
+			runtimeRevision: "rev-1",
+			commands: [{ name: "x", description: "y", sourceInfo: { path: "C:\\s" } }],
+		} as never);
+		await expect(pi.agent.commands("c1", "s1", cwdRef)).rejects.toThrow();
+	});
+
+	it("extensionUi 走只读 endpoint 并严格解析快照", async () => {
+		const cwdRef = { rootDir: "D:\\", relativePath: "repo" };
+		const request = vi.fn(async () => ({
+			runtimeInstanceId: "spec-1",
+			runtimeRevision: "rev-1",
+			sequence: 2,
+			title: "构建中",
+			statuses: [{ key: "k", text: "1" }],
+			widgets: [{ key: "w", lines: ["a"], placement: "belowEditor" }],
+		}));
+		const pi = createPiApi({ request: request as never });
+
+		const snapshot = await pi.agent.extensionUi("c1", "s1", cwdRef);
+		expect(snapshot.sequence).toBe(2);
+		expect(snapshot.widgets).toHaveLength(1);
+		expect(request).toHaveBeenLastCalledWith(
+			"GET",
+			"/api/clients/c1/pi/agent/s1/extension-ui?rootDir=D%3A%5C&relativePath=repo",
+			undefined,
+			undefined,
+		);
+
+		request.mockResolvedValueOnce({ sequence: -1 } as never);
+		await expect(pi.agent.extensionUi("c1", "s1", cwdRef)).rejects.toThrow();
+	});
+
+	it("executeCommand 由 Server 接纳 Run（不传 runId），携带 cwdRef/submissionId/name/args", async () => {
+		const request = vi.fn(async () => ({
+			jobId: "s1",
+			runId: "run-1",
+			sessionId: "s1",
+		}));
+		const pi = createPiApi({ request: request as never });
+		const cwdRef = { rootDir: "D:\\", relativePath: "repo" };
+
+		await pi.agent.executeCommand(
+			"c/1",
+			"s/1",
+			cwdRef,
+			"sub-1",
+			"fixture_ok",
+			"a b",
+		);
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c%2F1/pi/agent/s%2F1/command",
+			{ ...cwdRef, submissionId: "sub-1", name: "fixture_ok", args: "a b" },
+		);
+
+		// 省略 args 时不得把 undefined 透传（Client 侧按缺省空串处理）。
+		request.mockClear();
+		await pi.agent.executeCommand("c1", "s1", cwdRef, "sub-2", "fixture_ok");
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c1/pi/agent/s1/command",
+			{ ...cwdRef, submissionId: "sub-2", name: "fixture_ok" },
+		);
+	});
+
 	it("state 严格解析响应并拒绝畸形状态", async () => {
 		const valid: PiAgentState = {
 			status: "idle",
@@ -179,19 +268,19 @@ describe("VcpDeckClient.pi", () => {
 			sessionId: "s/1",
 			status: "idle",
 			runId: null,
-			executionModeOverride: "yolo",
-			effectiveExecutionMode: "yolo",
+			executionModeOverride: "automatic",
+			effectiveExecutionMode: "automatic",
 			ownerName: "User",
 			isOwner: true,
 		};
 		const request = vi.fn(async () => snapshot);
 		const pi = createPiApi({ request: request as never });
 		const cwdRef = { rootDir: "D:\\\\", relativePath: "repo" };
-		await expect(pi.agent.setExecutionMode("c/1", "s/1", cwdRef, "yolo")).resolves.toEqual(snapshot);
+		await expect(pi.agent.setExecutionMode("c/1", "s/1", cwdRef, "automatic")).resolves.toEqual(snapshot);
 		expect(request).toHaveBeenLastCalledWith(
 			"POST",
 			"/api/clients/c%2F1/pi/agent/s%2F1/execution-mode",
-			{ ...cwdRef, mode: "yolo" },
+			{ ...cwdRef, mode: "automatic" },
 		);
 		await pi.agent.setExecutionMode("c/1", "s/1", cwdRef, null);
 		expect(request).toHaveBeenLastCalledWith(
@@ -205,7 +294,7 @@ describe("VcpDeckClient.pi", () => {
 		const cwdRef = { rootDir: "D:\\\\", relativePath: "repo" };
 		const malformed = vi.fn(async () => ({ effectiveExecutionMode: "turbo" }));
 		await expect(
-			createPiApi({ request: malformed as never }).agent.setExecutionMode("c1", "s1", cwdRef, "auto"),
+			createPiApi({ request: malformed as never }).agent.setExecutionMode("c1", "s1", cwdRef, "supervised"),
 		).rejects.toThrow();
 		const unknownField = vi.fn(async () => ({
 			jobId: "s1", sessionId: "s1", status: "idle", runId: null,
@@ -213,7 +302,7 @@ describe("VcpDeckClient.pi", () => {
 			ownerName: null, isOwner: true, injected: true,
 		}));
 		await expect(
-			createPiApi({ request: unknownField as never }).agent.setExecutionMode("c1", "s1", cwdRef, "auto"),
+			createPiApi({ request: unknownField as never }).agent.setExecutionMode("c1", "s1", cwdRef, "supervised"),
 		).rejects.toThrow();
 	});
 

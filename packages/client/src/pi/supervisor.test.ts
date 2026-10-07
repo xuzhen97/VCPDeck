@@ -29,6 +29,18 @@ function prompt(runId: string, cwdRef?: PiCwdRef): PiRequest {
 	});
 }
 
+/** 扩展斜杠命令：与 prompt 同生命周期（ADR-0040 决策 2）。 */
+function command(runId: string, cwdRef?: PiCwdRef): PiRequest {
+	return req({
+		action: "agent.command",
+		jobId: "s1",
+		runId,
+		sessionId: "s1",
+		cwdRef: cwdRef ?? { rootDir: "D:\\", relativePath: "a" },
+		payload: { name: "fixture_status", args: "" },
+	});
+}
+
 interface FakeHandle extends PiWorkerHandle {
 	sent: WorkerReq[];
 	emitMessage: (msg: PiWorkerOutboundMessage) => void;
@@ -196,7 +208,7 @@ function makeSupervisor(opts: {
 				runtimeRevision: "0123456789abcdef",
 				config: {
 					spec: {
-						schemaVersion: 4,
+						schemaVersion: 5,
 						specId: "s1",
 						profileId: "p1",
 						profileRevision: 1,
@@ -206,8 +218,7 @@ function makeSupervisor(opts: {
 							allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
 							defaultThinkingLevel: "medium",
 						},
-						toolPolicy: { allow: [], confirm: [], deny: [] },
-						toolExecutionMode: "auto",
+						toolExecutionMode: "automatic",
 						runtimeRevision: "0123456789abcdef",
 					},
 					credentialEntries: [{ providerId: "anthropic", apiKey: "sk-test" }],
@@ -388,6 +399,41 @@ describe("PiSupervisor", () => {
 		expect(next).toMatchObject({ ok: true });
 		expect(
 			supervisor.getStateReport().runs.some((r) => r.runId === "job-a" && r.status === "done"),
+		).toBe(true);
+	});
+
+	it("扩展命令建立并结清项目锁：prompt_done 后无 cwdRef 的结算查询仍能定位（回归）", async () => {
+		// 曾经的缺陷：supervisor 只为 agent.prompt 建 activeRun（也不回收），
+		// `agent.command` 的 entry.activeRun 恒为 null → 终态分支整段被跳过，
+		// terminalCwd 永不写入。于是服务端 30 秒后的结算查询（无 cwdRef，
+		// 只能按 jobId+runId 回退）拿到 PI_SESSION_NOT_FOUND，被静默吞掉，
+		// job 停在 running、内存项目锁永不释放，后续包括【新建会话】
+		// 都撞 `Project has an active turn`。
+		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
+		await supervisor.request(command("cmd-a", CWD_REF_A));
+
+		handles[0].emitMessage({
+			type: "event",
+			sessionId: "s1",
+			jobId: "s1",
+			runId: "cmd-a",
+			event: { type: "prompt_done", sessionId: "s1" },
+		});
+
+		// ① 模拟服务端的结算查询：只有 jobId+runId，没有 cwdRef。
+		// 修复前这里会因 terminalCwd 缺失而报 PI_SESSION_NOT_FOUND。
+		const settle = await supervisor.request(
+			req({ action: "agent.state", jobId: "s1", sessionId: "s1", runId: "cmd-a" }),
+		);
+		expect(settle.ok).toBe(true);
+
+		// ② 锁已结清：同项目下一条命令被接纳。
+		expect(await supervisor.request(command("cmd-b", CWD_REF_A))).toMatchObject({ ok: true });
+		// ③ 命令也计入终态摘要，供 Server 重连对账。
+		expect(
+			supervisor
+				.getStateReport()
+				.runs.some((r) => r.runId === "cmd-a" && r.status === "done"),
 		).toBe(true);
 	});
 

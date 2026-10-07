@@ -62,7 +62,7 @@ function makeController(
 		...((overrides.events as object) ?? {}),
 	};
 	const runs = {
-		setExecutionMode: vi.fn(async () => ({ ...idleSnapshot, executionModeOverride: "yolo", effectiveExecutionMode: "yolo" })),
+		setExecutionMode: vi.fn(async () => ({ ...idleSnapshot, executionModeOverride: "automatic", effectiveExecutionMode: "automatic" })),
 		ensureSession: vi.fn(async () => {}),
 		snapshot: vi.fn(async () => idleSnapshot),
 		startRun: vi.fn(async () => ({ jobId: "s1", runId: "run-1" })),
@@ -100,7 +100,7 @@ function makeController(
 				clientId: "c1",
 				capabilities: ["agent.pi"],
 				capabilityDetails: {
-					pi: { available: true, sessionJobProtocolVersion: 2 },
+					pi: { available: true, sessionJobProtocolVersion: 3 },
 				},
 			},
 		]),
@@ -175,10 +175,10 @@ describe("PiController", () => {
 			return { ok: true, data: {} };
 		});
 
-		await expect(controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "yolo" }, actor))
-			.resolves.toMatchObject({ executionModeOverride: "yolo", effectiveExecutionMode: "yolo" });
+		await expect(controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "automatic" }, actor))
+			.resolves.toMatchObject({ executionModeOverride: "automatic", effectiveExecutionMode: "automatic" });
 		expect(runs.assertIdleMutation).toHaveBeenCalledWith("c1", "p".repeat(64));
-		expect(runs.setExecutionMode).toHaveBeenCalledWith(actor, { clientId: "c1", sessionId: "s1", mode: "yolo" });
+		expect(runs.setExecutionMode).toHaveBeenCalledWith(actor, { clientId: "c1", sessionId: "s1", mode: "automatic" });
 
 		await controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: null }, actor);
 		expect(runs.setExecutionMode).toHaveBeenLastCalledWith(actor, { clientId: "c1", sessionId: "s1", mode: null });
@@ -197,18 +197,18 @@ describe("PiController", () => {
 
 	it("execution mode 拒绝错误项目中的 Session、非 owner 与运行中项目", async () => {
 		const wrongSession = makeController({ requests: { request: vi.fn(async () => ({ ok: true, data: { info: { id: "other" } } })) } });
-		await expect(wrongSession.controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "auto" }, actor))
+		await expect(wrongSession.controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "automatic" }, actor))
 			.rejects.toMatchObject({ response: { code: "PI_SESSION_NOT_FOUND" } });
 
 		const observer = makeController({ runs: { snapshot: vi.fn(async () => ({ ...idleSnapshot, isOwner: false })) } });
 		observer.requests.request.mockImplementation(async (_lease, req: { action: string }) => req.action === "session.get"
 			? { ok: true, data: { info: { id: "s1" } } } : { ok: true, data: { projectKey: "p".repeat(64) } });
-		await expect(observer.controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "auto" }, actor))
+		await expect(observer.controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "automatic" }, actor))
 			.rejects.toMatchObject({ response: { code: "PI_CONTROL_FORBIDDEN" } });
 
 		const busy = makeController({ runs: { assertIdleMutation: vi.fn(async () => { throw Object.assign(new Error("busy"), { code: "PI_PROJECT_BUSY" }); }) } });
 		busy.requests.request.mockResolvedValue({ ok: true, data: { projectKey: "p".repeat(64) } });
-		await expect(busy.controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "auto" }, actor))
+		await expect(busy.controller.setExecutionMode("c1", "s1", { ...cwdRef, mode: "automatic" }, actor))
 			.rejects.toMatchObject({ response: { code: "PI_PROJECT_BUSY" } });
 		expect(busy.runs.setExecutionMode).not.toHaveBeenCalled();
 	});
@@ -223,7 +223,7 @@ describe("PiController", () => {
 			{} as never,
 			undefined,
 		);
-		await expect(withoutRuntime.setExecutionMode("c1", "s1", { ...cwdRef, mode: "auto" }, actor)).rejects.toMatchObject({ response: { code: "PI_CLIENT_UNSUPPORTED" } });
+		await expect(withoutRuntime.setExecutionMode("c1", "s1", { ...cwdRef, mode: "automatic" }, actor)).rejects.toMatchObject({ response: { code: "PI_CLIENT_UNSUPPORTED" } });
 	});
 
 	it("models 直通返回 Client 的模型数组（不按 envelope 取 .models）", async () => {
@@ -596,7 +596,7 @@ describe("PiController", () => {
 				return { ok: true, data: { accepted: true } };
 			},
 		);
-		const runWithMode = { jobId: "s1", runId: "run-1", executionMode: "yolo" as const };
+		const runWithMode = { jobId: "s1", runId: "run-1", executionMode: "automatic" as const };
 		runs.startRun = vi.fn(async () => runWithMode);
 		await controller.prompt(
 			"c1",
@@ -634,7 +634,7 @@ describe("PiController", () => {
 			expect.anything(),
 			expect.objectContaining({
 				action: "agent.prompt",
-				payload: expect.objectContaining({ executionMode: "yolo" }),
+				payload: expect.objectContaining({ executionMode: "automatic" }),
 			}),
 		);
 	});
@@ -1018,6 +1018,220 @@ describe("PiController", () => {
 			}),
 		);
 		expect(runs.resume).not.toHaveBeenCalled();
+	});
+
+	describe("扩展命令与 UI 快照的只读投影", () => {
+		it("commands 转发 agent.commands 并返回绑定运行时的清单", async () => {
+			const { controller, requests } = makeController();
+			requests.request.mockResolvedValue({
+				ok: true,
+				data: {
+					runtimeInstanceId: "spec-1",
+					runtimeRevision: "rev-1",
+					commands: [{ name: "fixture_ok", description: "就绪探针" }],
+				},
+			} as never);
+
+			await expect(controller.extensionCommands("c1", "s1", "D:\\", "repo")).resolves.toEqual({
+				runtimeInstanceId: "spec-1",
+				runtimeRevision: "rev-1",
+				commands: [{ name: "fixture_ok", description: "就绪探针" }],
+			});
+			expect(requests.request).toHaveBeenCalledWith(
+				{ clientId: "c1", socketId: "socket-1" },
+				expect.objectContaining({ action: "agent.commands", sessionId: "s1" }),
+			);
+		});
+
+		it("commands 上游夹带本地来源路径时按 502 拒绝，不透传", async () => {
+			// Client 若回传 sourceInfo（含本地路径），这里必须拒绝而不是原样转发。
+			const { controller, requests } = makeController();
+			requests.request.mockResolvedValue({
+				ok: true,
+				data: {
+					runtimeInstanceId: "spec-1",
+					runtimeRevision: "rev-1",
+					commands: [
+						{ name: "x", description: "y", sourceInfo: { path: "C:\\secret" } },
+					],
+				},
+			} as never);
+
+			await expect(controller.extensionCommands("c1", "s1", "D:\\", "repo")).rejects.toMatchObject(
+				{ response: { code: "PI_PROTOCOL_INVALID" } },
+			);
+		});
+
+		it("extension-ui 转发 extension.ui.get 并返回严格快照", async () => {
+			const { controller, requests } = makeController();
+			requests.request.mockResolvedValue({
+				ok: true,
+				data: {
+					runtimeInstanceId: "spec-1",
+					runtimeRevision: "rev-1",
+					sequence: 3,
+					title: "构建中",
+					statuses: [{ key: "k", text: "1" }],
+					widgets: [{ key: "w", lines: ["a"], placement: "belowEditor" }],
+				},
+			} as never);
+
+			const snapshot = await controller.extensionUiSnapshot("c1", "s1", "D:\\", "repo");
+			expect(snapshot).toMatchObject({ sequence: 3, title: "构建中" });
+			expect(snapshot.widgets).toHaveLength(1);
+			expect(requests.request).toHaveBeenCalledWith(
+				{ clientId: "c1", socketId: "socket-1" },
+				expect.objectContaining({ action: "extension.ui.get", sessionId: "s1" }),
+			);
+		});
+
+		it("extension-ui 上游快照畸形时按 502 拒绝", async () => {
+			const { controller, requests } = makeController();
+			requests.request.mockResolvedValue({
+				ok: true,
+				data: { sequence: -1, statuses: "nope" },
+			} as never);
+
+			await expect(controller.extensionUiSnapshot("c1", "s1", "D:\\", "repo")).rejects.toMatchObject(
+				{ response: { code: "PI_PROTOCOL_INVALID" } },
+			);
+		});
+	});
+
+	describe("executeCommand（扩展命令）", () => {
+		const CMD_CWD = { rootDir: "D:\\", relativePath: "repo" };
+
+		/** 让 project.resolve 与 Run 接纳走通，其余动作按测试指定。 */
+		function withProject(
+			handler: (action: string) => { ok: true; data: unknown },
+		) {
+			return (async (_lease: unknown, request: { action: string }) => {
+				if (request.action === "project.resolve") {
+					return { ok: true, data: { projectKey: "k".repeat(64) } };
+				}
+				return handler(request.action);
+			}) as never;
+		}
+
+		it("缺 cwd 或 name 时按 PI_PROTOCOL_INVALID 拒绝，不发任何请求", async () => {
+			for (const body of [
+				null,
+				{},
+				{ ...CMD_CWD },
+				{ ...CMD_CWD, name: "" },
+				{ ...CMD_CWD, name: 42 },
+				{ rootDir: "D:\\", name: "x" },
+			] as unknown[]) {
+				const { controller, requests, runs } = makeController();
+				await expect(
+					controller.executeCommand(
+						"c1",
+						"s1",
+						body as { rootDir?: string; relativePath?: string; name?: string },
+						actor,
+					),
+				).rejects.toMatchObject({ response: { code: "PI_PROTOCOL_INVALID" } });
+				expect(requests.request).not.toHaveBeenCalled();
+				expect(runs.startRun).not.toHaveBeenCalled();
+			}
+		});
+
+		it("命令由 Server 接纳 Run（不收调用方自带 runId），再以 agent.command 转发", async () => {
+			const { controller, requests, runs } = makeController();
+			requests.request.mockImplementation(
+				withProject((action) =>
+					action === "agent.command"
+						? { ok: true, data: { accepted: true } }
+						: { ok: true, data: {} },
+				),
+			);
+
+			await expect(
+				controller.executeCommand(
+					"c1",
+					"s1",
+					{ ...CMD_CWD, submissionId: "sub-1", name: "fixture_ok", args: "a b" },
+					actor,
+				),
+			).resolves.toMatchObject({ jobId: "s1", runId: "run-1", sessionId: "s1" });
+
+			// Run 由 Server 接纳，调用方无法绕过项目互斥与结算。
+			expect(runs.startRun).toHaveBeenCalledWith(actor, {
+				clientId: "c1",
+				sessionId: "s1",
+				projectKey: "k".repeat(64),
+			});
+			expect(runs.accept).toHaveBeenCalledWith("s1", "run-1");
+			expect(requests.request).toHaveBeenCalledWith(
+				{ clientId: "c1", socketId: "socket-1" },
+				expect.objectContaining({
+					action: "agent.command",
+					sessionId: "s1",
+					jobId: "s1",
+					runId: "run-1",
+					payload: { name: "fixture_ok", args: "a b" },
+				}),
+			);
+		});
+
+		it("未注册命令：Client 以 { ok: false } 返回时必翻成 400，绝不静默 200", async () => {
+			// 真实 SDK 下命令未命中不会 reject，只回一个失败对象；
+			// 若原样透传，调用方会看到 HTTP 200 却什么都没发生（静默失败）。
+			const { controller, requests, runs } = makeController();
+			requests.request.mockImplementation(
+				withProject((action) =>
+					action === "agent.command"
+						? {
+								ok: true,
+								data: {
+									ok: false,
+									error: {
+										code: "PI_EXTENSION_COMMAND_NOT_FOUND",
+										message: "Unknown Pi command: nope",
+									},
+								},
+							}
+						: { ok: true, data: {} },
+				),
+			);
+
+			await expect(
+				controller.executeCommand(
+					"c1",
+					"s1",
+					{ ...CMD_CWD, name: "nope" },
+					actor,
+				),
+			).rejects.toMatchObject({
+				response: { code: "PI_EXTENSION_COMMAND_NOT_FOUND" },
+			});
+			// 被拒绝的动作必须结算掉 Run，不得留下悬挂。
+			expect(runs.finishRun).toHaveBeenCalledWith("s1", "run-1");
+			expect(runs.accept).not.toHaveBeenCalled();
+		});
+
+		it("缺 args 时补空串，不把 undefined 透传给 Client", async () => {
+			const { controller, requests } = makeController();
+			requests.request.mockImplementation(
+				withProject((action) =>
+					action === "agent.command"
+						? { ok: true, data: { accepted: true } }
+						: { ok: true, data: {} },
+				),
+			);
+			await controller.executeCommand(
+				"c1",
+				"s1",
+				{ ...CMD_CWD, name: "fixture_ok" },
+				actor,
+			);
+			expect(requests.request).toHaveBeenCalledWith(
+				{ clientId: "c1", socketId: "socket-1" },
+				expect.objectContaining({
+					payload: { name: "fixture_ok", args: "" },
+				}),
+			);
+		});
 	});
 
 	it("prompt dispatch disconnect 将 matching run CAS 为 disconnected", async () => {

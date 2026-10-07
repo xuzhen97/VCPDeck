@@ -7,6 +7,7 @@
 import {
 	BadRequestException,
 	Body,
+	ConflictException,
 	Controller,
 	Delete,
 	Get,
@@ -23,6 +24,7 @@ import {
 	PiAdminProtocolError,
 	parsePiCredentialCreateInput,
 	parsePiCredentialUpdateInput,
+	parsePiExecutionMigrationInput,
 	parsePiProfileCreateInput,
 	parsePiProfileUpdateInput,
 	parsePiProviderCreateInput,
@@ -201,6 +203,42 @@ export class PiAdminController {
 			return profile;
 		} catch (error) {
 			throw piHttpError(error, "Pi Profile 更新失败");
+		}
+	}
+
+	/**
+	 * 确认新的执行语义（ADR-0039 决策 3）。
+	 *
+	 * 这是唯一能解除存量 approval/auto 待确认门控的入口；按 revision CAS，
+	 * 配置已变化时返回 409，避免用旧页面提交的确认覆盖新配置。
+	 */
+	@Post("profiles/:id/execution-migration")
+	async confirmExecutionMigration(
+		@Param("id") id: string,
+		@Body() body: unknown,
+	) {
+		let input: { expectedRevision: number; mode: "supervised" | "automatic" };
+		try {
+			input = parsePiExecutionMigrationInput(body);
+		} catch (error) {
+			throw piHttpError(error, "Pi Profile 执行语义确认失败");
+		}
+		try {
+			const profile = await this.profiles.confirmExecutionMigration(id, input);
+			await this.runtime?.pushToBoundClients(profile.id);
+			return profile;
+		} catch (error) {
+			const failure = error as { code?: string; message?: string };
+			if (
+				failure.code === "PI_CONFIG_UNAVAILABLE" &&
+				/is revision|已变化/.test(failure.message ?? "")
+			) {
+				throw new ConflictException({
+					code: "PI_CONFIG_UNAVAILABLE",
+					message: failure.message ?? "Pi Profile 配置已变化",
+				});
+			}
+			throw piHttpError(error, "Pi Profile 执行语义确认失败");
 		}
 	}
 

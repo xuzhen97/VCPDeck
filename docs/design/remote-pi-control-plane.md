@@ -163,7 +163,7 @@ Server RuntimeSpec + Client Release Bundle + VCPDeck isolated data root
 | Pi Profile | Server | 是 | 否 | 是 |
 | 默认模型/允许模型 | Server Profile | 是 | 否 | 是 |
 | thinking 策略 | Server Profile | 是 | 否 | 是 |
-| Tool allow/deny/approval | Server Profile | 是 | 否 | 是 |
+| 工具执行模式(supervised/automatic,ADR-0039) | Server Profile | 是 | 否 | 是 |
 | Resource 启用项 | Server Profile | 是 | 否 | 是 |
 | Provider Credential 密文 | Server | 是 | 否 | 是（密文） |
 | Runtime credential 明文 | Worker runtime | 否 | 否 | 否 |
@@ -616,28 +616,26 @@ Tool Policy 不是 OS sandbox。
 Profile 级执行模式已按 [ADR-0033](../adr/0033-pi-tool-approval-mode.md) 落地：
 
 ```text
-toolExecutionMode = approval | auto | yolo
+executionConfiguration.mode = supervised | automatic（ADR-0039，逐工具三桶已删除）
 ```
 
-Tool Policy 与 Execution Mode 分层：Approval/Auto 继续使用 `allow / confirm / deny`；YOLO 则显式跳过 Tool Policy，只信任当前 Runtime 实际注册/加载的工具。固定语义：
+工具执行语义由 **ADR-0039** 定义为两模式：`supervised`（含读取工具在内每次调用都需人工批准，拒绝/取消/超时即拒绝）与 `automatic`（直接执行当前 Runtime 实际注册的工具）。逐工具三桶（`allow/confirm/deny`）已删除——同一 `bash` 既能查询也能破坏，按工具名分类无法提供等价安全保障。
 
-| Policy | Approval | Auto | YOLO |
-| --- | --- | --- | --- |
-| allow | execute | execute | execute |
-| confirm | approve each call | execute | execute |
-| deny | reject | reject | execute |
-| unknown/unlisted | reject | reject | execute if registered by Runtime |
+| 语义 | supervised | automatic |
+| --- | --- | --- |
+| 已注册工具 | 每次调用需批准 | 直接执行 |
+| 能力面 | Runtime 实际注册的工具 | Runtime 实际注册的工具 |
 
-Auto 不改变 SDK 工具白名单，仍保持 `tools = allow ∪ confirm`、`excludeTools = deny`。YOLO 则不再按三桶缩小工具集合，但仍受已启用受信 Resource、Runtime/平台可用性、Provider/Model Policy、VCPDeck 隔离和 Client OS 权限约束。该变化以 RuntimeSpec v4、host bridge v2 和 `vcp.tool-policy` resource v2 显式版本化并已实现；既有 Profile 迁移为 `approval` 保持旧行为，新建 UI Profile 默认 `auto`，YOLO 只能显式选择。
+`vcp.tool-policy` 仍是宿主必需资源：Profile 未启用即拒绝保存（缺它则无任何 `tool_call` 门控）。该变化以 RuntimeSpec **v5**、host bridge **v3**、`vcp.tool-policy` resource **v3** 与 SessionJob **v3** 显式版本化并已实现。
 
-完整版本、数据迁移、兼容、Frontend 与测试设计见 [`pi-tool-approval-mode.md`](./pi-tool-approval-mode.md) 和 [ADR-0033](../adr/0033-pi-tool-approval-mode.md)。
+存量迁移**不静默扩权**（ADR-0039）：旧 `yolo` → `automatic`；旧 `approval`/`auto` → `supervised` 占位并置为 `needs_confirmation`，须由操作者经专用端点 `POST /api/pi/profiles/:id/execution-migration` 显式确认（携带 `expectedRevision` 作 CAS，冲突返回 409）；普通 PATCH 不能清 pending。完整版本、数据迁移、兼容、Frontend 与测试设计见 [ADR-0039](../adr/0039-pi-two-mode-execution.md) 与 [ADR-0040](../adr/0040-pi-extension-web-interaction.md)；旧版三桶设计见 [`pi-tool-approval-mode.md`](./pi-tool-approval-mode.md)（已被 ADR-0039 替代）。
 
 ### 14.2 已实现：会话级执行模式覆盖（ADR-0034）与 Agent Chat 布局
 
 在 Profile 级默认之上，Server 的 Session Job 现可保存**可空**的会话覆盖值（[ADR-0034](../adr/0034-pi-session-execution-mode-override.md)）：
 
 ```text
-executionModeOverride = approval | auto | yolo | null   // null = 动态跟随当前绑定 Profile
+executionModeOverride = supervised | automatic | null   // null = 动态跟随当前绑定 Profile（ADR-0039 两模式）
 ```
 
 权威与生命周期：
@@ -648,7 +646,7 @@ executionModeOverride = approval | auto | yolo | null   // null = 动态跟随�
 - 模式写入与 Run 接纳共用按 clientId 串行的窄队列，避免“设置成功但下一个 Run 用旧模式”。
 - Client 侧 `PI_SESSION_JOB_PROTOCOL_VERSION` 升到 v2：`agent.prompt` 缺 `executionMode` 或值非法即 `PI_PROTOCOL_INVALID`；`ensureWrapper()` 比较当前 wrapper 模式与请求模式，空闲时不一致就先关闭旧 wrapper 再按新模式重建，使 SDK 工具集与 Tool Policy bridge 同源；活跃 Run 期间不同模式的 Prompt 返回 `PI_PROJECT_BUSY`。
 
-`/agent/chat` 页面据此改为「机器 → 多项目 → 会话 → 宽屏聊天」：项目列表只存在当前浏览器的 `clientId` 分区（置顶/移除仅改本地索引，可损坏时恢复为空列表），项目行可直接新建任务并立即打开空会话。会话参数（模型、思考等级、执行模式）收在 composer 底部操作行内，菜单展示服务端确认的覆盖值与有效模式（「跟随 Profile」表示清除覆盖），YOLO 显示风险提示。布局沿用全局导航：Agent 左栏是不套卡片的平整项目/会话导航（二级操作为图标按钮，保留可访问名称），中栏只保留一条会话标题栏与居中空态，机器工作区 `/machines/:id` 的 Pi 入口沿用原有会话树、重命名/删除与 Owner 限制，不因共享组件改变行为。
+`/agent/chat` 页面据此改为「机器 → 多项目 → 会话 → 宽屏聊天」:项目列表只存在当前浏览器的 `clientId` 分区(置顶/移除仅改本地索引,可损坏时恢复为空列表),项目行可直接新建任务并立即打开空会话。会话参数(模型、思考等级、执行模式)收在 composer 底部操作行内,菜单展示服务端确认的覆盖值与有效模式(「跟随 Profile」表示清除覆盖),自动执行显示边界提示。布局沿用全局导航:Agent 左栏是不套卡片的平整项目/会话导航(二级操作为图标按钮,保留可访问名称),中栏只保留一条会话标题栏与居中空态,机器工作区 `/machines/:id` 的 Pi 入口沿用原有会话树、重命名/删除与 Owner 限制,不因共享组件改变行为。
 
 ### 14.3 已实现：纯图片 Prompt 与粘贴上传（ADR-0035）
 
@@ -657,7 +655,19 @@ executionModeOverride = approval | auto | yolo | null   // null = 动态跟随�
 - Server 在创建 Run、发布事件之前校验组合与图片引用：引用以 `File` 行为权威（同 client、`purpose=pi_prompt`、`completed`、未过期，且 sha256/size/mimeType 与 DB 一致），调用方提交的 `url` 一律丢弃并换成服务端即时签发的下载凭证；空文本无图、仅空白文本无图、上传未完成、过期或元数据不符均以 `PI_IMAGE_INVALID`/`PI_PROTOCOL_INVALID` 拒绝，不会留下孤立 Run。
 - Shared 的 Server → Client 请求解析器校验同一组合，Client Worker 在跨信任边界再次调用 `parsePiRequest`，不假定 Server 已校验。真实 Pi SDK 已用集成测试验证：`prompt("", { images })` 产生「空文本 + image」用户消息，并可从 Session JSONL 回放；不通过时不得自动补造提示词。
 - 浏览器端选图与 Ctrl+V 粘贴共用同一上传通道（create → Storage PUT → complete）；草稿按稳定 `id` 更新与移除（同名文件不串位），切会话/移除后晚到的完成结果因 id 已不在草稿列表而被丢弃，上传中/失败的草稿会阻止发送并给出提示。
-- 旧的同代 Client 不认识该组合时会以 `PI_PROTOCOL_INVALID` 明确拒绝（fail closed），线格式与 `PI_SESSION_JOB_PROTOCOL_VERSION` 不变。
+- 旧的同代 Client 不认识该组合时会以 `PI_PROTOCOL_INVALID` 明确拒绝(fail closed),线格式与 `PI_SESSION_JOB_PROTOCOL_VERSION` 不变。
+
+### 14.4 已实现:受信扩展的网页交互(ADR-0040)
+
+扩展不再只是「能被模型调用」：命令、通知与持续文本状态也接入网页。落地内容与边界：
+
+- **命令**:网页可发现当前 Session/runtime 实际注册的扩展命令,仅投影调用名与描述,**不回显本地来源路径**(Client 投影已剔除 `sourceInfo`,也不含 Skills/Prompt 模板);清单绑定 `specId` + `runtimeRevision`,阻止对已换代会话误执行旧命令。执行入口 `POST .../agent/:sessionId/command` 与 Prompt 同样由 Server 接纳 Run(`admitAndDispatch` 复用项目互斥/取消/重连对账/结算),不接受调用方自带 `runId`;未知命令由 Client 明确拒绝(`PI_EXTENSION_COMMAND_NOT_FOUND`),**绝不退化为普通 Prompt**;命令处理完成且其启动的 Agent 工作结束、无待回答 UI 后才结算,期间 `agent_settled` 不被当作可结算终态。
+- **持续 UI 状态**:Client 按会话运行时保存 status/widget/title 的最新有界快照(每类 32 key、单条 4096/2048 字符、快照 128 KiB,超限拒绝并回滚而非静默截断);Worker 销毁或 Session 替换清空;网页经 `GET .../agent/:sessionId/extension-ui` **拉取**最新快照(不重放历史更新),前端按同换代 sequence 新旧裁决,失败不用空值覆盖已有状态,晚到的旧状态不得覆盖新状态。
+- **有限 UI 语义**:select/confirm/input/editor 阻塞对话沿用;`notify` 不再把等级拼进正文(等级字段待后续协议补充);`set_editor_text` 作为待应用填充展示,仅由用户显式应用或忽略,UI 不自动发送;`custom` 返回 undefined 并以告警说明降级,不伪造成功状态。
+- **文本安全**:扩展文本是待安全展示的数据——纯文本节点渲染,禁止 `dangerouslySetInnerHTML`,ANSI/终端控制序列与 C0 控制符剔除,不解析 HTML/脚本。
+- **重连**:每次(重)连接重新对账并拉取命令与 UI 快照,首次连接由 openSession 统一拉取;命令仅就绪且空闲时查询,避免为 Observer 重连反复启动 Worker factory。
+
+**仍受限制**:不支持扩展终端组件/Skills/Prompt 模板/Session 替换/reload Runtime;不支持动态安装扩展与项目资源;通知可能在断线期间丢失,持续 UI 状态在 Worker 重启后消失(不持久化正文的既定取舍)。详见 [ADR-0040](../adr/0040-pi-extension-web-interaction.md)。
 
 ## 15. Project Resources 与 Trust
 
@@ -976,7 +986,7 @@ flowchart LR
 | Plan 1.1「Provider 接入与模型目录来源」 | B 的配置面收敛 + §7 模型条目来源语义 | 一次接入（名称/协议/Base URL/API Key）完成 Provider + 模型 + 凭据原子创建；远程 `/models` 自动拉取；模型元数据来源判别联合 `catalog \| explicit` | 内置目录可解析的模型必须拿到真实上下文窗口与成本（不写占位值）；自定义端点必须显式元数据且标注未确认；无可用模型不注册 Provider |
 | Plan 2「受信资源与策略」 | D Bundle + E Tool/Resource policy | `pi-resources/` + manifest + hash 随 Release 发布；allow/confirm/deny（默认拒绝、每次调用审批、超时即拒绝）；项目资源继续默认关闭 | Bundle 缺失或不匹配 fail closed；Project 本地 Extension 永不加载；策略与资源不落盘不进环境变量 |
 | Plan 2.1「旧 Session 显式导入」 | §21.3 显式导入（从 Plan 2 拆出） | 用户主动选择源 Session → 只读打开 → 校验 cwd → 复制到 VCPDeck Session root，源文件不动 | 不自动搬运、不迁移凭据；导入后只操作副本 |
-| Plan 2.2「工具执行模式」 | §14.1 Execution Mode | Profile 增加 `approval / auto / yolo`；RuntimeSpec v4、bridge v2、`vcp.tool-policy` v2；既有 Profile 安全迁移 | 已实现：Auto 保持策略能力面但取消 `confirm` 交互；YOLO 跳过 Tool Policy、仅限当前 Runtime 已注册工具；活跃 Run 不热切换 |
+| Plan 2.2「工具执行模式」 | §14.1 Execution Mode | 初版:`approval / auto / yolo`,RuntimeSpec v4、bridge v2、`vcp.tool-policy` v2;**已由 ADR-0039 演进为两模式 `supervised / automatic`**(RuntimeSpec v5、bridge v3、`vcp.tool-policy` v3、SessionJob v3),逐工具三桶删除;存量 Profile 不静默扩权,须显式确认迁移 | 已实现:两模式语义落地;活跃 Run 不热切换;迁移确认走专用端点(CAS,冲突 409) |
 | Plan 3「展示层复用」 | F UI renderer | VCPDeck Pi UI Adapter + 从 `examples/pi-web` 移植展示组件 | 替换 renderer 不改变 REST/SSE/Owner/Run 与 Session Job 语义（§18） |
 
 硬约束：Plan 1 不得只发布 Client 侧隔离；Plan 1 完成前，任何 Client Release 都不得引入「没有 RuntimeSpec 也启动 Pi Worker」的路径。

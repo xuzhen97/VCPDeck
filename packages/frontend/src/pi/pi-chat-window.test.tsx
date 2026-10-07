@@ -27,6 +27,9 @@ function state(overrides: Partial<PiSessionState> = {}): PiSessionState {
 		thinkingSelection: "auto",
 		thinkingText: "先检查项目结构，再读取 README。",
 		thinkingDurationMs: 1234,
+		commands: null,
+		extensionUi: null,
+		editorRequest: null,
 		...overrides,
 	};
 }

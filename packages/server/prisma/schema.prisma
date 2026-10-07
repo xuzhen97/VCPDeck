@@ -45,6 +45,10 @@ model Job {
   errorMessage String?
   toolExecutionModeOverride String?
   runExecutionMode String?
+  /// 存量 approval/auto 覆盖尚未被 Owner 确认移除逐工具限制（ADR-0039）
+  executionModeNeedsConfirmation Boolean @default(false)
+  /// 一次性迁移说明：旧覆盖模式（仅供展示，不进入新授权路径）
+  legacyExecutionModeOverride String?
   timeout      Int?
   createdAt    DateTime  @default(now())
   startedAt    DateTime?
@@ -291,10 +295,15 @@ model PiProfile {
   defaultThinkingLevel String   @default("medium")
   // JSON: [resourceId]；NULL = 未配置（无 Bundle 资源需求）
   enabledResourceIds   String?
-  // JSON: { allow, confirm, deny }；NULL = 未配置（等价空策略，未列出工具全部拒绝）
+  /// 旧逐工具三桶（ADR-0030/0033）。ADR-0039 已删除该授权维度：
+  /// 此列只作为存量迁移材料保留到操作者确认新语义为止，不再参与运行时授权。
   toolPolicyJson       String?
-  // approval | auto | yolo；旧行与省略输入均为 approval（ADR-0033）
-  toolExecutionMode    String   @default("approval")
+  // supervised | automatic（ADR-0039）；待确认迁移时为占位值，pending 为真时不可运行
+  toolExecutionMode    String   @default("supervised")
+  /// 存量 approval/auto 尚未被操作者确认移除逐工具限制：确认前不得接纳新 Run
+  executionModeNeedsConfirmation Boolean @default(false)
+  /// 一次性迁移说明：旧模式 + 旧三桶（仅供展示，不进入新授权路径）
+  legacyExecutionConfigJson String?
   revision             Int      @default(1)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt

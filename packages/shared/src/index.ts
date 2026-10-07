@@ -50,6 +50,7 @@ export type {
 
 // ── 远程 Pi 协议 ──
 export * from "./pi.js";
+export * from "./pi-extension.js";
 export * from "./pi-bundle.js";
 
 // ── 交互式终端协议 ──

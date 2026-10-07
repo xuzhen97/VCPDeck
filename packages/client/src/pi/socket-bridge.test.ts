@@ -139,7 +139,7 @@ async function makeDeps(
 		runtimeRevision: "0123456789abcdef",
 		config: {
 			spec: {
-				schemaVersion: 4,
+				schemaVersion: 5,
 				specId: "s1",
 				profileId: "p1",
 				profileRevision: 1,
@@ -149,8 +149,7 @@ async function makeDeps(
 					allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
 					defaultThinkingLevel: "medium",
 				},
-				toolPolicy: { allow: [], confirm: [], deny: [] },
-				toolExecutionMode: "auto",
+				toolExecutionMode: "automatic",
 				runtimeRevision: "0123456789abcdef",
 			},
 			credentialEntries: [{ providerId: "anthropic", apiKey: "sk-test" }],
@@ -256,7 +255,7 @@ describe("attachPiBridge", () => {
 			sessionId: "s1",
 			jobId: "j1",
 			runId: "j1",
-			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval" },
+			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised" },
 		});
 		expect(result).toMatchObject({ ok: true });
 
@@ -290,7 +289,7 @@ describe("attachPiBridge", () => {
 			sessionId: "s1",
 			jobId: "j1",
 			runId: "j1",
-			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval" },
+			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised" },
 		});
 		expect(result).toMatchObject({ ok: true });
 		emitMessage({
@@ -495,7 +494,7 @@ describe("attachPiBridge", () => {
 describe("RuntimeSpec 接纳与门控", () => {
 	const readySpec = {
 		spec: {
-			schemaVersion: 4,
+			schemaVersion: 5,
 			specId: "spec-1",
 			profileId: "p1",
 			profileRevision: 1,
@@ -505,8 +504,7 @@ describe("RuntimeSpec 接纳与门控", () => {
 				allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
 				defaultThinkingLevel: "medium",
 			},
-			toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
-			toolExecutionMode: "approval",
+			toolExecutionMode: "supervised",
 			runtimeRevision: "0123456789abcdef",
 		},
 		credentials: {
@@ -571,7 +569,7 @@ describe("RuntimeSpec 接纳与门控", () => {
 			runId: "run-1",
 			sessionId: "s1",
 			cwdRef: { rootDir: roots[0]!, relativePath: "proj" },
-			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval" },
+			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised" },
 		});
 		await vi.waitFor(() =>
 			expect(emitCalls.some((c) => c.event === Events.PI_RESPONSE)).toBe(true),

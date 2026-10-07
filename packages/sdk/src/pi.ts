@@ -1,5 +1,7 @@
 import {
 	parsePiAgentState,
+	parsePiExtensionCommands,
+	parsePiExtensionUiSnapshot,
 	parsePiSessionJobSnapshot,
 	type PaginatedResult,
 	type PiAgentState,
@@ -9,6 +11,9 @@ import {
 	type PiCredentialInfo,
 	type PiCredentialUpdateInput,
 	type PiCwdRef,
+	type PiExecutionMigrationInput,
+	type PiExtensionCommands,
+	type PiExtensionUiSnapshot,
 	type PiModelInfo,
 	type PiProfileCreateInput,
 	type PiProfileInfo,
@@ -194,6 +199,40 @@ export interface PiAgentApi {
 			cancelled?: boolean;
 		},
 	): Promise<unknown>;
+	/**
+	 * 调用 Pi 扩展斜杠命令。
+	 *
+	 * 只接受 Client 已注册的调用名：Client 会先核验注册表，未注册时以
+	 * `PI_EXTENSION_COMMAND_NOT_FOUND` 拒绝（Server 映射为 400），
+	 * **不会**回退为一次普通模型请求。命令是否真正结束以 `waitForIdle()` 为准。
+	 */
+	executeCommand(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		submissionId: string,
+		name: string,
+		args?: string,
+	): Promise<PiPromptAccepted>;
+	/**
+	 * 当前 Session/runtime 实际注册的扩展命令。
+	 *
+	 * 只含调用名与描述，**不含本地来源路径**（ADR-0040 决策 2）；清单绑定具体
+	 * 运行时换代，用于阻止对已换代会话误执行旧命令。
+	 */
+	commands(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		signal?: AbortSignal,
+	): Promise<PiExtensionCommands>;
+	/** 持续 UI 状态快照（status/widget/title 的最新有界值）。 */
+	extensionUi(
+		clientId: string,
+		sessionId: string,
+		cwdRef: PiCwdRef,
+		signal?: AbortSignal,
+	): Promise<PiExtensionUiSnapshot>;
 	/** SSE path（session 级；cookie 认证浏览器用 EventSource 连接） */
 	eventsPath(clientId: string, sessionId: string): string;
 }
@@ -245,6 +284,15 @@ export interface PiProfilesApi {
 	update(
 		id: string,
 		input: PiProfileUpdateInput,
+		signal?: AbortSignal,
+	): Promise<PiProfileInfo>;
+	/**
+	 * 确认新的执行语义（ADR-0039）：这是唯一能解除存量 approval/auto 待确认门控的入口。
+	 * 必须携带 `expectedRevision`，服务端按 revision CAS，冲突时返回 409。
+	 */
+	confirmExecutionMigration(
+		id: string,
+		input: PiExecutionMigrationInput,
 		signal?: AbortSignal,
 	): Promise<PiProfileInfo>;
 	remove(id: string, signal?: AbortSignal): Promise<{ ok: boolean }>;
@@ -524,12 +572,37 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 						...(customInstructions ? { customInstructions } : {}),
 					},
 				),
-			abortCompact: (clientId, sessionId, runId) =>
+				abortCompact: (clientId, sessionId, runId) =>
 				client.request(
 					"POST",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/abort-compact`,
 					{
 						runId,
+					},
+				),
+				commands: async (clientId, sessionId, cwdRef, signal) =>
+				parsePiExtensionCommands(await client.request(
+					"GET",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/commands?${cwdQuery(cwdRef)}`,
+					undefined,
+					signal,
+				)),
+			extensionUi: async (clientId, sessionId, cwdRef, signal) =>
+				parsePiExtensionUiSnapshot(await client.request(
+					"GET",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/extension-ui?${cwdQuery(cwdRef)}`,
+					undefined,
+					signal,
+				)),
+			executeCommand: (clientId, sessionId, cwdRef, submissionId, name, args) =>
+				client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/command`,
+					{
+						...cwdRef,
+						submissionId,
+						name,
+						...(args !== undefined ? { args } : {}),
 					},
 				),
 			setModel: (clientId, sessionId, cwdRef, provider, modelId) =>
@@ -657,6 +730,13 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 				client.request("POST", "/api/pi/profiles", input, signal),
 			update: (id, input, signal) =>
 				client.request("PATCH", `/api/pi/profiles/${enc(id)}`, input, signal),
+			confirmExecutionMigration: (id, input, signal) =>
+				client.request(
+					"POST",
+					`/api/pi/profiles/${enc(id)}/execution-migration`,
+					input,
+					signal,
+				),
 			remove: (id, signal) =>
 				client.request(
 					"DELETE",

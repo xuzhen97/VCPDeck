@@ -167,7 +167,7 @@ describe("PiProviderService 模型发现", () => {
 		const registry = new PiRuntimeRegistry();
 		registry.setCapability("c1", {
 			piSdkVersion: "0.86.0",
-			runtimeSpecProtocolVersion: 4,
+			runtimeSpecProtocolVersion: 5,
 			configMode: "server-authoritative",
 		});
 		registry.setModelCatalog("c1", {

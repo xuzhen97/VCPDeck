@@ -370,8 +370,9 @@ var require_pi = __commonJS({
   "../shared/dist/pi.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.PiProtocolError = exports2.PI_THINKING_LEVELS = exports2.PI_IMAGE_MIME_TYPES = exports2.MAX_PI_IMAGES_TOTAL_BYTES = exports2.MAX_PI_IMAGE_BYTES = exports2.MAX_PI_IMAGES_PER_PROMPT = exports2.PI_PROJECT_KEY_LENGTH = exports2.MAX_IMPORT_LIST_SESSIONS = exports2.MAX_IMPORT_SOURCE_NAMES = exports2.MAX_PREVIEW_CODE_POINTS = exports2.PI_IMPORT_REASON_CODES = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_BUILTIN_TOOL_IDS = exports2.PI_TOOL_POLICY_BUCKETS = exports2.PI_BUNDLE_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = void 0;
+    exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.PiProtocolError = exports2.PI_THINKING_LEVELS = exports2.PI_IMAGE_MIME_TYPES = exports2.MAX_PI_IMAGES_TOTAL_BYTES = exports2.MAX_PI_IMAGE_BYTES = exports2.MAX_PI_IMAGES_PER_PROMPT = exports2.PI_PROJECT_KEY_LENGTH = exports2.MAX_IMPORT_LIST_SESSIONS = exports2.MAX_IMPORT_SOURCE_NAMES = exports2.MAX_PREVIEW_CODE_POINTS = exports2.PI_IMPORT_REASON_CODES = exports2.PI_LEGACY_TOOL_EXECUTION_MODES = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_BUILTIN_TOOL_IDS = exports2.PI_TOOL_POLICY_BUCKETS = exports2.PI_BUNDLE_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = void 0;
     exports2.isPiToolExecutionMode = isPiToolExecutionMode;
+    exports2.isPiLegacyToolExecutionMode = isPiLegacyToolExecutionMode;
     exports2.emptyPiToolPolicy = emptyPiToolPolicy;
     exports2.parsePiToolPolicy = parsePiToolPolicy;
     exports2.assertSourceName = assertSourceName;
@@ -382,6 +383,7 @@ var require_pi = __commonJS({
     exports2.parsePiSessionJobSnapshot = parsePiSessionJobSnapshot2;
     exports2.isPiThinkingLevel = isPiThinkingLevel;
     exports2.isPiAgentIdle = isPiAgentIdle;
+    exports2.isPiClientEventType = isPiClientEventType;
     exports2.safePiErrorMessage = safePiErrorMessage;
     exports2.parsePiRequest = parsePiRequest;
     exports2.parsePiResponse = parsePiResponse;
@@ -393,6 +395,8 @@ var require_pi = __commonJS({
     exports2.parsePiModelMetadata = parsePiModelMetadata;
     exports2.parsePiRuntimeSpecV3 = parsePiRuntimeSpecV3;
     exports2.parsePiRuntimeSpecV4 = parsePiRuntimeSpecV4;
+    exports2.parsePiRuntimeSpecV5 = parsePiRuntimeSpecV5;
+    exports2.parsePiRuntimeSpecMessageV5 = parsePiRuntimeSpecMessageV5;
     exports2.parsePiCredentialLeaseV2 = parsePiCredentialLeaseV2;
     exports2.parsePiRuntimeSpecMessageV3 = parsePiRuntimeSpecMessageV3;
     exports2.parsePiRuntimeSpecMessageV4 = parsePiRuntimeSpecMessageV4;
@@ -426,11 +430,15 @@ var require_pi = __commonJS({
       "PI_BUNDLE_UNAVAILABLE",
       "PI_POLICY_UNAVAILABLE",
       "PI_TOOL_POLICY_DENIED",
-      "PI_TOOL_POLICY_REJECTED"
+      "PI_TOOL_POLICY_REJECTED",
+      "PI_EXECUTION_CONFIRMATION_REQUIRED",
+      "PI_EXTENSION_COMMAND_NOT_FOUND",
+      "PI_EXTENSION_UNSUPPORTED",
+      "PI_EXTENSION_UI_LIMIT_EXCEEDED"
     ];
-    exports2.PI_SESSION_JOB_PROTOCOL_VERSION = 2;
+    exports2.PI_SESSION_JOB_PROTOCOL_VERSION = 3;
     exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = 1;
-    exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = 4;
+    exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = 5;
     exports2.PI_BUNDLE_PROTOCOL_VERSION = 1;
     exports2.PI_TOOL_POLICY_BUCKETS = ["allow", "confirm", "deny"];
     exports2.PI_BUILTIN_TOOL_IDS = [
@@ -443,9 +451,13 @@ var require_pi = __commonJS({
       "find",
       "ls"
     ];
-    exports2.PI_TOOL_EXECUTION_MODES = ["approval", "auto", "yolo"];
+    exports2.PI_TOOL_EXECUTION_MODES = ["supervised", "automatic"];
     function isPiToolExecutionMode(value2) {
-      return typeof value2 === "string" && exports2.PI_TOOL_EXECUTION_MODES.includes(value2);
+      return value2 === "supervised" || value2 === "automatic";
+    }
+    exports2.PI_LEGACY_TOOL_EXECUTION_MODES = ["approval", "auto"];
+    function isPiLegacyToolExecutionMode(value2) {
+      return value2 === "approval" || value2 === "auto";
     }
     function emptyPiToolPolicy() {
       return { allow: [], confirm: [], deny: [] };
@@ -750,6 +762,8 @@ var require_pi = __commonJS({
       "agent.compact",
       "agent.abortCompact",
       "agent.commands",
+      "agent.command",
+      "extension.ui.get",
       "agent.stats",
       "model.set",
       "thinking.set",
@@ -792,6 +806,9 @@ var require_pi = __commonJS({
       "usage_update",
       "status_update"
     ]);
+    function isPiClientEventType(type) {
+      return typeof type === "string" && EVENT_TYPES.has(type);
+    }
     var RUN_STATUSES = /* @__PURE__ */ new Set([
       "running",
       "waiting_input",
@@ -1515,18 +1532,73 @@ var require_pi = __commonJS({
     function parsePiRuntimeSpecV4(value2) {
       assertRecord(value2, "PiRuntimeSpecV4");
       assertKeys(value2, SPEC_V4_KEYS, "PiRuntimeSpecV4");
-      if (value2.schemaVersion !== exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION) {
+      if (value2.schemaVersion !== 4) {
         throw new PiProtocolError(`PiRuntimeSpecV4 schemaVersion \u4E0D\u652F\u6301: ${String(value2.schemaVersion)}`);
       }
       if (!("toolExecutionMode" in value2)) {
         throw new PiProtocolError("PiRuntimeSpecV4 \u7F3A\u5C11\u5B57\u6BB5 toolExecutionMode");
       }
-      if (!isPiToolExecutionMode(value2.toolExecutionMode)) {
+      if (!isPiLegacyToolExecutionMode(value2.toolExecutionMode) && value2.toolExecutionMode !== "yolo") {
         throw new PiProtocolError(`PiRuntimeSpecV4 toolExecutionMode \u4E0D\u652F\u6301: ${String(value2.toolExecutionMode)}`);
       }
       const { toolExecutionMode, ...v3Shape } = value2;
       const base = parsePiRuntimeSpecV3({ ...v3Shape, schemaVersion: 3 });
-      return { ...base, schemaVersion: 4, toolExecutionMode };
+      return {
+        ...base,
+        schemaVersion: 4,
+        toolExecutionMode
+      };
+    }
+    var SPEC_V5_KEYS = /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "specId",
+      "profileId",
+      "profileRevision",
+      "providers",
+      "modelPolicy",
+      "toolExecutionMode",
+      "requiredBundle",
+      "runtimeRevision"
+    ]);
+    function parsePiRuntimeSpecV5(value2) {
+      assertRecord(value2, "PiRuntimeSpecV5");
+      assertKeys(value2, SPEC_V5_KEYS, "PiRuntimeSpecV5");
+      if (value2.schemaVersion !== exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION) {
+        throw new PiProtocolError(`PiRuntimeSpecV5 schemaVersion \u4E0D\u652F\u6301: ${String(value2.schemaVersion)}`);
+      }
+      if (!("toolExecutionMode" in value2)) {
+        throw new PiProtocolError("PiRuntimeSpecV5 \u7F3A\u5C11\u5B57\u6BB5 toolExecutionMode");
+      }
+      if (!isPiToolExecutionMode(value2.toolExecutionMode)) {
+        throw new PiProtocolError(`PiRuntimeSpecV5 toolExecutionMode \u4E0D\u652F\u6301: ${String(value2.toolExecutionMode)}`);
+      }
+      const { toolExecutionMode, requiredBundle, ...core } = value2;
+      const { requiredBundle: _dropped, ...base } = parsePiRuntimeSpecV3({
+        ...core,
+        schemaVersion: 3,
+        toolPolicy: emptyPiToolPolicy()
+      });
+      return {
+        schemaVersion: 5,
+        specId: base.specId,
+        profileId: base.profileId,
+        profileRevision: base.profileRevision,
+        providers: base.providers,
+        modelPolicy: base.modelPolicy,
+        toolExecutionMode,
+        ...requiredBundle === void 0 ? {} : { requiredBundle: parsePiRequiredBundle(requiredBundle) },
+        runtimeRevision: base.runtimeRevision
+      };
+    }
+    function parsePiRuntimeSpecMessageV5(value2) {
+      assertRecord(value2, "PiRuntimeSpecMessageV5");
+      assertKeys(value2, /* @__PURE__ */ new Set(["spec", "credentials"]), "PiRuntimeSpecMessageV5");
+      const spec = parsePiRuntimeSpecV5(value2.spec);
+      const credentials = parsePiCredentialLeaseV2(value2.credentials);
+      const providers = new Set(spec.providers.map((provider) => provider.providerId));
+      if (providers.size !== credentials.entries.length || credentials.entries.some((entry) => !providers.has(entry.providerId)))
+        throw new PiProtocolError("credentials \u4E0E providers \u4E0D\u5339\u914D");
+      return { spec, credentials };
     }
     function parsePiCredentialLeaseV2(value2) {
       assertRecord(value2, "PiCredentialLeaseV2");
@@ -1650,8 +1722,8 @@ var require_pi = __commonJS({
       "session.entryContent",
       "agent.state",
       "agent.stats",
-      "agent.commands",
-      "models.list"
+      "models.list",
+      "extension.ui.get"
     ];
     exports2.PI_WORKER_ACTIONS = [
       "session.new",
@@ -1666,6 +1738,10 @@ var require_pi = __commonJS({
       "agent.abort",
       "agent.compact",
       "agent.abortCompact",
+      // 命令发现会初始化扩展运行时（factory + resources_discover），因此与执行同类，
+      // 必须在 RuntimeSpec ready 且项目空闲时才允许（ADR-0040 决策 2）。
+      "agent.commands",
+      "agent.command",
       "model.set",
       "thinking.set",
       "extension.respond",
@@ -1680,6 +1756,275 @@ var require_pi = __commonJS({
     }
     function isPiReadAction(action) {
       return PI_READ_ACTION_SET.has(action);
+    }
+  }
+});
+
+// ../shared/dist/pi-extension.js
+var require_pi_extension = __commonJS({
+  "../shared/dist/pi-extension.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.MAX_EXTENSION_ID_CHARS = exports2.MAX_EXTENSION_COMMAND_ARGS_CHARS = exports2.MAX_EXTENSION_COMMAND_DESC_CHARS = exports2.MAX_EXTENSION_COMMAND_NAME_CHARS = exports2.MAX_EXTENSION_COMMANDS = exports2.MAX_EXTENSION_SNAPSHOT_BYTES = exports2.MAX_EXTENSION_LINE_CHARS = exports2.MAX_EXTENSION_WIDGET_LINES = exports2.MAX_EXTENSION_EDITOR_CHARS = exports2.MAX_EXTENSION_TEXT_CHARS = exports2.MAX_EXTENSION_KEY_CHARS = exports2.MAX_EXTENSION_KEYS = exports2.PiExtensionProtocolError = void 0;
+    exports2.parsePiExtensionUiUpdate = parsePiExtensionUiUpdate;
+    exports2.parsePiExtensionUiSnapshot = parsePiExtensionUiSnapshot2;
+    exports2.parsePiExtensionCommands = parsePiExtensionCommands2;
+    exports2.assertPiExtensionCommandArgs = assertPiExtensionCommandArgs;
+    exports2.parsePiExecutionMigrationInput = parsePiExecutionMigrationInput;
+    var pi_js_1 = require_pi();
+    var PiExtensionProtocolError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "PiExtensionProtocolError";
+      }
+    };
+    exports2.PiExtensionProtocolError = PiExtensionProtocolError;
+    exports2.MAX_EXTENSION_KEYS = 32;
+    exports2.MAX_EXTENSION_KEY_CHARS = 128;
+    exports2.MAX_EXTENSION_TEXT_CHARS = 4096;
+    exports2.MAX_EXTENSION_EDITOR_CHARS = 32768;
+    exports2.MAX_EXTENSION_WIDGET_LINES = 100;
+    exports2.MAX_EXTENSION_LINE_CHARS = 2048;
+    exports2.MAX_EXTENSION_SNAPSHOT_BYTES = 128 * 1024;
+    exports2.MAX_EXTENSION_COMMANDS = 128;
+    exports2.MAX_EXTENSION_COMMAND_NAME_CHARS = 128;
+    exports2.MAX_EXTENSION_COMMAND_DESC_CHARS = 4096;
+    exports2.MAX_EXTENSION_COMMAND_ARGS_CHARS = 32768;
+    exports2.MAX_EXTENSION_ID_CHARS = 128;
+    function isRecord2(value2) {
+      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+    }
+    function codePointLength(value2) {
+      let count = 0;
+      for (const _ of value2)
+        count += 1;
+      return count;
+    }
+    function requireCodePoints(value2, what, max) {
+      if (typeof value2 !== "string" || value2.length === 0) {
+        throw new PiExtensionProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      }
+      if (codePointLength(value2) > max) {
+        throw new PiExtensionProtocolError(`${what} \u957F\u5EA6\u8D85\u8FC7\u4E0A\u9650 ${max}`);
+      }
+      return value2;
+    }
+    function optionalCodePoints(value2, what, max) {
+      if (value2 === void 0)
+        return void 0;
+      return requireCodePoints(value2, what, max);
+    }
+    function requireKeys(value2, allowed, what) {
+      for (const key of Object.keys(value2)) {
+        if (!allowed.includes(key)) {
+          throw new PiExtensionProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function requirePlacement(value2, what) {
+      if (value2 !== "aboveEditor" && value2 !== "belowEditor") {
+        throw new PiExtensionProtocolError(`${what} \u5FC5\u987B\u662F aboveEditor \u6216 belowEditor`);
+      }
+      return value2;
+    }
+    function requireLevel(value2, what) {
+      if (value2 !== "info" && value2 !== "warning" && value2 !== "error") {
+        throw new PiExtensionProtocolError(`${what} \u5FC5\u987B\u662F info\u3001warning \u6216 error`);
+      }
+      return value2;
+    }
+    var encoder = new TextEncoder();
+    function parsePiExtensionUiUpdate(value2) {
+      if (!isRecord2(value2)) {
+        throw new PiExtensionProtocolError("extensionUiUpdate \u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      switch (value2.kind) {
+        case "notify": {
+          requireKeys(value2, ["kind", "message", "level"], "extensionUiUpdate.notify");
+          return {
+            kind: "notify",
+            message: requireCodePoints(value2.message, "notify.message", exports2.MAX_EXTENSION_TEXT_CHARS),
+            level: requireLevel(value2.level, "notify.level")
+          };
+        }
+        case "setStatus": {
+          requireKeys(value2, ["kind", "key", "text"], "extensionUiUpdate.setStatus");
+          const text = optionalCodePoints(value2.text, "setStatus.text", exports2.MAX_EXTENSION_TEXT_CHARS);
+          return {
+            kind: "setStatus",
+            key: requireCodePoints(value2.key, "setStatus.key", exports2.MAX_EXTENSION_KEY_CHARS),
+            ...text === void 0 ? {} : { text }
+          };
+        }
+        case "setWidget": {
+          requireKeys(value2, ["kind", "key", "lines", "placement"], "extensionUiUpdate.setWidget");
+          let lines;
+          if (value2.lines !== void 0) {
+            if (!Array.isArray(value2.lines)) {
+              throw new PiExtensionProtocolError("setWidget.lines \u5FC5\u987B\u662F\u6570\u7EC4");
+            }
+            if (value2.lines.length > exports2.MAX_EXTENSION_WIDGET_LINES) {
+              throw new PiExtensionProtocolError(`setWidget.lines \u6570\u91CF\u8D85\u8FC7\u4E0A\u9650 ${exports2.MAX_EXTENSION_WIDGET_LINES}`);
+            }
+            lines = value2.lines.map((line, index) => requireCodePoints(line, `setWidget.lines[${index}]`, exports2.MAX_EXTENSION_LINE_CHARS));
+          }
+          return {
+            kind: "setWidget",
+            key: requireCodePoints(value2.key, "setWidget.key", exports2.MAX_EXTENSION_KEY_CHARS),
+            ...lines === void 0 ? {} : { lines },
+            ...value2.placement === void 0 ? {} : { placement: requirePlacement(value2.placement, "setWidget.placement") }
+          };
+        }
+        case "setTitle": {
+          requireKeys(value2, ["kind", "title"], "extensionUiUpdate.setTitle");
+          return {
+            kind: "setTitle",
+            title: requireCodePoints(value2.title, "setTitle.title", exports2.MAX_EXTENSION_TEXT_CHARS)
+          };
+        }
+        case "set_editor_text": {
+          requireKeys(value2, ["kind", "requestId", "text"], "extensionUiUpdate.set_editor_text");
+          if (typeof value2.text !== "string") {
+            throw new PiExtensionProtocolError("set_editor_text.text \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+          }
+          if (codePointLength(value2.text) > exports2.MAX_EXTENSION_EDITOR_CHARS) {
+            throw new PiExtensionProtocolError(`set_editor_text.text \u957F\u5EA6\u8D85\u8FC7\u4E0A\u9650 ${exports2.MAX_EXTENSION_EDITOR_CHARS}`);
+          }
+          return {
+            kind: "set_editor_text",
+            requestId: requireCodePoints(value2.requestId, "set_editor_text.requestId", exports2.MAX_EXTENSION_ID_CHARS),
+            text: value2.text
+          };
+        }
+        default:
+          throw new PiExtensionProtocolError(`extensionUiUpdate.kind \u4E0D\u53D7\u652F\u6301: ${String(value2.kind)}`);
+      }
+    }
+    function parsePiExtensionUiSnapshot2(value2) {
+      if (!isRecord2(value2)) {
+        throw new PiExtensionProtocolError("extensionUiSnapshot \u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      requireKeys(value2, [
+        "runtimeInstanceId",
+        "runtimeRevision",
+        "sequence",
+        "title",
+        "statuses",
+        "widgets"
+      ], "extensionUiSnapshot");
+      if (!Number.isSafeInteger(value2.sequence) || value2.sequence < 0) {
+        throw new PiExtensionProtocolError("extensionUiSnapshot.sequence \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
+      }
+      const instanceId = value2.runtimeInstanceId === null ? null : requireCodePoints(value2.runtimeInstanceId, "runtimeInstanceId", exports2.MAX_EXTENSION_ID_CHARS);
+      const revision = value2.runtimeRevision === null ? null : requireCodePoints(value2.runtimeRevision, "runtimeRevision", exports2.MAX_EXTENSION_ID_CHARS);
+      if (instanceId === null !== (revision === null)) {
+        throw new PiExtensionProtocolError("runtimeInstanceId \u4E0E runtimeRevision \u5FC5\u987B\u540C\u65F6\u4E3A\u7A7A\u6216\u540C\u65F6\u5B58\u5728");
+      }
+      const title = value2.title === null ? null : requireCodePoints(value2.title, "title", exports2.MAX_EXTENSION_TEXT_CHARS);
+      if (!Array.isArray(value2.statuses) || value2.statuses.length > exports2.MAX_EXTENSION_KEYS) {
+        throw new PiExtensionProtocolError(`statuses \u6570\u91CF\u8D85\u8FC7\u4E0A\u9650 ${exports2.MAX_EXTENSION_KEYS}`);
+      }
+      if (!Array.isArray(value2.widgets) || value2.widgets.length > exports2.MAX_EXTENSION_KEYS) {
+        throw new PiExtensionProtocolError(`widgets \u6570\u91CF\u8D85\u8FC7\u4E0A\u9650 ${exports2.MAX_EXTENSION_KEYS}`);
+      }
+      const statuses = value2.statuses.map((item, index) => {
+        if (!isRecord2(item)) {
+          throw new PiExtensionProtocolError(`statuses[${index}] \u5FC5\u987B\u662F\u5BF9\u8C61`);
+        }
+        requireKeys(item, ["key", "text"], `statuses[${index}]`);
+        return {
+          key: requireCodePoints(item.key, `statuses[${index}].key`, exports2.MAX_EXTENSION_KEY_CHARS),
+          text: requireCodePoints(item.text, `statuses[${index}].text`, exports2.MAX_EXTENSION_TEXT_CHARS)
+        };
+      });
+      const widgets = value2.widgets.map((item, index) => {
+        if (!isRecord2(item)) {
+          throw new PiExtensionProtocolError(`widgets[${index}] \u5FC5\u987B\u662F\u5BF9\u8C61`);
+        }
+        requireKeys(item, ["key", "lines", "placement"], `widgets[${index}]`);
+        if (!Array.isArray(item.lines) || item.lines.length > exports2.MAX_EXTENSION_WIDGET_LINES) {
+          throw new PiExtensionProtocolError(`widgets[${index}].lines \u6570\u91CF\u8D85\u8FC7\u4E0A\u9650 ${exports2.MAX_EXTENSION_WIDGET_LINES}`);
+        }
+        return {
+          key: requireCodePoints(item.key, `widgets[${index}].key`, exports2.MAX_EXTENSION_KEY_CHARS),
+          lines: item.lines.map((line, lineIndex) => requireCodePoints(line, `widgets[${index}].lines[${lineIndex}]`, exports2.MAX_EXTENSION_LINE_CHARS)),
+          placement: requirePlacement(item.placement, `widgets[${index}].placement`)
+        };
+      });
+      const snapshot = {
+        runtimeInstanceId: instanceId,
+        runtimeRevision: revision,
+        sequence: value2.sequence,
+        title,
+        statuses,
+        widgets
+      };
+      if (encoder.encode(JSON.stringify(snapshot)).length > exports2.MAX_EXTENSION_SNAPSHOT_BYTES) {
+        throw new PiExtensionProtocolError(`extensionUiSnapshot \u8D85\u8FC7\u5B57\u8282\u4E0A\u9650 ${exports2.MAX_EXTENSION_SNAPSHOT_BYTES}`);
+      }
+      return snapshot;
+    }
+    function requireCommandName(value2, what) {
+      const name = requireCodePoints(value2, what, exports2.MAX_EXTENSION_COMMAND_NAME_CHARS);
+      if (/\s/.test(name) || name.includes("/") || name.includes("\\")) {
+        throw new PiExtensionProtocolError(`${what} \u4E0D\u5F97\u5305\u542B\u7A7A\u767D\u6216\u8DEF\u5F84\u5206\u9694\u7B26`);
+      }
+      return name;
+    }
+    function parsePiExtensionCommands2(value2) {
+      if (!isRecord2(value2)) {
+        throw new PiExtensionProtocolError("extensionCommands \u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      requireKeys(value2, ["runtimeInstanceId", "runtimeRevision", "commands"], "extensionCommands");
+      if (!Array.isArray(value2.commands) || value2.commands.length > exports2.MAX_EXTENSION_COMMANDS) {
+        throw new PiExtensionProtocolError(`commands \u6570\u91CF\u8D85\u8FC7\u4E0A\u9650 ${exports2.MAX_EXTENSION_COMMANDS}`);
+      }
+      const seen = /* @__PURE__ */ new Set();
+      const commands = value2.commands.map((item, index) => {
+        if (!isRecord2(item)) {
+          throw new PiExtensionProtocolError(`commands[${index}] \u5FC5\u987B\u662F\u5BF9\u8C61`);
+        }
+        requireKeys(item, ["name", "description"], `commands[${index}]`);
+        const name = requireCommandName(item.name, `commands[${index}].name`);
+        if (seen.has(name)) {
+          throw new PiExtensionProtocolError(`commands \u542B\u91CD\u590D\u8C03\u7528\u540D ${name}`);
+        }
+        seen.add(name);
+        return {
+          name,
+          description: requireCodePoints(item.description, `commands[${index}].description`, exports2.MAX_EXTENSION_COMMAND_DESC_CHARS)
+        };
+      });
+      return {
+        runtimeInstanceId: requireCodePoints(value2.runtimeInstanceId, "runtimeInstanceId", exports2.MAX_EXTENSION_ID_CHARS),
+        runtimeRevision: requireCodePoints(value2.runtimeRevision, "runtimeRevision", exports2.MAX_EXTENSION_ID_CHARS),
+        commands
+      };
+    }
+    function assertPiExtensionCommandArgs(value2) {
+      if (typeof value2 !== "string") {
+        throw new PiExtensionProtocolError("command args \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
+      if (codePointLength(value2) > exports2.MAX_EXTENSION_COMMAND_ARGS_CHARS) {
+        throw new PiExtensionProtocolError(`command args \u957F\u5EA6\u8D85\u8FC7\u4E0A\u9650 ${exports2.MAX_EXTENSION_COMMAND_ARGS_CHARS}`);
+      }
+      return value2;
+    }
+    function parsePiExecutionMigrationInput(value2) {
+      if (!isRecord2(value2)) {
+        throw new PiExtensionProtocolError("executionMigration \u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      requireKeys(value2, ["expectedRevision", "mode"], "executionMigration");
+      if (!Number.isSafeInteger(value2.expectedRevision) || value2.expectedRevision < 1) {
+        throw new PiExtensionProtocolError("expectedRevision \u5FC5\u987B\u662F\u6B63\u6574\u6570");
+      }
+      if (!(0, pi_js_1.isPiToolExecutionMode)(value2.mode)) {
+        throw new PiExtensionProtocolError(`mode \u4E0D\u53D7\u652F\u6301: ${String(value2.mode)}`);
+      }
+      return {
+        expectedRevision: value2.expectedRevision,
+        mode: value2.mode
+      };
     }
   }
 });
@@ -2527,8 +2872,8 @@ var require_pi_admin = __commonJS({
       "enabled",
       "credentialIds",
       "enabledResourceIds",
-      "toolPolicy",
-      "toolExecutionMode"
+      "toolExecutionMode",
+      "mode"
     ]);
     var DEFAULT_MODEL_KEYS = /* @__PURE__ */ new Set(["provider", "modelId"]);
     var MAX_RESOURCE_IDS = 64;
@@ -2818,9 +3163,6 @@ var require_pi_admin = __commonJS({
       if (value2.enabledResourceIds !== void 0) {
         input.enabledResourceIds = parseResourceIds(value2.enabledResourceIds);
       }
-      if (value2.toolPolicy !== void 0) {
-        input.toolPolicy = parseProfileToolPolicy(value2.toolPolicy);
-      }
       if (value2.toolExecutionMode !== void 0) {
         input.toolExecutionMode = parseProfileToolExecutionMode(value2.toolExecutionMode);
       }
@@ -2828,16 +3170,9 @@ var require_pi_admin = __commonJS({
     }
     function parseProfileToolExecutionMode(value2) {
       if (!(0, pi_js_1.isPiToolExecutionMode)(value2)) {
-        throw new PiAdminProtocolError("toolExecutionMode \u5FC5\u987B\u662F approval/auto/yolo");
+        throw new PiAdminProtocolError("toolExecutionMode \u5FC5\u987B\u662F supervised \u6216 automatic");
       }
       return value2;
-    }
-    function parseProfileToolPolicy(value2) {
-      try {
-        return (0, pi_js_1.parsePiToolPolicy)(value2);
-      } catch (error) {
-        throw new PiAdminProtocolError(error.message);
-      }
     }
     function parseResourceIds(value2) {
       if (!Array.isArray(value2) || value2.length > MAX_RESOURCE_IDS) {
@@ -2876,9 +3211,6 @@ var require_pi_admin = __commonJS({
       }
       if (value2.enabledResourceIds !== void 0) {
         input.enabledResourceIds = parseResourceIds(value2.enabledResourceIds);
-      }
-      if (value2.toolPolicy !== void 0) {
-        input.toolPolicy = parseProfileToolPolicy(value2.toolPolicy);
       }
       if (value2.toolExecutionMode !== void 0) {
         input.toolExecutionMode = parseProfileToolExecutionMode(value2.toolExecutionMode);
@@ -3798,6 +4130,7 @@ var require_dist = __commonJS({
       return git_ssh_js_1.parseGitSshTargetInput;
     } });
     __exportStar(require_pi(), exports2);
+    __exportStar(require_pi_extension(), exports2);
     __exportStar(require_pi_bundle(), exports2);
     __exportStar(require_terminal(), exports2);
     __exportStar(require_pi_admin(), exports2);
@@ -4596,6 +4929,14 @@ function createPiApi(client) {
       abortCompact: (clientId, sessionId, runId) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/abort-compact`, {
         runId
       }),
+      commands: async (clientId, sessionId, signal) => (0, import_shared2.parsePiExtensionCommands)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/commands`, void 0, signal)),
+      extensionUi: async (clientId, sessionId, signal) => (0, import_shared2.parsePiExtensionUiSnapshot)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/extension-ui`, void 0, signal)),
+      executeCommand: (clientId, sessionId, cwdRef, submissionId, name, args) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/command`, {
+        ...cwdRef,
+        submissionId,
+        name,
+        ...args !== void 0 ? { args } : {}
+      }),
       setModel: (clientId, sessionId, cwdRef, provider, modelId) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/model`, {
         ...cwdRef,
         provider,
@@ -4630,6 +4971,7 @@ function createPiApi(client) {
       get: (id, signal) => client.request("GET", `/api/pi/profiles/${enc(id)}`, void 0, signal),
       create: (input, signal) => client.request("POST", "/api/pi/profiles", input, signal),
       update: (id, input, signal) => client.request("PATCH", `/api/pi/profiles/${enc(id)}`, input, signal),
+      confirmExecutionMigration: (id, input, signal) => client.request("POST", `/api/pi/profiles/${enc(id)}/execution-migration`, input, signal),
       remove: (id, signal) => client.request("DELETE", `/api/pi/profiles/${enc(id)}`, void 0, signal)
     },
     credentials: {

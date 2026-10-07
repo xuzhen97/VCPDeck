@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
-	PI_BUILTIN_TOOL_IDS,
-	PI_TOOL_POLICY_BUCKETS,
 	type PiCredentialInfo,
 	type PiModelRef,
 	type PiProfileInfo,
 	type PiProviderInfo,
 	type PiRuntimeStatus,
 	type PiToolExecutionMode,
-	type PiToolPolicy,
-	type PiToolPolicyBucket,
 } from "@vcpdeck/shared";
 import { useSdk } from "@/api/context";
 import { apiErrorMessage } from "@/api/error-message";
@@ -21,45 +17,35 @@ import { StatusChip } from "@/components/status-chip";
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "max"];
 
-/** 执行 confirm 策略的 Bundle 资源 ID（与 Server 校验、ADR-0030 一致）。 */
-const TOOL_POLICY_RESOURCE_ID = "vcp.tool-policy";
+/**
+ * 新建 Profile 的执行模式缺省：监督（ADR-0039）。
+ *
+ * 逐工具三桶已删除：能力面由「平台可用内置工具 + 已启用受信扩展实际注册的工具」决定，
+ * 因此只需选择监督程度。自动执行必须由操作者显式选择。
+ */
+const DEFAULT_TOOL_EXECUTION_MODE: PiToolExecutionMode = "supervised";
 
-/** 新建 Profile 的基线策略：读类放行、写与执行类需审批，deny 留空。 */
-const BASELINE_TOOL_POLICY: PiToolPolicy = {
-	allow: ["read", "grep", "find", "ls"],
-	confirm: ["write", "edit", "bash"],
-	deny: [],
-};
-
-/** 工具执行模式（ADR-0033）：新建默认 auto；Server 缺省仍是 approval。 */
-const DEFAULT_TOOL_EXECUTION_MODE: PiToolExecutionMode = "auto";
-
+/** 工具执行模式（ADR-0039）：监督逐次审批 / 自动直接执行。 */
 const TOOL_EXECUTION_MODES: Array<{
 	mode: PiToolExecutionMode;
 	label: string;
 	hint: string;
 }> = [
 	{
-		mode: "approval",
-		label: "审批模式",
-		hint: "allow 工具直接执行；confirm 工具每次调用需要批准。",
+		mode: "supervised",
+		label: "监督模式",
+		hint: "每次工具调用（含读取）都需要你确认；拒绝、取消或超时都判定为拒绝。",
 	},
 	{
-		mode: "auto",
+		mode: "automatic",
 		label: "自动执行",
-		hint: "confirm 工具不再弹出人工确认；deny 和未配置工具仍然禁止。",
-	},
-	{
-		mode: "yolo",
-		label: "YOLO",
-		hint: "忽略 Tool Policy 的 allow/confirm/deny；但不加载未启用的资源，也不绕过 Runtime 或 OS 权限。",
+		hint: "当前运行时已注册的工具（内置 + 已启用受信扩展）直接执行，不再逐次询问。",
 	},
 ];
 
 const TOOL_EXECUTION_MODE_LABELS: Record<PiToolExecutionMode, string> = {
-	approval: "审批模式",
-	auto: "自动执行",
-	yolo: "YOLO",
+	supervised: "监督模式",
+	automatic: "自动执行",
 };
 
 /** 每行一个 `provider/modelId`（可带 `@thinkingLevel`）。 */
@@ -93,7 +79,6 @@ export function PiProfilesPanel() {
 	const [allowedLines, setAllowedLines] = useState("");
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [selectedCredentialIds, setSelectedCredentialIds] = useState<string[]>([]);
-	const [toolPolicy, setToolPolicy] = useState<PiToolPolicy>(BASELINE_TOOL_POLICY);
 	const [toolExecutionMode, setToolExecutionMode] = useState<PiToolExecutionMode>(
 		DEFAULT_TOOL_EXECUTION_MODE,
 	);
@@ -159,23 +144,6 @@ export function PiProfilesPanel() {
 		}
 	}, [availableProviders, defaultProvider]);
 
-	/** 勾选某个桶即从其它桶移除：三桶互斥（与 Server 校验一致）。 */
-	function toggleTool(bucket: PiToolPolicyBucket, tool: string) {
-		setToolPolicy((prev) => {
-			const next: PiToolPolicy = {
-				allow: [...prev.allow],
-				confirm: [...prev.confirm],
-				deny: [...prev.deny],
-			};
-			const enabled = next[bucket].includes(tool);
-			for (const other of PI_TOOL_POLICY_BUCKETS) {
-				next[other] = next[other].filter((item) => item !== tool);
-			}
-			if (!enabled) next[bucket].push(tool);
-			return next;
-		});
-	}
-
 	async function submit(e: FormEvent) {
 		e.preventDefault();
 		if (saving) return;
@@ -214,14 +182,7 @@ export function PiProfilesPanel() {
 			);
 			return;
 		}
-		// confirm 由随 Bundle 发布的策略扩展执行；未启用该资源则策略永远无法生效。
-		if (
-			toolPolicy.confirm.length > 0 &&
-			!enabledResourceIds.includes(TOOL_POLICY_RESOURCE_ID)
-		) {
-			setError(`启用 confirm 必须先启用 ${TOOL_POLICY_RESOURCE_ID} 资源`);
-			return;
-		}
+		// 执行模式扩展由 Server 作为宿主必需资源校验（ADR-0039），此处无需再提示。
 		setSaving(true);
 		setError(null);
 		try {
@@ -234,7 +195,6 @@ export function PiProfilesPanel() {
 				allowedModels: allowed,
 				defaultThinkingLevel,
 				credentialIds: selectedCredentialIds,
-				toolPolicy,
 				toolExecutionMode,
 				enabledResourceIds,
 			};
@@ -249,11 +209,37 @@ export function PiProfilesPanel() {
 			setDefaultThinkingLevel("medium");
 			setAllowedLines("");
 			setSelectedCredentialIds([]);
-			setToolPolicy(BASELINE_TOOL_POLICY);
 			setToolExecutionMode(DEFAULT_TOOL_EXECUTION_MODE);
 			setEnabledResourceIds([]);
 		} catch (error) {
 			setError(apiErrorMessage(error, "Profile 保存失败，请检查模型与 thinking 级别"));
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	/**
+	 * 确认存量 Profile 的新执行语义（ADR-0039 决策 3）。
+	 *
+	 * 这是解除待确认门控的唯一入口：携带当前 revision 让 Server 做 CAS，
+	 * 并发变化时返回 409，不静默重试，以免用旧页面的确认覆盖别人的新配置。
+	 */
+	async function confirmMigration(
+		item: PiProfileInfo,
+		mode: PiToolExecutionMode,
+	) {
+		setSaving(true);
+		setError(null);
+		try {
+			const saved = await sdk.pi.profiles.confirmExecutionMigration(item.id, {
+				expectedRevision: item.revision,
+				mode,
+			});
+			setItems((prev) => prev.map((entry) => (entry.id === saved.id ? saved : entry)));
+		} catch (error) {
+			setError(
+				apiErrorMessage(error, "执行语义确认失败，请重新加载后再确认"),
+			);
 		} finally {
 			setSaving(false);
 		}
@@ -397,38 +383,8 @@ export function PiProfilesPanel() {
 								}
 							</p>
 							<p className="text-xs text-muted-foreground">
-								切换模式不会修改下面的三桶；它们表达“切回审批模式时哪些工具需要人工确认”。
+								模式随 Profile revision 换代；活跃 Run 内不热切换。
 							</p>
-						</div>
-					</div>
-					<div className="space-y-1.5" data-testid="pi-profile-tool-policy">
-						<Label>工具策略（未列出的工具默认拒绝）</Label>
-						<div className="space-y-2 rounded-md border border-border p-3 text-sm">
-							{PI_TOOL_POLICY_BUCKETS.map((bucket) => (
-								<div
-									key={bucket}
-									className="flex flex-wrap items-center gap-3"
-								>
-									<span className="w-16 text-muted-foreground">{bucket}</span>
-									{PI_BUILTIN_TOOL_IDS.map((tool) => (
-										<label
-											key={`${bucket}-${tool}`}
-											className="flex items-center gap-1"
-										>
-											<input
-												type="checkbox"
-												aria-label={`策略-${bucket}-${tool}`}
-												checked={toolPolicy[bucket].includes(tool)}
-												onChange={() => toggleTool(bucket, tool)}
-											/>
-											<span>
-												{tool}
-												{tool === "powershell" ? "（仅 Windows）" : ""}
-											</span>
-										</label>
-									))}
-								</div>
-							))}
 						</div>
 					</div>
 					<div className="space-y-1.5" data-testid="pi-profile-resources">
@@ -492,8 +448,11 @@ export function PiProfilesPanel() {
 									setDefaultThinkingLevel(item.defaultThinkingLevel);
 									setAllowedLines(toLines(item.allowedModels));
 									setSelectedCredentialIds(item.credentialIds);
-									setToolPolicy(item.toolPolicy);
-									setToolExecutionMode(item.toolExecutionMode);
+									// 待确认（toolExecutionMode 为 null）时表单先落保守缺省；
+									// 解除待确认必须走专用确认入口，普通保存不会清除它。
+									setToolExecutionMode(
+										item.toolExecutionMode ?? DEFAULT_TOOL_EXECUTION_MODE,
+									);
 									setEnabledResourceIds(item.enabledResourceIds);
 								}}>编辑</Button>
 								<StatusChip
@@ -501,8 +460,14 @@ export function PiProfilesPanel() {
 									tone={item.enabled ? "success" : "danger"}
 								/>
 								<StatusChip
-									label={TOOL_EXECUTION_MODE_LABELS[item.toolExecutionMode]}
-									tone={item.toolExecutionMode === "yolo" ? "danger" : "neutral"}
+									label={
+										item.executionConfiguration.state === "ready"
+											? TOOL_EXECUTION_MODE_LABELS[item.executionConfiguration.mode]
+											: "待确认"
+									}
+									tone={
+										item.executionConfiguration.state === "ready" ? "neutral" : "danger"
+									}
 								/>
 								<span className="font-medium">{item.name}</span>
 								<span className="text-muted-foreground">
@@ -518,10 +483,37 @@ export function PiProfilesPanel() {
 									凭据 {item.credentialIds.length} · 绑定 Client {item.boundClientIds.length}
 								</span>
 							</div>
-							{item.toolExecutionMode === "yolo" && (
-								<p className="text-xs text-destructive">
-									YOLO：忽略 Tool Policy 的 allow/confirm/deny，当前 Runtime 已注册/加载的工具直接执行；不加载未启用的资源，也不绕过 Runtime 或 OS 权限。
-								</p>
+							{item.executionConfiguration.state === "needs_confirmation" && (
+								<div
+									className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-2"
+									data-testid="pi-profile-migration"
+								>
+									<p className="text-xs text-destructive">
+										该 Profile 的旧逐工具限制（
+										{item.executionConfiguration.legacyMode}
+										）已不再生效，需你明确选择新的执行语义后才能继续使用。
+									</p>
+									<p className="font-mono text-xs text-muted-foreground">
+										旧策略仅作说明：allow [
+										{item.executionConfiguration.legacyPolicy.allow.join(", ")}
+										] · confirm [
+										{item.executionConfiguration.legacyPolicy.confirm.join(", ")}
+										] · deny [
+										{item.executionConfiguration.legacyPolicy.deny.join(", ")}]
+									</p>
+									<div className="flex flex-wrap gap-2">
+										{TOOL_EXECUTION_MODES.map((option) => (
+											<Button
+												key={option.mode}
+												type="button"
+												variant="outline"
+												onClick={() => void confirmMigration(item, option.mode)}
+											>
+												确认并改为{option.label}
+											</Button>
+										))}
+									</div>
+								</div>
 							)}
 							<pre className="overflow-x-auto rounded bg-muted p-2 font-mono text-xs">
 								{toLines(item.allowedModels)}

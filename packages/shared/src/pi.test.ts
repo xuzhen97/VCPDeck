@@ -74,7 +74,7 @@ describe("Session Job 协议", () => {
 	it("导出协议版本和 Job 枚举", () => {
 		expect(JobType.AGENT_SESSION).toBe("agent.session");
 		expect(JobStatus.IDLE).toBe("idle");
-		expect(PI_SESSION_JOB_PROTOCOL_VERSION).toBe(2);
+		expect(PI_SESSION_JOB_PROTOCOL_VERSION).toBe(3);
 		expect(PI_ERROR_CODES).toContain("PI_STATE_PENDING");
 	});
 });
@@ -86,7 +86,7 @@ describe("parsePiRequest", () => {
 			sessionId: "s1", jobId: "s1", runId: "run1",
 		};
 		const image = { fileId: "f1", sha256: "sha", size: 42, mimeType: "image/png", url: "https://example.test/image" };
-		const payload = { submissionId: "sub1", executionMode: "auto" };
+		const payload = { submissionId: "sub1", executionMode: "automatic" };
 		expect(parsePiRequest({ ...base, payload: { ...payload, prompt: "", attachments: [image] } }).payload?.prompt).toBe("");
 		expect(parsePiRequest({ ...base, payload: { ...payload, prompt: " \t", attachments: [image] } }).payload?.prompt).toBe(" \t");
 		for (const prompt of ["", " \t"]) {
@@ -105,7 +105,7 @@ describe("parsePiRequest", () => {
 			sessionId: "session-1",
 			jobId: "session-1",
 			runId: "run-1",
-			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "approval" },
+			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "supervised" },
 		});
 		expect(request.jobId).toBe("session-1");
 		expect(request.runId).toBe("run-1");
@@ -120,7 +120,7 @@ describe("parsePiRequest", () => {
 				sessionId: "session-1",
 				jobId: "other-job",
 				runId: "run-1",
-				payload: { prompt: "hello", submissionId: "sub-1", executionMode: "approval" },
+				payload: { prompt: "hello", submissionId: "sub-1", executionMode: "supervised" },
 			}),
 		).toThrow(/jobId.*sessionId/);
 	});
@@ -163,10 +163,10 @@ describe("parsePiRequest", () => {
 				payload: {
 					prompt: "hello",
 					submissionId: "sub1",
-					executionMode: "yolo",
+					executionMode: "automatic",
 				},
 			}).payload?.executionMode,
-		).toBe("yolo");
+		).toBe("automatic");
 		for (const payload of [
 			{ prompt: "hello", submissionId: "sub1", executionMode: "unsafe" },
 			{ prompt: "hello", submissionId: "sub1" },
@@ -225,7 +225,7 @@ describe("parsePiRequest", () => {
 				sessionId: "s1",
 				jobId: "j1",
 				runId: "j1",
-				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval", attachments },
+				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised", attachments },
 			}),
 		).toThrow();
 	});
@@ -246,7 +246,7 @@ describe("parsePiRequest", () => {
 				sessionId: "s1",
 				jobId: "j1",
 				runId: "j1",
-				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval", attachments },
+				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised", attachments },
 			}),
 		).toThrow();
 	});
@@ -268,7 +268,7 @@ describe("parsePiRequest", () => {
 				sessionId: "s1",
 				jobId: "j1",
 				runId: "j1",
-				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "approval", attachments },
+				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised", attachments },
 			}),
 		).toThrow();
 	});

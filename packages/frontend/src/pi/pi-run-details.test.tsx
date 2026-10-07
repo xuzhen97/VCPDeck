@@ -18,7 +18,7 @@ const idleJob: import("@vcpdeck/shared").PiSessionJobSnapshot = {
 	status: "idle" as const,
 	runId: null,
 	executionModeOverride: null,
-	effectiveExecutionMode: "approval",
+	effectiveExecutionMode: "supervised",
 	ownerName: "User",
 	isOwner: true,
 };

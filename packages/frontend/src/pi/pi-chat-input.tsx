@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, ImagePlus } from "lucide-react";
-import { PI_IMAGE_MIME_TYPES } from "@vcpdeck/shared";
+import { PI_IMAGE_MIME_TYPES, type PiExtensionCommand } from "@vcpdeck/shared";
 import { Button } from "@/components/ui/button";
 import type { PiSessionStatus } from "./use-pi-session.js";
 
@@ -41,6 +41,11 @@ export function PiChatInput({
 	attachmentError = null,
 	onPickFiles,
 	onRemoveAttachment,
+	commands = [],
+	onCommand,
+	editorRequest = null,
+	onApplyEditorRequest,
+	onDismissEditorRequest,
 }: {
 	status: PiSessionStatus;
 	disabled: boolean;
@@ -62,10 +67,22 @@ export function PiChatInput({
 	attachmentError?: string | null;
 	onPickFiles?: (files: File[]) => void;
 	onRemoveAttachment?: (id: string) => void;
+	/** 当前 Session/runtime 实际注册的扩展命令（仅调用名与描述）。 */
+	commands?: PiExtensionCommand[];
+	/**
+	 * 调用扩展斜杠命令。返回 `false` 表示未被接受，输入区保留草稿。
+	 * 未知命令由 Server/Client 明确拒绝，绝不会退化为普通 Prompt。
+	 */
+	onCommand?: (name: string, args: string) => unknown;
+	/** 待处理的扩展编辑填充；仅由用户显式应用或忽略，UI 不自动发送。 */
+	editorRequest?: { requestId: string; text: string } | null;
+	onApplyEditorRequest?: (requestId: string, text: string) => void;
+	onDismissEditorRequest?: (requestId: string) => void;
 }) {
 	const [text, setText] = useState("");
 	const [mode, setMode] = useState<"prompt" | "steer" | "followUp">("prompt");
 	const [submitting, setSubmitting] = useState(false);
+	const [commandError, setCommandError] = useState<string | null>(null);
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
 	const running = status === "running" || status === "waiting_input";
@@ -80,9 +97,60 @@ export function PiChatInput({
 		incompleteDraftCount === 0 &&
 		(text.trim().length > 0 || readyDraftCount > 0);
 
+	// 只有普通 prompt 模式且空闲时才提供命令选择：运行中的steer/followUp 不接受斜杠命令。
+	const slashQuery = mode === "prompt" && promptable ? text : "";
+	const showCommandPicker =
+		slashQuery.startsWith("/") && !disabled && !submitting;
+
+	/** 把 "/name args" 严格解析为注册命令；未知命令返回 null（绝不退化为 Prompt）。 */
+	function parseCommand(
+		value: string,
+	): { name: string; args: string; known: boolean } | null {
+		if (!value.startsWith("/")) return null;
+		const rest = value.slice(1);
+		if (rest.length === 0) return null;
+		const separator = rest.search(/\s/);
+		const rawName = separator === -1 ? rest : rest.slice(0, separator);
+		const args = separator === -1 ? "" : rest.slice(separator + 1).trim();
+		const match = commands.find((c) => c.name === rawName);
+		return { name: match ? match.name : rawName, args, known: Boolean(match) };
+	}
+
+	const applyEditorRequest = () => {
+		if (!editorRequest) return;
+		// 应用是显式用户动作：按 ADR-0040 决策 3，UI 不得自动发送。
+		setText((prev) => (prev.length > 0 ? `${prev}\n${editorRequest.text}` : editorRequest.text));
+		onApplyEditorRequest?.(editorRequest.requestId, editorRequest.text);
+	};
+
 	const submit = async () => {
 		if (!canSend) return;
 		const value = text.trim();
+		setCommandError(null);
+		// 斜杠输入一律走命令通道：未知命令明确拒绝并保留草稿，绝不退化为 Prompt。
+		if (value.startsWith("/")) {
+			const parsed = parseCommand(value);
+			if (!parsed) {
+				setCommandError("未知扩展命令");
+				return;
+			}
+			if (!parsed.known) {
+				setCommandError(`未知扩展命令：/${parsed.name}`);
+				return;
+			}
+			if (attachments.length > 0) {
+				setCommandError("扩展命令不支持附件，请先移除附件");
+				return;
+			}
+			setSubmitting(true);
+			try {
+				const result = await onCommand?.(parsed.name, parsed.args);
+				if (result !== false) setText("");
+			} finally {
+				setSubmitting(false);
+			}
+			return;
+		}
 		setSubmitting(true);
 		try {
 			const result =
@@ -208,6 +276,78 @@ export function PiChatInput({
 						))}
 					</div>
 				)}
+				{/* 扩展编辑填充：仅展示与显式应用/忽略，绝不自动覆写草稿（ADR-0040 决策 3）。 */}
+				{editorRequest ? (
+					<fieldset
+						aria-label="扩展编辑填充"
+						className="mb-1.5 rounded-md border border-border/70 px-2 py-1.5 text-xs"
+					>
+						<legend className="sr-only">扩展编辑填充</legend>
+						<p className="whitespace-pre-wrap break-words text-muted-foreground">
+							{editorRequest.text}
+						</p>
+						<div className="mt-1 flex gap-1.5">
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								disabled={disabled}
+								onClick={applyEditorRequest}
+							>
+								应用扩展填充
+							</Button>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								disabled={disabled}
+								onClick={() => onDismissEditorRequest?.(editorRequest.requestId)}
+							>
+								忽略扩展填充
+							</Button>
+						</div>
+					</fieldset>
+				) : null}
+				{/* 命令选择：仅列调用名与描述，不含任何本地来源信息。 */}
+				{showCommandPicker ? (
+					commands.length > 0 ? (
+						<div
+							role="listbox"
+							aria-label="扩展命令"
+							className="mb-1.5 max-h-40 overflow-y-auto rounded-md border border-border/70 p-1"
+						>
+							{commands.map((c) => (
+								<button
+									key={c.name}
+									type="button"
+									role="option"
+									aria-selected={false}
+									className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1 text-left text-xs hover:bg-accent"
+									onClick={() => {
+										setText(`/${c.name} `);
+										setCommandError(null);
+										textareaRef.current?.focus();
+									}}
+								>
+									<span className="font-medium">/{c.name}</span>
+									{c.description ? (
+										<span className="text-muted-foreground">{c.description}</span>
+									) : null}
+								</button>
+							))}
+						</div>
+					) : (
+						// 无命令不是错误状态，但必须有可见反馈：静默会让人以为界面坏了。
+						<p role="status" className="px-1.5 text-xs text-muted-foreground">
+							当前没有可用的扩展命令（受信扩展未注册任何命令）。以 / 开头的内容不会被当作普通消息发送。
+						</p>
+					)
+				) : null}
+				{commandError ? (
+					<p role="status" className="px-1.5 text-xs text-destructive">
+						{commandError}
+					</p>
+				) : null}
 				<textarea
 					ref={textareaRef}
 					value={text}

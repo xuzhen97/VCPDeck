@@ -7,14 +7,14 @@
  */
 import {
 	isPiToolExecutionMode,
-	parsePiToolPolicy,
+	type LegacyPiToolPolicy,
 	type PiBundleCapability,
+	type PiLegacyToolExecutionMode,
 	type PiModelRef,
 	type PiProviderModel,
 	type PiProviderModelInfo,
 	type PiProviderProtocol,
 	type PiToolExecutionMode,
-	type PiToolPolicy,
 } from "./pi.js";
 
 /** 列表接口统一分页结果（与仓库约定一致） */
@@ -36,14 +36,36 @@ export interface PiProfileInfo {
 	defaultThinkingLevel: string;
 	/** 该 Profile 允许加载的 Bundle 资源 ID（无 Bundle 需求时为空数组）。 */
 	enabledResourceIds: string[];
-	/** 工具策略：未出现在任何桶的工具默认拒绝。 */
-	toolPolicy: PiToolPolicy;
-	/** 工具执行模式：Approval / Auto / YOLO（ADR-0033）。 */
-	toolExecutionMode: PiToolExecutionMode;
+	/**
+	 * 执行语义当前状态（ADR-0039 决策 3）。
+	 *
+	 * `needs_confirmation` 表示存量 approval/auto 配置尚未被操作者确认移除逐工具限制，
+	 * 此时 `toolExecutionMode` 为 null，Profile 不得接纳新 Run。
+	 */
+	executionConfiguration: PiExecutionConfiguration;
+	/**
+	 * 工具执行模式：supervised / automatic。
+	 * 待确认迁移时为 null——不得用默认值伪装成已确认配置。
+	 */
+	toolExecutionMode: PiToolExecutionMode | null;
 	revision: number;
 	credentialIds: string[];
 	boundClientIds: string[];
 }
+
+/**
+ * Profile 执行语义的对外投影。
+ *
+ * `ready` 才能参与 RuntimeSpec 组装；`needs_confirmation` 只用于展示旧限制并引导确认，
+ * 旧策略仅供一次性说明，不是新运行时的第二套授权来源。
+ */
+export type PiExecutionConfiguration =
+	| { state: "ready"; mode: PiToolExecutionMode }
+	| {
+			state: "needs_confirmation";
+			legacyMode: PiLegacyToolExecutionMode;
+			legacyPolicy: LegacyPiToolPolicy;
+	  };
 
 /** Provider 对外投影（不含凭据材料）。 */
 export interface PiProviderInfo {
@@ -170,9 +192,7 @@ export interface PiProfileCreateInput {
 	credentialIds?: string[];
 	/** 省略 = 不启用任何 Bundle 资源。 */
 	enabledResourceIds?: string[];
-	/** 省略 = 空策略（未列出工具全部拒绝）。 */
-	toolPolicy?: PiToolPolicy;
-	/** 省略 = Server 保守默认 approval（产品新建默认由 Frontend 显式提交）。 */
+	/** 省略 = Server 保守默认 supervised（产品新建默认由 Frontend 显式提交）。 */
 	toolExecutionMode?: PiToolExecutionMode;
 }
 
@@ -258,8 +278,8 @@ const PROFILE_CREATE_KEYS = new Set([
 	"enabled",
 	"credentialIds",
 	"enabledResourceIds",
-	"toolPolicy",
 	"toolExecutionMode",
+	"mode",
 ]);
 const DEFAULT_MODEL_KEYS = new Set(["provider", "modelId"]);
 /** 单个 Profile 可启用的 Bundle 资源数量上限 */
@@ -570,9 +590,6 @@ export function parsePiProfileCreateInput(value: unknown): PiProfileCreateInput 
 	if (value.enabledResourceIds !== undefined) {
 		input.enabledResourceIds = parseResourceIds(value.enabledResourceIds);
 	}
-	if (value.toolPolicy !== undefined) {
-		input.toolPolicy = parseProfileToolPolicy(value.toolPolicy);
-	}
 	if (value.toolExecutionMode !== undefined) {
 		input.toolExecutionMode = parseProfileToolExecutionMode(value.toolExecutionMode);
 	}
@@ -586,23 +603,16 @@ export function parsePiProfileCreateInput(value: unknown): PiProfileCreateInput 
 function parseProfileToolExecutionMode(value: unknown): PiToolExecutionMode {
 	if (!isPiToolExecutionMode(value)) {
 		throw new PiAdminProtocolError(
-			"toolExecutionMode 必须是 approval/auto/yolo",
+			"toolExecutionMode 必须是 supervised 或 automatic",
 		);
 	}
 	return value;
 }
 
 /**
- * 解析 Profile 的工具策略：把共享 parser 的 `PiProtocolError` 统一为边界错误类型，
- * 使 Controller 映射为 400 而不是 500（请求体错误属于协议错误）。
+ * 逐工具三桶已于 ADR-0039 删除：Profile 的 create/update 不再接受 `toolPolicy`，
+ * 存量策略只作为迁移说明保存在 Profile 投影里，不会进入新运行时的授权路径。
  */
-function parseProfileToolPolicy(value: unknown): PiToolPolicy {
-	try {
-		return parsePiToolPolicy(value);
-	} catch (error) {
-		throw new PiAdminProtocolError((error as Error).message);
-	}
-}
 
 /** 资源 ID 列表：非空字符串、去重、数量受限（Bundle 资源 ID，非路径）。 */
 function parseResourceIds(value: unknown): string[] {
@@ -646,9 +656,6 @@ export function parsePiProfileUpdateInput(value: unknown): PiProfileUpdateInput 
 	}
 	if (value.enabledResourceIds !== undefined) {
 		input.enabledResourceIds = parseResourceIds(value.enabledResourceIds);
-	}
-	if (value.toolPolicy !== undefined) {
-		input.toolPolicy = parseProfileToolPolicy(value.toolPolicy);
 	}
 	if (value.toolExecutionMode !== undefined) {
 		input.toolExecutionMode = parseProfileToolExecutionMode(value.toolExecutionMode);

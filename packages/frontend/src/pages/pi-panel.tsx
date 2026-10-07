@@ -13,6 +13,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { PiSessionSidebar } from "../pi/pi-session-sidebar.js";
 import { PiChatWindow } from "../pi/pi-chat-window.js";
 import { PiChatInput, type PiChatAttachmentDraft } from "../pi/pi-chat-input.js";
+import { PiExtensionStatus } from "../pi/pi-extension-status.js";
 import { PiRunDetails, THINKING_OPTIONS } from "../pi/pi-run-details.js";
 import { PiExtensionDialog } from "../pi/pi-extension-dialog.js";
 import { usePiSession, type PiThinkingSelection } from "../pi/use-pi-session.js";
@@ -117,17 +118,16 @@ function AgentSessionSettings({
 			onChange={(event) => onExecutionModeChange(event.target.value === "profile" ? null : event.target.value as PiToolExecutionMode)}
 		>
 			<option value="profile">跟随 Profile{mode ? ` · ${mode}` : " · 未知"}</option>
-			<option value="approval">审批模式</option>
-			<option value="auto">自动执行</option>
-			<option value="yolo">YOLO（跳过工具策略限制）</option>
+			<option value="supervised">监督模式</option>
+			<option value="automatic">自动执行</option>
 		</select>
-		{mode === "yolo" && (
+		{mode === "automatic" && (
 			<span
 				role="status"
-				className="shrink-0 text-xs text-destructive"
-				title="YOLO 会跳过 Tool Policy，但仍受 Runtime 与操作系统权限限制。"
+				className="shrink-0 text-xs text-muted-foreground"
+				title="自动执行不会再逐次询问，但工具仍限于当前 Runtime 已注册/加载的集合，并受操作系统权限限制。"
 			>
-				⚠ YOLO 会跳过 Tool Policy，但仍受 Runtime 与操作系统权限限制。
+				自动执行：已注册工具直接运行，不再逐次询问。
 			</span>
 		)}
 	</div>;
@@ -519,6 +519,11 @@ export function PiPanel({
 						<div className="min-h-0 flex-1"><PiChatWindow state={state} info={info} sessionId={sessionId} onLoadMore={() => { if (cwdRef && sessionId) void actions.loadMore(); }} onImageLoad={(block) => void handleImageLoad(block)} imageUrls={loadedImages} /></div>
 					)}
 					{sessionError && <p role="alert" className="px-5 text-sm text-destructive">{sessionError}</p>}
+					{/* 扩展持续 UI 状态（status/widget/title）：纯文本展示，不执行 HTML。
+					    上/下分区由组件内按 placement 标注，便于后续拆分到 Composer 上下。 */}
+					<div className="px-5">
+						<PiExtensionStatus snapshot={state.extensionUi} />
+					</div>
 					<PiChatInput
 						/* 上下文变化时重挂载：草稿文本与 prompt/steer/followUp 模式属于单个会话，
 						   否则切项目/会话后残留草稿会被发到错误的会话。 */
@@ -543,6 +548,19 @@ export function PiPanel({
 									),
 								}
 							: {})}
+						commands={state.commands?.commands ?? []}
+						onCommand={async (name, args) => {
+							// 未知命令返回 rejected（Server/Client 明确拒绝），
+							// Composer 据此保留草稿，绝不退化为普通 Prompt。
+							return (await actions.command(name, args)) !== "rejected";
+						}}
+						editorRequest={state.editorRequest}
+						onApplyEditorRequest={(requestId) =>
+							actions.dismissEditorRequest(requestId)
+						}
+						onDismissEditorRequest={(requestId) =>
+							actions.dismissEditorRequest(requestId)
+						}
 						attachments={attachments.map((a) => ({
 							id: a.id,
 							name: a.name,

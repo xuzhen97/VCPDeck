@@ -83,6 +83,17 @@ const DESTRUCTIVE_ACTIONS = new Set([
 	"thinking.set",
 ]);
 
+/**
+ * 会“开启一个回合”的动作：接纳后必须在终态时结清项目锁。
+ *
+ * 指令与 prompt 共用同一套 Run 生命周期（ADR-0040 决策 2）。若漏掉
+ * `agent.command`，它的 `entry.activeRun` 恒为 null，终态分支不会执行，
+ * `terminalCwd` 也就永不写入 —— 服务端 30 秒后的结算查询按 jobId+runId
+ * 定不到 cwd，返回 `PI_SESSION_NOT_FOUND`，job 停在 running，
+ * 项目锁永不释放，后续（含新建会话）全部撞 `Project has an active turn`。
+ */
+const RUN_ESTABLISHING_ACTIONS = new Set(["agent.prompt", "agent.command"]);
+
 export interface PiSupervisor {
 	request(request: PiRequest, timeoutMs?: number): Promise<PiResponse>;
 	getStateReport(): PiStateReport;
@@ -472,7 +483,7 @@ export function createPiSupervisor(options: {
 					entry = entryFor(key, cwd);
 				}
 
-				if (request.action === "agent.prompt") {
+				if (RUN_ESTABLISHING_ACTIONS.has(request.action)) {
 					if (entry.activeRun && !(await reclaimStaleRun(entry))) {
 						return piError(
 							request.requestId,
@@ -510,7 +521,7 @@ export function createPiSupervisor(options: {
 				const run = entry.activeRun;
 				const result = await requestViaWorker(entry, key, request, timeoutMs);
 				if (
-					((request.action === "agent.prompt" && !result.ok) ||
+					((RUN_ESTABLISHING_ACTIONS.has(request.action) && !result.ok) ||
 						(request.action === "agent.abort" && result.ok)) &&
 					run?.jobId === request.jobId &&
 					run?.sessionId === request.sessionId &&

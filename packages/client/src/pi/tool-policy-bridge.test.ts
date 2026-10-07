@@ -5,63 +5,55 @@ import {
 	readToolPolicyBridge,
 } from "./tool-policy-bridge.js";
 
-const policy = { allow: ["read"], confirm: ["bash"], deny: ["write"] };
-
-describe("tool-policy bridge（策略 + 执行模式 → Bundle 扩展的进程内通道）", () => {
-	it("安装后写入带版本的对象（含执行模式）", () => {
+describe("tool-policy bridge v3（执行模式 → Bundle 扩展的进程内通道）", () => {
+	it("安装后写入带版本的对象（只含执行模式，无逐工具策略）", () => {
 		const target: Record<string, unknown> = {};
-		installToolPolicyBridge(policy, "auto", target);
+		installToolPolicyBridge("supervised", target);
 
 		expect(target.__vcpdeckPiHost).toEqual({
-			bridgeVersion: 2,
-			toolPolicy: { allow: ["read"], confirm: ["bash"], deny: ["write"] },
-			toolExecutionMode: "auto",
+			bridgeVersion: 3,
+			toolExecutionMode: "supervised",
 		});
+		// 三桶已删除（ADR-0039）：桥接不得再携带任何工具名单。
+		expect(target.__vcpdeckPiHost).not.toHaveProperty("toolPolicy");
 	});
 
-	it("读回时做深拷贝（调用方不能改写已安装的策略）", () => {
+	it("读回两模式", () => {
 		const target: Record<string, unknown> = {};
-		installToolPolicyBridge(policy, "yolo", target);
-
-		const first = readToolPolicyBridge(target);
-		first?.toolPolicy.allow.push("write");
-		expect(readToolPolicyBridge(target)?.toolPolicy.allow).toEqual(["read"]);
-		expect(readToolPolicyBridge(target)?.toolExecutionMode).toBe("yolo");
+		installToolPolicyBridge("automatic", target);
+		expect(readToolPolicyBridge(target)?.toolExecutionMode).toBe("automatic");
 	});
 
 	it("未安装时返回 null", () => {
 		expect(readToolPolicyBridge({})).toBeNull();
 	});
 
-	it("版本不符时返回 null（Bundle 与 Client 错配不得静默放行）", () => {
-		const target: Record<string, unknown> = {
-			__vcpdeckPiHost: {
-				bridgeVersion: 1,
-				toolPolicy: policy,
-				toolExecutionMode: "auto",
-			},
-		};
-		expect(readToolPolicyBridge(target)).toBeNull();
-	});
-
-	it("缺少或非法执行模式时返回 null（不猜默认模式）", () => {
-		expect(
-			readToolPolicyBridge({
-				__vcpdeckPiHost: { bridgeVersion: 2, toolPolicy: policy },
-			}),
-		).toBeNull();
+	it("旧 v2 桥接返回 null（不得回退三桶语义）", () => {
 		expect(
 			readToolPolicyBridge({
 				__vcpdeckPiHost: {
 					bridgeVersion: 2,
-					toolPolicy: policy,
-					toolExecutionMode: "unsafe",
+					toolPolicy: { allow: ["read"], confirm: [], deny: [] },
+					toolExecutionMode: "auto",
 				},
 			}),
 		).toBeNull();
 	});
 
+	it("缺少、旧值或非法执行模式时返回 null（不猜默认模式）", () => {
+		expect(
+			readToolPolicyBridge({ __vcpdeckPiHost: { bridgeVersion: 3 } }),
+		).toBeNull();
+		for (const mode of ["auto", "yolo", "approval", "unsafe", 1]) {
+			expect(
+				readToolPolicyBridge({
+					__vcpdeckPiHost: { bridgeVersion: 3, toolExecutionMode: mode },
+				}),
+			).toBeNull();
+		}
+	});
+
 	it("版本常量与写入口径一致", () => {
-		expect(PI_TOOL_POLICY_BRIDGE_VERSION).toBe(2);
+		expect(PI_TOOL_POLICY_BRIDGE_VERSION).toBe(3);
 	});
 });

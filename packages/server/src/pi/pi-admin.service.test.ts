@@ -19,6 +19,8 @@ interface ProfileRow {
 	enabledResourceIds: string | null;
 	toolPolicyJson: string | null;
 	toolExecutionMode: string;
+	executionModeNeedsConfirmation: boolean;
+	legacyExecutionConfigJson: string | null;
 	revision: number;
 	createdAt: Date;
 	updatedAt: Date;
@@ -73,6 +75,11 @@ function makePrisma() {
 
 	const prisma: any = {
 		$transaction: async <T>(work: (tx: any) => Promise<T>) => work(prisma),
+		// 存量执行语义迁移读取会话 Job；本文件只覆盖 Profile 行为，故恒为空集。
+		job: {
+			findMany: async () => [],
+			updateMany: async () => ({ count: 0 }),
+		},
 		piProfile: {
 			create: async ({ data }: { data: Partial<ProfileRow> }) => {
 				const row: ProfileRow = {
@@ -85,8 +92,11 @@ function makePrisma() {
 					defaultThinkingLevel: data.defaultThinkingLevel ?? "medium",
 					enabledResourceIds: data.enabledResourceIds ?? null,
 					toolPolicyJson: data.toolPolicyJson ?? null,
-					// 与 Prisma `@default("approval")` 同口径，用于验证 API 缺省语义。
-					toolExecutionMode: data.toolExecutionMode ?? "approval",
+					// 与 Prisma `@default("supervised")` 同口径，用于验证 API 缺省语义。
+					toolExecutionMode: data.toolExecutionMode ?? "supervised",
+					executionModeNeedsConfirmation:
+						data.executionModeNeedsConfirmation ?? false,
+					legacyExecutionConfigJson: data.legacyExecutionConfigJson ?? null,
 					revision: 1,
 					createdAt: new Date(),
 					updatedAt: new Date(),
@@ -100,7 +110,11 @@ function makePrisma() {
 						(where.id !== undefined && p.id === where.id) ||
 						(where.name !== undefined && p.name === where.name),
 				) ?? null,
-			findMany: async ({ skip = 0, take = 20 }: { skip?: number; take?: number }) =>
+			// 存量迁移以无参形式读取全量行（迁移不做分页）。
+			findMany: async ({
+				skip = 0,
+				take = 20,
+			}: { skip?: number; take?: number } = {}) =>
 				profiles.slice(skip, skip + take),
 			count: async () => profiles.length,
 			update: async ({
@@ -311,6 +325,8 @@ const profileInput = (credentialIds: string[] = ["c1"]) => ({
 	allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
 	defaultThinkingLevel: "medium" as const,
 	credentialIds,
+	// 执行模式扩展是宿主必需资源（ADR-0039）：新建 Profile 必须启用它。
+	enabledResourceIds: ["vcp.tool-policy"],
 });
 
 describe("PiCredentialService", () => {
@@ -449,54 +465,43 @@ describe("PiProfileService 的工具策略与 Bundle 资源校验", () => {
 		allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
 		defaultThinkingLevel: "medium" as const,
 		credentialIds: ["c1"],
+		enabledResourceIds: ["vcp.tool-policy"],
 		...extra,
 	});
 
-	it("启用 confirm 但未启用 vcp.tool-policy 时拒绝保存", async () => {
+	it("未启用执行模式资源时拒绝保存（缺失即无任何执行门控）", async () => {
 		const s = makeServices();
 		await expect(
-			s.profiles.create(
-				baseInput({
-					toolPolicy: { allow: [], confirm: ["bash"], deny: [] },
-					enabledResourceIds: [],
-				}),
-			),
+			s.profiles.create(baseInput({ enabledResourceIds: [] })),
 		).rejects.toMatchObject({ code: "PI_CONFIG_UNAVAILABLE" });
 		await expect(
-			s.profiles.create(
-				baseInput({
-					toolPolicy: { allow: [], confirm: ["bash"], deny: [] },
-					enabledResourceIds: [],
-				}),
-			),
+			s.profiles.create(baseInput({ enabledResourceIds: [] })),
 		).rejects.toThrow(/vcp\.tool-policy/);
 	});
 
-	it("策略与资源落库后可完整回读", async () => {
+	it("执行语义与资源落库后可完整回读", async () => {
 		const s = makeServices();
 		const info = await s.profiles.create(
 			baseInput({
-				toolPolicy: { allow: ["read"], confirm: ["bash"], deny: ["write"] },
+				toolExecutionMode: "automatic",
 				enabledResourceIds: ["vcp.tool-policy"],
 			}),
 		);
-		expect(info.toolPolicy).toEqual({
-			allow: ["read"],
-			confirm: ["bash"],
-			deny: ["write"],
+		expect(info.executionConfiguration).toEqual({
+			state: "ready",
+			mode: "automatic",
 		});
+		expect(info.toolExecutionMode).toBe("automatic");
 		expect(info.enabledResourceIds).toEqual(["vcp.tool-policy"]);
+		// 逐工具三桶已删除：Profile 不再保存也不再回显任何策略列。
+		expect(info).not.toHaveProperty("toolPolicy");
 	});
 
-	it("空策略与无资源时两列存 NULL（读取回退为默认值）", async () => {
+	it("执行模式扩展是宿主必需资源：缺失即拒绝创建", async () => {
 		const s = makeServices();
-		const info = await s.profiles.create(
-			baseInput({ toolPolicy: { allow: [], confirm: [], deny: [] } }),
-		);
-		expect(s.profileRows[0]?.toolPolicyJson).toBeNull();
-		expect(s.profileRows[0]?.enabledResourceIds).toBeNull();
-		expect(info.toolPolicy).toEqual({ allow: [], confirm: [], deny: [] });
-		expect(info.enabledResourceIds).toEqual([]);
+		await expect(
+			s.profiles.create(baseInput({ enabledResourceIds: [] })),
+		).rejects.toThrow(/vcp\.tool-policy/);
 	});
 
 	it("已有 Client 上报 Bundle 时拒绝未知资源 ID", async () => {
@@ -510,7 +515,12 @@ describe("PiProfileService 的工具策略与 Bundle 资源校验", () => {
 		});
 		const profiles = new PiProfileService(s.prisma as never, registry);
 		await expect(
-			profiles.create(baseInput({ enabledResourceIds: ["vcp.unknown"] })),
+			profiles.create(
+				baseInput({
+					// 带必需资源以便精确命中「未知资源」校验，而不是先被必需资源检查拦截。
+					enabledResourceIds: ["vcp.tool-policy", "vcp.unknown"],
+				}),
+			),
 		).rejects.toThrow(/未知资源/);
 		await expect(
 			profiles.create(baseInput({ enabledResourceIds: ["vcp.tool-policy"] })),
@@ -527,26 +537,21 @@ describe("PiProfileService 的工具策略与 Bundle 资源校验", () => {
 			profiles.create(
 				baseInput({
 					enabledResourceIds: ["vcp.tool-policy"],
-					toolPolicy: { allow: [], confirm: ["bash"], deny: [] },
 				}),
 			),
 		).resolves.toMatchObject({ enabledResourceIds: ["vcp.tool-policy"] });
 	});
 
-	it("更新时保留未提交的策略与资源", async () => {
+	it("更新时保留未提交的资源与执行模式", async () => {
 		const s = makeServices();
 		const created = await s.profiles.create(
 			baseInput({
 				enabledResourceIds: ["vcp.tool-policy"],
-				toolPolicy: { allow: ["read"], confirm: [], deny: [] },
+				toolExecutionMode: "automatic",
 			}),
 		);
 		const updated = await s.profiles.update(created.id, { name: "renamed" });
-		expect(updated.toolPolicy).toEqual({
-			allow: ["read"],
-			confirm: [],
-			deny: [],
-		});
+		expect(updated.toolExecutionMode).toBe("automatic");
 		expect(updated.enabledResourceIds).toEqual(["vcp.tool-policy"]);
 	});
 });
@@ -558,38 +563,60 @@ describe("PiProfileService 的工具执行模式", () => {
 		allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
 		defaultThinkingLevel: "medium" as const,
 		credentialIds: ["c1"],
+		enabledResourceIds: ["vcp.tool-policy"],
 		...extra,
 	});
 
-	it("省略时保守默认为 approval，显式模式落库并可回读", async () => {
+	it("省略时保守默认为 supervised，显式模式落库并可回读", async () => {
 		const s = makeServices();
-		const omitted = await s.profiles.create(baseInput());
-		expect(omitted.toolExecutionMode).toBe("approval");
-		expect(s.profileRows[0]?.toolExecutionMode).toBe("approval");
+		const omitted = await s.profiles.create(
+			baseInput({ enabledResourceIds: ["vcp.tool-policy"] }),
+		);
+		expect(omitted.toolExecutionMode).toBe("supervised");
+		expect(s.profileRows[0]?.toolExecutionMode).toBe("supervised");
+		expect(omitted.executionConfiguration).toEqual({
+			state: "ready",
+			mode: "supervised",
+		});
 
-		const explicit = await s.profiles.create(baseInput({ name: "auto", toolExecutionMode: "auto" }));
-		expect(explicit.toolExecutionMode).toBe("auto");
-		expect(s.profileRows[1]?.toolExecutionMode).toBe("auto");
+		const explicit = await s.profiles.create(
+			baseInput({
+				name: "auto",
+				enabledResourceIds: ["vcp.tool-policy"],
+				toolExecutionMode: "automatic",
+			}),
+		);
+		expect(explicit.toolExecutionMode).toBe("automatic");
+		expect(s.profileRows[1]?.toolExecutionMode).toBe("automatic");
 	});
 
 	it("更新模式递增 revision，并在未提交时保留原值", async () => {
 		const s = makeServices();
-		const created = await s.profiles.create(baseInput({ toolExecutionMode: "auto" }));
+		const created = await s.profiles.create(
+			baseInput({
+				enabledResourceIds: ["vcp.tool-policy"],
+				toolExecutionMode: "automatic",
+			}),
+		);
 		const renamed = await s.profiles.update(created.id, { name: "renamed" });
 		expect(renamed).toMatchObject({
-			toolExecutionMode: "auto",
+			toolExecutionMode: "automatic",
 			revision: created.revision + 1,
 		});
-		const updated = await s.profiles.update(created.id, { toolExecutionMode: "yolo" });
+		const updated = await s.profiles.update(created.id, {
+			toolExecutionMode: "supervised",
+		});
 		expect(updated).toMatchObject({
-			toolExecutionMode: "yolo",
+			toolExecutionMode: "supervised",
 			revision: renamed.revision + 1,
 		});
 	});
 
 	it("数据库中的非法模式 fail closed（PI_CONFIG_UNAVAILABLE）", async () => {
 		const s = makeServices();
-		const created = await s.profiles.create(baseInput());
+		const created = await s.profiles.create(
+			baseInput({ enabledResourceIds: ["vcp.tool-policy"] }),
+		);
 		await s.profiles.setBinding("client-1", created.id);
 		s.profileRows[0]!.toolExecutionMode = "unsafe";
 		await expect(s.profiles.get(created.id)).rejects.toMatchObject({

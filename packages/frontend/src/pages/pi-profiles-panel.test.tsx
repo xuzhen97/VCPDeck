@@ -55,6 +55,7 @@ function makeSdk() {
 	const credentialList = vi.fn().mockResolvedValue(page([credential]));
 	const create = vi.fn();
 	const update = vi.fn();
+	const confirmMigration = vi.fn();
 	const clientList = vi
 		.fn()
 		.mockResolvedValue([{ clientId: "c1", hostname: "host-1" }]);
@@ -70,13 +71,13 @@ function makeSdk() {
 	const client = {
 		clients: { list: clientList },
 		pi: {
-			profiles: { list: profileList, create, update },
+			profiles: { list: profileList, create, update, confirmExecutionMigration: confirmMigration },
 			providers: { list: providerList },
 			credentials: { list: credentialList },
 			runtime,
 		},
 	} as unknown as VcpDeckClient;
-	return { client, create };
+	return { client, create, confirmMigration };
 }
 
 function renderPanel(client: VcpDeckClient) {
@@ -169,6 +170,10 @@ describe("PiProfilesPanel", () => {
 			defaultModel: { provider: "axonhub", modelId: "mimo-v2.6-flash" },
 			allowedModels: [{ provider: "axonhub", modelId: "mimo-v2.6-flash" }],
 			defaultThinkingLevel: "medium",
+			// 列表渲染读取 executionConfiguration（ADR-0039）：缺它会让模式标签取不到值。
+			executionConfiguration: { state: "ready", mode: "supervised" },
+			toolExecutionMode: "supervised",
+			enabledResourceIds: ["vcp.tool-policy"],
 			revision: 1,
 			credentialIds: ["cred-1"],
 			boundClientIds: [],
@@ -192,35 +197,45 @@ describe("PiProfilesPanel", () => {
 });
 
 describe("PiProfilesPanel 的工具执行模式", () => {
-	const listProfile = (mode: string) => ({
+	/** 已就绪的列表项：两模式、无逐工具三桶。 */
+	const listProfile = (mode: "supervised" | "automatic") => ({
 		id: "p1",
 		name: "已有配置",
 		enabled: true,
 		defaultModel: { provider: "axonhub", modelId: "mimo-v2.6-flash" },
 		allowedModels: [{ provider: "axonhub", modelId: "mimo-v2.6-flash" }],
 		defaultThinkingLevel: "medium",
+		executionConfiguration: { state: "ready", mode },
 		toolExecutionMode: mode,
 		enabledResourceIds: ["vcp.tool-policy"],
-		toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
 		revision: 1,
 		credentialIds: ["cred-1"],
 		boundClientIds: [],
 	});
 
-	it("新建默认为自动执行，切换模式不改写三桶，并提交所选模式", async () => {
+	/** 待确认迁移的列表项：toolExecutionMode 为 null，保留旧限制供展示。 */
+	const pendingProfile = () => ({
+		...listProfile("supervised"),
+		id: "pending",
+		name: "存量配置",
+		toolExecutionMode: null,
+		executionConfiguration: {
+			state: "needs_confirmation" as const,
+			legacyMode: "auto" as const,
+			legacyPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
+		},
+		revision: 7,
+	});
+
+	it("新建默认监督模式，并提交所选模式且不再提交任何三桶", async () => {
 		const user = userEvent.setup();
 		const { client, create } = makeSdk();
-		create.mockResolvedValueOnce({ ...listProfile("yolo"), name: "测试" });
+		create.mockResolvedValueOnce({ ...listProfile("automatic"), name: "测试" });
 		renderPanel(client);
 
-		// 产品默认：新建 Profile 显式使用 auto（Server 缺省仍是 approval）
-		expect(await screen.findByLabelText("自动执行")).toBeChecked();
-
-		await user.click(screen.getByLabelText("YOLO"));
-		// 切换模式不得改动策略桶（切回受控模式时才能恢复原分类）
-		expect(screen.getByLabelText("策略-allow-read")).toBeChecked();
-		expect(screen.getByLabelText("策略-confirm-bash")).toBeChecked();
-		expect(screen.getByLabelText("策略-confirm-write")).toBeChecked();
+		// 产品默认：监督模式（自动执行必须显式选择）。
+		expect(await screen.findByLabelText("监督模式")).toBeChecked();
+		await user.click(screen.getByLabelText("自动执行"));
 
 		await fillBasics(user);
 		await user.type(screen.getByLabelText("默认模型 ID"), "mimo-v2.6-flash");
@@ -228,23 +243,17 @@ describe("PiProfilesPanel 的工具执行模式", () => {
 		await user.click(screen.getByLabelText("资源-vcp.tool-policy"));
 		await user.click(screen.getByRole("button", { name: "创建 Profile" }));
 
-		expect(create).toHaveBeenCalledWith(
-			expect.objectContaining({
-				toolExecutionMode: "yolo",
-				toolPolicy: {
-					allow: ["read", "grep", "find", "ls"],
-					confirm: ["write", "edit", "bash"],
-					deny: [],
-				},
-			}),
-		);
+		const submitted = create.mock.calls[0]?.[0] as Record<string, unknown>;
+		expect(submitted).toMatchObject({ toolExecutionMode: "automatic" });
+		// 逐工具三桶已删除（ADR-0039）：请求体不得再携带 toolPolicy。
+		expect(submitted).not.toHaveProperty("toolPolicy");
 	});
 
-	it("编辑已有 Profile 时回显其模式（旧 Profile 为审批模式）", async () => {
+	it("编辑已就绪 Profile 时回显其模式", async () => {
 		const user = userEvent.setup();
 		const { client } = makeSdk();
 		(client.pi.profiles.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			data: [listProfile("approval")],
+			data: [listProfile("supervised")],
 			total: 1,
 			page: 1,
 			pageSize: 20,
@@ -254,36 +263,29 @@ describe("PiProfilesPanel 的工具执行模式", () => {
 
 		await user.click(await screen.findByRole("button", { name: "编辑" }));
 
-		expect(screen.getByLabelText("审批模式")).toBeChecked();
+		expect(screen.getByLabelText("监督模式")).toBeChecked();
 		expect(screen.getByLabelText("自动执行")).not.toBeChecked();
 	});
 
-	it("说明文案明确各模式的能力与安全边界", async () => {
+	it("说明文案明确两模式的能力与安全边界", async () => {
 		const user = userEvent.setup();
 		const { client } = makeSdk();
 		renderPanel(client);
 
-		// 默认（自动执行）：confirm 不弹窗，但 deny 与未配置工具仍禁止
 		expect(
-			await screen.findByText(/deny 和未配置工具仍然禁止/),
+			await screen.findByText(/每次工具调用（含读取）都需要你确认/),
 		).toBeInTheDocument();
 
-		await user.click(screen.getByLabelText("审批模式"));
+		await user.click(screen.getByLabelText("自动执行"));
 		expect(
-			screen.getByText(/confirm 工具每次调用需要批准/),
-		).toBeInTheDocument();
-
-		await user.click(screen.getByLabelText("YOLO"));
-		expect(screen.getByText(/忽略 Tool Policy/)).toBeInTheDocument();
-		expect(
-			screen.getByText(/不加载未启用的资源，也不绕过 Runtime 或 OS 权限/),
+			screen.getByText(/不再逐次询问/),
 		).toBeInTheDocument();
 	});
 
-	it("列表显示当前模式标签并标记 YOLO", async () => {
+	it("列表显示模式标签，待确认项显示待确认并给出迁移入口", async () => {
 		const { client } = makeSdk();
 		(client.pi.profiles.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			data: [listProfile("yolo"), { ...listProfile("auto"), id: "p2", name: "自动配置" }],
+			data: [listProfile("automatic"), pendingProfile()],
 			total: 2,
 			page: 1,
 			pageSize: 20,
@@ -292,58 +294,40 @@ describe("PiProfilesPanel 的工具执行模式", () => {
 		renderPanel(client);
 
 		expect(await screen.findByText("已有配置")).toBeInTheDocument();
-		// 单选控件与列表标签同名，因此列表项里必须至少各有一个
-		expect(screen.getAllByText("YOLO").length).toBeGreaterThanOrEqual(2);
-		expect(screen.getAllByText("自动执行").length).toBeGreaterThanOrEqual(2);
+		expect(screen.getByTestId("pi-profile-migration")).toBeInTheDocument();
+		// 旧限制只作为说明展示，且明确告知已不再生效。
+		expect(screen.getByText(/已不再生效/)).toBeInTheDocument();
+		expect(screen.getAllByText("待确认").length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("迁移确认携带当前 revision 与所选模式调用专用入口", async () => {
+		const user = userEvent.setup();
+		const { client, confirmMigration } = makeSdk();
+		(client.pi.profiles.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			data: [pendingProfile()],
+			total: 1,
+			page: 1,
+			pageSize: 20,
+			totalPages: 1,
+		});
+		confirmMigration.mockResolvedValueOnce(listProfile("automatic"));
+		renderPanel(client);
+
+		// 确认前不得自动提交任何模式。
+		expect(confirmMigration).not.toHaveBeenCalled();
+		await user.click(
+			await screen.findByRole("button", { name: "确认并改为自动执行" }),
+		);
+
+		expect(confirmMigration).toHaveBeenCalledWith("pending", {
+			expectedRevision: 7,
+			mode: "automatic",
+		});
 	});
 });
 
-describe("PiProfilesPanel 的工具策略与 Bundle 资源", () => {
-	it("新建 Profile 预填基线策略：读类放行、写与执行类需审批", async () => {
-		const { client } = makeSdk();
-		renderPanel(client);
-		await screen.findByLabelText("策略-allow-read");
-
-		for (const tool of ["read", "grep", "find", "ls"]) {
-			expect(screen.getByLabelText(`策略-allow-${tool}`)).toBeChecked();
-		}
-		for (const tool of ["write", "edit", "bash"]) {
-			expect(screen.getByLabelText(`策略-confirm-${tool}`)).toBeChecked();
-		}
-		for (const bucket of ["allow", "confirm", "deny"]) {
-			expect(screen.getByLabelText(`策略-${bucket}-powershell`)).not.toBeChecked();
-		}
-	});
-
-	it("勾选一个桶会从其它桶移除（三桶互斥）", async () => {
-		const user = userEvent.setup();
-		const { client } = makeSdk();
-		renderPanel(client);
-		await screen.findByLabelText("策略-allow-read");
-
-		await user.click(screen.getByLabelText("策略-deny-read"));
-
-		expect(screen.getByLabelText("策略-deny-read")).toBeChecked();
-		expect(screen.getByLabelText("策略-allow-read")).not.toBeChecked();
-	});
-
-	it("confirm 非空但未启用 vcp.tool-policy 时本地拦截，不发请求", async () => {
-		const user = userEvent.setup();
-		const { client, create } = makeSdk();
-		renderPanel(client);
-		await fillBasics(user);
-		await user.type(screen.getByLabelText(ALLOWED_LABEL), "axonhub/mimo-v2.6-flash");
-		await user.type(screen.getByLabelText("默认模型 ID"), "mimo-v2.6-flash");
-
-		await user.click(screen.getByRole("button", { name: "创建 Profile" }));
-
-		expect(await screen.findByTestId("pi-profiles-error")).toHaveTextContent(
-			"vcp.tool-policy",
-		);
-		expect(create).not.toHaveBeenCalled();
-	});
-
-	it("启用资源后提交 toolPolicy 与 enabledResourceIds", async () => {
+describe("PiProfilesPanel 的 Bundle 资源", () => {
+	it("启用资源后提交 enabledResourceIds，且不再提交任何逐工具策略", async () => {
 		const user = userEvent.setup();
 		const { client, create } = makeSdk();
 		create.mockResolvedValueOnce({
@@ -354,7 +338,8 @@ describe("PiProfilesPanel 的工具策略与 Bundle 资源", () => {
 			allowedModels: [{ provider: "axonhub", modelId: "mimo-v2.6-flash" }],
 			defaultThinkingLevel: "medium",
 			enabledResourceIds: ["vcp.tool-policy"],
-			toolPolicy: { allow: ["read", "grep", "find", "ls"], confirm: ["write", "edit", "bash"], deny: [] },
+			executionConfiguration: { state: "ready", mode: "supervised" },
+			toolExecutionMode: "supervised",
 			revision: 1,
 			credentialIds: ["cred-1"],
 			boundClientIds: [],
@@ -367,16 +352,40 @@ describe("PiProfilesPanel 的工具策略与 Bundle 资源", () => {
 
 		await user.click(screen.getByRole("button", { name: "创建 Profile" }));
 
-		expect(create).toHaveBeenCalledWith(
-			expect.objectContaining({
-				enabledResourceIds: ["vcp.tool-policy"],
-				toolPolicy: {
-					allow: ["read", "grep", "find", "ls"],
-					confirm: ["write", "edit", "bash"],
-					deny: [],
-				},
-			}),
-		);
+		const submitted = create.mock.calls[0]?.[0] as Record<string, unknown>;
+		expect(submitted).toMatchObject({
+			enabledResourceIds: ["vcp.tool-policy"],
+		});
+		expect(submitted).not.toHaveProperty("toolPolicy");
+	});
+
+	it("必需资源缺失交由 Server 判定，界面不再本地拦截（单一权威）", async () => {
+		const user = userEvent.setup();
+		const { client, create } = makeSdk();
+		// Server 才是「必需资源」的权威：本地不得用自己的副本规则先拦下来，
+		// 否则界面与后端的判定会分叉。这里只验证请求确实发出。
+		create.mockResolvedValueOnce({
+			id: "p1",
+			name: "测试",
+			enabled: true,
+			defaultModel: { provider: "axonhub", modelId: "mimo-v2.6-flash" },
+			allowedModels: [{ provider: "axonhub", modelId: "mimo-v2.6-flash" }],
+			defaultThinkingLevel: "medium",
+			enabledResourceIds: [],
+			executionConfiguration: { state: "ready", mode: "supervised" },
+			toolExecutionMode: "supervised",
+			revision: 1,
+			credentialIds: ["cred-1"],
+			boundClientIds: [],
+		});
+		renderPanel(client);
+		await fillBasics(user);
+		await user.type(screen.getByLabelText(ALLOWED_LABEL), "axonhub/mimo-v2.6-flash");
+		await user.type(screen.getByLabelText("默认模型 ID"), "mimo-v2.6-flash");
+
+		await user.click(screen.getByRole("button", { name: "创建 Profile" }));
+
+		expect(create).toHaveBeenCalledTimes(1);
 	});
 
 	it("尚无 Client 上报 Bundle 时给出提示但不禁用保存", async () => {

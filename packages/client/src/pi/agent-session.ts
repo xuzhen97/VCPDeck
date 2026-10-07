@@ -2,21 +2,27 @@ import type {
 	AgentSession,
 	AgentSessionEvent,
 	SessionEntry,
-	SlashCommandInfo,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { randomUUID } from "node:crypto";
 import {
+	PI_BUILTIN_TOOL_IDS,
 	isPiThinkingLevel,
 	type PiAction,
 	type PiAgentState,
 	type PiClientEvent,
+	type PiExtensionCommand,
+	type PiExtensionCommands,
 	type PiExtensionUiRequest,
+	type PiExtensionUiSnapshot,
+	type PiExtensionUiUpdate,
+	type PiExtensionWidgetPlacement,
 	type PiToolExecutionMode,
-	type PiToolPolicy,
 } from "@vcpdeck/shared";
 import { projectPiEvent } from "./event-projector.js";
-import { toolSetsFor } from "./runtime-spec.js";
+import { activateRuntimeTools } from "./extension-host.js";
+import { PiExtensionUiState } from "./extension-ui.js";
+import type { PiExtensionUiView } from "./extension-ui.js";
 import { filterShellTools, resolvePiShells } from "./shell.js";
 import { installToolPolicyBridge } from "./tool-policy-bridge.js";
 
@@ -77,15 +83,17 @@ export interface PiAgentSessionOptions {
 	modelRuntime: unknown;
 	/** Server 允许且凭据可用的模型集合（Spec 的 resolvedModels） */
 	modelScope: Array<{ provider: string; modelId: string }>;
-	/** Server 下发的工具策略（v4 Spec 必带）：决定 tools/excludeTools 与审批面。 */
-	toolPolicy: PiToolPolicy;
-	/** Server 下发的工具执行模式（ADR-0033）：决定策略如何被执行。 */
+	/** Server 下发的工具执行模式（ADR-0039 两值）：决定监督/自动如何执行。 */
 	toolExecutionMode: PiToolExecutionMode;
 	/** 已校验通过的 Bundle 扩展入口（为空表示不加载任何 Bundle 资源）。 */
 	bundleExtensionPaths?: string[];
 	sessionFile?: string;
 	initialModel?: { provider: string; modelId: string };
 	thinkingLevel?: ThinkingLevel;
+	/** 运行时实例身份（Spec 的 specId）：命令与 UI 快照必须绑定到具体换代。 */
+	runtimeInstanceId?: string | null;
+	/** 运行时换代 revision；晚到的旧状态不得覆盖新状态（ADR-0040 决策 4）。 */
+	runtimeRevision?: string | null;
 }
 
 export interface PiAgentSessionWrapper {
@@ -97,6 +105,20 @@ export interface PiAgentSessionWrapper {
 	getState(): PiAgentState;
 	shutdown(): Promise<void>;
 	destroy(): void;
+}
+
+/** UI 通知等级归一化：无法识别的等级按 info 处理，不把等级拼进正文。 */
+function toNotifyLevel(type: string | undefined): "info" | "warning" | "error" {
+	return type === "warning" || type === "error" ? type : "info";
+}
+
+/** Widget 位置归一化：未知值不带出，交由状态层使用缺省值。 */
+function toWidgetPlacement(
+	placement: string | undefined,
+): PiExtensionWidgetPlacement | undefined {
+	return placement === "aboveEditor" || placement === "belowEditor"
+		? placement
+		: undefined;
 }
 
 type UiKind = PiExtensionUiRequest["kind"];
@@ -124,18 +146,24 @@ export function startPiAgentSession(
 
 		const sdk = await getSdk();
 		let wrapper: PiAgentSessionWrapperImpl | null = null;
-		// 策略与模式必须在绑定扩展之前进入进程内桥接：Bundle 扩展在 factory 阶段读它。
-		installToolPolicyBridge(options.toolPolicy, options.toolExecutionMode);
-		const { tools, excludeTools } = toolSetsFor(
-			options.toolPolicy,
-			options.toolExecutionMode,
-		);
+		// 模式必须在绑定扩展之前进入进程内桥接：Bundle 扩展在 factory 阶段读它。
+		installToolPolicyBridge(options.toolExecutionMode);
 		// shell 解析一次，同时用于两处：
 		// 1. `Settings.shellPath`：SDK 构造 bash 工具时读它（`createAllToolDefinitions` →
 		//    `bash: { shellPath }`），因此 bash 工具用绝对路径，不依赖宿主 PATH；
 		// 2. 工具集合按平台可用性过滤：Windows 无 bash 时不能把 bash 留给模型（每次调用都报错）。
 		const shells = await resolvePiShells();
-		const availableTools = filterShellTools(tools, shells, process.platform);
+		// ADR-0039：不再用 Server 逐工具目录缩小能力面。可用集合 = 平台可用内置工具 +
+		// 已启用受信扩展实际注册的工具。这里只算出“平台不存在”的内置工具名，
+		// 在会话构建完成后从激活集合中剔除。
+		const availableBuiltins = filterShellTools(
+			[...PI_BUILTIN_TOOL_IDS],
+			shells,
+			process.platform,
+		);
+		const unavailableBuiltinNames = new Set(
+			PI_BUILTIN_TOOL_IDS.filter((name) => !availableBuiltins.includes(name)),
+		);
 		const services = await (await getSdk()).createAgentSessionServices({
 			cwd: sessionManager.getCwd(),
 			agentDir,
@@ -215,10 +243,9 @@ export function startPiAgentSession(
 		).createAgentSessionFromServices({
 			services,
 			sessionManager,
-			// 工具集合：approval/auto 为策略白名单（allow ∪ confirm，deny 排除）；
-			// yolo 为当前 Runtime 已加载的内置工具全集（ADR-0033）。
-			tools: availableTools,
-			excludeTools,
+			// 不传 `tools` 白名单：SDK 的 `tools` 是**全工具 allowlist**，只列内置工具会把
+			// 扩展注册的工具整体过滤掉（已由 extension-host.integration.test.ts 实测锁定）。
+			// 也不传 `excludeTools`：平台不可用的内置 shell 由下方 activateRuntimeTools 剔除。
 			...(initial.model ? { model: initial.model as never } : {}),
 			...(initial.thinkingLevel
 				? { thinkingLevel: initial.thinkingLevel }
@@ -230,7 +257,14 @@ export function startPiAgentSession(
 					: {}),
 		});
 
-		wrapper = new PiAgentSessionWrapperImpl(inner);
+		wrapper = new PiAgentSessionWrapperImpl(
+			inner,
+			options.runtimeInstanceId ?? null,
+			options.runtimeRevision ?? null,
+		);
+		// 按运行时实际注册集合激活（内置 + 扩展），仅剔除平台不存在的 shell。
+		// 两模式共用同一能力面；差别只在监督模式逐次审批（ADR-0039 决策 1）。
+		activateRuntimeTools(inner, unavailableBuiltinNames);
 		wrapper.start();
 		return wrapper;
 	})();
@@ -269,6 +303,12 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	private pendingUi: PendingUi | null = null;
 	private extensionUiQueue: PendingUi[] = [];
 	private promptRunning = false;
+	/** 扩展命令处理器是否仍在执行（期间不得把 agent_settled 当作可结算终态）。 */
+	private commandRunning = false;
+	/** 按会话运行时保存的 status/widget/title 有界快照（ADR-0040 决策 4）。 */
+	private readonly extensionUiState = new PiExtensionUiState();
+	/** 当前扩展 UI 写入句柄；运行时换代时重建，使旧句柄自动失效。 */
+	private extensionUiView: PiExtensionUiView | null = null;
 	private extensionsBound = false;
 	private extensionBindingPromise: Promise<void> | null = null;
 	private unsubscribe: (() => void) | null = null;
@@ -277,7 +317,11 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 	private shutdownPromise: Promise<void> | null = null;
 	private _alive = true;
 
-	constructor(public readonly inner: AgentSession) {}
+	constructor(
+		public readonly inner: AgentSession,
+		private readonly runtimeInstanceId: string | null = null,
+		private readonly runtimeRevision: string | null = null,
+	) {}
 
 	get sessionId(): string {
 		return this.inner.sessionId;
@@ -291,6 +335,7 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 		return (
 			this._alive &&
 			(this.promptRunning ||
+				this.commandRunning ||
 				this.inner.isStreaming ||
 				this.inner.isCompacting ||
 				this.pendingUi !== null ||
@@ -300,12 +345,19 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 
 	start(): void {
 		this.unsubscribe = this.inner.subscribe((event: AgentSessionEvent) => {
+			// 命令运行期间不得透传 agent_settled：那只是命令内部启动的 Agent 工作结束了，
+			// 命令处理器本身可能仍在执行。把它当终态会让 Worker/Server 提前释放项目锁，
+			// 下一条消息就会撞上 ``Project has an active turn``（ADR-0040 决策 2）。
+			// 命令真正完成时由 `agent.command` 分支在 `waitForIdle()` 后补发 prompt_done。
+			if (this.commandRunning && event.type === "agent_settled") return;
 			const projected = projectPiEvent(event, this.sessionId);
 			if (!projected) return;
 			if (IDLE_RESET_EVENT_TYPES.has(event.type)) this.resetIdleTimer();
 			this.emit(projected);
 		});
 		this.resetIdleTimer();
+		// 会话建立即绑定当前运行时换代；之后 Worker 换代会重建会话并重新绑定。
+		this.bindExtensionUiRuntime(this.runtimeInstanceId, this.runtimeRevision);
 		this.beginExtensionBinding();
 	}
 
@@ -401,6 +453,9 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				this.promptRunning = true;
 				this.inner
 					.prompt(message, {
+						// 普通 Prompt 不展开模板：网页上未注册的 `/xxx` 必须被当普通文本或直接拒绝，
+						// 不能在这里静默变成扩展命令（ADR-0040 决策 2）。
+						expandPromptTemplates: false,
 						...(images?.length ? { images } : {}),
 						...(streamingBehavior ? { streamingBehavior } : {}),
 						source: "rpc",
@@ -421,6 +476,48 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 						});
 					});
 				return null;
+			}
+			case "agent.command": {
+				// 只接受已注册的调用名：未注册的斜杠输入不得回退为普通模型请求
+				// （真实 SDK 下那会变成一次缺凭据的模型调用，见 extension-host 集成测试）。
+				const name = payload.name as string;
+				const args = typeof payload.args === "string" ? payload.args : "";
+				if (!this.inner.extensionRunner.getCommand(name)) {
+					return {
+						ok: false,
+						error: {
+							code: "PI_EXTENSION_COMMAND_NOT_FOUND",
+							message: `Unknown Pi command: ${name}`,
+						},
+					};
+				}
+				this.commandRunning = true;
+				this.promptRunning = true;
+				void (async () => {
+					try {
+						await this.inner.prompt(args ? `/${name} ${args}` : `/${name}`, {
+							source: "rpc",
+						});
+						// 命令处理器返回不等于回合结束：它可能还启动了 Agent 工作或有待回答问题。
+						// 必须等到权威空闲才能对外宣称完成（ADR-0040 决策 2）。
+						await this.inner.waitForIdle();
+						this.promptRunning = false;
+						this.commandRunning = false;
+						this.resetIdleTimer();
+						this.emit({ type: "prompt_done", sessionId: this.sessionId });
+					} catch (error: unknown) {
+						this.promptRunning = false;
+						this.commandRunning = false;
+						this.resetIdleTimer();
+						this.emit({
+							type: "prompt_error",
+							sessionId: this.sessionId,
+							code: "PI_RUNTIME_UNAVAILABLE",
+							message: error instanceof Error ? error.message : String(error),
+						});
+					}
+				})();
+				return { accepted: true };
 			}
 			case "agent.steer":
 				await this.inner.steer(payload.message as string);
@@ -461,6 +558,9 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 				return this.inner.getSessionStats();
 			case "agent.commands":
 				return this.getCommands();
+			case "extension.ui.get":
+				// 拉取式投影：网页重连后读取最新有界快照，不重放历史更新。
+				return this.extensionUiSnapshot();
 			case "models.list":
 				return this.listModels();
 			case "model.set": {
@@ -569,33 +669,34 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			.map((m) => ({ provider: m.provider, modelId: m.id }));
 	}
 
-	private async getCommands(): Promise<unknown> {
-		const commands: SlashCommandInfo[] = [];
+	private async getCommands(): Promise<PiExtensionCommands> {
+		const { runtimeInstanceId, runtimeRevision } = this;
+		// ADR-0040 决策 2：命令必须绑定到具体运行时换代，否则网页可能对已换代的会话
+		// 误执行旧命令。身份未就绪时不得编造占位值，直接报稳定的运行时不可用错误。
+		if (runtimeInstanceId === null || runtimeRevision === null) {
+			throw Object.assign(new Error("Pi runtime identity unavailable"), {
+				code: "PI_RUNTIME_UNAVAILABLE",
+			});
+		}
+		const commands: PiExtensionCommand[] = [];
+		// 等扩展注册完成：刚建好的会话可能在异步绑定中，此时查会得到空清单，
+		// 让网页误以为"没有任何命令"。
+		await this.ensureExtensionsBound().catch(() => {});
 		for (const registered of this.inner.extensionRunner.getRegisteredCommands()) {
 			commands.push({
 				name: registered.invocationName,
-				description: registered.description,
-				source: "extension",
-				sourceInfo: registered.sourceInfo,
+				description:
+					typeof registered.description === "string" ? registered.description : "",
 			});
 		}
-		for (const template of this.inner.promptTemplates) {
-			commands.push({
-				name: template.name,
-				description: template.description,
-				source: "prompt",
-				sourceInfo: template.sourceInfo,
-			});
-		}
-		for (const skill of this.inner.resourceLoader.getSkills().skills) {
-			commands.push({
-				name: `skill:${skill.name}`,
-				description: skill.description,
-				source: "skill",
-				sourceInfo: skill.sourceInfo,
-			});
-		}
-		return { commands };
+		// ADR-0040 决策 2：只投影扩展实际注册的调用名与描述。
+		// - 不含 Skills 与 Prompt 模板（本期不顺带开放）；
+		// - 丢弃 sourceInfo（内含本地来源路径，属敏感信息）。
+		return {
+			runtimeInstanceId,
+			runtimeRevision,
+			commands,
+		};
 	}
 
 	getState(): PiAgentState {
@@ -713,51 +814,62 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			editor: (title: string, prefill?: string, opts?: { timeout?: number }) =>
 				this.requestExtensionUi("editor", title, { prefill }, opts?.timeout),
 			notify: (message: string, type?: string) => {
-				this.emitUi({
+				// 等级必须走 `level` 字段；不得拼进正文（否则网页无法区分样式，也无法过滤）。
+				this.applyExtensionUiUpdate({
 					kind: "notify",
-					title: undefined,
 					message,
-					...(type ? { message: `${type}: ${message}` } : {}),
+					level: toNotifyLevel(type),
 				});
 			},
 			setStatus: (key: string, text?: string) => {
-				this.emitUi({ kind: "setStatus", title: key, message: text });
+				// 省略 text 即清除该 key；空串是合法文本，两者语义不同。
+				this.applyExtensionUiUpdate({
+					kind: "setStatus",
+					key,
+					...(text === undefined ? {} : { text }),
+				});
 			},
 			setWidget: (
 				key: string,
 				content?: unknown,
 				options?: { placement?: string },
 			) => {
-				if (content !== undefined && !Array.isArray(content)) return;
-				this.emitUi({
+				// 非字符串数组内容无法映射为有界文本行，按 SDK 非终端模式降级为清除。
+				const lines = Array.isArray(content)
+					? content.filter((line): line is string => typeof line === "string")
+					: undefined;
+				const placement = toWidgetPlacement(options?.placement);
+				this.applyExtensionUiUpdate({
 					kind: "setWidget",
-					title: key,
-					message: Array.isArray(content) ? content.join("\n") : undefined,
-					...(options?.placement ? { options: [options.placement] } : {}),
+					key,
+					...(content === undefined ? {} : { lines: lines ?? [] }),
+					...(placement ? { placement } : {}),
 				});
 			},
 			setTitle: (title: string) => {
-				this.emitUi({ kind: "setTitle", title, message: undefined });
+				this.applyExtensionUiUpdate({ kind: "setTitle", title });
 			},
 			pasteToEditor: (text: string) => {
-				this.emitUi({
+				this.applyExtensionUiUpdate({
 					kind: "set_editor_text",
-					title: undefined,
-					message: text,
+					requestId: randomUUID(),
+					text,
 				});
 			},
 			setEditorText: (text: string) => {
-				this.emitUi({
+				this.applyExtensionUiUpdate({
 					kind: "set_editor_text",
-					title: undefined,
-					message: text,
+					requestId: randomUUID(),
+					text,
 				});
 			},
 			custom: () => {
-				this.emitUi({
+				// ADR-0040 决策 3：custom 返回 undefined，不承诺任意终端布局。
+				// 以 notify 告警说明降级，不伪造一个看似成功的 status。
+				this.applyExtensionUiUpdate({
 					kind: "notify",
-					title: "Custom UI",
-					message: "custom UI 不支持",
+					message: "custom UI 在网页不受支持，已按非终端模式降级",
+					level: "warning",
 				});
 				return Promise.resolve(undefined);
 			},
@@ -785,6 +897,51 @@ export class PiAgentSessionWrapperImpl implements PiAgentSessionWrapper {
 			...(req.options?.length ? { options: req.options } : {}),
 		};
 		this.emit({ type: "extension_request", sessionId: this.sessionId, ui });
+	}
+
+	/**
+	 * 绑定扩展 UI 状态的运行时换代。
+	 *
+	 * Worker 在运行时初始化时调用；传入新的身份/revision 会使旧句柄失效，
+	 * 从而阻止换代后迟到的旧状态覆盖新状态（ADR-0040 决策 4）。
+	 */
+	bindExtensionUiRuntime(instanceId: string | null, revision: string | null): void {
+		this.extensionUiView = this.extensionUiState.bind(instanceId, revision);
+	}
+
+	/** 当前持续 UI 快照（浏览器重连时拉取最新值，不重放历史更新）。 */
+	extensionUiSnapshot(): PiExtensionUiSnapshot {
+		return this.extensionUiState.snapshot();
+	}
+
+	/**
+	 * 应用一条扩展 UI 更新。
+	 *
+	 * status/widget/title 是持续状态，写入有界快照；notify/set_editor_text 是一次性投影，
+	 * 不入快照，直接转发。被拒绝的状态变更不伪造成功，也不报告为已应用。
+	 */
+	private applyExtensionUiUpdate(update: PiExtensionUiUpdate): void {
+		this.extensionUiView ??= this.extensionUiState.bind(this.sessionId, null);
+		const result = this.extensionUiView.apply(update);
+		if (result.applied || result.reason !== "TRANSIENT") return;
+		switch (update.kind) {
+			case "notify":
+				this.emitUi({
+					kind: "notify",
+					title: undefined,
+					message: update.message,
+				});
+				return;
+			case "set_editor_text":
+				this.emitUi({
+					kind: "set_editor_text",
+					title: undefined,
+					message: update.text,
+				});
+				return;
+			default:
+				return;
+		}
 	}
 
 	private requestExtensionUi(

@@ -82,7 +82,7 @@ pnpm -r test
 pnpm --filter @vcpdeck/server build
 ```
 
-`pnpm lint` 当前依赖仓库提供可用的 ESLint executable；若命令因工具缺失未运行，必须明确报告，不能声称 lint 通过。
+`pnpm lint` 使用 Biome（`npx --yes @biomejs/biome@^2 lint packages scripts`，配置见 `biome.json`），工具由 npx 自动获取，无需仓库预装。当前基线是通过（退出码 0，0 errors）；会失败的规则已在 `biome.json` 中显式降级为 `warn`，因此存在大量不阻塞门禁的告警，属既定取舍，不要在无关改动中顺手清理。若因离线等原因无法获取工具而未运行，必须明确报告，不能声称 lint 通过。
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

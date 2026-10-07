@@ -11,10 +11,8 @@ import {
 	PI_BUNDLE_PROTOCOL_VERSION,
 	PI_RUNTIME_SPEC_PROTOCOL_VERSION,
 	type PiCapabilityStatus,
-	type PiCredentialLeaseV2,
-	type PiProviderInfo,
 	type PiRuntimeAck,
-	type PiRuntimeSpecMessageV4,
+	type PiRuntimeSpecMessageV5,
 	type PiRuntimeStatus,
 } from "@vcpdeck/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -23,14 +21,14 @@ import { PiProviderService } from "./pi-provider.service.js";
 import { PiProfileService } from "./pi-profile.service.js";
 import { PiRuntimeRegistry } from "./pi-runtime-registry.service.js";
 import {
-	buildPiRuntimeSpecV4,
+	buildPiRuntimeSpecV5,
 	type PiCredentialMeta,
 } from "./pi-runtime-spec.js";
 
 /** Server → Client 的 Spec 发送通道（由 ClientGateway.afterInit 绑定）。 */
 export type PiRuntimeSender = (
 	clientId: string,
-	message: PiRuntimeSpecMessageV4 | null,
+	message: PiRuntimeSpecMessageV5 | null,
 ) => void;
 
 @Injectable()
@@ -130,14 +128,27 @@ export class PiRuntimeService {
 		return this.registry.status(clientId);
 	}
 
-	/** 返回 ready RuntimeSpec 对应的 Profile 默认执行模式；不可用时 fail closed。 */
-	async effectiveExecutionMode(clientId: string): Promise<import("@vcpdeck/shared").PiToolExecutionMode> {
+	/**
+	 * 返回 ready RuntimeSpec 对应的 Profile 默认执行模式；不可用时 fail closed。
+	 *
+	 * Profile 处于待确认迁移时抛 `PI_EXECUTION_CONFIRMATION_REQUIRED`：
+	 * 静默返回一个模式就等于替操作者完成了 ADR-0039 要求���显式确认。
+	 */
+	async effectiveExecutionMode(
+		clientId: string,
+	): Promise<import("@vcpdeck/shared").PiToolExecutionMode> {
 		this.registry.assertReady(clientId);
 		const profile = await this.profiles.resolveBoundProfile(clientId);
 		if (!profile || !profile.enabled || profile.allowedModels.length === 0) {
 			throw Object.assign(new Error("Pi Profile is unavailable"), { code: "PI_CONFIG_UNAVAILABLE" });
 		}
-		return profile.toolExecutionMode;
+		if (profile.executionConfiguration.state !== "ready") {
+			throw Object.assign(
+				new Error("Pi Profile 尚未确认新的执行语义"),
+				{ code: "PI_EXECUTION_CONFIRMATION_REQUIRED" },
+			);
+		}
+		return profile.executionConfiguration.mode;
 	}
 
 	/** 未就绪时抛 PI_CONFIG_UNAVAILABLE。 */
@@ -162,6 +173,15 @@ export class PiRuntimeService {
 		const profile = await this.profiles.resolveBoundProfile(clientId);
 		if (!profile || !profile.enabled || profile.allowedModels.length === 0) {
 			this.registry.setDesired(clientId, null);
+			this.emit(clientId, null);
+			return;
+		}
+
+		// 待确认迁移：不下发 Spec，也不解密凭据，并给出可操作原因（ADR-0039 决策 3）。
+		// 静默下发一个模式等于替操作者完成了要求显式确认的权限变更。
+		if (profile.executionConfiguration.state !== "ready") {
+			this.registry.setDesired(clientId, null);
+			this.registry.setReason(clientId, "PI_EXECUTION_CONFIRMATION_REQUIRED");
 			this.emit(clientId, null);
 			return;
 		}
@@ -192,7 +212,7 @@ export class PiRuntimeService {
 			this.emit(clientId, null);
 			return;
 		}
-		const spec = buildPiRuntimeSpecV4(
+		const spec = buildPiRuntimeSpecV5(
 			profile,
 			providers,
 			metas,
@@ -256,7 +276,7 @@ export class PiRuntimeService {
 		}
 	}
 
-	private emit(clientId: string, message: PiRuntimeSpecMessageV4 | null): void {
+	private emit(clientId: string, message: PiRuntimeSpecMessageV5 | null): void {
 		if (!this.sender) return;
 		const socketId = this.registry.socketFor(clientId);
 		if (!socketId || !this.registry.isCompatible(clientId)) return;

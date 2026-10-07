@@ -4,7 +4,16 @@
 
 ## [未发布]
 
+## [0.16.0] - 2026-10-07
+
+### 变更
+
+- **Pi 工具执行语义改为两模式（ADR-0039）**：删除逐工具三桶（`allow/confirm/deny`）与 Approval/Auto/YOLO 三模式，改为 `supervised`（含读取工具在内每次调用需人工批准）与 `automatic`（直接执行当前 Runtime 实际注册的工具）。同一 `bash` 既能查询也能破坏，按工具名分类无法提供等价安全保障；扩展工具接入也不再需要逐工具配置。协议版本升级：RuntimeSpec v5、SessionJob v3、host bridge v3、`vcp.tool-policy` resource v3。存量 Profile **不静默扩权**：旧 `yolo` 迁为 `automatic`，旧 `approval`/`auto` 置为待确认状态，须由操作者在 Profile 页经专用端点显式确认（带版本 CAS，冲突返回 409）；活跃 Run 内不热切换。
+- **受信 Pi 扩展的网页交互（ADR-0040）**：网页可发现并调用当前会话实际注册的扩展斜杠命令（仅投影调用名与描述，不回显本地来源路径，不含 Skills/Prompt 模板）；未知命令明确拒绝、绝不退化为普通 Prompt；命令与 Prompt 同样由 Server 接纳 Run，复用项目互斥与结算链路。通知与持续文本状态接入网页：status/widget/title 按会话保存有界快照（超限拒绝而非静默截断），重连时拉取最新快照，晚到的旧状态不会覆盖新状态；扩展编辑填充仅由用户显式应用或忽略，UI 不自动发送；扩展文本以纯文本展示，不执行 HTML/脚本或终端控制序列。
+
 ### 修复
+
+- **扩展命令跑完后项目锁不再泄漏（`Project has an active turn`）**：Client 的 supervisor 只为 `agent.prompt` 建立活动回合，`agent.command` 的 `activeRun` 恒为 `null`，导致它的终态分支整段被跳过、结算回退用的 `terminalCwd` 永不写入。Server 30 秒宽限期后的结算查询不带 `cwdRef`、只能按 `jobId`+`runId` 回退定位，于是拿到 `PI_SESSION_NOT_FOUND`；该失败被静默吞掉（`if (!response.ok) return`），Job 停在 `running`，而项目锁是 Server 进程内存态，**只有重启才清**。表现即：执行过一条扩展命令后，同项目后续任何操作（**包括新建会话**）全部撞 `PI_PROJECT_BUSY`。现在命令与 Prompt 共用同一套运行建立/结清动作集，新增回归用例锁定「无 `cwdRef` 的结算查询仍能定位」。
 
 - **Git SSH 分发状态在 Client 重连后不再卡在「待同步」**：`REGISTER` 处理原先先下发 install、后回注册 ack，而 Client 的 Git SSH 桥只处理 ack 之后的指令（fail closed），导致每次重连后的首次 install 被静默丢弃、回执永不产生——能力从不可用恢复、换代或断线收敛后，目标会永久停在 `pending`（密钥实际在盘且已生效，仅状态不收敛）。现在先回 ack 再下发，状态可正常收敛到 `installed`；新增回归用例锁定命令收发顺序。
 

@@ -30,9 +30,13 @@ import {
 	isPiToolExecutionMode,
 	PI_ERROR_CODES,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
+	parsePiExtensionCommands,
+	parsePiExtensionUiSnapshot,
 	type ActorContext,
 	type PiAttachmentDescriptor,
 	type PiCwdRef,
+	type PiExtensionCommands,
+	type PiExtensionUiSnapshot,
 	type PiPromptAccepted,
 	type PiRequest,
 	type PiRuntimeStatus,
@@ -715,7 +719,7 @@ export class PiController {
 			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
 		}
 		if (body.mode !== null && !isPiToolExecutionMode(body.mode)) {
-			throw badRequest("PI_PROTOCOL_INVALID", "mode must be approval, auto, yolo, or null");
+			throw badRequest("PI_PROTOCOL_INVALID", "mode must be supervised, automatic, or null");
 		}
 		return this.withReconciledClient(clientId, async (lease) => {
 			if (Object.keys(body).some((key) => !["rootDir", "relativePath", "mode"].includes(key))) {
@@ -823,116 +827,180 @@ export class PiController {
 			throw badRequest("PI_PROTOCOL_INVALID", "prompt or images required");
 		}
 
-		return this.withReconciledClient(clientId, async (lease) => {
-			const [projectKey] = await Promise.all([
-				this.resolveProjectKey(lease, { rootDir, relativePath }),
-				this.runs.ensureSession(actor, { clientId, sessionId }),
-			]);
-			await this.assertIdle(clientId, projectKey);
-			let run: { jobId: string; runId: string; executionMode: PiToolExecutionMode };
+		return this.withReconciledClient(clientId, (lease) =>
+			this.admitAndDispatch(lease, actor, {
+				clientId,
+				sessionId,
+				cwdRef: { rootDir, relativePath },
+				submissionId,
+				action: "agent.prompt",
+				payload: (executionMode) => ({
+					prompt: body.prompt,
+					submissionId,
+					executionMode,
+					...(images.length > 0 ? { attachments: images } : {}),
+				}),
+			}),
+		);
+	}
+
+
+	/**
+	 * 接纳一个新 Run 并分发一次动作。
+	 *
+	 * prompt 与扩展命令共用同一条 Run 生命周期（ADR-0040 决策 2）：复用项目互斥、
+	 * 取消、重连对账与结算，不建立独立的后台命令通道。调用方**不得**自带 runId，
+	 * 否则会绕过项目互斥与结算对账。
+	 */
+	private async admitAndDispatch(
+		lease: PiGenerationLease,
+		actor: ActorContext,
+		params: {
+			clientId: string;
+			sessionId: string;
+			cwdRef: PiCwdRef;
+			submissionId: string;
+			action: PiRequest["action"];
+			payload: (executionMode: PiToolExecutionMode) => Record<string, unknown>;
+			/**
+			 * 判定动作是否被拒绝。Client 对已注册但失败的命令返回 `{ok:false}` 而非
+			 * transport 错误，必须在此翻成稳定 HTTP 错误，否则调用方会看到 200
+			 * 却什么都没发生（静默失败）。
+			 */
+			rejectResult?: (data: unknown) => { code: string; message: string } | null;
+		},
+	): Promise<PiPromptAccepted> {
+		const { clientId, sessionId, cwdRef, submissionId } = params;
+		const [projectKey] = await Promise.all([
+			this.resolveProjectKey(lease, cwdRef),
+			this.runs.ensureSession(actor, { clientId, sessionId }),
+		]);
+		await this.assertIdle(clientId, projectKey);
+		let run: { jobId: string; runId: string; executionMode: PiToolExecutionMode };
+		try {
+			run = await this.runs.startRun(actor, { clientId, sessionId, projectKey });
+		} catch (err) {
+			if (!isPiError(err) || err.code !== "PI_PROJECT_BUSY") throw err;
+			const previous = await this.runs.snapshot(sessionId, actor.identityId);
+			if (!previous.runId)
+				throw new ConflictException({ code: err.code, message: err.message });
+			const state = parsePiAgentState(
+				await this.requestOnce(lease, {
+					requestId: randomUUID(),
+					action: "agent.state",
+					cwdRef,
+					sessionId,
+					jobId: sessionId,
+					runId: previous.runId,
+				}),
+			);
+			await this.runs.reconcileOpen(sessionId, previous.runId, state);
 			try {
 				run = await this.runs.startRun(actor, { clientId, sessionId, projectKey });
-			} catch (err) {
-				if (!isPiError(err) || err.code !== "PI_PROJECT_BUSY") throw err;
-				const previous = await this.runs.snapshot(sessionId, actor.identityId);
-				if (!previous.runId) throw new ConflictException({ code: err.code, message: err.message });
-				const state = parsePiAgentState(await this.requestOnce(lease, {
-					requestId: randomUUID(), action: "agent.state", cwdRef: { rootDir, relativePath },
-					sessionId, jobId: sessionId, runId: previous.runId,
-				}));
-				await this.runs.reconcileOpen(sessionId, previous.runId, state);
-				try {
-					run = await this.runs.startRun(actor, { clientId, sessionId, projectKey });
-				} catch (retryError) {
-					if (isPiError(retryError) && retryError.code === "PI_PROJECT_BUSY") {
-						throw new ConflictException({ code: retryError.code, message: retryError.message });
-					}
-					throw retryError;
+			} catch (retryError) {
+				if (isPiError(retryError) && retryError.code === "PI_PROJECT_BUSY") {
+					throw new ConflictException({
+						code: retryError.code,
+						message: retryError.message,
+					});
 				}
+				throw retryError;
 			}
-			const { jobId, runId } = run;
+		}
+		const { jobId, runId } = run;
 
-			// 先发布 run_created（submissionId 绑定），再 dispatch，保证首个 Agent 事件不丢
-			await this.events.publish({
-				clientId,
+		// 先发布 run_created（submissionId 绑定），再 dispatch，保证首个 Agent 事件不丢
+		await this.events.publish({
+			clientId,
+			sessionId,
+			jobId,
+			runId,
+			event: { type: "run_created", sessionId, submissionId, runId },
+		});
+
+		let dispatchError: unknown;
+		this.runtime?.assertCompatible(lease.clientId);
+		this.runtime?.assertReady(lease.clientId);
+		let response: PiResponse;
+		try {
+			response = await this.requests.request(lease, {
+				requestId: randomUUID(),
+				action: params.action,
+				cwdRef,
 				sessionId,
 				jobId,
 				runId,
-				event: { type: "run_created", sessionId, submissionId, runId },
+				payload: params.payload(run.executionMode),
 			});
-
-			let dispatchError: unknown;
-			this.runtime?.assertCompatible(lease.clientId);
-			this.runtime?.assertReady(lease.clientId);
-			let response: PiResponse;
-			try {
-				response = await this.requests.request(lease, {
-					requestId: randomUUID(),
-					action: "agent.prompt",
-					cwdRef: { rootDir, relativePath },
-					sessionId,
-					jobId,
-					runId,
-					payload: {
-						prompt: body.prompt,
-						submissionId,
-						executionMode: run.executionMode,
-						...(images.length > 0 ? { attachments: images } : {}),
-					},
-				});
-				if (!response.ok) {
-					await this.runs.finishRun(jobId, runId);
-					dispatchError = badRequest(response.error.code, response.error.message);
-				} else {
-					await this.runs.accept(jobId, runId);
-				}
-			} catch (error) {
-				dispatchError = error;
-				const code = error instanceof Error && "code" in error
+			const rejection = response.ok
+				? (params.rejectResult?.(response.data) ?? null)
+				: { code: response.error.code, message: response.error.message };
+			if (rejection) {
+				await this.runs.finishRun(jobId, runId);
+				dispatchError = badRequest(rejection.code, rejection.message);
+			} else {
+				await this.runs.accept(jobId, runId);
+			}
+		} catch (error) {
+			dispatchError = error;
+			const code =
+				error instanceof Error && "code" in error
 					? String((error as { code: unknown }).code)
 					: undefined;
-				if (code === "PI_CLIENT_DISCONNECTED") {
-					await this.runs.markRunDisconnected(jobId, runId);
-				} else if (code === "PI_REQUEST_TIMEOUT") {
-					try {
-						const stateResponse: PiResponse = await this.requests.request(lease, {
-							requestId: randomUUID(), action: "agent.state",
-							cwdRef: { rootDir, relativePath }, sessionId, jobId, runId,
-						});
-						if (stateResponse.ok) {
-							const state = parsePiAgentState(stateResponse.data);
-							if (isPiAgentIdle(state)) {
-								await this.runs.finishRun(jobId, runId);
-							} else {
-								await this.runs.accept(jobId, runId);
-								await this.runs.reconcileOpen(jobId, runId, state);
-							}
+			if (code === "PI_CLIENT_DISCONNECTED") {
+				await this.runs.markRunDisconnected(jobId, runId);
+			} else if (code === "PI_REQUEST_TIMEOUT") {
+				try {
+					const stateResponse: PiResponse = await this.requests.request(lease, {
+						requestId: randomUUID(),
+						action: "agent.state",
+						cwdRef,
+						sessionId,
+						jobId,
+						runId,
+					});
+					if (stateResponse.ok) {
+						const state = parsePiAgentState(stateResponse.data);
+						if (isPiAgentIdle(state)) {
+							await this.runs.finishRun(jobId, runId);
+						} else {
+							await this.runs.accept(jobId, runId);
+							await this.runs.reconcileOpen(jobId, runId, state);
 						}
-					} catch (stateError) {
-						if (stateError instanceof Error && "code" in stateError
-							&& String((stateError as { code: unknown }).code) === "PI_CLIENT_DISCONNECTED") {
-							await this.runs.markRunDisconnected(jobId, runId);
-						}
+					}
+				} catch (stateError) {
+					if (
+						stateError instanceof Error &&
+						"code" in stateError &&
+						String((stateError as { code: unknown }).code) ===
+							"PI_CLIENT_DISCONNECTED"
+					) {
+						await this.runs.markRunDisconnected(jobId, runId);
 					}
 				}
 			}
+		}
 
-			const current = await this.runs.snapshot(sessionId, actor.identityId);
-			if (current.status === "done" || current.status === "cancelled") {
-				try {
-					await this.requests.request(lease, {
-						requestId: randomUUID(), action: "agent.abort",
-						sessionId, jobId, runId,
-					});
-				} catch { /* best effort: only the dispatched run is addressed */ }
-				throw new ConflictException({
-					code: "PI_CONTROL_FORBIDDEN",
-					message: "Session completed while the prompt was dispatching",
+		const current = await this.runs.snapshot(sessionId, actor.identityId);
+		if (current.status === "done" || current.status === "cancelled") {
+			try {
+				await this.requests.request(lease, {
+					requestId: randomUUID(),
+					action: "agent.abort",
+					sessionId,
+					jobId,
+					runId,
 				});
+			} catch {
+				/* best effort: only the dispatched run is addressed */
 			}
-			if (dispatchError) throw dispatchError;
-			return { jobId, runId, sessionId };
-		});
+			throw new ConflictException({
+				code: "PI_CONTROL_FORBIDDEN",
+				message: "Session completed while the action was dispatching",
+			});
+		}
+		if (dispatchError) throw dispatchError;
+		return { jobId, runId, sessionId };
 	}
 
 	@Sse("agent/:sessionId/events")
@@ -1118,6 +1186,106 @@ export class PiController {
 			},
 		});
 		return { ok: true };
+	}
+
+	@Get("agent/:sessionId/commands")
+	async extensionCommands(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Query("rootDir") rootDir: string,
+		@Query("relativePath") relativePath: string,
+	): Promise<PiExtensionCommands> {
+		await this.requirePiClient(clientId);
+		// Client 用 cwdRef 解析会话归属与项目，缺失即 PI_PROTOCOL_INVALID。
+		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
+			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
+		}
+		const data = await this.requestForClient(clientId, {
+			requestId: randomUUID(),
+			action: "agent.commands",
+			cwdRef: { rootDir, relativePath },
+			sessionId,
+		});
+		// Client 只应投影调用名与描述；本地来源路径不得越过 Client 边界。
+		return this.parseUpstream("Client", data, parsePiExtensionCommands);
+	}
+
+	@Get("agent/:sessionId/extension-ui")
+	async extensionUiSnapshot(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Query("rootDir") rootDir: string,
+		@Query("relativePath") relativePath: string,
+	): Promise<PiExtensionUiSnapshot> {
+		await this.requirePiClient(clientId);
+		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
+			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
+		}
+		const data = await this.requestForClient(clientId, {
+			requestId: randomUUID(),
+			action: "extension.ui.get",
+			cwdRef: { rootDir, relativePath },
+			sessionId,
+		});
+		return this.parseUpstream("Client", data, parsePiExtensionUiSnapshot);
+	}
+
+	@Post("agent/:sessionId/command")
+	async executeCommand(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Body()
+		body: {
+			rootDir?: string;
+			relativePath?: string;
+			submissionId?: string;
+			name?: string;
+			args?: string;
+		},
+		@Actor() actor: ActorContext,
+	): Promise<PiPromptAccepted> {
+		await this.requirePiClient(clientId);
+		const { rootDir, relativePath, name } = body ?? {};
+		if (typeof rootDir !== "string" || typeof relativePath !== "string") {
+			throw badRequest("PI_PROTOCOL_INVALID", "rootDir/relativePath required");
+		}
+		if (typeof name !== "string" || name.length === 0) {
+			throw badRequest("PI_PROTOCOL_INVALID", "name required");
+		}
+		// 命令是**启动新工作**，因此与 prompt 一样由 Server 接纳 Run：
+		// 复用项目互斥、取消、重连对账与结算，不接受调用方自带 runId
+		// （否则会绕过互斥与结算对账）。
+		const submissionId =
+			typeof body.submissionId === "string" && body.submissionId.length > 0
+				? body.submissionId
+				: randomUUID();
+		return this.withReconciledClient(clientId, (lease) =>
+			this.admitAndDispatch(lease, actor, {
+				clientId,
+				sessionId,
+				cwdRef: { rootDir, relativePath },
+				submissionId,
+				action: "agent.command",
+				payload: () => ({
+					name,
+					args: typeof body.args === "string" ? body.args : "",
+				}),
+				// 未注册命令由 Client 以 `{ ok: false }` 返回而非 transport 错误
+				// （真实 SDK 不会 reject）：必须翻成稳定 HTTP 错误，
+				// 否则调用方会看到 200 却什么都没发生。
+				rejectResult: (data) => {
+					const r = data as {
+						ok?: boolean;
+						error?: { code?: string; message?: string };
+					} | null;
+					if (r?.ok !== false) return null;
+					return {
+						code: r.error?.code ?? "PI_PROTOCOL_INVALID",
+						message: r.error?.message ?? "Pi command rejected",
+					};
+				},
+			}),
+		);
 	}
 
 	// ── 空闲项目操作（idle mutation lock） ──

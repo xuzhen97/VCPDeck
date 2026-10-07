@@ -7,7 +7,7 @@ import {
 	type PiProfileInfo,
 	type PiProviderInfo,
 	type PiRuntimeSpecV1,
-	type PiRuntimeSpecV4,
+	type PiRuntimeSpecV5,
 } from "@vcpdeck/shared";
 
 export interface PiCredentialMeta {
@@ -45,16 +45,27 @@ export function computeRuntimeRevision(input: {
 }
 
 /**
- * 构造 v4 RuntimeSpec：只输入非秘密 Provider、凭据元数据与目标 Client 的 Bundle 版本。
- * 策略与执行模式均随 Spec 下发（ADR-0033）；`requiredBundle` 仅在 Profile 启用了资源时出现，
- * 未提供 `bundleVersion` 时不构造该字段（下发前的门控已保证需要资源时必然存在已上报的 Bundle 版本）。
+ * 构造 v5 RuntimeSpec：只输入非秘密 Provider、凭据元数据与目标 Client 的 Bundle 版本。
+ *
+ * 相比 v4 的唯一变化是**删除 `toolPolicy`**：能力面由「平台可用内置工具 + 已启用
+ * 受信扩展实际注册的工具」决定，Server 不再维护逐工具授权目录（ADR-0039）。
+ * `requiredBundle` 仅在 Profile 启用了资源时出现。
+ *
+ * 传入的 Profile 若处于 `needs_confirmation`，`toolExecutionMode` 为 null；
+ * 调用方必须先完成显式确认再调用本函数，否则这里会以
+ * `PI_EXECUTION_CONFIRMATION_REQUIRED` fail closed，而不是猜一个默认模式。
  */
-export function buildPiRuntimeSpecV4(
+export function buildPiRuntimeSpecV5(
 	profile: PiProfileInfo,
 	providers: PiProviderInfo[],
 	credentials: PiCredentialMeta[],
 	bundleVersion?: string,
-): PiRuntimeSpecV4 {
+): PiRuntimeSpecV5 {
+	if (profile.executionConfiguration.state !== "ready") {
+		throw Object.assign(new Error("Pi Profile 尚未确认新的执行语义"), {
+			code: "PI_EXECUTION_CONFIRMATION_REQUIRED",
+		});
+	}
 	const requiredBundle =
 		profile.enabledResourceIds.length > 0 && bundleVersion
 			? {
@@ -64,7 +75,7 @@ export function buildPiRuntimeSpecV4(
 				}
 			: undefined;
 	return {
-		schemaVersion: 4,
+		schemaVersion: 5,
 		specId: randomUUID(),
 		profileId: profile.id,
 		profileRevision: profile.revision,
@@ -81,12 +92,7 @@ export function buildPiRuntimeSpecV4(
 			allowedModels: profile.allowedModels.map((model) => ({ ...model })),
 			defaultThinkingLevel: profile.defaultThinkingLevel,
 		},
-		toolPolicy: {
-			allow: [...profile.toolPolicy.allow],
-			confirm: [...profile.toolPolicy.confirm],
-			deny: [...profile.toolPolicy.deny],
-		},
-		toolExecutionMode: profile.toolExecutionMode,
+		toolExecutionMode: profile.executionConfiguration.mode,
 		...(requiredBundle ? { requiredBundle } : {}),
 		runtimeRevision: computeRuntimeRevision({
 			profileId: profile.id,

@@ -142,7 +142,7 @@ function makeSdk() {
 					status: "idle",
 					runId: null,
 					executionModeOverride: null,
-					effectiveExecutionMode: "approval",
+					effectiveExecutionMode: "supervised",
 					ownerName: "User",
 					isOwner: true,
 				})),
@@ -288,6 +288,7 @@ describe("PiPanel", () => {
 		});
 		const thinkingCalls = (sdk.pi.agent.setThinking as ReturnType<typeof vi.fn>)
 			.mock.calls.length;
+		// 思考选择的「auto」仍会传给 setThinking（此处验证重复点击同一值不多发请求）。
 		fireEvent.change(thinkingSelect, {
 			target: { value: "auto" },
 		});
@@ -685,7 +686,7 @@ describe("PiPanel", () => {
 					status: "idle",
 					runId: null,
 					executionModeOverride: null,
-					effectiveExecutionMode: "approval",
+					effectiveExecutionMode: "supervised",
 					ownerName: "User",
 					isOwner: true,
 				},
@@ -704,8 +705,8 @@ describe("PiPanel", () => {
 				sessionId: "s1",
 				status: "idle",
 				runId: null,
-				executionModeOverride: "yolo",
-				effectiveExecutionMode: "yolo",
+				executionModeOverride: "automatic",
+				effectiveExecutionMode: "automatic",
 				ownerName: "User",
 				isOwner: true,
 			});
@@ -719,14 +720,14 @@ describe("PiPanel", () => {
 
 			const repo = { rootDir: "D:\\", relativePath: "repo" };
 			fireEvent.change(screen.getByLabelText("会话执行模式"), {
-				target: { value: "yolo" },
+				target: { value: "automatic" },
 			});
 			await vi.waitFor(() =>
-				expect(sdk.pi.agent.setExecutionMode).toHaveBeenCalledWith("c1", "s1", repo, "yolo"),
+				expect(sdk.pi.agent.setExecutionMode).toHaveBeenCalledWith("c1", "s1", repo, "automatic"),
 			);
 			// 菜单展示服务端确认的覆盖值与有效模式，而不是前端猜测值
 			await vi.waitFor(() =>
-				expect(screen.getByRole("status")).toHaveTextContent("YOLO 会跳过 Tool Policy"),
+				expect(screen.getByRole("status")).toHaveTextContent("自动执行：已注册工具直接运行"),
 			);
 		});
 	});

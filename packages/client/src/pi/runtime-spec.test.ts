@@ -3,14 +3,12 @@ import type {
 	PiCredentialLeaseV2,
 	PiModelRef,
 	PiRuntimeProviderSpec,
-	PiRuntimeSpecMessageV4,
+	PiRuntimeSpecMessageV5,
 } from "@vcpdeck/shared";
-import { PI_BUILTIN_TOOL_IDS } from "@vcpdeck/shared";
 import {
 	effectiveDefaultModel,
 	evaluateRuntimeSpec,
 	resolveModelRegistrations,
-	toolSetsFor,
 	type ModelRuntimeLike,
 } from "./runtime-spec.js";
 
@@ -75,10 +73,10 @@ function message(overrides: {
 	defaultModel?: { provider: string; modelId: string };
 	allowedModels?: PiModelRef[];
 	entries?: Array<{ providerId: string; apiKey: string }>;
-} = {}): PiRuntimeSpecMessageV4 {
+} = {}): PiRuntimeSpecMessageV5 {
 	return {
 		spec: {
-			schemaVersion: 4,
+			schemaVersion: 5,
 			specId: "s1",
 			profileId: "p1",
 			profileRevision: 3,
@@ -91,8 +89,8 @@ function message(overrides: {
 				],
 				defaultThinkingLevel: "medium",
 			},
-			toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
-			toolExecutionMode: "auto",
+			// v5 不再携带逐工具策略（ADR-0039）；模式只有两值。
+			toolExecutionMode: "automatic",
 			runtimeRevision: "0123456789abcdef",
 		},
 		credentials: {
@@ -327,51 +325,6 @@ describe("createModelRuntimeWithLease 与 SDK 目录交互", () => {
 		expect(config.models[0]).toMatchObject({ id: "claude-x", contextWindow: 1000000 });
 		expect(setRuntimeApiKey).toHaveBeenCalledWith("anthropic", "sk-live");
 		vi.doUnmock("@earendil-works/pi-coding-agent");
-	});
-});
-
-describe("toolSetsFor（策略与执行模式的工具映射）", () => {
-	it("approval/auto：tools = allow ∪ confirm 去重排序，excludeTools = deny", () => {
-		for (const mode of ["approval", "auto"] as const) {
-			expect(
-				toolSetsFor(
-					{
-						allow: ["read", "grep"],
-						confirm: ["bash", "read"],
-						deny: ["write"],
-					},
-					mode,
-				),
-			).toEqual({
-				tools: ["bash", "grep", "read"],
-				excludeTools: ["write"],
-			});
-		}
-	});
-
-	it("approval/auto：空策略得到空白名单（未列出工具全部不可用）", () => {
-		expect(toolSetsFor({ allow: [], confirm: [], deny: [] }, "auto")).toEqual({
-			tools: [],
-			excludeTools: [],
-		});
-	});
-
-	it("approval/auto：未列出的工具既不进 tools 也不进 excludeTools", () => {
-		const { tools, excludeTools } = toolSetsFor(
-			{ allow: ["read"], confirm: [], deny: [] },
-			"approval",
-		);
-		expect(tools).not.toContain("bash");
-		expect(excludeTools).not.toContain("bash");
-	});
-
-	it("yolo：暴露当前 Runtime 的内置工具全集，且不应用 deny", () => {
-		expect(
-			toolSetsFor({ allow: [], confirm: [], deny: ["bash"] }, "yolo"),
-		).toEqual({
-			tools: [...PI_BUILTIN_TOOL_IDS].sort(),
-			excludeTools: [],
-		});
 	});
 });
 

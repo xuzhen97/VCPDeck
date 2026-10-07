@@ -399,7 +399,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 		const invalid = await requestOnce(child, request("invalid-mode", "unsafe"));
 		expect(invalid).toMatchObject({ ok: false, error: { code: "PI_PROTOCOL_INVALID" } });
 		for (const prompt of ["", " \t"]) {
-			const empty = await requestOnce(child, { ...request(`empty-${prompt.length}`, "approval"), payload: { prompt, submissionId: "empty", executionMode: "approval" } });
+			const empty = await requestOnce(child, { ...request(`empty-${prompt.length}`, "supervised"), payload: { prompt, submissionId: "empty", executionMode: "supervised" } });
 			expect(empty).toMatchObject({ ok: false, error: { code: "PI_PROTOCOL_INVALID" } });
 		}
 		child.kill();
@@ -541,7 +541,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 			sessionId,
 			runId: "run-1",
 			cwdRef: { rootDir: cwd, relativePath: "" },
-			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "approval" },
+			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "supervised" },
 		});
 		await settled;
 
@@ -682,7 +682,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 			sessionId,
 			runId: "run-1",
 			cwdRef: { rootDir: fakeHome, relativePath: "project" },
-			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "approval" },
+			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "supervised" },
 		});
 		await settled;
 
@@ -845,7 +845,7 @@ describe("Pi Worker prompt pipeline seam", () => {
 					specId: "s1",
 					profileId: "p1",
 					profileRevision: 1,
-					toolExecutionMode: "approval",
+					toolExecutionMode: "supervised",
 					modelPolicy: {
 						defaultModel: { provider: "anthropic", modelId: "claude-x" },
 						allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
@@ -898,20 +898,20 @@ describe("Pi Worker prompt pipeline seam", () => {
 
 		try {
 			// 首个 Run 使用 approval：按当前 wrapper 模式建立工具集合。
-			await expect(prompt("run-approval", "approval")).resolves.toMatchObject({
+			await expect(prompt("run-supervised", "supervised")).resolves.toMatchObject({
 				ok: true,
 				data: { accepted: true },
 			});
 			await vi.waitFor(() =>
 				expect(wrappers[0]?.send).toHaveBeenCalledWith("agent.prompt", expect.anything()),
 			);
-			expect(startedModes).toEqual(["approval"]);
+			expect(startedModes).toEqual(["supervised"]);
 			await settle(0);
 
 			// 空闲时模式改为 yolo：同项目必须关闭旧 wrapper 并重建。
-			await expect(prompt("run-yolo", "yolo")).resolves.toMatchObject({ ok: true });
+			await expect(prompt("run-automatic", "automatic")).resolves.toMatchObject({ ok: true });
 			await vi.waitFor(() => expect(wrappers.length).toBe(2));
-			expect(startedModes).toEqual(["approval", "yolo"]);
+			expect(startedModes).toEqual(["supervised", "automatic"]);
 			expect(wrappers[0]!.shutdown).toHaveBeenCalledOnce();
 			await vi.waitFor(() =>
 				expect(wrappers[1]?.send).toHaveBeenCalledWith("agent.prompt", expect.anything()),
@@ -919,7 +919,7 @@ describe("Pi Worker prompt pipeline seam", () => {
 			await settle(1);
 
 			// 模式不变时复用同一 wrapper，不重复换代。
-			await expect(prompt("run-yolo-again", "yolo")).resolves.toMatchObject({ ok: true });
+			await expect(prompt("run-automatic-again", "automatic")).resolves.toMatchObject({ ok: true });
 			await vi.waitFor(() =>
 				expect(wrappers.length).toBe(2),
 			);
@@ -931,7 +931,7 @@ describe("Pi Worker prompt pipeline seam", () => {
 			expect(wrappers[1]!.shutdown).not.toHaveBeenCalled();
 
 			// 活跃 Run 期间不得换届：返回忙碌且不触碰在跑的 wrapper。
-			await expect(prompt("run-active", "auto")).resolves.toMatchObject({
+			await expect(prompt("run-active", "supervised")).resolves.toMatchObject({
 				ok: false,
 				error: { code: "PI_PROJECT_BUSY" },
 			});
@@ -1091,7 +1091,7 @@ describe("Pi Worker prompt pipeline seam", () => {
 						sessionId: "session-1",
 						...(runId ? { runId } : {}),
 						cwdRef: { rootDir: "C:\\repo", relativePath: "" },
-						payload: action === "agent.prompt" ? { submissionId: requestId, executionMode: "approval", ...(payload ?? {}) } : payload,
+						payload: action === "agent.prompt" ? { submissionId: requestId, executionMode: "supervised", ...(payload ?? {}) } : payload,
 					},
 				},
 				{} as never,
@@ -1126,7 +1126,7 @@ describe("Pi Worker prompt pipeline seam", () => {
 						sessionId: "session-1",
 						runId,
 						cwdRef: { rootDir: "C:\\repo", relativePath: "" },
-						payload: action === "agent.prompt" ? { submissionId: requestId, executionMode: "approval", ...(payload ?? {}) } : payload,
+						payload: action === "agent.prompt" ? { submissionId: requestId, executionMode: "supervised", ...(payload ?? {}) } : payload,
 					},
 				},
 				{} as never,
@@ -1380,4 +1380,206 @@ describe("Pi Worker prompt pipeline seam", () => {
 			vi.doUnmock("./runtime-spec.js");
 		}
 	});
+});
+
+describe("Pi Worker 扩展命令管道(ADR-0040 决策 2)", () => {
+	it("agent.command 与 prompt 同生命周期:建立 active run、项目互斥、由权威空闲结算", async () => {
+		vi.resetModules();
+		type EventListener = (event: { type: string; sessionId: string }) => void;
+		const makeWrapper = () => {
+			const stub = {
+				sessionId: "session-1",
+				alive: true,
+				listeners: [] as EventListener[],
+				// 与真实 PiAgentSessionWrapperImpl 契约一致：未注册命令返回失败对象而非抛错，
+				// 已注册返回 { accepted: true }（见 agent-session.ts 的 agent.command 分支）。
+				send: vi.fn(
+					async (action: string, payload?: { name?: string }) => {
+						if (action === "agent.command") {
+							if (payload?.name === "nope") {
+								return {
+									ok: false,
+									error: {
+										code: "PI_EXTENSION_COMMAND_NOT_FOUND",
+										message: "Unknown Pi command: nope",
+									},
+								};
+							}
+							return { accepted: true };
+						}
+						return null;
+					},
+				),
+				getState: vi.fn(() => ({ status: "idle" })),
+				shutdown: vi.fn(async () => { stub.alive = false; }),
+				isAlive: () => stub.alive,
+				onEvent: (listener: EventListener) => {
+					stub.listeners.push(listener);
+					return () => {
+						const index = stub.listeners.indexOf(listener);
+						if (index !== -1) stub.listeners.splice(index, 1);
+					};
+				},
+			};
+			return stub;
+		};
+		const wrappers: Array<ReturnType<typeof makeWrapper>> = [];
+		const startPiAgentSession = vi.fn(async () => {
+			const stub = makeWrapper();
+			wrappers.push(stub);
+			return stub;
+		});
+		vi.doMock("@earendil-works/pi-coding-agent", () => ({
+			SessionManager: {
+				list: vi.fn().mockResolvedValue([{ id: "session-1", path: "session.jsonl" }]),
+			},
+		}));
+		vi.doMock("./agent-session.js", () => ({ startPiAgentSession }));
+		vi.doMock("./session-reader.js", () => ({
+			createPiSessionReader: () => ({ state: vi.fn().mockResolvedValue({ status: "idle" }) }),
+		}));
+		vi.doMock("./images.js", () => ({
+			downloadPromptImages: vi.fn().mockResolvedValue([]),
+			toSdkImages: vi.fn(() => []),
+		}));
+		vi.doMock("./runtime-spec.js", async () => {
+			const actual = await vi.importActual<typeof import("./runtime-spec.js")>(
+				"./runtime-spec.js",
+			);
+			return {
+				...actual,
+				createModelRuntimeWithLease: vi.fn(async () => ({
+					getAvailable: async () => [],
+				})),
+			};
+		});
+
+		const sent: PiWorkerOutboundMessage[] = [];
+		const originalArg = process.argv[2];
+		const originalSend = process.send;
+		const beforeMessageListeners = new Set(process.listeners("message"));
+		process.argv[2] = "/tmp/pi-worker-command";
+		process.env.VCPDECK_CLIENT_DATA_DIR = dataRootFor("/tmp/pi-worker-command");
+		Object.defineProperty(process, "send", {
+			configurable: true,
+			value: vi.fn((message: PiWorkerOutboundMessage) => sent.push(message)),
+		});
+		await import("./worker.js");
+		const workerListener = process
+			.listeners("message")
+			.find((listener) => !beforeMessageListeners.has(listener));
+		expect(workerListener).toBeDefined();
+
+		(workerListener as (message: unknown) => void)?.({
+			type: "runtime-init",
+			config: {
+				spec: {
+					schemaVersion: 5,
+					specId: "spec-1",
+					profileId: "p1",
+					profileRevision: 1,
+					toolExecutionMode: "supervised",
+					modelPolicy: {
+						defaultModel: { provider: "anthropic", modelId: "claude-x" },
+						allowedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+						defaultThinkingLevel: "medium",
+					},
+					runtimeRevision: "0123456789abcdef",
+				},
+				credentialEntries: [{ provider: "anthropic", apiKey: "sk-test" }],
+				resolvedModels: [{ provider: "anthropic", modelId: "claude-x" }],
+				unavailableModels: [],
+			} as never,
+		});
+
+		let requestSeq = 0;
+		const request = (
+			action: string,
+			runId: string | null,
+			payload?: Record<string, unknown>,
+		): Promise<PiWorkerOutboundMessage> => {
+			const requestId = `cmd-${++requestSeq}`;
+			workerListener?.(
+				{
+					type: "request",
+					projectKey: "project",
+					request: {
+						requestId,
+						action,
+						jobId: "session-1",
+						sessionId: "session-1",
+						...(runId ? { runId } : {}),
+						cwdRef: { rootDir: "C:\repo", relativePath: "" },
+						payload: payload ?? {},
+					},
+				},
+				{} as never,
+			);
+			return new Promise<PiWorkerOutboundMessage>((resolve) => {
+				const timer = setInterval(() => {
+					const hit = sent.find(
+						(message) =>
+							message.type === "response" && message.requestId === requestId,
+					);
+					if (hit) {
+						clearInterval(timer);
+						resolve(hit);
+					}
+				}, 5);
+			});
+		};
+		// 命令处理器返回 ≠ 回合结束:由权威空闲触发结算(与真实 SDK 一致)。
+		const settle = async () => {
+			await vi.waitFor(() => expect(wrappers[0]?.listeners.length).toBe(1));
+			wrappers[0]!.listeners[0]!({
+				type: "agent_settled",
+				sessionId: "session-1",
+			});
+		};
+
+		try {
+			// 命令是启动新工作:必须像 prompt 一样建立 active run,
+			// 而不是要求"已有 active run"。
+			await expect(
+				request("agent.command", "run-cmd", { name: "review", args: "src" }),
+			).resolves.toMatchObject({ ok: true, data: { accepted: true } });
+			expect(wrappers[0]?.send).toHaveBeenCalledWith(
+				"agent.command",
+				expect.objectContaining({ name: "review", args: "src" }),
+			);
+
+			// 命令未结算期间项目互斥:第二条命令必须被拒(与 prompt 一致)。
+			await expect(
+				request("agent.command", "run-cmd-2", { name: "review" }),
+			).resolves.toMatchObject({ ok: false, error: { code: "PI_PROJECT_BUSY" } });
+
+			// 权威空闲结算后,run 必须被释放,可再次启动命令。
+			await settle();
+			await expect(
+				request("agent.command", "run-cmd-3", { name: "review" }),
+			).resolves.toMatchObject({ ok: true, data: { accepted: true } });
+			await settle();
+
+			// 未注册命令：明确拒绝，不回落为普通 Prompt。
+			// 契约：Worker 把失败作为结果数据返回（transport 仍 ok），
+			// 由 Server 的 rejectResult 读取并映射为 400。
+			await expect(
+				request("agent.command", "run-cmd-4", { name: "nope" }),
+			).resolves.toMatchObject({
+				ok: true,
+				data: {
+					ok: false,
+					error: { code: "PI_EXTENSION_COMMAND_NOT_FOUND" },
+				},
+			});
+			// 拒绝已即时结算:随后命令可以再次启动。
+			await expect(
+				request("agent.command", "run-cmd-5", { name: "review" }),
+			).resolves.toMatchObject({ ok: true, data: { accepted: true } });
+		} finally {
+			process.argv[2] = originalArg;
+			if (originalSend === undefined) delete (process as { send?: unknown }).send;
+			else Object.defineProperty(process, "send", { configurable: true, value: originalSend });
+		}
+	}, 30_000);
 });

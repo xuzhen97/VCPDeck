@@ -95,7 +95,7 @@ function prismaMock() {
 	return { job, _jobs: jobs };
 }
 
-function setup(profileMode: "approval" | "auto" | "yolo" = "approval") {
+function setup(profileMode: "supervised" | "auto" | "automatic" = "supervised") {
 	const prisma = prismaMock();
 	const runtime = {
 		assertReady: vi.fn(),
@@ -135,14 +135,14 @@ describe("PiRunService session CAS", () => {
 		await ensure();
 		expect(await service.snapshot("s1", actor.identityId)).toMatchObject({
 			executionModeOverride: null,
-			effectiveExecutionMode: "approval",
+			effectiveExecutionMode: "supervised",
 		});
 
-		await service.setExecutionMode(actor, { ...input, mode: "yolo" });
-		expect(current().toolExecutionModeOverride).toBe("yolo");
+		await service.setExecutionMode(actor, { ...input, mode: "automatic" });
+		expect(current().toolExecutionModeOverride).toBe("automatic");
 		expect(await service.snapshot("s1", actor.identityId)).toMatchObject({
-			executionModeOverride: "yolo",
-			effectiveExecutionMode: "yolo",
+			executionModeOverride: "automatic",
+			effectiveExecutionMode: "automatic",
 		});
 
 		runtime.effectiveExecutionMode.mockResolvedValue("auto");
@@ -157,10 +157,10 @@ describe("PiRunService session CAS", () => {
 	it("only Owner can change the mode and an active run makes it immutable", async () => {
 		const { service, ensure, running } = setup();
 		await ensure();
-		await expect(service.setExecutionMode(otherActor, { ...input, mode: "auto" }))
+		await expect(service.setExecutionMode(otherActor, { ...input, mode: "supervised" }))
 			.rejects.toMatchObject({ code: "PI_CONTROL_FORBIDDEN" });
 		const run = await running();
-		await expect(service.setExecutionMode(actor, { ...input, mode: "yolo" }))
+		await expect(service.setExecutionMode(actor, { ...input, mode: "automatic" }))
 			.rejects.toMatchObject({ code: "PI_PROJECT_BUSY" });
 		await service.finishRun(run.jobId, run.runId);
 	});
@@ -168,15 +168,15 @@ describe("PiRunService session CAS", () => {
 	it("serializes mode changes with run acceptance and persists the accepted mode", async () => {
 		const { service, ensure, current } = setup();
 		await ensure();
-		const changed = service.setExecutionMode(actor, { ...input, mode: "yolo" });
+		const changed = service.setExecutionMode(actor, { ...input, mode: "automatic" });
 		const runPromise = service.startRun(actor, input);
 		await changed;
 		const run = await runPromise;
-		expect(run.executionMode).toBe("yolo");
+		expect(run.executionMode).toBe("automatic");
 		expect(current()).toMatchObject({
 			status: "pending",
-			toolExecutionModeOverride: "yolo",
-			runExecutionMode: "yolo",
+			toolExecutionModeOverride: "automatic",
+			runExecutionMode: "automatic",
 		});
 	});
 
@@ -223,8 +223,8 @@ describe("PiRunService session CAS", () => {
 	it("每次 startRun 保持 jobId 并生成新 runId", async () => {
 		const { service, start, current } = setup();
 		const first = await start();
-		expect(first.executionMode).toBe("approval");
-		expect(current().runExecutionMode).toBe("approval");
+		expect(first.executionMode).toBe("supervised");
+		expect(current().runExecutionMode).toBe("supervised");
 		await service.finishRun(first.jobId, first.runId);
 		const second = await service.startRun(actor, input);
 		expect(first.jobId).toBe("s1");
@@ -243,7 +243,7 @@ describe("PiRunService session CAS", () => {
 			ownerName: "User",
 			isOwner: false,
 			executionModeOverride: null,
-			effectiveExecutionMode: "approval",
+			effectiveExecutionMode: "supervised",
 		});
 	});
 

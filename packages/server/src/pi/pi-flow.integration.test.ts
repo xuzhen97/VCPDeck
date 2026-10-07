@@ -149,7 +149,7 @@ function registration(clientId = "c1") {
 				sdkVersion: "1",
 				nodeVersion: "22.18.0",
 				shellKind: "path" as const,
-				sessionJobProtocolVersion: 2,
+				sessionJobProtocolVersion: 3,
 			},
 		},
 	};
@@ -175,7 +175,7 @@ function makeLoopback() {
 	);
 	const runs = new PiRunService(prisma as never, {
 		assertReady: vi.fn(),
-		effectiveExecutionMode: vi.fn(async () => "approval"),
+		effectiveExecutionMode: vi.fn(async () => "supervised"),
 	} as never);
 	const requests = new PiRequestBroker();
 	const events = new PiEventBroker(requests, runs);
@@ -190,7 +190,7 @@ function makeLoopback() {
 				clientId: "c1",
 				capabilities: ["agent.pi"],
 				capabilityDetails: {
-					pi: { available: true, sessionJobProtocolVersion: 2 },
+					pi: { available: true, sessionJobProtocolVersion: 3 },
 				},
 			},
 		]),
@@ -692,7 +692,7 @@ describe("Pi Gateway loopback 集成", () => {
 		});
 		await flush();
 		await vi.waitFor(() => expect(emitted[1]?.action).toBe("agent.prompt"));
-		expect(emitted[1]?.payload?.executionMode).toBe("approval");
+		expect(emitted[1]?.payload?.executionMode).toBe("supervised");
 		const promptRequest = emitted[1]!;
 		await loop.respond(newSocket, {
 			requestId: promptRequest.requestId,
@@ -826,5 +826,142 @@ describe("Pi Gateway loopback 集成", () => {
 			),
 		).rejects.toMatchObject({ response: { code: "PI_IMAGE_INVALID" } });
 		expect(loop.prisma.jobs.length).toBe(jobsAfterValid);
+	});
+});
+
+describe("Pi Gateway 扩展命令 loopback(ADR-0040 决策 2)", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	it("executeCommand 接纳 Run → 下发命令 → 项目互斥 → 结算 → 未注册命令拒绝与恢复", async () => {
+		// 外层 describe 的 afterEach 会 useRealTimers，故必须在测试体内启用。
+		vi.useFakeTimers();
+		const loop = makeLoopback();
+		const socket = loop.addSocket("socket-1");
+		loop.requestHandlers.set(socket.id, (request) => {
+			emitted.push(request);
+			const data =
+				request.action === "project.resolve"
+					? { projectKey: PROJECT_KEY }
+					: request.action === "agent.state"
+						// 结算检查会查询权威 state:回环返回空闲,让 Run 能收敛。
+						? idleState()
+						: request.action === "agent.command" && request.payload?.name === "nope"
+						? // 未注册命令由 Client 以结果数据返回(transport ok),由 Server 映射 400
+							{
+								ok: false,
+								error: {
+									code: "PI_EXTENSION_COMMAND_NOT_FOUND",
+									message: "Unknown Pi command: nope",
+								},
+							}
+						: { accepted: true };
+			queueMicrotask(
+				() =>
+					void loop.respond(socket, {
+						requestId: request.requestId,
+						ok: true,
+						data,
+					}),
+			);
+		});
+
+		await loop.register(socket);
+		await loop.reconcile(socket);
+		const emitted: PiRequest[] = [];
+
+		// 1) 已注册命令:接纳 Run 并下发 agent.command。
+		const acceptedRun = (await loop.controller.executeCommand(
+			"c1",
+			"session-cmd",
+			{
+				rootDir: "D:\\",
+				relativePath: "repo",
+				submissionId: "sub-cmd-1",
+				name: "review",
+				args: "src/pi",
+			},
+			actor,
+		)) as { jobId: string; runId: string; sessionId: string };
+		expect(acceptedRun).toMatchObject({ jobId: "session-cmd", sessionId: "session-cmd" });
+		const dispatched = emitted.find(
+			(request) => request.action === "agent.command",
+		);
+		expect(dispatched?.payload).toMatchObject({ name: "review", args: "src/pi" });
+		// Run 由 Server 接纳:调用方无法自带 runId 绕过互斥。
+		expect(dispatched?.runId).toBeTruthy();
+		expect(loop.current("session-cmd")).toBeDefined();
+
+		// 2) 项目互斥:Run 活跃期间,下一条命令必须被拒。
+		await expect(
+			loop.controller.executeCommand(
+				"c1",
+				"session-cmd",
+				{
+					rootDir: "D:\\",
+					relativePath: "repo",
+					submissionId: "sub-cmd-busy",
+					name: "review",
+				},
+				actor,
+			),
+		).rejects.toMatchObject({ response: { code: "PI_PROJECT_BUSY" } });
+		// 被互斥拒绝的请求不得下发到 Client。
+		expect(
+			emitted.filter((r) => r.action === "agent.command"),
+		).toHaveLength(1);
+
+		// 3) 结算:Client 上报 agent_settled 驱动 Run 收敛。
+		await loop.gateway.handlePiEvent(socket, {
+			clientId: "c1",
+			sessionId: "session-cmd",
+			jobId: acceptedRun.jobId,
+			runId: acceptedRun.runId,
+			event: { type: "agent_settled", sessionId: "session-cmd" },
+		} as PiEvent);
+		await vi.advanceTimersByTimeAsync(30_000);
+		await flush();
+		expect(loop.current("session-cmd")).toMatchObject({ status: "idle" });
+
+		// 4) 未注册命令:能到达 Client 并被拒绝,翻成 400 且 Run 即时结算。
+		await expect(
+			loop.controller.executeCommand(
+				"c1",
+				"session-cmd",
+				{
+					rootDir: "D:\\",
+					relativePath: "repo",
+					submissionId: "sub-cmd-4",
+					name: "nope",
+				},
+				actor,
+			),
+		).rejects.toMatchObject({
+			response: { code: "PI_EXTENSION_COMMAND_NOT_FOUND" },
+		});
+		await vi.advanceTimersByTimeAsync(30_000);
+		await flush();
+		expect(loop.current("session-cmd")).toMatchObject({ status: "idle" });
+
+		// 5) 拒绝结算后可再次执行。
+		await expect(
+			loop.controller.executeCommand(
+				"c1",
+				"session-cmd",
+				{
+					rootDir: "D:\\",
+					relativePath: "repo",
+					submissionId: "sub-cmd-5",
+					name: "review",
+				},
+				actor,
+			),
+		).resolves.toMatchObject({ sessionId: "session-cmd" });
+
+		expect(
+			emitted.filter((r) => r.action === "agent.command"),
+		).toHaveLength(3);
 	});
 });

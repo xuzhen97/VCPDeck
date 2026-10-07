@@ -128,6 +128,11 @@ function safePiErrorMessage(code: string): string {
 		PI_POLICY_UNAVAILABLE: "Pi tool policy is unavailable",
 		PI_TOOL_POLICY_DENIED: "Tool call was denied by policy",
 		PI_TOOL_POLICY_REJECTED: "Tool call was not approved",
+		PI_EXECUTION_CONFIRMATION_REQUIRED:
+			"Pi execution mode needs explicit confirmation",
+		PI_EXTENSION_COMMAND_NOT_FOUND: "Pi extension command was not found",
+		PI_EXTENSION_UNSUPPORTED: "Pi extension operation is unsupported",
+		PI_EXTENSION_UI_LIMIT_EXCEEDED: "Pi extension UI state exceeded limits",
 	};
 	return messages[code as PiErrorCode] ?? "Pi session failed";
 }

@@ -293,7 +293,7 @@ describe("parsePiCredential*Input", () => {
 	});
 });
 
-describe("Profile 的工具策略与 Bundle 资源字段", () => {
+describe("Profile 的执行模式与 Bundle 资源字段", () => {
 	const base = {
 		name: "测试",
 		defaultModel: { provider: "axonhub", modelId: "mimo" },
@@ -301,39 +301,32 @@ describe("Profile 的工具策略与 Bundle 资源字段", () => {
 		defaultThinkingLevel: "medium",
 	};
 
-	it("创建时解析 toolPolicy 与 enabledResourceIds", () => {
+	it("逐工具三桶已删除：create/update 携带 toolPolicy 一律拒绝", () => {
+		expect(() =>
+			parsePiProfileCreateInput({
+				...base,
+				toolPolicy: { allow: ["read"], confirm: [], deny: [] },
+			}),
+		).toThrow(/未知字段/);
+		expect(() =>
+			parsePiProfileUpdateInput({
+				toolPolicy: { allow: [], confirm: [], deny: ["bash"] },
+			}),
+		).toThrow(/未知字段/);
+	});
+
+	it("创建时解析 enabledResourceIds", () => {
 		const parsed = parsePiProfileCreateInput({
 			...base,
-			toolPolicy: { allow: ["read"], confirm: ["bash"], deny: [] },
 			enabledResourceIds: ["vcp.tool-policy"],
-		});
-		expect(parsed.toolPolicy).toEqual({
-			allow: ["read"],
-			confirm: ["bash"],
-			deny: [],
 		});
 		expect(parsed.enabledResourceIds).toEqual(["vcp.tool-policy"]);
 	});
 
 	it("省略新字段时不产生额外键", () => {
 		const parsed = parsePiProfileCreateInput(base);
-		expect("toolPolicy" in parsed).toBe(false);
+		expect("toolExecutionMode" in parsed).toBe(false);
 		expect("enabledResourceIds" in parsed).toBe(false);
-	});
-
-	it("未知工具名与跨桶冲突按协议错误拒绝（400 而非 500）", () => {
-		expect(() =>
-			parsePiProfileCreateInput({
-				...base,
-				toolPolicy: { allow: ["nope"], confirm: [], deny: [] },
-			}),
-		).toThrow(PiAdminProtocolError);
-		expect(() =>
-			parsePiProfileCreateInput({
-				...base,
-				toolPolicy: { allow: ["bash"], confirm: ["bash"], deny: [] },
-			}),
-		).toThrow(/互斥/);
 	});
 
 	it("enabledResourceIds 重复或超限时拒绝", () => {
@@ -351,29 +344,23 @@ describe("Profile 的工具策略与 Bundle 资源字段", () => {
 		).toThrow(/数量/);
 	});
 
-	it("更新时可单独提交 toolPolicy", () => {
-		const parsed = parsePiProfileUpdateInput({
-			toolPolicy: { allow: [], confirm: [], deny: ["bash"] },
-		});
-		expect(parsed.toolPolicy).toEqual({ allow: [], confirm: [], deny: ["bash"] });
-	});
-
-	it("创建/更新时可提交工具执行模式，非法值按协议错误拒绝", () => {
+	it("创建/更新时可提交两模式，旧三模式与未知值按协议错误拒绝", () => {
 		expect(
-			parsePiProfileCreateInput({ ...base, toolExecutionMode: "auto" })
+			parsePiProfileCreateInput({ ...base, toolExecutionMode: "supervised" })
 				.toolExecutionMode,
-		).toBe("auto");
-		expect(parsePiProfileUpdateInput({ toolExecutionMode: "yolo" })).toEqual({
-			toolExecutionMode: "yolo",
+		).toBe("supervised");
+		expect(parsePiProfileUpdateInput({ toolExecutionMode: "automatic" })).toEqual({
+			toolExecutionMode: "automatic",
 		});
 		expect("toolExecutionMode" in parsePiProfileCreateInput(base)).toBe(false);
 		expect(() =>
 			parsePiProfileCreateInput({ ...base, toolExecutionMode: "unsafe" }),
 		).toThrow(PiAdminProtocolError);
+		// 旧三模式不得被“就近映射”成新语义（ADR-0039 决策 3）。
 		for (const mode of ["approval", "auto", "yolo"]) {
-			expect(
-				parsePiProfileUpdateInput({ toolExecutionMode: mode }).toolExecutionMode,
-			).toBe(mode);
+			expect(() => parsePiProfileUpdateInput({ toolExecutionMode: mode })).toThrow(
+				PiAdminProtocolError,
+			);
 		}
 	});
 

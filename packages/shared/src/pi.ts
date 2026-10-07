@@ -29,12 +29,16 @@ export const PI_ERROR_CODES = [
 	"PI_POLICY_UNAVAILABLE",
 	"PI_TOOL_POLICY_DENIED",
 	"PI_TOOL_POLICY_REJECTED",
+	"PI_EXECUTION_CONFIRMATION_REQUIRED",
+	"PI_EXTENSION_COMMAND_NOT_FOUND",
+	"PI_EXTENSION_UNSUPPORTED",
+	"PI_EXTENSION_UI_LIMIT_EXCEEDED",
 ] as const;
 
 export type PiErrorCode = (typeof PI_ERROR_CODES)[number];
 
 /** Session Job 协议版本；Server 与新 Client 必须精确匹配。 */
-export const PI_SESSION_JOB_PROTOCOL_VERSION = 2;
+export const PI_SESSION_JOB_PROTOCOL_VERSION = 3;
 
 /**
  * PiRuntimeSpec 协议版本。
@@ -48,7 +52,7 @@ export const PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = 1;
  * v4 在 v3 之上强制携带 `toolExecutionMode`（ADR-0033）；Server/Client 必须精确相等，
  * 版本错位时 Pi 不可用而不是回退到旧语义。
  */
-export const PI_RUNTIME_SPEC_PROTOCOL_VERSION = 4;
+export const PI_RUNTIME_SPEC_PROTOCOL_VERSION = 5;
 
 /** Bundle manifest 协议版本（docs/adr/0030 决策 1）。 */
 export const PI_BUNDLE_PROTOCOL_VERSION = 1;
@@ -83,25 +87,47 @@ export interface PiToolPolicy {
 }
 
 /**
- * Profile 级工具执行模式（ADR-0033）。
+ * Profile 级工具执行模式（ADR-0039）。
  *
- * - `approval`：执行策略允许的能力，`confirm` 每次调用请求人工批准；
- * - `auto`：执行策略允许的能力，`confirm` 不再请求批准；
- * - `yolo`：跳过 Tool Policy 三桶判定，只按当前 Runtime 实际注册/加载的工具执行。
+ * - `supervised`（监督）：每次模型工具调用必须取得明确批准（含读取工具）；
+ * - `automatic`（自动）：模型直接调用当前运行时实际注册的工具。
+ *
+ * 旧三模式（`approval` / `auto` / `yolo`）与逐工具三桶已被删除；旧取值只允许
+ * 出现在存量迁移材料中，不得作为新协议值下发或被新 Client 解释。
  */
-export const PI_TOOL_EXECUTION_MODES = ["approval", "auto", "yolo"] as const;
+export const PI_TOOL_EXECUTION_MODES = ["supervised", "automatic"] as const;
 
 export type PiToolExecutionMode = (typeof PI_TOOL_EXECUTION_MODES)[number];
 
-/** 判断值是否为受支持的工具执行模式；未知值一律拒绝（不猜默认值）。 */
+/** 判断值是否为受支持的工具执行模式；旧取值与未知值一律拒绝（不猜默认值）。 */
 export function isPiToolExecutionMode(
 	value: unknown,
 ): value is PiToolExecutionMode {
 	return (
-		typeof value === "string" &&
-		(PI_TOOL_EXECUTION_MODES as readonly string[]).includes(value)
+		value === "supervised" || value === "automatic"
 	);
 }
+
+/** 旧 `approval` / `auto` 取值：仅用于存量迁移说明，不得进入新协议。 */
+export const PI_LEGACY_TOOL_EXECUTION_MODES = ["approval", "auto"] as const;
+
+export type PiLegacyToolExecutionMode =
+	(typeof PI_LEGACY_TOOL_EXECUTION_MODES)[number];
+
+/** 判断值是否为需要显式确认迁移的旧执行模式。 */
+export function isPiLegacyToolExecutionMode(
+	value: unknown,
+): value is PiLegacyToolExecutionMode {
+	return value === "approval" || value === "auto";
+}
+
+/**
+ * 旧逐工具三桶策略：ADR-0030/ADR-0033 的历史形状。
+ *
+ * 仅用于存量迁移展示与一次性说明；不再是新 Profile 的输入或新 Spec 的字段。
+ * `LegacyPiToolPolicy` 是它在迁移语境下的显式名称。
+ */
+export type LegacyPiToolPolicy = PiToolPolicy;
 
 /** 空策略：等于「所有工具都不可用」，用于未配置策略的历史 Profile。 */
 export function emptyPiToolPolicy(): PiToolPolicy {
@@ -643,9 +669,16 @@ export interface PiRuntimeSpecMessageV3 {
 	credentials: PiCredentialLeaseV2;
 }
 
+/** v4 及更早 Spec 使用的旧模式取值：仅用于诊断旧 Spec（ADR-0039 已删除）。 */
+export type PiLegacyRuntimeToolExecutionMode =
+	| PiLegacyToolExecutionMode
+	| "yolo";
+
 /**
  * RuntimeSpec v4：在 v3 基础上强制携带 Profile 级工具执行模式（ADR-0033）。
  * 模式会改变 Client 实际执行工具的行为，因此不能作为 v3 的可选字段下发。
+ *
+ * 已被 v5 取代（ADR-0039）；保留只供诊断旧 Spec，不是新下发路径。
  */
 export interface PiRuntimeSpecV4 {
 	schemaVersion: 4;
@@ -660,8 +693,8 @@ export interface PiRuntimeSpecV4 {
 	};
 	/** 工具策略：未出现在任何桶的工具默认拒绝。 */
 	toolPolicy: PiToolPolicy;
-	/** 工具执行模式：决定 Tool Policy 如何被执行。 */
-	toolExecutionMode: PiToolExecutionMode;
+	/** 旧执行模式：Approval / Auto / YOLO。 */
+	toolExecutionMode: PiLegacyRuntimeToolExecutionMode;
 	/** 存在当且仅当 Profile 需要 Bundle 资源。 */
 	requiredBundle?: {
 		protocolVersion: number;
@@ -673,6 +706,39 @@ export interface PiRuntimeSpecV4 {
 
 export interface PiRuntimeSpecMessageV4 {
 	spec: PiRuntimeSpecV4;
+	credentials: PiCredentialLeaseV2;
+}
+
+/**
+ * RuntimeSpec v5：删除逐工具三桶，只下发两模式（ADR-0039 决策 1、4）。
+ *
+ * 能力面改为「平台可用内置工具 + 已启用受信扩展实际注册的工具」，
+ * 因此 Spec 不再携带 Server 逐工具授权目录。
+ */
+export interface PiRuntimeSpecV5 {
+	schemaVersion: 5;
+	specId: string;
+	profileId: string;
+	profileRevision: number;
+	providers: PiRuntimeProviderSpec[];
+	modelPolicy: {
+		defaultModel: { provider: string; modelId: string };
+		allowedModels: PiModelRef[];
+		defaultThinkingLevel: string;
+	};
+	/** 工具执行模式：supervised 逐次审批 / automatic 直接执行已注册工具。 */
+	toolExecutionMode: PiToolExecutionMode;
+	/** 存在当且仅当 Profile 需要 Bundle 资源。 */
+	requiredBundle?: {
+		protocolVersion: number;
+		bundleVersion: string;
+		resourceIds: string[];
+	};
+	runtimeRevision: string;
+}
+
+export interface PiRuntimeSpecMessageV5 {
+	spec: PiRuntimeSpecV5;
 	credentials: PiCredentialLeaseV2;
 }
 
@@ -761,6 +827,8 @@ export type PiAction =
 	| "agent.compact"
 	| "agent.abortCompact"
 	| "agent.commands"
+	| "agent.command"
+	| "extension.ui.get"
 	| "agent.stats"
 	| "model.set"
 	| "thinking.set"
@@ -1105,6 +1173,8 @@ const ACTIONS: ReadonlySet<string> = new Set<PiAction>([
 	"agent.compact",
 	"agent.abortCompact",
 	"agent.commands",
+	"agent.command",
+	"extension.ui.get",
 	"agent.stats",
 	"model.set",
 	"thinking.set",
@@ -1150,6 +1220,16 @@ const EVENT_TYPES: ReadonlySet<string> = new Set<PiClientEvent["type"]>([
 	"usage_update",
 	"status_update",
 ]);
+
+/**
+ * 判断是否为已知的 Client 事件类型。
+ *
+ * 跨信任边界输入不得宽松猜测：SSE 帧先经此守卫，未知 type 一律丢弃
+ * 而不是透传给消费方（与 EVENT_TYPES 同源，避免两份清单漂移）。
+ */
+export function isPiClientEventType(type: unknown): type is PiClientEvent["type"] {
+	return typeof type === "string" && EVENT_TYPES.has(type);
+}
 
 const RUN_STATUSES: ReadonlySet<string> = new Set([
 	"running",
@@ -2050,7 +2130,8 @@ const SPEC_V4_KEYS = new Set([
 export function parsePiRuntimeSpecV4(value: unknown): PiRuntimeSpecV4 {
 	assertRecord(value, "PiRuntimeSpecV4");
 	assertKeys(value, SPEC_V4_KEYS, "PiRuntimeSpecV4");
-	if (value.schemaVersion !== PI_RUNTIME_SPEC_PROTOCOL_VERSION) {
+	// 固定为字面量 4：v4 只用于诊断旧 Spec，不能跟随当前协议常量。
+	if (value.schemaVersion !== 4) {
 		throw new PiProtocolError(
 			`PiRuntimeSpecV4 schemaVersion 不支持: ${String(value.schemaVersion)}`,
 		);
@@ -2058,14 +2139,86 @@ export function parsePiRuntimeSpecV4(value: unknown): PiRuntimeSpecV4 {
 	if (!("toolExecutionMode" in value)) {
 		throw new PiProtocolError("PiRuntimeSpecV4 缺少字段 toolExecutionMode");
 	}
-	if (!isPiToolExecutionMode(value.toolExecutionMode)) {
+	if (!isPiLegacyToolExecutionMode(value.toolExecutionMode) && value.toolExecutionMode !== "yolo") {
 		throw new PiProtocolError(
 			`PiRuntimeSpecV4 toolExecutionMode 不支持: ${String(value.toolExecutionMode)}`,
 		);
 	}
 	const { toolExecutionMode, ...v3Shape } = value;
 	const base = parsePiRuntimeSpecV3({ ...v3Shape, schemaVersion: 3 });
-	return { ...base, schemaVersion: 4, toolExecutionMode };
+	return {
+		...base,
+		schemaVersion: 4,
+		toolExecutionMode: toolExecutionMode as PiLegacyRuntimeToolExecutionMode,
+	};
+}
+
+/** v5 顶层字段集合：v4 去掉 toolPolicy。 */
+const SPEC_V5_KEYS = new Set([
+	"schemaVersion",
+	"specId",
+	"profileId",
+	"profileRevision",
+	"providers",
+	"modelPolicy",
+	"toolExecutionMode",
+	"requiredBundle",
+	"runtimeRevision",
+]);
+
+/**
+ * 严格解析 RuntimeSpec v5。
+ *
+ * v5 相对 v4 的唯一语义变化是**删除逐工具三桶**并把模式收窄为两值，因此：
+ * - 顶层出现 `toolPolicy` 视为未知字段并拒绝（避免 Server 以为策略仍在生效）；
+ * - 旧三模式取值一律拒绝，不做「就近映射」；
+ * - Provider / 模型 / Bundle 的校验复用 v3 的同一份实现，避免两套规则分叉：
+ *   这里传入一个**合成的空策略**只是为了复用共享校验路径，返回值随后被丢弃。
+ */
+export function parsePiRuntimeSpecV5(value: unknown): PiRuntimeSpecV5 {
+	assertRecord(value, "PiRuntimeSpecV5");
+	assertKeys(value, SPEC_V5_KEYS, "PiRuntimeSpecV5");
+	if (value.schemaVersion !== PI_RUNTIME_SPEC_PROTOCOL_VERSION) {
+		throw new PiProtocolError(
+			`PiRuntimeSpecV5 schemaVersion 不支持: ${String(value.schemaVersion)}`,
+		);
+	}
+	if (!("toolExecutionMode" in value)) {
+		throw new PiProtocolError("PiRuntimeSpecV5 缺少字段 toolExecutionMode");
+	}
+	if (!isPiToolExecutionMode(value.toolExecutionMode)) {
+		throw new PiProtocolError(
+			`PiRuntimeSpecV5 toolExecutionMode 不支持: ${String(value.toolExecutionMode)}`,
+		);
+	}
+	const { toolExecutionMode, requiredBundle, ...core } = value;
+	const { requiredBundle: _dropped, ...base } = parsePiRuntimeSpecV3({
+		...core,
+		schemaVersion: 3,
+		toolPolicy: emptyPiToolPolicy(),
+	});
+	return {
+		schemaVersion: 5,
+		specId: base.specId,
+		profileId: base.profileId,
+		profileRevision: base.profileRevision,
+		providers: base.providers,
+		modelPolicy: base.modelPolicy,
+		toolExecutionMode,
+		...(requiredBundle === undefined ? {} : { requiredBundle: parsePiRequiredBundle(requiredBundle) }),
+		runtimeRevision: base.runtimeRevision,
+	};
+}
+
+/** 严格解析 v5 RuntimeSpec envelope，并校验 lease/provider 完全匹配。 */
+export function parsePiRuntimeSpecMessageV5(value: unknown): PiRuntimeSpecMessageV5 {
+	assertRecord(value, "PiRuntimeSpecMessageV5");
+	assertKeys(value, new Set(["spec", "credentials"]), "PiRuntimeSpecMessageV5");
+	const spec = parsePiRuntimeSpecV5(value.spec);
+	const credentials = parsePiCredentialLeaseV2(value.credentials);
+	const providers = new Set(spec.providers.map((provider) => provider.providerId));
+	if (providers.size !== credentials.entries.length || credentials.entries.some((entry) => !providers.has(entry.providerId))) throw new PiProtocolError("credentials 与 providers 不匹配");
+	return { spec, credentials };
 }
 
 /** 严格解析 v2 凭据 lease。 */
@@ -2225,8 +2378,8 @@ export const PI_READ_ACTIONS = [
 	"session.entryContent",
 	"agent.state",
 	"agent.stats",
-	"agent.commands",
 	"models.list",
+	"extension.ui.get",
 ] as const;
 
 /** 需要活跃 Pi Worker 的动作。 */
@@ -2243,6 +2396,10 @@ export const PI_WORKER_ACTIONS = [
 	"agent.abort",
 	"agent.compact",
 	"agent.abortCompact",
+	// 命令发现会初始化扩展运行时（factory + resources_discover），因此与执行同类，
+	// 必须在 RuntimeSpec ready 且项目空闲时才允许（ADR-0040 决策 2）。
+	"agent.commands",
+	"agent.command",
 	"model.set",
 	"thinking.set",
 	"extension.respond",
