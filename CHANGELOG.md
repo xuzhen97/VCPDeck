@@ -4,6 +4,10 @@
 
 ## [未发布]
 
+### 修复
+
+- **frp.reconcile Job 不再永久 running（生产孤儿 539da971）**：该 system Job 的唯一终态出口是 Client 结果回报（`handleLocalResult`），但其内部有多个守卫静默 `return` 不结算；`finishCycle` 与停机清理（`onModuleDestroy`）也只删周期不结算在途 Job；DB 里的 `timeout` 字段更是写了没有任何代码消费。任何一环时序错开（发版停机窗口恰逢 Client 重连触发 reconcile 即可），Job 就成为永久 running 的孤儿——占用运行统计、且会挡下一次发布的 drain 等待。现在加**三层防御**：① 后台扫描兑底（每 60s 结算所有 running 超过 `timeout` 预算的 reconcile Job，唯一能覆盖所有静默路径的层）；② `onModuleDestroy` 停机清账（结算在途 Job，避免重启后孤儿化）；③ `finishCycle` 防御性结算（从「调用方保证已终局」的隐式约定变为显式保证，幂等）。生产存量孤儿已结算修正（映射早已确认 active，仅账面）。新增兑底扫描测试组并做 RED 验证。
+
 ## [0.16.3] - 2026-10-07
 
 ### 修复

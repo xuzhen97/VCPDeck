@@ -143,6 +143,10 @@ function setup() {
 			timers.push({ delay, run: () => Promise.resolve(run()) });
 		},
 		log: vi.fn(),
+		// 现有测试按 timers[0]/[1] = 5s/30s 槽位的顺序断言;超时兑底扫太
+		// 会额外插入一个 timer 打乱下标,故在基础 setup 里禁用,由专门的
+		// sweep 测试组显式启用并单独构造。
+		sweepIntervalMs: 0,
 	});
 	const dispatcher = vi.fn();
 	service.bindDispatcher(dispatcher);
@@ -646,13 +650,166 @@ describe("FrpReconciliationService 生命周期与守卫", () => {
 		expect(prisma.frpMapping.updateMany.mock.calls.length).toBe(writes);
 	});
 
-	it("onModuleDestroy 清空周期与 timer", () => {
-		const { service, prisma } = setup();
-		prisma.frpMapping.findMany.mockResolvedValue([mappingRow({ id: "fm_1" })]);
-		// 同步触发 handleState 的同步部分即可建立周期（dispatch 异步）
-		void service.handleState("c1", "socket-1", stateReport()).then(() => {
-			service.onModuleDestroy();
-			expect(service.isBusy("c1")).toBe(false);
+	describe("在途 Job 超时兑底扫描", () => {
+		/** 独立构造：启用 sweep,用可控时钟与自排 timer 收集器。 */
+		function setupSweep(opts?: {
+			clock?: { now: number };
+			jobs?: Record<string, Record<string, unknown>>;
+		}) {
+			const clock = opts?.clock ?? { now: 1_000_000 };
+			const jobs = opts?.jobs ?? {};
+			const prisma = {
+				client: {
+					findUnique: vi.fn().mockResolvedValue({
+						id: "c1",
+						capabilityDetails: JSON.stringify({
+							frp: { available: true, reconcileProtocolVersion: 1 },
+						}),
+					}),
+				},
+				frpMapping: {
+					findMany: vi.fn().mockResolvedValue([]),
+					updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+					update: vi.fn().mockResolvedValue({}),
+					create: vi.fn(),
+				},
+				job: {
+					create: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
+						jobs[data.id as string] = { ...data };
+						return { ...data };
+					}),
+					findUnique: vi.fn(),
+					findMany: vi
+						.fn()
+						.mockImplementation(async () =>
+							Object.entries(jobs)
+								.filter(([, j]) => j.status === "running")
+								.map(([id, j]) => ({ id, ...j })),
+						),
+					update: vi
+						.fn()
+						.mockImplementation(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+							const row = jobs[where.id];
+							if (row) Object.assign(row, data);
+							return row ?? null;
+						}),
+				},
+			};
+			const instances = {
+				getById: vi.fn().mockResolvedValue(instance),
+				listDashboardProxies: vi.fn().mockResolvedValue(dashboardWith()),
+			};
+			const timers: TimerEntry[] = [];
+			const service = new FrpReconciliationService(prisma as never, instances as never, {
+				schedule: (delay, run) => {
+					timers.push({ delay, run: () => Promise.resolve(run()) });
+					return { cancel: () => {} } as unknown as NodeJS.Timeout;
+				},
+				log: vi.fn(),
+				sweepIntervalMs: 60_000,
+				now: () => clock.now,
+			});
+			return { service, prisma, jobs, timers };
+		}
+
+		const runningReconcile = (over: Record<string, unknown> = {}) => ({
+			type: "frp.reconcile",
+			status: "running",
+			clientId: "c1",
+			timeout: 30,
+			startedAt: new Date(1_000_000),
+			...over,
 		});
+
+		it("running 超过 timeout 预算的 reconcile Job 被强制终局为 FRP_RECONCILE_TIMEOUT(回归:生产孤儿 539da971)", async () => {
+			const clock = { now: 1_000_000 };
+			const { prisma, timers } = setupSweep({ clock });
+			// 直接触发 sweep(跳过 60s 等待):constructor 排的首个 timer 就是它
+			const sweep = timers.find((t) => t.delay === 60_000);
+			expect(sweep).toBeTruthy();
+
+			prisma.job.findMany.mockResolvedValue([
+				// 超预算 60s > 30s:应被结算
+				{ id: "j_stale", ...runningReconcile({ startedAt: new Date(1_000_000 - 60_000) }) },
+				// 未超预算(5s < 30s):不结算
+				{ id: "j_fresh", ...runningReconcile({ startedAt: new Date(1_000_000 - 5_000) }) },
+				// 无预算字段的历史行:不兜底
+				{ id: "j_legacy", ...runningReconcile({ timeout: null }) },
+			]);
+
+			await sweep!.run();
+
+			const settled = prisma.job.update.mock.calls.filter(
+				(c) => c[0].where.id === "j_stale",
+			);
+			expect(settled.length).toBe(1);
+			expect(settled[0]![0].data.status).toBe("error");
+			expect(settled[0]![0].data.errorCode).toBe("FRP_RECONCILE_TIMEOUT");
+			expect(prisma.job.update.mock.calls.some((c) => c[0].where.id === "j_fresh")).toBe(false);
+			expect(prisma.job.update.mock.calls.some((c) => c[0].where.id === "j_legacy")).toBe(false);
+		});
+
+		it("扫描失败不终止兑底循环(自排下一轮)", async () => {
+			const { prisma, timers } = setupSweep();
+			prisma.job.findMany.mockRejectedValue(new Error("db down"));
+			const sweep = timers.find((t) => t.delay === 60_000);
+			expect(timers.length).toBeGreaterThanOrEqual(1);
+
+			await sweep!.run();
+
+			// 失败后仍重排了下一轮 sweep
+			expect(timers.filter((t) => t.delay === 60_000).length).toBeGreaterThanOrEqual(2);
+		});
+
+		it("在途 Job 属于活周期时,先取消周期再结算(避免与后续上报纠缠)", async () => {
+			const clock = { now: 1_000_000 };
+			const { service, prisma, jobs, timers } = setupSweep({ clock });
+			// 先建立一个活周期(dispatch 已派发,currentJobId 已设)
+			prisma.frpMapping.findMany.mockResolvedValue([mappingRow({ id: "fm_1" })]);
+			prisma.job.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
+				jobs[where.id] ?? null,
+			);
+			await service.handleState("c1", "socket-1", stateReport());
+			expect(service.isBusy("c1")).toBe(true);
+
+			// 周期真实的在途 Job(从 job.create 捕获),已超预算
+			const created = Object.entries(jobs).find(([, j]) => j.type === "frp.reconcile");
+			expect(created).toBeTruthy();
+			const liveId = created![0] as string;
+			prisma.job.findMany.mockResolvedValue([
+				{ id: liveId, ...runningReconcile({ startedAt: new Date(1_000_000 - 60_000) }) },
+			]);
+
+			const sweep = timers.find((t) => t.delay === 60_000);
+			await sweep!.run();
+
+			// 周期被取消、Job 被终局;后续上报可走新周期路由
+			expect(service.isBusy("c1")).toBe(false);
+			expect(
+				prisma.job.update.mock.calls.some(
+					(c) => c[0].where.id === liveId && c[0].data.errorCode === "FRP_RECONCILE_TIMEOUT",
+				),
+			).toBe(true);
+		});
+	});
+
+	it("onModuleDestroy 清空周期与 timer", async () => {
+		const { service, prisma, jobs } = setup();
+		prisma.frpMapping.findMany.mockResolvedValue([mappingRow({ id: "fm_1" })]);
+		// 同步触发 handleState 的同步部分即可建立周期(dispatch 异步)
+		await service.handleState("c1", "socket-1", stateReport());
+		expect(service.isBusy("c1")).toBe(true);
+
+		service.onModuleDestroy();
+		expect(service.isBusy("c1")).toBe(false);
+
+		// 停机清账:在途 reconcile Job 必须被结算,否则重启后就是永久孤儿
+		// (生产事故 539da971:发版停机窗口恰逢 Client 重连触发 reconcile)。
+		const createdJobId = [...jobs.entries()].find(([, j]) => j.type === "frp.reconcile")![0] as string;
+		expect(
+			prisma.job.update.mock.calls.some(
+				(c) => c[0].where.id === createdJobId && c[0].data.errorCode === "FRP_RECONCILE_FAILED",
+			),
+		).toBe(true);
 	});
 });

@@ -12,7 +12,6 @@ import {
 	parseFrpReconcileResult,
 	parseFrpRuntimeStateReport,
 	type DispatchPayload,
-	type FrpMappingStatus,
 	type FrpReconcilePayload,
 	type FrpReconcileResult,
 	type FrpRuntimeStateAck,
@@ -34,14 +33,22 @@ type ScheduleHandle = ReturnType<typeof setTimeout> | undefined;
 
 /** reconcile 调度依赖（测试注入；缺省用真实 setTimeout 与 console）。 */
 interface ReconcileScheduleDeps {
-	/** 重试延迟（ms）：[0, 5000, 30000]（首次立即，之后 5s/30s 两个槽位）。 */
+	/** 重试延迟(ms):[0, 5000, 30000](首次立即,之后 5s/30s 两个槽位)。 */
 	delays?: [number, number, number];
-	/** 定时器注入（测试用）；缺省使用真实 setTimeout。 */
+	/** 定时器注入(测试用);缺省使用真实 setTimeout。 */
 	schedule?: (delayMs: number, run: () => void) => ScheduleHandle;
-	/** 日志注入（测试用）；缺省使用 console。 */
+	/** 日志注入(测试用);缺省使用 console。 */
 	log?: (msg: string) => void;
-	/** 双重确认有界等待预算（ms）；覆盖 frpc 建连窗口，缺省 3000。 */
+	/** 双重确认有界等待预算(ms);覆盖 frpc 建连窗口,缺省 3000。 */
 	confirmWaitMs?: number;
+	/**
+	 * 在途 Job 超时兜底扫描间隔(ms);缺省 60s,传 0 禁用。
+	 * 这层防御覆盖所有静默漏洞(handleLocalResult 守卫 return、周期被清、
+	 * 停机窗口)，任何漏结算的 reconcile Job 都会被兜底强制终局。
+	 */
+	sweepIntervalMs?: number;
+	/** 超时判定参考时钟(测试用);缺省 Date.now。 */
+	now?: () => number;
 }
 
 /** FrpMapping 行的最小读模型（避免耦合生成类型字段全集）。 */
@@ -106,6 +113,9 @@ export class FrpReconciliationService implements OnModuleDestroy {
 	private readonly schedule: (delayMs: number, run: () => void) => ScheduleHandle;
 	private readonly log: (msg: string) => void;
 	private readonly confirmWaitMs: number;
+	private readonly sweepIntervalMs: number;
+	private readonly now: () => number;
+	private sweepTimer: ScheduleHandle | null = null;
 	private dispatcher: ((socketId: string, dispatch: DispatchPayload) => void) | null =
 		null;
 
@@ -126,17 +136,79 @@ export class FrpReconciliationService implements OnModuleDestroy {
 			});
 		this.log = deps.log ?? ((msg) => console.log(`[frp-reconcile] ${msg}`));
 		this.confirmWaitMs = deps.confirmWaitMs ?? 3_000;
+		this.sweepIntervalMs = deps.sweepIntervalMs ?? 60_000;
+		this.now = deps.now ?? (() => Date.now());
+		if (this.sweepIntervalMs > 0) {
+			this.sweepTimer = this.schedule(this.sweepIntervalMs, () => this.sweepTimedOutJobs());
+		}
 	}
 
 	onModuleDestroy(): void {
-		for (const ctx of this.contexts.values()) this.cancelSlots(ctx);
+		if (this.sweepTimer) {
+			clearTimeout(this.sweepTimer);
+			this.sweepTimer = null;
+		}
+		for (const ctx of this.contexts.values()) {
+			this.cancelSlots(ctx);
+			// 停机清账：在途 Job 若不结算，进程重启后就是永久 running 的孤儿
+			// （生产事故 539da971：发版停机窗口恰逢 Client 重连触发 reconcile）。
+			// 幂等：已终局的 update 无害。
+			if (ctx.currentJobId) {
+				void this.settleJob(ctx.currentJobId, false, "FRP_RECONCILE_FAILED");
+			}
+		}
 		this.contexts.clear();
 		this.leases.clear();
 	}
 
-	/** 绑定精确 socketId 派发通道（gateway afterInit 注入）。 */
+	/** 绑定精确 socketId 派发通道(gateway afterInit 注入)。 */
 	bindDispatcher(dispatcher: (socketId: string, dispatch: DispatchPayload) => void): void {
 		this.dispatcher = dispatcher;
+	}
+
+	/**
+	 * 在途 reconcile Job 超时兜底：结算所有 running 超过 timeout 字段的
+	 * frp.reconcile Job。
+	 *
+	 * 这是最后一层防御：handleLocalResult 的守卫静默 return、周期被清、
+	 * 停机窗口漏结算——任何路径漏掉的孤儿都会在这里被强制终局，Job 不再
+	 * 永久 running（生产事故 539da971）。幂等：已终局行不会被命中；与
+	 * 周期/重试槽位的交互见 sweep 中对 contexts 的处理说明。
+	 */
+	private async sweepTimedOutJobs(): Promise<void> {
+		// 重排下一轮：扫描自身失败不应终止兜底循环。
+		this.sweepTimer = this.schedule(this.sweepIntervalMs, () =>
+			this.sweepTimedOutJobs(),
+		);
+		try {
+			const nowMs = this.now();
+			const jobs = await this.prisma.job.findMany({
+				where: { type: "frp.reconcile", status: "running" },
+			});
+			for (const job of jobs) {
+				// timeout 字段单位是秒；缺 0/null 的历史行不兜底（保守：只处理
+				// 带明确预算的 Job）。
+				const budgetSeconds = job.timeout ?? 0;
+				if (budgetSeconds <= 0) continue;
+				const startedMs = job.startedAt ? job.startedAt.getTime() : 0;
+				if (startedMs <= 0 || nowMs - startedMs < budgetSeconds * 1_000) continue;
+
+				// 若该 Job 仍属于某个活周期，先取消周期（清槽位），让后续上报
+				// 走正常的新周期/新代次路由，而不是与已终局的 Job 互相纠缠。
+				const ctx = this.contexts.get(job.clientId);
+				if (ctx && ctx.currentJobId === job.id) {
+					this.cancelCycle(job.clientId, "job-timeout-sweep");
+				}
+				this.log(
+					`reconcile Job 超时兑底结算 (job=${job.id}, client=${job.clientId})`,
+				);
+				await this.settleJob(job.id, false, "FRP_RECONCILE_TIMEOUT");
+			}
+		} catch (error) {
+			this.log(
+				`超时扫描失败: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
 	}
 
 	/** 该 Client 是否处于恢复周期（create/delete 据此稳定返回 409）。 */
@@ -890,7 +962,16 @@ export class FrpReconciliationService implements OnModuleDestroy {
 
 	private finishCycle(clientId: string): void {
 		const ctx = this.contexts.get(clientId);
-		if (ctx) this.cancelSlots(ctx);
+		if (ctx) {
+			this.cancelSlots(ctx);
+			// 防御性结算：调用方约定只在 Job 已终局后走到这里，但该约定
+			// 依赖时序正确而无任何强制。若在途 Job 未结算就删周期，它将
+			// 成为永久 running 的孤儿（生产事故 539da971）。幂等：已终局
+			// 的 update 无害。
+			if (ctx.currentJobId) {
+				void this.settleJob(ctx.currentJobId, false, "FRP_RECONCILE_TIMEOUT");
+			}
+		}
 		this.contexts.delete(clientId);
 	}
 
