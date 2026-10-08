@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.16.3] - 2026-10-07
+
 ### 修复
 
 - **发布失败后 Server 不再永久拒绝派发 Job(2026-10-07 生产事故)**:`ServerDrain.drain()` 超时后原先只抛错、**不解除内存闸门**,而 `JobScheduler.tryDispatch` 据此拒绝派发、编排器失败路径又只 `markFailed` 从不重启 Server —— 一次失败的发布就让 Server 进入只有重启才能恢复的降级态,所有新 Job 静默卡在 `pending`。现在 drain 的**任何失败出口**(超时、DB 查询异常)都会在 `finally` 中恢复派发;编排器在 drain 成功后的后续步骤(`broadcastShutdown`/`applyUpdate`)失败时也会显式 `release()` —— 进程不死则闸门常在,闸门必须随失败一起解除。成功路径语义不变:闸门保持到 `applyUpdate` 接管前,停止窗口内仍拒绝新 Job。新增回归用例锁定超时/异常/编排器失败三条路径与「成功后保持闸门」不变量。
