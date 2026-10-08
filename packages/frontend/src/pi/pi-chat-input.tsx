@@ -46,6 +46,7 @@ export function PiChatInput({
 	editorRequest = null,
 	onApplyEditorRequest,
 	onDismissEditorRequest,
+	onComplete,
 }: {
 	status: PiSessionStatus;
 	disabled: boolean;
@@ -78,6 +79,11 @@ export function PiChatInput({
 	editorRequest?: { requestId: string; text: string } | null;
 	onApplyEditorRequest?: (requestId: string, text: string) => void;
 	onDismissEditorRequest?: (requestId: string) => void;
+	/**
+	 * 会话处于 `error` 态时把回合收尾为 `done`（等价于右栏「标记完成」）。
+	 * 错误态下输入框是禁用的，若不在此处给出入口，用户只能去开右栏抽屉才能脱困。
+	 */
+	onComplete?: () => void;
 }) {
 	const [text, setText] = useState("");
 	const [mode, setMode] = useState<"prompt" | "steer" | "followUp">("prompt");
@@ -348,6 +354,27 @@ export function PiChatInput({
 						{commandError}
 					</p>
 				) : null}
+				{status === "error" && (
+					<div
+						role="alert"
+						className="flex items-center justify-between gap-2 rounded border border-destructive/40 bg-destructive/5 px-2 py-1.5"
+					>
+						<span className="text-xs text-destructive">
+							会话处于运行错误状态，标记完成后可继续提问。
+						</span>
+						{onComplete ? (
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								className="shrink-0"
+								onClick={onComplete}
+							>
+								标记完成
+							</Button>
+						) : null}
+					</div>
+				)}
 				<textarea
 					ref={textareaRef}
 					value={text}
@@ -359,7 +386,7 @@ export function PiChatInput({
 							: running
 								? "运行中…"
 								: status === "error"
-									? "运行错误，请先标记完成"
+									? "运行错误，请先点上方「标记完成」"
 									: "随便问问"
 					}
 					className="max-h-48 min-h-11 w-full resize-none bg-transparent px-1.5 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground/80 disabled:opacity-50"

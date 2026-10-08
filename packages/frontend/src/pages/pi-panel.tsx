@@ -561,6 +561,10 @@ export function PiPanel({
 						onDismissEditorRequest={(requestId) =>
 							actions.dismissEditorRequest(requestId)
 						}
+						/* 错误态输入框禁用，入口不能只藏在右栏抽屉里；仅会话属主可用。 */
+						onComplete={
+							state.job?.isOwner ? () => void actions.complete() : undefined
+						}
 						attachments={attachments.map((a) => ({
 							id: a.id,
 							name: a.name,

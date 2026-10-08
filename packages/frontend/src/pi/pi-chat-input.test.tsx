@@ -446,4 +446,38 @@ describe("PiChatInput", () => {
 			expect(document.querySelector("img")).toBeNull();
 		});
 	});
+
+	describe("运行错误态", () => {
+		it("属主在输入框上方直接看到「标记完成」，不必去开右栏抽屉", () => {
+			renderInput({ status: "error", onComplete: vi.fn() });
+			expect(screen.getByRole("alert").textContent).toContain(
+				"标记完成后可继续提问",
+			);
+			expect(screen.getByRole("button", { name: "标记完成" })).toBeTruthy();
+		});
+
+		it("点击「标记完成」触发收尾回调", async () => {
+			const onComplete = vi.fn();
+			renderInput({ status: "error", onComplete });
+			await userEvent.click(screen.getByRole("button", { name: "标记完成" }));
+			expect(onComplete).toHaveBeenCalledTimes(1);
+		});
+
+		it("非属主（未提供回调）不渲染入口", () => {
+			renderInput({ status: "error" });
+			expect(screen.queryByRole("button", { name: "标记完成" })).toBeNull();
+		});
+
+		it("错误态下输入框仍禁用，占位文案指向该入口", () => {
+			renderInput({ status: "error", onComplete: vi.fn() });
+			const box = screen.getByLabelText("Pi 输入") as HTMLTextAreaElement;
+			expect(box.disabled).toBe(true);
+			expect(box.placeholder).toBe("运行错误，请先点上方「标记完成」");
+		});
+
+		it("非错误态不渲染该入口", () => {
+			renderInput({ status: "idle", onComplete: vi.fn() });
+			expect(screen.queryByRole("button", { name: "标记完成" })).toBeNull();
+		});
+	});
 });

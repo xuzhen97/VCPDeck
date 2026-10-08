@@ -367,6 +367,62 @@ describe("PiPanel", () => {
 		expect(sdk.pi.sessions.delete).not.toHaveBeenCalled();
 	});
 
+	it("会话错误态时，属主在输入区直接看到「标记完成」入口，无需开右栏抽屉", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const sdk = makeSdk();
+		(sdk.pi.sessions.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{
+				id: "s1",
+				name: "errored",
+				firstMessage: null,
+				messageCount: 1,
+				modified: "2026-08-08T00:00:00.000Z",
+				running: false,
+			},
+		]);
+		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
+			job: {
+				jobId: "s1",
+				sessionId: "s1",
+				status: "error",
+				runId: null,
+				ownerName: "admin",
+				isOwner: true,
+				errorCode: "PI_CLIENT_RESTARTED",
+				errorMessage: "boom",
+			},
+			agentState: {
+				status: "error",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
+		});
+		(sdk.pi.agent.complete as ReturnType<typeof vi.fn>).mockResolvedValue({
+			jobId: "s1",
+		});
+		// 入口必须在输入区本身，而不是只存在于右栏「运行详情」里；
+		// 因此按 alert 作用域断言，不依赖右栏是否渲染。
+		renderPanel(makeClient(), sdk);
+
+		await selectCwd("D:\\repo");
+		await screen.findAllByText("errored");
+		await screen.getAllByText("errored")[0]!.click();
+		await vi.waitFor(() => expect(sdk.pi.agent.open).toHaveBeenCalled());
+
+		const alert = (await screen.findAllByRole("alert")).find((node) =>
+			node.textContent?.includes("标记完成后可继续提问"),
+		);
+		expect(alert).toBeTruthy();
+		fireEvent.click(within(alert!).getByRole("button", { name: "标记完成" }));
+		await vi.waitFor(() =>
+			expect(sdk.pi.agent.complete).toHaveBeenCalled(),
+		);
+	});
+
 	it("实时 Extension 等待与恢复同步显示运行详情", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const sdk = makeSdk();
