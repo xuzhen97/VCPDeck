@@ -63,6 +63,7 @@ function mockLauncher() {
 function mockDrain() {
 	return {
 		drain: vi.fn(),
+		release: vi.fn(),
 	};
 }
 
@@ -183,6 +184,38 @@ describe("ReleaseOrchestrator", () => {
 				expect.stringContaining("下载失败"),
 			);
 			expect(deps.channel.broadcastShutdown).not.toHaveBeenCalled();
+		});
+
+		it("drain 超时失败后显式解除闸门，恢复 Job 派发(回归:2026-10-07 生产死锁)", async () => {
+			deps.releases.findByVersion.mockResolvedValue(releaseInfo());
+			deps.releases.getActiveRelease.mockResolvedValue(null);
+			deps.drain.drain.mockRejectedValue(
+				new Error("等待 job 收敛超时(仍有 1 个运行中)"),
+			);
+
+			await orchestrator.startRelease("1.2.1");
+
+			expect(deps.releases.markFailed).toHaveBeenCalledWith(
+				"1.2.1",
+				expect.stringContaining("收敛超时"),
+			);
+			expect(deps.drain.release).toHaveBeenCalledTimes(1);
+			expect(deps.channel.broadcastShutdown).not.toHaveBeenCalled();
+		});
+
+		it("drain 成功后 applyUpdate 失败同样解除闸门(进程不死则闸门常在)", async () => {
+			deps.releases.findByVersion.mockResolvedValue(releaseInfo());
+			deps.releases.getActiveRelease.mockResolvedValue(null);
+			deps.drain.drain.mockResolvedValue(undefined);
+			deps.launcher.applyUpdate.mockRejectedValue(new Error("apply 失败"));
+
+			await orchestrator.startRelease("1.2.1");
+
+			expect(deps.releases.markFailed).toHaveBeenCalledWith(
+				"1.2.1",
+				expect.stringContaining("apply 失败"),
+			);
+			expect(deps.drain.release).toHaveBeenCalledTimes(1);
 		});
 	});
 

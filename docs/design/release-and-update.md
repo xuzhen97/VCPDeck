@@ -366,7 +366,7 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 | 解压失败 | 目标版本可能留下不完整目录 | 删除不完整版本目录后重新 prepare |
 | 目标版本目录已存在 | 仅当 manifest 可解析、版本号匹配且当前 artifact 的业务入口存在时，`prepare` 才跳过下载和校验；不完整目录会先清理再准备 | 仅含 Launcher payload 的目录会重新下载、校验和解压；完整目录继续幂等跳过 |
 | preStart 失败 | 不进入 current 切换，旧进程通常仍运行 | 修复迁移/权限；核对是否已有部分 DB 副作用 |
-| Server drain 超时 | Release 标为 failed，但 drain 闸门当前不会自动解除 | 检查活跃 Job；当前通常需重启 Server 恢复派发 |
+| Server drain 超时 | Release 标为 failed；drain 抛错路径自动解除闸门、编排器失败路径显式 `release()`，Job 派发随即恢复 | 无需重启；检查活跃 Job 为何未收敛（如卡死的 `agent.session`）后可重新发布 |
 | 新 Server 探活失败 | Launcher 尝试回退 previous current | 确认旧 Server 与当前 DB 兼容 |
 | Client drain 超时 | 继续 apply，未完成运行态可能被终止 | 重连后对账 Job/Terminal/Pi，不伪造成功 |
 | Client 重连版本不符 | Client 标记 failed | 检查 Launcher 日志和 previous 回退原因 |
@@ -416,7 +416,7 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 2. 实现 `launcherMinVersion` 强制校验；
 3. 建立 systemd/Windows Service 安装流程；
 4. 增加构件发布者数字签名；
-5. 修复 Server drain 失败后的闸门恢复；
+5. 完成 Server drain 失败后的闸门恢复(超时抛错路径自动解除,编排器失败路径显式 release());
 6. 防止重复版本覆盖 archive，并处理活动 Release 期间的新上传；
 7. 对 archive 条目和 manifest 做严格运行时验证；
 8. 完成 Server 重启窗口 Job 对账和跨平台全链路 Release E2E；

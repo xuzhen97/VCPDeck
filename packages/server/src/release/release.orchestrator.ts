@@ -48,6 +48,8 @@ export interface LauncherClient {
 /** 优雅停机协调（B4 实现）：停派发并等待 job 收敛 */
 export interface DrainCoordinator {
 	drain(timeoutMs?: number): Promise<void>;
+	/** 失败路径显式解除闸门，恢复 Job 派发（进程不死则闸门常在） */
+	release(): void;
 }
 
 export interface ReleaseOrchestratorOptions {
@@ -132,6 +134,10 @@ export class ReleaseOrchestrator {
 			// apply 后本进程应被 launcher 停止；连接被掐断与「进程仍存活」无法
 			// 可靠区分，不在此落库失败——终局以新进程重启后的版本对账为准。
 		} catch (e) {
+			// 闸门是进程内状态：编排器失败（含 drain 成功后 broadcastShutdown/
+			// applyUpdate 抛错）时进程仍存活，不解除闸门就会永久拒绝派发，
+			// 只有重启才能恢复（2026-10-07 生产事故）。
+			this.drain.release();
 			const message = e instanceof Error ? e.message : String(e);
 			await this.releases.markFailed(version, `服务端更新失败: ${message}`);
 		}
