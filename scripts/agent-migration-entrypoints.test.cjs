@@ -39,7 +39,9 @@ test("Server main.ts 启动前断言迁移就绪", () => {
 
 test("Release preStart 先执行 Agent 迁移再 db push", () => {
 	const pack = read("scripts/pack-release.ts");
-	assert.match(pack, /preStart:\s*"node agent-session-migration\.cjs && node node_modules\/prisma\/build\/index\.js db push"/);
+	// 路径与源码布局一致(`prisma/` 子目录),否则打包后的 dist/main.js
+	// 与 preStart 都会找不到迁移脚本(0.17.0 首次发布失败的原因)。
+	assert.match(pack, /preStart:\s*"node prisma\/agent-session-migration\.cjs && node node_modules\/prisma\/build\/index\.js db push"/);
 });
 
 test("安装脚本 initDatabase 先迁移后 push", () => {
@@ -54,8 +56,12 @@ test("安装脚本 initDatabase 先迁移后 push", () => {
 	assert.ok(pushCall > migrationCall, "push 在迁移之后");
 });
 
-test("pack-release 为 server staging 携带迁移脚本与 SQL", () => {
+test("pack-release 为 server staging 携带迁移脚本与 SQL,并做构件自检", () => {
 	const pack = read("scripts/pack-release.ts");
 	assert.match(pack, /agent-session-migration\.cjs/);
 	assert.match(pack, /20261008000000_agent_session_run_audit/);
+	// 落位到 `prisma/` 子目录(与源码布局一致),并断言构件自检被调用。
+	assert.match(pack, /join\(target, "prisma", "agent-session-migration\.cjs"\)/);
+	assert.match(pack, /join\(target, "prisma", "agent-session-migration\.sql"\)/);
+	assert.match(pack, /assertStagedMigrationResolvable\(target\)/);
 });

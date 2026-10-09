@@ -5,9 +5,8 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module.js";
 import cookieParser from "cookie-parser";
 import { PrismaService } from "./prisma/prisma.service.js";
+import { assertAgentMigrationReady, resolveMigrationSqlPath } from "../prisma/agent-session-migration.cjs";
 import { resolveDatabaseUrl } from "./prisma/database-url.js";
-import { assertAgentMigrationReady } from "../prisma/agent-session-migration.cjs";
-import { resolve } from "node:path";
 import { FrpsInstancesService } from "./frp/frp-instances.service.js";
 import { FrpReconciliationService } from "./frp/frp-reconciliation.service.js";
 import { ReleaseOrchestrator } from "./release/release.orchestrator.js";
@@ -63,8 +62,9 @@ async function bootstrap() {
 	try {
 		await assertAgentMigrationReady({
 			url: resolveDatabaseUrl(),
-			sqlPath: resolve(process.cwd(), "prisma", "migrations",
-				"20261008000000_agent_session_run_audit", "migration.sql"),
+			// 路径解析由迁移模块统一负责(源码布局与发布构件布局不同),
+			// 不在此处重复一份 layout 知识。
+			sqlPath: resolveMigrationSqlPath(),
 		});
 	} catch (error) {
 		console.error("[bootstrap] Agent 迁移未就绪:", error instanceof Error ? error.message : error);

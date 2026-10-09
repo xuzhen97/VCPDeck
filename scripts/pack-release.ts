@@ -29,6 +29,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
@@ -260,6 +261,29 @@ async function buildPiResourceBundle(
 	);
 }
 
+/** 构件自检用的 CJS 加载器（pack-release 自身是 ESM）。 */
+const stageRequire = createRequire(import.meta.url);
+
+/**
+ * 构件自检:用构件自带的迁移脚本与 SQL,校验它能在构件布局下定位 SQL。
+ * 0.17.0 首次发布就因构件布局与脚本的路径假设不一致而在生产 preStart 失败
+ * (MODULE_NOT_FOUND),随后启动断言又会因找不到 SQL 而 fail closed;
+ * 这两类问题必须在构建阶段暴露,而不是等生产发布。
+ */
+function assertStagedMigrationResolvable(serverTarget: string): void {
+	const script = join(serverTarget, "prisma", "agent-session-migration.cjs");
+	if (!existsSync(script)) {
+		throw new Error(`构件缺少迁移脚本: ${script}`);
+	}
+	const { resolveMigrationSqlPath } = stageRequire(script) as {
+		resolveMigrationSqlPath: (baseDir?: string) => string;
+	};
+	const resolved = resolveMigrationSqlPath(serverTarget);
+	if (!existsSync(resolved)) {
+		throw new Error(`构件迁移 SQL 无法解析: ${resolved}`);
+	}
+}
+
 /** 组装单个构件的生产部署目录（esbuild 单文件 + frp + 外部依赖精简安装） */
 async function stagePackage(
 	pkgName: "server" | "client",
@@ -331,15 +355,21 @@ async function stagePackage(
 		);
 		// Prisma 7 CLI 强制要求 config 文件(preStart db push 与运行时共用 DATABASE_URL)
 		cpSync(join(pkgDir, "prisma.config.cjs"), join(target, "prisma.config.cjs"));
-		// Agent 显式迁移(ADR-0041):preStart 先迁移后 db push;脚本与 SQL 随包分发
+		// Agent 显式迁移(ADR-0041):preStart 先迁移后 db push。
+		// 落位在 `<server>/prisma/` 与源码布局一致:构建后的 dist/main.js 以
+		// `../prisma/agent-session-migration.cjs` 引用它,且迁移脚本按
+		// `<cwd>/prisma/agent-session-migration.sql` 定位 SQL。
 		cpSync(
 			join(pkgDir, "prisma", "agent-session-migration.cjs"),
-			join(target, "agent-session-migration.cjs"),
+			join(target, "prisma", "agent-session-migration.cjs"),
 		);
 		cpSync(
 			join(pkgDir, "prisma", "migrations", "20261008000000_agent_session_run_audit", "migration.sql"),
-			join(target, "agent-session-migration.sql"),
+			join(target, "prisma", "agent-session-migration.sql"),
 		);
+		// 构件自检:迁移脚本必须能按 cwd=构件 server 目录找到 SQL。
+		// 0.17.0 首次发布就因构件布局与脚本假设不一致而在生产 preStart 失败。
+		assertStagedMigrationResolvable(target);
 		// Frontend 构建产物 → <server>/public，由 ServeStatic 同源托管（见 ADR-0013）
 		// （frontend 已在 main() 中先于 staging 构建，此处校验防遗漏）
 		const frontendDist = join(ROOT, "packages", "frontend", "dist");
@@ -610,7 +640,7 @@ async function main(): Promise<void> {
 							dir: "server",
 							entry: "dist/main.js",
 							// 不依赖 PATH/.bin（shell 执行时环境无 node_modules/.bin）
-							preStart: "node agent-session-migration.cjs && node node_modules/prisma/build/index.js db push",
+							preStart: "node prisma/agent-session-migration.cjs && node node_modules/prisma/build/index.js db push",
 						},
 						client: { dir: "client", entry: "dist/index.js" },
 					},

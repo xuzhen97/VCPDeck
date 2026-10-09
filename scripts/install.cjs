@@ -486,7 +486,8 @@ async function collectEnvArgs(args, io = { input: stdin, output: stdout }) {
 function initDatabase(versionDir, dbUrl, env = process.env) {
 	const serverDir = join(versionDir, "server");
 	// ADR-0041:Agent 迁移先于 db push;新构件才携带脚本,旧构件沿用原初始化。
-	const migrationScript = join(serverDir, "agent-session-migration.cjs");
+	// 路径与源码布局一致(`<server>/prisma/`),迁移脚本以 cwd 为锚点定位 SQL。
+	const migrationScript = join(serverDir, "prisma", "agent-session-migration.cjs");
 	if (existsSync(migrationScript)) {
 		console.log("[install] 执行 Agent 会话迁移...");
 		try {

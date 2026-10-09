@@ -224,6 +224,93 @@ test("CLI 失败时输出真实原因,不只说「迁移执行失败」", () => 
 	assert.match(result.stderr, /Unable to open connection|nope\.db/);
 });
 
+test("发布构件布局(脚本与 SQL 在 prisma/ 子目录)下 preStart 命令可执行", () => {
+	// 2026-10-09 0.17.0 首次发布失败的真实回归:构件把 prisma/ 摊平到构件根,
+	// 脚本又以 __dirname/.. 为依赖解析基准 → MODULE_NOT_FOUND。
+	// 现在构件保持与源码一致的 `prisma/` 布局,且以 cwd 为 SQL 锚点。
+	// 本用例把构件放在仓库外,依赖靠 junction 指向真实 node_modules,
+	// 因此只有「从脚本自身目录解析依赖」才能通过。
+	const { spawnSync } = require("node:child_process");
+	const scriptSrc = path.join(__dirname, "..", "packages", "server", "prisma", "agent-session-migration.cjs");
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "vcpdeck-artifact-"));
+	dirs.push(root);
+	const serverDir = path.join(root, "server");
+	const prismaDir = path.join(serverDir, "prisma");
+	fs.mkdirSync(prismaDir, { recursive: true });
+	fs.copyFileSync(scriptSrc, path.join(prismaDir, "agent-session-migration.cjs"));
+	fs.copyFileSync(SQL_PATH, path.join(prismaDir, "agent-session-migration.sql"));
+	// 发布构件的依赖在 server/node_modules;用 junction 避免真实拷贝。
+	fs.symlinkSync(
+		path.join(__dirname, "..", "packages", "server", "node_modules"),
+		path.join(serverDir, "node_modules"),
+		"junction",
+	);
+	const dbPath = path.join(root, "artifact.db").split(path.sep).join("/");
+	// cwd = server 目录,与 Launcher/install.cjs 一致;命令取自构件 manifest 的 preStart。
+	const result = spawnSync(
+		process.execPath,
+		["prisma/agent-session-migration.cjs"],
+		{
+			cwd: serverDir,
+			env: { ...process.env, DATABASE_URL: `file:///${dbPath}` },
+			encoding: "utf8",
+		},
+	);
+	assert.equal(result.status, 0, `preStart 应成功,stderr=${result.stderr}`);
+	assert.match(result.stdout, /迁移完成|已应用/);
+});
+
+test("迁移 SQL 定位以 cwd 为锚点(兼容源码与构件布局),缺失时报出已查找路径", () => {
+	assert.ok(migration, "迁移模块缺失:RED 阶段");
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "vcpdeck-sqlpath-"));
+	dirs.push(root);
+	// 发布构件布局:`<server>/prisma/agent-session-migration.sql`。
+	fs.mkdirSync(path.join(root, "prisma"), { recursive: true });
+	const flat = path.join(root, "prisma", "agent-session-migration.sql");
+	fs.writeFileSync(flat, "-- flat");
+	assert.equal(migration.resolveMigrationSqlPath(root), flat);
+	// 源码布局:`<server>/prisma/migrations/<version>/migration.sql`。
+	const nestedDir = path.join(root, "prisma", "migrations", "20261008000000_agent_session_run_audit");
+	fs.mkdirSync(nestedDir, { recursive: true });
+	const nested = path.join(nestedDir, "migration.sql");
+	fs.writeFileSync(nested, "-- nested");
+	fs.rmSync(flat);
+	assert.equal(migration.resolveMigrationSqlPath(root), nested);
+	// 都缺失:必须带出已查找路径,而不是无从下手的 ENOENT。
+	// 注意:模块目录兜底候选在源码树里总能命中真 SQL,故该负例放到
+	// 构件布局的端到端用例(见下一条)里验证。
+	assert.ok(migration.resolveMigrationSqlPath(root).length > 0);
+});
+
+test("构件缺 SQL 时报出已查找路径并非零退出", () => {
+	const { spawnSync } = require("node:child_process");
+	const scriptSrc = path.join(__dirname, "..", "packages", "server", "prisma", "agent-session-migration.cjs");
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "vcpdeck-nosql-"));
+	dirs.push(root);
+	const serverDir = path.join(root, "server");
+	const prismaDir = path.join(serverDir, "prisma");
+	fs.mkdirSync(prismaDir, { recursive: true });
+	fs.copyFileSync(scriptSrc, path.join(prismaDir, "agent-session-migration.cjs"));
+	// 故意不放 agent-session-migration.sql。
+	fs.symlinkSync(
+		path.join(__dirname, "..", "packages", "server", "node_modules"),
+		path.join(serverDir, "node_modules"),
+		"junction",
+	);
+	const result = spawnSync(
+		process.execPath,
+		["prisma/agent-session-migration.cjs"],
+		{
+			cwd: serverDir,
+			env: { ...process.env, DATABASE_URL: `file:///${path.join(root, "x.db").split(path.sep).join("/")}` },
+			encoding: "utf8",
+		},
+	);
+	assert.notEqual(result.status, 0, "缺 SQL 必须非零退出");
+	assert.match(result.stderr, /找不到迁移 SQL/);
+	assert.match(result.stderr, /agent-session-migration\.sql/, "应列出已查找路径");
+});
+
 beforeEach(() => {
 	// 每个 test 共享目录清理由 makeLegacyDb 的 finally 覆盖;这里仅兜底。
 });

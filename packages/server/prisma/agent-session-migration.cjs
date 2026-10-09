@@ -18,8 +18,12 @@ const { createHash } = require("node:crypto");
 const { createRequire } = require("node:module");
 const { pathToFileURL } = require("node:url");
 
-// 从本目录出发解析依赖(server 包内 node_modules),不依赖进程 cwd。
-const pkgRequire = createRequire(path.join(__dirname, "..", "package.json"));
+// 依赖从**脚本自身所在目录**向上解析,不依赖进程 cwd:
+// - 源码布局:packages/server/prisma/ → 向上找到 packages/server/node_modules;
+// - 发布构件布局:server/(prisma/ 被摊平到构件根) → 直接命中 server/node_modules。
+// 若以 __dirname/.. 为基准,发布构件会去 apps/<version>/node_modules 找依赖而
+// MODULE_NOT_FOUND(2026-10-09 0.17.0 首次发布即因此失败)。
+const pkgRequire = createRequire(path.join(__dirname, "package.json"));
 const { createClient } = pkgRequire("@libsql/client");
 
 const MIGRATION_VERSION = "20261008000000_agent_session_run_audit";
@@ -45,25 +49,70 @@ function sqlDigest(sqlPath) {
 
 /** 读取迁移 SQL;文件缺失视为部署残缺,直接失败。 */
 /**
+ * 定位迁移 SQL。锚点是 **server 包根**(cwd),不是 __dirname:
+ * 发布构件的 server 入口是 esbuild 打包产物,模块被内联后 __dirname 变成
+ * `<server>/dist`,按它去找必然落空(2026-10-09 0.17.0 预发布验证即撞此坑)。
+ * Launcher(daemon 以构件目录为 cwd)、install.cjs 与 dev 脚本均保证 cwd = server 包根。
+ * 候选:
+ * 1. `<server>/prisma/agent-session-migration.sql` —— 发布构件(pack-release 落位);
+ * 2. `<server>/prisma/migrations/<version>/migration.sql` —— 源码布局;
+ * 3. 模块目录下的源码布局 —— 仅当调用方直接以模块目录为 cwd 时的兜底。
+ * 都找不到时报出已查找路径,而不是无从下手的 ENOENT。
+ */
+function resolveMigrationSqlPath(baseDir = process.cwd()) {
+	const { existsSync } = require("node:fs");
+	const candidates = [
+		path.join(baseDir, "prisma", "agent-session-migration.sql"),
+		path.join(baseDir, "prisma", "migrations", MIGRATION_VERSION, "migration.sql"),
+		path.join(__dirname, "migrations", MIGRATION_VERSION, "migration.sql"),
+	];
+	const found = candidates.find((candidate) => existsSync(candidate));
+	if (!found) {
+		throw new AgentMigrationBlockedError(
+			`找不到迁移 SQL,已查找: ${candidates.join(", ")}`,
+		);
+	}
+	return found;
+}
+
+/**
+ * 定位 Prisma config:源码在 server 包根,发布构件摊平到与脚本同层。
+ * 找不到时返回 null,由调用方退回内置默认值。
+ */
+function resolvePrismaConfigPath(baseDir = __dirname) {
+	const { existsSync } = require("node:fs");
+	const candidates = [
+		path.join(baseDir, "prisma.config.cjs"),
+		path.join(baseDir, "..", "prisma.config.cjs"),
+	];
+	return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+/**
  * 解析 CLI 入口使用的数据库地址。
  * - 显式 DATABASE_URL 永远优先(安装器与生产单元文件都依赖这一点);
  * - 未设置时退回 Prisma config 的 datasource(即开发库),并把其中的相对
  *   `file:./prisma/dev.db` 按 **server 包根** 解析成绝对 file URL ——
  *   Prisma CLI 也是以包根为基准,脚本必须等价,否则换 cwd 调用会连错库。
  */
-function resolveCliDatabaseUrl(env = process.env, serverRoot = path.join(__dirname, "..")) {
+function resolveCliDatabaseUrl(env = process.env, serverRoot = null) {
 	const explicit = env?.DATABASE_URL;
 	if (explicit) return explicit;
+	const configPath = resolvePrismaConfigPath();
+	// 相对路径的基准就是 config 所在目录(源码=server 包根,构件=构件根)。
+	const baseDir = serverRoot ?? (configPath ? path.dirname(configPath) : __dirname);
 	let configured = "file:./prisma/dev.db";
-	try {
-		const config = require(path.join(serverRoot, "prisma.config.cjs"));
-		if (typeof config?.datasource?.url === "string") configured = config.datasource.url;
-	} catch {
-		// 配置文件缺失(未随构件发布)时沿用同一默认位置,不因此失败。
+	if (configPath) {
+		try {
+			const config = require(configPath);
+			if (typeof config?.datasource?.url === "string") configured = config.datasource.url;
+		} catch {
+			// 配置不可读时沿用同一默认位置,不因此失败。
+		}
 	}
 	const relative = /^file:(?:\.\/)?(.*)$/.exec(configured);
 	if (!relative) return configured;
-	return pathToFileURL(path.resolve(serverRoot, relative[1])).href;
+	return pathToFileURL(path.resolve(baseDir, relative[1])).href;
 }
 
 function loadSql(sqlPath) {
@@ -378,14 +427,16 @@ module.exports = {
 	MIGRATION_VERSION,
 	migrateAgentSessions,
 	assertAgentMigrationReady,
-	// 仅供测试与 CLI 入口:解析"该连哪个库"的策略只此一处。
+	// 仅供测试与 CLI 入口:解析“该连哪个库”与“SQL 在哪”的策略只此一处。
 	resolveCliDatabaseUrl,
+	resolveMigrationSqlPath,
+	resolvePrismaConfigPath,
 };
 
 // CLI 入口:node agent-session-migration.cjs
 if (require.main === module) {
 	const databaseUrl = resolveCliDatabaseUrl();
-	const sqlPath = path.join(__dirname, "migrations", MIGRATION_VERSION, "migration.sql");
+	const sqlPath = resolveMigrationSqlPath();
 	migrateAgentSessions({ url: databaseUrl, sqlPath })
 		.then((result) => {
 			console.log(

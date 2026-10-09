@@ -24,5 +24,12 @@ export declare function assertAgentMigrationReady(options: AgentMigrationOptions
 /** 解析 CLI 入口的数据库地址:显式 DATABASE_URL 优先,否则回退 Prisma config 的开发库。 */
 export declare function resolveCliDatabaseUrl(
 	env?: { DATABASE_URL?: string },
-	serverRoot?: string,
+	serverRoot?: string | null,
 ): string;
+/**
+ * 定位迁移 SQL:同时兼容源码布局与发布构件布局(构件中 SQL 与脚本同目录)。
+ * 均不存在时抛出 AGENT_MIGRATION_BLOCKED 并列出已查找路径。
+ */
+export declare function resolveMigrationSqlPath(baseDir?: string): string;
+/** 定位 prisma.config.cjs;不存在时返回 null(调用方退回内置默认值)。 */
+export declare function resolvePrismaConfigPath(baseDir?: string): string | null;
