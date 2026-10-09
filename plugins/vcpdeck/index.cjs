@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.16.4";
+    exports2.VERSION = "0.17.0";
   }
 });
 
@@ -362,7 +362,7 @@ var require_pi = __commonJS({
   "../shared/dist/pi.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.PiProtocolError = exports2.PI_THINKING_LEVELS = exports2.PI_IMAGE_MIME_TYPES = exports2.MAX_PI_IMAGES_TOTAL_BYTES = exports2.MAX_PI_IMAGE_BYTES = exports2.MAX_PI_IMAGES_PER_PROMPT = exports2.PI_PROJECT_KEY_LENGTH = exports2.MAX_IMPORT_LIST_SESSIONS = exports2.MAX_IMPORT_SOURCE_NAMES = exports2.MAX_PREVIEW_CODE_POINTS = exports2.PI_IMPORT_REASON_CODES = exports2.PI_LEGACY_TOOL_EXECUTION_MODES = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_BUILTIN_TOOL_IDS = exports2.PI_TOOL_POLICY_BUCKETS = exports2.PI_BUNDLE_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = void 0;
+    exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.PiProtocolError = exports2.PI_THINKING_LEVELS = exports2.PI_IMAGE_MIME_TYPES = exports2.MAX_PI_IMAGES_TOTAL_BYTES = exports2.MAX_PI_IMAGE_BYTES = exports2.MAX_PI_IMAGES_PER_PROMPT = exports2.PI_PROJECT_KEY_LENGTH = exports2.MAX_IMPORT_LIST_SESSIONS = exports2.MAX_IMPORT_SOURCE_NAMES = exports2.MAX_PREVIEW_CODE_POINTS = exports2.PI_IMPORT_REASON_CODES = exports2.PI_LEGACY_TOOL_EXECUTION_MODES = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_BUILTIN_TOOL_IDS = exports2.PI_TOOL_POLICY_BUCKETS = exports2.PI_BUNDLE_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_SESSION_PROTOCOL_VERSION = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = void 0;
     exports2.isPiToolExecutionMode = isPiToolExecutionMode;
     exports2.isPiLegacyToolExecutionMode = isPiLegacyToolExecutionMode;
     exports2.emptyPiToolPolicy = emptyPiToolPolicy;
@@ -372,7 +372,10 @@ var require_pi = __commonJS({
     exports2.parsePiImportPreviewResponse = parsePiImportPreviewResponse;
     exports2.parsePiImportRunRequest = parsePiImportRunRequest;
     exports2.parsePiImportRunResponse = parsePiImportRunResponse;
-    exports2.parsePiSessionJobSnapshot = parsePiSessionJobSnapshot2;
+    exports2.isPiRunTerminal = isPiRunTerminal;
+    exports2.parsePiSessionSnapshot = parsePiSessionSnapshot2;
+    exports2.parsePiRunInfo = parsePiRunInfo2;
+    exports2.parsePiAuditEventInfo = parsePiAuditEventInfo2;
     exports2.isPiThinkingLevel = isPiThinkingLevel;
     exports2.isPiAgentIdle = isPiAgentIdle;
     exports2.isPiClientEventType = isPiClientEventType;
@@ -429,6 +432,7 @@ var require_pi = __commonJS({
       "PI_EXTENSION_UI_LIMIT_EXCEEDED"
     ];
     exports2.PI_SESSION_JOB_PROTOCOL_VERSION = 3;
+    exports2.PI_SESSION_PROTOCOL_VERSION = 4;
     exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = 1;
     exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = 5;
     exports2.PI_BUNDLE_PROTOCOL_VERSION = 1;
@@ -550,7 +554,12 @@ var require_pi = __commonJS({
     var IMPORT_PREVIEW_KEYS = /* @__PURE__ */ new Set(["sourceName", "previewText", "truncated"]);
     var IMPORT_RUN_REQUEST_KEYS = /* @__PURE__ */ new Set(["sourceNames"]);
     var IMPORT_RUN_RESPONSE_KEYS = /* @__PURE__ */ new Set(["results"]);
-    var IMPORT_RUN_RESULT_KEYS = /* @__PURE__ */ new Set(["sourceName", "status", "reasonCode"]);
+    var IMPORT_RUN_RESULT_KEYS = /* @__PURE__ */ new Set([
+      "sourceName",
+      "status",
+      "reasonCode",
+      "sessionId"
+    ]);
     var IMPORT_ITEM_STATUSES = /* @__PURE__ */ new Set([
       "imported",
       "alreadyImported",
@@ -637,6 +646,9 @@ var require_pi = __commonJS({
         if (typeof raw.status !== "string" || !IMPORT_ITEM_STATUSES.has(raw.status)) {
           throw new PiProtocolError(`${what}.status \u4E0D\u53D7\u652F\u6301`);
         }
+        if (raw.sessionId !== void 0) {
+          assertString(raw.sessionId, `${what}.sessionId`, 256);
+        }
         if (raw.reasonCode !== void 0) {
           if (typeof raw.reasonCode !== "string" || !IMPORT_REASON_CODE_SET.has(raw.reasonCode)) {
             throw new PiProtocolError(`${what}.reasonCode \u53EA\u80FD\u662F\u4E09\u4E2A\u7A33\u5B9A\u7801\u4E4B\u4E00`);
@@ -644,59 +656,182 @@ var require_pi = __commonJS({
           return {
             sourceName,
             status: raw.status,
-            reasonCode: raw.reasonCode
+            reasonCode: raw.reasonCode,
+            ...raw.sessionId !== void 0 ? { sessionId: raw.sessionId } : {}
           };
         }
         return {
           sourceName,
-          status: raw.status
+          status: raw.status,
+          ...raw.sessionId !== void 0 ? { sessionId: raw.sessionId } : {}
         };
       });
       return { results };
     }
-    function parsePiSessionJobSnapshot2(value) {
-      assertRecord(value, "PiSessionJobSnapshot");
+    var ISO_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+    var PI_RUN_STATUSES_V4 = /* @__PURE__ */ new Set([
+      "pending",
+      "running",
+      "waiting_input",
+      "disconnected",
+      "succeeded",
+      "failed",
+      "aborted"
+    ]);
+    var PI_RUN_TERMINAL_STATUSES = /* @__PURE__ */ new Set(["succeeded", "failed", "aborted"]);
+    var PI_AUDIT_EVENT_TYPES = /* @__PURE__ */ new Set([
+      "created",
+      "imported",
+      "renamed",
+      "archived",
+      "restored",
+      "deleted",
+      "execution_mode_changed"
+    ]);
+    var PI_AUDIT_RESULTS = /* @__PURE__ */ new Set(["requested", "ok", "failed"]);
+    function isPiRunTerminal(status) {
+      return PI_RUN_TERMINAL_STATUSES.has(status);
+    }
+    function assertIsoDatetime(v, what) {
+      assertString(v, what);
+      if (!ISO_DATETIME_PATTERN.test(v)) {
+        throw new PiProtocolError(`${what} \u5FC5\u987B\u662F UTC ISO \u65F6\u95F4`);
+      }
+    }
+    function assertOptionalIsoDatetime(v, what) {
+      if (v !== void 0 && v !== null)
+        assertIsoDatetime(v, what);
+    }
+    function parsePiSessionSnapshot2(value) {
+      assertRecord(value, "PiSessionSnapshot");
       assertKeys(value, /* @__PURE__ */ new Set([
-        "jobId",
         "sessionId",
         "status",
-        "runId",
-        "executionModeOverride",
-        "effectiveExecutionMode",
+        "activeRun",
         "ownerName",
         "isOwner",
-        "errorCode",
-        "errorMessage"
-      ]), "PiSessionJobSnapshot");
-      assertString(value.jobId, "jobId", 256);
+        "executionModeOverride",
+        "effectiveExecutionMode",
+        "executionModeNeedsConfirmation"
+      ]), "PiSessionSnapshot");
       assertString(value.sessionId, "sessionId", 256);
-      if (typeof value.status !== "string" || ![
-        "idle",
-        "pending",
-        "running",
-        "waiting_input",
-        "done",
-        "disconnected",
-        "error",
-        "cancelled"
-      ].includes(value.status))
-        throw new PiProtocolError("status \u4E0D\u53D7\u652F\u6301");
-      if (value.runId !== null)
-        assertString(value.runId, "runId", 256);
+      assertString(value.status, "status");
+      if (!("available" === value.status || "archived" === value.status || "deleted" === value.status)) {
+        throw new PiProtocolError(`status \u4E0D\u53D7\u652F\u6301: ${String(value.status)}`);
+      }
+      const activeRun = value.activeRun === null ? null : parsePiRunInfo2(value.activeRun);
+      if (value.ownerName !== null)
+        assertString(value.ownerName, "ownerName", 256);
+      if (typeof value.isOwner !== "boolean")
+        throw new PiProtocolError("isOwner \u5FC5\u987B\u662F\u5E03\u5C14");
       for (const field of ["executionModeOverride", "effectiveExecutionMode"]) {
         if (value[field] !== null && !isPiToolExecutionMode(value[field])) {
           throw new PiProtocolError(`${field} \u4E0D\u53D7\u652F\u6301`);
         }
       }
-      if (value.ownerName !== null)
-        assertString(value.ownerName, "ownerName", 256);
-      if (typeof value.isOwner !== "boolean")
-        throw new PiProtocolError("isOwner \u5FC5\u987B\u662F\u5E03\u5C14");
-      if (value.errorCode !== void 0 && (typeof value.errorCode !== "string" || !exports2.PI_ERROR_CODES.includes(value.errorCode))) {
-        throw new PiProtocolError("errorCode \u4E0D\u53D7\u652F\u6301");
+      if (typeof value.executionModeNeedsConfirmation !== "boolean") {
+        throw new PiProtocolError("executionModeNeedsConfirmation \u5FC5\u987B\u662F\u5E03\u5C14");
       }
-      if (value.errorMessage !== void 0)
-        assertString(value.errorMessage, "errorMessage", MAX_TEXT_CHARS);
+      return value;
+    }
+    function parsePiRunInfo2(value) {
+      assertRecord(value, "PiRunInfo");
+      assertKeys(value, /* @__PURE__ */ new Set([
+        "runId",
+        "sessionId",
+        "status",
+        "kind",
+        "executionMode",
+        "actorName",
+        "source",
+        "createdAt",
+        "acceptedAt",
+        "startedAt",
+        "finishedAt",
+        "errorCode"
+      ]), "PiRunInfo");
+      assertString(value.runId, "runId", 256);
+      assertString(value.sessionId, "sessionId", 256);
+      assertString(value.status, "status");
+      if (!PI_RUN_STATUSES_V4.has(value.status)) {
+        throw new PiProtocolError(`status \u4E0D\u53D7\u652F\u6301: ${String(value.status)}`);
+      }
+      assertString(value.kind, "kind");
+      if (value.kind !== "prompt" && value.kind !== "command") {
+        throw new PiProtocolError(`kind \u4E0D\u53D7\u652F\u6301: ${String(value.kind)}`);
+      }
+      if (!isPiToolExecutionMode(value.executionMode)) {
+        throw new PiProtocolError("executionMode \u4E0D\u53D7\u652F\u6301");
+      }
+      if (value.actorName !== null)
+        assertString(value.actorName, "actorName", 256);
+      if (value.source !== null)
+        assertString(value.source, "source", 64);
+      assertIsoDatetime(value.createdAt, "createdAt");
+      assertOptionalIsoDatetime(value.acceptedAt, "acceptedAt");
+      assertOptionalIsoDatetime(value.startedAt, "startedAt");
+      assertOptionalIsoDatetime(value.finishedAt, "finishedAt");
+      const terminal = PI_RUN_TERMINAL_STATUSES.has(value.status);
+      if (terminal) {
+        if (value.finishedAt === null) {
+          throw new PiProtocolError("\u7EC8\u6001 Run \u5FC5\u987B\u643A\u5E26 finishedAt");
+        }
+      } else if (value.finishedAt !== null) {
+        throw new PiProtocolError("\u975E\u7EC8\u6001 Run \u4E0D\u5F97\u643A\u5E26 finishedAt");
+      }
+      if (value.errorCode !== null)
+        assertErrorCode(value.errorCode, "errorCode");
+      if (value.status === "failed" && value.errorCode === null) {
+        throw new PiProtocolError("failed Run \u5FC5\u987B\u643A\u5E26\u5B89\u5168 errorCode");
+      }
+      if (value.status !== "failed" && value.errorCode !== null) {
+        throw new PiProtocolError("\u4EC5 failed Run \u5141\u8BB8 errorCode");
+      }
+      return value;
+    }
+    function parsePiAuditEventInfo2(value) {
+      assertRecord(value, "PiAuditEventInfo");
+      assertKeys(value, /* @__PURE__ */ new Set([
+        "id",
+        "sessionId",
+        "event",
+        "result",
+        "actorName",
+        "source",
+        "createdAt",
+        "errorCode",
+        "oldExecutionMode",
+        "newExecutionMode"
+      ]), "PiAuditEventInfo");
+      assertString(value.id, "id", 256);
+      assertString(value.sessionId, "sessionId", 256);
+      assertString(value.event, "event");
+      if (!PI_AUDIT_EVENT_TYPES.has(value.event)) {
+        throw new PiProtocolError(`event \u4E0D\u53D7\u652F\u6301: ${String(value.event)}`);
+      }
+      assertString(value.result, "result");
+      if (!PI_AUDIT_RESULTS.has(value.result)) {
+        throw new PiProtocolError(`result \u4E0D\u53D7\u652F\u6301: ${String(value.result)}`);
+      }
+      if (value.actorName !== null)
+        assertString(value.actorName, "actorName", 256);
+      if (value.source !== null)
+        assertString(value.source, "source", 64);
+      assertIsoDatetime(value.createdAt, "createdAt");
+      if (value.errorCode !== null)
+        assertErrorCode(value.errorCode, "errorCode");
+      for (const field of ["oldExecutionMode", "newExecutionMode"]) {
+        if (value[field] !== null && !isPiToolExecutionMode(value[field])) {
+          throw new PiProtocolError(`${field} \u4E0D\u53D7\u652F\u6301`);
+        }
+      }
+      if (value.event === "execution_mode_changed") {
+        if (value.oldExecutionMode === null && value.newExecutionMode === null) {
+          throw new PiProtocolError("execution_mode_changed \u5FC5\u987B\u643A\u5E26\u6A21\u5F0F\u524D\u540E\u503C");
+        }
+      } else if (value.oldExecutionMode !== null || value.newExecutionMode !== null) {
+        throw new PiProtocolError("\u4EC5 execution_mode_changed \u5141\u8BB8\u6A21\u5F0F\u524D\u540E\u503C");
+      }
       return value;
     }
     exports2.PI_PROJECT_KEY_LENGTH = 64;
@@ -769,7 +904,6 @@ var require_pi = __commonJS({
       "action",
       "cwdRef",
       "sessionId",
-      "jobId",
       "runId",
       "payload"
     ]);
@@ -801,13 +935,7 @@ var require_pi = __commonJS({
     function isPiClientEventType(type) {
       return typeof type === "string" && EVENT_TYPES.has(type);
     }
-    var RUN_STATUSES = /* @__PURE__ */ new Set([
-      "running",
-      "waiting_input",
-      "idle",
-      "done",
-      "error"
-    ]);
+    var RUN_STATUSES = PI_RUN_STATUSES_V4;
     var ERROR_CODES = new Set(exports2.PI_ERROR_CODES);
     var EXTENSION_UI_KINDS = /* @__PURE__ */ new Set([
       "select",
@@ -860,11 +988,6 @@ var require_pi = __commonJS({
     function assertOptionalString(v, what, maxLength) {
       if (v !== void 0)
         assertString(v, what, maxLength);
-    }
-    function assertSessionJobPair(sessionId, jobId) {
-      if (sessionId !== void 0 && jobId !== void 0 && sessionId !== jobId) {
-        throw new PiProtocolError("jobId \u5FC5\u987B\u7B49\u4E8E sessionId");
-      }
     }
     function assertErrorCode(v, what) {
       assertString(v, what);
@@ -954,20 +1077,18 @@ var require_pi = __commonJS({
       assertString(input.action, "action");
       if (!ACTIONS.has(input.action))
         throw new PiProtocolError(`\u672A\u77E5 action ${String(input.action)}`);
-      assertSessionJobPair(input.sessionId, input.jobId);
+      if (input.jobId !== void 0) {
+        throw new PiProtocolError("jobId \u5DF2\u968F ADR-0041 \u79FB\u9664,\u4EC5\u4F7F\u7528 sessionId+runId");
+      }
       if (input.cwdRef !== void 0)
         input.cwdRef = parseCwdRef(input.cwdRef);
       if (input.sessionId !== void 0)
         assertString(input.sessionId, "sessionId");
-      if (input.jobId !== void 0)
-        assertString(input.jobId, "jobId");
       if (input.runId !== void 0)
         assertString(input.runId, "runId");
       if (RUN_SCOPED_ACTIONS.has(input.action)) {
         if (input.sessionId === void 0)
           throw new PiProtocolError(`${input.action} \u7F3A sessionId`);
-        if (input.jobId === void 0)
-          throw new PiProtocolError(`${input.action} \u7F3A jobId`);
         if (input.runId === void 0)
           throw new PiProtocolError(`${input.action} \u7F3A runId`);
       }
@@ -1088,7 +1209,6 @@ var require_pi = __commonJS({
     var EVENT_KEYS = /* @__PURE__ */ new Set([
       "clientId",
       "sessionId",
-      "jobId",
       "runId",
       "event"
     ]);
@@ -1097,9 +1217,7 @@ var require_pi = __commonJS({
       assertKeys(input, EVENT_KEYS, "PiEvent");
       assertString(input.clientId, "clientId");
       assertString(input.sessionId, "sessionId");
-      assertString(input.jobId, "jobId");
       assertString(input.runId, "runId");
-      assertSessionJobPair(input.sessionId, input.jobId);
       assertRecord(input.event, "event");
       assertString(input.event.type, "event.type");
       if (!EVENT_TYPES.has(input.event.type))
@@ -1182,11 +1300,12 @@ var require_pi = __commonJS({
       const runs = [];
       for (const item of input.runs) {
         assertRecord(item, "run");
-        assertKeys(item, /* @__PURE__ */ new Set(["jobId", "runId", "sessionId", "status", "projectKey"]), "run");
-        assertString(item.jobId, "run.jobId");
+        assertKeys(item, /* @__PURE__ */ new Set(["runId", "sessionId", "status", "projectKey", "errorCode"]), "run");
+        if (item.jobId !== void 0) {
+          throw new PiProtocolError("run.jobId \u5DF2\u968F ADR-0041 \u79FB\u9664,\u4EC5\u4F7F\u7528 sessionId+runId");
+        }
         assertString(item.runId, "run.runId");
         assertString(item.sessionId, "run.sessionId");
-        assertSessionJobPair(item.sessionId, item.jobId);
         assertString(item.status, "run.status");
         if (!RUN_STATUSES.has(item.status)) {
           throw new PiProtocolError(`\u672A\u77E5 run \u72B6\u6001 ${String(item.status)}`);
@@ -1200,12 +1319,20 @@ var require_pi = __commonJS({
             throw new PiProtocolError("projectKey \u957F\u5EA6\u5FC5\u987B\u4E3A 64");
           }
         }
+        if (item.errorCode !== void 0) {
+          if (item.status !== "failed") {
+            throw new PiProtocolError("\u4EC5 failed \u7EC8\u5C40\u5141\u8BB8 errorCode");
+          }
+          assertErrorCode(item.errorCode, "run.errorCode");
+        } else if (item.status === "failed") {
+          throw new PiProtocolError("failed \u7EC8\u5C40\u5FC5\u987B\u643A\u5E26\u5B89\u5168 errorCode");
+        }
         runs.push({
-          jobId: item.jobId,
           runId: item.runId,
           sessionId: item.sessionId,
           status: item.status,
-          projectKey: item.projectKey
+          projectKey: item.projectKey,
+          ...item.errorCode !== void 0 ? { errorCode: item.errorCode } : {}
         });
       }
       return { clientId: input.clientId, runs, ...parseReportRuntimeState(input) };
@@ -3834,6 +3961,7 @@ var require_machine_register = __commonJS({
       "nodeVersion",
       "shellKind",
       "sessionJobProtocolVersion",
+      "sessionProtocolVersion",
       "runtimeSpecProtocolVersion",
       "configMode",
       "modelCatalog",
@@ -3904,6 +4032,9 @@ var require_machine_register = __commonJS({
         };
         if (value.sessionJobProtocolVersion !== void 0) {
           status.sessionJobProtocolVersion = requirePositiveInt(value.sessionJobProtocolVersion, "pi.sessionJobProtocolVersion");
+        }
+        if (value.sessionProtocolVersion !== void 0) {
+          status.sessionProtocolVersion = requirePositiveInt(value.sessionProtocolVersion, "pi.sessionProtocolVersion");
         }
         if (value.runtimeSpecProtocolVersion !== void 0) {
           status.runtimeSpecProtocolVersion = requirePositiveInt(value.runtimeSpecProtocolVersion, "pi.runtimeSpecProtocolVersion");
@@ -4065,8 +4196,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.Events = exports2.parsePiProviderDiscoveryInput = exports2.parsePiProfileUpdateInput = exports2.parsePiProfileCreateInput = exports2.parsePiCredentialUpdateInput = exports2.parsePiCredentialCreateInput = exports2.PiAdminProtocolError = exports2.safePiErrorMessage = exports2.parsePiRuntimeSpecV4 = exports2.parsePiRuntimeSpecV3 = exports2.parsePiRuntimeSpecV1 = exports2.parsePiRuntimeSpecMessageV4 = exports2.parsePiRuntimeSpecMessageV3 = exports2.parsePiRuntimeSpecMessage = exports2.parsePiRuntimeAck = exports2.parsePiCredentialLeaseV2 = exports2.parsePiAgentState = exports2.isPiToolExecutionMode = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
-    exports2.isPiWorkerAction = exports2.isPiReadAction = exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = exports2.parseTunnelClose = exports2.parseTunnelClientState = exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parsePiModelCatalogStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = void 0;
+    exports2.parsePiCredentialCreateInput = exports2.PiAdminProtocolError = exports2.safePiErrorMessage = exports2.parsePiRuntimeSpecV4 = exports2.parsePiRuntimeSpecV3 = exports2.parsePiRuntimeSpecV1 = exports2.parsePiRuntimeSpecMessageV4 = exports2.parsePiRuntimeSpecMessageV3 = exports2.parsePiRuntimeSpecMessage = exports2.parsePiRuntimeAck = exports2.parsePiCredentialLeaseV2 = exports2.parsePiAgentState = exports2.isPiToolExecutionMode = exports2.isPiThinkingLevel = exports2.isPiAgentIdle = exports2.PI_TOOL_EXECUTION_MODES = exports2.PI_THINKING_LEVELS = exports2.PI_SESSION_JOB_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION = exports2.PI_RUNTIME_SPEC_PROTOCOL_VERSION = exports2.PI_ERROR_CODES = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parsePiAuditEventInfo = exports2.parsePiRunInfo = exports2.parsePiSessionSnapshot = exports2.PI_SESSION_PROTOCOL_VERSION = exports2.isPiRunTerminal = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.isPiWorkerAction = exports2.isPiReadAction = exports2.PI_WORKER_ACTIONS = exports2.PI_READ_ACTIONS = exports2.parseTunnelSessionCreateRequest = exports2.parseTunnelSessionCreated = exports2.parseTunnelPrepare = exports2.parseTunnelIceServer = exports2.parseTunnelConfigUpdate = exports2.parseTunnelConfigInfo = exports2.parseTunnelClose = exports2.parseTunnelClientState = exports2.parseTunnelClientSignal = exports2.parseTunnelBrowserSignal = exports2.parseTunnelBrowserAttach = exports2.parseP2pTunnelCapabilityStatus = exports2.TunnelLimits = exports2.P2P_TUNNEL_PROTOCOL_VERSION = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parsePiModelCatalogStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parsePiProviderDiscoveryInput = exports2.parsePiProfileUpdateInput = exports2.parsePiProfileCreateInput = exports2.parsePiCredentialUpdateInput = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -4126,6 +4257,22 @@ var require_dist = __commonJS({
     __exportStar(require_pi_bundle(), exports2);
     __exportStar(require_terminal(), exports2);
     __exportStar(require_pi_admin(), exports2);
+    var pi_js_1 = require_pi();
+    Object.defineProperty(exports2, "isPiRunTerminal", { enumerable: true, get: function() {
+      return pi_js_1.isPiRunTerminal;
+    } });
+    Object.defineProperty(exports2, "PI_SESSION_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return pi_js_1.PI_SESSION_PROTOCOL_VERSION;
+    } });
+    Object.defineProperty(exports2, "parsePiSessionSnapshot", { enumerable: true, get: function() {
+      return pi_js_1.parsePiSessionSnapshot;
+    } });
+    Object.defineProperty(exports2, "parsePiRunInfo", { enumerable: true, get: function() {
+      return pi_js_1.parsePiRunInfo;
+    } });
+    Object.defineProperty(exports2, "parsePiAuditEventInfo", { enumerable: true, get: function() {
+      return pi_js_1.parsePiAuditEventInfo;
+    } });
     var update_js_1 = require_update();
     Object.defineProperty(exports2, "ReleaseClientState", { enumerable: true, get: function() {
       return update_js_1.ReleaseClientState;
@@ -4151,63 +4298,63 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "isReleaseArchiveAvailable", { enumerable: true, get: function() {
       return update_js_1.isReleaseArchiveAvailable;
     } });
-    var pi_js_1 = require_pi();
+    var pi_js_2 = require_pi();
     Object.defineProperty(exports2, "PI_ERROR_CODES", { enumerable: true, get: function() {
-      return pi_js_1.PI_ERROR_CODES;
+      return pi_js_2.PI_ERROR_CODES;
     } });
     Object.defineProperty(exports2, "PI_RUNTIME_SPEC_PROTOCOL_VERSION", { enumerable: true, get: function() {
-      return pi_js_1.PI_RUNTIME_SPEC_PROTOCOL_VERSION;
+      return pi_js_2.PI_RUNTIME_SPEC_PROTOCOL_VERSION;
     } });
     Object.defineProperty(exports2, "PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION", { enumerable: true, get: function() {
-      return pi_js_1.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION;
+      return pi_js_2.PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION;
     } });
     Object.defineProperty(exports2, "PI_SESSION_JOB_PROTOCOL_VERSION", { enumerable: true, get: function() {
-      return pi_js_1.PI_SESSION_JOB_PROTOCOL_VERSION;
+      return pi_js_2.PI_SESSION_JOB_PROTOCOL_VERSION;
     } });
     Object.defineProperty(exports2, "PI_THINKING_LEVELS", { enumerable: true, get: function() {
-      return pi_js_1.PI_THINKING_LEVELS;
+      return pi_js_2.PI_THINKING_LEVELS;
     } });
     Object.defineProperty(exports2, "PI_TOOL_EXECUTION_MODES", { enumerable: true, get: function() {
-      return pi_js_1.PI_TOOL_EXECUTION_MODES;
+      return pi_js_2.PI_TOOL_EXECUTION_MODES;
     } });
     Object.defineProperty(exports2, "isPiAgentIdle", { enumerable: true, get: function() {
-      return pi_js_1.isPiAgentIdle;
+      return pi_js_2.isPiAgentIdle;
     } });
     Object.defineProperty(exports2, "isPiThinkingLevel", { enumerable: true, get: function() {
-      return pi_js_1.isPiThinkingLevel;
+      return pi_js_2.isPiThinkingLevel;
     } });
     Object.defineProperty(exports2, "isPiToolExecutionMode", { enumerable: true, get: function() {
-      return pi_js_1.isPiToolExecutionMode;
+      return pi_js_2.isPiToolExecutionMode;
     } });
     Object.defineProperty(exports2, "parsePiAgentState", { enumerable: true, get: function() {
-      return pi_js_1.parsePiAgentState;
+      return pi_js_2.parsePiAgentState;
     } });
     Object.defineProperty(exports2, "parsePiCredentialLeaseV2", { enumerable: true, get: function() {
-      return pi_js_1.parsePiCredentialLeaseV2;
+      return pi_js_2.parsePiCredentialLeaseV2;
     } });
     Object.defineProperty(exports2, "parsePiRuntimeAck", { enumerable: true, get: function() {
-      return pi_js_1.parsePiRuntimeAck;
+      return pi_js_2.parsePiRuntimeAck;
     } });
     Object.defineProperty(exports2, "parsePiRuntimeSpecMessage", { enumerable: true, get: function() {
-      return pi_js_1.parsePiRuntimeSpecMessage;
+      return pi_js_2.parsePiRuntimeSpecMessage;
     } });
     Object.defineProperty(exports2, "parsePiRuntimeSpecMessageV3", { enumerable: true, get: function() {
-      return pi_js_1.parsePiRuntimeSpecMessageV3;
+      return pi_js_2.parsePiRuntimeSpecMessageV3;
     } });
     Object.defineProperty(exports2, "parsePiRuntimeSpecMessageV4", { enumerable: true, get: function() {
-      return pi_js_1.parsePiRuntimeSpecMessageV4;
+      return pi_js_2.parsePiRuntimeSpecMessageV4;
     } });
     Object.defineProperty(exports2, "parsePiRuntimeSpecV1", { enumerable: true, get: function() {
-      return pi_js_1.parsePiRuntimeSpecV1;
+      return pi_js_2.parsePiRuntimeSpecV1;
     } });
     Object.defineProperty(exports2, "parsePiRuntimeSpecV3", { enumerable: true, get: function() {
-      return pi_js_1.parsePiRuntimeSpecV3;
+      return pi_js_2.parsePiRuntimeSpecV3;
     } });
     Object.defineProperty(exports2, "parsePiRuntimeSpecV4", { enumerable: true, get: function() {
-      return pi_js_1.parsePiRuntimeSpecV4;
+      return pi_js_2.parsePiRuntimeSpecV4;
     } });
     Object.defineProperty(exports2, "safePiErrorMessage", { enumerable: true, get: function() {
-      return pi_js_1.safePiErrorMessage;
+      return pi_js_2.safePiErrorMessage;
     } });
     var pi_admin_js_1 = require_pi_admin();
     Object.defineProperty(exports2, "PiAdminProtocolError", { enumerable: true, get: function() {
@@ -4537,18 +4684,18 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parseTunnelSessionCreateRequest", { enumerable: true, get: function() {
       return tunnel_js_1.parseTunnelSessionCreateRequest;
     } });
-    var pi_js_2 = require_pi();
+    var pi_js_3 = require_pi();
     Object.defineProperty(exports2, "PI_READ_ACTIONS", { enumerable: true, get: function() {
-      return pi_js_2.PI_READ_ACTIONS;
+      return pi_js_3.PI_READ_ACTIONS;
     } });
     Object.defineProperty(exports2, "PI_WORKER_ACTIONS", { enumerable: true, get: function() {
-      return pi_js_2.PI_WORKER_ACTIONS;
+      return pi_js_3.PI_WORKER_ACTIONS;
     } });
     Object.defineProperty(exports2, "isPiReadAction", { enumerable: true, get: function() {
-      return pi_js_2.isPiReadAction;
+      return pi_js_3.isPiReadAction;
     } });
     Object.defineProperty(exports2, "isPiWorkerAction", { enumerable: true, get: function() {
-      return pi_js_2.isPiWorkerAction;
+      return pi_js_3.isPiWorkerAction;
     } });
   }
 });
@@ -4854,11 +5001,49 @@ function createPiApi(client) {
         targetId
       })
     },
+    // 独立会话控制面:读取不依赖 Client 在线(ADR-0041)。
+    sessionsControl: {
+      snapshot: async (clientId, sessionId, signal) => (0, import_shared2.parsePiSessionSnapshot)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/snapshot`, void 0, signal)),
+      archive: async (clientId, sessionId) => (0, import_shared2.parsePiSessionSnapshot)(await client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/archive`)),
+      restore: async (clientId, sessionId) => (0, import_shared2.parsePiSessionSnapshot)(await client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/restore`)),
+      runs: async (clientId, sessionId, options, signal) => {
+        const params = new URLSearchParams();
+        if (options?.page !== void 0)
+          params.set("page", String(options.page));
+        if (options?.pageSize !== void 0)
+          params.set("pageSize", String(options.pageSize));
+        const query = params.toString();
+        const page = await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/runs${query ? `?${query}` : ""}`, void 0, signal);
+        return {
+          data: (page.data ?? []).map((item) => (0, import_shared2.parsePiRunInfo)(item)),
+          total: Number(page.total ?? 0),
+          page: Number(page.page ?? 1),
+          pageSize: Number(page.pageSize ?? 20),
+          totalPages: Number(page.totalPages ?? 0)
+        };
+      },
+      run: async (clientId, sessionId, runId, signal) => (0, import_shared2.parsePiRunInfo)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/runs/${enc(runId)}`, void 0, signal)),
+      audit: async (clientId, sessionId, options, signal) => {
+        const params = new URLSearchParams();
+        if (options?.page !== void 0)
+          params.set("page", String(options.page));
+        if (options?.pageSize !== void 0)
+          params.set("pageSize", String(options.pageSize));
+        const query = params.toString();
+        const page = await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/audit${query ? `?${query}` : ""}`, void 0, signal);
+        return {
+          data: (page.data ?? []).map((item) => (0, import_shared2.parsePiAuditEventInfo)(item)),
+          total: Number(page.total ?? 0),
+          page: Number(page.page ?? 1),
+          pageSize: Number(page.pageSize ?? 20),
+          totalPages: Number(page.totalPages ?? 0)
+        };
+      }
+    },
     agent: {
       newSession: (clientId, cwdRef, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/new`, { ...cwdRef }, signal),
       open: (clientId, sessionId, cwdRef, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/open`, cwdRef, signal),
-      complete: (clientId, sessionId, runId, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/complete`, runId === void 0 ? {} : { runId }, signal),
-      setExecutionMode: async (clientId, sessionId, cwdRef, mode) => (0, import_shared2.parsePiSessionJobSnapshot)(await client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/execution-mode`, { ...cwdRef, mode })),
+      setExecutionMode: async (clientId, sessionId, cwdRef, mode) => (0, import_shared2.parsePiSessionSnapshot)(await client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/execution-mode`, { ...cwdRef, mode })),
       state: async (clientId, sessionId, cwdRef, signal) => (0, import_shared2.parsePiAgentState)(await client.request("GET", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}?${cwdQuery(cwdRef)}`, void 0, signal)),
       prompt: (clientId, sessionId, cwdRef, input, signal) => client.request("POST", `/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}`, {
         ...cwdRef,
