@@ -1,3 +1,12 @@
+/**
+ * Agent Run 状态机(ADR-0041)。
+ *
+ * 职责边界:
+ * - 每轮 Prompt/扩展命令一个 AgentRun;活动状态使用条件更新 CAS;
+ * - 会话 activeRunId 作为原子指针,结算后清空并释放精确项目锁;
+ * - 连接 generation、项目锁、settlement timer 与重连对账;
+ * - 不写 Job,不保存 Prompt/正文/路径;失败只记稳定错误码。
+ */
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
@@ -5,19 +14,18 @@ import {
 	type ActorContext,
 	type PiAgentState,
 	type PiErrorCode,
-		type PiSessionJobSnapshot,
 	type PiStateAck,
 	type PiStateReport,
 	type PiToolExecutionMode,
 } from "@vcpdeck/shared";
-import { JobStatus, isPiAgentIdle } from "@vcpdeck/shared";
+import { isPiAgentIdle } from "@vcpdeck/shared";
 import { PiRuntimeService } from "./pi-runtime.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 interface ProjectLock {
 	clientId: string;
 	projectKey: string;
-	jobId: string;
+	sessionId: string;
 	runId: string;
 }
 
@@ -26,44 +34,49 @@ interface ClientGeneration {
 	ready: boolean;
 }
 
-interface RunPayload {
-	runId?: string;
-	deleteToken?: string;
-	previousStatus?: DeletableStatus;
-}
-
-type DeletableStatus = "idle" | "done" | "error";
-type JobRecord = {
+interface RunRow {
 	id: string;
+	sessionId: string;
 	clientId: string;
-	type: string;
 	status: string;
-	payload: string;
-	result?: string | null;
-	progress?: string | null;
-	errorCode?: string | null;
-	errorMessage?: string | null;
+	kind: string;
+	executionMode?: string | null;
 	createdByIdentityId?: string | null;
 	createdByName?: string | null;
+	createdVia?: string | null;
+	createdAt: Date;
+	acceptedAt?: Date | null;
+	startedAt?: Date | null;
 	finishedAt?: Date | null;
+	errorCode?: string | null;
+}
+
+interface SessionRow {
+	id: string;
+	clientId: string;
+	status: string;
+	ownerIdentityId?: string | null;
+	activeRunId?: string | null;
 	toolExecutionModeOverride?: string | null;
-	runExecutionMode?: string | null;
-};
+	executionModeNeedsConfirmation?: boolean;
+	deleteToken?: string | null;
+}
 
 const SETTLEMENT_GRACE_MS = 30_000;
-const EMPTY_SESSION_PAYLOAD = "{}";
-const ACTIVE_STATUSES = [
-	JobStatus.PENDING,
-	JobStatus.RUNNING,
-	JobStatus.WAITING_INPUT,
-	JobStatus.DISCONNECTED,
-] as const;
+const PENDING = "pending";
+const RUNNING = "running";
+const WAITING_INPUT = "waiting_input";
+const DISCONNECTED = "disconnected";
+const ACTIVE_RUN_STATUSES = [PENDING, RUNNING, WAITING_INPUT, DISCONNECTED] as const;
+const TERMINAL_STATUSES = ["succeeded", "failed", "aborted"] as const;
 
-function piError(code: string, message: string): Error {
+type RunStatus = (typeof ACTIVE_RUN_STATUSES)[number] | (typeof TERMINAL_STATUSES)[number];
+
+function piError(code: PiErrorCode, message: string): Error {
 	return Object.assign(new Error(message), { code });
 }
 
-function parseStoredExecutionMode(raw: unknown): import("@vcpdeck/shared").PiToolExecutionMode | null {
+function parseStoredExecutionMode(raw: unknown): PiToolExecutionMode | null {
 	if (raw === null || raw === undefined) return null;
 	if (!isPiToolExecutionMode(raw)) {
 		throw piError("PI_CONFIG_UNAVAILABLE", "Session execution mode is invalid");
@@ -71,36 +84,8 @@ function parseStoredExecutionMode(raw: unknown): import("@vcpdeck/shared").PiToo
 	return raw;
 }
 
-function parsePayload(raw: string): RunPayload {
-	try {
-		const value: unknown = JSON.parse(raw);
-		if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-		const payload = value as Record<string, unknown>;
-		const keys = Object.keys(payload);
-		if (keys.length === 1 && keys[0] === "runId"
-			&& typeof payload.runId === "string" && payload.runId.length > 0) {
-			return { runId: payload.runId };
-		}
-		if (keys.length === 2 && keys.includes("deleteToken") && keys.includes("previousStatus")
-			&& typeof payload.deleteToken === "string" && payload.deleteToken.length > 0
-			&& (payload.previousStatus === "idle" || payload.previousStatus === "done" || payload.previousStatus === "error")) {
-			return { deleteToken: payload.deleteToken, previousStatus: payload.previousStatus };
-		}
-		return {};
-	} catch {
-		return {};
-	}
-}
-
-function runPayload(runId: string): string {
-	return JSON.stringify({ runId });
-}
-
-function deletePayload(deleteToken: string, previousStatus: DeletableStatus): string {
-	return JSON.stringify({ deleteToken, previousStatus });
-}
-
-function safePiErrorMessage(code: string): string {
+/** 稳定错误码 → 安全英文消息(不泄露外部原始错误)。 */
+export function safePiErrorMessage(code: string): string {
 	const messages: Record<PiErrorCode, string> = {
 		PI_PROTOCOL_INVALID: "Pi protocol input was invalid",
 		PI_CLIENT_UNSUPPORTED: "Pi client is unsupported",
@@ -128,8 +113,7 @@ function safePiErrorMessage(code: string): string {
 		PI_POLICY_UNAVAILABLE: "Pi tool policy is unavailable",
 		PI_TOOL_POLICY_DENIED: "Tool call was denied by policy",
 		PI_TOOL_POLICY_REJECTED: "Tool call was not approved",
-		PI_EXECUTION_CONFIRMATION_REQUIRED:
-			"Pi execution mode needs explicit confirmation",
+		PI_EXECUTION_CONFIRMATION_REQUIRED: "Pi execution mode needs explicit confirmation",
 		PI_EXTENSION_COMMAND_NOT_FOUND: "Pi extension command was not found",
 		PI_EXTENSION_UNSUPPORTED: "Pi extension operation is unsupported",
 		PI_EXTENSION_UI_LIMIT_EXCEEDED: "Pi extension UI state exceeded limits",
@@ -137,7 +121,7 @@ function safePiErrorMessage(code: string): string {
 	return messages[code as PiErrorCode] ?? "Pi session failed";
 }
 
-/** Pi Session Job 的原子状态机与短期连接代次租约。 */
+/** Agent Run 的原子状态机、项目锁与连接代次租约。 */
 @Injectable()
 export class PiRunService {
 	private readonly locks = new Map<string, ProjectLock>();
@@ -162,12 +146,20 @@ export class PiRunService {
 		};
 	}
 
+	private runs() {
+		return (this.prisma as unknown as { agentRun: RunQueries }).agentRun;
+	}
+
+	private sessions() {
+		return (this.prisma as unknown as { agentSession: SessionQueries }).agentSession;
+	}
+
 	private lockKey(clientId: string, projectKey: string): string {
 		return `${clientId}:${projectKey}`;
 	}
 
-	private settlementKey(jobId: string, runId: string): string {
-		return `${jobId}:${runId}`;
+	private settlementKey(sessionId: string, runId: string): string {
+		return `${sessionId}:${runId}`;
 	}
 
 	private async serialized<T>(clientId: string, operation: () => Promise<T>): Promise<T> {
@@ -208,335 +200,168 @@ export class PiRunService {
 		}
 	}
 
-	private async findSession(jobId: string): Promise<JobRecord> {
-		const job = await this.prisma.job.findUnique({ where: { id: jobId } });
-		if (!job || job.type !== "agent.session") {
-			throw piError("PI_SESSION_NOT_FOUND", "Pi session was not found");
-		}
-		return job as JobRecord;
+	private async findSession(sessionId: string): Promise<SessionRow> {
+		const row = await this.sessions().findUnique({ where: { id: sessionId } }) as SessionRow | null;
+		if (!row) throw piError("PI_SESSION_NOT_FOUND", "Pi session was not found");
+		return row;
 	}
 
-	private setLock(clientId: string, projectKey: string, jobId: string, runId: string): void {
-		this.locks.set(this.lockKey(clientId, projectKey), { clientId, projectKey, jobId, runId });
+	private setLock(clientId: string, projectKey: string, sessionId: string, runId: string): void {
+		this.locks.set(this.lockKey(clientId, projectKey), { clientId, projectKey, sessionId, runId });
 	}
 
-	private releaseLock(jobId: string, runId: string): void {
+	private releaseLock(sessionId: string, runId: string): void {
 		for (const [key, lock] of this.locks) {
-			if (lock.jobId === jobId && lock.runId === runId) this.locks.delete(key);
+			if (lock.sessionId === sessionId && lock.runId === runId) this.locks.delete(key);
 		}
 	}
 
 	/** 仅供精确 run 测试与短期编排判断。 */
-	hasLock(jobId: string, runId: string): boolean {
-		return [...this.locks.values()].some((lock) => lock.jobId === jobId && lock.runId === runId);
+	hasLock(sessionId: string, runId: string): boolean {
+		return [...this.locks.values()].some((lock) => lock.sessionId === sessionId && lock.runId === runId);
 	}
 
-	async ensureSession(
-		actor: ActorContext,
-		input: { clientId: string; sessionId: string },
-	): Promise<void> {
-		const existing = await this.prisma.job.findUnique({ where: { id: input.sessionId } });
-		if (existing) {
-			if (existing.clientId !== input.clientId || existing.type !== "agent.session") {
-				throw piError("PI_SESSION_NOT_FOUND", "Session id belongs to a different resource");
-			}
-			return;
-		}
-		try {
-			await this.prisma.job.create({
-				data: {
-					id: input.sessionId,
-					clientId: input.clientId,
-					type: "agent.session",
-					status: JobStatus.IDLE,
-					payload: EMPTY_SESSION_PAYLOAD,
-					progress: null,
-					createdByIdentityId: actor.identityId,
-					createdByName: actor.displayName,
-					createdVia: actor.source,
-				},
-			});
-		} catch (error) {
-			if (!(error && typeof error === "object" && "code" in error && error.code === "P2002")) throw error;
-			const winner = await this.prisma.job.findUnique({ where: { id: input.sessionId } });
-			if (!winner || winner.clientId !== input.clientId || winner.type !== "agent.session") {
-				throw piError("PI_SESSION_NOT_FOUND", "Session id belongs to a different resource");
-			}
+	async assertIdleMutation(clientId: string, projectKey: string): Promise<void> {
+		if (this.locks.has(this.lockKey(clientId, projectKey))) {
+			throw piError("PI_PROJECT_BUSY", "Project has an active turn");
 		}
 	}
 
-	async snapshot(sessionId: string, identityId: string): Promise<PiSessionJobSnapshot> {
-		const job = await this.findSession(sessionId);
-		const payload = parsePayload(job.payload);
-		const active = ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number]);
-		const executionModeOverride = parseStoredExecutionMode(job.toolExecutionModeOverride);
-		let effectiveExecutionMode = active
-			? parseStoredExecutionMode(job.runExecutionMode)
-			: executionModeOverride;
-		if (!active && effectiveExecutionMode === null) {
-			try {
-				effectiveExecutionMode = await this.profileForClient(job.clientId);
-			} catch (error) {
-				if (!(error instanceof Error && "code" in error && error.code === "PI_CONFIG_UNAVAILABLE")) throw error;
-			}
-		}
-		return {
-			jobId: job.id,
-			sessionId: job.id,
-			status: job.status as PiSessionJobSnapshot["status"],
-			runId: active && typeof payload.runId === "string" ? payload.runId : null,
-			ownerName: job.createdByName ?? null,
-			isOwner: job.createdByIdentityId === identityId,
-			executionModeOverride,
-			effectiveExecutionMode,
-			...(job.errorCode ? { errorCode: job.errorCode as PiErrorCode } : {}),
-			...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
-		};
-	}
-
-	async setExecutionMode(
-		actor: ActorContext,
-		input: { clientId: string; sessionId: string; mode: PiToolExecutionMode | null },
-	): Promise<PiSessionJobSnapshot> {
-		if (input.mode !== null && !isPiToolExecutionMode(input.mode)) {
-			throw piError("PI_PROTOCOL_INVALID", "Execution mode is invalid");
-		}
-		return this.withExecutionModeQueue(input.clientId, async () => {
-			this.runtimeReady(input.clientId);
-			const current = await this.findSession(input.sessionId);
-			if (current.clientId !== input.clientId || current.createdByIdentityId !== actor.identityId) {
-				throw piError("PI_CONTROL_FORBIDDEN", "Only the session owner can change execution mode");
-			}
-			if (!([JobStatus.IDLE, JobStatus.DONE] as string[]).includes(current.status)
-				|| current.payload !== EMPTY_SESSION_PAYLOAD) {
-				throw piError("PI_PROJECT_BUSY", "Execution mode can only change while the session is idle");
-			}
-			await this.profileForClient(input.clientId);
-			const changed = await this.prisma.job.updateMany({
-				where: {
-					id: input.sessionId,
-					clientId: input.clientId,
-					type: "agent.session",
-					status: { in: [JobStatus.IDLE, JobStatus.DONE] },
-					payload: EMPTY_SESSION_PAYLOAD,
-					createdByIdentityId: actor.identityId,
-				},
-				data: { toolExecutionModeOverride: input.mode },
-			});
-			if (!Number.isSafeInteger(changed.count) || changed.count !== 1) throw piError("PI_PROJECT_BUSY", "Session changed while updating execution mode");
-			return this.snapshot(input.sessionId, actor.identityId);
-		});
-	}
-
+	/**
+	 * 接纳一轮新执行:同一事务创建 AgentRun 并抢占会话 activeRunId。
+	 * 归档会话在新 Prompt 时恢复为 available(调用方补 restored 审计)。
+	 */
 	async startRun(
 		actor: ActorContext,
-		input: { clientId: string; sessionId: string; projectKey: string },
-	): Promise<{ jobId: string; runId: string; executionMode: PiToolExecutionMode }> {
-		const run = await this.withExecutionModeQueue(input.clientId, async () => {
+		input: { clientId: string; sessionId: string; projectKey: string; kind: "prompt" | "command" },
+	): Promise<{ sessionId: string; runId: string; executionMode: PiToolExecutionMode; restoredFromArchive: boolean }> {
+		return this.withExecutionModeQueue(input.clientId, async () => {
 			this.runtimeReady(input.clientId);
 			const profileMode = await this.profileForClient(input.clientId);
 			const session = await this.findSession(input.sessionId);
-			if (session.clientId !== input.clientId || session.createdByIdentityId !== actor.identityId) {
+			if (session.clientId !== input.clientId || session.ownerIdentityId !== actor.identityId) {
 				throw piError("PI_CONTROL_FORBIDDEN", "Only the session owner can start a run");
+			}
+			if (session.status === "deleted") throw piError("PI_PROJECT_BUSY", "Session is deleted");
+			if (session.deleteToken) throw piError("PI_PROJECT_BUSY", "Session has a pending deletion");
+			if (session.executionModeNeedsConfirmation === true) {
+				throw piError("PI_EXECUTION_CONFIRMATION_REQUIRED", "Execution mode migration is not confirmed");
 			}
 			const override = parseStoredExecutionMode(session.toolExecutionModeOverride);
 			const mode = override ?? profileMode;
-			const runId = randomUUID();
 			const key = this.lockKey(input.clientId, input.projectKey);
 			if (this.locks.has(key)) throw piError("PI_PROJECT_BUSY", "Project has an active run");
+			const runId = randomUUID();
+			const restoredFromArchive = session.status === "archived";
 			this.setLock(input.clientId, input.projectKey, input.sessionId, runId);
-		try {
-			const updated = await this.prisma.job.updateMany({
-				where: {
-					id: input.sessionId,
-					clientId: input.clientId,
-					type: "agent.session",
-					status: { in: [JobStatus.IDLE, JobStatus.DONE] },
-					payload: EMPTY_SESSION_PAYLOAD,
-					createdByIdentityId: actor.identityId,
-				},
-				data: {
-					status: JobStatus.PENDING,
-					payload: runPayload(runId),
-					runExecutionMode: mode,
-					progress: null,
-					result: null,
-					startedAt: null,
-					finishedAt: null,
-					errorCode: null,
-					errorMessage: null,
-				},
-			});
-			if (!Number.isSafeInteger(updated.count) || updated.count !== 1) {
-				throw piError("PI_PROJECT_BUSY", "Session is not idle");
-			}
-			return {
-				jobId: input.sessionId,
-				runId,
-				executionMode: mode,
-			};
+			try {
+				await this.prisma.$transaction(async (client) => {
+					const scoped = client as unknown as { agentRun: RunQueries; agentSession: SessionQueries };
+					await scoped.agentRun.create({
+						data: {
+							id: runId,
+							sessionId: input.sessionId,
+							clientId: input.clientId,
+							status: PENDING,
+							kind: input.kind,
+							executionMode: mode,
+							createdByIdentityId: actor.identityId ?? null,
+							createdByName: actor.displayName ?? null,
+							createdVia: actor.source ?? null,
+						},
+					});
+					const updated = await scoped.agentSession.updateMany({
+						where: {
+							id: input.sessionId,
+							clientId: input.clientId,
+							activeRunId: null,
+							deleteToken: null,
+							status: { in: ["available", "archived"] },
+						},
+						data: {
+							activeRunId: runId,
+							lastActivityAt: new Date(),
+							...(restoredFromArchive ? { status: "available", archivedAt: null } : {}),
+						},
+					});
+					if (updated.count !== 1) throw piError("PI_PROJECT_BUSY", "Session has an active run");
+				});
 			} catch (error) {
 				this.releaseLock(input.sessionId, runId);
 				throw error;
 			}
+			return { sessionId: input.sessionId, runId, executionMode: mode, restoredFromArchive };
 		});
-		return run;
 	}
 
-	async accept(jobId: string, runId: string): Promise<boolean> {
-		return this.runTransition(jobId, runId, [JobStatus.PENDING], { status: JobStatus.RUNNING, startedAt: new Date() });
-	}
-
-	async waitForInput(jobId: string, runId: string): Promise<boolean> {
-		return this.runTransition(jobId, runId, [JobStatus.PENDING, JobStatus.RUNNING], { status: JobStatus.WAITING_INPUT });
-	}
-
-	async resume(jobId: string, runId: string): Promise<boolean> {
-		return this.runTransition(jobId, runId, [JobStatus.WAITING_INPUT], { status: JobStatus.RUNNING });
-	}
-
-	async finishRun(jobId: string, runId: string): Promise<boolean> {
-		const updated = await this.runTransition(jobId, runId, ACTIVE_STATUSES, {
-			status: JobStatus.IDLE,
-			payload: EMPTY_SESSION_PAYLOAD,
-			progress: null,
-			finishedAt: null,
+	async accept(sessionId: string, runId: string): Promise<boolean> {
+		return this.runTransition(sessionId, runId, [PENDING], {
+			status: RUNNING,
+			acceptedAt: new Date(),
+			startedAt: new Date(),
 		});
-		if (updated) this.releaseLock(jobId, runId);
-		return updated;
 	}
 
-	async completeSession(jobId: string, runId?: string): Promise<boolean> {
-		const now = new Date();
-		if (runId !== undefined) {
-			const updated = await this.runTransition(jobId, runId, ACTIVE_STATUSES, {
-				status: JobStatus.DONE,
-				payload: EMPTY_SESSION_PAYLOAD,
-				progress: null,
-				finishedAt: now,
-			});
-			if (updated) this.releaseLock(jobId, runId);
-			if (updated) return true;
-		}
-		if (runId !== undefined) return false;
-		const completed = await this.prisma.job.updateMany({
-			where: {
-				id: jobId,
-				type: "agent.session",
-				status: { in: [JobStatus.IDLE, JobStatus.ERROR] },
-				payload: EMPTY_SESSION_PAYLOAD,
-			},
-			data: {
-				status: JobStatus.DONE,
-				progress: null,
-				finishedAt: now,
-				errorCode: null,
-				errorMessage: null,
-			},
-		});
-		if (completed.count > 0) return true;
-		const unchanged = await this.prisma.job.updateMany({
-			where: {
-				id: jobId,
-				type: "agent.session",
-				status: JobStatus.DONE,
-				payload: EMPTY_SESSION_PAYLOAD,
-			},
-			data: { status: JobStatus.DONE },
-		});
-		return unchanged.count > 0;
+	async waitForInput(sessionId: string, runId: string): Promise<boolean> {
+		return this.runTransition(sessionId, runId, [PENDING, RUNNING], { status: WAITING_INPUT });
 	}
 
-	async failSession(jobId: string, runId: string, code: PiErrorCode): Promise<boolean> {
-		const updated = await this.runTransition(jobId, runId, ACTIVE_STATUSES, {
-			status: JobStatus.ERROR,
-			payload: EMPTY_SESSION_PAYLOAD,
-			progress: null,
+	async resume(sessionId: string, runId: string): Promise<boolean> {
+		return this.runTransition(sessionId, runId, [WAITING_INPUT], { status: RUNNING });
+	}
+
+	/** 精确断线标记:matching run 才进入 disconnected,断线不是失败。 */
+	async markRunDisconnected(sessionId: string, runId: string): Promise<boolean> {
+		return this.runTransition(sessionId, runId, [PENDING, RUNNING, WAITING_INPUT], { status: DISCONNECTED });
+	}
+
+	/**
+	 * 权威结算一轮:先 CAS Run 终态,再清会话指针并释放精确锁。
+	 * 非 failed 不允许 errorCode;failed 未给码时按 Worker 异常处理。
+	 */
+	async settleRun(
+		sessionId: string,
+		runId: string,
+		outcome: { status: "succeeded" | "failed" | "aborted"; errorCode?: PiErrorCode },
+	): Promise<boolean> {
+		const terminal = TERMINAL_STATUSES.includes(outcome.status);
+		if (!terminal) throw piError("PI_PROTOCOL_INVALID", "Run can only settle to a terminal status");
+		const errorCode = outcome.status === "failed" ? (outcome.errorCode ?? "PI_WORKER_EXITED") : null;
+		const updated = await this.runTransition(sessionId, runId, ACTIVE_RUN_STATUSES, {
+			status: outcome.status,
 			finishedAt: new Date(),
-			errorCode: code,
-			errorMessage: safePiErrorMessage(code),
+			errorCode,
 		});
-		if (updated) this.releaseLock(jobId, runId);
-		return updated;
+		if (!updated) return false;
+		await this.clearActiveRun(sessionId, runId);
+		this.releaseLock(sessionId, runId);
+		return true;
 	}
 
-	async reconcileOpen(jobId: string, runId: string, state: PiAgentState): Promise<boolean> {
+	/** 旧事件/取消前的中止请求:只收敛 matching active run。 */
+	async failRun(sessionId: string, runId: string, code: PiErrorCode): Promise<boolean> {
+		return this.settleRun(sessionId, runId, { status: "failed", errorCode: code });
+	}
+
+	/** 重连后按 Client 权威状态收敛本轮。 */
+	async reconcileOpen(sessionId: string, runId: string, state: PiAgentState): Promise<boolean> {
 		if (isPiAgentIdle(state)) {
-			return this.finishRun(jobId, runId);
+			return this.settleRun(sessionId, runId, { status: "succeeded" });
 		}
 		const target = state.waitingForExtensionInput || state.status === "waiting_for_extension_input"
-			? JobStatus.WAITING_INPUT
-			: JobStatus.RUNNING;
-		return this.runTransition(jobId, runId, [JobStatus.RUNNING, JobStatus.WAITING_INPUT, JobStatus.DISCONNECTED], { status: target });
+			? WAITING_INPUT
+			: RUNNING;
+		return this.runTransition(sessionId, runId, [RUNNING, WAITING_INPUT, DISCONNECTED], { status: target });
 	}
 
-	async beginDelete(jobId: string, identityId: string): Promise<{
-		deleteToken: string;
-		previousStatus: DeletableStatus;
-		existingReservation: boolean;
-	}> {
-		const job = await this.findSession(jobId);
-		if (job.createdByIdentityId !== identityId) throw piError("PI_CONTROL_FORBIDDEN", "Only the session owner can delete it");
-		const payload = parsePayload(job.payload);
-		if (job.status === JobStatus.CANCELLED && payload.deleteToken && payload.previousStatus) {
-			return { deleteToken: payload.deleteToken, previousStatus: payload.previousStatus, existingReservation: true };
-		}
-		if (![JobStatus.IDLE, JobStatus.DONE, JobStatus.ERROR].includes(job.status as JobStatus)) {
-			throw piError("PI_PROJECT_BUSY", "Session has an active run");
-		}
-		const deleteToken = randomUUID();
-		const previousStatus = job.status as DeletableStatus;
-		const updated = await this.prisma.job.updateMany({
-			where: { id: jobId, type: "agent.session", status: previousStatus, payload: EMPTY_SESSION_PAYLOAD },
-			data: { status: JobStatus.CANCELLED, payload: deletePayload(deleteToken, previousStatus), progress: null, finishedAt: new Date() },
-		});
-		if (updated.count === 0) throw piError("PI_PROJECT_BUSY", "Session state changed during deletion");
-		return { deleteToken, previousStatus, existingReservation: false };
-	}
-
-	async rollbackDelete(jobId: string, deleteToken: string): Promise<boolean> {
-		const job = await this.findSession(jobId);
-		const payload = parsePayload(job.payload);
-		if (!payload.previousStatus || payload.deleteToken !== deleteToken) return false;
-		const updated = await this.prisma.job.updateMany({
-			where: { id: jobId, type: "agent.session", status: JobStatus.CANCELLED, payload: deletePayload(deleteToken, payload.previousStatus) },
-			data: { status: payload.previousStatus, payload: EMPTY_SESSION_PAYLOAD, progress: null },
-		});
-		return updated.count > 0;
-	}
-
-	async commitDelete(jobId: string, deleteToken: string): Promise<boolean> {
-		const job = await this.findSession(jobId);
-		const payload = parsePayload(job.payload);
-		if (!payload.previousStatus || payload.deleteToken !== deleteToken) return false;
-		const updated = await this.prisma.job.updateMany({
-			where: { id: jobId, type: "agent.session", status: JobStatus.CANCELLED, payload: deletePayload(deleteToken, payload.previousStatus) },
-			data: { status: JobStatus.CANCELLED, payload: EMPTY_SESSION_PAYLOAD, progress: null },
-		});
-		return updated.count > 0;
-	}
-
-	async assertSessionOwner(jobId: string, identityId: string): Promise<void> {
-		const job = await this.findSession(jobId);
-		if (job.createdByIdentityId !== identityId) throw piError("PI_CONTROL_FORBIDDEN", "Only the session owner can control it");
-	}
-
-	async assertCurrentRunOwner(jobId: string, runId: string, identityId: string): Promise<void> {
-		const job = await this.findSession(jobId);
-		if (job.createdByIdentityId !== identityId || job.payload !== runPayload(runId) || !ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])) {
-			throw piError("PI_CONTROL_FORBIDDEN", "Only the current run owner can control it");
-		}
-	}
-
-	async scheduleSettlement(jobId: string, runId: string, onSettle: () => Promise<void>): Promise<void> {
-		this.cancelSettlement(jobId, runId);
-		const key = this.settlementKey(jobId, runId);
+	async scheduleSettlement(sessionId: string, runId: string, onSettle: () => Promise<void>): Promise<void> {
+		this.cancelSettlement(sessionId, runId);
+		const key = this.settlementKey(sessionId, runId);
 		const timer = setTimeout(() => {
 			this.settlementTimers.delete(key);
-			void this.findSession(jobId)
-				.then((job) => {
-					if (job.payload === runPayload(runId)
-						&& ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])) {
+			void this.findRun(sessionId, runId)
+				.then((run) => {
+					if (run && ACTIVE_RUN_STATUSES.includes(run.status as typeof ACTIVE_RUN_STATUSES[number])) {
 						return onSettle();
 					}
 				})
@@ -545,8 +370,8 @@ export class PiRunService {
 		this.settlementTimers.set(key, timer);
 	}
 
-	cancelSettlement(jobId: string, runId: string): void {
-		const key = this.settlementKey(jobId, runId);
+	cancelSettlement(sessionId: string, runId: string): void {
+		const key = this.settlementKey(sessionId, runId);
 		const timer = this.settlementTimers.get(key);
 		if (timer) {
 			clearTimeout(timer);
@@ -589,26 +414,14 @@ export class PiRunService {
 		});
 	}
 
-	/** 将不确定 dispatch 的 matching run 精确标记为断线。 */
-	async markRunDisconnected(jobId: string, runId: string): Promise<boolean> {
-		return this.runTransition(
-			jobId,
-			runId,
-			[JobStatus.PENDING, JobStatus.RUNNING, JobStatus.WAITING_INPUT],
-			{ status: JobStatus.DISCONNECTED },
-		);
-	}
-
 	async disconnectGeneration(clientId: string, socketId: string): Promise<boolean> {
 		return this.serialized(clientId, async () => {
 			const generation = this.generations.get(clientId);
 			if (!generation || generation.socketId !== socketId) return false;
 			this.generations.delete(clientId);
-			const jobs = await this.listActiveSessionJobs(clientId);
-			for (const job of jobs) {
-				const runId = parsePayload(job.payload).runId;
-				if (!runId || ![JobStatus.PENDING, JobStatus.RUNNING, JobStatus.WAITING_INPUT].includes(job.status as JobStatus)) continue;
-				await this.runTransition(job.id, runId, [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.WAITING_INPUT], { status: JobStatus.DISCONNECTED });
+			for (const run of await this.listActiveRuns(clientId)) {
+				if (![PENDING, RUNNING, WAITING_INPUT].includes(run.status as typeof PENDING)) continue;
+				await this.runTransition(run.sessionId, run.id, [PENDING, RUNNING, WAITING_INPUT], { status: DISCONNECTED });
 			}
 			return true;
 		});
@@ -626,71 +439,95 @@ export class PiRunService {
 			seenKeys.add(run.projectKey);
 		}
 		for (const run of activeReports) {
-			const job = await this.prisma.job.findUnique({ where: { id: run.jobId } }) as JobRecord | null;
-			if (!job || job.clientId !== clientId || job.type !== "agent.session" || job.payload !== runPayload(run.runId) || !ACTIVE_STATUSES.includes(job.status as typeof ACTIVE_STATUSES[number])) {
+			const row = await this.findRun(run.sessionId, run.runId);
+			if (!row || row.clientId !== clientId || !ACTIVE_RUN_STATUSES.includes(row.status as typeof ACTIVE_RUN_STATUSES[number])) {
 				closedRunIds.push(run.runId);
 				continue;
 			}
 			if (run.projectKey && duplicateKeys.has(run.projectKey)) {
-				await this.failSession(run.jobId, run.runId, "PI_PROTOCOL_INVALID");
+				await this.failRun(run.sessionId, run.runId, "PI_PROTOCOL_INVALID");
 				closedRunIds.push(run.runId);
 				continue;
 			}
-			const status = run.status === "waiting_input" ? JobStatus.WAITING_INPUT : JobStatus.RUNNING;
-			if (await this.runTransition(run.jobId, run.runId, ACTIVE_STATUSES, { status })) {
+			const status = run.status === "waiting_input" ? WAITING_INPUT : RUNNING;
+			if (await this.runTransition(run.sessionId, run.runId, ACTIVE_RUN_STATUSES, { status })) {
 				acceptedRunIds.push(run.runId);
-				if (run.projectKey) this.setLock(clientId, run.projectKey, run.jobId, run.runId);
+				if (run.projectKey) this.setLock(clientId, run.projectKey, run.sessionId, run.runId);
 			}
 		}
-		for (const run of report.runs.filter((candidate) => candidate.status === "idle" || candidate.status === "done")) {
-			const job = await this.prisma.job.findUnique({ where: { id: run.jobId } });
-			if (job?.clientId === clientId && await this.finishRun(run.jobId, run.runId)) acceptedRunIds.push(run.runId);
+		for (const run of report.runs.filter((candidate) => candidate.status === "succeeded" || candidate.status === "aborted")) {
+			const row = await this.findRun(run.sessionId, run.runId);
+			if (row?.clientId === clientId) {
+				const settled = await this.settleRun(run.sessionId, run.runId, {
+					status: run.status === "aborted" ? "aborted" : "succeeded",
+				});
+				if (settled) acceptedRunIds.push(run.runId);
+			}
 		}
-		for (const run of report.runs.filter((candidate) => candidate.status === "error")) {
-			const job = await this.prisma.job.findUnique({ where: { id: run.jobId } });
-			if (job?.clientId === clientId && await this.failSession(run.jobId, run.runId, "PI_WORKER_EXITED")) {
+		for (const run of report.runs.filter((candidate) => candidate.status === "failed")) {
+			const row = await this.findRun(run.sessionId, run.runId);
+			if (row?.clientId === clientId && await this.failRun(run.sessionId, run.runId, run.errorCode ?? "PI_WORKER_EXITED")) {
 				acceptedRunIds.push(run.runId);
 			}
 		}
-		const reported = new Set(report.runs.map((run) => `${run.jobId}:${run.runId}`));
-		for (const job of await this.listActiveSessionJobs(clientId)) {
-			const runId = parsePayload(job.payload).runId;
-			if (!runId || reported.has(`${job.id}:${runId}`)) continue;
-			await this.failSession(job.id, runId, "PI_CLIENT_RESTARTED");
+		const reported = new Set(report.runs.map((run) => `${run.sessionId}:${run.runId}`));
+		for (const row of await this.listActiveRuns(clientId)) {
+			if (reported.has(`${row.sessionId}:${row.id}`)) continue;
+			await this.failRun(row.sessionId, row.id, "PI_CLIENT_RESTARTED");
 		}
 		return { acceptedRunIds, closedRunIds, reportAgain: closedRunIds.length > 0 };
 	}
 
-	async assertIdleMutation(clientId: string, projectKey: string): Promise<void> {
-		if (this.locks.has(this.lockKey(clientId, projectKey))) throw piError("PI_PROJECT_BUSY", "Project has an active turn");
+	/** 某 Client 的非终态 Run(重连对账与发布 drain 使用)。 */
+	async listActiveRuns(clientId: string): Promise<Array<{ id: string; sessionId: string; status: string; kind: string }>> {
+		const rows = await this.runs().findMany({
+			where: { clientId, status: { in: [...ACTIVE_RUN_STATUSES] } },
+		}) as RunRow[];
+		return rows.map((row) => ({ id: row.id, sessionId: row.sessionId, status: row.status, kind: row.kind }));
 	}
 
-	async listAllRuns(): Promise<Array<Record<string, unknown>>> {
-		return this.prisma.job.findMany({ where: { type: "agent.run" } });
+	/** 全库非终态 Run 数量(发布 drain 闸门)。 */
+	async countActiveRuns(): Promise<number> {
+		return this.runs().count({ where: { status: { in: [...ACTIVE_RUN_STATUSES] } } });
 	}
 
-	async listActiveByClient(clientId: string): Promise<Array<{ jobId: string; runId: string; sessionId: string; status: string }>> {
-		const jobs = await this.prisma.job.findMany({
-			where: { clientId, type: "agent.session", status: { in: [...ACTIVE_STATUSES] } },
+	private async findRun(sessionId: string, runId: string): Promise<RunRow | null> {
+		const row = await this.runs().findUnique({ where: { id: runId } }) as RunRow | null;
+		return row && row.sessionId === sessionId ? row : null;
+	}
+
+	/** 仅当会话 activeRunId 仍指向本轮时清空,避免误清新 Run 指针。 */
+	private async clearActiveRun(sessionId: string, runId: string): Promise<void> {
+		await this.sessions().updateMany({
+			where: { id: sessionId, activeRunId: runId },
+			data: { activeRunId: null, lastActivityAt: new Date() },
 		});
-		return (jobs as JobRecord[]).flatMap((job) => {
-			const runId = parsePayload(job.payload).runId;
-			return typeof runId === "string" ? [{ jobId: job.id, runId, sessionId: job.id, status: job.status }] : [];
-		});
 	}
 
-	private async listActiveSessionJobs(clientId: string): Promise<JobRecord[]> {
-		return this.prisma.job.findMany({
-			where: { clientId, type: "agent.session", status: { in: [...ACTIVE_STATUSES] } },
-		}) as Promise<JobRecord[]>;
-	}
-
-	private async runTransition(jobId: string, runId: string, statuses: readonly string[], data: Record<string, unknown>): Promise<boolean> {
-		const updated = await this.prisma.job.updateMany({
-			where: { id: jobId, type: "agent.session", status: { in: [...statuses] }, payload: runPayload(runId) },
+	private async runTransition(
+		sessionId: string,
+		runId: string,
+		statuses: readonly string[],
+		data: Record<string, unknown>,
+	): Promise<boolean> {
+		const updated = await this.runs().updateMany({
+			where: { id: runId, sessionId, status: { in: [...statuses] } },
 			data,
 		});
 		return updated.count > 0;
 	}
-
 }
+
+interface RunQueries {
+	create(args: { data: Record<string, unknown> }): Promise<unknown>;
+	findUnique(args: { where: { id: string } }): Promise<unknown>;
+	findMany(args: Record<string, unknown>): Promise<unknown>;
+	count(args: Record<string, unknown>): Promise<number>;
+	updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
+}
+interface SessionQueries {
+	findUnique(args: { where: { id: string } }): Promise<unknown>;
+	updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
+}
+
+export type { RunStatus };

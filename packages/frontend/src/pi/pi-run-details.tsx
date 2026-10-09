@@ -1,10 +1,11 @@
 import type {
 	PiAgentState,
 	PiModelInfo,
-	PiSessionJobSnapshot,
+	PiSessionSnapshot,
 } from "@vcpdeck/shared";
+import { isPiRunTerminal } from "@vcpdeck/shared";
 import { Button } from "@/components/ui/button";
-import type { PiThinkingSelection } from "./use-pi-session.js";
+import type { PiThinkingSelection, PiSessionStatus } from "./use-pi-session.js";
 
 /** 思考等级候选：右栏与 Agent 输入区共用，避免两处枚举漂移。 */
 export const THINKING_OPTIONS: ReadonlyArray<readonly [PiThinkingSelection, string]> =
@@ -23,27 +24,36 @@ function modelValue(model: PiModelInfo | undefined): string {
 	return model ? `${model.provider}\u0000${model.modelId}` : "";
 }
 
-/** 右栏：Session Job 状态与 agent 运行细节（无正文）。 */
+/** 右栏：会话快照、活跃 Run 细节与 Owner 操作（无正文）。
+ *
+ * `status` 由 usePiSession 统一给出：它合并了服务端活跃 Run 与事件通道的本地态
+ * （例如扩展等待态会比服务端快照更早到达），右栏不得自行推导一份。
+ */
 export function PiRunDetails({
-	job,
+	snapshot,
+	status,
 	agentState,
 	models,
 	thinkingSelection,
 	disabled,
 	onModelChange,
 	onThinkingChange,
-	onComplete,
+	onArchive,
+	onRestore,
 }: {
-	job: PiSessionJobSnapshot | null;
+	snapshot: PiSessionSnapshot | null;
+	status: PiSessionStatus;
 	agentState: PiAgentState | null;
 	models: PiModelInfo[];
 	thinkingSelection: PiThinkingSelection;
 	disabled: boolean;
 	onModelChange(provider: string, modelId: string): void;
 	onThinkingChange(level: PiThinkingSelection): void;
-	onComplete(): void;
+	onArchive(): void;
+	onRestore(): void;
 }) {
-	const status = job?.status ?? "idle";
+	const activeRun = snapshot?.activeRun ?? null;
+	const archived = snapshot?.status === "archived";
 	const statusText: Record<string, string> = {
 		idle: "空闲，可继续提问",
 		pending: "等待运行",
@@ -54,10 +64,12 @@ export function PiRunDetails({
 		error: "运行错误",
 		cancelled: "已完成，可继续提问以重新激活",
 	};
+	// 只有非终局 Run 才算"执行中";已结算/失败/中止的本轮不阻塞设置。
+	const busy = activeRun !== null && !isPiRunTerminal(activeRun.status);
 	const settingsDisabled =
 		disabled ||
-		!job?.isOwner ||
-		status !== "idle" ||
+		!snapshot?.isOwner ||
+		busy ||
 		agentState?.compacting === true;
 
 	return (
@@ -72,23 +84,33 @@ export function PiRunDetails({
 						aria-hidden
 					/>
 					<span>{statusText[status] ?? status}</span>
+					{archived && (
+						<span className="rounded bg-secondary/60 px-1.5 py-0.5 text-[10px]">
+							已归档
+						</span>
+					)}
 					<span className="rounded bg-secondary/60 px-1.5 py-0.5 text-[10px]">
-						{job?.isOwner === false
+						{snapshot?.isOwner === false
 							? "只读观察者"
-							: job?.ownerName
-								? `Owner: ${job.ownerName}`
+							: snapshot?.ownerName
+								? `Owner: ${snapshot.ownerName}`
 								: "Owner"}
 					</span>
 				</div>
-				{status === "error" && (
+				{/* 本轮失败的安全错误码;会话本身仍可用,失败不阻塞下一轮。 */}
+				{activeRun && isPiRunTerminal(activeRun.status) && activeRun.errorCode && (
 					<p role="alert" className="text-xs text-red-500">
-						{job?.errorCode ?? "PI_RUNTIME_UNAVAILABLE"}：
-						{job?.errorMessage ?? "运行失败"}
+						本轮失败:{activeRun.errorCode}
 					</p>
 				)}
-				{job?.isOwner && (
-					<Button type="button" variant="outline" onClick={onComplete}>
-						{job.runId ? "停止并标记完成" : "标记完成"}
+				{snapshot?.isOwner && (
+					// 归档只整理入口,不结算本轮执行,也不删除远端内容。
+					<Button
+						type="button"
+						variant="outline"
+						onClick={archived ? onRestore : onArchive}
+					>
+						{archived ? "恢复会话" : "归档会话"}
 					</Button>
 				)}
 			</section>
@@ -168,8 +190,8 @@ export function PiRunDetails({
 					标识
 				</h3>
 				<div className="break-all text-xs text-muted-foreground">
-					<div>Session / Job: {job?.sessionId ?? "—"}</div>
-					<div>Current Run: {job?.runId ?? "—"}</div>
+					<div>Session / Job: {snapshot?.sessionId ?? "—"}</div>
+					<div>Current Run: {activeRun?.runId ?? "—"}</div>
 				</div>
 			</section>
 		</div>

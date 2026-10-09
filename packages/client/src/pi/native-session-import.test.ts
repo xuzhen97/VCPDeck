@@ -185,6 +185,37 @@ describe("importNativeSessions（幂等 / 复制 / 校验 / 清理 / 批量）",
 		return join(deps.sessionsRoot, sessionNamespaceFor(canonicalPath(cwd), secret), name);
 	}
 
+	it("导入结果带新建会话 ID,供 Server 写独立导入审计(ADR-0041)", async () => {
+		const { deps, projectDir } = await makeRunEnv();
+		const target = await targetFor(deps, projectDir, "nested_a.jsonl");
+		const withId = await importNativeSessions(["nested_a.jsonl"], {
+			...deps,
+			resolveSessionId: (file) => (file === target ? "sess-1" : null),
+		});
+		expect(withId.results[0]).toEqual({
+			sourceName: "nested_a.jsonl",
+			status: "imported",
+			sessionId: "sess-1",
+		});
+
+		// 未注入解析器(或解析不出)时不臆造 ID:字段缺省,Server 必须容忍。
+		const bareEnv = await makeRunEnv();
+		const bare = await importNativeSessions(["nested_a.jsonl"], bareEnv.deps);
+		expect(bare.results[0]).toEqual({
+			sourceName: "nested_a.jsonl",
+			status: "imported",
+		});
+
+		// 被拒绝的条目即便能解析出 ID 也不上报(没有新建会话)。
+		const rejectedEnv = await makeRunEnv();
+		const rejected = await importNativeSessions(["foreign_c.jsonl"], {
+			...rejectedEnv.deps,
+			resolveSessionId: () => "sess-2",
+		});
+		expect(rejected.results[0]?.status).toBe("rejected");
+		expect(rejected.results[0]?.sessionId).toBeUndefined();
+	});
+
 	it("成功导入 → 幂等二次导入 alreadyImported，目标内容与源都不变", async () => {
 		const { deps, sourceRoot, projectDir, nestedFile } = await makeRunEnv();
 		const sourceHash = createHash("sha256").update(await readFile(nestedFile)).digest("hex");

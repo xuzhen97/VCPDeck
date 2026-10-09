@@ -103,7 +103,8 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 
 - Job payload 可能包含敏感 command、script、executable、args、cwd、文件路径和 `file.writeText` 正文；最终 stdout/stderr 及 `file.readText` 正文当前进入 Job result 和数据库备份，列表、详情、日志与保留策略必须按敏感数据处理；
 - Server 不持久化终端正文、快照、输入和 reconnect token；
-- Server 不持久化 Pi prompt、正文、thinking 和真实 cwd；
+- Server 不持久化 Pi prompt、正文、thinking、图片正文、Extension 输入、工具参数/输出和真实 cwd；
+- Pi 侧 Server 持久化限于会话所有权、控制态（`available`/`archived`）、执行模式覆盖、每轮 Run 摘要与会话操作审计事件；本次不引入逐工具审计（[ADR-0041](./adr/0041-agent-session-run-and-audit-separation.md)）；
 - TerminalAudit 仅记录生命周期；
 - P2P 隧道的 coturn 配置只存 URL/realm；TURN shared secret 仅存 `VCPDECK_TURN_SECRET_FILE` 指向的 `0640` 文件，临时凭据、SDP、candidate 与 HTTP 正文均不落库、不进日志；
 - 错误 message 不得包含 stack、文件内容、Token、签名 URL或原始外部 API 响应；
@@ -140,6 +141,7 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 ### Pi
 
 - Owner 校验、project lock 与 Server 执行；Owner 约束写入限制，但不构成多租户隔离边界；
+- 会话生命周期与每轮执行独立于 Job；归档/恢复只改会话入口，删除会话保留 Run 摘要与审计事件（仅稳定 sessionId），不保留正文；
 - cwd 只来自 Files roots 并经 Client realpath/canonicalize；`projectKey` 是进程级随机 secret 对 canonical cwd 的 HMAC，不泄露真实路径，Client 重启后变化；
 - Session 目录名使用安装级持久 secret 派生的不透明 namespace，不含路径信息；
 - **Pi 配置与凭据的权威在 Server**：模型策略、thinking、Client→Profile 绑定持久化在 Server SQLite；Provider 凭据只以密文（AES-256-GCM + `keyVersion`）落库，根密钥来自 Server 进程外的 `VCPDECK_PI_CREDENTIAL_KEY_FILE`，不与密文同库形成等价明文；

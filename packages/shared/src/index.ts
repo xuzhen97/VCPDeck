@@ -108,8 +108,14 @@ export type {
 	PiRuntimeSpecV1,
 	PiRuntimeSpecV4,
 	PiSessionCreated,
-	PiSessionJobSnapshot,
-	PiSessionJobStatus,
+	PiSessionSnapshot,
+	PiSessionControlStatus,
+	PiRunInfo,
+	PiRunStatus,
+	PiRunKind,
+	PiAuditEventInfo,
+	PiAuditEventType,
+	PiAuditEventResult,
 	PiSessionOpenResult,
 	PiStateAck,
 	PiSessionContextPage,
@@ -128,6 +134,13 @@ export type {
 	PiRuntimeSpecMessageV3,
 	PiRuntimeSpecV3,
 	PiToolExecutionMode,
+} from "./pi.js";
+export {
+	isPiRunTerminal,
+	PI_SESSION_PROTOCOL_VERSION,
+	parsePiSessionSnapshot,
+	parsePiRunInfo,
+	parsePiAuditEventInfo,
 } from "./pi.js";
 export type {
 	ReleaseArchiveAvailableInfo,

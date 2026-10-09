@@ -141,6 +141,7 @@ describe("probePiCapability", () => {
 			"runtimeSpecProtocolVersion",
 			"sdkVersion",
 			"sessionJobProtocolVersion",
+			"sessionProtocolVersion",
 			"shellKind",
 		]);
 		// modelCatalog 只包含 SDK 版本与 Provider ID，不含模型元数据。

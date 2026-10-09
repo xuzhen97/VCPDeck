@@ -15,10 +15,11 @@ import { PiChatWindow } from "../pi/pi-chat-window.js";
 import { PiChatInput, type PiChatAttachmentDraft } from "../pi/pi-chat-input.js";
 import { PiExtensionStatus } from "../pi/pi-extension-status.js";
 import { PiRunDetails, THINKING_OPTIONS } from "../pi/pi-run-details.js";
+import { PiAuditPanel } from "../pi/pi-audit-panel.js";
 import { PiExtensionDialog } from "../pi/pi-extension-dialog.js";
 import { usePiSession, type PiThinkingSelection } from "../pi/use-pi-session.js";
 import { setPiThinkingLoader } from "../pi/pi-thinking-loader.js";
-import type { PiToolExecutionMode, PiSessionJobSnapshot } from "@vcpdeck/shared";
+import type { PiToolExecutionMode, PiSessionSnapshot } from "@vcpdeck/shared";
 import {
 	MAX_PI_IMAGE_BYTES,
 	MAX_PI_IMAGES_PER_PROMPT,
@@ -61,7 +62,7 @@ function validateAttachments(
  * 参数名仅保留给无障碍层（aria-label），避免重复文字噪声。
  */
 function AgentSessionSettings({
-	job,
+	snapshot: snapshot,
 	models,
 	model,
 	thinkingSelection,
@@ -70,7 +71,7 @@ function AgentSessionSettings({
 	onThinkingChange,
 	onExecutionModeChange,
 }: {
-	job: PiSessionJobSnapshot | null;
+	snapshot: PiSessionSnapshot | null;
 	models: PiModelInfo[];
 	model: PiModelInfo | null;
 	thinkingSelection: PiThinkingSelection;
@@ -79,7 +80,7 @@ function AgentSessionSettings({
 	onThinkingChange: (level: PiThinkingSelection) => void;
 	onExecutionModeChange: (mode: PiToolExecutionMode | null) => void;
 }) {
-	const mode = job?.effectiveExecutionMode;
+	const mode = snapshot?.effectiveExecutionMode;
 	const modelValue = model ? `${model.provider}\u0000${model.modelId}` : "";
 	const compactSelect =
 		"h-8 max-w-32 truncate rounded-lg border-0 bg-transparent px-1 text-xs text-muted-foreground outline-none transition hover:bg-secondary/70 focus:bg-secondary/70 disabled:opacity-50";
@@ -90,7 +91,7 @@ function AgentSessionSettings({
 		<select
 			aria-label="会话模型"
 			className={`${compactSelect} max-w-40`}
-			disabled={disabled || !job?.isOwner || models.length === 0}
+			disabled={disabled || !snapshot?.isOwner || models.length === 0}
 			value={modelValue}
 			onChange={(event) => {
 				const [provider, modelId] = event.target.value.split("\u0000");
@@ -104,7 +105,7 @@ function AgentSessionSettings({
 		<select
 			aria-label="会话思考等级"
 			className={compactSelect}
-			disabled={disabled || !job?.isOwner}
+			disabled={disabled || !snapshot?.isOwner}
 			value={thinkingSelection}
 			onChange={(event) => onThinkingChange(event.target.value as PiThinkingSelection)}
 		>
@@ -113,8 +114,8 @@ function AgentSessionSettings({
 		<select
 			aria-label="会话执行模式"
 			className={compactSelect}
-			value={job?.executionModeOverride ?? "profile"}
-			disabled={disabled || !job?.isOwner || !mode}
+			value={snapshot?.executionModeOverride ?? "profile"}
+			disabled={disabled || !snapshot?.isOwner || !mode}
 			onChange={(event) => onExecutionModeChange(event.target.value === "profile" ? null : event.target.value as PiToolExecutionMode)}
 		>
 			<option value="profile">跟随 Profile{mode ? ` · ${mode}` : " · 未知"}</option>
@@ -440,7 +441,7 @@ export function PiPanel({
 		);
 	}
 
-	const isObserver = state.job?.isOwner === false;
+	const isObserver = state.snapshot?.isOwner === false;
 	const settingsDisabled =
 		!sessionId ||
 		isObserver ||
@@ -536,7 +537,7 @@ export function PiPanel({
 							? {
 									settingsSlot: (
 										<AgentSessionSettings
-											job={state.job}
+											snapshot={state.snapshot}
 											models={state.models}
 											model={state.agentState?.model ?? null}
 											thinkingSelection={state.thinkingSelection}
@@ -562,9 +563,6 @@ export function PiPanel({
 							actions.dismissEditorRequest(requestId)
 						}
 						/* 错误态输入框禁用，入口不能只藏在右栏抽屉里；仅会话属主可用。 */
-						onComplete={
-							state.job?.isOwner ? () => void actions.complete() : undefined
-						}
 						attachments={attachments.map((a) => ({
 							id: a.id,
 							name: a.name,
@@ -607,7 +605,8 @@ export function PiPanel({
 					data-testid="pi-right-panel"
 				>
 					<PiRunDetails
-						job={state.job ?? null}
+						snapshot={state.snapshot ?? null}
+						status={state.status}
 						agentState={state.agentState}
 						models={state.models}
 						thinkingSelection={state.thinkingSelection}
@@ -616,8 +615,16 @@ export function PiPanel({
 							void actions.setModel(provider, modelId)
 						}
 						onThinkingChange={(level) => void actions.setThinking(level)}
-						onComplete={() => void actions.complete()}
+						onArchive={() => void actions.archive()}
+						onRestore={() => void actions.restore()}
 					/>
+					{sessionId ? (
+						<PiAuditPanel
+							clientId={client.clientId}
+							sessionId={sessionId}
+							pi={sdk.pi}
+						/>
+					) : null}
 				</aside>
 			</div>
 
@@ -661,7 +668,8 @@ export function PiPanel({
 				title="运行详情"
 			>
 				<PiRunDetails
-					job={state.job ?? null}
+					snapshot={state.snapshot ?? null}
+					status={state.status}
 					agentState={state.agentState}
 					models={state.models}
 					thinkingSelection={state.thinkingSelection}
@@ -670,7 +678,8 @@ export function PiPanel({
 						void actions.setModel(provider, modelId)
 					}
 					onThinkingChange={(level) => void actions.setThinking(level)}
-					onComplete={() => void actions.complete()}
+					onArchive={() => void actions.archive()}
+					onRestore={() => void actions.restore()}
 				/>
 			</Drawer>
 

@@ -65,11 +65,11 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0001](./0001-control-plane-and-outbound-clients.md) | Accepted | Server 中心控制面，Client 主动出站连接 |
 | [0002](./0002-sqlite-prisma-control-plane.md) | Accepted | 当前控制面使用 SQLite + Prisma |
 | [0003](./0003-separate-launcher-for-updates.md) | Accepted | 使用独立 Launcher 守护和回退业务进程 |
-| [0004](./0004-typed-job-kernel.md) | Accepted | Typed Job 作为可持久化远程操作内核 |
+| [0004](./0004-typed-job-kernel.md) | Accepted（Pi Session 复用 Job 条款由 ADR-0041 替代） | Typed Job 作为可持久化远程操作内核 |
 | [0005](./0005-shared-contracts-and-communication-channels.md) | Accepted | Shared 统一治理协议并按职责划分通信通道 |
 | [0006](./0006-file-control-and-data-plane-separation.md) | Accepted | 文件传输的控制面与数据面分离 |
 | [0007](./0007-client-owned-interactive-runtime.md) | Accepted | 远程交互运行态驻留 Client，Server 最小持久化 |
-| [0008](./0008-pi-session-job-and-run-lifecycle.md) | Accepted | Pi Session 使用稳定 Session Job 与独立 Run 身份 |
+| [0008](./0008-pi-session-job-and-run-lifecycle.md) | Superseded by ADR-0041 | 历史方案：Pi Session 使用稳定 Session Job 与独立 Run 身份 |
 | [0009](./0009-trusted-operator-security-domain.md) | Accepted | 当前采用可信操作者单信任域 |
 | [0010](./0010-client-owned-script-runtime-registry.md) | Accepted | 脚本执行迁移到 Client 持有的受控运行时注册表 |
 | [0011](./0011-server-side-opaque-authentication-and-actor-context.md) | Accepted | 使用服务端 opaque Session/Credential 与可信 ActorContext |
@@ -99,3 +99,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0038](./0038-git-ssh-distribution-under-shared-psk.md) | Accepted | 共享 PSK 下选定 Client ID 仅为运维分发范围，不构成每机身份认证；泄漏按整套 Git 密钥失陷处置 |
 | [0039](./0039-pi-two-mode-execution.md) | Accepted（尚未实现） | 删除逐工具三桶，采用 supervised/automatic；保留 Session 覆盖与 Run 固化，旧受限配置显式确认迁移 |
 | [0040](./0040-pi-extension-web-interaction.md) | Accepted（尚未实现） | 受信扩展命令复用 Owner/Run 控制；网页提供有限 UI 与 Client 内存状态恢复，不支持任意 TUI、Session 替换或 Runtime reload |
+| [0041](./0041-agent-session-run-and-audit-separation.md) | Accepted（已实现） | Agent Session、Run 摘要与会话操作审计独立于 Job；移除会话完成语义，保留最小审计与精确 Run 对账 |

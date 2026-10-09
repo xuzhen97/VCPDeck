@@ -28,35 +28,31 @@ interface ProfileRow {
 	legacyExecutionConfigJson: string | null;
 }
 
-interface JobRow {
+interface SessionRow {
 	id: string;
-	type: string;
-	status: string;
+	activeRunId: string | null;
 	toolExecutionModeOverride: string | null;
-	runExecutionMode: string | null;
 	executionModeNeedsConfirmation: boolean;
 	legacyExecutionModeOverride: string | null;
 }
 
-const ACTIVE = new Set(["pending", "running", "waiting_input", "disconnected"]);
-
 /** 内存版 prisma fake：只实现迁移用到的那几个方法。 */
-function makeDb(profiles: ProfileRow[], jobs: JobRow[]): PiExecutionMigrationDb & {
+function makeDb(profiles: ProfileRow[], sessions: SessionRow[]): PiExecutionMigrationDb & {
 	profiles: ProfileRow[];
-	jobs: JobRow[];
+	sessions: SessionRow[];
 } {
 	const db = {
 		profiles,
-		jobs,
+		sessions,
 		async $transaction<T>(fn: (tx: PiExecutionMigrationDb) => Promise<T>): Promise<T> {
 			// 快照/回滚：任一步抛错都不留下半转换状态。
 			const profileBackup = profiles.map((row) => ({ ...row }));
-			const jobBackup = jobs.map((row) => ({ ...row }));
+			const sessionBackup = sessions.map((row) => ({ ...row }));
 			try {
 				return await fn(db);
 			} catch (error) {
 				profiles.splice(0, profiles.length, ...profileBackup);
-				jobs.splice(0, jobs.length, ...jobBackup);
+				sessions.splice(0, sessions.length, ...sessionBackup);
 				throw error;
 			}
 		},
@@ -72,14 +68,14 @@ function makeDb(profiles: ProfileRow[], jobs: JobRow[]): PiExecutionMigrationDb 
 				return { ...row };
 			},
 		},
-		job: {
-			findMany: async () => jobs.map((row) => ({ ...row })),
+		agentSession: {
+			findMany: async () => sessions.map((row) => ({ ...row })),
 			updateMany: async (args: {
 				where: { id: string };
-				data: Partial<JobRow>;
+				data: Partial<SessionRow>;
 			}) => {
 				let count = 0;
-				for (const row of jobs) {
+				for (const row of sessions) {
 					if (row.id === args.where.id) {
 						Object.assign(row, args.data);
 						count += 1;
@@ -89,7 +85,7 @@ function makeDb(profiles: ProfileRow[], jobs: JobRow[]): PiExecutionMigrationDb 
 			},
 		},
 	};
-	return db as PiExecutionMigrationDb & { profiles: ProfileRow[]; jobs: JobRow[] };
+	return db as PiExecutionMigrationDb & { profiles: ProfileRow[]; sessions: SessionRow[] };
 }
 
 const profile = (over: Partial<ProfileRow> = {}): ProfileRow => ({
@@ -101,12 +97,10 @@ const profile = (over: Partial<ProfileRow> = {}): ProfileRow => ({
 	...over,
 });
 
-const job = (over: Partial<JobRow> = {}): JobRow => ({
+const session = (over: Partial<SessionRow> = {}): SessionRow => ({
 	id: "s1",
-	type: "agent.session",
-	status: "idle",
+	activeRunId: null,
 	toolExecutionModeOverride: null,
-	runExecutionMode: null,
 	executionModeNeedsConfirmation: false,
 	legacyExecutionModeOverride: null,
 	...over,
@@ -122,7 +116,7 @@ describe("migratePiExecutionRows", () => {
 					toolPolicyJson: JSON.stringify({ allow: [], confirm: [], deny: ["bash"] }),
 				}),
 			],
-			[job({ id: "s-yolo", toolExecutionModeOverride: "yolo" })],
+			[session({ id: "s-yolo", toolExecutionModeOverride: "yolo" })],
 		);
 
 		const result = await migratePiExecutionRows(db);
@@ -134,7 +128,7 @@ describe("migratePiExecutionRows", () => {
 			legacyExecutionConfigJson: null,
 			toolPolicyJson: null,
 		});
-		expect(db.jobs[0]).toMatchObject({
+		expect(db.sessions[0]).toMatchObject({
 			toolExecutionModeOverride: "automatic",
 			executionModeNeedsConfirmation: false,
 			legacyExecutionModeOverride: null,
@@ -151,7 +145,7 @@ describe("migratePiExecutionRows", () => {
 					toolPolicyJson: JSON.stringify(policy),
 				}),
 			],
-			[job({ id: "s-auto", toolExecutionModeOverride: "approval" })],
+			[session({ id: "s-auto", toolExecutionModeOverride: "approval" })],
 		);
 
 		const result = await migratePiExecutionRows(db);
@@ -164,7 +158,7 @@ describe("migratePiExecutionRows", () => {
 		const legacy = JSON.parse(db.profiles[0]!.legacyExecutionConfigJson ?? "{}");
 		expect(legacy).toEqual({ mode: "auto", policy });
 		// 旧覆盖不能被自动映射成新模式：清空覆盖 + 独立待确认。
-		expect(db.jobs[0]).toMatchObject({
+		expect(db.sessions[0]).toMatchObject({
 			toolExecutionModeOverride: null,
 			executionModeNeedsConfirmation: true,
 			legacyExecutionModeOverride: "approval",
@@ -174,7 +168,7 @@ describe("migratePiExecutionRows", () => {
 	it("重复执行不解除待确认，也不复活已确认配置", async () => {
 		const db = makeDb(
 			[profile({ id: "p-auto", toolExecutionMode: "auto" })],
-			[job({ id: "s-auto", toolExecutionModeOverride: "auto" })],
+			[session({ id: "s-auto", toolExecutionModeOverride: "auto" })],
 		);
 
 		await migratePiExecutionRows(db);
@@ -184,7 +178,7 @@ describe("migratePiExecutionRows", () => {
 
 		expect(db.profiles[0]!.executionModeNeedsConfirmation).toBe(true);
 		expect(db.profiles[0]!.legacyExecutionConfigJson).toBe(JSON.stringify(first));
-		expect(db.jobs[0]!.executionModeNeedsConfirmation).toBe(true);
+		expect(db.sessions[0]!.executionModeNeedsConfirmation).toBe(true);
 	});
 
 	it("已是新模式的行不产生任何写入", async () => {
@@ -197,7 +191,7 @@ describe("migratePiExecutionRows", () => {
 					legacyExecutionConfigJson: null,
 				}),
 			],
-			[job({ id: "s-new", toolExecutionModeOverride: "supervised" })],
+			[session({ id: "s-new", toolExecutionModeOverride: "supervised" })],
 		);
 
 		const result = await migratePiExecutionRows(db);
@@ -211,11 +205,10 @@ describe("migratePiExecutionRows", () => {
 		const db = makeDb(
 			[],
 			[
-				job({
+				session({
 					id: "s-busy",
-					status: "running",
+					activeRunId: "run-1",
 					toolExecutionModeOverride: "auto",
-					runExecutionMode: "approval",
 				}),
 			],
 		);
@@ -223,20 +216,20 @@ describe("migratePiExecutionRows", () => {
 		const result = await migratePiExecutionRows(db);
 
 		expect(result.blockedSessions).toEqual(["s-busy"]);
-		expect(db.jobs[0]!.toolExecutionModeOverride).toBe("auto");
-		expect(db.jobs[0]!.executionModeNeedsConfirmation).toBe(false);
+		expect(db.sessions[0]!.toolExecutionModeOverride).toBe("auto");
+		expect(db.sessions[0]!.executionModeNeedsConfirmation).toBe(false);
 	});
 
-	it("非 agent.session 的普通 Job 一律不改", async () => {
+	it("无覆盖的会话不产生任何写入", async () => {
 		const db = makeDb(
 			[],
-			[job({ id: "exec-1", type: "exec", toolExecutionModeOverride: "auto" })],
+			[session({ id: "s-plain" })],
 		);
 
 		await migratePiExecutionRows(db);
 
-		expect(db.jobs[0]!.toolExecutionModeOverride).toBe("auto");
-		expect(db.jobs[0]!.executionModeNeedsConfirmation).toBe(false);
+		expect(db.sessions[0]!.toolExecutionModeOverride).toBeNull();
+		expect(db.sessions[0]!.executionModeNeedsConfirmation).toBe(false);
 	});
 
 	it("未知旧模式保持原样并计入阻塞（不猜语义）", async () => {
@@ -286,7 +279,7 @@ describe("ensurePiExecutionMigration", () => {
 				return fn(counted);
 			},
 			piProfile: db.piProfile,
-			job: db.job,
+			agentSession: db.agentSession,
 		};
 
 		await ensurePiExecutionMigration(counted);

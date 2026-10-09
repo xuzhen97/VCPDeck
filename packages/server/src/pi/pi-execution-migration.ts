@@ -33,13 +33,11 @@ export interface PiExecutionMigrationProfileRow {
 	legacyExecutionConfigJson: string | null;
 }
 
-/** 迁移读取的 Job 列。 */
-export interface PiExecutionMigrationJobRow {
+/** 迁移读取的会话列(ADR-0041:会话已是独立 AgentSession,不再是 agent.session Job)。 */
+export interface PiExecutionMigrationSessionRow {
 	id: string;
-	type: string;
-	status: string;
+	activeRunId: string | null;
 	toolExecutionModeOverride: string | null;
-	runExecutionMode: string | null;
 	executionModeNeedsConfirmation: boolean;
 	legacyExecutionModeOverride: string | null;
 }
@@ -54,11 +52,11 @@ export interface PiExecutionMigrationDb {
 			data: Partial<PiExecutionMigrationProfileRow>;
 		}): Promise<unknown>;
 	};
-	job: {
-		findMany(): Promise<PiExecutionMigrationJobRow[]>;
+	agentSession: {
+		findMany(): Promise<PiExecutionMigrationSessionRow[]>;
 		updateMany(args: {
 			where: { id: string };
-			data: Partial<PiExecutionMigrationJobRow>;
+			data: Partial<PiExecutionMigrationSessionRow>;
 		}): Promise<{ count: number }>;
 	};
 }
@@ -73,17 +71,6 @@ export interface PiExecutionMigrationResult {
 	/** 活动 Run 或旧值非法的会话（等待 drain 或人工处理）。 */
 	blockedSessions: string[];
 }
-
-/** 与 Run 状态机一致的活动状态：这些会话不能被改写。 */
-const ACTIVE_JOB_STATUSES: ReadonlySet<string> = new Set([
-	"pending",
-	"running",
-	"waiting_input",
-	"disconnected",
-]);
-
-/** 仅迁移 Pi 会话 Job；普通 Job 的同名列属于无关数据。 */
-const SESSION_JOB_TYPE = "agent.session";
 
 /**
  * 旧策略列 → 可展示的旧策略。
@@ -152,9 +139,8 @@ export async function migratePiExecutionRows(
 			result.blockedProfiles.push(row.id);
 		}
 
-		for (const row of await tx.job.findMany()) {
-			if (row.type !== SESSION_JOB_TYPE) continue;
-			if (ACTIVE_JOB_STATUSES.has(row.status)) {
+		for (const row of await tx.agentSession.findMany()) {
+			if (row.activeRunId) {
 				result.blockedSessions.push(row.id);
 				continue;
 			}
@@ -165,7 +151,7 @@ export async function migratePiExecutionRows(
 			const override = row.toolExecutionModeOverride;
 			if (override === null) continue;
 			if (override === "yolo") {
-				await tx.job.updateMany({
+				await tx.agentSession.updateMany({
 					where: { id: row.id },
 					data: {
 						toolExecutionModeOverride: "automatic",
@@ -178,7 +164,7 @@ export async function migratePiExecutionRows(
 			}
 			if (isPiLegacyToolExecutionMode(override)) {
 				// 旧 approval/auto 的限制语义不能被自动映射：清空覆盖并独立置为待确认。
-				await tx.job.updateMany({
+				await tx.agentSession.updateMany({
 					where: { id: row.id },
 					data: {
 						toolExecutionModeOverride: null,

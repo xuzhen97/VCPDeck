@@ -4,6 +4,7 @@ import { fork } from "node:child_process";
 import {
 	PI_RUNTIME_SPEC_PROTOCOL_VERSION,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
+	PI_SESSION_PROTOCOL_VERSION,
 	type PiCapabilityStatus,
 } from "@vcpdeck/shared";
 import { isSupportedNodeVersion } from "./node-version.js";
@@ -236,6 +237,7 @@ export async function probePiCapability(
 		nodeVersion: env.nodeVersion,
 		shellKind,
 		sessionJobProtocolVersion: PI_SESSION_JOB_PROTOCOL_VERSION,
+		sessionProtocolVersion: PI_SESSION_PROTOCOL_VERSION,
 		runtimeSpecProtocolVersion: PI_RUNTIME_SPEC_PROTOCOL_VERSION,
 		configMode: "server-authoritative",
 		...(worker.providerIds.length > 0

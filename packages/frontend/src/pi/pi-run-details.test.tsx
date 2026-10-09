@@ -1,7 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { PiRunInfo, PiSessionSnapshot } from "@vcpdeck/shared";
 import { PiRunDetails } from "./pi-run-details.js";
+import type { PiSessionStatus } from "./use-pi-session.js";
 
 const agentState = {
 	status: "idle" as const,
@@ -12,22 +14,52 @@ const agentState = {
 	model: { provider: "p", modelId: "m1" },
 	queuedMessages: { steering: [], followUp: [] },
 };
-const idleJob: import("@vcpdeck/shared").PiSessionJobSnapshot = {
-	jobId: "s1",
+
+const idleSnapshot: PiSessionSnapshot = {
 	sessionId: "s1",
-	status: "idle" as const,
-	runId: null,
+	status: "available",
+	activeRun: null,
 	executionModeOverride: null,
 	effectiveExecutionMode: "supervised",
+	executionModeNeedsConfirmation: false,
 	ownerName: "User",
 	isOwner: true,
 };
+
+function activeRun(status: PiRunInfo["status"]): PiRunInfo {
+	const terminal = status === "succeeded" || status === "failed" || status === "aborted";
+	return {
+		runId: "run-1",
+		sessionId: "s1",
+		status,
+		kind: "prompt",
+		executionMode: "supervised",
+		actorName: "User",
+		source: "web",
+		createdAt: "2026-10-08T00:00:00.000Z",
+		acceptedAt: "2026-10-08T00:00:01.000Z",
+		startedAt: "2026-10-08T00:00:01.000Z",
+		finishedAt: terminal ? "2026-10-08T00:00:05.000Z" : null,
+		errorCode: status === "failed" ? "PI_WORKER_EXITED" : null,
+	};
+}
+
+/** 与 usePiSession.effectiveStatus 等价的展示态推导,供用例默认值使用。 */
+function statusOf(snapshot: PiSessionSnapshot): PiSessionStatus {
+	const run = snapshot.activeRun;
+	if (run?.status === "disconnected") return "disconnected";
+	if (run?.status === "failed") return "error";
+	if (run?.status === "waiting_input") return "waiting_input";
+	if (!run || run.status === "succeeded" || run.status === "aborted") return "idle";
+	return "running";
+}
 
 function renderDetails(
 	overrides: Partial<Parameters<typeof PiRunDetails>[0]> = {},
 ) {
 	const props: Parameters<typeof PiRunDetails>[0] = {
-		job: idleJob,
+		snapshot: idleSnapshot,
+		status: statusOf(idleSnapshot),
 		agentState,
 		models: [
 			{ provider: "p", modelId: "m1" },
@@ -37,34 +69,61 @@ function renderDetails(
 		disabled: false,
 		onModelChange: vi.fn(),
 		onThinkingChange: vi.fn(),
-		onComplete: vi.fn(),
+		onArchive: vi.fn(),
+		onRestore: vi.fn(),
 		...overrides,
 	};
 	return { ...render(<PiRunDetails {...props} />), props };
 }
 
 describe("PiRunDetails", () => {
-	it("空闲 Owner 可以标记完成", async () => {
-		const onComplete = vi.fn();
-		renderDetails({ onComplete });
-		await userEvent.click(screen.getByRole("button", { name: "标记完成" }));
-		expect(onComplete).toHaveBeenCalledOnce();
+	it("空闲会话没有完成语义,只提供归档入口", async () => {
+		const onArchive = vi.fn();
+		renderDetails({ onArchive });
+		// ADR-0041:会话不再有\"完成\"动作。
+		expect(screen.queryByRole("button", { name: /完成/ })).toBeNull();
+		await userEvent.click(screen.getByRole("button", { name: "归档会话" }));
+		expect(onArchive).toHaveBeenCalledOnce();
 	});
-	it("活动时显示停止并标记完成", () => {
-		renderDetails({ job: { ...idleJob, status: "running", runId: "run-1" } });
-		expect(screen.getByRole("button", { name: "停止并标记完成" })).toBeTruthy();
+
+	it("活跃轮次禁用设置且不显示完成入口", () => {
+		renderDetails({
+			snapshot: { ...idleSnapshot, activeRun: activeRun("running") },
+			status: "running",
+		});
+		expect(screen.queryByRole("button", { name: /完成/ })).toBeNull();
 		expect(screen.getByRole("combobox", { name: "模型" })).toBeDisabled();
+		expect(screen.getByText("运行中")).toBeTruthy();
 	});
-	it("done 显示可重新激活说明", () => {
-		renderDetails({ job: { ...idleJob, status: "done" } });
-		expect(screen.getByText("已完成，可继续提问以重新激活")).toBeTruthy();
+
+	it("上一轮失败展示安全错误码,会话仍可继续", () => {
+		renderDetails({
+			snapshot: { ...idleSnapshot, activeRun: activeRun("failed") },
+			status: "error",
+		});
+		expect(screen.getByRole("alert").textContent).toContain("PI_WORKER_EXITED");
+		// 失败不阻塞设置:没有活跃执行即可调整。
+		expect(screen.getByRole("combobox", { name: "模型" })).not.toBeDisabled();
 	});
-	it("Observer 不显示完成按钮且设置只读", () => {
-		renderDetails({ job: { ...idleJob, isOwner: false } });
-		expect(screen.queryByRole("button", { name: /标记完成/ })).toBeNull();
+
+	it("归档会话提供恢复入口", async () => {
+		const onRestore = vi.fn();
+		renderDetails({
+			snapshot: { ...idleSnapshot, status: "archived" },
+			onRestore,
+		});
+		expect(screen.getByText("已归档")).toBeTruthy();
+		await userEvent.click(screen.getByRole("button", { name: "恢复会话" }));
+		expect(onRestore).toHaveBeenCalledOnce();
+	});
+
+	it("Observer 不显示归档入口且设置只读", () => {
+		renderDetails({ snapshot: { ...idleSnapshot, isOwner: false } });
+		expect(screen.queryByRole("button", { name: /归档|恢复/ })).toBeNull();
 		expect(screen.getByRole("combobox", { name: "模型" })).toBeDisabled();
 		expect(screen.getByRole("combobox", { name: "思考深度" })).toBeDisabled();
 	});
+
 	it("空闲时转发模型和思考选择", () => {
 		const onModelChange = vi.fn();
 		const onThinkingChange = vi.fn();

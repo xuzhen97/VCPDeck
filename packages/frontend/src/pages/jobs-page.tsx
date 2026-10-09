@@ -6,7 +6,6 @@ import { ErrorState, LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
 import { StatusChip } from "@/components/status-chip";
 import { DownloadLinkCard } from "@/components/download-link-card";
-import { MarkDoneButton } from "@/components/mark-done-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Drawer } from "@/components/ui/drawer";
@@ -226,12 +225,6 @@ function JobRow({
 						查看详情
 					</Button>
 					<JobCancelButton job={job} onChanged={onChanged} stopPropagation />
-					<MarkDoneButton
-						job={job}
-						onChanged={onChanged}
-						stopPropagation
-						size="sm"
-					/>
 				</div>
 			</td>
 		</tr>
@@ -295,7 +288,6 @@ function JobDetails({
 					label={statusLabel(job.status)}
 					tone={statusTone(job.status)}
 				/>
-				<MarkDoneButton job={job} onChanged={onChanged} size="sm" />
 			</div>
 			<div className="grid gap-4 sm:grid-cols-2">
 				<Field label="任务 ID" value={job.jobId} wide />

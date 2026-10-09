@@ -2,7 +2,9 @@ import {
 	parsePiAgentState,
 	parsePiExtensionCommands,
 	parsePiExtensionUiSnapshot,
-	parsePiSessionJobSnapshot,
+	parsePiSessionSnapshot,
+	parsePiRunInfo,
+	parsePiAuditEventInfo,
 	type PaginatedResult,
 	type PiAgentState,
 	type PiAttachmentRef,
@@ -29,7 +31,9 @@ import {
 	type PiImportRunResponse,
 	type PiPromptAccepted,
 	type PiSessionCreated,
-	type PiSessionJobSnapshot,
+	type PiSessionSnapshot,
+	type PiRunInfo,
+	type PiAuditEventInfo,
 	type PiSessionOpenResult,
 	type PiThinkingLevel,
 	type PiToolExecutionMode,
@@ -126,18 +130,12 @@ export interface PiAgentApi {
 		cwdRef: PiCwdRef,
 		signal?: AbortSignal,
 	): Promise<PiSessionOpenResult>;
-	complete(
-		clientId: string,
-		sessionId: string,
-		runId?: string,
-		signal?: AbortSignal,
-	): Promise<PiSessionJobSnapshot>;
 	setExecutionMode(
 		clientId: string,
 		sessionId: string,
 		cwdRef: PiCwdRef,
 		mode: PiToolExecutionMode | null,
-	): Promise<PiSessionJobSnapshot>;
+	): Promise<PiSessionSnapshot>;
 	state(
 		clientId: string,
 		sessionId: string,
@@ -154,26 +152,26 @@ export interface PiAgentApi {
 	steer(
 		clientId: string,
 		sessionId: string,
-		jobId: string,
+		runId: string,
 		message: string,
 	): Promise<unknown>;
 	followUp(
 		clientId: string,
 		sessionId: string,
-		jobId: string,
+		runId: string,
 		message: string,
 	): Promise<unknown>;
-	abort(clientId: string, sessionId: string, jobId: string): Promise<unknown>;
+	abort(clientId: string, sessionId: string, runId: string): Promise<unknown>;
 	compact(
 		clientId: string,
 		sessionId: string,
-		jobId: string,
+		runId: string,
 		customInstructions?: string,
 	): Promise<unknown>;
 	abortCompact(
 		clientId: string,
 		sessionId: string,
-		jobId: string,
+		runId: string,
 	): Promise<unknown>;
 	setModel(
 		clientId: string,
@@ -191,7 +189,7 @@ export interface PiAgentApi {
 	extensionResponse(
 		clientId: string,
 		sessionId: string,
-		jobId: string,
+		runId: string,
 		response: {
 			requestId: string;
 			value?: string;
@@ -237,6 +235,37 @@ export interface PiAgentApi {
 	eventsPath(clientId: string, sessionId: string): string;
 }
 
+/**
+ * 独立会话控制面 (ADR-0041)。
+ *
+ * 读取不依赖 Client 在线:快照/Run 摘要/审计来自 Server 持久化;
+ * `pi.agent` 仍负责需要活跃 Worker 的操作。
+ */
+export interface PiSessionsControlApi {
+	/** 会话快照:控制状态、当前活跃 Run 与 Owner 视图。 */
+	snapshot(clientId: string, sessionId: string, signal?: AbortSignal): Promise<PiSessionSnapshot>;
+	/** 归档:只整理入口,不删除远端内容、不结算当前 Run。 */
+	archive(clientId: string, sessionId: string): Promise<PiSessionSnapshot>;
+	/** 恢复归档会话。 */
+	restore(clientId: string, sessionId: string): Promise<PiSessionSnapshot>;
+	/** 每轮执行摘要(分页,倒序)。 */
+	runs(
+		clientId: string,
+		sessionId: string,
+		options?: { page?: number; pageSize?: number },
+		signal?: AbortSignal,
+	): Promise<PaginatedResult<PiRunInfo>>;
+	/** 单轮执行摘要。 */
+	run(clientId: string, sessionId: string, runId: string, signal?: AbortSignal): Promise<PiRunInfo>;
+	/** 会话操作审计(分页,倒序);删除会话后仍可查询。 */
+	audit(
+		clientId: string,
+		sessionId: string,
+		options?: { page?: number; pageSize?: number },
+		signal?: AbortSignal,
+	): Promise<PaginatedResult<PiAuditEventInfo>>;
+}
+
 export interface PiAttachmentsApi {
 	create(
 		clientId: string,
@@ -259,6 +288,8 @@ export interface PiApi {
 		signal?: AbortSignal,
 	): Promise<PiModelInfo[]>;
 	sessions: PiSessionsApi;
+	/** 独立会话控制面(快照/归档/恢复/Run 摘要/审计)。 */
+	sessionsControl: PiSessionsControlApi;
 	agent: PiAgentApi;
 	attachments: PiAttachmentsApi;
 	running(clientId: string, signal?: AbortSignal): Promise<unknown>;
@@ -489,6 +520,72 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 				),
 		},
 
+		// 独立会话控制面:读取不依赖 Client 在线(ADR-0041)。
+		sessionsControl: {
+			snapshot: async (clientId, sessionId, signal) =>
+				parsePiSessionSnapshot(await client.request(
+					"GET",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/snapshot`,
+					undefined,
+					signal,
+				)),
+			archive: async (clientId, sessionId) =>
+				parsePiSessionSnapshot(await client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/archive`,
+				)),
+			restore: async (clientId, sessionId) =>
+				parsePiSessionSnapshot(await client.request(
+					"POST",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/restore`,
+				)),
+			runs: async (clientId, sessionId, options, signal) => {
+				const params = new URLSearchParams();
+				if (options?.page !== undefined) params.set("page", String(options.page));
+				if (options?.pageSize !== undefined) params.set("pageSize", String(options.pageSize));
+				const query = params.toString();
+				const page = (await client.request(
+					"GET",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/runs${query ? `?${query}` : ""}`,
+					undefined,
+					signal,
+				)) as { data?: unknown[]; total?: number; page?: number; pageSize?: number; totalPages?: number };
+				return {
+					data: (page.data ?? []).map((item) => parsePiRunInfo(item)),
+					total: Number(page.total ?? 0),
+					page: Number(page.page ?? 1),
+					pageSize: Number(page.pageSize ?? 20),
+					totalPages: Number(page.totalPages ?? 0),
+				};
+			},
+			run: async (clientId, sessionId, runId, signal) =>
+				parsePiRunInfo(await client.request(
+					"GET",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/runs/${enc(runId)}`,
+					undefined,
+					signal,
+				)),
+			audit: async (clientId, sessionId, options, signal) => {
+				const params = new URLSearchParams();
+				if (options?.page !== undefined) params.set("page", String(options.page));
+				if (options?.pageSize !== undefined) params.set("pageSize", String(options.pageSize));
+				const query = params.toString();
+				const page = (await client.request(
+					"GET",
+					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/audit${query ? `?${query}` : ""}`,
+					undefined,
+					signal,
+				)) as { data?: unknown[]; total?: number; page?: number; pageSize?: number; totalPages?: number };
+				return {
+					data: (page.data ?? []).map((item) => parsePiAuditEventInfo(item)),
+					total: Number(page.total ?? 0),
+					page: Number(page.page ?? 1),
+					pageSize: Number(page.pageSize ?? 20),
+					totalPages: Number(page.totalPages ?? 0),
+				};
+			},
+		},
+
 		agent: {
 			newSession: (clientId, cwdRef, signal) =>
 				client.request(
@@ -504,15 +601,8 @@ export function createPiApi(client: Pick<VcpDeckClient, "request">): PiApi {
 					cwdRef,
 					signal,
 				),
-			complete: (clientId, sessionId, runId, signal) =>
-				client.request(
-					"POST",
-					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/complete`,
-					runId === undefined ? {} : { runId },
-					signal,
-				),
 			setExecutionMode: async (clientId, sessionId, cwdRef, mode) =>
-				parsePiSessionJobSnapshot(await client.request(
+				parsePiSessionSnapshot(await client.request(
 					"POST",
 					`/api/clients/${enc(clientId)}/pi/agent/${enc(sessionId)}/execution-mode`,
 					{ ...cwdRef, mode },

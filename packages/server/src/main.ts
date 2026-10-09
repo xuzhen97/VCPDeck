@@ -5,19 +5,20 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module.js";
 import cookieParser from "cookie-parser";
 import { PrismaService } from "./prisma/prisma.service.js";
+import { resolveDatabaseUrl } from "./prisma/database-url.js";
+import { assertAgentMigrationReady } from "../prisma/agent-session-migration.cjs";
+import { resolve } from "node:path";
 import { FrpsInstancesService } from "./frp/frp-instances.service.js";
 import { FrpReconciliationService } from "./frp/frp-reconciliation.service.js";
 import { ReleaseOrchestrator } from "./release/release.orchestrator.js";
 import { randomUUID } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 import { FrontendOriginIoAdapter } from "./static/frontend-origin.adapter.js";
+import { resolveFrontendOrigin } from "./auth/trusted-origins.js";
 import {
 	createFrontendFallback,
 	resolveFrontendDir,
 } from "./static/frontend-static.js";
-
-const FRONTEND_ORIGIN =
-	process.env.VCPDECK_FRONTEND_ORIGIN || "http://localhost:5173";
 
 /** 监听端口：默认 3001，可用 VCPDECK_PORT 覆盖（1–65535 整数） */
 function resolvePort(): number {
@@ -57,6 +58,19 @@ async function bootstrapAdmin(prisma: PrismaService) {
 }
 
 async function bootstrap() {
+	// Agent 迁移就绪检查(ADR-0041):迁移未应用或与部署不一致时拒绝启动;
+	// 正常启动路径已由 pre-start 显式迁移,此处只读校验,不自行改库。
+	try {
+		await assertAgentMigrationReady({
+			url: resolveDatabaseUrl(),
+			sqlPath: resolve(process.cwd(), "prisma", "migrations",
+				"20261008000000_agent_session_run_audit", "migration.sql"),
+		});
+	} catch (error) {
+		console.error("[bootstrap] Agent 迁移未就绪:", error instanceof Error ? error.message : error);
+		process.exit(1);
+	}
+
 	const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
 	// socket.io 同源 CORS（SPA 单包交付：页面与 API 同源 :3001 时 /app 也放行）；
@@ -64,7 +78,7 @@ async function bootstrap() {
 	app.useWebSocketAdapter(new FrontendOriginIoAdapter(app.getHttpServer()));
 
 	app.use(cookieParser());
-	app.enableCors({ origin: FRONTEND_ORIGIN, credentials: true });
+	app.enableCors({ origin: resolveFrontendOrigin(), credentials: true });
 
 	// Frontend 静态资源同源托管（开发环境由 Vite 提供，找不到产物时仅 API）
 	const frontendDir = resolveFrontendDir();

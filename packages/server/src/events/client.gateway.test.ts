@@ -178,7 +178,6 @@ const report: PiStateReport = {
 const event: PiEvent = {
 	clientId: "c1",
 	sessionId: "s1",
-	jobId: "s1",
 	runId: "r1",
 	event: { type: "agent_start", sessionId: "s1" },
 };

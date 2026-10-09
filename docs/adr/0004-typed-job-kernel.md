@@ -1,6 +1,7 @@
 # ADR-0004：Typed Job 作为可持久化远程操作内核
 
-- 状态：Accepted
+- 状态：Accepted（决策第 9 条由 ADR-0041 替代，其余决策继续有效）
+- 局部替代：[`ADR-0041：Agent Session、Run 与最小审计独立于 Job`](./0041-agent-session-run-and-audit-separation.md)（尚未实现）；以下保留历史正文，当前代码仍复用 Session Job。
 - 日期：2026-08-15（补录既有决策）
 - 决策者：项目维护者
 - 关联：`docs/domain-model.md`、`docs/protocols.md`、`docs/design/remote-execution.md`、`docs/design/remote-files.md`

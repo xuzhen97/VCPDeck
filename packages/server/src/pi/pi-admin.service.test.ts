@@ -53,6 +53,13 @@ interface BindingRow {
 	profileId: string;
 	updatedAt: Date;
 }
+interface SessionRow {
+	id: string;
+	activeRunId: string | null;
+	toolExecutionModeOverride: string | null;
+	executionModeNeedsConfirmation: boolean;
+	legacyExecutionModeOverride: string | null;
+}
 
 /** 最小有状态 Prisma 假实现：只覆盖服务实际使用的方法。 */
 function makePrisma() {
@@ -60,6 +67,7 @@ function makePrisma() {
 	const credentials: CredentialRow[] = [];
 	const links: LinkRow[] = [];
 	const bindings: BindingRow[] = [];
+	const sessions: SessionRow[] = [];
 
 	const applyData = <T extends object>(row: T, data: Record<string, unknown>) => {
 		for (const [k, v] of Object.entries(data)) {
@@ -75,10 +83,22 @@ function makePrisma() {
 
 	const prisma: any = {
 		$transaction: async <T>(work: (tx: any) => Promise<T>) => work(prisma),
-		// 存量执行语义迁移读取会话 Job；本文件只覆盖 Profile 行为，故恒为空集。
-		job: {
-			findMany: async () => [],
-			updateMany: async () => ({ count: 0 }),
+		// ADR-0041:执行语义转换作用于独立 AgentSession,不再是 agent.session Job。
+		agentSession: {
+			findMany: async () => sessions.map((row: SessionRow) => ({ ...row })),
+			updateMany: async (args: {
+				where: { id: string };
+				data: Partial<SessionRow>;
+			}) => {
+				let count = 0;
+				for (const row of sessions) {
+					if (row.id === args.where.id) {
+						Object.assign(row, args.data);
+						count += 1;
+					}
+				}
+				return { count };
+			},
 		},
 		piProfile: {
 			create: async ({ data }: { data: Partial<ProfileRow> }) => {

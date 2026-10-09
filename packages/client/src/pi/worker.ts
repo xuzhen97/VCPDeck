@@ -110,7 +110,6 @@ function getModelRuntime(): Promise<unknown> {
 	return modelRuntimePromise;
 }
 interface ActivePrompt {
-	jobId: string;
 	runId: string;
 	sessionId: string;
 	cancelToken: { cancelled: boolean };
@@ -118,7 +117,7 @@ interface ActivePrompt {
 }
 let active: ActivePrompt | null = null;
 let promptPipeline: Promise<unknown> | null = null;
-const settledRunIds = new Map<string, { jobId: string; sessionId: string }>();
+const settledRunIds = new Map<string, { sessionId: string }>();
 const MAX_SETTLED_RUN_IDS = 32;
 let lastActivity = Date.now();
 
@@ -223,14 +222,12 @@ async function ensureWrapper(
 
 function matchesRun(
 	run: ActivePrompt | null,
-	jobId: string,
 	sessionId: string,
 	runId: string,
 	cancelToken: ActivePrompt["cancelToken"],
 ): run is ActivePrompt {
 	return (
 		run !== null &&
-		run.jobId === jobId &&
 		run.sessionId === sessionId &&
 		run.runId === runId &&
 		run.cancelToken === cancelToken
@@ -243,7 +240,6 @@ function matchesRequest(
 ): run is ActivePrompt {
 	return (
 		run !== null &&
-		request.jobId === run.jobId &&
 		request.sessionId === run.sessionId &&
 		request.runId === run.runId
 	);
@@ -251,13 +247,13 @@ function matchesRequest(
 
 function isCurrentRun(run: ActivePrompt): boolean {
 	return (
-		matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken) &&
+		matchesRun(active, run.sessionId, run.runId, run.cancelToken) &&
 		!run.cancelToken.cancelled
 	);
 }
 
 function clearRun(run: ActivePrompt): void {
-	if (!matchesRun(active, run.jobId, run.sessionId, run.runId, run.cancelToken))
+	if (!matchesRun(active, run.sessionId, run.runId, run.cancelToken))
 		return;
 	run.unsubscribe?.();
 	run.unsubscribe = null;
@@ -266,7 +262,7 @@ function clearRun(run: ActivePrompt): void {
 }
 
 function rememberSettledRun(run: ActivePrompt): void {
-	settledRunIds.set(run.runId, { jobId: run.jobId, sessionId: run.sessionId });
+	settledRunIds.set(run.runId, { sessionId: run.sessionId });
 	if (settledRunIds.size > MAX_SETTLED_RUN_IDS) {
 		settledRunIds.delete(settledRunIds.keys().next().value!);
 	}
@@ -302,7 +298,6 @@ function bindWrapperEvents(w: PiAgentSessionWrapper, run: ActivePrompt): void {
 		send({
 			type: "event",
 			sessionId: run.sessionId,
-			jobId: run.jobId,
 			runId: run.runId,
 			event,
 		});
@@ -316,7 +311,6 @@ function emitPromptError(run: ActivePrompt, error: unknown): void {
 	send({
 		type: "event",
 		sessionId: run.sessionId,
-		jobId: run.jobId,
 		runId: run.runId,
 		event: { type: "prompt_error", sessionId: run.sessionId, ...normalized },
 	});
@@ -523,6 +517,8 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 					roots: await discoverRoots(),
 					sessionsRoot: paths.sessionsRoot,
 					installSecretPath: paths.installSecretPath,
+					// 与 get/clone 同一约定解析副本 sessionId,供 Server 写导入审计。
+					resolveSessionId: (file) => reader.sessionIdForPath(file) || null,
 				},
 			);
 		}
@@ -549,7 +545,6 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 				if (
 					!matchesRequest(active, request) &&
 					settled &&
-					settled.jobId === request.jobId &&
 					settled.sessionId === sessionId
 				) {
 					return reader.state(sessionId);
@@ -565,9 +560,13 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 					throw Object.assign(new Error("Pi project is busy"), {
 						code: "PI_PROJECT_BUSY",
 					});
+				if (typeof request.runId !== "string" || request.runId.length === 0) {
+					throw Object.assign(new Error("runId required"), {
+						code: "PI_PROTOCOL_INVALID",
+					});
+				}
 				const run: ActivePrompt = {
-					jobId: request.jobId ?? "",
-					runId: request.runId ?? "",
+					runId: request.runId,
 					sessionId,
 					cancelToken: { cancelled: false },
 					unsubscribe: null,
@@ -590,9 +589,13 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 					throw Object.assign(new Error("Pi project is busy"), {
 						code: "PI_PROJECT_BUSY",
 					});
+				if (typeof request.runId !== "string" || request.runId.length === 0) {
+					throw Object.assign(new Error("runId required"), {
+						code: "PI_PROTOCOL_INVALID",
+					});
+				}
 				const run: ActivePrompt = {
-					jobId: request.jobId ?? "",
-					runId: request.runId ?? "",
+					runId: request.runId,
 					sessionId,
 					cancelToken: { cancelled: false },
 					unsubscribe: null,
@@ -662,7 +665,6 @@ async function dispatch(request: PiRequest): Promise<unknown> {
 			if (
 				!matchesRun(
 					active,
-					run.jobId,
 					run.sessionId,
 					run.runId,
 					run.cancelToken,

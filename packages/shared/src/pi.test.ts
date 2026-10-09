@@ -4,6 +4,7 @@ import { JobStatus, JobType } from "./index.js";
 import {
 	PI_ERROR_CODES,
 	PI_SESSION_JOB_PROTOCOL_VERSION,
+	PI_SESSION_PROTOCOL_VERSION,
 	isPiAgentIdle,
 	isPiThinkingLevel,
 	MAX_PI_IMAGES_PER_PROMPT,
@@ -11,6 +12,8 @@ import {
 	parsePiEvent,
 	parsePiRequest,
 	parsePiResponse,
+	parsePiSessionSnapshot,
+	parsePiRunInfo,
 	parsePiStateReport,
 	type PiAgentState,
 } from "./pi.js";
@@ -83,7 +86,7 @@ describe("parsePiRequest", () => {
 	it("只允许空文本与有效图片组合，拒绝无内容 prompt", () => {
 		const base = {
 			requestId: "r1", action: "agent.prompt", cwdRef: { rootDir: "D:\\\\", relativePath: "repo" },
-			sessionId: "s1", jobId: "s1", runId: "run1",
+			sessionId: "s1", runId: "run1",
 		};
 		const image = { fileId: "f1", sha256: "sha", size: 42, mimeType: "image/png", url: "https://example.test/image" };
 		const payload = { submissionId: "sub1", executionMode: "automatic" };
@@ -97,21 +100,19 @@ describe("parsePiRequest", () => {
 		expect(() => parsePiRequest({ ...base, payload: { ...payload, prompt: "", attachments: [{ ...image, size: 11 * 1024 * 1024 }] } })).toThrow();
 	});
 
-	it("允许 Session Job 使用独立 Prompt runId", () => {
+	it("允许独立 Run 使用独立 Prompt runId(v4)", () => {
 		const request = parsePiRequest({
 			requestId: "request-1",
 			action: "agent.prompt",
 			cwdRef: { rootDir: "D:\\", relativePath: "repo" },
 			sessionId: "session-1",
-			jobId: "session-1",
 			runId: "run-1",
 			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "supervised" },
 		});
-		expect(request.jobId).toBe("session-1");
 		expect(request.runId).toBe("run-1");
 	});
 
-	it("拒绝 jobId 与 sessionId 不一致", () => {
+	it("拒绝 Job 信封字段 jobId(v4)", () => {
 		expect(() =>
 			parsePiRequest({
 				requestId: "request-1",
@@ -122,7 +123,7 @@ describe("parsePiRequest", () => {
 				runId: "run-1",
 				payload: { prompt: "hello", submissionId: "sub-1", executionMode: "supervised" },
 			}),
-		).toThrow(/jobId.*sessionId/);
+		).toThrow(/jobId/);
 	});
 
 	it("拒绝未知 action", () => {
@@ -137,7 +138,6 @@ describe("parsePiRequest", () => {
 				requestId: "r1",
 				action: "agent.state",
 				sessionId: "s1",
-				jobId: "j1",
 				runId: "j1",
 				evil: true,
 			}),
@@ -154,7 +154,6 @@ describe("parsePiRequest", () => {
 			action: "agent.prompt",
 			cwdRef: { rootDir: "D:\\\\", relativePath: "repo" },
 			sessionId: "s1",
-			jobId: "s1",
 			runId: "run1",
 		};
 		expect(
@@ -203,7 +202,6 @@ describe("parsePiRequest", () => {
 				requestId: "r1",
 				action,
 				sessionId: "s1",
-				jobId: "s1",
 			}),
 		).toThrow(/runId/);
 	});
@@ -223,7 +221,6 @@ describe("parsePiRequest", () => {
 				requestId: "r1",
 				action: "agent.prompt",
 				sessionId: "s1",
-				jobId: "j1",
 				runId: "j1",
 				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised", attachments },
 			}),
@@ -244,7 +241,6 @@ describe("parsePiRequest", () => {
 				requestId: "r1",
 				action: "agent.prompt",
 				sessionId: "s1",
-				jobId: "j1",
 				runId: "j1",
 				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised", attachments },
 			}),
@@ -266,7 +262,6 @@ describe("parsePiRequest", () => {
 				requestId: "r1",
 				action: "agent.prompt",
 				sessionId: "s1",
-				jobId: "j1",
 				runId: "j1",
 				payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised", attachments },
 			}),
@@ -374,7 +369,6 @@ describe("parsePiEvent", () => {
 		const ev = parsePiEvent({
 			clientId: "c1",
 			sessionId: "s1",
-			jobId: "s1",
 			runId: "run-1",
 			event: { type: "agent_end", sessionId: "s1" },
 		});
@@ -385,7 +379,6 @@ describe("parsePiEvent", () => {
 		const event = parsePiEvent({
 			clientId: "client-1",
 			sessionId: "session-1",
-			jobId: "session-1",
 			runId: "run-1",
 			event: {
 				type: "extension_resolved",
@@ -400,7 +393,6 @@ describe("parsePiEvent", () => {
 			parsePiEvent({
 				clientId: "client-1",
 				sessionId: "session-1",
-				jobId: "session-1",
 				runId: "run-1",
 				event: {
 					type: "extension_resolved",
@@ -418,7 +410,6 @@ describe("parsePiEvent", () => {
 			parsePiEvent({
 				clientId: "client-1",
 				sessionId: "session-1",
-				jobId: "session-1",
 				runId: "run-1",
 				event: { type: "agent_end", sessionId: "other-session" },
 			}),
@@ -430,7 +421,6 @@ describe("parsePiEvent", () => {
 			parsePiEvent({
 				clientId: "c1",
 				sessionId: "s1",
-				jobId: "s1",
 				runId: "r1",
 				event: {
 					type: "extension_request",
@@ -446,7 +436,6 @@ describe("parsePiEvent", () => {
 			parsePiEvent({
 				clientId: "c1",
 				sessionId: "s1",
-				jobId: "s1",
 				runId: "r1",
 				event: { type: "prompt_error", sessionId: "s1", code: "UNKNOWN", message: "bad" },
 			}),
@@ -455,7 +444,6 @@ describe("parsePiEvent", () => {
 			parsePiEvent({
 				clientId: "c1",
 				sessionId: "s1",
-				jobId: "s1",
 				runId: "r1",
 				event: {
 					type: "extension_request",
@@ -470,7 +458,6 @@ describe("parsePiEvent", () => {
 		const ev = parsePiEvent({
 			clientId: "c1",
 			sessionId: "s1",
-			jobId: "s1",
 			runId: "run-1",
 			event: {
 				type: "thinking_progress",
@@ -490,7 +477,6 @@ describe("parsePiEvent", () => {
 			parsePiEvent({
 				clientId: "c1",
 				sessionId: "s1",
-				jobId: "j1",
 				runId: "j1",
 				event: { type: "totally_unknown" },
 			}),
@@ -538,25 +524,26 @@ describe("parsePiStateReport", () => {
 		).toThrow(/runtimeRevision/);
 	});
 
-	it("接受活动状态、独立 runId 和无 projectKey 的 idle/error", () => {
+	it("接受活动状态与无 projectKey 的终局摘要", () => {
 		const report = parsePiStateReport({
 			clientId: "c1",
 			runs: [
 				{
-					jobId: "s1",
 					runId: "run-1",
 					sessionId: "s1",
 					status: "running",
 					projectKey: "a".repeat(64),
 				},
-				{ jobId: "s2", runId: "run-2", sessionId: "s2", status: "idle" },
-				{ jobId: "s3", runId: "run-3", sessionId: "s3", status: "error" },
+				{ runId: "run-2", sessionId: "s2", status: "succeeded" },
+				{ runId: "run-3", sessionId: "s3", status: "failed", errorCode: "PI_WORKER_EXITED" },
+				{ runId: "run-4", sessionId: "s4", status: "aborted" },
 			],
 		});
 		expect(report.runs.map((run) => run.status)).toEqual([
 			"running",
-			"idle",
-			"error",
+			"succeeded",
+			"failed",
+			"aborted",
 		]);
 	});
 
@@ -565,7 +552,7 @@ describe("parsePiStateReport", () => {
 			expect(() =>
 				parsePiStateReport({
 					clientId: "c1",
-					runs: [{ jobId: "s1", runId: "r1", sessionId: "s1", status }],
+					runs: [{ runId: "r1", sessionId: "s1", status }],
 				}),
 			).toThrow(/projectKey/);
 		}
@@ -576,7 +563,7 @@ describe("parsePiStateReport", () => {
 			parsePiStateReport({
 				clientId: "c1",
 				runs: [
-					{ jobId: "j1", runId: "j1", sessionId: "s1", status: "mystery" },
+					{ runId: "j1", sessionId: "s1", status: "mystery" },
 				],
 			}),
 		).toThrow();
@@ -588,7 +575,6 @@ describe("parsePiStateReport", () => {
 				clientId: "c1",
 				runs: [
 					{
-						jobId: "j1",
 						runId: "j1",
 						sessionId: "s1",
 						status: "running",
@@ -599,13 +585,13 @@ describe("parsePiStateReport", () => {
 		).toThrow();
 	});
 
-	it("拒绝 jobId 与 sessionId 不一致", () => {
+	it("拒绝 Job 信封字段 jobId(v4)", () => {
 		expect(() =>
 			parsePiStateReport({
 				clientId: "c1",
-				runs: [{ jobId: "j1", runId: "r1", sessionId: "s1", status: "done" }],
+				runs: [{ jobId: "j1", runId: "r1", sessionId: "s1", status: "running", projectKey: "a".repeat(64) }],
 			}),
-		).toThrow(/jobId.*sessionId/);
+		).toThrow(/jobId/);
 	});
 
 	it("拒绝 runs 超过 1,000 项", () => {
@@ -613,10 +599,9 @@ describe("parsePiStateReport", () => {
 			parsePiStateReport({
 				clientId: "c1",
 				runs: Array.from({ length: 1001 }, (_, index) => ({
-					jobId: `s${index}`,
 					runId: `r${index}`,
 					sessionId: `s${index}`,
-					status: "idle",
+					status: "succeeded",
 				})),
 			}),
 		).toThrow(/runs/);
@@ -662,5 +647,94 @@ describe("Pi 动作门控分类", () => {
 	it("未分类动作不被悄悄放行（既非 read 也非 worker）", () => {
 		expect(isPiReadAction("session.explode")).toBe(false);
 		expect(isPiWorkerAction("session.explode")).toBe(false);
+	});
+});
+
+// ── ADR-0041 Task 2:独立 Session/Run 契约(v4)──
+describe("v4 独立 Session/Run 契约", () => {
+	it("协议版本推进到 4", () => {
+		expect(PI_SESSION_PROTOCOL_VERSION).toBe(4);
+	});
+
+	it("parsePiSessionSnapshot 严格校验并拒绝 Job 字段与伪造完成状态", () => {
+		const validSession = {
+			sessionId: "s1",
+			status: "available",
+			activeRun: null,
+			ownerName: "User",
+			isOwner: true,
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+		};
+		expect(parsePiSessionSnapshot(validSession)).toMatchObject({ sessionId: "s1", status: "available" });
+		expect(() => parsePiSessionSnapshot({ ...validSession, jobId: "s1" })).toThrow();
+		expect(() => parsePiSessionSnapshot({ ...validSession, status: "done" })).toThrow();
+		expect(() => parsePiSessionSnapshot({ ...validSession, status: "mystery" })).toThrow();
+	});
+
+	it("parsePiRunInfo 校验终态时间与错误码一致性", () => {
+		const running = {
+			runId: "r1", sessionId: "s1", status: "running", kind: "prompt",
+			executionMode: "automatic", actorName: "User", source: "web",
+			createdAt: "2026-10-08T00:00:00.000Z", acceptedAt: null, startedAt: null,
+			finishedAt: null, errorCode: null,
+		};
+		expect(parsePiRunInfo(running)).toMatchObject({ runId: "r1", status: "running" });
+		// 非终态不得携带 finishedAt
+		expect(() => parsePiRunInfo({ ...running, finishedAt: "2026-10-08T01:00:00.000Z" })).toThrow();
+		const failed = { ...running, status: "failed", finishedAt: "2026-10-08T01:00:00.000Z", errorCode: "PI_WORKER_EXITED" };
+		expect(parsePiRunInfo(failed)).toMatchObject({ status: "failed", errorCode: "PI_WORKER_EXITED" });
+		// 终态必须携带 finishedAt
+		expect(() => parsePiRunInfo({ ...running, status: "failed" })).toThrow();
+		// failed 必须带 errorCode
+		expect(() => parsePiRunInfo({ ...failed, errorCode: null })).toThrow();
+		// succeeded 不得带 errorCode
+		expect(() => parsePiRunInfo({ ...failed, status: "succeeded" })).toThrow();
+		expect(() => parsePiRunInfo({ ...running, kind: "mystery" })).toThrow();
+	});
+
+	it("v4 请求移除 jobId:旧字段拒绝,RUN_SCOPED 只要求 sessionId+runId", () => {
+		const base = {
+			requestId: "r1", action: "agent.abort", sessionId: "s1", runId: "run1",
+		};
+		expect(parsePiRequest(base)).toMatchObject({ sessionId: "s1", runId: "run1" });
+		expect(() => parsePiRequest({ ...base, jobId: "s1" })).toThrow(/jobId/);
+		expect(() => parsePiRequest({ ...base, runId: undefined, jobId: undefined })).toThrow();
+	});
+
+	it("v4 事件移除 jobId:旧形状拒绝", () => {
+		const event = {
+			clientId: "c1", sessionId: "s1", runId: "r1",
+			event: { type: "agent_start", sessionId: "s1" },
+		};
+		expect(parsePiEvent(event)).toMatchObject({ sessionId: "s1", runId: "r1" });
+		expect(() => parsePiEvent({ ...event, jobId: "s1" })).toThrow(/jobId/);
+	});
+
+	it("v4 状态报告终局摘要:succeeded/failed/aborted 且 failed 带安全错误码", () => {
+		const report = parsePiStateReport({
+			clientId: "c1",
+			runs: [
+				{ runId: "r1", sessionId: "s1", status: "running", projectKey: "a".repeat(64) },
+				{ runId: "r2", sessionId: "s2", status: "succeeded" },
+				{ runId: "r3", sessionId: "s3", status: "failed", errorCode: "PI_WORKER_EXITED" },
+				{ runId: "r4", sessionId: "s4", status: "aborted" },
+			],
+		});
+		expect(report.runs.map((run) => run.status)).toEqual(["running", "succeeded", "failed", "aborted"]);
+		expect(() =>
+			parsePiStateReport({
+				clientId: "c1",
+				runs: [{ runId: "r5", sessionId: "s5", status: "failed" }],
+			}),
+		).toThrow(/errorCode/);
+		// 旧 jobId 字段拒绝
+		expect(() =>
+			parsePiStateReport({
+				clientId: "c1",
+				runs: [{ jobId: "s1", runId: "r1", sessionId: "s1", status: "running", projectKey: "a".repeat(64) }],
+			}),
+		).toThrow(/jobId/);
 	});
 });

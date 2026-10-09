@@ -162,6 +162,7 @@ const PI_CAPABILITY_KEYS = new Set([
 	"nodeVersion",
 	"shellKind",
 	"sessionJobProtocolVersion",
+	"sessionProtocolVersion",
 	"runtimeSpecProtocolVersion",
 	"configMode",
 	"modelCatalog",
@@ -268,6 +269,12 @@ export function parsePiCapabilityStatus(value: unknown): PiCapabilityStatus {
 			status.sessionJobProtocolVersion = requirePositiveInt(
 				value.sessionJobProtocolVersion,
 				"pi.sessionJobProtocolVersion",
+			);
+		}
+		if (value.sessionProtocolVersion !== undefined) {
+			status.sessionProtocolVersion = requirePositiveInt(
+				value.sessionProtocolVersion,
+				"pi.sessionProtocolVersion",
 			);
 		}
 		if (value.runtimeSpecProtocolVersion !== undefined) {

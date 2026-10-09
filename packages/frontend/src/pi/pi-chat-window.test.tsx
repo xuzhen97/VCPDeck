@@ -16,7 +16,7 @@ function state(overrides: Partial<PiSessionState> = {}): PiSessionState {
 		],
 		session: null,
 		agentState: null,
-		job: overrides.job ?? null,
+		snapshot: overrides.snapshot ?? null,
 		runId: "j1",
 		status: "running",
 		error: null,

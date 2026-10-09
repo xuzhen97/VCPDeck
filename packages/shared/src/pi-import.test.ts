@@ -205,6 +205,30 @@ describe("parsePiImportRunResponse", () => {
 		).toHaveLength(3);
 	});
 
+	it("可选 sessionId 必须是 256 以内的非空字符串(ADR-0041 导入审计所需)", () => {
+		expect(
+			parsePiImportRunResponse({
+				results: [
+					{ sourceName: "a.jsonl", status: "imported", sessionId: "sess-1" },
+				],
+			}).results[0],
+		).toEqual({ sourceName: "a.jsonl", status: "imported", sessionId: "sess-1" });
+
+		for (const sessionId of ["", "x".repeat(257), 1, null]) {
+			expect(() =>
+				parsePiImportRunResponse({
+					results: [{ sourceName: "a.jsonl", status: "imported", sessionId }],
+				}),
+			).toThrow(/sessionId/);
+		}
+		// 缺省仍然合法:Server 必须容忍未上报 sessionId 的 Client。
+		expect(
+			parsePiImportRunResponse({
+				results: [{ sourceName: "a.jsonl", status: "imported" }],
+			}).results[0],
+		).toEqual({ sourceName: "a.jsonl", status: "imported" });
+	});
+
 	it("reasonCode 仅允许三个稳定码；未知字段拒绝", () => {
 		expect(() =>
 			parsePiImportRunResponse({

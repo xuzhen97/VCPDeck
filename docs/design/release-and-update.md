@@ -234,7 +234,7 @@ sequenceDiagram
     C->>C: draining=true，拒绝新 Job
     C->>L: POST /prepare
     L->>L: 下载、校验、解压
-    C->>C: 等待 executor 跟踪的 running Job（有超时）
+    C->>C: 等待 executor 跟踪的 running Job（有超时；不覆盖 Pi Worker）
     C->>S: update:ready
     C->>L: POST /apply
     L->>L: 停 Client、切换、启动、稳定窗口探活
@@ -249,7 +249,9 @@ sequenceDiagram
 
 Client 收到有效更新请求后先设置本地 drain，再调用 prepare，因此下载和解压期间 dispatcher 已拒绝新 Job。等待达到上限后，Client 仍会继续 ready/apply，所以它是“有界尽力等待”，不是所有任务完成的强保证。
 
-当前 drain 查询复用 `executor.ts` 的活动 Job 集合，主要覆盖该 executor 跟踪的命令进程；它不构成对 File transfer、Terminal PTY 或 Pi Worker 的统一运行态屏障。因此即使查询为空，也不能推断 Client 上所有远程活动都已安全收敛。
+当前 **Client** drain 查询复用 `executor.ts` 的活动 Job 集合，主要覆盖该 executor 跟踪的命令进程；它不构成对 File transfer、Terminal PTY 或 Pi Worker 的统一运行态屏障。因此即使查询为空，也不能推断 Client 上所有远程活动都已安全收敛。
+
+**Server** drain 则同时等待普通 Job 与 `AgentRun`：ADR-0041 之后 Agent 执行不再写 Job，只查 Job 会让发布在活跃 Agent 回合上直接切换。
 
 Client 更新会停止整个 Client 进程：
 
@@ -366,7 +368,7 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 | 解压失败 | 目标版本可能留下不完整目录 | 删除不完整版本目录后重新 prepare |
 | 目标版本目录已存在 | 仅当 manifest 可解析、版本号匹配且当前 artifact 的业务入口存在时，`prepare` 才跳过下载和校验；不完整目录会先清理再准备 | 仅含 Launcher payload 的目录会重新下载、校验和解压；完整目录继续幂等跳过 |
 | preStart 失败 | 不进入 current 切换，旧进程通常仍运行 | 修复迁移/权限；核对是否已有部分 DB 副作用 |
-| Server drain 超时 | Release 标为 failed；drain 抛错路径自动解除闸门、编排器失败路径显式 `release()`，Job 派发随即恢复 | 无需重启；检查活跃 Job 为何未收敛（如卡死的 `agent.session`）后可重新发布 |
+| Server drain 超时 | Release 标为 failed；drain 抛错路径自动解除闸门、编排器失败路径显式 `release()`，Job 派发随即恢复 | 无需重启；检查活跃 Job 与 Agent Run 为何未收敛（drain 同时等待两者，见 [ADR-0041](../adr/0041-agent-session-run-and-audit-separation.md)）后可重新发布 |
 | 新 Server 探活失败 | Launcher 尝试回退 previous current | 确认旧 Server 与当前 DB 兼容 |
 | Client drain 超时 | 继续 apply，未完成运行态可能被终止 | 重连后对账 Job/Terminal/Pi，不伪造成功 |
 | Client 重连版本不符 | Client 标记 failed | 检查 Launcher 日志和 previous 回退原因 |

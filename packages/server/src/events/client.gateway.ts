@@ -64,7 +64,10 @@ import { GitSshService } from "../git-ssh/git-ssh.service.js";
 
 const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
 
-@WebSocketGateway({ namespace: "/client", cors: { origin: process.env.VCPDECK_CORS_ORIGIN || "http://localhost:5173" } })
+// CORS 由引擎级的 FrontendOriginIoAdapter 统一判定(ADR-0013):socket.io 的 CORS 只在
+// Server/Engine 层生效,命名空间级 cors 配置不参与握手,写在这里会被误导为「/client 受
+// VCPDECK_CORS_ORIGIN 限制」。可信 Origin 白名单见 auth/trusted-origins.ts。
+@WebSocketGateway({ namespace: "/client" })
 export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   @WebSocketServer()
   server!: Server;

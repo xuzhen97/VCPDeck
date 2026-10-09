@@ -76,7 +76,7 @@ pnpm release --version=x.y.z
 | `VCPDECK_PSK` | `vcpdeck-dev-psk` | `/client` PSK，生产必须随机替换 |
 | `VCPDECK_PI_CREDENTIAL_KEY_FILE` | 未设 = Pi 配置不可用（**本地 dev 例外**：`pnpm dev` / `pnpm dev:all` 会自动生成 `.tmp/dev-secrets/pi-credential.key` 并写入 `packages/server/.env`） | Pi Provider 凭据的加密根密钥（文件内容为 base64 的 32 字节）。**生产必须位于 Server 进程外**（如 `/etc/vcpdeck/pi-credential.key`，`0640 root:serverUser`）；缺失或长度不符时凭据写入与 RuntimeSpec 组装 fail closed，Server 启动与其他能力不受影响 |
 | `VCPDECK_GIT_SSH_KEY_FILE` | 未设 = Server 自行创建并管理根密钥 | Git SSH 共享私钥的加密根密钥（文件内容为 base64 的 32 字节）。**缺省无需配置**：首次在「设置 → Git 密钥」点击生成时，Server 自动在版本目录外的数据根创建受限文件 `<VCPDECK_APP_DIR | Server 工作目录>/data/git-ssh/root.key`（POSIX 目录 `0700`/文件 `0600`；Windows 关闭继承并授权运行账户、SYSTEM 与 Administrators），重启与自更新后复用，并发首次创建只产生一把密钥。仍可显式指定路径兼容旧部署（如 `/etc/vcpdeck/git-ssh.key`，`0640 root:serverUser`），显式路径**优先且只读**，不可读时直接 fail closed，**不自动回退也不另建**。必须与 Pi 凭据根密钥**分开**；密钥缺失/损坏/与既有密文不匹配时生成与分发 fail closed（`GIT_SSH_KEY_UNAVAILABLE`），**绝不静默换钥**，否则既有私钥将永久无法解密。该文件必须与 SQLite 配对备份。Client 侧不保存根密钥，只在 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh` 保存受管私钥副本 |
-| `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | `/client` Gateway CORS Origin |
+| `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | 引擎级可信 Origin 白名单之一（与 `VCPDECK_FRONTEND_ORIGIN` 并列）；socket.io CORS 只在引擎层生效，`/app` 与 `/client` 共用同一判定 |
 | `VCPDECK_PORT` | `3001` | Server 监听端口（1–65535 整数）；改端口时必须同步配置 Client `VCPDECK_SERVER` 与 Server Launcher `VCPDECK_PROBE_URL` |
 | `PUBLIC_SHARE_BASE_URL` | 空（回退 `SERVER_URL`） | VCPDeckBridge 公开分享链接基地址；只接受 HTTP(S)，反向代理部署时应配置为外部公开地址 |
 
@@ -277,6 +277,24 @@ prisma db push
 5. 启动新 Server 并检查 `/api/status`；
 6. 验证关键查询和 Job 创建；
 7. 再进入 Client 更新阶段。
+
+### 6.1 Agent 会话模型切换（Pi 协议 v4）
+
+Agent 会话、Run 与会话操作审计已从 Job 移出（[ADR-0041](./adr/0041-agent-session-run-and-audit-separation.md)），`PI_SESSION_PROTOCOL_VERSION` 升到 `4`。该切换新旧模型双向不兼容，必须按顺序执行：
+
+1. 暂停用户新 Prompt；等待或中止已有 Agent 回合并由**旧** Client 权威确认；
+2. 确认 `pending` / `running` / `waiting_input` / `disconnected` 的回合与未确认删除预约全部清零；
+3. 对 SQLite 与 Storage 做一致性备份，并保留旧版本构件；
+4. 停止旧 Server 与旧 Client；
+5. 新构件启动时执行**显式 Agent migration**（Server 启动前自动断言并 fail closed），成功后同步 schema 并启动 Server；
+6. 升级 Client；v4 注册与对账成功后再恢复 Agent 控制；离线的旧 Client 只影响 Pi 能力，不影响其普通 Job 能力；
+7. 验证连续两轮、失败轮、停止、归档/恢复、审计查询，且普通 Job 列表不含 Agent。
+
+Agent migration 遇到旧模型遗留的活动回合或删除预约时直接报错阻塞，不自行假设终态；不提供直接改库把活动 Run “改成功”的恢复命令。
+
+本版迁移是 **expand-only**（只新增三张表与一个关系字段，不删除、不改名、不收紧任何既有字段），因此**回退不需要恢复备份**：Launcher 回退只切应用版本、不逆转数据库，旧版本代码继续读写同一数据库即可启动运行。回退的代价是**可见性**：新模型产生的 Run 与会话审计在旧控制面不可见，且旧版本会重新看到迁移时刻意保留的 `agent.session` Job 行。唯一会失败的路径是**用旧版本的 `prisma db push`**（例如用旧发布包执行 `install.cjs --force`）——它会把新增表视为多余并索要 `--accept-data-loss`；此时按 §9.7 切换 `current` 的路径回退，不要跑旧版本的 push。回退演练只在隔离库与 mock Client 上进行。
+
+上述第 3 步的备份仍然是发布纪律（数据安全与灾难恢复），不是回退的前置条件；对应的 contract 清理（删除遗留 Job 行与不再使用的模式列）推迟到本版稳定后的后续发布。
 
 ## 7. Frontend 托管
 

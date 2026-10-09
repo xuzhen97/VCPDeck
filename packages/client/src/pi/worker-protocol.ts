@@ -26,7 +26,6 @@ export type PiWorkerResponseMessage =
 export interface PiWorkerEventMessage {
 	type: "event";
 	sessionId: string;
-	jobId: string;
 	runId: string;
 	event: PiClientEvent;
 }

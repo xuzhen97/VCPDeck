@@ -147,34 +147,19 @@ describe("JobDetailPage 下载链接", () => {
 	});
 });
 
-it("Pi 会话任务可从头部标记完成并重新加载", async () => {
-	const session = {
+it("Pi 会话任务不再提供完成入口(ADR-0041)", async () => {
+	const session: JobInfo = {
 		...exportJob,
 		type: "agent.session",
 		status: JobStatus.WAITING_INPUT,
 		result: null,
 		payload: {},
 	};
-	// 可变 current：complete 成功后置 done，随后的 reload 必然读到新状态（无时序竞态）
-	let current: JobInfo = session;
-	const get = vi.fn().mockImplementation(() => Promise.resolve(current));
-	const complete = vi.fn().mockImplementation(async () => {
-		current = { ...session, status: JobStatus.DONE };
-	});
-	renderDetail(session, vi.fn(), {
-		jobs: { get },
-		pi: { agent: { complete } },
-	});
+	const get = vi.fn().mockResolvedValue(session);
+	renderDetail(session, vi.fn(), { jobs: { get } });
 
-	const button = await screen.findByRole("button", { name: "标记完成" });
-	await userEvent.click(button);
-	await userEvent.click(screen.getByRole("button", { name: "确认完成" }));
-	expect(complete).toHaveBeenCalledWith(
-		"c1",
-		"job-1",
-		undefined,
-		expect.any(AbortSignal),
-	);
-	await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-	expect(await screen.findByText("done")).toBeVisible();
+	// 会话完成语义已移除:详情页头部不再有"标记完成"按钮。
+	expect(await screen.findByText("agent.session")).toBeVisible();
+	expect(screen.queryByRole("button", { name: "标记完成" })).toBeNull();
+	expect(get).toHaveBeenCalledTimes(1);
 });

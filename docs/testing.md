@@ -172,6 +172,7 @@ Release 不得只凭构建成功发布。至少确认：
 - 文件浏览、文本留痕、写/移/删覆盖、导入/导出、Local/Alibaba 完整性差异、取消/断线和 Storage；
 - Terminal attach/input/resync/close、snapshot/seq、控制权、Client/Server 重启、TTL/expired 和真实 PTY；
 - Pi Session CRUD/fork/clone、prompt/steer/follow-up/compact/abort、Extension 对话框、图片、SSE、Worker/Client/Server reconnect；
+- Agent 会话与 Run 独立于 Job（ADR-0041）：归档/恢复、失败后继续、每轮自动结算、会话操作审计分页、普通 Job 列表不含 Agent、Server drain 同时等待 Agent Run、显式 Agent migration 在遗留活跃 Run/删除预约时 fail closed；
 - Pi 配置链路：Profile/Credential/绑定 CRUD、凭据只回安全元数据、RuntimeSpec 下发与 ACK、模型 scope 等于 allowedModels ∩ 凭据可用、Server 先行升级；
 - FRPS probe、单实例映射、frpc 退出/重启、删除孤儿和凭据不泄漏；
 - Windows/Linux 构件从上传到 Server 更新、Client 逐台更新、离线补更和失败回退的完整链路；Alibaba 后端必须证明上传/下载正文均不经过 Server；

@@ -47,7 +47,7 @@ export class PiEventBroker {
 
 	/** Client 上报事件：投影扇出 + 状态机更新 */
 	async publish(event: PiEvent): Promise<void> {
-		const { clientId, sessionId, jobId, runId } = event;
+		const { clientId, sessionId, runId } = event;
 		const key = this.key(clientId, sessionId);
 		const stream = this.streams.get(key);
 
@@ -56,25 +56,28 @@ export class PiEventBroker {
 			isDialogKind(event.event.ui.kind);
 		// 只有交互式 Extension UI 才进入 waiting_input；notify 等状态通知不阻塞回合。
 		if (interactiveExtension) {
-			await this.runs.waitForInput(jobId, runId).catch(() => {});
+			await this.runs.waitForInput(sessionId, runId).catch(() => {});
 		}
 		if (event.event.type === "extension_resolved" && !event.event.hasPending) {
-			await this.runs.resume(jobId, runId).catch(() => {});
+			await this.runs.resume(sessionId, runId).catch(() => {});
 		}
 		// grace 内新 activity 取消 settlement；普通 notify 不算 activity。
 		if (
 			ACTIVITY_EVENTS.has(event.event.type) &&
 			(event.event.type !== "extension_request" || interactiveExtension)
 		) {
-			this.runs.cancelSettlement(jobId, runId);
+			this.runs.cancelSettlement(sessionId, runId);
 		}
 		if (event.event.type === "prompt_error") {
-			this.runs.cancelSettlement(jobId, runId);
-			await this.runs.finishRun(jobId, runId).catch(() => {});
+			// v4:错误是权威失败终局,保留安全错误码供审计摘要;不当作正常空闲结算。
+			this.runs.cancelSettlement(sessionId, runId);
+			await this.runs
+				.settleRun(sessionId, runId, { status: "failed", errorCode: event.event.code })
+				.catch(() => {});
 		}
 		// 终态触发 settlement 检查
 		if (SETTLEMENT_TRIGGERS.has(event.event.type)) {
-			await this.scheduleSettlementCheck(clientId, sessionId, jobId, runId);
+			await this.scheduleSettlementCheck(clientId, sessionId, runId);
 		}
 
 		if (stream) {
@@ -111,27 +114,26 @@ export class PiEventBroker {
 	private async scheduleSettlementCheck(
 		clientId: string,
 		sessionId: string,
-		jobId: string,
 		runId: string,
 	): Promise<void> {
-		await this.runs.scheduleSettlement(jobId, runId, async () => {
+		await this.runs.scheduleSettlement(sessionId, runId, async () => {
 			try {
 				await this.runs.withReconciledClient(clientId, async (lease) => {
 					const response = await this.requests.request(lease, {
-						requestId: `settle-${jobId}-${Date.now()}`,
+						requestId: `settle-${sessionId}-${Date.now()}`,
 						action: "agent.state",
 						sessionId,
-						jobId,
 						runId,
 					});
 					if (!response.ok) return;
 					const state = parsePiAgentState(response.data);
+					// 只有权威空闲才结算成功;非空闲/身份不明留给对账。
 					if (isPiAgentIdle(state)) {
-						await this.runs.finishRun(jobId, runId);
+						await this.runs.settleRun(sessionId, runId, { status: "succeeded" });
 					}
 				});
 			} catch {
-				// Client 断线、generation 切换或畸形响应：留给重连 reconcile。
+				// Client 断线、generation 切换或畸形响应:留给重连 reconcile。
 			}
 		});
 	}

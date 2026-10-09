@@ -1,6 +1,6 @@
 /**
- * 服务端优雅停机闸门：停止新派发并等待运行中 job 收敛。
- * 详见 docs/design/release-and-update.md。
+ * 服务端优雅停机闸门:停止新派发并等待运行中 Job 与 Agent Run 收敛。
+ * 详见 docs/design/release-and-update.md 与 ADR-0041。
  */
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -66,9 +66,17 @@ export class ServerDrain {
 		try {
 			const deadline = Date.now() + timeoutMs;
 			for (;;) {
-				const running = await this.prisma.job.count({
-					where: { status: { in: ["running", "waiting_input"] } },
-				});
+				// 普通 Job 与 Agent Run 都要收敛:解耦后 Agent 执行不再写 Job,
+				// 只查 Job 会让发布在活跃 Agent 回合上直接切换。
+				const [runningJobs, runningRuns] = await Promise.all([
+					this.prisma.job.count({
+						where: { status: { in: ["running", "waiting_input"] } },
+					}),
+					this.prisma.agentRun.count({
+						where: { status: { in: ["pending", "running", "waiting_input", "disconnected"] } },
+					}),
+				]);
+				const running = runningJobs + runningRuns;
 				if (running === 0) return;
 				if (Date.now() >= deadline) {
 					throw new Error(`等待 job 收敛超时(仍有 ${running} 个运行中)`);

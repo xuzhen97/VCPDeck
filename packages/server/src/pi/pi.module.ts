@@ -11,6 +11,7 @@ import { PiRuntimeService } from "./pi-runtime.service.js";
 import { PiEventBroker } from "./pi-event-broker.js";
 import { PiRequestBroker } from "./pi-request-broker.js";
 import { PiRunService } from "./pi-run.service.js";
+import { PiSessionService } from "./pi-session.service.js";
 import { FileModule } from "../file/file.module.js";
 import { StorageModule } from "../storage/storage.module.js";
 
@@ -22,6 +23,7 @@ import { StorageModule } from "../storage/storage.module.js";
 		PiRequestBroker,
 		PiEventBroker,
 		PiRunService,
+		PiSessionService,
 		PiAttachmentService,
 		PiProfileService,
 		PiCredentialService,
@@ -33,6 +35,7 @@ import { StorageModule } from "../storage/storage.module.js";
 		PiRequestBroker,
 		PiEventBroker,
 		PiRunService,
+		PiSessionService,
 		PiProfileService,
 		PiCredentialService,
 		PiProviderService,

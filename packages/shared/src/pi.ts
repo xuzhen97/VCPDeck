@@ -37,8 +37,18 @@ export const PI_ERROR_CODES = [
 
 export type PiErrorCode = (typeof PI_ERROR_CODES)[number];
 
-/** Session Job 协议版本；Server 与新 Client 必须精确匹配。 */
+/**
+ * 旧 Session Job 协议版本号,仅保留用于读取仍在上报该字段的存量 Client(机器注册兼容)。
+ * 当前 Pi 业务协议以 PI_SESSION_PROTOCOL_VERSION 为准,Server 不再据此放行控制面。
+ */
 export const PI_SESSION_JOB_PROTOCOL_VERSION = 3;
+
+/**
+ * v4 独立 Session/Run 协议版本(ADR-0041)。
+ * v4 移除 Job 信封:请求/事件/状态报告只携带 sessionId+runId;
+ * 旧 v3 Client 仅在机器注册时兼容解析,不进入 Pi 业务协议。
+ */
+export const PI_SESSION_PROTOCOL_VERSION = 4;
 
 /**
  * PiRuntimeSpec 协议版本。
@@ -230,6 +240,12 @@ export interface PiImportRunResult {
 	sourceName: string;
 	status: PiImportItemStatus;
 	reasonCode?: PiImportReasonCode;
+	/**
+	 * 新建副本在 VCPDeck 内的 sessionId（仅 Client 实际复制成功时上报）。
+	 * Server 据此登记独立会话控制面并写 imported 审计（ADR-0041）；
+	 * 旧 Client 不上报该字段时保持缺省，Server 不得据此拒绝导入结果。
+	 */
+	sessionId?: string;
 }
 
 export interface PiImportRunResponse {
@@ -313,7 +329,12 @@ const IMPORT_LIST_KEYS = new Set(["sourceRoot", "sessions"]);
 const IMPORT_PREVIEW_KEYS = new Set(["sourceName", "previewText", "truncated"]);
 const IMPORT_RUN_REQUEST_KEYS = new Set(["sourceNames"]);
 const IMPORT_RUN_RESPONSE_KEYS = new Set(["results"]);
-const IMPORT_RUN_RESULT_KEYS = new Set(["sourceName", "status", "reasonCode"]);
+const IMPORT_RUN_RESULT_KEYS = new Set([
+	"sourceName",
+	"status",
+	"reasonCode",
+	"sessionId",
+]);
 const IMPORT_ITEM_STATUSES = new Set<string>([
 	"imported",
 	"alreadyImported",
@@ -429,6 +450,9 @@ export function parsePiImportRunResponse(value: unknown): PiImportRunResponse {
 		if (typeof raw.status !== "string" || !IMPORT_ITEM_STATUSES.has(raw.status)) {
 			throw new PiProtocolError(`${what}.status 不受支持`);
 		}
+		if (raw.sessionId !== undefined) {
+			assertString(raw.sessionId, `${what}.sessionId`, 256);
+		}
 		if (raw.reasonCode !== undefined) {
 			if (
 				typeof raw.reasonCode !== "string" ||
@@ -440,11 +464,17 @@ export function parsePiImportRunResponse(value: unknown): PiImportRunResponse {
 				sourceName,
 				status: raw.status as PiImportItemStatus,
 				reasonCode: raw.reasonCode as PiImportReasonCode,
+				...(raw.sessionId !== undefined
+					? { sessionId: raw.sessionId as string }
+					: {}),
 			};
 		}
 		return {
 			sourceName,
 			status: raw.status as PiImportItemStatus,
+			...(raw.sessionId !== undefined
+				? { sessionId: raw.sessionId as string }
+				: {}),
 		};
 	});
 	return { results };
@@ -460,55 +490,218 @@ export type PiSessionJobStatus =
 	| "error"
 	| "cancelled";
 
-export interface PiSessionJobSnapshot {
-	jobId: string;
+// ── v4 独立 Session/Run 契约(ADR-0041)──
+
+export type PiSessionControlStatus = "available" | "archived" | "deleted";
+
+export type PiRunStatus =
+	| "pending"
+	| "running"
+	| "waiting_input"
+	| "disconnected"
+	| "succeeded"
+	| "failed"
+	| "aborted";
+
+export type PiRunKind = "prompt" | "command";
+
+export type PiAuditEventType =
+	| "created"
+	| "imported"
+	| "renamed"
+	| "archived"
+	| "restored"
+	| "deleted"
+	| "execution_mode_changed";
+
+export type PiAuditEventResult = "requested" | "ok" | "failed";
+
+/** 独立会话快照:不含 Job 字段,不使用 done/error/cancelled 生命周期。 */
+export interface PiSessionSnapshot {
 	sessionId: string;
-	status: PiSessionJobStatus;
-	runId: string | null;
-	executionModeOverride: PiToolExecutionMode | null;
-	effectiveExecutionMode: PiToolExecutionMode | null;
+	status: PiSessionControlStatus;
+	activeRun: PiRunInfo | null;
 	ownerName: string | null;
 	isOwner: boolean;
-	errorCode?: PiErrorCode;
-	errorMessage?: string;
+	executionModeOverride: PiToolExecutionMode | null;
+	effectiveExecutionMode: PiToolExecutionMode | null;
+	executionModeNeedsConfirmation: boolean;
 }
 
-/** 严格解析 Server 返回的 Session Job 快照。 */
-export function parsePiSessionJobSnapshot(value: unknown): PiSessionJobSnapshot {
-	assertRecord(value, "PiSessionJobSnapshot");
+/** 一轮执行摘要:行本身承担每轮执行审计;不含 prompt/正文/路径。 */
+export interface PiRunInfo {
+	runId: string;
+	sessionId: string;
+	status: PiRunStatus;
+	kind: PiRunKind;
+	executionMode: PiToolExecutionMode;
+	actorName: string | null;
+	source: string | null;
+	createdAt: string;
+	acceptedAt: string | null;
+	startedAt: string | null;
+	finishedAt: string | null;
+	errorCode: PiErrorCode | null;
+}
+
+/** 会话控制面操作的最小审计事件;删除会话不级联清除。 */
+export interface PiAuditEventInfo {
+	id: string;
+	sessionId: string;
+	event: PiAuditEventType;
+	result: PiAuditEventResult;
+	actorName: string | null;
+	source: string | null;
+	createdAt: string;
+	errorCode: PiErrorCode | null;
+	oldExecutionMode: PiToolExecutionMode | null;
+	newExecutionMode: PiToolExecutionMode | null;
+}
+
+const ISO_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+const PI_RUN_STATUSES_V4: ReadonlySet<string> = new Set([
+	"pending", "running", "waiting_input", "disconnected", "succeeded", "failed", "aborted",
+]);
+const PI_RUN_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["succeeded", "failed", "aborted"]);
+const PI_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set([
+	"created", "imported", "renamed", "archived", "restored", "deleted", "execution_mode_changed",
+]);
+const PI_AUDIT_RESULTS: ReadonlySet<string> = new Set(["requested", "ok", "failed"]);
+
+/** 判断 Run 状态是否为终态(结算后不可重新激活)。 */
+export function isPiRunTerminal(status: PiRunStatus): boolean {
+	return PI_RUN_TERMINAL_STATUSES.has(status);
+}
+
+function assertIsoDatetime(v: unknown, what: string): void {
+	assertString(v, what);
+	if (!ISO_DATETIME_PATTERN.test(v)) {
+		throw new PiProtocolError(`${what} 必须是 UTC ISO 时间`);
+	}
+}
+
+function assertOptionalIsoDatetime(v: unknown, what: string): void {
+	if (v !== undefined && v !== null) assertIsoDatetime(v, what);
+}
+
+/** 严格解析独立会话快照;Job 字段与旧生命周期状态一律拒绝。 */
+export function parsePiSessionSnapshot(value: unknown): PiSessionSnapshot {
+	assertRecord(value, "PiSessionSnapshot");
 	assertKeys(value, new Set([
-		"jobId", "sessionId", "status", "runId", "executionModeOverride",
-		"effectiveExecutionMode", "ownerName", "isOwner", "errorCode", "errorMessage",
-	]), "PiSessionJobSnapshot");
-	assertString(value.jobId, "jobId", 256);
+		"sessionId", "status", "activeRun", "ownerName", "isOwner",
+		"executionModeOverride", "effectiveExecutionMode", "executionModeNeedsConfirmation",
+	]), "PiSessionSnapshot");
 	assertString(value.sessionId, "sessionId", 256);
-	if (typeof value.status !== "string" || ![
-		"idle", "pending", "running", "waiting_input", "done", "disconnected", "error", "cancelled",
-	].includes(value.status)) throw new PiProtocolError("status 不受支持");
-	if (value.runId !== null) assertString(value.runId, "runId", 256);
+	assertString(value.status, "status");
+	if (!("available" === value.status || "archived" === value.status || "deleted" === value.status)) {
+		throw new PiProtocolError(`status 不受支持: ${String(value.status)}`);
+	}
+	const activeRun = value.activeRun === null ? null : parsePiRunInfo(value.activeRun);
+	if (value.ownerName !== null) assertString(value.ownerName, "ownerName", 256);
+	if (typeof value.isOwner !== "boolean") throw new PiProtocolError("isOwner 必须是布尔");
 	for (const field of ["executionModeOverride", "effectiveExecutionMode"] as const) {
 		if (value[field] !== null && !isPiToolExecutionMode(value[field])) {
 			throw new PiProtocolError(`${field} 不受支持`);
 		}
 	}
-	if (value.ownerName !== null) assertString(value.ownerName, "ownerName", 256);
-	if (typeof value.isOwner !== "boolean") throw new PiProtocolError("isOwner 必须是布尔");
-	if (value.errorCode !== undefined && (typeof value.errorCode !== "string" || !PI_ERROR_CODES.includes(value.errorCode as PiErrorCode))) {
-		throw new PiProtocolError("errorCode 不受支持");
+	if (typeof value.executionModeNeedsConfirmation !== "boolean") {
+		throw new PiProtocolError("executionModeNeedsConfirmation 必须是布尔");
 	}
-	if (value.errorMessage !== undefined) assertString(value.errorMessage, "errorMessage", MAX_TEXT_CHARS);
 	// SAFETY: exact key validation and runtime refinement above establish every required field and
-	// restrict status, modes, error code, and optional strings before exposing the shared type.
-	return value as unknown as PiSessionJobSnapshot;
+	// restrict status, modes, and active run before exposing the shared type.
+	return value as unknown as PiSessionSnapshot;
+}
+
+/** 严格解析一轮执行摘要;终态/时间/错误码必须自洽。 */
+export function parsePiRunInfo(value: unknown): PiRunInfo {
+	assertRecord(value, "PiRunInfo");
+	assertKeys(value, new Set([
+		"runId", "sessionId", "status", "kind", "executionMode", "actorName", "source",
+		"createdAt", "acceptedAt", "startedAt", "finishedAt", "errorCode",
+	]), "PiRunInfo");
+	assertString(value.runId, "runId", 256);
+	assertString(value.sessionId, "sessionId", 256);
+	assertString(value.status, "status");
+	if (!PI_RUN_STATUSES_V4.has(value.status)) {
+		throw new PiProtocolError(`status 不受支持: ${String(value.status)}`);
+	}
+	assertString(value.kind, "kind");
+	if (value.kind !== "prompt" && value.kind !== "command") {
+		throw new PiProtocolError(`kind 不受支持: ${String(value.kind)}`);
+	}
+	if (!isPiToolExecutionMode(value.executionMode)) {
+		throw new PiProtocolError("executionMode 不受支持");
+	}
+	if (value.actorName !== null) assertString(value.actorName, "actorName", 256);
+	if (value.source !== null) assertString(value.source, "source", 64);
+	assertIsoDatetime(value.createdAt, "createdAt");
+	assertOptionalIsoDatetime(value.acceptedAt, "acceptedAt");
+	assertOptionalIsoDatetime(value.startedAt, "startedAt");
+	assertOptionalIsoDatetime(value.finishedAt, "finishedAt");
+	const terminal = PI_RUN_TERMINAL_STATUSES.has(value.status);
+	if (terminal) {
+		if (value.finishedAt === null) {
+			throw new PiProtocolError("终态 Run 必须携带 finishedAt");
+		}
+	} else if (value.finishedAt !== null) {
+		throw new PiProtocolError("非终态 Run 不得携带 finishedAt");
+	}
+	if (value.errorCode !== null) assertErrorCode(value.errorCode, "errorCode");
+	if (value.status === "failed" && value.errorCode === null) {
+		throw new PiProtocolError("failed Run 必须携带安全 errorCode");
+	}
+	if (value.status !== "failed" && value.errorCode !== null) {
+		throw new PiProtocolError("仅 failed Run 允许 errorCode");
+	}
+	// SAFETY: exact key validation, terminal/time/errorCode consistency and mode refinement
+	// above establish every required field before exposing the shared type.
+	return value as unknown as PiRunInfo;
+}
+
+/** 严格解析最小审计事件;模式前后值仅 execution_mode_changed 使用。 */
+export function parsePiAuditEventInfo(value: unknown): PiAuditEventInfo {
+	assertRecord(value, "PiAuditEventInfo");
+	assertKeys(value, new Set([
+		"id", "sessionId", "event", "result", "actorName", "source", "createdAt",
+		"errorCode", "oldExecutionMode", "newExecutionMode",
+	]), "PiAuditEventInfo");
+	assertString(value.id, "id", 256);
+	assertString(value.sessionId, "sessionId", 256);
+	assertString(value.event, "event");
+	if (!PI_AUDIT_EVENT_TYPES.has(value.event)) {
+		throw new PiProtocolError(`event 不受支持: ${String(value.event)}`);
+	}
+	assertString(value.result, "result");
+	if (!PI_AUDIT_RESULTS.has(value.result)) {
+		throw new PiProtocolError(`result 不受支持: ${String(value.result)}`);
+	}
+	if (value.actorName !== null) assertString(value.actorName, "actorName", 256);
+	if (value.source !== null) assertString(value.source, "source", 64);
+	assertIsoDatetime(value.createdAt, "createdAt");
+	if (value.errorCode !== null) assertErrorCode(value.errorCode, "errorCode");
+	for (const field of ["oldExecutionMode", "newExecutionMode"] as const) {
+		if (value[field] !== null && !isPiToolExecutionMode(value[field])) {
+			throw new PiProtocolError(`${field} 不受支持`);
+		}
+	}
+	if (value.event === "execution_mode_changed") {
+		if (value.oldExecutionMode === null && value.newExecutionMode === null) {
+			throw new PiProtocolError("execution_mode_changed 必须携带模式前后值");
+		}
+	} else if (value.oldExecutionMode !== null || value.newExecutionMode !== null) {
+		throw new PiProtocolError("仅 execution_mode_changed 允许模式前后值");
+	}
+	// SAFETY: exact key validation and enum/mode refinement above establish every required
+	// field before exposing the shared type.
+	return value as unknown as PiAuditEventInfo;
 }
 
 export interface PiSessionCreated {
 	sessionId: string;
-	jobId: string;
 }
 
 export interface PiSessionOpenResult {
-	job: PiSessionJobSnapshot;
+	snapshot: PiSessionSnapshot;
 	agentState: PiAgentState;
 }
 
@@ -781,8 +974,10 @@ export type PiCapabilityStatus =
 			sdkVersion: string;
 			nodeVersion: string;
 			shellKind: "configured" | "git-bash" | "path" | "system";
-			/** 旧 Client 缺省；新 Client 固定上报当前版本。 */
+			/** 旧 Client 缺省;新 Client 固定上报当前版本。 */
 			sessionJobProtocolVersion?: number;
+			/** v4 独立 Session/Run 协议版本(ADR-0041);缺失 = 旧 Client。 */
+			sessionProtocolVersion?: number;
 			/** 缺失 = 旧 Client，不支持隔离运行时（设计 §22）。 */
 			runtimeSpecProtocolVersion?: number;
 			/** 新 Client 固定上报 server-authoritative。 */
@@ -843,7 +1038,6 @@ export interface PiRequest {
 	action: PiAction;
 	cwdRef?: PiCwdRef;
 	sessionId?: string;
-	jobId?: string;
 	runId?: string;
 	payload?: Record<string, unknown>;
 }
@@ -878,11 +1072,10 @@ export interface PiAttachmentDescriptor {
 	url: string;
 }
 
-/** prompt 被接受后的权威响应（SSE 断线 fallback 使用） */
+/** PiPromptAccepted:v4 只携带 sessionId+runId,不再有 Job 信封。 */
 export interface PiPromptAccepted {
-	jobId: string;
-	runId: string;
 	sessionId: string;
+	runId: string;
 }
 
 /** 临时附件引用（short-lived，不进 Job/日志） */
@@ -895,11 +1088,10 @@ export interface PiAttachmentRef {
 	expiresAt: number;
 }
 
-/** 投影后的 Agent 事件（Client → Server 包装） */
+/** 投影后的 Agent 事件(Client → Server 包装) */
 export interface PiEvent {
 	clientId: string;
 	sessionId: string;
-	jobId: string;
 	runId: string;
 	event: PiClientEvent;
 }
@@ -963,13 +1155,13 @@ export interface PiExtensionUiRequest {
 	timeoutMs?: number;
 }
 
-/** 活动/终态 run 摘要（PI_STATE，不含 cwd/path/prompt） */
+/** 活动/终态 run 摘要(PI_STATE,不含 cwd/path/prompt);v4 终局摘要含安全错误码 */
 export interface PiRunSummary {
-	jobId: string;
 	runId: string;
 	sessionId: string;
-	status: "running" | "waiting_input" | "idle" | "done" | "error";
+	status: PiRunStatus;
 	projectKey?: PiProjectKey;
+	errorCode?: PiErrorCode;
 }
 
 /** Client 重连/注册时的运行状态报告 */
@@ -1189,7 +1381,6 @@ const REQUEST_KEYS = new Set([
 	"action",
 	"cwdRef",
 	"sessionId",
-	"jobId",
 	"runId",
 	"payload",
 ]);
@@ -1231,13 +1422,7 @@ export function isPiClientEventType(type: unknown): type is PiClientEvent["type"
 	return typeof type === "string" && EVENT_TYPES.has(type);
 }
 
-const RUN_STATUSES: ReadonlySet<string> = new Set([
-	"running",
-	"waiting_input",
-	"idle",
-	"done",
-	"error",
-]);
+const RUN_STATUSES: ReadonlySet<string> = PI_RUN_STATUSES_V4;
 const ERROR_CODES: ReadonlySet<string> = new Set(PI_ERROR_CODES);
 const EXTENSION_UI_KINDS = new Set([
 	"select",
@@ -1429,18 +1614,18 @@ export function parsePiRequest(input: unknown): PiRequest {
 	assertString(input.action, "action");
 	if (!ACTIONS.has(input.action))
 		throw new PiProtocolError(`未知 action ${String(input.action)}`);
-	assertSessionJobPair(input.sessionId, input.jobId);
+	// v4:不再接受 Job 信封字段
+	if (input.jobId !== undefined) {
+		throw new PiProtocolError("jobId 已随 ADR-0041 移除,仅使用 sessionId+runId");
+	}
 
 	if (input.cwdRef !== undefined) input.cwdRef = parseCwdRef(input.cwdRef);
 	if (input.sessionId !== undefined) assertString(input.sessionId, "sessionId");
-	if (input.jobId !== undefined) assertString(input.jobId, "jobId");
 	if (input.runId !== undefined) assertString(input.runId, "runId");
 
 	if (RUN_SCOPED_ACTIONS.has(input.action as PiAction)) {
 		if (input.sessionId === undefined)
 			throw new PiProtocolError(`${input.action} 缺 sessionId`);
-		if (input.jobId === undefined)
-			throw new PiProtocolError(`${input.action} 缺 jobId`);
 		if (input.runId === undefined)
 			throw new PiProtocolError(`${input.action} 缺 runId`);
 	}
@@ -1596,20 +1781,17 @@ export function parsePiAgentState(input: unknown): PiAgentState {
 const EVENT_KEYS = new Set([
 	"clientId",
 	"sessionId",
-	"jobId",
 	"runId",
 	"event",
 ]);
 
-/** 校验 Client → Server 事件包装（Server Gateway 收到后必须先调用） */
+/** 校验 Client → Server 事件包装(Server Gateway 收到后必须先调用) */
 export function parsePiEvent(input: unknown): PiEvent {
 	assertRecord(input, "PiEvent");
 	assertKeys(input, EVENT_KEYS, "PiEvent");
 	assertString(input.clientId, "clientId");
 	assertString(input.sessionId, "sessionId");
-	assertString(input.jobId, "jobId");
 	assertString(input.runId, "runId");
-	assertSessionJobPair(input.sessionId, input.jobId);
 	assertRecord(input.event, "event");
 	assertString(input.event.type, "event.type");
 	if (!EVENT_TYPES.has(input.event.type))
@@ -1720,13 +1902,14 @@ export function parsePiStateReport(input: unknown): PiStateReport {
 		assertRecord(item, "run");
 		assertKeys(
 			item,
-			new Set(["jobId", "runId", "sessionId", "status", "projectKey"]),
+			new Set(["runId", "sessionId", "status", "projectKey", "errorCode"]),
 			"run",
 		);
-		assertString(item.jobId, "run.jobId");
+		if (item.jobId !== undefined) {
+			throw new PiProtocolError("run.jobId 已随 ADR-0041 移除,仅使用 sessionId+runId");
+		}
 		assertString(item.runId, "run.runId");
 		assertString(item.sessionId, "run.sessionId");
-		assertSessionJobPair(item.sessionId, item.jobId);
 		assertString(item.status, "run.status");
 		if (!RUN_STATUSES.has(item.status)) {
 			throw new PiProtocolError(`未知 run 状态 ${String(item.status)}`);
@@ -1740,12 +1923,21 @@ export function parsePiStateReport(input: unknown): PiStateReport {
 				throw new PiProtocolError("projectKey 长度必须为 64");
 			}
 		}
+		// 终局摘要:failed 必须携带安全错误码;其余终态与非终态不得携带
+		if (item.errorCode !== undefined) {
+			if (item.status !== "failed") {
+				throw new PiProtocolError("仅 failed 终局允许 errorCode");
+			}
+			assertErrorCode(item.errorCode, "run.errorCode");
+		} else if (item.status === "failed") {
+			throw new PiProtocolError("failed 终局必须携带安全 errorCode");
+		}
 		runs.push({
-			jobId: item.jobId,
 			runId: item.runId,
 			sessionId: item.sessionId,
 			status: item.status as PiRunSummary["status"],
 			projectKey: item.projectKey,
+			...(item.errorCode !== undefined ? { errorCode: item.errorCode as PiErrorCode } : {}),
 		});
 	}
 	return { clientId: input.clientId, runs, ...parseReportRuntimeState(input) };

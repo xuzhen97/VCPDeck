@@ -27,9 +27,10 @@ model Client {
   socketId          String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
-  jobs              Job[]
-  frpMappings       FrpMapping[]
-  terminalSessions  TerminalSession[]
+  jobs               Job[]
+  frpMappings        FrpMapping[]
+  terminalSessions   TerminalSession[]
+  agentSessions      AgentSession[]
 }
 
 model Job {
@@ -45,9 +46,9 @@ model Job {
   errorMessage String?
   toolExecutionModeOverride String?
   runExecutionMode String?
-  /// 存量 approval/auto 覆盖尚未被 Owner 确认移除逐工具限制（ADR-0039）
+  /// 存量 approval/auto 覆盖尚未被 Owner 确认移除逐工具限制(ADR-0039)
   executionModeNeedsConfirmation Boolean @default(false)
-  /// 一次性迁移说明：旧覆盖模式（仅供展示，不进入新授权路径）
+  /// 一次性迁移说明:旧覆盖模式(仅供展示,不进入新授权路径)
   legacyExecutionModeOverride String?
   timeout      Int?
   createdAt    DateTime  @default(now())
@@ -57,6 +58,96 @@ model Job {
   createdByName       String?
   createdVia          String?
   updatedAt    DateTime  @updatedAt
+}
+
+// ── Agent 会话/执行/审计(ADR-0041):脱离 Job 的独立控制面实体 ──
+// Session 是长期资源,不使用 Job done/error/cancelled 语义;
+// Run 由权威执行报告自动结算;审计只保存安全元数据,不保存对话正文。
+model AgentSession {
+  id                   String   @id // 稳定 sessionId,迁移自旧 agent.session Job 的原值
+  clientId             String
+  client               Client   @relation(fields: [clientId], references: [id])
+  status               String   @default("available") // available | archived | deleted(墓碑)
+  ownerIdentityId      String?
+  ownerName            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  lastActivityAt       DateTime?
+  archivedAt           DateTime?
+  deletedAt            DateTime?
+  /// 当前活跃 Run 的 CAS 指针;非终态 Run 结算后清空
+  activeRunId          String?  @unique
+  toolExecutionModeOverride      String?
+  /// 存量 approval/auto 覆盖尚未被 Owner 确认(ADR-0039);确认前不得接纳新 Run
+  executionModeNeedsConfirmation Boolean @default(false)
+  /// 一次性迁移说明:旧覆盖模式(仅供展示,不进入新授权路径)
+  legacyExecutionModeOverride String?
+  /// 删除预约 deleteToken;非空表示等待远端确认
+  deleteToken          String?
+  /// 预约前的状态(rollback 用)
+  deletePreviousStatus String?
+  /// 迁移来源标记:该行来自旧 agent.session Job
+  migratedFromJob      Boolean  @default(false)
+  /// 迁移时的旧状态标签(仅供展示,不参与运行语义)
+  legacyJobStatus      String?
+
+  runs   AgentRun[]
+  audits AgentAuditEvent[]
+
+  @@index([clientId, status])
+}
+
+// 一轮 Prompt/扩展命令执行;行本身承担每轮执行审计,不另建镜像表。
+model AgentRun {
+  id                  String   @id // runId(UUID)
+  sessionId           String
+  session             AgentSession @relation(fields: [sessionId], references: [id])
+  clientId            String
+  status              String   @default("pending") // pending|running|waiting_input|disconnected|succeeded|failed|aborted
+  kind                String   @default("prompt") // prompt | command
+  executionMode       String?
+  createdByIdentityId String?
+  createdByName       String?
+  createdVia          String?
+  createdAt           DateTime @default(now())
+  acceptedAt          DateTime?
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  errorCode           String?
+
+  @@index([sessionId, createdAt, id])
+  @@index([clientId, status])
+}
+
+// 会话控制面操作的最小审计;删除会话不级联删除本表。
+model AgentAuditEvent {
+  id               String   @id
+  sessionId        String
+  session          AgentSession @relation(fields: [sessionId], references: [id])
+  clientId         String
+  event            String   // created|imported|renamed|archived|restored|deleted|execution_mode_changed
+  result           String   @default("requested") // requested|ok|failed
+  identityId       String?
+  actorName        String?
+  source           String?
+  operationId      String?
+  oldExecutionMode String?
+  newExecutionMode String?
+  errorCode        String?
+  createdAt        DateTime @default(now())
+
+  @@unique([operationId, event, result])
+  @@index([sessionId, createdAt, id])
+  @@index([clientId, createdAt, id])
+}
+
+/// Agent 显式迁移版本标记(单行);由 packages/server/prisma/agent-session-migration.cjs 写入。
+/// 声明在 Prisma schema 中只为让 db push 不把它当成多余表删除;生产迁移不依赖本模型。
+model AgentMigration {
+  id        Int      @id
+  version   String
+  sqlDigest String
+  appliedAt DateTime @default(now())
 }
 
 model Release {

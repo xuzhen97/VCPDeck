@@ -7,7 +7,6 @@ import { useResource } from "@/api/hooks/use-resource";
 import { DownloadLinkCard } from "@/components/download-link-card";
 import { ErrorState, LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
-import { MarkDoneButton } from "@/components/mark-done-button";
 
 export function JobDetailPage() {
 	const sdk = useSdk();
@@ -37,7 +36,6 @@ function JobDetail({
 			<PageHeading
 				title={job.type}
 				description={job.jobId}
-				actions={<MarkDoneButton job={job} onChanged={onChanged} />}
 			/>
 			<Card>
 				<CardContent className="grid gap-4 pt-6 text-sm sm:grid-cols-2">

@@ -9,7 +9,8 @@ import type {
 	PiModelInfo,
 	PiSessionContextPage,
 	PiSessionDetail,
-	PiSessionJobSnapshot,
+	PiSessionSnapshot,
+	PiRunInfo,
 	PiSessionOpenResult,
 	PiThinkingLevel,
 } from "@vcpdeck/shared";
@@ -40,7 +41,7 @@ export interface PiSessionState {
 	messages: PiMessage[];
 	session: PiSessionDetail | null;
 	agentState: PiAgentState | null;
-	job: PiSessionJobSnapshot | null;
+	snapshot: PiSessionSnapshot | null;
 	runId: string | null;
 	status: PiSessionStatus;
 	error: string | null;
@@ -105,29 +106,46 @@ export interface PiSessionActions {
 	navigate(targetId: string): Promise<void>;
 	fork(messageId: string): Promise<void>;
 	clone(): Promise<void>;
-	complete(): Promise<void>;
+	/** 归档会话:只整理入口,不结算当前 Run(ADR-0041)。 */
+	archive(): Promise<void>;
+	/** 恢复归档会话。 */
+	restore(): Promise<void>;
 	/** 重置内部状态（用于删除会话后清空会话相关 UI）。 */
 	reset(): void;
 	close(): void;
 }
 
+/**
+ * 会话展示态:来自当前活跃 Run 与客户端本地乐观状态(ADR-0041)。
+ * 会话本身没有 done/error 生命周期,失败只是本轮结果。
+ */
 function effectiveStatus(
-	job: PiSessionJobSnapshot,
+	snapshot: PiSessionSnapshot,
 	agentState: PiAgentState,
 ): PiSessionStatus {
-	if (job.status === "done" || job.status === "cancelled") return "done";
-	if (job.status === "disconnected") return "disconnected";
-	if (job.status === "error") return "error";
-	if (job.status === "waiting_input" || agentState.pendingExtension)
+	const run = snapshot.activeRun;
+	if (run?.status === "disconnected") return "disconnected";
+	if (run?.status === "failed") return "error";
+	if (run?.status === "waiting_input" || agentState.pendingExtension) {
 		return "waiting_input";
-	return job.status === "idle" ? "idle" : "running";
+	}
+	if (!run || run.status === "succeeded" || run.status === "aborted") return "idle";
+	return "running";
+}
+
+/** 仅替换活跃 Run 摘要,保持快照其余字段不变。 */
+function withActiveRun(
+	snapshot: PiSessionSnapshot | null,
+	activeRun: PiRunInfo | null,
+): PiSessionSnapshot | null {
+	return snapshot ? { ...snapshot, activeRun } : null;
 }
 
 const INITIAL_STATE: PiSessionState = {
 	messages: [],
 	session: null,
 	agentState: null,
-	job: null,
+	snapshot: null,
 	runId: null,
 	status: "idle",
 	error: null,
@@ -145,7 +163,7 @@ const INITIAL_STATE: PiSessionState = {
 
 /** 前端 Pi 会话状态机（参考 Pi Web useAgentSession 核心语义） */
 export function usePiSession(
-	pi: Pick<PiApi, "sessions" | "agent" | "models"> &
+	pi: Pick<PiApi, "sessions" | "sessionsControl" | "agent" | "models"> &
 		Partial<Pick<PiApi, "running">>,
 ) {
 	const [state, setState] = useState<PiSessionState>(INITIAL_STATE);
@@ -407,9 +425,6 @@ export function usePiSession(
 											...s,
 											runId: event.runId,
 											status: "running",
-											job: s.job
-												? { ...s.job, status: "running", runId: event.runId }
-												: s.job,
 										}));
 									}
 								}
@@ -465,9 +480,7 @@ export function usePiSession(
 									...s,
 									status: "idle",
 									runId: null,
-									job: s.job
-										? { ...s.job, status: "idle", runId: null }
-										: null,
+									snapshot: withActiveRun(s.snapshot, null),
 									error: event.message,
 								}));
 								void reloadHistory();
@@ -483,7 +496,7 @@ export function usePiSession(
 									...s,
 									status: "idle",
 									runId: null,
-									job: s.job ? { ...s.job, status: "idle", runId: null } : null,
+									snapshot: withActiveRun(s.snapshot, null),
 								}));
 								void reloadHistory();
 								void refreshState();
@@ -515,7 +528,6 @@ export function usePiSession(
 								setState((s) => ({
 									...s,
 									status: "waiting_input",
-									job: s.job ? { ...s.job, status: "waiting_input" } : null,
 									pendingExtension: {
 										requestId: event.ui.requestId,
 										kind: event.ui.kind,
@@ -541,12 +553,6 @@ export function usePiSession(
 										...s,
 										pendingExtension: null,
 										status: hasPending ? "waiting_input" : "running",
-										job: s.job
-											? {
-													...s.job,
-													status: hasPending ? "waiting_input" : "running",
-												}
-											: null,
 									};
 								});
 								return;
@@ -723,19 +729,20 @@ export function usePiSession(
 			}
 			models = modelsResult;
 			if (sessionGenerationRef.current !== sessionGeneration) return;
-			const { job, agentState } = openResult;
-			activeRunIdRef.current = job.runId;
-			isOwnerRef.current = job.isOwner;
-			if (job.runId) retiredRunIdsRef.current.delete(job.runId);
-			const pendingExtension = job.runId
+			const { snapshot, agentState } = openResult;
+			const activeRunId = snapshot.activeRun?.runId ?? null;
+			activeRunIdRef.current = activeRunId;
+			isOwnerRef.current = snapshot.isOwner;
+			if (activeRunId) retiredRunIdsRef.current.delete(activeRunId);
+			const pendingExtension = activeRunId
 				? (agentState.pendingExtension ?? null)
 				: null;
 			setState((s) => ({
 				...s,
-				job,
+				snapshot,
 				agentState,
-				status: effectiveStatus(job, agentState),
-				runId: job.runId,
+				status: effectiveStatus(snapshot, agentState),
+				runId: activeRunId,
 				pendingExtension,
 				...(models ? { models } : {}),
 				thinkingSelection: agentState.thinkingLevel,
@@ -743,7 +750,7 @@ export function usePiSession(
 
 			// 只在就绪且空闲时拉取扩展命令与 UI 快照：
 			// 避免为 Observer 的每次重连都启动 Worker factory（ADR-0040 决策 4）。
-			if (job.status === "idle" && !pendingExtension) {
+			if (!activeRunId && !pendingExtension) {
 				await Promise.all([refreshCommands(), refreshExtensionUi()]);
 			}
 		},
@@ -811,7 +818,7 @@ export function usePiSession(
 					submissionId,
 					prompt: input.prompt,
 					...(input.images?.length ? { images: input.images } : {}),
-				})) as { jobId: string; runId: string; sessionId: string };
+				})) as { runId: string; sessionId: string };
 				// POST response 补绑（run_created 可能已到；未到则用权威响应）
 				if (
 					sessionGenerationRef.current === sessionGeneration &&
@@ -827,9 +834,7 @@ export function usePiSession(
 						setState((s) => ({
 							...s,
 							runId: accepted.runId,
-							job: s.job
-								? { ...s.job, status: "running", runId: accepted.runId }
-								: s.job,
+							status: "running",
 						}));
 					}
 				}
@@ -851,13 +856,6 @@ export function usePiSession(
 							? {
 									status: "running" as const,
 									runId: settlingRunId,
-									job: s.job
-										? {
-												...s.job,
-												status: "running" as const,
-												runId: settlingRunId,
-											}
-										: s.job,
 								}
 								: { status: "idle" as const }),
 						error: err instanceof Error ? err.message : String(err),
@@ -938,11 +936,12 @@ export function usePiSession(
 					if (sessionGenerationRef.current !== sessionGeneration) return;
 					clearGrace();
 					retiredRunIdsRef.current.add(runId);
+					// 中止请求不等于已中止:本地先释放执行态,终局由 Client 权威摘要收敛。
 					setState((st) => ({
 						...st,
 						status: "idle",
 						runId: null,
-						job: st.job ? { ...st.job, status: "idle", runId: null } : null,
+						snapshot: withActiveRun(st.snapshot, null),
 					}));
 					activeRunIdRef.current = null;
 				}),
@@ -993,9 +992,10 @@ export function usePiSession(
 				if (stateRef.current.status !== "idle" && stateRef.current.status !== "done") return;
 				const generation = sessionGenerationRef.current;
 				try {
-					const job = await pi.agent.setExecutionMode(clientId, sessionId, cwdRef, mode);
+					const snapshot = await pi.agent.setExecutionMode(clientId, sessionId, cwdRef, mode);
 					if (sessionGenerationRef.current !== generation) return;
-					setState((s) => ({ ...s, job, error: null }));
+					// 采用服务端确认的覆盖值与有效模式,不做前端猜测。
+					setState((s) => ({ ...s, snapshot, error: null }));
 				} catch (err) {
 					if (sessionGenerationRef.current === generation) setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
 					throw err;
@@ -1051,7 +1051,6 @@ export function usePiSession(
 									...st,
 									status: "running",
 									pendingExtension: null,
-									job: st.job ? { ...st.job, status: "running" } : null,
 								}
 							: st,
 					);
@@ -1064,7 +1063,7 @@ export function usePiSession(
 					!clientId ||
 					!sessionId ||
 					!cwdRef ||
-					!stateRef.current.job?.isOwner
+					!stateRef.current.snapshot?.isOwner
 				)
 					return;
 				await pi.sessions.navigate(clientId, sessionId, cwdRef, targetId);
@@ -1077,7 +1076,7 @@ export function usePiSession(
 					!clientId ||
 					!sessionId ||
 					!cwdRef ||
-					!stateRef.current.job?.isOwner
+					!stateRef.current.snapshot?.isOwner
 				)
 					return;
 				await pi.sessions.fork(clientId, sessionId, cwdRef, messageId);
@@ -1090,31 +1089,28 @@ export function usePiSession(
 					!clientId ||
 					!sessionId ||
 					!cwdRef ||
-					!stateRef.current.job?.isOwner
+					!stateRef.current.snapshot?.isOwner
 				)
 					return;
 				await pi.sessions.clone(clientId, sessionId, cwdRef);
 			},
-			complete: async () => {
+			archive: async () => {
 				const clientId = clientIdRef.current;
 				const sessionId = sessionIdRef.current;
-				const job = stateRef.current.job;
 				const sessionGeneration = sessionGenerationRef.current;
-				if (!clientId || !sessionId || !job?.isOwner) return;
-				const snapshot = await pi.agent.complete(
-					clientId,
-					sessionId,
-					activeRunIdRef.current ?? undefined,
-				);
+				if (!clientId || !sessionId || !stateRef.current.snapshot?.isOwner) return;
+				const next = await pi.sessionsControl.archive(clientId, sessionId);
 				if (sessionGenerationRef.current !== sessionGeneration) return;
-				activeRunIdRef.current = snapshot.runId;
-				setState((s) => ({
-					...s,
-					job: snapshot,
-					runId: snapshot.runId,
-					status: snapshot.status === "error" ? "error" : "done",
-					pendingExtension: null,
-				}));
+				setState((s) => ({ ...s, snapshot: next }));
+			},
+			restore: async () => {
+				const clientId = clientIdRef.current;
+				const sessionId = sessionIdRef.current;
+				const sessionGeneration = sessionGenerationRef.current;
+				if (!clientId || !sessionId || !stateRef.current.snapshot?.isOwner) return;
+				const next = await pi.sessionsControl.restore(clientId, sessionId);
+				if (sessionGenerationRef.current !== sessionGeneration) return;
+				setState((s) => ({ ...s, snapshot: next }));
 			},
 			close,
 			reset,

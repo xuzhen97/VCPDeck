@@ -50,8 +50,31 @@ function emit(data: unknown): void {
 
 const CWD = { rootDir: "D:\\", relativePath: "repo" };
 
-function makePi() {
+/** 独立会话快照(ADR-0041):活跃 Run 为空表示空闲可用。 */
+const availableSnapshot = {
+	sessionId: "s1",
+	status: "available" as const,
+	activeRun: null,
+	executionModeOverride: null,
+	effectiveExecutionMode: "supervised" as const,
+	executionModeNeedsConfirmation: false,
+	ownerName: "User",
+	isOwner: true,
+};
+
+const sessionsControlStub = {
+	snapshot: vi.fn(async () => availableSnapshot),
+	run: vi.fn(),
+	archive: vi.fn(),
+	restore: vi.fn(),
+	runs: vi.fn(async () => ({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 })),
+	audit: vi.fn(async () => ({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 })),
+} as unknown as Parameters<typeof usePiSession>[0]["sessionsControl"];
+
+function makePi(): Parameters<typeof usePiSession>[0] {
+	// 测试替身只实现本文件用到的子集,形状由运行期断言保证。
 	return {
+		sessionsControl: sessionsControlStub,
 		sessions: {
 			list: vi.fn(async () => ({ sessions: [] })),
 			get: vi.fn(async () => ({
@@ -74,12 +97,11 @@ function makePi() {
 		},
 		models: vi.fn(async () => [{ provider: "p", modelId: "m1" }]),
 		agent: {
-			newSession: vi.fn(async () => ({ sessionId: "s1", jobId: "s1" })),
+			newSession: vi.fn(async () => ({ sessionId: "s1" })),
 			open: vi.fn(async (_clientId: string, sessionId: string) => ({
-				job: { jobId: sessionId, sessionId, status: "idle", runId: null, ownerName: "User", isOwner: true },
+				snapshot: { ...availableSnapshot, sessionId },
 				agentState: { status: "idle", streaming: false, prompting: false, compacting: false, thinkingLevel: "off", model: { provider: "p", modelId: "m1" }, queuedMessages: { steering: [], followUp: [] } },
 			})),
-			complete: vi.fn(async (_clientId: string, sessionId: string) => ({ jobId: sessionId, sessionId, status: "done", runId: null, ownerName: "User", isOwner: true })),
 			state: vi.fn(async () => ({
 				status: "idle",
 				streaming: false,
@@ -106,7 +128,7 @@ function makePi() {
 			eventsPath: (clientId: string, sessionId: string) =>
 				`/api/clients/${clientId}/pi/agent/${sessionId}/events`,
 		},
-	} as unknown as Pick<PiApi, "sessions" | "agent" | "models">;
+	} as unknown as Pick<PiApi, "sessions" | "sessionsControl" | "agent" | "models">;
 }
 
 afterEach(() => {

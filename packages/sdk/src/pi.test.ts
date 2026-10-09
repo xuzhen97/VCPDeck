@@ -17,7 +17,7 @@ function makeClient() {
 }
 
 describe("createPiApi", () => {
-	it("open/complete 使用 Session Job endpoint 与 body", async () => {
+	it("open 使用独立会话端点;complete 已随 ADR-0041 移除", async () => {
 		const request = vi.fn(async () => ({}));
 		const pi = createPiApi({ request: request as never });
 		const cwdRef = { rootDir: "D:\\", relativePath: "repo" };
@@ -29,20 +29,46 @@ describe("createPiApi", () => {
 			cwdRef,
 			undefined,
 		);
+		// 会话完成语义已移除:SDK 不再暴露 complete(需整理时用 archive/restore)。
+		expect("complete" in pi.agent).toBe(false);
+	});
 
-		await pi.agent.complete("c1", "s1", "run-1");
+	it("会话控制面:归档/恢复/快照/审计使用独立端点", async () => {
+		const snapshot = {
+			sessionId: "s1",
+			status: "archived",
+			activeRun: null,
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
+		};
+		const request = vi.fn(async () => snapshot);
+		const pi = createPiApi({ request: request as never });
+
+		await pi.sessionsControl.archive("c1", "s1");
 		expect(request).toHaveBeenLastCalledWith(
 			"POST",
-			"/api/clients/c1/pi/agent/s1/complete",
-			{ runId: "run-1" },
+			"/api/clients/c1/pi/agent/s1/archive",
+		);
+		await pi.sessionsControl.restore("c1", "s1");
+		expect(request).toHaveBeenLastCalledWith(
+			"POST",
+			"/api/clients/c1/pi/agent/s1/restore",
+		);
+		await pi.sessionsControl.runs("c1", "s1", { page: 2, pageSize: 10 });
+		expect(request).toHaveBeenLastCalledWith(
+			"GET",
+			"/api/clients/c1/pi/agent/s1/runs?page=2&pageSize=10",
+			undefined,
 			undefined,
 		);
-
-		await pi.agent.complete("c1", "s1");
+		await pi.sessionsControl.audit("c1", "s1");
 		expect(request).toHaveBeenLastCalledWith(
-			"POST",
-			"/api/clients/c1/pi/agent/s1/complete",
-			{},
+			"GET",
+			"/api/clients/c1/pi/agent/s1/audit",
+			undefined,
 			undefined,
 		);
 	});
@@ -264,12 +290,12 @@ describe("VcpDeckClient.pi", () => {
 
 	it("agent.setExecutionMode 支持设置与清除会话覆盖", async () => {
 		const snapshot = {
-			jobId: "s/1",
 			sessionId: "s/1",
-			status: "idle",
-			runId: null,
+			status: "available",
+			activeRun: null,
 			executionModeOverride: "automatic",
 			effectiveExecutionMode: "automatic",
+			executionModeNeedsConfirmation: false,
 			ownerName: "User",
 			isOwner: true,
 		};
@@ -297,8 +323,9 @@ describe("VcpDeckClient.pi", () => {
 			createPiApi({ request: malformed as never }).agent.setExecutionMode("c1", "s1", cwdRef, "supervised"),
 		).rejects.toThrow();
 		const unknownField = vi.fn(async () => ({
-			jobId: "s1", sessionId: "s1", status: "idle", runId: null,
+			sessionId: "s1", status: "available", activeRun: null,
 			executionModeOverride: null, effectiveExecutionMode: null,
+			executionModeNeedsConfirmation: false,
 			ownerName: null, isOwner: true, injected: true,
 		}));
 		await expect(

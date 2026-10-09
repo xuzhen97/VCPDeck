@@ -390,7 +390,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 		await writeFile(session.getSessionFile()!, `${JSON.stringify(session.getHeader())}\n`, "utf8");
 		const child = spawnWorker(cwd, { PI_CODING_AGENT_DIR: agentDir });
 		const request = (requestId: string, executionMode?: string | null) => ({
-			requestId, action: "agent.prompt", jobId: sessionId, sessionId,
+			requestId, action: "agent.prompt", sessionId,
 			runId: requestId, cwdRef: { rootDir: agentDir, relativePath: "project" },
 			payload: { prompt: "hello", submissionId: requestId, ...(executionMode !== undefined ? { executionMode } : {}) },
 		});
@@ -537,8 +537,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 		await requestOnce(child, {
 			requestId: "prompt-1",
 			action: "agent.prompt",
-			jobId: sessionId,
-			sessionId,
+						sessionId,
 			runId: "run-1",
 			cwdRef: { rootDir: cwd, relativePath: "" },
 			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "supervised" },
@@ -678,8 +677,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 		await requestOnce(child, {
 			requestId: "r-prompt",
 			action: "agent.prompt",
-			jobId: sessionId,
-			sessionId,
+						sessionId,
 			runId: "run-1",
 			cwdRef: { rootDir: fakeHome, relativePath: "project" },
 			payload: { prompt: "hello", submissionId: "sub-1", executionMode: "supervised" },
@@ -868,7 +866,6 @@ describe("Pi Worker prompt pipeline seam", () => {
 				request: {
 					requestId,
 					action: "agent.prompt",
-					jobId: "session-1",
 					sessionId: "session-1",
 					runId,
 					cwdRef: { rootDir: "C:\\repo", relativePath: "" },
@@ -1087,7 +1084,6 @@ describe("Pi Worker prompt pipeline seam", () => {
 					request: {
 						requestId,
 						action,
-						jobId: "session-1",
 						sessionId: "session-1",
 						...(runId ? { runId } : {}),
 						cwdRef: { rootDir: "C:\\repo", relativePath: "" },
@@ -1122,7 +1118,6 @@ describe("Pi Worker prompt pipeline seam", () => {
 					request: {
 						requestId,
 						action,
-						jobId: "session-1",
 						sessionId: "session-1",
 						runId,
 						cwdRef: { rootDir: "C:\\repo", relativePath: "" },
@@ -1330,7 +1325,6 @@ describe("Pi Worker prompt pipeline seam", () => {
 						request: {
 							requestId,
 							action,
-							jobId: "session-1",
 							sessionId: "session-1",
 							payload,
 						},
@@ -1506,7 +1500,6 @@ describe("Pi Worker 扩展命令管道(ADR-0040 决策 2)", () => {
 					request: {
 						requestId,
 						action,
-						jobId: "session-1",
 						sessionId: "session-1",
 						...(runId ? { runId } : {}),
 						cwdRef: { rootDir: "C:\repo", relativePath: "" },

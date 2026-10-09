@@ -1,6 +1,7 @@
 # ADR-0008：Pi Session 使用稳定 Session Job 与独立 Run 身份
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0041
+- 替代决策：[`ADR-0041：Agent Session、Run 与最小审计独立于 Job`](./0041-agent-session-run-and-audit-separation.md)（Accepted，尚未实现）；以下保留历史决策，当前代码仍使用 Session Job。
 - 日期：2026-08-15（补录既有决策）
 - 决策者：项目维护者
 - 关联：[`docs/design/remote-pi.md`](../design/remote-pi.md)、[`docs/domain-model.md`](../domain-model.md)、[`docs/protocols.md`](../protocols.md)

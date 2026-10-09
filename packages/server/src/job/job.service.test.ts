@@ -370,11 +370,12 @@ describe("JobService.list()", () => {
 		} as never);
 		await svc.list({ clientId: "c1" });
 
+		// ADR-0041:Agent 类型恒被排除,过滤条件需同时携带 clientId 与排除项。
 		expect(prisma.job.findMany).toHaveBeenCalledWith(
-			expect.objectContaining({ where: { clientId: "c1" } }),
+			expect.objectContaining({ where: { clientId: "c1", type: { notIn: ["agent.session", "agent.run"] } } }),
 		);
 		expect(prisma.job.count).toHaveBeenCalledWith(
-			expect.objectContaining({ where: { clientId: "c1" } }),
+			expect.objectContaining({ where: { clientId: "c1", type: { notIn: ["agent.session", "agent.run"] } } }),
 		);
 	});
 
@@ -398,7 +399,7 @@ describe("JobService.list()", () => {
 		await svc.list({ status: "running" as JobStatus });
 
 		expect(prisma.job.findMany).toHaveBeenCalledWith(
-			expect.objectContaining({ where: { status: "running" } }),
+			expect.objectContaining({ where: { status: "running", type: { notIn: ["agent.session", "agent.run"] } } }),
 		);
 	});
 
@@ -425,6 +426,8 @@ describe("JobService.list()", () => {
 			status: { in: ["pending", "running", "waiting_input"] },
 			type: {
 				notIn: [
+					"agent.session",
+					"agent.run",
 					"file.roots",
 					"file.list",
 					"file.stat",
@@ -514,7 +517,11 @@ describe("JobService.list()", () => {
 
 		expect(prisma.job.findMany).toHaveBeenCalledWith(
 			expect.objectContaining({
-				where: { clientId: "c1", status: "done" },
+				where: {
+					clientId: "c1",
+					status: "done",
+					type: { notIn: ["agent.session", "agent.run"] },
+				},
 				skip: 5,
 				take: 5,
 			}),

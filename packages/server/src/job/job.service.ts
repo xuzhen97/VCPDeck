@@ -19,6 +19,9 @@ import { StorageService } from "../storage/storage.service.js";
 import { randomUUID } from "node:crypto";
 import type { UploadTarget } from "@vcpdeck/shared";
 
+/** 已脱离 Job 的 Agent 类型:通用 Job 入口一律排除。 */
+const AGENT_JOB_TYPES = ["agent.session", "agent.run"];
+
 const FILE_READ_TYPES = ["file.list", "file.stat", "file.readText", "file.export", "file.roots"];
 const FILE_WRITE_TYPES = [
 	"file.writeText",
@@ -550,6 +553,12 @@ export class JobService {
   }> {
     const job = await this.prisma.job.findUnique({ where: { id: jobId } });
     if (!job) throw new Error(`Job "${jobId}" not found`);
+    if (AGENT_JOB_TYPES.includes(job.type)) {
+      throw Object.assign(
+        new Error("Agent sessions are not controllable as jobs"),
+        { code: "INVALID_JOB_TYPE" },
+      );
+    }
 
     if (job.status === "pending" || job.status === "waiting_input") {
       await this.prisma.job.update({
@@ -576,10 +585,15 @@ export class JobService {
     const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 20));
     const where: Record<string, unknown> = {};
     if (options.clientId) where.clientId = options.clientId;
+    // ADR-0041:Agent 会话/执行已脱离 Job;历史遗留行与存量 agent.run
+    // 不得再出现在通用 Job 列表或统计中(审计改由 Agent 专属接口提供)。
+    where.type = { notIn: AGENT_JOB_TYPES };
     if (options.status === "active") {
       where.status = { in: ["pending", "running", "waiting_input"] };
+      // 与基础 Agent 排除合并,不能覆盖:否则 active 视图会重新混入 Agent。
       where.type = {
         notIn: [
+          ...AGENT_JOB_TYPES,
           "file.roots",
           "file.list",
           "file.stat",

@@ -311,13 +311,14 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 
 - 检查 `agent.pi` capabilityDetails；
 - Node 是否至少 22.19.0，Bash、Pi agentDir、锁定 SDK、模型和认证是否满足探测；
-- `PI_SESSION_JOB_PROTOCOL_VERSION` 是否匹配；
+- `PI_SESSION_PROTOCOL_VERSION`（当前 4）是否匹配；
 - 检查目标项目路径是否在允许的 file roots，realpath 后是否仍在 root 内；
 - `PI_STATE_PENDING` 表示新 Socket generation 尚未完成权威对账，应等待而不是新建 Run；
-- `PI_CLIENT_RESTARTED` 表示原活动 Run 不可恢复，不能伪造成功；Session JSONL 仍存在时可处理 error 后重新打开；
+- `PI_CLIENT_RESTARTED` 表示原活动 Run 不可恢复，不能伪造成功；会话本身仍可用（失败只属于那一轮），Session JSONL 仍存在时可直接发起下一轮 Prompt；
 - Browser/SSE 断线后重新读取 Session detail/context 和 Agent state，不等待事件补传；
 - Server 重启后等待 Client PI_STATE 重建项目锁和活动 Run；
-- Session 正文不在 SQLite，恢复历史需要目标机器 Pi Session 备份。
+- Session 正文不在 SQLite；Server 只保存会话所有权、Run 摘要与会话操作审计，恢复对话历史需要目标机器 Pi Session 备份；
+- 归档只管理会话入口、不结算当前 Run 也不删除远端内容；删除会话会保留 Run 摘要与审计事件（仅保留稳定 sessionId）。
 
 ### Storage 分享与下载失效
 

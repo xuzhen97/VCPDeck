@@ -253,7 +253,6 @@ describe("attachPiBridge", () => {
 			action: "agent.prompt",
 			cwdRef: { rootDir: roots[0]!, relativePath: "proj" },
 			sessionId: "s1",
-			jobId: "j1",
 			runId: "j1",
 			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised" },
 		});
@@ -262,7 +261,6 @@ describe("attachPiBridge", () => {
 		emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "j1",
 			runId: "j1",
 			event: { type: "agent_end", sessionId: "s1" },
 		});
@@ -287,7 +285,6 @@ describe("attachPiBridge", () => {
 			action: "agent.prompt",
 			cwdRef: { rootDir: roots[0]!, relativePath: "proj" },
 			sessionId: "s1",
-			jobId: "j1",
 			runId: "j1",
 			payload: { prompt: "hi", submissionId: "sub-1", executionMode: "supervised" },
 		});
@@ -295,12 +292,11 @@ describe("attachPiBridge", () => {
 		emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "j1",
 			runId: "j1",
 			event: { type: "agent_settled", sessionId: "s1" },
 		});
 		expect(
-			deps.supervisor.getStateReport().runs.some((r) => r.jobId === "j1"),
+			deps.supervisor.getStateReport().runs.some((r) => r.runId === "j1"),
 		).toBe(true);
 
 		// 触发注册完成
@@ -319,9 +315,9 @@ describe("attachPiBridge", () => {
 		const stateCall = emitCalls.find((c) => c.event === Events.PI_STATE);
 		expect(stateCall).toBeDefined();
 		const statePayload = stateCall?.args[0] as {
-			runs: Array<{ jobId: string }>;
+			runs: Array<{ runId: string }>;
 		};
-		expect(statePayload.runs.some((r) => r.jobId === "j1")).toBe(true);
+		expect(statePayload.runs.some((r) => r.runId === "j1")).toBe(true);
 
 		// 调用 PI_STATE 的 ack → terminal 清理
 		const stateAck = stateCall?.args[1] as (ack: {
@@ -329,7 +325,7 @@ describe("attachPiBridge", () => {
 		}) => void;
 		stateAck({ acceptedRunIds: ["j1"] });
 		expect(
-			deps.supervisor.getStateReport().runs.some((r) => r.jobId === "j1"),
+			deps.supervisor.getStateReport().runs.some((r) => r.runId === "j1"),
 		).toBe(false);
 	});
 
@@ -565,7 +561,6 @@ describe("RuntimeSpec 接纳与门控", () => {
 		fire(listeners, Events.PI_REQUEST, {
 			requestId: "r-blocked",
 			action: "agent.prompt",
-			jobId: "s1",
 			runId: "run-1",
 			sessionId: "s1",
 			cwdRef: { rootDir: roots[0]!, relativePath: "proj" },

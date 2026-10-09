@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { PiPanel } from "./pi-panel.js";
 import { SdkProvider } from "@/api/context";
 import type { ClientInfo } from "@vcpdeck/shared";
@@ -71,6 +72,33 @@ function makeSdk() {
 				{ provider: "p", modelId: "m1" },
 				{ provider: "p", modelId: "m2" },
 			]),
+			// 独立会话控制面(ADR-0041):快照/归档/审计读取来自 Server。
+			sessionsControl: {
+				snapshot: vi.fn(async () => ({
+					sessionId: "s1",
+					status: "available",
+					activeRun: null,
+					executionModeOverride: null,
+					effectiveExecutionMode: "supervised",
+					executionModeNeedsConfirmation: false,
+					ownerName: "admin",
+					isOwner: true,
+				})),
+				run: vi.fn(),
+				archive: vi.fn(async () => ({
+					sessionId: "s1",
+					status: "archived",
+					activeRun: null,
+					executionModeOverride: null,
+					effectiveExecutionMode: "supervised",
+					executionModeNeedsConfirmation: false,
+					ownerName: "admin",
+					isOwner: true,
+				})),
+				restore: vi.fn(),
+				runs: vi.fn(async () => ({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 })),
+				audit: vi.fn(async () => ({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 })),
+			},
 			sessions: {
 				list: vi.fn(async () => ({ sessions: [] })),
 				get: vi.fn(async () => ({
@@ -89,13 +117,15 @@ function makeSdk() {
 			agent: {
 				newSession: vi.fn(async () => ({ sessionId: "s1", jobId: "s1" })),
 				open: vi.fn(async (_clientId: string, sessionId: string) => ({
-					job: {
-						jobId: sessionId,
-						sessionId,
-						status: "idle",
-						runId: null,
-						ownerName: "User",
-						isOwner: true,
+					snapshot: {
+					sessionId: "s1",
+					status: "available",
+					activeRun: null,
+					executionModeOverride: null,
+					effectiveExecutionMode: "supervised",
+					executionModeNeedsConfirmation: false,
+					ownerName: "User",
+					isOwner: true,
 					},
 					agentState: {
 						status: "idle",
@@ -310,13 +340,28 @@ describe("PiPanel", () => {
 			},
 		]);
 		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: {
-				jobId: "s1",
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: {
+				runId: "run-1",
 				sessionId: "s1",
 				status: "running",
-				runId: "run-1",
-				ownerName: "Other",
-				isOwner: false,
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: "User",
+				source: "web",
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: "2026-10-08T00:00:01.000Z",
+				startedAt: "2026-10-08T00:00:01.000Z",
+				finishedAt: null,
+				errorCode: null,
+			},
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "Other",
+			isOwner: false,
 			},
 			agentState: {
 				status: "running",
@@ -357,7 +402,7 @@ describe("PiPanel", () => {
 		expect(sdk.pi.agent.steer).not.toHaveBeenCalled();
 		expect(sdk.pi.agent.followUp).not.toHaveBeenCalled();
 		expect(sdk.pi.agent.abort).not.toHaveBeenCalled();
-		expect(sdk.pi.agent.complete).not.toHaveBeenCalled();
+		expect(sdk.pi.sessionsControl.archive).not.toHaveBeenCalled();
 		expect(sdk.pi.agent.setModel).not.toHaveBeenCalled();
 		expect(sdk.pi.agent.setThinking).not.toHaveBeenCalled();
 		expect(sdk.pi.sessions.rename).not.toHaveBeenCalled();
@@ -367,59 +412,44 @@ describe("PiPanel", () => {
 		expect(sdk.pi.sessions.delete).not.toHaveBeenCalled();
 	});
 
-	it("会话错误态时，属主在输入区直接看到「标记完成」入口，无需开右栏抽屉", async () => {
+	it("会话可用时由右栏提供归档入口,输入区不再出现完成按钮", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const sdk = makeSdk();
 		(sdk.pi.sessions.list as ReturnType<typeof vi.fn>).mockResolvedValue([
 			{
 				id: "s1",
-				name: "errored",
+				name: "archivable",
 				firstMessage: null,
 				messageCount: 1,
 				modified: "2026-08-08T00:00:00.000Z",
 				running: false,
 			},
 		]);
-		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: {
-				jobId: "s1",
-				sessionId: "s1",
-				status: "error",
-				runId: null,
-				ownerName: "admin",
-				isOwner: true,
-				errorCode: "PI_CLIENT_RESTARTED",
-				errorMessage: "boom",
-			},
-			agentState: {
-				status: "error",
-				streaming: false,
-				prompting: false,
-				compacting: false,
-				thinkingLevel: "off",
-				model: { provider: "p", modelId: "m1" },
-				queuedMessages: { steering: [], followUp: [] },
-			},
+		(sdk.pi.sessionsControl.archive as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: "s1",
+			status: "archived",
+			activeRun: null,
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "admin",
+			isOwner: true,
 		});
-		(sdk.pi.agent.complete as ReturnType<typeof vi.fn>).mockResolvedValue({
-			jobId: "s1",
-		});
-		// 入口必须在输入区本身，而不是只存在于右栏「运行详情」里；
-		// 因此按 alert 作用域断言，不依赖右栏是否渲染。
 		renderPanel(makeClient(), sdk);
 
 		await selectCwd("D:\\repo");
-		await screen.findAllByText("errored");
-		await screen.getAllByText("errored")[0]!.click();
+		await screen.findAllByText("archivable");
+		await screen.getAllByText("archivable")[0]!.click();
 		await vi.waitFor(() => expect(sdk.pi.agent.open).toHaveBeenCalled());
 
-		const alert = (await screen.findAllByRole("alert")).find((node) =>
-			node.textContent?.includes("标记完成后可继续提问"),
+		// ADR-0041:会话不再有"完成"动作,输入区不得出现完成入口。
+		expect(screen.queryByRole("button", { name: /标记完成/ })).toBeNull();
+
+		await userEvent.click(
+			(await screen.findAllByRole("button", { name: "归档会话" }))[0]!,
 		);
-		expect(alert).toBeTruthy();
-		fireEvent.click(within(alert!).getByRole("button", { name: "标记完成" }));
 		await vi.waitFor(() =>
-			expect(sdk.pi.agent.complete).toHaveBeenCalled(),
+			expect(sdk.pi.sessionsControl.archive).toHaveBeenCalledWith("c1", "s1"),
 		);
 	});
 
@@ -437,13 +467,28 @@ describe("PiPanel", () => {
 			},
 		]);
 		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: {
-				jobId: "s1",
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: {
+				runId: "run-1",
 				sessionId: "s1",
 				status: "running",
-				runId: "run-1",
-				ownerName: "User",
-				isOwner: true,
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: "User",
+				source: "web",
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: "2026-10-08T00:00:01.000Z",
+				startedAt: "2026-10-08T00:00:01.000Z",
+				finishedAt: null,
+				errorCode: null,
+			},
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
 			},
 			agentState: {
 				status: "running",
@@ -533,13 +578,28 @@ describe("PiPanel", () => {
 			},
 		]);
 		(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: {
-				jobId: "s1",
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: {
+				runId: "run-1",
 				sessionId: "s1",
 				status: "running",
-				runId: "run-1",
-				ownerName: "User",
-				isOwner: true,
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: "User",
+				source: "web",
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: "2026-10-08T00:00:01.000Z",
+				startedAt: "2026-10-08T00:00:01.000Z",
+				finishedAt: null,
+				errorCode: null,
+			},
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
 			},
 			agentState: {
 				status: "running",
@@ -736,15 +796,15 @@ describe("PiPanel", () => {
 				},
 			]);
 			(sdk.pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-				job: {
-					jobId: "s1",
-					sessionId: "s1",
-					status: "idle",
-					runId: null,
-					executionModeOverride: null,
-					effectiveExecutionMode: "supervised",
-					ownerName: "User",
-					isOwner: true,
+				snapshot: {
+				sessionId: "s1",
+				status: "available",
+				activeRun: null,
+				executionModeOverride: null,
+				effectiveExecutionMode: "supervised",
+				executionModeNeedsConfirmation: false,
+				ownerName: "User",
+				isOwner: true,
 				},
 				agentState: {
 					status: "idle",
@@ -757,12 +817,12 @@ describe("PiPanel", () => {
 				},
 			});
 			(sdk.pi.agent.setExecutionMode as ReturnType<typeof vi.fn>).mockResolvedValue({
-				jobId: "s1",
 				sessionId: "s1",
-				status: "idle",
-				runId: null,
+				status: "available",
+				activeRun: null,
 				executionModeOverride: "automatic",
 				effectiveExecutionMode: "automatic",
+				executionModeNeedsConfirmation: false,
 				ownerName: "User",
 				isOwner: true,
 			});

@@ -12,8 +12,9 @@ VCPDeck 当前领域围绕“可信操作者通过控制面管理远程机器”
 Identity ─创建/操作→ Job ─调度到→ Client
                          ├─产生/消费→ File
                          ├─管理→ FrpMapping ─使用→ FrpsInstance
-                         ├─承载→ Pi Session（agent.session Job）
                          └─协作→ TerminalSession
+Identity ─创建/操作→ AgentSession ─触发→ AgentRun（不受 Job 调度）
+                         └─记录→ AgentAuditEvent
 Release ─编排更新→ Server / Client ─由→ Launcher 守护
 ```
 
@@ -35,7 +36,9 @@ TODO、工作流、聊天和 VCPToolBox 桥接目前没有落地数据模型，�
 | FrpMapping | `id` | SQLite；实际进程在 Client | 目标服务到 FRPS 的映射 |
 | TerminalSession | `id` | SQLite；PTY 在 Client | 只持久化元数据，不保存正文 |
 | TerminalAuditEvent | `id` | SQLite | 终端生命周期最小审计 |
-| Pi Session | `jobId === sessionId` | Job + 远程 Pi JSONL | Server 保存生命周期元数据；正文由远程 Pi 管理 |
+| Pi Session（AgentSession） | `id` / `sessionId` | SQLite + 远程 Pi JSONL | 独立控制面实体；Server 保存所有权、控制配置与生命周期元数据，正文由远程 Pi 管理 |
+| AgentRun | `id` / `runId` | SQLite | 单轮 Prompt 的执行摘要与审计；终态为 succeeded/failed/aborted |
+| AgentAuditEvent | `id` | SQLite | 会话创建、导入、归档、恢复、删除、执行模式变更等控制面最小审计；不保存正文 |
 | Release | `version` | SQLite + Storage Provider/发布文件目录 | 全局更新状态、平台构件元数据和各 Client 结果 |
 | ReleaseUploadSession | `id`；`version + platform` 唯一 | SQLite；正文直传外部 Provider | Alibaba 分片会话控制面：声明 SHA/大小、Provider file/upload id、分片大小、操作者、状态和有效期；不保存 URL |
 | ClientInstallerConfig | `default` | SQLite | Client 一键安装开关及最后变更者摘要；默认关闭 |
@@ -95,9 +98,9 @@ Job 是一次具有目标 Client、类型、输入、生命周期、结果和操
 - `exec`；
 - `file.roots/list/stat/readText/writeText/mkdir/delete/move/export/import`；
 - `frp.create/delete/list` 与内部 `frp.reconcile`（Client 重连后由 Server 自动派发，恢复期望映射；不向调用方暴露）；
-- `agent.run`、`agent.session`。
+- `agent.run`；
 
-`agent.session` 使用专门状态机，不占通用 Job 调度槽。新类型必须同时更新 Shared 类型/校验、Server 能力映射、Client dispatcher、SDK 和测试。远程文件的当前 payload、路径和失败边界见 [`design/remote-files.md`](./design/remote-files.md)。
+`agent.session` Job 类型已由 ADR-0041 移除：Agent 会话、每轮 Run 与会话操作审计由 `AgentSession`、`AgentRun`、`AgentAuditEvent` 持久化，新 Agent 操作不再创建或更新 Job，也不进入普通 Job 列表、统计与通用任务控制。Shared、Server、Client、SDK、Frontend 与 CLI 统一使用独立会话与 Run 契约。新类型必须同时更新 Shared 类型/校验、Server 能力映射、Client dispatcher、SDK 和测试。远程文件的当前 payload、路径和失败边界见 [`design/remote-files.md`](./design/remote-files.md)。
 
 `exec` 当前包含互斥的 command/script 模式：command 由系统 Shell 执行；script 当前允许外部提交 `executable + args` 并通过 stdin 发送源码。脚本源码、executable、args 和 cwd 保存在 Job payload；最终 stdout/stderr 当前保存在 Job result。ADR-0010 已决定迁移到 Client 受控 runtime ID，但尚未落地，详见 [`design/remote-execution.md`](./design/remote-execution.md)。
 
@@ -184,37 +187,55 @@ starting → detached/active → exited | interrupted | expired | closed | error
 - TerminalAuditEvent 只记录 created/attached/takeover/closed 等生命周期，不记录输入输出；
 - 当前 Client 本地 expired 不上报 Server，从未 attach 的新 Session 也可能未启动 TTL，详见 [`design/remote-terminal.md`](./design/remote-terminal.md)。
 
-## 9. Pi Session
+## 9. Agent Session、Run 与审计
 
-Pi Session 复用 Job：`type=agent.session` 且 `jobId === sessionId`。
+会话与执行不再复用 Job。`AgentSession` 保存稳定 sessionId、Client、固定 Owner、执行模式覆盖与归档状态；每次 Prompt 创建一个 `AgentRun`；会话控制面操作写入 `AgentAuditEvent`。
+
+已写入审计的操作：创建（`created`）、导入（`imported`）、重命名（`renamed`）、归档（`archived`）、恢复（`restored`，含归档会话被新 Prompt 自动恢复）、删除（`deleted`，跨网络操作按 `requested` → `ok`/`failed` 区分请求与已确认结果）、执行模式变更（`execution_mode_changed`）。
+
+导入结果的 `PiImportRunResult` 携带可选 `sessionId`（仅 Client 实际复制成功时上报），Server 据此登记会话控制面并写 `imported` 审计；未上报该字段的旧 Client 与 `rejected` 条目不登记，不臆造会话。
+
+会话生命周期：
 
 ```mermaid
 stateDiagram-v2
-    [*] --> idle
-    idle --> pending: prompt
+    [*] --> available: 新建/导入
+    available --> archived: 归档
+    archived --> available: 恢复或新 Prompt
+    available --> deleted: 删除
+    archived --> deleted: 删除
+```
+
+单轮 Run 状态：
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
     pending --> running: Client 接受
+    pending --> failed
     running --> waiting_input: Extension 交互
     waiting_input --> running: 回复
-    running --> idle: 本轮结算
+    running --> succeeded: 权威执行完成
+    running --> failed
+    running --> aborted: 中止已确认
     pending --> disconnected
     running --> disconnected
     disconnected --> running: matching run 对账
-    disconnected --> error: 不可恢复
-    idle --> done: 手动完成
-    done --> pending: 新 prompt 重新激活
-    idle --> cancelled: 删除
-    done --> cancelled: 删除
+    disconnected --> failed: 不可恢复
 ```
 
 不变量：
 
-- 每次 prompt 使用新的 `runId`，迟到事件不能结算其他 run；
+- 会话本身没有 done/error 终态；失败、中止只属于某一轮 Run，终态不重新激活；
+- 每次 prompt 使用新的 `runId`，迟到事件不能结算其他 Run；会话的 `activeRunId` 只指向未结算的那一轮；
 - 同一 Client/projectKey 同时只允许一个活跃项目锁；
-- Server 持久化所有权和状态，不保存 prompt、正文、thinking、真实 cwd；
+- 同一会话只允许一个未结算 Run，状态转换与结算均绑定精确 sessionId/runId 并做条件更新；
+- Server 持久化所有权、控制配置、Run 摘要与会话操作审计，不保存 prompt、回复、thinking、图片、扩展输入、工具参数或工具输出；
+- 删除会话不级联删除 Run 摘要与审计事件，审计保留稳定 sessionId；
 - Session JSONL 和 Pi 配置保存在远程用户的 Pi 目录；
 - `projectKey` 是 Client 进程级随机 secret 对 canonical cwd 的 HMAC，只用于内存互斥/对账，Client 重启后变化且不持久化；
-- Server 与 Client 的 `PI_SESSION_JOB_PROTOCOL_VERSION` 必须精确相等；
-- 完整 Worker、Extension、断线、隐私和兼容边界见 [`design/remote-pi.md`](./design/remote-pi.md)。
+- Server 与 Client 的 `PI_SESSION_PROTOCOL_VERSION` 必须精确相等，当前为 `4`；
+- 完整 Worker、Extension、断线、迁移与兼容边界见 [`design/remote-pi.md`](./design/remote-pi.md)。
 
 ## 10. Release 与 Launcher
 

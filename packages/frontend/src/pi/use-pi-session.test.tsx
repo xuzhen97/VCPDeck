@@ -75,17 +75,45 @@ function makePi() {
 			{ provider: "p", modelId: "m1" },
 			{ provider: "p", modelId: "m2" },
 		]),
+		sessionsControl: {
+			snapshot: vi.fn(async () => ({
+				sessionId: "s1",
+				status: "available",
+				activeRun: null,
+				executionModeOverride: null,
+				effectiveExecutionMode: "supervised",
+				executionModeNeedsConfirmation: false,
+				ownerName: "User",
+				isOwner: true,
+			})),
+			run: vi.fn(),
+			archive: vi.fn(async () => ({
+				sessionId: "s1",
+				status: "archived",
+				activeRun: null,
+				executionModeOverride: null,
+				effectiveExecutionMode: "supervised",
+				executionModeNeedsConfirmation: false,
+				ownerName: "User",
+				isOwner: true,
+			})),
+			restore: vi.fn(),
+			runs: vi.fn(async () => ({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 })),
+			audit: vi.fn(async () => ({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 })),
+		},
 		running: vi.fn(async () => []),
 		agent: {
 			newSession: vi.fn(async () => ({ sessionId: "s1", jobId: "s1" })),
 			open: vi.fn(async (_clientId: string, sessionId: string) => ({
-				job: {
-					jobId: sessionId,
-					sessionId,
-					status: "idle",
-					runId: null,
-					ownerName: "User",
-					isOwner: true,
+				snapshot: {
+				sessionId: "s1",
+				status: "available",
+				activeRun: null,
+				executionModeOverride: null,
+				effectiveExecutionMode: "supervised",
+				executionModeNeedsConfirmation: false,
+				ownerName: "User",
+				isOwner: true,
 				},
 				agentState: {
 					status: "idle",
@@ -106,16 +134,7 @@ function makePi() {
 				model: { provider: "p", modelId: "m1" },
 				queuedMessages: { steering: [], followUp: [] },
 			})),
-			complete: vi.fn(async (_clientId: string, sessionId: string) => ({
-				jobId: sessionId,
-				sessionId,
-				status: "done",
-				runId: null,
-				ownerName: "User",
-				isOwner: true,
-			})),
 			prompt: vi.fn(async () => ({
-				jobId: "s1",
 				runId: "j1",
 				sessionId: "s1",
 			})),
@@ -144,7 +163,7 @@ function makePi() {
 			eventsPath: (clientId: string, sessionId: string) =>
 				`/api/clients/${clientId}/pi/agent/${sessionId}/events`,
 		},
-	} as unknown as Pick<PiApi, "sessions" | "agent" | "models"> &
+	} as unknown as Pick<PiApi, "sessions" | "sessionsControl" | "agent" | "models"> &
 		Partial<Pick<PiApi, "running">>;
 }
 
@@ -159,13 +178,15 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			job: {
-				jobId: "s1",
-				sessionId: "s1",
-				status: "done",
-				runId: null,
-				ownerName: "User",
-				isOwner: true,
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: null,
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
 			},
 			agentState: {
 				status: "idle",
@@ -183,21 +204,36 @@ describe("usePiSession", () => {
 
 		expect(pi.agent.open).toHaveBeenCalledWith("c1", "s1", CWD);
 		expect(pi.running).not.toHaveBeenCalled();
-		expect(result.current.state.status).toBe("done");
-		expect(result.current.state.job?.status).toBe("done");
+		expect(result.current.state.status).toBe("idle");
+		expect(result.current.state.snapshot?.status).toBe("available");
 	});
 
 	it("恢复 matching pendingExtension 并按 requestId 关闭", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: {
-				jobId: "s1",
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: {
+				runId: "j1",
 				sessionId: "s1",
 				status: "waiting_input",
-				runId: "j1",
-				ownerName: "User",
-				isOwner: true,
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: "User",
+				source: "web",
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: "2026-10-08T00:00:01.000Z",
+				startedAt: "2026-10-08T00:00:01.000Z",
+				finishedAt: null,
+				errorCode: null,
+			},
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
 			},
 			agentState: {
 				status: "waiting_for_extension_input",
@@ -247,13 +283,28 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: {
-				jobId: "s1",
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: {
+				runId: "j1",
 				sessionId: "s1",
 				status: "waiting_input",
-				runId: "j1",
-				ownerName: "User",
-				isOwner: true,
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: "User",
+				source: "web",
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: "2026-10-08T00:00:01.000Z",
+				startedAt: "2026-10-08T00:00:01.000Z",
+				finishedAt: null,
+				errorCode: null,
+			},
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
 			},
 			agentState: {
 				status: "waiting_for_extension_input",
@@ -286,7 +337,7 @@ describe("usePiSession", () => {
 			}),
 		);
 		expect(result.current.state.status).toBe("waiting_input");
-		expect(result.current.state.job?.status).toBe("waiting_input");
+		expect(result.current.state.snapshot?.activeRun?.status).toBe("waiting_input");
 		expect(result.current.state.pendingExtension).toBeNull();
 
 		act(() =>
@@ -320,13 +371,15 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			job: {
-				jobId: "s1",
-				sessionId: "s1",
-				status: "idle",
-				runId: null,
-				ownerName: "Other",
-				isOwner: false,
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: null,
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "Other",
+			isOwner: false,
 			},
 			agentState: {
 				status: "idle",
@@ -344,47 +397,75 @@ describe("usePiSession", () => {
 		expect(pi.agent.prompt).not.toHaveBeenCalled();
 	});
 
-	it("error Job 不能发送", async () => {
+	it("活跃 Run 未结算时不能发送", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			job: {
-				jobId: "s1",
-				sessionId: "s1",
-				status: "error",
-				runId: null,
-				ownerName: "User",
-				isOwner: true,
-				errorCode: "PI_WORKER_EXITED",
-				errorMessage: "worker exited",
-			},
-			agentState: {
-				status: "idle",
-				streaming: false,
-				prompting: false,
-				compacting: false,
-				thinkingLevel: "off",
-				model: { provider: "p", modelId: "m1" },
-				queuedMessages: { steering: [], followUp: [] },
-			},
-		});
-		const { result } = renderHook(() => usePiSession(pi));
-		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
-		await act(async () => result.current.actions.send({ prompt: "no" }));
-		expect(pi.agent.prompt).not.toHaveBeenCalled();
-	});
-
-	it("complete 使用当前 runId 并采用返回 Job", async () => {
-		vi.stubGlobal("EventSource", MockEventSource);
-		const pi = makePi();
-		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			job: {
-				jobId: "s1",
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: {
+				runId: "run-1",
 				sessionId: "s1",
 				status: "running",
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: "User",
+				source: "web",
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: "2026-10-08T00:00:01.000Z",
+				startedAt: "2026-10-08T00:00:01.000Z",
+				finishedAt: null,
+				errorCode: null,
+			},
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
+			},
+			agentState: {
+				status: "idle",
+				streaming: false,
+				prompting: false,
+				compacting: false,
+				thinkingLevel: "off",
+				model: { provider: "p", modelId: "m1" },
+				queuedMessages: { steering: [], followUp: [] },
+			},
+		});
+		const { result } = renderHook(() => usePiSession(pi));
+		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
+		await act(async () => result.current.actions.send({ prompt: "no" }));
+		expect(pi.agent.prompt).not.toHaveBeenCalled();
+	});
+
+	it("archive 归档会话并采用返回快照", async () => {
+		vi.stubGlobal("EventSource", MockEventSource);
+		const pi = makePi();
+		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: {
 				runId: "run-1",
-				ownerName: "User",
-				isOwner: true,
+				sessionId: "s1",
+				status: "running",
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: "User",
+				source: "web",
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: "2026-10-08T00:00:01.000Z",
+				startedAt: "2026-10-08T00:00:01.000Z",
+				finishedAt: null,
+				errorCode: null,
+			},
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
 			},
 			agentState: {
 				status: "running",
@@ -398,9 +479,10 @@ describe("usePiSession", () => {
 		});
 		const { result } = renderHook(() => usePiSession(pi));
 		await act(async () => result.current.actions.openSession("c1", "s1", CWD));
-		await act(async () => result.current.actions.complete());
-		expect(pi.agent.complete).toHaveBeenCalledWith("c1", "s1", "run-1");
-		expect(result.current.state.status).toBe("done");
+		// ADR-0041:complete 已移除,整理会话走归档;归档不结算当前 Run。
+		await act(async () => result.current.actions.archive());
+		expect(pi.sessionsControl.archive).toHaveBeenCalledWith("c1", "s1");
+		expect(result.current.state.snapshot?.status).toBe("archived");
 	});
 	it("createSession → stream ready → prompt（两阶段）", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
@@ -686,7 +768,6 @@ describe("usePiSession", () => {
 
 		expect(result.current.state.status).toBe("running");
 		expect(result.current.state.runId).toBe("j1");
-		expect(result.current.state.job?.status).toBe("running");
 		expect(result.current.state.error).toBe("network failed");
 
 		await act(async () => result.current.actions.send({ prompt: "third" }));
@@ -750,13 +831,15 @@ describe("usePiSession", () => {
 		const abortRequest = deferred<unknown>();
 		(pi.agent.open as ReturnType<typeof vi.fn>)
 			.mockResolvedValueOnce({
-				job: {
-					jobId: "s1",
-					sessionId: "s1",
-					status: "idle",
-					runId: null,
-					ownerName: "User",
-					isOwner: true,
+				snapshot: {
+				sessionId: "s1",
+				status: "available",
+				activeRun: null,
+				executionModeOverride: null,
+				effectiveExecutionMode: "supervised",
+				executionModeNeedsConfirmation: false,
+				ownerName: "User",
+				isOwner: true,
 				},
 				agentState: {
 					status: "idle",
@@ -769,13 +852,28 @@ describe("usePiSession", () => {
 				},
 			})
 			.mockResolvedValue({
-				job: {
-					jobId: "s2",
-					sessionId: "s2",
-					status: "running",
+				snapshot: {
+				sessionId: "s1",
+				status: "available",
+				activeRun: {
 					runId: "j2",
-					ownerName: "User",
-					isOwner: true,
+					sessionId: "s1",
+					status: "running",
+					kind: "prompt",
+					executionMode: "supervised",
+					actorName: "User",
+					source: "web",
+					createdAt: "2026-10-08T00:00:00.000Z",
+					acceptedAt: "2026-10-08T00:00:01.000Z",
+					startedAt: "2026-10-08T00:00:01.000Z",
+					finishedAt: null,
+					errorCode: null,
+				},
+				executionModeOverride: null,
+				effectiveExecutionMode: "supervised",
+				executionModeNeedsConfirmation: false,
+				ownerName: "User",
+				isOwner: true,
 				},
 				agentState: {
 					status: "running",
@@ -812,13 +910,28 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: {
-				jobId: "s1",
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: {
 				runId: "j-active",
 				sessionId: "s1",
 				status: "running",
-				ownerName: "User",
-				isOwner: true,
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: "User",
+				source: "web",
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: "2026-10-08T00:00:01.000Z",
+				startedAt: "2026-10-08T00:00:01.000Z",
+				finishedAt: null,
+				errorCode: null,
+			},
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
 			},
 			agentState: {
 				status: "running",
@@ -844,13 +957,28 @@ describe("usePiSession", () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValue({
-			job: {
-				jobId: "s1",
+			snapshot: {
+			sessionId: "s1",
+			status: "available",
+			activeRun: {
 				runId: "j-active",
 				sessionId: "s1",
 				status: "running",
-				ownerName: "User",
-				isOwner: true,
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: "User",
+				source: "web",
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: "2026-10-08T00:00:01.000Z",
+				startedAt: "2026-10-08T00:00:01.000Z",
+				finishedAt: null,
+				errorCode: null,
+			},
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
 			},
 			agentState: {
 				status: "running",
@@ -880,13 +1008,15 @@ describe("usePiSession", () => {
 				sessionId === "a"
 					? firstOpenResult.promise
 					: Promise.resolve({
-							job: {
-								jobId: "b",
-								sessionId: "b",
-								status: "done",
-								runId: null,
-								ownerName: "User",
-								isOwner: true,
+							snapshot: {
+							sessionId: "b",
+							status: "available",
+							activeRun: null,
+							executionModeOverride: null,
+							effectiveExecutionMode: "supervised",
+							executionModeNeedsConfirmation: false,
+							ownerName: "User",
+							isOwner: true,
 							},
 							agentState: {
 								status: "idle",
@@ -905,13 +1035,15 @@ describe("usePiSession", () => {
 		await waitFor(() => expect(pi.agent.open).toHaveBeenCalledTimes(1));
 		await act(async () => result.current.actions.openSession("c1", "b", CWD));
 		firstOpenResult.resolve({
-			job: {
-				jobId: "a",
-				sessionId: "a",
-				status: "error",
-				runId: null,
-				ownerName: "User",
-				isOwner: true,
+			snapshot: {
+			sessionId: "a",
+			status: "available",
+			activeRun: null,
+			executionModeOverride: null,
+			effectiveExecutionMode: "supervised",
+			executionModeNeedsConfirmation: false,
+			ownerName: "User",
+			isOwner: true,
 			},
 			agentState: {
 				status: "idle",
@@ -925,8 +1057,8 @@ describe("usePiSession", () => {
 		});
 		await act(async () => firstOpen);
 
-		expect(result.current.state.job?.sessionId).toBe("b");
-		expect(result.current.state.status).toBe("done");
+		expect(result.current.state.snapshot?.sessionId).toBe("b");
+		expect(result.current.state.status).toBe("idle");
 	});
 
 	it("快速切换 Session 时旧请求结果不覆盖新 Session", async () => {
@@ -1017,15 +1149,17 @@ describe("usePiSession", () => {
 		expect(result.current.state.thinkingSelection).toBe("auto");
 	});
 
-	it("agentState 陈旧（Job 已 idle）时切换模型仍发送请求", async () => {
+	it("agentState 陈旧(无活跃 Run)时切换模型仍发送请求", async () => {
 		vi.stubGlobal("EventSource", MockEventSource);
 		const pi = makePi();
 		(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-			job: {
-				jobId: "s1",
+			snapshot: {
 				sessionId: "s1",
-				status: "idle",
-				runId: null,
+				status: "available",
+				activeRun: null,
+				executionModeOverride: null,
+				effectiveExecutionMode: "supervised",
+				executionModeNeedsConfirmation: false,
 				ownerName: "User",
 				isOwner: true,
 			},
@@ -1187,7 +1321,6 @@ describe("usePiSession", () => {
 			});
 		});
 		expect(result.current.state.status).toBe("waiting_input");
-		expect(result.current.state.job?.status).toBe("waiting_input");
 		expect(result.current.state.pendingExtension?.requestId).toBe("u1");
 
 		await act(async () => {
@@ -1200,7 +1333,6 @@ describe("usePiSession", () => {
 			expect.objectContaining({ requestId: "u1", confirmed: true }),
 		);
 		await waitFor(() => expect(result.current.state.status).toBe("running"));
-		expect(result.current.state.job?.status).toBe("running");
 	});
 
 	it("旧 Extension 响应完成后保留期间收到的新弹框", async () => {
@@ -1252,7 +1384,6 @@ describe("usePiSession", () => {
 
 		expect(result.current.state.pendingExtension?.requestId).toBe("u2");
 		expect(result.current.state.status).toBe("waiting_input");
-		expect(result.current.state.job?.status).toBe("waiting_input");
 	});
 
 	it("extensionResponse cancelled:true 转发 cancelled 参数", async () => {
@@ -1542,13 +1673,28 @@ describe("usePiSession", () => {
 		it("运行中不执行斜杠命令", async () => {
 			const pi = makePi();
 			(pi.agent.open as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-				job: {
-					jobId: "s1",
+				snapshot: {
+				sessionId: "s1",
+				status: "available",
+				activeRun: {
+					runId: "run-1",
 					sessionId: "s1",
 					status: "running",
-					runId: "run-1",
-					ownerName: "User",
-					isOwner: true,
+					kind: "prompt",
+					executionMode: "supervised",
+					actorName: "User",
+					source: "web",
+					createdAt: "2026-10-08T00:00:00.000Z",
+					acceptedAt: "2026-10-08T00:00:01.000Z",
+					startedAt: "2026-10-08T00:00:01.000Z",
+					finishedAt: null,
+					errorCode: null,
+				},
+				executionModeOverride: null,
+				effectiveExecutionMode: "supervised",
+				executionModeNeedsConfirmation: false,
+				ownerName: "User",
+				isOwner: true,
 				},
 				agentState: {
 					status: "running",

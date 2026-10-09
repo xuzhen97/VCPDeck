@@ -74,6 +74,8 @@ export interface PiSessionReader {
 	): Promise<{ sessionId: string }>;
 	clone(sessionId: string): Promise<{ sessionId: string }>;
 	navigate(sessionId: string, leafId: string): Promise<PiSessionContextPage>;
+	/** 由会话文件路径推导 sessionId(与 get/clone 同一约定);无法识别时返回空串。 */
+	sessionIdForPath(file: string): string;
 }
 
 /**
@@ -308,6 +310,10 @@ export function createPiSessionReader(
 	}
 
 	return {
+		// 路径→sessionId 只在这一处定义:get/clone 与导入审计共用,避免约定漂移。
+		sessionIdForPath(file) {
+			return sessionIdFromPath(file);
+		},
 		async list() {
 			return loadList();
 		},

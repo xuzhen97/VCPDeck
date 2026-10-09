@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+### 变更
+
+- **Agent 会话、每轮执行与会话操作审计不再复用 Job（[ADR-0041](./docs/adr/0041-agent-session-run-and-audit-separation.md)）**：新增 `AgentSession`、`AgentRun`、`AgentAuditEvent` 三个独立实体，取代原 `agent.session` Job 承载的会话所有权、当前 Run 与人工完成语义。
+  - **不再有「完成」动作**：会话是长期入口，只有「归档 / 恢复」；归档只整理入口，不结算当前 Run、不删除远端对话，新 Prompt 会自动恢复会话。
+  - **每轮自动结算**：每次 Prompt 创建独立 `AgentRun`，由权威执行报告结算为 `succeeded` / `failed` / `aborted`（带安全错误码），终态不再重新激活。某轮失败不再让整个会话变成「错误态死胡同」，可直接继续下一轮。
+  - **审计与 Job 分离**：「Agent」页新增执行历史与会话操作审计（分页、只读、无正文）。已覆盖会话创建、导入、重命名、归档、恢复、删除（区分「已请求 / 成功 / 失败」）与执行模式变更；导入逐条结果新增可选 `sessionId`，Server 据此登记会话并记导入审计（旧 Client 缺省该字段时照常导入，只是不登记）；Server 只保存会话所有权、控制态、Run 摘要（发起者/执行时间/状态/安全错误码）与会话操作审计，仍**不**持久化 prompt、回复、thinking、图片正文、扩展输入、工具参数或工具输出，本次也不引入逐工具审计。
+  - **普通 Job 页面不再出现 Agent**：Job 列表、统计、取消与 drain 等通用控制不再包含 Agent；`ServerDrain` 同时等待普通 Job 与 `AgentRun` 收敛，避免发布在活跃 Agent 回合上直接切换。
+  - **协议升级 `PI_SESSION_PROTOCOL_VERSION = 4`**：请求、事件与会话状态报文移除 `jobId`；原 `complete` 端点保留安全拒绝（不静默映射为成功或归档）。v4 与旧协议双向不兼容，Server/Client 必须整套升级。
+  - **迁移与回退**：Server 启动前执行显式 Agent migration，旧模型仍存在活跃回合或未确认删除预约时直接阻塞（不伪造终态）。升级前必须停收新 Prompt、按旧协议结算或安全终止活跃 Run，并备份数据库与 Storage。该迁移是 **expand-only**（只新增表与字段，不删除/改名/收紧既有字段），因此**回退只需切回旧 binary**，旧版本可继续读写同一数据库，无需恢复备份；回退代价是新模型产生的 Run/审计在旧控制面不可见，且旧版本会重新看到迁移时刻意保留的 `agent.session` Job 行（不要用旧版本执行 `prisma db push`）。操作步骤见 [deployment](./docs/deployment.md) 第 6.1 节。
+
 ## [0.16.4] - 2026-10-08
 
 ### 修复

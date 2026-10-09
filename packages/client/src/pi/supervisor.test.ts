@@ -21,7 +21,6 @@ function req(overrides: Partial<PiRequest>): PiRequest {
 function prompt(runId: string, cwdRef?: PiCwdRef): PiRequest {
 	return req({
 		action: "agent.prompt",
-		jobId: "s1",
 		runId,
 		sessionId: "s1",
 		cwdRef: cwdRef ?? { rootDir: "D:\\", relativePath: "a" },
@@ -33,7 +32,6 @@ function prompt(runId: string, cwdRef?: PiCwdRef): PiRequest {
 function command(runId: string, cwdRef?: PiCwdRef): PiRequest {
 	return req({
 		action: "agent.command",
-		jobId: "s1",
 		runId,
 		sessionId: "s1",
 		cwdRef: cwdRef ?? { rootDir: "D:\\", relativePath: "a" },
@@ -288,7 +286,6 @@ describe("PiSupervisor", () => {
 		handles[0].emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "s1",
 			runId: "job-a",
 			event: {
 				type: "extension_request",
@@ -307,14 +304,13 @@ describe("PiSupervisor", () => {
 			req({
 				action: "extension.respond",
 				cwdRef: undefined,
-				jobId: "s1",
 				runId: "job-a",
 				sessionId: "s1",
 				payload: { requestId: "u1", confirmed: true },
 			}),
 		);
 		handles[0]!.emitMessage({
-			type: "event", sessionId: "s1", jobId: "s1", runId: "job-a",
+			type: "event", sessionId: "s1", runId: "job-a",
 			event: { type: "extension_resolved", sessionId: "s1", requestId: "u1", reason: "answered", hasPending: false },
 		});
 		expect(supervisor.getStateReport().runs[0]?.status).toBe("running");
@@ -347,7 +343,6 @@ describe("PiSupervisor", () => {
 			req({
 				action: "agent.compact",
 				cwdRef: undefined,
-				jobId: "s1",
 				runId: "job-a",
 				sessionId: "s1",
 			}),
@@ -361,7 +356,6 @@ describe("PiSupervisor", () => {
 		handles[0].emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "s1",
 			runId: "job-a",
 			event: { type: "agent_settled", sessionId: "s1" },
 		});
@@ -372,7 +366,7 @@ describe("PiSupervisor", () => {
 
 		// terminal summary 保留
 		const report = supervisor.getStateReport();
-		expect(report.runs.some((r) => r.runId === "job-a" && r.status === "done")).toBe(true);
+		expect(report.runs.some((r) => r.runId === "job-a" && r.status === "succeeded")).toBe(true);
 
 		await supervisor.applyStateAck({ acceptedRunIds: ["job-a"], closedRunIds: [], reportAgain: false });
 		expect(
@@ -390,7 +384,6 @@ describe("PiSupervisor", () => {
 		handles[0].emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "s1",
 			runId: "job-a",
 			event: { type: "prompt_done", sessionId: "s1" },
 		});
@@ -398,7 +391,7 @@ describe("PiSupervisor", () => {
 		const next = await supervisor.request(prompt("job-b", CWD_REF_A));
 		expect(next).toMatchObject({ ok: true });
 		expect(
-			supervisor.getStateReport().runs.some((r) => r.runId === "job-a" && r.status === "done"),
+			supervisor.getStateReport().runs.some((r) => r.runId === "job-a" && r.status === "succeeded"),
 		).toBe(true);
 	});
 
@@ -406,7 +399,7 @@ describe("PiSupervisor", () => {
 		// 曾经的缺陷：supervisor 只为 agent.prompt 建 activeRun（也不回收），
 		// `agent.command` 的 entry.activeRun 恒为 null → 终态分支整段被跳过，
 		// terminalCwd 永不写入。于是服务端 30 秒后的结算查询（无 cwdRef，
-		// 只能按 jobId+runId 回退）拿到 PI_SESSION_NOT_FOUND，被静默吞掉，
+		// 只能按 sessionId+runId 回退）拿到 PI_SESSION_NOT_FOUND，被静默吞掉，
 		// job 停在 running、内存项目锁永不释放，后续包括【新建会话】
 		// 都撞 `Project has an active turn`。
 		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
@@ -415,15 +408,14 @@ describe("PiSupervisor", () => {
 		handles[0].emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "s1",
 			runId: "cmd-a",
 			event: { type: "prompt_done", sessionId: "s1" },
 		});
 
-		// ① 模拟服务端的结算查询：只有 jobId+runId，没有 cwdRef。
+		// ① 模拟服务端的结算查询：只有 sessionId+runId，没有 cwdRef。
 		// 修复前这里会因 terminalCwd 缺失而报 PI_SESSION_NOT_FOUND。
 		const settle = await supervisor.request(
-			req({ action: "agent.state", jobId: "s1", sessionId: "s1", runId: "cmd-a" }),
+			req({ action: "agent.state", sessionId: "s1", runId: "cmd-a" }),
 		);
 		expect(settle.ok).toBe(true);
 
@@ -433,7 +425,7 @@ describe("PiSupervisor", () => {
 		expect(
 			supervisor
 				.getStateReport()
-				.runs.some((r) => r.runId === "cmd-a" && r.status === "done"),
+				.runs.some((r) => r.runId === "cmd-a" && r.status === "succeeded"),
 		).toBe(true);
 	});
 
@@ -448,7 +440,7 @@ describe("PiSupervisor", () => {
 		expect(next).toMatchObject({ ok: true });
 		// 陈旧 run 补一份终态摘要，让 Server 侧对账也能收敛。
 		const report = supervisor.getStateReport();
-		expect(report.runs.some((r) => r.runId === "job-a" && r.status === "done")).toBe(true);
+		expect(report.runs.some((r) => r.runId === "job-a" && r.status === "succeeded")).toBe(true);
 		expect(report.runs.some((r) => r.runId === "job-b" && r.status === "running")).toBe(true);
 	});
 
@@ -488,12 +480,11 @@ describe("PiSupervisor", () => {
 		handles[0].emitMessage({
 			type: "event",
 			sessionId: "s1",
-			jobId: "s1",
 			runId: "job-a",
 			event: { type: "prompt_error", sessionId: "s1", code: "PI_RUNTIME_UNAVAILABLE", message: "boom" },
 		});
 
-		expect(supervisor.getStateReport().runs[0]?.status).toBe("error");
+		expect(supervisor.getStateReport().runs[0]?.status).toBe("failed");
 		const next = await supervisor.request(prompt("job-b", CWD_REF_A));
 		expect(next).toMatchObject({ ok: true });
 	});
@@ -502,7 +493,7 @@ describe("PiSupervisor", () => {
 		const { supervisor, handles } = makeSupervisor({ autoRespond: true });		await supervisor.request(prompt("job-a", CWD_REF_A));
 
 		handles[0].emitExit(1);
-		expect(supervisor.getStateReport().runs[0]?.status).toBe("error");
+		expect(supervisor.getStateReport().runs[0]?.status).toBe("failed");
 	});
 
 	it("Worker 无响应时 request 超时", async () => {
@@ -517,16 +508,15 @@ describe("PiSupervisor", () => {
 		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
 		await supervisor.request(prompt("run-1", CWD_REF_A));
 		handles[0]!.emitMessage({
-			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			type: "event", sessionId: "s1", runId: "run-1",
 			event: { type: "agent_settled", sessionId: "s1" },
 		});
 		await supervisor.request(prompt("run-2", CWD_REF_A));
 		handles[0]!.emitMessage({
-			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			type: "event", sessionId: "s1", runId: "run-1",
 			event: { type: "agent_settled", sessionId: "s1" },
 		});
 		expect(supervisor.getStateReport().runs).toContainEqual(expect.objectContaining({
-			jobId: "s1", sessionId: "s1", runId: "run-2", status: "running",
 		}));
 	});
 
@@ -534,16 +524,16 @@ describe("PiSupervisor", () => {
 		const { supervisor, handles } = makeSupervisor({ autoRespond: true });
 		await supervisor.request(prompt("run-1", CWD_REF_A));
 		handles[0]!.emitMessage({
-			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			type: "event", sessionId: "s1", runId: "run-1",
 			event: { type: "extension_request", sessionId: "s1", ui: { requestId: "u1", extensionId: "e", kind: "confirm" } },
 		});
 		handles[0]!.emitMessage({
-			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			type: "event", sessionId: "s1", runId: "run-1",
 			event: { type: "extension_resolved", sessionId: "s1", requestId: "u1", reason: "answered", hasPending: true },
 		});
 		expect(supervisor.getStateReport().runs.find((run) => run.runId === "run-1")?.status).toBe("waiting_input");
 		handles[0]!.emitMessage({
-			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			type: "event", sessionId: "s1", runId: "run-1",
 			event: { type: "extension_resolved", sessionId: "s1", requestId: "u2", reason: "answered", hasPending: false },
 		});
 		expect(supervisor.getStateReport().runs.find((run) => run.runId === "run-1")?.status).toBe("running");
@@ -555,7 +545,6 @@ describe("PiSupervisor", () => {
 
 		await expect(supervisor.request(req({
 			action: "agent.abort",
-			jobId: "s1",
 			sessionId: "s1",
 			runId: "run-1",
 		}))).resolves.toMatchObject({ ok: true });
@@ -675,7 +664,7 @@ describe("PiSupervisor", () => {
 
 		// Run 结算后按换代语义关闭，下次动作用新 revision fork。
 		handles[0]!.emitMessage({
-			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			type: "event", sessionId: "s1", runId: "run-1",
 			event: { type: "agent_settled", sessionId: "s1" },
 		});
 		await vi.waitFor(() => expect(handles[0]!.kill).toHaveBeenCalled());
@@ -757,7 +746,7 @@ describe("PiSupervisor", () => {
 			type: "request", request: { action: "agent.abort", runId: "run-1" },
 		});
 		handles[0]!.emitMessage({
-			type: "event", sessionId: "s1", jobId: "s1", runId: "run-1",
+			type: "event", sessionId: "s1", runId: "run-1",
 			event: { type: "agent_settled", sessionId: "s1" },
 		});
 		if (abortMessage?.type === "request") {

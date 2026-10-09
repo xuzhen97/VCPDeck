@@ -29,7 +29,7 @@ import {
 	parsePiImportRunResponse,
 	isPiToolExecutionMode,
 	PI_ERROR_CODES,
-	PI_SESSION_JOB_PROTOCOL_VERSION,
+	PI_SESSION_PROTOCOL_VERSION,
 	parsePiExtensionCommands,
 	parsePiExtensionUiSnapshot,
 	type ActorContext,
@@ -37,12 +37,15 @@ import {
 	type PiCwdRef,
 	type PiExtensionCommands,
 	type PiExtensionUiSnapshot,
+	type PaginatedResult,
+	type PiAuditEventInfo,
 	type PiPromptAccepted,
 	type PiRequest,
+	type PiRunInfo,
 	type PiRuntimeStatus,
 	type PiResponse,
 	type PiSessionCreated,
-	type PiSessionJobSnapshot,
+	type PiSessionSnapshot,
 	type PiSessionOpenResult,
 	type PiToolExecutionMode,
 } from "@vcpdeck/shared";
@@ -54,8 +57,38 @@ import {
 	type PiGenerationLease,
 } from "./pi-request-broker.js";
 import { PiRunService } from "./pi-run.service.js";
+import { PiSessionService } from "./pi-session.service.js";
 import { PiRuntimeService } from "./pi-runtime.service.js";
 import { PiAttachmentService } from "./pi-attachment.service.js";
+
+/** 把 Client 返回的 code 收敛到已登记错误码,未知值不进入审计。 */
+function safeErrorCode(code: string): import("@vcpdeck/shared").PiErrorCode {
+	return (PI_ERROR_CODES as readonly string[]).includes(code)
+		? (code as import("@vcpdeck/shared").PiErrorCode)
+		: "PI_PROTOCOL_INVALID";
+}
+
+/**
+ * 取服务端错误里已登记的 Pi 错误码:服务层抛的是 Error+code,
+ * 控制器 badRequest 抛的是 HttpException(response.code),两者都要认。
+ * 未登记的 code 返回 undefined,不把原始值写进审计。
+ */
+function piErrorCodeOf(error: unknown): import("@vcpdeck/shared").PiErrorCode | undefined {
+	const direct =
+		error instanceof Error && "code" in error
+			? (error as { code: unknown }).code
+			: undefined;
+	const fromResponse = (error as { response?: { code?: unknown } } | null)?.response?.code;
+	const raw =
+		typeof direct === "string"
+			? direct
+			: typeof fromResponse === "string"
+				? fromResponse
+				: undefined;
+	return raw && (PI_ERROR_CODES as readonly string[]).includes(raw)
+		? (raw as import("@vcpdeck/shared").PiErrorCode)
+		: undefined;
+}
 
 function badRequest(code: string, message: string): BadRequestException {
 	return new BadRequestException({ code, message });
@@ -103,6 +136,7 @@ export class PiController {
 		@Inject(PiRequestBroker) private readonly requests: PiRequestBroker,
 		@Inject(PiEventBroker) private readonly events: PiEventBroker,
 		@Inject(PiRunService) private readonly runs: PiRunService,
+		@Inject(PiSessionService) private readonly sessionsService: PiSessionService,
 		@Inject(ClientService) private readonly clients: ClientService,
 		@Inject(PiAttachmentService) private readonly attachments: PiAttachmentService,
 		// RuntimeSpec 就绪门控（可选注入：旧测试构造保持兼容）
@@ -125,7 +159,7 @@ export class PiController {
 		if (
 			!client.capabilities.includes("agent.pi") ||
 			client.capabilityDetails.pi?.available !== true ||
-			client.capabilityDetails.pi.sessionJobProtocolVersion !== PI_SESSION_JOB_PROTOCOL_VERSION
+			client.capabilityDetails.pi.sessionProtocolVersion !== PI_SESSION_PROTOCOL_VERSION
 		) {
 			throw badRequest(
 				"PI_CLIENT_UNSUPPORTED",
@@ -232,18 +266,25 @@ export class PiController {
 		}
 	}
 
-	private async assertSessionOwner(jobId: string, actor: ActorContext): Promise<void> {
+	private async assertSessionOwner(sessionId: string, actor: ActorContext): Promise<void> {
 		try {
-			await this.runs.assertSessionOwner(jobId, actor.identityId);
+			await this.sessionsService.assertSessionOwner(sessionId, actor.identityId);
 		} catch (err) {
 			if (isPiError(err)) throw badRequest(err.code, err.message);
 			throw err;
 		}
 	}
 
-	private async assertActiveOwner(jobId: string, runId: string, actor: ActorContext): Promise<void> {
+	/** 控制当前回合:必须是 Owner,且 runId 指向会话当前活跃 Run。 */
+	private async assertActiveOwner(sessionId: string, runId: string, actor: ActorContext): Promise<void> {
 		try {
-			await this.runs.assertCurrentRunOwner(jobId, runId, actor.identityId);
+			await this.sessionsService.assertSessionOwner(sessionId, actor.identityId);
+			const snapshot = await this.sessionsService.snapshot(sessionId, actor.identityId);
+			if (!snapshot.activeRun || snapshot.activeRun.runId !== runId) {
+				throw Object.assign(new Error("Run is no longer current"), {
+					code: "PI_CONTROL_FORBIDDEN",
+				});
+			}
 		} catch (err) {
 			if (err instanceof Error && "code" in err) {
 				throw badRequest(
@@ -348,7 +389,19 @@ export class PiController {
 			action: "sessions.list",
 			cwdRef: { rootDir, relativePath },
 		});
-		return (data as { sessions: unknown[] }).sessions;
+		const sessions = (data as { sessions: unknown[] }).sessions;
+		// 控制状态来自 Server 的 AgentSession(归档/删除),只对本页有界 ID 合并;
+		// 未登记的会话保持未归档,不因一次列表读取就创建 Owner。
+		const ids = sessions
+			.map((item) => (item as { id?: unknown }).id)
+			.filter((id): id is string => typeof id === "string")
+			.slice(0, 200);
+		const controlStatus = await this.sessionsService.controlStatusFor(clientId, ids);
+		return sessions.map((item) => {
+			const id = (item as { id?: unknown }).id;
+			const status = typeof id === "string" ? controlStatus.get(id) : undefined;
+			return status ? { ...(item as Record<string, unknown>), controlStatus: status } : item;
+		});
 	}
 
 	// ── 旧 Session 显式导入（ADR-0031；设计 §21.3）：
@@ -388,6 +441,7 @@ export class PiController {
 	async importSessions(
 		@Param("clientId") clientId: string,
 		@Body() body: unknown,
+		@Actor() actor: ActorContext,
 	) {
 		await this.requirePiClient(clientId);
 		let parsed: { sourceNames: string[] };
@@ -401,7 +455,23 @@ export class PiController {
 			action: "session.import.run",
 			payload: { sourceNames: parsed.sourceNames },
 		});
-		return this.parseUpstream("Client", data, parsePiImportRunResponse);
+		const response = this.parseUpstream(
+			"Client",
+			data,
+			parsePiImportRunResponse,
+		);
+		// ADR-0041 决策 4:导入是会话控制面操作,必须留下独立最小审计。
+		// 只有实际存在于 VCPDeck 的副本才登记(imported / alreadyImported),
+		// rejected 没有新会话;旧 Client 不上报 sessionId 时保持原样。
+		for (const result of response.results) {
+			if (result.status === "rejected" || !result.sessionId) continue;
+			await this.sessionsService.ensureSession(actor, {
+				clientId,
+				sessionId: result.sessionId,
+				event: "imported",
+			});
+		}
+		return response;
 	}
 
 	@Get("sessions/:sessionId")
@@ -479,19 +549,54 @@ export class PiController {
 		if (typeof name !== "string" || name.trim() === "") {
 			throw badRequest("PI_PROTOCOL_INVALID", "name required");
 		}
-		// 从侧边栏对未打开的会话改名/删/克隆等：必须先把 Job 记录补上，再查 owner
-		await this.runs.ensureSession(actor, { clientId, sessionId });
+		// 从侧边栏对未打开的会话改名/删/克隆等:必须先补控制面记录,再查 owner
+		await this.sessionsService.ensureSession(actor, { clientId, sessionId });
 		await this.assertSessionOwner(sessionId, actor);
-		await this.withReconciledClient(clientId, async (lease) => {
-			const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
-			await this.assertIdle(clientId, projectKey);
-			await this.requestOnce(lease, {
-				requestId: randomUUID(),
-				action: "session.rename",
-				cwdRef: { rootDir, relativePath },
-				sessionId,
-				payload: { name },
+		// 控制面变更必须与审计一致:先记"已请求",远端确认后才记成功。
+		const operationId = randomUUID();
+		await this.sessionsService.recordAudit({
+			sessionId,
+			clientId,
+			event: "renamed",
+			result: "requested",
+			actor,
+			operationId,
+		});
+		try {
+			await this.withReconciledClient(clientId, async (lease) => {
+				const projectKey = await this.resolveProjectKey(lease, { rootDir, relativePath });
+				await this.assertIdle(clientId, projectKey);
+				await this.requestOnce(lease, {
+					requestId: randomUUID(),
+					action: "session.rename",
+					cwdRef: { rootDir, relativePath },
+					sessionId,
+					payload: { name },
+				});
 			});
+		} catch (error) {
+			// 超时/断线表示结果不确定,保留 requested 不宣称失败;其余记 failed。
+			const code = piErrorCodeOf(error);
+			if (code && code !== "PI_REQUEST_TIMEOUT" && code !== "PI_CLIENT_DISCONNECTED") {
+				await this.sessionsService.recordAudit({
+					sessionId,
+					clientId,
+					event: "renamed",
+					result: "failed",
+					actor,
+					operationId,
+					errorCode: code,
+				});
+			}
+			throw error;
+		}
+		await this.sessionsService.recordAudit({
+			sessionId,
+			clientId,
+			event: "renamed",
+			result: "ok",
+			actor,
+			operationId,
 		});
 		return { ok: true };
 	}
@@ -507,8 +612,10 @@ export class PiController {
 		await this.requirePiClient(clientId);
 		const cwdRef = requireCwd(body);
 		return this.withReconciledClient(clientId, async (lease) => {
-			await this.runs.ensureSession(actor, { clientId, sessionId });
-			const reservation = await this.runs.beginDelete(sessionId, actor.identityId);
+			await this.sessionsService.ensureSession(actor, { clientId, sessionId });
+			const reservation = await this.sessionsService.beginDelete(sessionId, actor.identityId, {
+				actor,
+			});
 			this.runtime?.assertCompatible(lease.clientId);
 			this.runtime?.assertReady(lease.clientId);
 			let response: PiResponse;
@@ -526,11 +633,14 @@ export class PiController {
 				throw error;
 			}
 			if (response.ok || response.error.code === "PI_SESSION_NOT_FOUND") {
-				await this.runs.commitDelete(sessionId, reservation.deleteToken);
+				await this.sessionsService.commitDelete(sessionId, reservation.deleteToken, { actor });
 				return { ok: true };
 			}
 			if (["PI_PROTOCOL_INVALID", "PI_PROJECT_NOT_ALLOWED", "PI_PROJECT_BUSY"].includes(response.error.code)) {
-				await this.runs.rollbackDelete(sessionId, reservation.deleteToken);
+				await this.sessionsService.rollbackDelete(sessionId, reservation.deleteToken, {
+					actor,
+					errorCode: response.error.code,
+				});
 				throw badRequest(response.error.code, response.error.message);
 			}
 
@@ -549,11 +659,14 @@ export class PiController {
 				throw error;
 			}
 			if (!confirmation.ok && confirmation.error.code === "PI_SESSION_NOT_FOUND") {
-				await this.runs.commitDelete(sessionId, reservation.deleteToken);
+				await this.sessionsService.commitDelete(sessionId, reservation.deleteToken, { actor });
 				return { ok: true };
 			}
 			if (confirmation.ok) {
-				await this.runs.rollbackDelete(sessionId, reservation.deleteToken);
+				await this.sessionsService.rollbackDelete(sessionId, reservation.deleteToken, {
+					actor,
+					errorCode: response.error.code,
+				});
 				throw badRequest(response.error.code, response.error.message);
 			}
 			throw badRequest(confirmation.error.code, confirmation.error.message);
@@ -657,8 +770,8 @@ export class PiController {
 		let original: unknown;
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
-				await this.runs.ensureSession(actor, { clientId, sessionId });
-				return { sessionId, jobId: sessionId };
+				await this.sessionsService.ensureSession(actor, { clientId, sessionId, event: "created" });
+				return { sessionId };
 			} catch (error) {
 				original ??= error;
 			}
@@ -694,15 +807,15 @@ export class PiController {
 		const cwdRef = requireCwd(body);
 		return this.withReconciledClient(clientId, async (lease) => {
 			await this.requestOnce(lease, { requestId: randomUUID(), action: "session.get", cwdRef, sessionId });
-			await this.runs.ensureSession(actor, { clientId, sessionId });
-			const snapshot = await this.runs.snapshot(sessionId, actor.identityId);
+			await this.sessionsService.ensureSession(actor, { clientId, sessionId });
+			const snapshot = await this.sessionsService.snapshot(sessionId, actor.identityId);
+			const activeRunId = snapshot.activeRun?.runId ?? null;
 			const agentState = parsePiAgentState(await this.requestOnce(lease, {
 				requestId: randomUUID(), action: "agent.state", cwdRef, sessionId,
-				jobId: snapshot.runId ? sessionId : undefined,
-				runId: snapshot.runId ?? undefined,
+				runId: activeRunId ?? undefined,
 			}));
-			if (snapshot.runId) await this.runs.reconcileOpen(sessionId, snapshot.runId, agentState);
-			return { job: await this.runs.snapshot(sessionId, actor.identityId), agentState };
+			if (activeRunId) await this.runs.reconcileOpen(sessionId, activeRunId, agentState);
+			return { snapshot: await this.sessionsService.snapshot(sessionId, actor.identityId), agentState };
 		});
 	}
 
@@ -712,7 +825,7 @@ export class PiController {
 		@Param("sessionId") sessionId: string,
 		@Body() body: unknown,
 		@Actor() actor: ActorContext,
-	): Promise<PiSessionJobSnapshot> {
+	): Promise<PiSessionSnapshot> {
 		await this.requirePiClient(clientId);
 		requireObject(body);
 		if (typeof body.rootDir !== "string" || typeof body.relativePath !== "string") {
@@ -736,37 +849,98 @@ export class PiController {
 				|| !("id" in response.info) || response.info.id !== sessionId) {
 				throw new NotFoundException({ code: "PI_SESSION_NOT_FOUND", message: "Pi session was not found in the selected project" });
 			}
-			await this.runs.ensureSession(actor, { clientId, sessionId });
-			const session = await this.runs.snapshot(sessionId, actor.identityId);
+			await this.sessionsService.ensureSession(actor, { clientId, sessionId });
+			const session = await this.sessionsService.snapshot(sessionId, actor.identityId);
 			if (!session.isOwner) throw badRequest("PI_CONTROL_FORBIDDEN", "Only the session owner can change execution mode");
-			return this.runs.setExecutionMode(actor, {
+			return this.sessionsService.setExecutionMode(actor, {
 				clientId, sessionId, mode: body.mode as PiToolExecutionMode | null,
 			});
 		});
 	}
 
+	/**
+	 * 旧"完成会话"入口:ADR-0041 已移除会话完成语义。
+	 * 明确拒绝而不是静默映射为归档或 Run 成功,避免旧调用方误判执行结果:
+	 * 整理会话用 /archive 与 /restore;停止本轮用 /abort。
+	 */
 	@Post("agent/:sessionId/complete")
 	async completeSession(
 		@Param("clientId") clientId: string,
-		@Param("sessionId") sessionId: string,
-		@Body() body: unknown,
-		@Actor() actor: ActorContext,
-	): Promise<PiSessionJobSnapshot> {
+	): Promise<never> {
 		await this.requirePiClient(clientId);
-		const requestedRunId = optionalRunId(body);
-		return this.withReconciledClient(clientId, async (lease) => {
-			await this.runs.assertSessionOwner(sessionId, actor.identityId);
-			const before = await this.runs.snapshot(sessionId, actor.identityId);
-			if (requestedRunId && before.runId !== requestedRunId) throw new ConflictException({ code: "PI_CONTROL_FORBIDDEN", message: "Run is no longer current" });
-			const runId = before.runId ?? requestedRunId;
-			if ((before.status === "running" || before.status === "waiting_input") && runId) {
-				await this.requestOnce(lease, { requestId: randomUUID(), action: "agent.abort", sessionId, jobId: sessionId, runId });
-			}
-			if (!await this.runs.completeSession(sessionId, runId)) {
-				const current = await this.runs.snapshot(sessionId, actor.identityId);
-				if (current.runId !== runId) throw new ConflictException({ code: "PI_CONTROL_FORBIDDEN", message: "Session run changed during completion" });
-			}
-			return this.runs.snapshot(sessionId, actor.identityId);
+		throw badRequest(
+			"PI_PROTOCOL_INVALID",
+			"Session completion was removed (ADR-0041); use /archive, /restore or /abort",
+		);
+	}
+
+	// ── 独立会话控制面:快照、归档/恢复、Run 与审计查询(不需要 Client 在线) ──
+
+	@Get("agent/:sessionId/snapshot")
+	async sessionSnapshot(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Actor() actor: ActorContext,
+	): Promise<PiSessionSnapshot> {
+		await this.sessionsService.requireClientSession(sessionId, clientId);
+		return this.sessionsService.snapshot(sessionId, actor.identityId);
+	}
+
+	@Post("agent/:sessionId/archive")
+	async archiveSession(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Actor() actor: ActorContext,
+	): Promise<PiSessionSnapshot> {
+		await this.sessionsService.requireClientSession(sessionId, clientId);
+		return this.sessionsService.setArchived(actor, { clientId, sessionId, archived: true });
+	}
+
+	@Post("agent/:sessionId/restore")
+	async restoreSession(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Actor() actor: ActorContext,
+	): Promise<PiSessionSnapshot> {
+		await this.sessionsService.requireClientSession(sessionId, clientId);
+		return this.sessionsService.setArchived(actor, { clientId, sessionId, archived: false });
+	}
+
+	@Get("agent/:sessionId/runs")
+	async listRuns(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Query("page") page?: string,
+		@Query("pageSize") pageSize?: string,
+	): Promise<PaginatedResult<PiRunInfo>> {
+		await this.sessionsService.requireClientSession(sessionId, clientId);
+		return this.sessionsService.listRuns(sessionId, {
+			...(page !== undefined ? { page: Number(page) } : {}),
+			...(pageSize !== undefined ? { pageSize: Number(pageSize) } : {}),
+		});
+	}
+
+	@Get("agent/:sessionId/runs/:runId")
+	async runInfo(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Param("runId") runId: string,
+	): Promise<PiRunInfo> {
+		await this.sessionsService.requireClientSession(sessionId, clientId);
+		return this.sessionsService.runInfo(sessionId, runId);
+	}
+
+	@Get("agent/:sessionId/audit")
+	async listAudit(
+		@Param("clientId") clientId: string,
+		@Param("sessionId") sessionId: string,
+		@Query("page") page?: string,
+		@Query("pageSize") pageSize?: string,
+	): Promise<PaginatedResult<PiAuditEventInfo>> {
+		await this.sessionsService.requireClientSession(sessionId, clientId);
+		return this.sessionsService.listAudit(sessionId, {
+			...(page !== undefined ? { page: Number(page) } : {}),
+			...(pageSize !== undefined ? { pageSize: Number(pageSize) } : {}),
 		});
 	}
 
@@ -873,16 +1047,23 @@ export class PiController {
 		const { clientId, sessionId, cwdRef, submissionId } = params;
 		const [projectKey] = await Promise.all([
 			this.resolveProjectKey(lease, cwdRef),
-			this.runs.ensureSession(actor, { clientId, sessionId }),
+			this.sessionsService.ensureSession(actor, { clientId, sessionId }),
 		]);
 		await this.assertIdle(clientId, projectKey);
-		let run: { jobId: string; runId: string; executionMode: PiToolExecutionMode };
+		let run: {
+			sessionId: string;
+			runId: string;
+			executionMode: PiToolExecutionMode;
+			restoredFromArchive: boolean;
+		};
+		const kind = params.action === "agent.command" ? "command" as const : "prompt" as const;
 		try {
-			run = await this.runs.startRun(actor, { clientId, sessionId, projectKey });
+			run = await this.runs.startRun(actor, { clientId, sessionId, projectKey, kind });
 		} catch (err) {
 			if (!isPiError(err) || err.code !== "PI_PROJECT_BUSY") throw err;
-			const previous = await this.runs.snapshot(sessionId, actor.identityId);
-			if (!previous.runId)
+			const previous = await this.sessionsService.snapshot(sessionId, actor.identityId);
+			const previousRunId = previous.activeRun?.runId;
+			if (!previousRunId)
 				throw new ConflictException({ code: err.code, message: err.message });
 			const state = parsePiAgentState(
 				await this.requestOnce(lease, {
@@ -890,13 +1071,12 @@ export class PiController {
 					action: "agent.state",
 					cwdRef,
 					sessionId,
-					jobId: sessionId,
-					runId: previous.runId,
+					runId: previousRunId,
 				}),
 			);
-			await this.runs.reconcileOpen(sessionId, previous.runId, state);
+			await this.runs.reconcileOpen(sessionId, previousRunId, state);
 			try {
-				run = await this.runs.startRun(actor, { clientId, sessionId, projectKey });
+				run = await this.runs.startRun(actor, { clientId, sessionId, projectKey, kind });
 			} catch (retryError) {
 				if (isPiError(retryError) && retryError.code === "PI_PROJECT_BUSY") {
 					throw new ConflictException({
@@ -907,13 +1087,26 @@ export class PiController {
 				throw retryError;
 			}
 		}
-		const { jobId, runId } = run;
+		const { runId } = run;
+
+		if (run.restoredFromArchive) {
+			// 归档会话被新 Prompt 恢复:与接纳同一路径记录最小审计。
+			await this.sessionsService
+				.recordAudit({
+					sessionId,
+					clientId,
+					event: "restored",
+					result: "ok",
+					actor,
+					operationId: runId,
+				})
+				.catch(() => {});
+		}
 
 		// 先发布 run_created（submissionId 绑定），再 dispatch，保证首个 Agent 事件不丢
 		await this.events.publish({
 			clientId,
 			sessionId,
-			jobId,
 			runId,
 			event: { type: "run_created", sessionId, submissionId, runId },
 		});
@@ -928,7 +1121,6 @@ export class PiController {
 				action: params.action,
 				cwdRef,
 				sessionId,
-				jobId,
 				runId,
 				payload: params.payload(run.executionMode),
 			});
@@ -936,10 +1128,14 @@ export class PiController {
 				? (params.rejectResult?.(response.data) ?? null)
 				: { code: response.error.code, message: response.error.message };
 			if (rejection) {
-				await this.runs.finishRun(jobId, runId);
+				// 被拒绝的一轮是确定失败:记安全错误码,不留假活跃状态。
+				await this.runs.settleRun(sessionId, runId, {
+					status: "failed",
+					errorCode: safeErrorCode(rejection.code),
+				});
 				dispatchError = badRequest(rejection.code, rejection.message);
 			} else {
-				await this.runs.accept(jobId, runId);
+				await this.runs.accept(sessionId, runId);
 			}
 		} catch (error) {
 			dispatchError = error;
@@ -948,7 +1144,7 @@ export class PiController {
 					? String((error as { code: unknown }).code)
 					: undefined;
 			if (code === "PI_CLIENT_DISCONNECTED") {
-				await this.runs.markRunDisconnected(jobId, runId);
+				await this.runs.markRunDisconnected(sessionId, runId);
 			} else if (code === "PI_REQUEST_TIMEOUT") {
 				try {
 					const stateResponse: PiResponse = await this.requests.request(lease, {
@@ -956,16 +1152,15 @@ export class PiController {
 						action: "agent.state",
 						cwdRef,
 						sessionId,
-						jobId,
 						runId,
 					});
 					if (stateResponse.ok) {
 						const state = parsePiAgentState(stateResponse.data);
 						if (isPiAgentIdle(state)) {
-							await this.runs.finishRun(jobId, runId);
+							await this.runs.settleRun(sessionId, runId, { status: "succeeded" });
 						} else {
-							await this.runs.accept(jobId, runId);
-							await this.runs.reconcileOpen(jobId, runId, state);
+							await this.runs.accept(sessionId, runId);
+							await this.runs.reconcileOpen(sessionId, runId, state);
 						}
 					}
 				} catch (stateError) {
@@ -975,32 +1170,14 @@ export class PiController {
 						String((stateError as { code: unknown }).code) ===
 							"PI_CLIENT_DISCONNECTED"
 					) {
-						await this.runs.markRunDisconnected(jobId, runId);
+						await this.runs.markRunDisconnected(sessionId, runId);
 					}
 				}
 			}
 		}
 
-		const current = await this.runs.snapshot(sessionId, actor.identityId);
-		if (current.status === "done" || current.status === "cancelled") {
-			try {
-				await this.requests.request(lease, {
-					requestId: randomUUID(),
-					action: "agent.abort",
-					sessionId,
-					jobId,
-					runId,
-				});
-			} catch {
-				/* best effort: only the dispatched run is addressed */
-			}
-			throw new ConflictException({
-				code: "PI_CONTROL_FORBIDDEN",
-				message: "Session completed while the action was dispatching",
-			});
-		}
 		if (dispatchError) throw dispatchError;
-		return { jobId, runId, sessionId };
+		return { sessionId, runId };
 	}
 
 	@Sse("agent/:sessionId/events")
@@ -1015,7 +1192,7 @@ export class PiController {
 	@Get("running")
 	async running(@Param("clientId") clientId: string) {
 		await this.requirePiClient(clientId);
-		return this.runs.listActiveByClient(clientId);
+		return this.runs.listActiveRuns(clientId);
 	}
 
 	// ── 图片附件（临时 Storage + FileRef） ──
@@ -1081,7 +1258,6 @@ export class PiController {
 			requestId: randomUUID(),
 			action,
 			sessionId,
-			jobId: sessionId,
 			runId,
 			...(payload ? { payload } : {}),
 		});
@@ -1125,14 +1301,14 @@ export class PiController {
 		const runId = requiredRunId(body);
 		await this.requirePiClient(clientId);
 		await this.assertActiveOwner(sessionId, runId, actor);
+		// 中止请求本身不证明远端已中止:不在此伪造终态,
+		// 由 Client 的权威终局摘要或重连对账收敛。
 		await this.requestForClient(clientId, {
 			requestId: randomUUID(),
 			action: "agent.abort",
 			sessionId,
-			jobId: sessionId,
 			runId,
 		});
-		await this.runs.finishRun(sessionId, runId);
 		return { ok: true };
 	}
 
@@ -1176,7 +1352,6 @@ export class PiController {
 			requestId: randomUUID(),
 			action: "extension.respond",
 			sessionId,
-			jobId: sessionId,
 			runId,
 			payload: {
 				requestId: body.requestId,

@@ -74,7 +74,7 @@ flowchart TB
 - AgentSession 当前调用 SDK `getAgentDir()`、SettingsManager、ModelRuntime、ProjectTrustStore；
 - SessionReader 在未传入 `sessionDir` 时由 Pi SDK 使用默认 Session 目录；
 - 目标机器上的全局 Pi 设置、凭据、Extensions、Skills 和 trust 会影响 VCPDeck Pi；
-- Server 已经拥有 Pi Session Job/Run 状态机、Owner/Observer、REST/SSE 和重连对账；
+- Server 已经拥有 Pi 会话/Run 状态机（ADR-0041 后独立于 Job）、Owner/Observer、REST/SSE 和重连对账；
 - Client 已采用项目级 Worker 子进程，适合注入独立 runtime root；
 - 仓库已有 `examples/pi-web`（MIT）作为 Pi Web UI 参考，但它默认共享本地 Pi 配置和 Session，不能直接当作 VCPDeck 控制面后端。
 
@@ -93,7 +93,7 @@ Server RuntimeSpec + Client Release Bundle + VCPDeck isolated data root
                     Pi SDK Worker
 ```
 
-现有 Session Job/Run、请求 Broker、SSE、Worker Supervisor 和大部分 Frontend 控制逻辑应尽量保留。
+现有会话/Run 状态、请求 Broker、SSE、Worker Supervisor 和大部分 Frontend 控制逻辑应尽量保留。
 
 ## 3. 目标与非目标
 
@@ -108,7 +108,7 @@ Server RuntimeSpec + Client Release Bundle + VCPDeck isolated data root
 - Release 回滚能回滚 Pi Runtime/Bundle，而不删除 VCPDeck Session；
 - 活跃 Run 的配置语义在一次运行期间稳定；
 - Server 明确知道 Client 的 Pi SDK、Bundle、RuntimeSpec 协议是否兼容；
-- UI 可复用成熟开源组件，但 VCPDeck Server/协议/Owner/Session Job 仍是控制事实源；
+- UI 可复用成熟开源组件，但 VCPDeck Server/协议/Owner/会话实体仍是控制事实源；
 - 新跨边界字段继续由 `@vcpdeck/shared` 严格解析。
 
 ### 3.2 非目标
@@ -173,7 +173,7 @@ Server RuntimeSpec + Client Release Bundle + VCPDeck isolated data root
 | Skills/Prompts | Client Release | 是 | 是，版本目录 | 选择/版本元数据 |
 | 活跃 Worker | Client | 否 | 否 | 否 |
 | Session JSONL | Client VCPDeck data root | 是 | 是 | 否 |
-| Session Job/Owner/Run | Server | 是 | 运行态摘要 | 是 |
+| 会话/Owner/Run 摘要 | Server | 是 | 运行态摘要 | 是 |
 | Project cwd | 目标机器文件系统 | 项目自身 | 是 | 否 |
 | 用户原生 Pi `~/.pi` | 用户原生 Pi | 是 | 是 | 否 |
 
@@ -183,7 +183,7 @@ flowchart LR
         P[Profile]
         C[Encrypted Credential]
         B[Client Binding]
-        J[Session Job and Run]
+        J[AgentSession and AgentRun]
     end
 
     subgraph ReleaseAuthority[Release authority]
@@ -632,7 +632,7 @@ executionConfiguration.mode = supervised | automatic（ADR-0039，逐工具三�
 
 ### 14.2 已实现：会话级执行模式覆盖（ADR-0034）与 Agent Chat 布局
 
-在 Profile 级默认之上，Server 的 Session Job 现可保存**可空**的会话覆盖值（[ADR-0034](../adr/0034-pi-session-execution-mode-override.md)）：
+在 Profile 级默认之上，Server 的 `AgentSession` 现可保存**可空**的会话覆盖值（[ADR-0034](../adr/0034-pi-session-execution-mode-override.md)；实体由 ADR-0041 从 Job 迁出）：
 
 ```text
 executionModeOverride = supervised | automatic | null   // null = 动态跟随当前绑定 Profile（ADR-0039 两模式）
@@ -640,11 +640,11 @@ executionModeOverride = supervised | automatic | null   // null = 动态跟随�
 
 权威与生命周期：
 
-- 覆盖值存于既有 Session Job 控制面（`Job.toolExecutionModeOverride`），不进入 Run 锁身份 payload；每个 Run 在接纳时把实际生效模式固化到 `Job.runExecutionMode`，并把该值随 `agent.prompt` 下发，因此同一个 Run 内不热切换。
+- 覆盖值存于 `AgentSession.executionModeOverride`，不进入 Run 锁身份 payload；每个 Run 在接纳时把实际生效模式固化到 `AgentRun.executionMode`，并把该值随 `agent.prompt` 下发，因此同一个 Run 内不热切换。
 - 有效模式由 Server 解析：会话覆盖值优先，否则读取目标 Client 当前绑定且**已就绪**的 Profile 默认模式；Runtime/Profile 无法确认时拒绝接纳 Run（不静默使用默认值）。
-- 修改入口 `POST /api/clients/:clientId/pi/agent/:sessionId/execution-mode` 仅限 Owner，且要求会话静态空闲（`idle`/`done`/`cancelled`）、无活跃 Run 换代冲突；请求必须携带该会话的项目目录引用，Server 先确认该 Session 确属该目录。Observer/运行中一律拒绝。
+- 修改入口 `POST /api/clients/:clientId/pi/agent/:sessionId/execution-mode` 仅限 Owner，且要求会话无未结算 Run；请求必须携带该会话的项目目录引用，Server 先确认该 Session 确属该目录。Observer/运行中一律拒绝。
 - 模式写入与 Run 接纳共用按 clientId 串行的窄队列，避免“设置成功但下一个 Run 用旧模式”。
-- Client 侧 `PI_SESSION_JOB_PROTOCOL_VERSION` 升到 v2：`agent.prompt` 缺 `executionMode` 或值非法即 `PI_PROTOCOL_INVALID`；`ensureWrapper()` 比较当前 wrapper 模式与请求模式，空闲时不一致就先关闭旧 wrapper 再按新模式重建，使 SDK 工具集与 Tool Policy bridge 同源；活跃 Run 期间不同模式的 Prompt 返回 `PI_PROJECT_BUSY`。
+- Client 侧 Pi 会话协议（[ADR-0041](../adr/0041-agent-session-run-and-audit-separation.md) 后为 `PI_SESSION_PROTOCOL_VERSION = 4`）：`agent.prompt` 缺 `executionMode` 或值非法即 `PI_PROTOCOL_INVALID`；`ensureWrapper()` 比较当前 wrapper 模式与请求模式，空闲时不一致就先关闭旧 wrapper 再按新模式重建，使 SDK 工具集与 Tool Policy bridge 同源；活跃 Run 期间不同模式的 Prompt 返回 `PI_PROJECT_BUSY`。
 
 `/agent/chat` 页面据此改为「机器 → 多项目 → 会话 → 宽屏聊天」:项目列表只存在当前浏览器的 `clientId` 分区(置顶/移除仅改本地索引,可损坏时恢复为空列表),项目行可直接新建任务并立即打开空会话。会话参数(模型、思考等级、执行模式)收在 composer 底部操作行内,菜单展示服务端确认的覆盖值与有效模式(「跟随 Profile」表示清除覆盖),自动执行显示边界提示。布局沿用全局导航:Agent 左栏是不套卡片的平整项目/会话导航(二级操作为图标按钮,保留可访问名称),中栏只保留一条会话标题栏与居中空态,机器工作区 `/machines/:id` 的 Pi 入口沿用原有会话树、重命名/删除与 Owner 限制,不因共享组件改变行为。
 
@@ -987,7 +987,7 @@ flowchart LR
 | Plan 2「受信资源与策略」 | D Bundle + E Tool/Resource policy | `pi-resources/` + manifest + hash 随 Release 发布；allow/confirm/deny（默认拒绝、每次调用审批、超时即拒绝）；项目资源继续默认关闭 | Bundle 缺失或不匹配 fail closed；Project 本地 Extension 永不加载；策略与资源不落盘不进环境变量 |
 | Plan 2.1「旧 Session 显式导入」 | §21.3 显式导入（从 Plan 2 拆出） | 用户主动选择源 Session → 只读打开 → 校验 cwd → 复制到 VCPDeck Session root，源文件不动 | 不自动搬运、不迁移凭据；导入后只操作副本 |
 | Plan 2.2「工具执行模式」 | §14.1 Execution Mode | 初版:`approval / auto / yolo`,RuntimeSpec v4、bridge v2、`vcp.tool-policy` v2;**已由 ADR-0039 演进为两模式 `supervised / automatic`**(RuntimeSpec v5、bridge v3、`vcp.tool-policy` v3、SessionJob v3),逐工具三桶删除;存量 Profile 不静默扩权,须显式确认迁移 | 已实现:两模式语义落地;活跃 Run 不热切换;迁移确认走专用端点(CAS,冲突 409) |
-| Plan 3「展示层复用」 | F UI renderer | VCPDeck Pi UI Adapter + 从 `examples/pi-web` 移植展示组件 | 替换 renderer 不改变 REST/SSE/Owner/Run 与 Session Job 语义（§18） |
+| Plan 3「展示层复用」 | F UI renderer | VCPDeck Pi UI Adapter + 从 `examples/pi-web` 移植展示组件 | 替换 renderer 不改变 REST/SSE/Owner/Run 与会话语义（§18） |
 
 硬约束：Plan 1 不得只发布 Client 侧隔离；Plan 1 完成前，任何 Client Release 都不得引入「没有 RuntimeSpec 也启动 Pi Worker」的路径。
 
@@ -1127,7 +1127,7 @@ Provider 的模型条目是判别联合，`metadataSource` 决定元数据权威
 
 - [`remote-pi.md`](./remote-pi.md)：当前远程 Pi 行为事实；本方案落地前继续保持 Current。
 - [ADR-0007](../adr/0007-client-owned-interactive-runtime.md)：继续有效；Session JSONL 和 Worker 仍在 Client。
-- [ADR-0008](../adr/0008-pi-session-job-and-run-lifecycle.md)：继续有效；Session Job/Run 模型不改变。
+- [ADR-0008](../adr/0008-pi-session-job-and-run-lifecycle.md)：已由 ADR-0041 替代；其历史 Session Job/Run 模型不改变。
 - [ADR-0029](../adr/0029-server-managed-isolated-pi-runtime.md)：本方案长期决策提案。
 - [`release-and-update.md`](./release-and-update.md)：Resource Bundle 实现后同步当前 Release 事实。
 - [`security.md`](../security.md)：集中 Credential、Tool Policy 和 trust 边界实现后同步。

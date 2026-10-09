@@ -35,6 +35,9 @@ interface PiTestOptions {
 	sessions?: unknown;
 	roots?: string[];
 	stateSequence?: string[];
+	runSequence?: Array<"pending" | "running" | "waiting_input" | "disconnected" | "succeeded" | "failed" | "aborted">;
+	runErrorCode?: string;
+	activeRun?: Record<string, unknown> | null;
 	contextMessages?: Array<Record<string, unknown>>;
 }
 
@@ -47,6 +50,7 @@ async function listenPi(
 ): Promise<{ port: number; bodies: unknown[] }> {
 	const bodies: unknown[] = [];
 	let stateIndex = 0;
+	let runIndex = 0;
 	const server = createServer((request, response) => {
 		const url = request.url ?? "";
 		const path = url.split("?")[0];
@@ -99,7 +103,50 @@ async function listenPi(
 			return;
 		}
 		if (/\/pi\/agent\/(s-[a-z0-9-]+)\/open$/.test(path)) {
-			response.end(JSON.stringify({ job: {} }));
+			response.end(JSON.stringify({ snapshot: {}, agentState: {} }));
+			return;
+		}
+		// ADR-0041:独立 Run 摘要与快照(CLI 按终局等待,不再把 idle 当成功)。
+		if (/\/pi\/agent\/(s-[a-z0-9-]+)\/runs\/run-1$/.test(path)) {
+			const sequence =
+				options.runSequence && options.runSequence.length > 0
+					? options.runSequence
+					: ["succeeded"];
+			const status = runIndex < sequence.length ? sequence[runIndex] : "succeeded";
+			runIndex += 1;
+			response.end(
+				JSON.stringify({
+					runId: "run-1",
+					sessionId: "s-new",
+					status,
+					kind: "prompt",
+					executionMode: "supervised",
+					actorName: "User",
+					source: "web",
+					createdAt: "2026-10-08T00:00:00.000Z",
+					acceptedAt: "2026-10-08T00:00:01.000Z",
+					startedAt: "2026-10-08T00:00:01.000Z",
+					finishedAt: status === "succeeded" || status === "failed" || status === "aborted"
+						? "2026-10-08T00:00:02.000Z"
+						: null,
+					errorCode: status === "failed" ? (options.runErrorCode ?? "PI_WORKER_EXITED") : null,
+				}),
+			);
+			return;
+		}
+		if (/\/pi\/agent\/(s-[a-z0-9-]+)\/snapshot$/.test(path)) {
+			response.end(
+				JSON.stringify({
+					sessionId: "s-existing",
+					status: "available",
+					activeRun: options.activeRun ?? null,
+					executionModeOverride: null,
+					effectiveExecutionMode: "supervised",
+					executionModeNeedsConfirmation: false,
+					ownerName: "User",
+					isOwner: true,
+				}),
+			);
 			return;
 		}
 		if (/\/pi\/agent\/(s-[a-z0-9-]+)$/.test(path) && request.method === "POST") {
@@ -111,7 +158,7 @@ async function listenPi(
 					body: JSON.parse(Buffer.concat(chunks).toString()),
 				});
 				response.end(
-					JSON.stringify({ submissionId: "sub-1", accepted: true }),
+					JSON.stringify({ sessionId: "s-new", runId: "run-1" }),
 				);
 			});
 			return;
@@ -210,7 +257,7 @@ describe("pi command", () => {
 
 	it("run 自动创建会话、提交提示词、轮询至 idle 并提取助手回复", async () => {
 		const { port, bodies } = await listenPi({
-			stateSequence: ["running", "idle"],
+			runSequence: ["running", "succeeded"],
 			contextMessages: [
 				{ role: "user", content: [{ type: "text", text: "列出文件" }] },
 				{
@@ -250,7 +297,7 @@ describe("pi command", () => {
 	});
 
 	it("既有会话走 open；扩展输入等待时明确报错", async () => {
-		const waiting = await listenPi({ stateSequence: ["waiting_for_extension_input"] });
+		const waiting = await listenPi({ runSequence: ["waiting_input"] });
 		const first = await fixture(waiting.port);
 		await expect(
 			runPiCommand(
@@ -274,16 +321,42 @@ describe("pi command", () => {
 		expect(lines.join("\n")).toContain("── Pi 回复 ──");
 	});
 
-	it("abort 提交中止请求", async () => {
-		const { port } = await listenPi({});
-		const { paths, processEnv } = await fixture(port);
+	it("abort 提交中止请求；无活跃轮次时为明确 no-op", async () => {
+		const active = await listenPi({
+			activeRun: {
+				runId: "run-9",
+				sessionId: "s-9",
+				status: "running",
+				kind: "prompt",
+				executionMode: "supervised",
+				actorName: null,
+				source: null,
+				createdAt: "2026-10-08T00:00:00.000Z",
+				acceptedAt: null,
+				startedAt: null,
+				finishedAt: null,
+				errorCode: null,
+			},
+		});
+		const first = await fixture(active.port);
 		const lines: string[] = [];
 		await runPiCommand("abort", ["workstation", "--session=s-9"], {
-			paths,
-			processEnv,
+			paths: first.paths,
+			processEnv: first.processEnv,
 			log: (m) => lines.push(m),
 		});
 		expect(lines.join("\n")).toContain("中止请求已提交");
+
+		// 没有活跃 Run:不猜 runId,明确告知无需中止。
+		const idle = await listenPi({});
+		const second = await fixture(idle.port);
+		const idleLines: string[] = [];
+		await runPiCommand("abort", ["workstation", "--session=s-9"], {
+			paths: second.paths,
+			processEnv: second.processEnv,
+			log: (m) => idleLines.push(m),
+		});
+		expect(idleLines.join("\n")).toContain("无需中止");
 	});
 
 	describe("pi attach REPL", () => {
@@ -327,7 +400,22 @@ describe("pi command", () => {
 
 		it("/abort 提交中止；EOF 退出；单轮失败不退出 REPL", async () => {
 			const { port } = await listenPi({
-				stateSequence: ["waiting_for_extension_input", "running", "idle"],
+				// 第 1 轮等待扩展输入,第 2 轮成功;之后 /abort 需要活跃 Run。
+				runSequence: ["waiting_input", "succeeded"],
+				activeRun: {
+					runId: "run-1",
+					sessionId: "s-existing",
+					status: "running",
+					kind: "prompt",
+					executionMode: "supervised",
+					actorName: null,
+					source: null,
+					createdAt: "2026-10-08T00:00:00.000Z",
+					acceptedAt: null,
+					startedAt: null,
+					finishedAt: null,
+					errorCode: null,
+				},
 				contextMessages: [
 					{ role: "assistant", content: [{ type: "text", text: "恢复后回复" }] },
 				],

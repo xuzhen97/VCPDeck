@@ -329,8 +329,17 @@ async function stagePackage(
 			join(pkgDir, "prisma", "schema.prisma"),
 			join(target, "schema.prisma"),
 		);
-		// Prisma 7 CLI 强制要求 config 文件（preStart db push 与运行时共用 DATABASE_URL）
+		// Prisma 7 CLI 强制要求 config 文件(preStart db push 与运行时共用 DATABASE_URL)
 		cpSync(join(pkgDir, "prisma.config.cjs"), join(target, "prisma.config.cjs"));
+		// Agent 显式迁移(ADR-0041):preStart 先迁移后 db push;脚本与 SQL 随包分发
+		cpSync(
+			join(pkgDir, "prisma", "agent-session-migration.cjs"),
+			join(target, "agent-session-migration.cjs"),
+		);
+		cpSync(
+			join(pkgDir, "prisma", "migrations", "20261008000000_agent_session_run_audit", "migration.sql"),
+			join(target, "agent-session-migration.sql"),
+		);
 		// Frontend 构建产物 → <server>/public，由 ServeStatic 同源托管（见 ADR-0013）
 		// （frontend 已在 main() 中先于 staging 构建，此处校验防遗漏）
 		const frontendDist = join(ROOT, "packages", "frontend", "dist");
@@ -601,7 +610,7 @@ async function main(): Promise<void> {
 							dir: "server",
 							entry: "dist/main.js",
 							// 不依赖 PATH/.bin（shell 执行时环境无 node_modules/.bin）
-							preStart: "node node_modules/prisma/build/index.js db push",
+							preStart: "node agent-session-migration.cjs && node node_modules/prisma/build/index.js db push",
 						},
 						client: { dir: "client", entry: "dist/index.js" },
 					},

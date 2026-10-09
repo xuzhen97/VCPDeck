@@ -12,6 +12,7 @@ import { PiEventBroker } from "./pi-event-broker.js";
 import { PiRequestBroker } from "./pi-request-broker.js";
 import { PiAttachmentService } from "./pi-attachment.service.js";
 import { PiRunService } from "./pi-run.service.js";
+import { PiSessionService } from "./pi-session.service.js";
 
 const actor = {
 	identityId: "user-1",
@@ -40,7 +41,8 @@ const SENSITIVE_SENTINELS = [
 ];
 
 function matches(value: unknown, condition: unknown): boolean {
-	if (condition && typeof condition === "object" && !Array.isArray(condition)) {
+	if (condition === null) return value === null || value === undefined;
+	if (typeof condition === "object" && !Array.isArray(condition)) {
 		const { in: values } = condition as { in?: unknown[] };
 		if (values) return values.includes(value);
 	}
@@ -122,7 +124,126 @@ function makePrismaMemory() {
 				files.find((candidate) => candidate.id === args.where.id) ?? null,
 		),
 	};
-	return { job, jobs, calls, file, files };
+	// ADR-0041:会话/执行/审计独立于 Job。
+	const sessions: Array<Record<string, unknown>> = [];
+	const agentRuns: Array<Record<string, unknown>> = [];
+	const audits: Array<Record<string, unknown>> = [];
+	const agentSession = {
+		create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+			calls.push(args);
+			if (sessions.some((candidate) => candidate.id === args.data.id)) throw { code: "P2002" };
+			const created = {
+				status: "available",
+				activeRunId: null,
+				executionModeNeedsConfirmation: false,
+				deleteToken: null,
+				deletePreviousStatus: null,
+				...args.data,
+			};
+			sessions.push(created);
+			return created;
+		}),
+		findUnique: vi.fn(async (args: { where: { id: string } }) =>
+			sessions.find((candidate) => candidate.id === args.where.id) ?? null),
+		findMany: vi.fn(async (args?: { where?: Record<string, unknown> }) =>
+			sessions.filter((candidate) =>
+				Object.entries(args?.where ?? {}).every(([key, value]) => matches(candidate[key], value)),
+			)),
+		update: vi.fn(async () => {
+			throw new Error("agentSession.update is forbidden; use updateMany CAS");
+		}),
+		updateMany: vi.fn(async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+			calls.push(args);
+			let count = 0;
+			for (const candidate of sessions) {
+				if (Object.entries(args.where).every(([key, value]) => matches(candidate[key], value))) {
+					Object.assign(candidate, args.data);
+					count += 1;
+				}
+			}
+			return { count };
+		}),
+	};
+	const agentRun = {
+		create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+			calls.push(args);
+			const created = { createdAt: new Date(), ...args.data };
+			agentRuns.push(created);
+			return created;
+		}),
+		findUnique: vi.fn(async (args: { where: { id: string } }) =>
+			agentRuns.find((candidate) => candidate.id === args.where.id) ?? null),
+		findMany: vi.fn(async (args?: { where?: Record<string, unknown> }) =>
+			agentRuns.filter((candidate) =>
+				Object.entries(args?.where ?? {}).every(([key, value]) => matches(candidate[key], value)),
+			)),
+		count: vi.fn(async (args?: { where?: Record<string, unknown> }) =>
+			agentRuns.filter((candidate) =>
+				Object.entries(args?.where ?? {}).every(([key, value]) => matches(candidate[key], value)),
+			).length),
+		update: vi.fn(async () => {
+			throw new Error("agentRun.update is forbidden; use updateMany CAS");
+		}),
+		updateMany: vi.fn(async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+			calls.push(args);
+			let count = 0;
+			for (const candidate of agentRuns) {
+				if (Object.entries(args.where).every(([key, value]) => matches(candidate[key], value))) {
+					Object.assign(candidate, args.data);
+					count += 1;
+				}
+			}
+			return { count };
+		}),
+	};
+	const agentAuditEvent = {
+		create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+			calls.push(args);
+			audits.push({ createdAt: new Date(), ...args.data });
+			return args.data;
+		}),
+		findMany: vi.fn(async (args?: { where?: Record<string, unknown> }) =>
+			audits.filter((candidate) =>
+				Object.entries(args?.where ?? {}).every(([key, value]) => matches(candidate[key], value)),
+			)),
+		count: vi.fn(async (args?: { where?: Record<string, unknown> }) =>
+			audits.filter((candidate) =>
+				Object.entries(args?.where ?? {}).every(([key, value]) => matches(candidate[key], value)),
+			).length),
+	};
+	const scoped = () => ({ job, file, agentSession, agentRun, agentAuditEvent });
+	const prisma = {
+		...scoped(),
+		$transaction: async <T,>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
+			const snapshot = {
+				sessions: structuredClone(sessions),
+				agentRuns: structuredClone(agentRuns),
+				audits: structuredClone(audits),
+			};
+			try {
+				return await fn(scoped());
+			} catch (error) {
+				sessions.splice(0, sessions.length, ...snapshot.sessions);
+				agentRuns.splice(0, agentRuns.length, ...snapshot.agentRuns);
+				audits.splice(0, audits.length, ...snapshot.audits);
+				throw error;
+			}
+		},
+	};
+	return {
+		...prisma,
+		job,
+		jobs,
+		calls,
+		file,
+		files,
+		agentSession,
+		agentRun,
+		agentAuditEvent,
+		sessions,
+		agentRuns,
+		audits,
+	};
 }
 
 function makeSocket(id: string): Socket {
@@ -149,7 +270,7 @@ function registration(clientId = "c1") {
 				sdkVersion: "1",
 				nodeVersion: "22.18.0",
 				shellKind: "path" as const,
-				sessionJobProtocolVersion: 3,
+				sessionProtocolVersion: 4,
 			},
 		},
 	};
@@ -173,10 +294,12 @@ function makeLoopback() {
 		} as never,
 		prisma as never,
 	);
-	const runs = new PiRunService(prisma as never, {
+	const runtimeSource = {
 		assertReady: vi.fn(),
 		effectiveExecutionMode: vi.fn(async () => "supervised"),
-	} as never);
+	};
+	const runs = new PiRunService(prisma as never, runtimeSource as never);
+	const sessions = new PiSessionService(prisma as never, runtimeSource as never);
 	const requests = new PiRequestBroker();
 	const events = new PiEventBroker(requests, runs);
 	const sockets = new Map<string, Socket>();
@@ -190,7 +313,7 @@ function makeLoopback() {
 				clientId: "c1",
 				capabilities: ["agent.pi"],
 				capabilityDetails: {
-					pi: { available: true, sessionJobProtocolVersion: 3 },
+					pi: { available: true, sessionProtocolVersion: 4 },
 				},
 			},
 		]),
@@ -253,6 +376,7 @@ function makeLoopback() {
 		requests,
 		events,
 		runs,
+		sessions,
 		clientService as never,
 		attachments,
 		{ assertCompatible: vi.fn(), assertReady: vi.fn() } as never,
@@ -294,12 +418,16 @@ function makeLoopback() {
 		const result = await gateway.handlePiState(socket, stateReport);
 		return result as unknown;
 	};
-	const current = (jobId: string) =>
-		prisma.jobs.find((job) => job.id === jobId)!;
+	/** 会话控制面行(含 activeRunId);Run 状态用 currentRun 读取。 */
+	const current = (sessionId: string) =>
+		prisma.sessions.find((row) => row.id === sessionId)!;
+	const currentRun = (runId: string) =>
+		prisma.agentRuns.find((row) => row.id === runId)!;
 
 	return {
 		prisma,
 		runs,
+		sessions,
 		requests,
 		events,
 		gateway,
@@ -313,6 +441,7 @@ function makeLoopback() {
 		register,
 		reconcile,
 		current,
+		currentRun,
 	};
 }
 
@@ -357,7 +486,7 @@ describe("Pi Gateway loopback 集成", () => {
 			reportAgain: false,
 		});
 
-		await loop.runs.ensureSession(actor, {
+		await loop.sessions.ensureSession(actor, {
 			clientId: "c1",
 			sessionId: "session-1",
 		});
@@ -365,12 +494,12 @@ describe("Pi Gateway loopback 集成", () => {
 			clientId: "c1",
 			sessionId: "session-1",
 			projectKey: PROJECT_KEY,
+			kind: "prompt",
 		});
-		await loop.runs.accept(run.jobId, run.runId);
+		await loop.runs.accept(run.sessionId, run.runId);
 		const base = {
 			clientId: "c1",
 			sessionId: "session-1",
-			jobId: "session-1",
 			runId: run.runId,
 		};
 		await loop.gateway.handlePiEvent(socket, {
@@ -381,7 +510,7 @@ describe("Pi Gateway loopback 集成", () => {
 				ui: { requestId: "ui-1", extensionId: "ext", kind: "confirm" },
 			},
 		} as PiEvent);
-		expect(loop.current("session-1").status).toBe("waiting_input");
+		expect(loop.currentRun(run.runId).status).toBe("waiting_input");
 		await loop.gateway.handlePiEvent(socket, {
 			...base,
 			event: {
@@ -392,17 +521,17 @@ describe("Pi Gateway loopback 集成", () => {
 				hasPending: false,
 			},
 		} as PiEvent);
-		expect(loop.current("session-1").status).toBe("running");
+		expect(loop.currentRun(run.runId).status).toBe("running");
 		await loop.gateway.handlePiEvent(socket, {
 			...base,
 			event: { type: "agent_settled", sessionId: "session-1" },
 		} as PiEvent);
 		await vi.advanceTimersByTimeAsync(30_000);
 		await flush();
-		expect(loop.current("session-1")).toMatchObject({
-			status: "idle",
-			payload: "{}",
-		});
+		// 自动结算为成功终局并释放会话指针;会话本身仍可用。
+		expect(loop.currentRun(run.runId).status).toBe("succeeded");
+		expect(loop.current("session-1")).toMatchObject({ activeRunId: null });
+		expect(loop.current("session-1").status).toBe("available");
 	});
 
 	it("run-1/run-2 settlement 交错与 complete race 保持当前 run/done", async () => {
@@ -412,7 +541,7 @@ describe("Pi Gateway loopback 集成", () => {
 		loop.autoRespond(socket);
 		await loop.register(socket);
 		await loop.reconcile(socket);
-		await loop.runs.ensureSession(actor, {
+		await loop.sessions.ensureSession(actor, {
 			clientId: "c1",
 			sessionId: "session-1",
 		});
@@ -421,51 +550,48 @@ describe("Pi Gateway loopback 集成", () => {
 			clientId: "c1",
 			sessionId: "session-1",
 			projectKey: PROJECT_KEY,
+			kind: "prompt",
 		});
-		await loop.runs.accept(run1.jobId, run1.runId);
+		await loop.runs.accept(run1.sessionId, run1.runId);
 		await loop.gateway.handlePiEvent(socket, {
 			clientId: "c1",
 			sessionId: "session-1",
-			jobId: "session-1",
 			runId: run1.runId,
 			event: { type: "agent_settled", sessionId: "session-1" },
 		} as PiEvent);
-		await loop.runs.finishRun(run1.jobId, run1.runId);
+		await loop.runs.settleRun(run1.sessionId, run1.runId, { status: "succeeded" });
 		const run2 = await loop.runs.startRun(actor, {
 			clientId: "c1",
 			sessionId: "session-1",
 			projectKey: PROJECT_KEY,
+			kind: "prompt",
 		});
-		await loop.runs.accept(run2.jobId, run2.runId);
+		await loop.runs.accept(run2.sessionId, run2.runId);
 		await vi.advanceTimersByTimeAsync(30_000);
-		expect(loop.current("session-1")).toMatchObject({
-			status: "running",
-			payload: JSON.stringify({ runId: run2.runId }),
-		});
+		expect(loop.current("session-1")).toMatchObject({ activeRunId: run2.runId });
+		expect(loop.currentRun(run1.runId).status).toBe("succeeded");
+		expect(loop.currentRun(run2.runId).status).toBe("running");
 
 		await loop.gateway.handlePiEvent(socket, {
 			clientId: "c1",
 			sessionId: "session-1",
-			jobId: "session-1",
 			runId: run2.runId,
 			event: { type: "agent_settled", sessionId: "session-1" },
 		} as PiEvent);
-		await loop.runs.completeSession("session-1", run2.runId);
+		await loop.runs.settleRun("session-1", run2.runId, { status: "succeeded" });
 		await vi.advanceTimersByTimeAsync(30_000);
-		expect(loop.current("session-1")).toMatchObject({
-			status: "done",
-			payload: "{}",
-		});
+		expect(loop.currentRun(run2.runId).status).toBe("succeeded");
+		expect(loop.current("session-1")).toMatchObject({ activeRunId: null });
 	});
 
 	it("projectKey 冲突要求二次 PI_STATE；prompt_error sentinel 不持久化", async () => {
 		const loop = makeLoopback();
 		const socket = loop.addSocket("socket-1");
-		await loop.runs.ensureSession(actor, {
+		await loop.sessions.ensureSession(actor, {
 			clientId: "c1",
 			sessionId: "session-1",
 		});
-		await loop.runs.ensureSession(actor, {
+		await loop.sessions.ensureSession(actor, {
 			clientId: "c1",
 			sessionId: "session-2",
 		});
@@ -473,28 +599,28 @@ describe("Pi Gateway loopback 集成", () => {
 			clientId: "c1",
 			sessionId: "session-1",
 			projectKey: "1".repeat(64),
+			kind: "prompt",
 		});
 		const run2 = await loop.runs.startRun(actor, {
 			clientId: "c1",
 			sessionId: "session-2",
 			projectKey: "2".repeat(64),
+			kind: "prompt",
 		});
-		await loop.runs.accept(run1.jobId, run1.runId);
-		await loop.runs.accept(run2.jobId, run2.runId);
+		await loop.runs.accept(run1.sessionId, run1.runId);
+		await loop.runs.accept(run2.sessionId, run2.runId);
 		await loop.register(socket);
 		expect(
 			await loop.reconcile(
 				socket,
 				report([
 					{
-						jobId: "session-1",
 						sessionId: "session-1",
 						runId: run1.runId,
 						status: "running",
 						projectKey: PROJECT_KEY,
 					},
 					{
-						jobId: "session-2",
 						sessionId: "session-2",
 						runId: run2.runId,
 						status: "running",
@@ -569,18 +695,20 @@ describe("Pi Gateway loopback 集成", () => {
 			await loop.gateway.handlePiEvent(socket, {
 				clientId: "c1",
 				sessionId: "session-3",
-				jobId: run3.jobId,
 				runId: run3.runId,
 				event,
 			} as PiEvent);
 		}
-		const job = loop.current(run3.jobId);
-		expect(job).toMatchObject({
-			errorMessage: null,
-			progress: null,
-			result: null,
+		const session = loop.current("session-3");
+		const failedRun = loop.currentRun(run3.runId);
+		// 失败摘要只保留安全错误码,不含外部错误正文。
+		expect(failedRun).toMatchObject({ status: "failed", errorCode: "PI_WORKER_EXITED" });
+		expect(session).not.toHaveProperty("errorMessage");
+		const persisted = JSON.stringify({
+			calls: loop.prisma.calls,
+			session,
+			failedRun,
 		});
-		const persisted = JSON.stringify({ calls: loop.prisma.calls, job });
 		for (const sentinel of SENSITIVE_SENTINELS) {
 			expect(persisted).not.toContain(sentinel);
 		}
@@ -641,7 +769,12 @@ describe("Pi Gateway loopback 集成", () => {
 			await flush();
 			await vi.advanceTimersByTimeAsync(15_000);
 			await outcome;
-			expect(loop.current("session-timeout").status).toBe(expectedStatus);
+			const session = loop.current("session-timeout");
+			if (expectedStatus === "running") {
+				expect(loop.currentRun(session.activeRunId as string).status).toBe("running");
+			} else {
+				expect(session.activeRunId).toBeNull();
+			}
 		},
 	);
 
@@ -651,7 +784,7 @@ describe("Pi Gateway loopback 集成", () => {
 		const newSocket = loop.addSocket("socket-2");
 		await loop.register(oldSocket);
 		await loop.reconcile(oldSocket);
-		await loop.runs.ensureSession(actor, { clientId: "c1", sessionId: "session-legacy" });
+		await loop.sessions.ensureSession(actor, { clientId: "c1", sessionId: "session-legacy" });
 		const emitted: PiRequest[] = [];
 		loop.requestHandlers.set(oldSocket.id, (request) => emitted.push(request));
 
@@ -712,10 +845,10 @@ describe("Pi Gateway loopback 集成", () => {
 		expect(newSocket.emit).toHaveBeenCalledWith("ack", { event: "register" });
 		await loop.reconcile(newSocket);
 
-		const beforeDisconnect = { ...loop.prisma.jobs[0] };
+		const beforeDisconnect = structuredClone(loop.prisma.sessions[0]);
 		await loop.gateway.handleDisconnect(oldSocket);
 		expect(loop.jobService.markDisconnected).not.toHaveBeenCalled();
-		expect(loop.prisma.jobs[0]).toEqual(beforeDisconnect);
+		expect(loop.prisma.sessions[0]).toEqual(beforeDisconnect);
 	});
 
 	it("纯图片 prompt 通过真实附件校验下发服务端描述符，无内容请求不创建 Run", async () => {
@@ -792,10 +925,12 @@ describe("Pi Gateway loopback 集成", () => {
 			],
 		});
 		expect(JSON.stringify(emitted)).not.toContain("evil.test");
-		expect(loop.prisma.jobs.length).toBe(jobsBefore + 1);
+		// ADR-0041:接纳 Run 不再写 Job,改为独立 AgentRun 行。
+		expect(loop.prisma.agentRuns.length).toBe(jobsBefore + 1);
+		expect(loop.prisma.jobs.length).toBe(jobsBefore);
 
 		// 无内容与无效引用都必须在创建 Run 之前被拒。
-		const jobsAfterValid = loop.prisma.jobs.length;
+		const jobsAfterValid = loop.prisma.agentRuns.length;
 		await expect(
 			loop.controller.prompt(
 				"c1",
@@ -825,7 +960,7 @@ describe("Pi Gateway loopback 集成", () => {
 				actor,
 			),
 		).rejects.toMatchObject({ response: { code: "PI_IMAGE_INVALID" } });
-		expect(loop.prisma.jobs.length).toBe(jobsAfterValid);
+		expect(loop.prisma.agentRuns.length).toBe(jobsAfterValid);
 	});
 });
 
@@ -884,8 +1019,8 @@ describe("Pi Gateway 扩展命令 loopback(ADR-0040 决策 2)", () => {
 				args: "src/pi",
 			},
 			actor,
-		)) as { jobId: string; runId: string; sessionId: string };
-		expect(acceptedRun).toMatchObject({ jobId: "session-cmd", sessionId: "session-cmd" });
+		)) as { runId: string; sessionId: string };
+		expect(acceptedRun).toMatchObject({ sessionId: "session-cmd" });
 		const dispatched = emitted.find(
 			(request) => request.action === "agent.command",
 		);
@@ -917,13 +1052,13 @@ describe("Pi Gateway 扩展命令 loopback(ADR-0040 决策 2)", () => {
 		await loop.gateway.handlePiEvent(socket, {
 			clientId: "c1",
 			sessionId: "session-cmd",
-			jobId: acceptedRun.jobId,
 			runId: acceptedRun.runId,
 			event: { type: "agent_settled", sessionId: "session-cmd" },
 		} as PiEvent);
 		await vi.advanceTimersByTimeAsync(30_000);
 		await flush();
-		expect(loop.current("session-cmd")).toMatchObject({ status: "idle" });
+		expect(loop.currentRun(acceptedRun.runId).status).toBe("succeeded");
+		expect(loop.current("session-cmd")).toMatchObject({ activeRunId: null });
 
 		// 4) 未注册命令:能到达 Client 并被拒绝,翻成 400 且 Run 即时结算。
 		await expect(
@@ -943,7 +1078,11 @@ describe("Pi Gateway 扩展命令 loopback(ADR-0040 决策 2)", () => {
 		});
 		await vi.advanceTimersByTimeAsync(30_000);
 		await flush();
-		expect(loop.current("session-cmd")).toMatchObject({ status: "idle" });
+		// 被拒绝的一轮以失败终局结算,会话指针释放,可再次执行。
+		expect(loop.current("session-cmd")).toMatchObject({ activeRunId: null });
+		expect(
+			loop.prisma.agentRuns.some((row) => row.status === "failed"),
+		).toBe(true);
 
 		// 5) 拒绝结算后可再次执行。
 		await expect(

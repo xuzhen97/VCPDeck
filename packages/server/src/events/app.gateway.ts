@@ -31,8 +31,7 @@ import {
 	parseTunnelBrowserAttach,
 	parseTunnelClose,
 } from "@vcpdeck/shared";
-
-const FRONTEND_ORIGIN = process.env.VCPDECK_FRONTEND_ORIGIN || "http://localhost:5173";
+import { resolveFrontendOrigin } from "../auth/trusted-origins.js";
 
 function sha256(s: string): string {
   return createHash("sha256").update(s).digest("hex");
@@ -60,7 +59,7 @@ function actorOf(client: Socket): ActorContext {
 
 @WebSocketGateway({
   namespace: "/app",
-  cors: { origin: FRONTEND_ORIGIN, credentials: true },
+  cors: { origin: resolveFrontendOrigin(), credentials: true },
 })
 export class AppGateway {
   @WebSocketServer()

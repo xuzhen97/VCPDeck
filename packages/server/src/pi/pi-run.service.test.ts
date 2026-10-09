@@ -1,10 +1,13 @@
+/**
+ * PiSessionService / PiRunService 行为测试(ADR-0041 Task 3)。
+ *
+ * 覆盖意图沿用旧 Session-Job 测试:Run CAS、旧轮隔离、settlement 隔离、
+ * 删除预约、CAS 写、generation 对账与安全错误消息;改为独立实体语义。
+ */
 import { describe, expect, it, vi } from "vitest";
-import {
-	PI_ERROR_CODES,
-	type ActorContext,
-	type PiStateReport,
-} from "@vcpdeck/shared";
-import { PiRunService } from "./pi-run.service.js";
+import { PI_ERROR_CODES, type ActorContext, type PiStateReport } from "@vcpdeck/shared";
+import { PiRunService, safePiErrorMessage } from "./pi-run.service.js";
+import { PiSessionService } from "./pi-session.service.js";
 
 const actor: ActorContext = {
 	identityId: "user-1",
@@ -16,350 +19,256 @@ const actor: ActorContext = {
 	requestId: "req-1",
 };
 const otherActor = { ...actor, identityId: "user-2", displayName: "Other" };
-const input = { clientId: "c1", sessionId: "s1", projectKey: "k1" };
-const activeStatuses = ["pending", "running", "waiting_input", "disconnected"];
+const input = { clientId: "c1", sessionId: "s1", projectKey: "k1", kind: "prompt" as const };
 
-function matches(value: unknown, condition: unknown): boolean {
-	if (condition && typeof condition === "object" && !Array.isArray(condition)) {
-		const where = condition as { in?: unknown[] };
-		if (where.in) return where.in.includes(value);
-	}
-	return value === condition;
+interface Db {
+	sessions: Array<Record<string, any>>;
+	runs: Array<Record<string, any>>;
+	audits: Array<Record<string, any>>;
 }
 
-function prismaMock() {
-	const jobs: Array<Record<string, unknown>> = [];
-	const job = {
-		create: vi.fn(async (args: { data: Record<string, unknown> }) => {
-			if (jobs.some((candidate) => candidate.id === args.data.id)) {
-				throw { code: "P2002" };
-			}
-			const created = {
-				payload: "{}",
-				progress: null,
-				result: null,
-				errorCode: null,
-				errorMessage: null,
-				startedAt: null,
-				finishedAt: null,
-				runExecutionMode: null,
-				toolExecutionModeOverride: null,
-				createdAt: new Date(),
-				...args.data,
-			};
-			jobs.push(created);
-			return created;
-		}),
-		findUnique: vi.fn(
-			async (args: { where: { id: string } }) =>
-				jobs.find((candidate) => candidate.id === args.where.id) ?? null,
-		),
-		findMany: vi.fn(async (args?: { where?: Record<string, unknown> }) =>
-			jobs.filter((candidate) =>
-				Object.entries(args?.where ?? {}).every(([key, value]) =>
-					matches(candidate[key], value),
-				),
-			),
-		),
-		update: vi.fn(
-			async (args: {
-				where: { id: string };
-				data: Record<string, unknown>;
-			}) => {
-				const candidate = jobs.find((item) => item.id === args.where.id);
-				if (!candidate) throw new Error("not found");
-				Object.assign(candidate, args.data);
-				return candidate;
-			},
-		),
-		updateMany: vi.fn(
-			async (args: {
-				where: Record<string, unknown>;
-				data: Record<string, unknown>;
-			}) => {
-				let count = 0;
-				for (const candidate of jobs) {
-					if (
-						Object.entries(args.where).every(([key, value]) =>
-							matches(candidate[key], value),
-						)
-					) {
-						Object.assign(candidate, args.data);
-						count += 1;
+function makePrisma() {
+	const db: Db = { sessions: [], runs: [], audits: [] };
+	let transactionDepth = 0;
+
+	function scoped() {
+		return {
+			agentSession: {
+				findUnique: async (args: { where: { id: string } }) =>
+					db.sessions.find((s) => s.id === args.where.id) ?? null,
+				create: async (args: { data: Record<string, any> }) => {
+					if (db.sessions.some((s) => s.id === args.data.id)) throw { code: "P2002" };
+					const row = { activeRunId: null, executionModeNeedsConfirmation: false, ...args.data };
+					db.sessions.push(row);
+					return row;
+				},
+				updateMany: vi.fn(async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+					let count = 0;
+					for (const row of db.sessions) {
+						if (matches(row, args.where)) { Object.assign(row, args.data); count++; }
 					}
-				}
-				return { count };
+					return { count };
+				}),
+				update: vi.fn(async () => { throw new Error("snapshot.update is forbidden; use updateMany CAS"); }),
 			},
-		),
+			agentRun: {
+				create: async (args: { data: Record<string, any> }) => {
+					const row = { createdAt: new Date(), ...args.data };
+					db.runs.push(row);
+					return row;
+				},
+				findUnique: async (args: { where: { id: string } }) =>
+					db.runs.find((r) => r.id === args.where.id) ?? null,
+				findMany: vi.fn(async (args: { where?: Record<string, unknown> }) =>
+					db.runs.filter((r) => matches(r, args?.where ?? {}))),
+				count: vi.fn(async (args: { where?: Record<string, unknown> }) =>
+					db.runs.filter((r) => matches(r, args?.where ?? {})).length),
+				updateMany: vi.fn(async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+					let count = 0;
+					for (const row of db.runs) {
+						if (matches(row, args.where)) { Object.assign(row, args.data); count++; }
+					}
+					return { count };
+				}),
+				update: vi.fn(async () => { throw new Error("snapshot.update is forbidden; use updateMany CAS"); }),
+			},
+			agentAuditEvent: {
+				create: async (args: { data: Record<string, any> }) => {
+					const key = `${args.data.operationId}:${args.data.event}:${args.data.result}`;
+					if (args.data.operationId !== null && args.data.operationId !== undefined
+						&& db.audits.some((a) => `${a.operationId}:${a.event}:${a.result}` === key)) {
+						throw { code: "P2002" };
+					}
+					db.audits.push({ createdAt: new Date(), ...args.data });
+					return args.data;
+				},
+				findMany: vi.fn(async (args: { where?: Record<string, unknown> }) =>
+					db.audits.filter((a) => matches(a, args?.where ?? {}))),
+				count: vi.fn(async (args: { where?: Record<string, unknown> }) =>
+					db.audits.filter((a) => matches(a, args?.where ?? {})).length),
+			},
+		};
+	}
+
+	const prisma = {
+		...scoped(),
+		$transaction: async <T,>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
+			if (transactionDepth > 0) return fn(scoped());
+			transactionDepth++;
+			const snapshot: Db = structuredClone(db);
+			try {
+				return await fn(scoped());
+			} catch (error) {
+				db.sessions = snapshot.sessions;
+				db.runs = snapshot.runs;
+				db.audits = snapshot.audits;
+				throw error;
+			} finally {
+				transactionDepth--;
+			}
+		},
+		_db: db,
 	};
-	return { job, _jobs: jobs };
+	return prisma;
 }
 
-function setup(profileMode: "supervised" | "auto" | "automatic" = "supervised") {
-	const prisma = prismaMock();
+function matches(row: Record<string, any>, where: Record<string, unknown>): boolean {
+	for (const [key, condition] of Object.entries(where)) {
+		const value = row[key];
+		// Prisma 语义:缺失的可空列视为 NULL;mock 必须等价,否则 CAS 条件永不命中。
+		if (condition === null) {
+			if (value !== null && value !== undefined) return false;
+			continue;
+		}
+		if (typeof condition === "object" && !Array.isArray(condition)) {
+			const c = condition as { in?: unknown[]; not?: unknown };
+			if (c.in) { if (!c.in.includes(value)) return false; continue; }
+			if ("not" in c) { if (value === c.not) return false; continue; }
+		}
+		if (value !== condition) return false;
+	}
+	return true;
+}
+
+function setup() {
+	const prisma = makePrisma();
 	const runtime = {
 		assertReady: vi.fn(),
-		effectiveExecutionMode: vi.fn(async () => profileMode),
+		effectiveExecutionMode: vi.fn(async () => "supervised" as const),
 	};
-	const service = new PiRunService(prisma as never, runtime as never);
-	const current = () => prisma._jobs.find((job) => job.id === "s1")!;
-	const ensure = () =>
-		service.ensureSession(actor, { clientId: "c1", sessionId: "s1" });
+	const sessions = new PiSessionService(prisma as never, runtime as never);
+	const runs = new PiRunService(prisma as never, runtime as never);
+	const ensure = () => sessions.ensureSession(actor, { clientId: "c1", sessionId: "s1", event: "created" });
 	const start = async () => {
 		await ensure();
-		return service.startRun(actor, input);
+		return runs.startRun(actor, input);
 	};
 	const running = async () => {
 		const run = await start();
-		expect(await service.accept(run.jobId, run.runId)).toBe(true);
+		expect(await runs.accept("s1", run.runId)).toBe(true);
 		return run;
 	};
-	return { prisma, service, current, ensure, start, running, runtime };
+	return {
+		prisma,
+		sessions,
+		runs,
+		ensure,
+		start,
+		running,
+		runtime,
+		session: () => prisma._db.sessions.find((s) => s.id === "s1")!,
+		runRow: (id: string) => prisma._db.runs.find((r) => r.id === id),
+	};
 }
 
 function report(runs: PiStateReport["runs"]): PiStateReport {
 	return { clientId: "c1", runs, runtimeRevision: null, configState: "pending" };
 }
 
-function activeReport(
-	runId: string,
-	status: "running" | "waiting_input" = "running",
-	projectKey = "k1",
-) {
-	return { jobId: "s1", runId, sessionId: "s1", status, projectKey } as const;
+function activeReport(runId: string, status: "running" | "waiting_input" = "running", projectKey = "k1") {
+	return { runId, sessionId: "s1", status, projectKey } as const;
 }
 
-describe("PiRunService session CAS", () => {
-	it("mode snapshot uses the current Profile default until an override is saved", async () => {
-		const { service, ensure, runtime, current } = setup();
-		await ensure();
-		expect(await service.snapshot("s1", actor.identityId)).toMatchObject({
-			executionModeOverride: null,
-			effectiveExecutionMode: "supervised",
-		});
+const idleState = {
+	status: "idle" as const,
+	streaming: false,
+	prompting: false,
+	compacting: false,
+	thinkingLevel: "off" as const,
+	queuedMessages: { steering: [], followUp: [] },
+};
 
-		await service.setExecutionMode(actor, { ...input, mode: "automatic" });
-		expect(current().toolExecutionModeOverride).toBe("automatic");
-		expect(await service.snapshot("s1", actor.identityId)).toMatchObject({
-			executionModeOverride: "automatic",
-			effectiveExecutionMode: "automatic",
-		});
-
-		runtime.effectiveExecutionMode.mockResolvedValue("auto");
-		await service.setExecutionMode(actor, { ...input, mode: null });
-		expect(current().toolExecutionModeOverride).toBeNull();
-		expect(await service.snapshot("s1", actor.identityId)).toMatchObject({
-			executionModeOverride: null,
-			effectiveExecutionMode: "auto",
-		});
-	});
-
-	it("only Owner can change the mode and an active run makes it immutable", async () => {
-		const { service, ensure, running } = setup();
-		await ensure();
-		await expect(service.setExecutionMode(otherActor, { ...input, mode: "supervised" }))
-			.rejects.toMatchObject({ code: "PI_CONTROL_FORBIDDEN" });
-		const run = await running();
-		await expect(service.setExecutionMode(actor, { ...input, mode: "automatic" }))
-			.rejects.toMatchObject({ code: "PI_PROJECT_BUSY" });
-		await service.finishRun(run.jobId, run.runId);
-	});
-
-	it("serializes mode changes with run acceptance and persists the accepted mode", async () => {
-		const { service, ensure, current } = setup();
-		await ensure();
-		const changed = service.setExecutionMode(actor, { ...input, mode: "automatic" });
-		const runPromise = service.startRun(actor, input);
-		await changed;
-		const run = await runPromise;
-		expect(run.executionMode).toBe("automatic");
-		expect(current()).toMatchObject({
-			status: "pending",
-			toolExecutionModeOverride: "automatic",
-			runExecutionMode: "automatic",
-		});
-	});
-
-	it("fails closed if the runtime/Profile mode cannot be verified", async () => {
-		const prisma = prismaMock();
-		const service = new PiRunService(prisma as never);
-		await service.ensureSession(actor, { clientId: "c1", sessionId: "s1" });
-		await expect(service.startRun(actor, input)).rejects.toMatchObject({ code: "PI_CONFIG_UNAVAILABLE" });
-		expect(prisma._jobs[0]).toMatchObject({ status: "idle", payload: "{}" });
-	});
-
-	it("ensureSession 以 sessionId 幂等创建 idle agent.session", async () => {
-		const { prisma, ensure } = setup();
-		await ensure();
-		await ensure();
-		expect(prisma._jobs).toHaveLength(1);
-		expect(prisma._jobs[0]).toMatchObject({
-			id: "s1", clientId: "c1", type: "agent.session", status: "idle",
-			payload: "{}", progress: null, createdByIdentityId: "user-1",
-		});
-	});
-
-	it("并发唯一键冲突后校验 winner，不覆盖 Owner", async () => {
-		const { prisma, service } = setup();
-		prisma._jobs.push({
-			id: "s1",
-			clientId: "c1",
-			type: "agent.session",
-			status: "idle",
-			payload: "{}",
-			createdByIdentityId: "user-1",
-			createdByName: "User",
-		});
-		prisma.job.findUnique
-			.mockResolvedValueOnce(null)
-			.mockResolvedValueOnce(prisma._jobs[0]);
-		prisma.job.create.mockRejectedValueOnce({ code: "P2002" });
-		await expect(
-			service.ensureSession(otherActor, { clientId: "c1", sessionId: "s1" }),
-		).resolves.toBeUndefined();
-		expect(prisma.job.update).not.toHaveBeenCalled();
-	});
-
-	it("每次 startRun 保持 jobId 并生成新 runId", async () => {
-		const { service, start, current } = setup();
+describe("PiRunService 独立 Run CAS", () => {
+	it("每轮 startRun 生成新 runId 且不创建 Job", async () => {
+		const { runs, start, session } = setup();
 		const first = await start();
 		expect(first.executionMode).toBe("supervised");
-		expect(current().runExecutionMode).toBe("supervised");
-		await service.finishRun(first.jobId, first.runId);
-		const second = await service.startRun(actor, input);
-		expect(first.jobId).toBe("s1");
-		expect(second.jobId).toBe("s1");
+		await runs.settleRun("s1", first.runId, { status: "succeeded" });
+		const second = await runs.startRun(actor, input);
 		expect(second.runId).not.toBe(first.runId);
+		expect(session().activeRunId).toBe(second.runId);
 	});
 
-	it("snapshot 只返回安全字段与 Owner 视图", async () => {
-		const { service, start } = setup();
-		const { runId } = await start();
-		expect(await service.snapshot("s1", "user-2")).toEqual({
-			jobId: "s1",
-			sessionId: "s1",
-			status: "pending",
-			runId,
-			ownerName: "User",
-			isOwner: false,
-			executionModeOverride: null,
-			effectiveExecutionMode: "supervised",
+	it("旧轮迟到失败不能结算新轮或释放新锁", async () => {
+		const { runs, running, session } = setup();
+		const first = await running();
+		await runs.settleRun("s1", first.runId, { status: "succeeded" });
+		const second = await runs.startRun(actor, input);
+		expect(await runs.waitForInput("s1", first.runId)).toBe(false);
+		expect(await runs.failRun("s1", first.runId, "PI_WORKER_EXITED")).toBe(false);
+		expect(session().activeRunId).toBe(second.runId);
+		expect(runs.hasLock("s1", second.runId)).toBe(true);
+		expect(runs.hasLock("s1", first.runId)).toBe(false);
+	});
+
+	it("同会话并发只允许一个 winner", async () => {
+		const { sessions, runs } = setup();
+		await sessions.ensureSession(actor, { clientId: "c1", sessionId: "s1", event: "created" });
+		const results = await Promise.allSettled([
+			runs.startRun(actor, input),
+			runs.startRun(actor, input),
+		]);
+		expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+		expect(results.filter((r) => r.status === "rejected")[0]).toMatchObject({
+			reason: { code: "PI_PROJECT_BUSY" },
 		});
 	});
 
-	it("执行完整 run 状态矩阵并保持 progress=null", async () => {
-		const { service, current, running } = setup();
+	it("完整状态矩阵:waiting_input/resume/settled 自动结算", async () => {
+		const { runs, running, session, runRow } = setup();
 		const run = await running();
-		expect(await service.waitForInput(run.jobId, run.runId)).toBe(true);
-		expect(await service.resume(run.jobId, run.runId)).toBe(true);
-		expect(await service.finishRun(run.jobId, run.runId)).toBe(true);
-		expect(current()).toMatchObject({ status: "idle", payload: "{}", progress: null });
-		const next = await service.startRun(actor, input);
-		expect(current()).toMatchObject({
-			status: "pending",
-			payload: JSON.stringify({ runId: next.runId }),
-			progress: null,
-			result: null,
-			finishedAt: null,
-			errorCode: null,
-			errorMessage: null,
-		});
-	});
-
-	it("done 可重开；error 不可自动重开", async () => {
-		const { service, current, ensure } = setup();
-		await ensure();
-		expect(await service.completeSession("s1")).toBe(true);
-		expect(await service.completeSession("s1")).toBe(true);
-		await expect(service.startRun(actor, input)).resolves.toBeDefined();
-		const runId = JSON.parse(String(current().payload)).runId as string;
-		await service.failSession("s1", runId, "PI_WORKER_EXITED");
-		await expect(service.startRun(actor, input)).rejects.toMatchObject({ code: "PI_PROJECT_BUSY" });
-	});
-
-	it("重复 complete 保持首次 finishedAt 不变", async () => {
-		const { service, current, ensure } = setup();
-		await ensure();
-		expect(await service.completeSession("s1")).toBe(true);
-		const finishedAt = (current().finishedAt as Date).getTime();
-		expect(await service.completeSession("s1")).toBe(true);
-		expect((current().finishedAt as Date).getTime()).toBe(finishedAt);
-	});
-
-	it("无 runId complete 将 error 原子完成为 done 并清理错误字段", async () => {
-		const { service, current, running } = setup();
-		const run = await running();
-		await service.failSession(run.jobId, run.runId, "PI_WORKER_EXITED");
-		expect(await service.completeSession(run.jobId)).toBe(true);
-		expect(current()).toMatchObject({
-			status: "done",
-			payload: "{}",
-			errorCode: null,
-			errorMessage: null,
-		});
-		const snapshot = await service.snapshot(run.jobId, actor.identityId);
-		expect(snapshot).not.toHaveProperty("errorCode");
-		expect(snapshot).not.toHaveProperty("errorMessage");
-	});
-
-	it("complete 处理 pending/active/disconnected 且 active 必须匹配 runId", async () => {
-		for (const status of activeStatuses) {
-			const { service, current, start } = setup();
-			const run = await start();
-			current().status = status;
-			expect(await service.completeSession(run.jobId, "wrong")).toBe(false);
-			expect(await service.completeSession(run.jobId, run.runId)).toBe(true);
-			expect(current()).toMatchObject({
-				status: "done",
-				payload: "{}",
-				progress: null,
-			});
-		}
+		expect(await runs.waitForInput("s1", run.runId)).toBe(true);
+		expect(runRow(run.runId)!.status).toBe("waiting_input");
+		expect(await runs.resume("s1", run.runId)).toBe(true);
+		expect(runRow(run.runId)!.status).toBe("running");
+		expect(await runs.settleRun("s1", run.runId, { status: "succeeded" })).toBe(true);
+		expect(runRow(run.runId)).toMatchObject({ status: "succeeded", errorCode: null });
+		expect(runRow(run.runId)!.finishedAt).toBeInstanceOf(Date);
+		expect(session().activeRunId).toBeNull();
 	});
 
 	it("提前到达的 Extension 不被 accept 覆盖", async () => {
-		const { service, current, start } = setup();
+		const { runs, start, runRow } = setup();
 		const run = await start();
-		expect(await service.waitForInput(run.jobId, run.runId)).toBe(true);
-		expect(await service.accept(run.jobId, run.runId)).toBe(false);
-		expect(current().status).toBe("waiting_input");
+		expect(await runs.waitForInput("s1", run.runId)).toBe(true);
+		expect(await runs.accept("s1", run.runId)).toBe(false);
+		expect(runRow(run.runId)!.status).toBe("waiting_input");
 	});
 
-	it("complete 与 settlement 并发时 done 不回退 idle", async () => {
-		const { service, current, running } = setup();
-		const run = await running();
-		await service.completeSession(run.jobId, run.runId);
-		expect(await service.finishRun(run.jobId, run.runId)).toBe(false);
-		expect(current().status).toBe("done");
-	});
-
-	it("旧 run 不能修改新 run 或释放新锁", async () => {
-		const { service, current, running } = setup();
+	it("失败一轮后会话仍可继续,失败保留安全错误码", async () => {
+		const { runs, running, runRow } = setup();
 		const first = await running();
-		await service.finishRun(first.jobId, first.runId);
-		const second = await service.startRun(actor, input);
-		expect(await service.waitForInput(first.jobId, first.runId)).toBe(false);
-		expect(
-			await service.failSession(first.jobId, first.runId, "PI_WORKER_EXITED"),
-		).toBe(false);
-		expect(current()).toMatchObject({
-			status: "pending",
-			payload: JSON.stringify({ runId: second.runId }),
+		expect(await runs.failRun("s1", first.runId, "PI_WORKER_EXITED")).toBe(true);
+		expect(runRow(first.runId)).toMatchObject({
+			status: "failed",
+			errorCode: "PI_WORKER_EXITED",
 		});
-		expect(service.hasLock(second.jobId, second.runId)).toBe(true);
+		const second = await runs.startRun(actor, input);
+		expect(second.runId).not.toBe(first.runId);
 	});
 
-	it("settlement timer 由 jobId+runId 精确隔离", async () => {
+	it("successful 结算不带 errorCode;failed 缺码时按 Worker 异常", async () => {
+		const { runs, running, runRow } = setup();
+		const a = await running();
+		await runs.settleRun("s1", a.runId, { status: "succeeded" });
+		expect(runRow(a.runId)!.errorCode).toBeNull();
+		const b = await runs.startRun(actor, input);
+		await runs.accept("s1", b.runId);
+		await runs.settleRun("s1", b.runId, { status: "failed" });
+		expect(runRow(b.runId)).toMatchObject({ status: "failed", errorCode: "PI_WORKER_EXITED" });
+	});
+
+	it("settlement timer 按 sessionId+runId 精确隔离", async () => {
 		vi.useFakeTimers();
 		try {
-			const { service, running } = setup();
+			const { runs, running } = setup();
 			const first = await running();
-			await service.scheduleSettlement(first.jobId, first.runId, vi.fn());
-			await service.finishRun(first.jobId, first.runId);
-			const second = await service.startRun(actor, input);
+			await runs.scheduleSettlement("s1", first.runId, vi.fn());
+			await runs.settleRun("s1", first.runId, { status: "succeeded" });
+			const second = await runs.startRun(actor, input);
 			const onSecond = vi.fn();
-			await service.scheduleSettlement(second.jobId, second.runId, onSecond);
-			service.cancelSettlement(first.jobId, first.runId);
+			await runs.scheduleSettlement("s1", second.runId, onSecond);
+			runs.cancelSettlement("s1", first.runId);
 			await vi.advanceTimersByTimeAsync(30_000);
 			expect(onSecond).toHaveBeenCalledOnce();
 		} finally {
@@ -367,15 +276,15 @@ describe("PiRunService session CAS", () => {
 		}
 	});
 
-	it("旧 settlement callback 在新 run 后不得执行", async () => {
+	it("旧 settlement callback 在新 run 后不执行", async () => {
 		vi.useFakeTimers();
 		try {
-			const { service, running } = setup();
+			const { runs, running } = setup();
 			const first = await running();
 			const onFirst = vi.fn();
-			await service.scheduleSettlement(first.jobId, first.runId, onFirst);
-			await service.finishRun(first.jobId, first.runId);
-			await service.startRun(actor, input);
+			await runs.scheduleSettlement("s1", first.runId, onFirst);
+			await runs.settleRun("s1", first.runId, { status: "succeeded" });
+			await runs.startRun(actor, input);
 			await vi.advanceTimersByTimeAsync(30_000);
 			expect(onFirst).not.toHaveBeenCalled();
 		} finally {
@@ -383,437 +292,280 @@ describe("PiRunService session CAS", () => {
 		}
 	});
 
-	it("删除 reservation 仅允许静态状态并按 token rollback/commit", async () => {
-		for (const status of ["idle", "done", "error"] as const) {
-			const { service, current, ensure } = setup();
-			await ensure();
-			current().status = status;
-			const reservation = await service.beginDelete("s1", actor.identityId);
-			expect(reservation).toMatchObject({
-				previousStatus: status,
-				existingReservation: false,
-			});
-			expect(current()).toMatchObject({ status: "cancelled" });
-			expect(await service.rollbackDelete("s1", reservation.deleteToken)).toBe(
-				true,
-			);
-			expect(current()).toMatchObject({ status, payload: "{}" });
-			const next = await service.beginDelete("s1", actor.identityId);
-			expect(await service.commitDelete("s1", next.deleteToken)).toBe(true);
-			expect(current()).toMatchObject({ status: "cancelled", payload: "{}" });
+	it("Run 记录只保存安全元数据", async () => {
+		const { running, runRow } = setup();
+		const run = await running();
+		const row = runRow(run.runId)!;
+		for (const banned of ["payload", "result", "progress", "prompt", "cwd", "errorMessage", "stderr"]) {
+			expect(row).not.toHaveProperty(banned);
 		}
+		expect(row).toMatchObject({ sessionId: "s1", kind: "prompt", executionMode: "supervised" });
 	});
 
-	it("delete 与 startRun 竞争时只有 reservation 取得 CAS", async () => {
-		const { service, ensure } = setup();
+	it("活动状态写全部走 updateMany CAS", async () => {
+		const { prisma, runs, running } = setup();
+		const run = await running();
+		await runs.waitForInput("s1", run.runId);
+		await runs.resume("s1", run.runId);
+		await runs.settleRun("s1", run.runId, { status: "succeeded" });
+		expect(prisma.agentRun.update).not.toHaveBeenCalled();
+		expect(prisma.agentSession.update).not.toHaveBeenCalled();
+		for (const call of prisma.agentRun.updateMany.mock.calls) {
+			expect(call[0].where).toHaveProperty("id", run.runId);
+			expect(call[0].where).toHaveProperty("sessionId", "s1");
+			expect(call[0].where).toHaveProperty("status");
+		}
+		for (const call of prisma.agentSession.updateMany.mock.calls) {
+			expect(call[0].where).toHaveProperty("id", "s1");
+		}
+	});
+});
+
+describe("PiSessionService 删除预约", () => {
+	it("仅静态状态可预约,rollback/commit 按 token", async () => {
+		const { sessions, ensure, session } = setup();
 		await ensure();
-		const reservation = await service.beginDelete("s1", actor.identityId);
-		await expect(service.startRun(actor, input)).rejects.toMatchObject({
-			code: "PI_PROJECT_BUSY",
-		});
-		expect(await service.commitDelete("s1", reservation.deleteToken)).toBe(
-			true,
-		);
+		const reservation = await sessions.beginDelete("s1", actor.identityId);
+		expect(reservation).toMatchObject({ previousStatus: "available", existingReservation: false });
+		expect(session().deleteToken).toBe(reservation.deleteToken);
+		expect(await sessions.rollbackDelete("s1", reservation.deleteToken)).toBe(true);
+		expect(session().deleteToken).toBeNull();
+		const next = await sessions.beginDelete("s1", actor.identityId);
+		expect(await sessions.commitDelete("s1", next.deleteToken)).toBe(true);
+		expect(session()).toMatchObject({ status: "deleted" });
+		expect(session().deletedAt).toBeInstanceOf(Date);
 	});
 
-	it("活动状态禁止删除，reservation 可幂等读取且不泄露 token", async () => {
-		const { service, start } = setup();
-		await start();
-		await expect(
-			service.beginDelete("s1", actor.identityId),
-		).rejects.toMatchObject({ code: "PI_PROJECT_BUSY" });
-		await service.finishRun(
-			"s1",
-			JSON.parse(
-				JSON.stringify((await service.snapshot("s1", actor.identityId)).runId),
-			),
-		);
-		const first = await service.beginDelete("s1", actor.identityId);
-		expect(await service.beginDelete("s1", actor.identityId)).toEqual({
-			...first,
-			existingReservation: true,
-		});
-		expect(
-			JSON.stringify(await service.snapshot("s1", actor.identityId)),
-		).not.toContain(first.deleteToken);
+	it("删除预约阻塞新一轮 startRun", async () => {
+		const { sessions, runs, ensure } = setup();
+		await ensure();
+		const reservation = await sessions.beginDelete("s1", actor.identityId);
+		await expect(runs.startRun(actor, input)).rejects.toMatchObject({ code: "PI_PROJECT_BUSY" });
+		expect(await sessions.commitDelete("s1", reservation.deleteToken)).toBe(true);
 	});
 
-	it("畸形 run/delete payload 不得被识别或参与 CAS", async () => {
-		const { service, current, running } = setup();
+	it("活动 Run 禁止删除;预约幂等且快照不泄露 token", async () => {
+		const { sessions, runs, running } = setup();
 		const run = await running();
-		current().payload = JSON.stringify({ runId: run.runId, extra: true });
-		expect((await service.snapshot("s1", actor.identityId)).runId).toBeNull();
-		expect(await service.listActiveByClient("c1")).toEqual([]);
-		expect(await service.finishRun("s1", run.runId)).toBe(false);
-
-		current().status = "cancelled";
-		current().payload = JSON.stringify({
-			deleteToken: "token",
-			previousStatus: "running",
-		});
-		await expect(
-			service.beginDelete("s1", actor.identityId),
-		).rejects.toMatchObject({
-			code: "PI_PROJECT_BUSY",
-		});
-		expect(await service.rollbackDelete("s1", "token")).toBe(false);
-		expect(await service.commitDelete("s1", "token")).toBe(false);
+		await expect(sessions.beginDelete("s1", actor.identityId)).rejects.toMatchObject({ code: "PI_PROJECT_BUSY" });
+		await runs.settleRun("s1", run.runId, { status: "succeeded" });
+		const first = await sessions.beginDelete("s1", actor.identityId);
+		const second = await sessions.beginDelete("s1", actor.identityId);
+		expect(second).toEqual({ ...first, existingReservation: true });
+		expect(JSON.stringify(await sessions.snapshot("s1", actor.identityId))).not.toContain(first.deleteToken);
 	});
 
-	it("所有新状态写均使用 updateMany CAS", async () => {
-		const { prisma, service, running } = setup();
+	it("确认删除保留 Run 与审计,并写入 deleted 事件", async () => {
+		const { sessions, runs, running, prisma } = setup();
 		const run = await running();
-		await service.waitForInput(run.jobId, run.runId);
-		await service.resume(run.jobId, run.runId);
-		await service.finishRun(run.jobId, run.runId);
-		expect(prisma.job.update).not.toHaveBeenCalled();
-		for (const call of prisma.job.updateMany.mock.calls) {
-			const where = call[0].where;
-			expect(where).toHaveProperty("id", "s1");
-			expect(where).toHaveProperty("payload");
-			expect(where).toHaveProperty("status");
-		}
+		await runs.settleRun("s1", run.runId, { status: "succeeded" });
+		const reservation = await sessions.beginDelete("s1", actor.identityId);
+		await sessions.commitDelete("s1", reservation.deleteToken);
+		expect(prisma._db.runs).toHaveLength(1);
+		expect(prisma._db.audits.filter((a) => a.event === "created")).toHaveLength(1);
 	});
 });
 
 describe("PiRunService generation reconcile", () => {
 	it("未 ready 或旧 socket 的 operation 抛 PI_STATE_PENDING", async () => {
-		const { service } = setup();
-		await service.markReconcilePending("c1", "socket-1");
-		await expect(
-			service.withReconciledClient("c1", async (lease) => lease.socketId),
-		).rejects.toMatchObject({ code: "PI_STATE_PENDING" });
-		await expect(
-			service.withReconciledSocket("c1", "old", async () => 1),
-		).rejects.toMatchObject({ code: "PI_STATE_PENDING" });
+		const { runs } = setup();
+		await runs.markReconcilePending("c1", "socket-1");
+		await expect(runs.withReconciledClient("c1", async (lease) => lease.socketId))
+			.rejects.toMatchObject({ code: "PI_STATE_PENDING" });
+		await expect(runs.withReconciledSocket("c1", "old", async () => 1))
+			.rejects.toMatchObject({ code: "PI_STATE_PENDING" });
 	});
 
 	it("operation lease 跨 await 时新 REGISTER 排队", async () => {
-		const { service } = setup();
-		await service.markReconcilePending("c1", "socket-1");
-		await service.reconcileGeneration("c1", "socket-1", report([]));
+		const { runs } = setup();
+		await runs.markReconcilePending("c1", "socket-1");
+		await runs.reconcileGeneration("c1", "socket-1", report([]));
 		let release!: () => void;
-		const gate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const operation = service.withReconciledClient("c1", async (lease) => {
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const operation = runs.withReconciledClient("c1", async (lease) => {
 			expect(lease.socketId).toBe("socket-1");
 			await gate;
 		});
-		const pending = service.markReconcilePending("c1", "socket-2");
+		const pending = runs.markReconcilePending("c1", "socket-2");
 		await Promise.resolve();
-		expect(
-			await Promise.race([
-				pending.then(() => "switched"),
-				Promise.resolve("blocked"),
-			]),
-		).toBe("blocked");
+		expect(await Promise.race([pending.then(() => "switched"), Promise.resolve("blocked")])).toBe("blocked");
 		release();
 		await operation;
 		await pending;
-		await expect(
-			service.withReconciledClient("c1", async () => 1),
-		).rejects.toMatchObject({ code: "PI_STATE_PENDING" });
+		await expect(runs.withReconciledClient("c1", async () => 1)).rejects.toMatchObject({ code: "PI_STATE_PENDING" });
 	});
 
 	it("旧 generation reconcile/disconnect 在任何写入前退出", async () => {
-		const { prisma, service, running, current } = setup();
+		const { prisma, runs, running, runRow } = setup();
 		const run = await running();
-		await service.markReconcilePending("c1", "new");
-		prisma.job.updateMany.mockClear();
-		await expect(
-			service.reconcileGeneration(
-				"c1",
-				"old",
-				report([activeReport(run.runId)]),
-			),
-		).rejects.toMatchObject({ code: "PI_STATE_PENDING" });
-		expect(await service.disconnectGeneration("c1", "old")).toBe(false);
-		expect(prisma.job.updateMany).not.toHaveBeenCalled();
-		expect(current().status).toBe("running");
+		await runs.markReconcilePending("c1", "new");
+		prisma.agentRun.updateMany.mockClear();
+		await expect(runs.reconcileGeneration("c1", "old", report([activeReport(run.runId)])))
+			.rejects.toMatchObject({ code: "PI_STATE_PENDING" });
+		expect(await runs.disconnectGeneration("c1", "old")).toBe(false);
+		expect(prisma.agentRun.updateMany).not.toHaveBeenCalled();
+		expect(runRow(run.runId)!.status).toBe("running");
 	});
 
 	it("markRunDisconnected 只 CAS matching active run", async () => {
-		const { service, current, running } = setup();
+		const { runs, running, runRow } = setup();
 		const run = await running();
-		expect(await service.markRunDisconnected(run.jobId, "wrong")).toBe(false);
-		expect(current().status).toBe("running");
-		expect(await service.markRunDisconnected(run.jobId, run.runId)).toBe(true);
-		expect(current()).toMatchObject({
-			status: "disconnected",
-			payload: JSON.stringify({ runId: run.runId }),
-		});
+		expect(await runs.markRunDisconnected("s1", "wrong")).toBe(false);
+		expect(runRow(run.runId)!.status).toBe("running");
+		expect(await runs.markRunDisconnected("s1", run.runId)).toBe(true);
+		expect(runRow(run.runId)!.status).toBe("disconnected");
 	});
 
-	it("当前 generation 断线 CAS disconnected，matching report 恢复", async () => {
-		const { service, running, current } = setup();
+	it("当前 generation 断线 CAS disconnected,matching report 恢复", async () => {
+		const { runs, running, runRow } = setup();
 		const run = await running();
-		await service.markReconcilePending("c1", "socket-1");
-		await service.reconcileGeneration(
-			"c1",
-			"socket-1",
-			report([activeReport(run.runId)]),
-		);
-		expect(await service.disconnectGeneration("c1", "socket-1")).toBe(true);
-		expect(current()).toMatchObject({
-			status: "disconnected",
-			payload: JSON.stringify({ runId: run.runId }),
-		});
-		await service.markReconcilePending("c1", "socket-2");
-		const ack = await service.reconcileGeneration(
-			"c1",
-			"socket-2",
-			report([activeReport(run.runId, "waiting_input")]),
-		);
-		expect(ack).toEqual({
-			acceptedRunIds: [run.runId],
-			closedRunIds: [],
-			reportAgain: false,
-		});
-		expect(current().status).toBe("waiting_input");
+		await runs.markReconcilePending("c1", "socket-1");
+		await runs.reconcileGeneration("c1", "socket-1", report([activeReport(run.runId)]));
+		expect(await runs.disconnectGeneration("c1", "socket-1")).toBe(true);
+		expect(runRow(run.runId)!.status).toBe("disconnected");
+		await runs.markReconcilePending("c1", "socket-2");
+		const ack = await runs.reconcileGeneration("c1", "socket-2", report([activeReport(run.runId, "waiting_input")]));
+		expect(ack).toEqual({ acceptedRunIds: [run.runId], closedRunIds: [], reportAgain: false });
+		expect(runRow(run.runId)!.status).toBe("waiting_input");
 	});
 
-	it("matching idle/done summary 收敛 idle 并释放锁", async () => {
-		for (const status of ["idle", "done"] as const) {
-			const { service, running, current } = setup();
+	it("matching succeeded/aborted 摘要收敛终态并释放锁", async () => {
+		for (const status of ["succeeded", "aborted"] as const) {
+			const { runs, running, runRow } = setup();
 			const run = await running();
-			await service.markReconcilePending("c1", "socket-1");
-			const ack = await service.reconcileGeneration(
-				"c1",
-				"socket-1",
-				report([{ jobId: "s1", runId: run.runId, sessionId: "s1", status }]),
-			);
+			await runs.markReconcilePending("c1", "socket-1");
+			const ack = await runs.reconcileGeneration("c1", "socket-1", report([{ runId: run.runId, sessionId: "s1", status }]));
 			expect(ack.acceptedRunIds).toEqual([run.runId]);
-			expect(current()).toMatchObject({
-				status: "idle",
-				payload: "{}",
-				progress: null,
-			});
-			expect(service.hasLock("s1", run.runId)).toBe(false);
+			expect(runRow(run.runId)!.status).toBe(status);
+			expect(runs.hasLock("s1", run.runId)).toBe(false);
 		}
 	});
 
-	it("matching error summary 收敛安全 error 并释放锁", async () => {
-		const { service, running, current } = setup();
+	it("matching failed 摘要收敛安全错误码并释放锁", async () => {
+		const { runs, running, runRow } = setup();
 		const run = await running();
-		await service.markReconcilePending("c1", "socket-1");
-		const ack = await service.reconcileGeneration(
-			"c1",
-			"socket-1",
-			report([
-				{ jobId: "s1", runId: run.runId, sessionId: "s1", status: "error" },
-			]),
-		);
+		await runs.markReconcilePending("c1", "socket-1");
+		const ack = await runs.reconcileGeneration("c1", "socket-1", report([
+			{ runId: run.runId, sessionId: "s1", status: "failed", errorCode: "PI_WORKER_EXITED" },
+		]));
 		expect(ack.acceptedRunIds).toEqual([run.runId]);
-		expect(current()).toMatchObject({
-			status: "error",
-			payload: "{}",
-			progress: null,
-			errorCode: "PI_WORKER_EXITED",
-			errorMessage: "Pi worker exited unexpectedly",
-		});
-		expect(service.hasLock("s1", run.runId)).toBe(false);
+		expect(runRow(run.runId)).toMatchObject({ status: "failed", errorCode: "PI_WORKER_EXITED" });
+		expect(runs.hasLock("s1", run.runId)).toBe(false);
 	});
 
-	it("DB 活动 run 未上报时安全失败，终态旧 active 要求 Client close", async () => {
-		const { service, running, current } = setup();
+	it("DB 活动 run 未上报时安全失败,终态旧 active 要求 Client close", async () => {
+		const { runs, running, runRow } = setup();
 		const run = await running();
-		await service.markReconcilePending("c1", "socket-1");
-		await service.reconcileGeneration("c1", "socket-1", report([]));
-		expect(current()).toMatchObject({
-			status: "error",
-			payload: "{}",
-			errorCode: "PI_CLIENT_RESTARTED",
-			errorMessage: "Client restarted before the Pi run could be recovered",
-		});
-		current().status = "done";
-		current().payload = "{}";
-		await service.markReconcilePending("c1", "socket-2");
-		const ack = await service.reconcileGeneration(
-			"c1",
-			"socket-2",
-			report([activeReport(run.runId)]),
-		);
-		expect(ack).toEqual({
-			acceptedRunIds: [],
-			closedRunIds: [run.runId],
-			reportAgain: true,
-		});
-		await expect(
-			service.withReconciledClient("c1", async () => 1),
-		).rejects.toMatchObject({ code: "PI_STATE_PENDING" });
+		await runs.markReconcilePending("c1", "socket-1");
+		await runs.reconcileGeneration("c1", "socket-1", report([]));
+		expect(runRow(run.runId)).toMatchObject({ status: "failed", errorCode: "PI_CLIENT_RESTARTED" });
+		// 已终态 Run 再次上报为 active:要求 Client close,不重新激活
+		await runs.markReconcilePending("c1", "socket-2");
+		const ack = await runs.reconcileGeneration("c1", "socket-2", report([activeReport(run.runId)]));
+		expect(ack).toEqual({ acceptedRunIds: [], closedRunIds: [run.runId], reportAgain: true });
+		await expect(runs.withReconciledClient("c1", async () => 1)).rejects.toMatchObject({ code: "PI_STATE_PENDING" });
 	});
 
-	it("同 projectKey 冲突 run 精确失败，Client abort 后二次报告 ready", async () => {
-		const { prisma, service, running } = setup();
+	it("同 projectKey 冲突 run 精确失败,Client abort 后二次报告 ready", async () => {
+		const { prisma, sessions, runs, running, runRow } = setup();
 		const first = await running();
-		await service.ensureSession(actor, { clientId: "c1", sessionId: "s2" });
-		const second = await service.startRun(actor, {
+		await sessions.ensureSession(actor, { clientId: "c1", sessionId: "s2" });
+		const second = await runs.startRun(actor, { clientId: "c1", sessionId: "s2", projectKey: "k2", kind: "prompt" });
+		await runs.accept("s2", second.runId);
+		await runs.markReconcilePending("c1", "socket-1");
+		const ack = await runs.reconcileGeneration("c1", "socket-1", {
 			clientId: "c1",
-			sessionId: "s2",
-			projectKey: "k2",
+			runtimeRevision: null,
+			configState: "pending",
+			runs: [
+				{ runId: first.runId, sessionId: "s1", status: "running", projectKey: "same" },
+				{ runId: second.runId, sessionId: "s2", status: "running", projectKey: "same" },
+			],
 		});
-		await service.accept(second.jobId, second.runId);
-		await service.markReconcilePending("c1", "socket-1");
-		const ack = await service.reconcileGeneration(
-			"c1",
-			"socket-1",
-			report([
-				{
-					jobId: "s1",
-					runId: first.runId,
-					sessionId: "s1",
-					status: "running",
-					projectKey: "same",
-				},
-				{
-					jobId: "s2",
-					runId: second.runId,
-					sessionId: "s2",
-					status: "running",
-					projectKey: "same",
-				},
-			]),
-		);
-		expect(ack).toEqual({
-			acceptedRunIds: [],
-			closedRunIds: [first.runId, second.runId],
-			reportAgain: true,
-		});
-		for (const jobId of ["s1", "s2"]) {
-			expect(prisma._jobs.find((job) => job.id === jobId)).toMatchObject({
-				status: "error",
-				payload: "{}",
-				errorCode: "PI_PROTOCOL_INVALID",
-				errorMessage: "Pi protocol input was invalid",
-			});
+		expect(ack).toEqual({ acceptedRunIds: [], closedRunIds: [first.runId, second.runId], reportAgain: true });
+		for (const runId of [first.runId, second.runId]) {
+			expect(runRow(runId)).toMatchObject({ status: "failed", errorCode: "PI_PROTOCOL_INVALID" });
 		}
-		expect(service.hasLock(first.jobId, first.runId)).toBe(false);
-		expect(service.hasLock(second.jobId, second.runId)).toBe(false);
-		expect(
-			await service.reconcileGeneration("c1", "socket-1", report([])),
-		).toEqual({
-			acceptedRunIds: [],
-			closedRunIds: [],
-			reportAgain: false,
+		expect(runs.hasLock("s1", first.runId)).toBe(false);
+		expect(runs.hasLock("s2", second.runId)).toBe(false);
+		expect(await runs.reconcileGeneration("c1", "socket-1", report([]))).toEqual({
+			acceptedRunIds: [], closedRunIds: [], reportAgain: false,
 		});
-		await expect(
-			service.withReconciledClient("c1", async () => "ready"),
-		).resolves.toBe("ready");
+		await expect(runs.withReconciledClient("c1", async () => "ready")).resolves.toBe("ready");
+		void prisma;
 	});
 
-	it("跨 client 的 duplicate/done/error 报告不收敛他人 Job 或释放锁", async () => {
-		for (const status of ["duplicate", "done", "error"] as const) {
-			const { prisma, service } = await setup();
-			await service.ensureSession(actor, {
-				clientId: "client-B",
-				sessionId: "b-session",
-			});
-			const run = await service.startRun(actor, {
-				clientId: "client-B",
-				sessionId: "b-session",
-				projectKey: "b-project",
-			});
-			await service.accept(run.jobId, run.runId);
-			await service.markReconcilePending("client-A", "socket-A");
-			const reportedRun = {
-				jobId: run.jobId,
-				runId: run.runId,
-				sessionId: "b-session",
-			};
-			await service.reconcileGeneration("client-A", "socket-A", {
-				clientId: "client-A",
-				runtimeRevision: null,
-				configState: "pending",
-				runs:
-					status === "duplicate"
-						? [
-								{ ...reportedRun, status: "running", projectKey: "duplicate" },
-								{
-									...reportedRun,
-									status: "waiting_input",
-									projectKey: "duplicate",
-								},
-							]
-						: [{ ...reportedRun, status }],
-			});
-			expect(prisma._jobs.find((job) => job.id === run.jobId)).toMatchObject({
-				clientId: "client-B",
-				status: "running",
-				payload: JSON.stringify({ runId: run.runId }),
-			});
-			expect(service.hasLock(run.jobId, run.runId)).toBe(true);
-		}
+	it("跨 client 的摘要不收敛他人 Run 或释放锁", async () => {
+		const { sessions, runs, runRow } = setup();
+		await sessions.ensureSession(actor, { clientId: "client-B", sessionId: "b-session" });
+		const run = await runs.startRun(actor, { clientId: "client-B", sessionId: "b-session", projectKey: "b-project", kind: "prompt" });
+		await runs.accept("b-session", run.runId);
+		await runs.markReconcilePending("client-A", "socket-A");
+		await runs.reconcileGeneration("client-A", "socket-A", {
+			clientId: "client-A",
+			runtimeRevision: null,
+			configState: "pending",
+			runs: [{ runId: run.runId, sessionId: "b-session", status: "succeeded" }],
+		});
+		expect(runRow(run.runId)!.status).toBe("running");
+		expect(runs.hasLock("b-session", run.runId)).toBe(true);
 	});
 
-	it("reconcileOpen 根据 agent state 精确收敛", async () => {
-		const { service, running, current } = setup();
+	it("reconcileOpen 按权威 agent state 精确收敛", async () => {
+		const { runs, running, runRow } = setup();
 		const run = await running();
-		current().status = "waiting_input";
-		expect(
-			await service.reconcileOpen("s1", run.runId, {
-				status: "running",
-				streaming: false,
-				prompting: false,
-				compacting: false,
-				thinkingLevel: "off",
-				queuedMessages: { steering: [], followUp: [] },
-			}),
-		).toBe(true);
-		expect(current().status).toBe("running");
-		expect(
-			await service.reconcileOpen("s1", run.runId, {
-				status: "idle",
-				streaming: false,
-				prompting: false,
-				compacting: false,
-				thinkingLevel: "off",
-				queuedMessages: { steering: [], followUp: [] },
-			}),
-		).toBe(true);
-		expect(current().status).toBe("idle");
+		await runs.markRunDisconnected("s1", run.runId);
+		expect(await runs.reconcileOpen("s1", run.runId, {
+			...idleState, status: "running",
+		})).toBe(true);
+		expect(runRow(run.runId)!.status).toBe("running");
+		expect(await runs.reconcileOpen("s1", run.runId, idleState)).toBe(true);
+		expect(runRow(run.runId)!.status).toBe("succeeded");
 	});
 
-	it("reconcileOpen 在 followUp 排队时不收敛 idle", async () => {
-		const { service, running, current } = setup();
+	it("reconcileOpen 在 followUp 排队时不收敛终态", async () => {
+		const { runs, running, runRow } = setup();
 		const run = await running();
-		expect(
-			await service.reconcileOpen("s1", run.runId, {
-				status: "idle",
-				streaming: false,
-				prompting: false,
-				compacting: false,
-				thinkingLevel: "off",
-				queuedMessages: { steering: [], followUp: ["follow"] },
-			}),
-		).toBe(true);
-		expect(current().status).toBe("running");
-		expect(current().payload).toBe(JSON.stringify({ runId: run.runId }));
+		expect(await runs.reconcileOpen("s1", run.runId, {
+			...idleState,
+			queuedMessages: { steering: [], followUp: ["follow"] },
+		})).toBe(true);
+		expect(runRow(run.runId)!.status).toBe("running");
+	});
+
+	it("listActiveRuns/countActiveRuns 只统计非终态", async () => {
+		const { runs, running } = setup();
+		const run = await running();
+		expect(await runs.countActiveRuns()).toBe(1);
+		expect((await runs.listActiveRuns("c1"))[0]).toMatchObject({ id: run.runId, sessionId: "s1" });
+		await runs.settleRun("s1", run.runId, { status: "succeeded" });
+		expect(await runs.countActiveRuns()).toBe(0);
 	});
 });
 
 describe("PiRunService safe failures", () => {
-	it("safePiErrorMessage 对全部 allowlist 有固定消息，未知 code 固定 fallback", async () => {
+	it("safePiErrorMessage 对全部 allowlist 有固定安全消息", () => {
 		for (const code of PI_ERROR_CODES) {
-			const { service, running, current } = setup();
-			const run = await running();
-			expect(await service.failSession(run.jobId, run.runId, code)).toBe(true);
-			expect(current().errorMessage).toEqual(expect.any(String));
-			expect(String(current().errorMessage).length).toBeGreaterThan(0);
+			const message = safePiErrorMessage(code);
+			expect(typeof message).toBe("string");
+			expect(message.length).toBeGreaterThan(0);
 		}
-		const { service, running, current } = setup();
-		const run = await running();
-		await service.failSession(run.jobId, run.runId, "UNKNOWN" as never);
-		expect(current().errorMessage).toBe("Pi session failed");
+		expect(safePiErrorMessage("UNKNOWN")).toBe("Pi session failed");
 	});
 
-	it("原始错误 sentinel 永不写入 Job", async () => {
-		const { service, running, prisma, current } = setup();
+	it("原始错误 sentinel 永不写入 Run", async () => {
+		const { runs, running, prisma } = setup();
 		const run = await running();
-		await service.failSession(run.jobId, run.runId, "PI_CLIENT_RESTARTED");
-		expect(JSON.stringify(prisma._jobs)).not.toContain("TOKEN=abc123");
-		expect(current().errorMessage).toBe(
-			"Client restarted before the Pi run could be recovered",
-		);
+		await runs.failRun("s1", run.runId, "PI_CLIENT_RESTARTED");
+		expect(JSON.stringify(prisma._db.runs)).not.toContain("TOKEN=abc123");
+		expect(prisma._db.runs.find((r) => r.id === run.runId)!.errorCode).toBe("PI_CLIENT_RESTARTED");
+	});
+
+	it("未 ready 的 Runtime 使 startRun fail closed", async () => {
+		const prisma = makePrisma();
+		const runs = new PiRunService(prisma as never);
+		const sessions = new PiSessionService(prisma as never);
+		await sessions.ensureSession(actor, { clientId: "c1", sessionId: "s1" });
+		await expect(runs.startRun(actor, input)).rejects.toMatchObject({ code: "PI_CONFIG_UNAVAILABLE" });
 	});
 });

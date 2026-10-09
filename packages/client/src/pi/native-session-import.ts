@@ -249,6 +249,11 @@ export interface ImportRunDeps {
 	installSecretPath: string;
 	/** 副本可解析校验（默认用 SDK 只读 open；测试可注入以模拟损坏副本）。 */
 	verifyTarget?: (file: string, dir: string) => void;
+	/**
+	 * 副本路径 → VCPDeck sessionId（由 Worker 注入 reader.sessionIdForPath）。
+	 * 仅用于让 Server 登记独立会话控制面并写导入审计（ADR-0041）；解析不出时返回 null。
+	 */
+	resolveSessionId?: (file: string) => string | null;
 }
 
 /**
@@ -317,7 +322,13 @@ async function importOne(
 		await rm(target.file, { force: true }); // 清理半成品，不留残缺副本
 		return { sourceName, status: "rejected", reasonCode: "PI_CONFIG_UNAVAILABLE" };
 	}
-	return { sourceName, status: "imported" };
+	// 只有确认新建副本时才上报 sessionId:被拒绝/无副本的条目不得让 Server 登记。
+	const sessionId = deps.resolveSessionId?.(target.file) ?? null;
+	return {
+		sourceName,
+		status: "imported",
+		...(sessionId ? { sessionId } : {}),
+	};
 }
 
 /**

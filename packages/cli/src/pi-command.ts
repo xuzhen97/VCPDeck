@@ -311,17 +311,19 @@ async function runRun(argv: string[], context: PiCommandContext): Promise<void> 
 		progressLog(`[vcpdeck] 已创建新会话 ${sessionId}`);
 	}
 
-	await client.pi.agent.prompt(clientId, sessionId, cwdRef, {
+	const accepted = await client.pi.agent.prompt(clientId, sessionId, cwdRef, {
 		submissionId: randomUUID(),
 		prompt,
 	});
 	progressLog("[vcpdeck] 提示词已提交，等待 Pi 完成…");
 
-	await waitUntilIdle(
+	// 按独立 Run 摘要等待终局(ADR-0041):空闲不等于本轮成功,
+	// 失败/中止要如实报错,不拿旧回复冒充结果。
+	await waitForRunOutcome(
 		client,
 		clientId,
 		sessionId,
-		cwdRef,
+		accepted.runId,
 		waitTimeout,
 		(s: string) => progressLog(`[vcpdeck] Pi 状态: ${s}`),
 		context.pollIntervalMs ?? POLL_INTERVAL_MS,
@@ -361,7 +363,20 @@ async function runAbort(
 	if (!clientFilter || !sessionId) throw new Error(piUsage());
 	const { environment, client } = await openContext(context, options);
 	const clientId = await resolveClientIdOrThrow(clientFilter, context);
-	const result = await client.pi.agent.abort(clientId, sessionId, sessionId);
+	// 只有存在活跃 Run 时才中止;没有活跃轮次是明确 no-op,不猜 runId。
+	const snapshot = await client.pi.sessionsControl.snapshot(clientId, sessionId);
+	const activeRunId = snapshot.activeRun?.runId ?? null;
+	if (!activeRunId) {
+		if (options.json === true) {
+			(context.log ?? console.log)(
+				JSON.stringify({ sessionId, aborted: false, reason: "no-active-run" }, null, 2),
+			);
+			return;
+		}
+		(context.log ?? console.log)(`[vcpdeck] 会话 ${sessionId} 当前没有进行中的执行，无需中止`);
+		return;
+	}
+	const result = await client.pi.agent.abort(clientId, sessionId, activeRunId);
 	if (options.json === true) {
 		(context.log ?? console.log)(JSON.stringify(result, null, 2));
 		return;
@@ -387,38 +402,53 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** 轮询 agent.state 至 idle；waiting_for_extension_input 视为需人工干预并抛错。 */
-async function waitUntilIdle(
+/**
+ * 等待本轮执行到达权威终局(ADR-0041)。
+ *
+ * - 只在 `succeeded` 返回,失败/中止如实抛错;
+ * - `waiting_input` 提示需要人工交互;
+ * - `disconnected` 表示待对账,继续有界等待;
+ * - 超时只报告等待超时,不谎报成功也不伪造中止。
+ */
+async function waitForRunOutcome(
 	client: VcpDeckClient,
 	clientId: string,
 	sessionId: string,
-	cwdRef: CwdRef,
+	runId: string,
 	timeoutSeconds: number,
 	onStatus: ((status: string) => void) | undefined,
 	pollIntervalMs: number,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutSeconds * 1_000;
 	let lastStatus: string | undefined;
-	while (Date.now() < deadline) {
-		const state = (await client.pi.agent.state(
-			clientId,
-			sessionId,
-			cwdRef,
-		)) as { status?: string };
-		const status = typeof state?.status === "string" ? state.status : "unknown";
-		if (status === "idle") return;
+	for (;;) {
+		const run = await client.pi.sessionsControl.run(clientId, sessionId, runId);
+		const status = run.status;
 		if (status !== lastStatus) {
 			onStatus?.(status);
 			lastStatus = status;
 		}
-		if (status === "waiting_for_extension_input") {
+		if (status === "succeeded") return;
+		if (status === "failed") {
+			throw new Error(
+				`Pi 本轮执行失败（${run.errorCode ?? "PI_WORKER_EXITED"}）；会话 ${sessionId} 仍可继续使用`,
+			);
+		}
+		if (status === "aborted") {
+			throw new Error(`Pi 本轮执行已被中止（会话 ${sessionId}）`);
+		}
+		if (status === "waiting_input") {
 			throw new Error(
 				`Pi 正在等待扩展输入（会话 ${sessionId}）；请在 Frontend 处理后重试，或用 pi abort 中止`,
 			);
 		}
+		if (Date.now() >= deadline) {
+			throw new Error(
+				`等待 Pi 完成超时（${timeoutSeconds} 秒，最后一次状态 ${status}）；会话 ${sessionId} 可继续使用`,
+			);
+		}
 		await sleep(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
 	}
-	throw new Error(`等待 Pi 完成超时（${timeoutSeconds} 秒）`);
 }
 
 /** 交互式对话 REPL：输入提示词 → 等待完成 → 取回回复，循环继续；/exit 或 Ctrl+D 退出。 */
@@ -523,20 +553,26 @@ async function runAttachRepl(
 				continue;
 			}
 			if (line === "/abort") {
-				await client.pi.agent.abort(clientId, sessionId, sessionId);
+				const snapshot = await client.pi.sessionsControl.snapshot(clientId, sessionId);
+				const activeRunId = snapshot.activeRun?.runId ?? null;
+				if (!activeRunId) {
+					output.write("[当前没有进行中的执行，无需中止]" + LF);
+					continue;
+				}
+				await client.pi.agent.abort(clientId, sessionId, activeRunId);
 				output.write("[已提交中止请求]" + LF);
 				continue;
 			}
 			try {
-				await client.pi.agent.prompt(clientId, sessionId, cwdRef, {
+				const accepted = await client.pi.agent.prompt(clientId, sessionId, cwdRef, {
 					submissionId: randomUUID(),
 					prompt: line,
 				});
-				await waitUntilIdle(
+				await waitForRunOutcome(
 					client,
 					clientId,
 					sessionId,
-					cwdRef,
+					accepted.runId,
 					perPromptTimeout,
 					(s: string) => output.write("[Pi " + s + "…" + LF),
 					pollIntervalMs,

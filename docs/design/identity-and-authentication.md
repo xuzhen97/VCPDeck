@@ -269,6 +269,8 @@ Actor 审计当前是局部实现：
 
 首次部署后不要长期把管理员密码留在普通 `.env`、Shell history 或发布构件中。当前 Server 只有发现“无 admin”才使用 bootstrap 密码；修改环境变量不会轮换已有管理员密码。
 
+`VCPDECK_FRONTEND_ORIGIN` 与 `VCPDECK_CORS_ORIGIN` 的默认值和判定逻辑集中在 `packages/server/src/auth/trusted-origins.ts` 一处，REST CORS、`/app` 与 `/client` 三处共用同一策略，不再各自硬编码默认值。
+
 ## 13. 运维与事件响应
 
 日常检查：

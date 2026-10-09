@@ -41,7 +41,6 @@ export interface PiWorkerHandle {
 }
 
 interface ActiveRun {
-	jobId: string;
 	runId: string;
 	sessionId: string;
 	projectKey: string;
@@ -88,7 +87,7 @@ const DESTRUCTIVE_ACTIONS = new Set([
  *
  * 指令与 prompt 共用同一套 Run 生命周期（ADR-0040 决策 2）。若漏掉
  * `agent.command`，它的 `entry.activeRun` 恒为 null，终态分支不会执行，
- * `terminalCwd` 也就永不写入 —— 服务端 30 秒后的结算查询按 jobId+runId
+ * `terminalCwd` 也就永不写入 —— 服务端 30 秒后的结算查询按 sessionId+runId
  * 定不到 cwd，返回 `PI_SESSION_NOT_FOUND`，job 停在 running，
  * 项目锁永不释放，后续（含新建会话）全部撞 `Project has an active turn`。
  */
@@ -124,7 +123,7 @@ export function createPiSupervisor(options: {
 	/** runId → envelope/cwd（终态后 settlement 查询回退；仅内存，不上报） */
 	const terminalCwd = new Map<
 		string,
-		{ cwd: string; jobId: string; sessionId: string }
+		{ cwd: string; sessionId: string }
 	>();
 	const eventListeners: ((event: PiEvent) => void)[] = [];
 	/** Server 下发的运行配置（含凭据 lease），只存在于内存 */
@@ -146,35 +145,35 @@ export function createPiSupervisor(options: {
 			const { cwd, key } = await resolveProjectCwd(request.cwdRef, roots);
 			return { key, cwd };
 		}
-		if (request.jobId) {
+		if (request.sessionId) {
 			for (const [key, entry] of registry) {
 				if (
-					entry.activeRun?.jobId === request.jobId &&
+					entry.activeRun?.sessionId === request.sessionId &&
 					(!request.runId || entry.activeRun.runId === request.runId)
 				) {
 					return { key, cwd: entry.cwd };
 				}
 			}
-			// settlement 在 activeRun 清除后查询：按 runId 回退，避免同 Session 多轮冲突
+			// settlement 在 activeRun 清除后查询:按 runId 回退,避免同 Session 多轮冲突
 			const settled = request.runId
 				? terminalCwd.get(request.runId)
 				: undefined;
-			if (settled && settled.jobId === request.jobId) {
+			if (settled && settled.sessionId === request.sessionId) {
 				return {
 					key: projectKeyFor(canonicalPath(settled.cwd)),
 					cwd: settled.cwd,
 				};
 			}
-			throw { code: "PI_SESSION_NOT_FOUND", message: "No active run for job" };
+			throw { code: "PI_SESSION_NOT_FOUND", message: "No active run for session" };
 		}
 		throw {
 			code: "PI_PROTOCOL_INVALID",
-			message: "Request needs cwdRef or jobId",
+			message: "Request needs cwdRef or sessionId",
 		};
 	}
 
 	/**
-	 * 机器级 Worker action（ADR-0031 导入链路）：不依赖项目 cwdRef/jobId，
+	 * 机器级 Worker action（ADR-0031 导入链路）：不依赖项目 cwdRef/sessionId，
 	 * 走合成机器 entry；runtime paths/源根均在 Worker 内自解，argv cwd 仅需非空。
 	 */
 	const MACHINE_WORKER_ACTIONS = new Set([
@@ -229,7 +228,7 @@ export function createPiSupervisor(options: {
 	 * 回收与权威状态不一致的项目锁；返回 true 表示可以继续接纳新 prompt。
 	 *
 	 * `entry.activeRun` 只是客户端缓存：它只在 Worker 的终态事件（`agent_settled` /
-	 * `prompt_done` / `prompt_error`）到达 **且 jobId+runId 匹配**时才释放，而同一事件是
+	 * `prompt_done` / `prompt_error`）到达 **且 sessionId+runId 匹配**时才释放，而同一事件是
 	 * **无条件**转发给 Server 的。一旦两边不同步，界面按 Server 的权威状态放行下一条消息，
 	 * 客户端却回 `PI_PROJECT_BUSY Project has an active turn`，而且 `applyStateAck` 只在
 	 * Server 明确 `closedRunIds` 时才清锁 —— 锁会一直留到 Worker 空闲 10 分钟关闭才自愈
@@ -251,7 +250,6 @@ export function createPiSupervisor(options: {
 				requestId: randomUUID(),
 				action: "agent.state",
 				sessionId: run.sessionId,
-				jobId: run.jobId,
 				runId: run.runId,
 			},
 			STALE_LOCK_PROBE_TIMEOUT_MS,
@@ -269,15 +267,13 @@ export function createPiSupervisor(options: {
 		}
 		if (entry.activeRun !== run) return true;
 		entry.terminals.push({
-			jobId: run.jobId,
 			runId: run.runId,
 			sessionId: run.sessionId,
-			status: "done",
+			status: "succeeded",
 			projectKey: run.projectKey,
 		});
 		terminalCwd.set(run.runId, {
 			cwd: entry.cwd,
-			jobId: run.jobId,
 			sessionId: run.sessionId,
 		});
 		entry.activeRun = null;
@@ -325,7 +321,7 @@ export function createPiSupervisor(options: {
 			}
 			if (msg.type === "event") {
 				const run = entry.activeRun;
-				if (run && msg.jobId === run.jobId && msg.runId === run.runId) {
+				if (run && msg.sessionId === run.sessionId && msg.runId === run.runId) {
 					if (
 						msg.event.type === "extension_request" &&
 						isDialogKind(msg.event.ui?.kind)
@@ -345,31 +341,32 @@ export function createPiSupervisor(options: {
 						msg.event.type === "prompt_done"
 					) {
 						entry.terminals.push({
-							jobId: run.jobId,
 							runId: run.runId,
 							sessionId: run.sessionId,
-							status: "done",
+							status: "succeeded",
 							projectKey: run.projectKey,
 						});
 						terminalCwd.set(run.runId, {
 							cwd: entry.cwd,
-							jobId: run.jobId,
 							sessionId: run.sessionId,
 						});
 						entry.activeRun = null;
 						closeIfDraining(entry);
 					}
 					if (msg.event.type === "prompt_error") {
+						// v4:错误是权威失败终局,携带安全错误码供审计摘要。
+						const code = msg.event.type === "prompt_error"
+							? (msg.event as { code?: unknown }).code
+							: undefined;
 						entry.terminals.push({
-							jobId: run.jobId,
 							runId: run.runId,
 							sessionId: run.sessionId,
-							status: "error",
+							status: "failed",
+							...(typeof code === "string" ? { errorCode: code as PiErrorCode } : {}),
 							projectKey: run.projectKey,
 						});
 						terminalCwd.set(run.runId, {
 							cwd: entry.cwd,
-							jobId: run.jobId,
 							sessionId: run.sessionId,
 						});
 						entry.activeRun = null;
@@ -379,7 +376,6 @@ export function createPiSupervisor(options: {
 				emitEvent({
 					clientId,
 					sessionId: msg.sessionId,
-					jobId: msg.jobId,
 					runId: msg.runId,
 					event: msg.event,
 				});
@@ -390,10 +386,10 @@ export function createPiSupervisor(options: {
 			if (entry.activeRun) {
 				const run = entry.activeRun;
 				orphanTerminals.push({
-					jobId: run.jobId,
 					runId: run.runId,
 					sessionId: run.sessionId,
-					status: "error",
+					status: "failed",
+					errorCode: "PI_WORKER_EXITED" as PiErrorCode,
 					projectKey: run.projectKey,
 				});
 				entry.activeRun = null;
@@ -491,9 +487,15 @@ export function createPiSupervisor(options: {
 							"Project has an active turn",
 						);
 					}
+					if (typeof request.runId !== "string" || request.runId.length === 0) {
+						return piError(
+							request.requestId,
+							"PI_PROTOCOL_INVALID",
+							"run-scoped action requires runId",
+						);
+					}
 					entry.activeRun = {
-						jobId: request.jobId ?? "",
-						runId: request.runId ?? request.jobId ?? "",
+						runId: request.runId,
 						sessionId: request.sessionId ?? "",
 						projectKey: key,
 						status: "running",
@@ -523,7 +525,6 @@ export function createPiSupervisor(options: {
 				if (
 					((RUN_ESTABLISHING_ACTIONS.has(request.action) && !result.ok) ||
 						(request.action === "agent.abort" && result.ok)) &&
-					run?.jobId === request.jobId &&
 					run?.sessionId === request.sessionId &&
 					run?.runId === request.runId &&
 					entry.activeRun === run
@@ -554,7 +555,6 @@ export function createPiSupervisor(options: {
 			for (const entry of registry.values()) {
 				if (entry.activeRun) {
 					runs.push({
-						jobId: entry.activeRun.jobId,
 						runId: entry.activeRun.runId,
 						sessionId: entry.activeRun.sessionId,
 						status: entry.activeRun.status,
@@ -624,7 +624,6 @@ export function createPiSupervisor(options: {
 					{
 						requestId: randomUUID(),
 						action: "agent.abort",
-						jobId: run.jobId,
 						runId: run.runId,
 						sessionId: run.sessionId,
 					},
@@ -665,15 +664,14 @@ function isDialogKind(kind: unknown): boolean {
 	);
 }
 
-/** 组装 PiEvent 包装（供 bridge 转发） */
+/** 组装 PiEvent 包装(供 bridge 转发) */
 export function wrapPiEvent(
 	clientId: string,
 	sessionId: string,
-	jobId: string,
 	runId: string,
 	event: PiClientEvent,
 ): PiEvent {
-	return { clientId, sessionId, jobId, runId, event };
+	return { clientId, sessionId, runId, event };
 }
 
 export { randomUUID as piRequestId };
