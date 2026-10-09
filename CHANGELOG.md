@@ -2,6 +2,18 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.17.1] - 2026-10-09
+
+**重新发布 0.17.0 的内容，并修复导致其服务端自更新失败的原因。**
+
+0.17.0 的双平台构件上传成功，但服务端自更新在 preStart 阶段失败并标记 `failed`，生产 Server 保持在 0.16.4、从未部署（失败发生在停止旧 Server 之前，无停机，也未触及数据库）。按「同一版本号不得复用」的发布规则改用 0.17.1 重新发布，变更内容见下一条目。
+
+### 修复
+
+- **发布构件的 Agent 迁移 preStart 无法执行（0.17.0 发版失败的直接原因）**：发布构件把 `prisma/` 摊平到构件根（`agent-session-migration.cjs` 与 `agent-session-migration.sql` 同在 `server/`），而脚本以 `__dirname/..` 作为 `@libsql/client` 的解析基准——源码布局下恰好是 `packages/server`，构件下却指向 `apps/<version>/node_modules`，而依赖实际在 `server/node_modules`，于是 preStart 以 `MODULE_NOT_FOUND` 失败。同一处还隐藏两个同类布局假设：迁移 SQL 与 `prisma.config.cjs` 的定位，以及 `main.ts` 启动断言自行拼接的 SQL 路径（即使 preStart 侥幸通过，Server 也会因找不到 SQL 而 fail closed）。
+- 现在脚本**从自身所在目录**解析依赖，并把「迁移 SQL 在哪」「prisma.config.cjs 在哪」收敛为模块内按候选路径解析的单一实现，同时兼容源码布局与发布构件布局；`main.ts` 改用同一解析器，不再重复一份路径知识；SQL 定位失败时报出已查找路径，不再是裸 ENOENT。
+- 新增回归用例覆盖**发布构件布局**（在仓库外用 junction 指向真实 `node_modules`，旧实现会立即 `MODULE_NOT_FOUND`）与两种布局的 SQL 定位，补上「只测过开发布局」的盲区。
+
 ## [0.17.0] - 2026-10-09
 
 ### 变更
