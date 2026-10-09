@@ -59,6 +59,21 @@ export async function bundleServer(outfile: string): Promise<void> {
 export const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 
 /**
+ * Pi SDK 的图片链路依赖（Photon WASM）。
+ *
+ * 它必须**保持 external** 并作为真实包存在于发行布局：它按 `__dirname` 读取同目录的
+ * `photon_rs_bg.wasm`，一旦被内联进单文件，wasm 定位失效，所有图片会被静默替换为
+ * `[Image omitted: ...]`（无错误码、无审计）。两个标记用于构建期断言内联与否：
+ * - `PI_PHOTON_INLINED_MARKER`：esbuild 内联模块时会写入该包的模块路径键，external 时为 0；
+ * - 产物必须保留裸说明符动态 import（`PI_PHOTON_IMPORT`）。
+ */
+export const PI_PHOTON_PACKAGE = "@silvia-odwyer/photon-node";
+/** esbuild 内联该包时会出现的模块路径片段（实测：内联 2 次 / external 0 次）。 */
+export const PI_PHOTON_INLINED_MARKER = "@silvia-odwyer+photon-node";
+/** 产物中必须保留的裸说明符动态 import 字面量。 */
+export const PI_PHOTON_IMPORT = JSON.stringify(PI_PHOTON_PACKAGE);
+
+/**
  * Pi SDK 单文件产物（`define PI_BUNDLED_NODE=true`）。
  *
  * 为什么必须打包（实测数据）：未打包时 Client 发布件是真 `node_modules`（14,688 文件 /
@@ -77,9 +92,17 @@ export const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
  * 用于 `VERSION` 与 Bundle 的 piSdkVersion 一致性）。
  */
 export async function bundlePiSdk(outDir: string): Promise<string> {
-	const clientPkg = JSON.parse(
-		readFileSync(resolve(ROOT, "packages/client/package.json"), "utf8"),
-	) as { dependencies?: Record<string, string> };
+	const clientPackagePath = resolve(ROOT, "packages/client/package.json");
+	let clientPkg: { dependencies?: Record<string, string> };
+	try {
+		clientPkg = JSON.parse(readFileSync(clientPackagePath, "utf8")) as {
+			dependencies?: Record<string, string>;
+		};
+	} catch (error) {
+		throw new Error(
+			`[bundle-apps] 无法解析 ${clientPackagePath}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 	const version = clientPkg.dependencies?.[PI_SDK_PACKAGE];
 	if (!version) {
 		throw new Error(
@@ -107,7 +130,10 @@ export async function bundlePiSdk(outDir: string): Promise<string> {
 			js: 'import { createRequire as __vcpCreateRequire } from "node:module"; const require = __vcpCreateRequire(import.meta.url);',
 		},
 		// 原生模块不在 Pi SDK 图内；显式保留以防御未来新增的绑定包。
-		external: ["*.node"],
+		// photon-node 必须外部化：它按 __dirname 读取同目录的 photon_rs_bg.wasm，
+		// 一旦内联进单文件，wasm 定位失效，图片会被静默替换为省略提示
+		// （见 scripts/pi-image-pipeline.test.ts 的回归门禁）。
+		external: ["*.node", PI_PHOTON_PACKAGE],
 		sourcemap: false,
 		minify: false,
 		logLevel: "warning",
@@ -136,7 +162,8 @@ export async function bundlePiSdk(outDir: string): Promise<string> {
  * 1. `VERSION` 可从 `import.meta.url` 上推的 `package.json` 读到（与 Bundle manifest 比对用）；
  * 2. 会话/模型/扩展加载入口确实导出（树摇或环境分支变化会在此暴露）；
  * 3. 扩展（插件）运行时 `import "<SDK 包名>"` 能解析——这是 `PI_BUNDLED_NODE` 嵌入模块分支
- *    生效的直接证据，也是「插件系统不受影响」的唯一可自动验证点。
+ *    生效的直接证据，也是「插件系统不受影响」的唯一可自动验证点；
+ * 4. 图片链路依赖 `PI_PHOTON_PACKAGE` 未被内联（内联会让图片静默失效，见该常量注释）。
  */
 async function verifyPiSdkBundle(
 	outfile: string,
@@ -185,7 +212,9 @@ async function verifyPiSdkBundle(
 			cwd: string,
 		) => Promise<{ extensions: unknown[] }>;
 		const loaded = await loader([probe], process.cwd());
-		const observed = globals.__vcpPiSdkProbe;
+		// `delete` 会让 TS 把该属性窄化为 undefined，因此显式取回声明类型，
+		// 否则下面的 observed?.sdk 会被报为「property does not exist on never」。
+		const observed = globals.__vcpPiSdkProbe as ProbeGlobal["__vcpPiSdkProbe"];
 		if (loaded.extensions.length === 0 || observed?.sdk !== true || observed?.typebox !== true) {
 			throw new Error(
 				`探针未在嵌入模块下解析（扩展数=${loaded.extensions.length}, sdk=${String(observed?.sdk)}, typebox=${String(observed?.typebox)}）`,
@@ -197,6 +226,20 @@ async function verifyPiSdkBundle(
 		);
 	} finally {
 		rmSync(probe, { force: true });
+	}
+
+	// 图片链路：Photon 必须保持 external。内联后它的 wasm 定位路径失效，图片会被静默
+	// 替换为省略提示（无错误码），因此把该回归拦在构建期，而不是等人去跑手动门禁。
+	const bundleText = readFileSync(outfile, "utf8");
+	if (bundleText.includes(PI_PHOTON_INLINED_MARKER)) {
+		throw new Error(
+			`[bundle-apps] ${PI_PHOTON_PACKAGE} 被内联进单文件产物（出现 ${PI_PHOTON_INLINED_MARKER}），图片链路会静默失效；请检查 bundlePiSdk 的 external 列表`,
+		);
+	}
+	if (!bundleText.includes(PI_PHOTON_IMPORT)) {
+		throw new Error(
+			`[bundle-apps] 单文件产物未保留 ${PI_PHOTON_PACKAGE} 的动态 import，图片链路会静默失效`,
+		);
 	}
 }
 

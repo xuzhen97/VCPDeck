@@ -12,6 +12,29 @@ describe("projectPiEvent", () => {
 		).toBeNull();
 	});
 
+	it("SDK 新增的边界事件不改变现有投影语义", () => {
+		// agent_before_settle（0.87.0 新增）没有专项分支，落到 default：
+		// 「未识别事件只提示历史已变化」。这是壳主的保守兼底——刷新历史是安全的，
+		// 但不得因此新增一条协议事件类型。此处把它锁定下来。
+		expect(projectPiEvent({ type: "agent_before_settle" }, SID)).toEqual({
+			type: "history_changed",
+			sessionId: SID,
+		});
+		// turn_end 本就是显式丢弃名单，增加边界字段（entries/aborted）后仍是丢弃。
+		expect(
+			projectPiEvent({ type: "turn_end", entries: [], aborted: false }, SID),
+		).toBeNull();
+	});
+
+	it("agent_settled 的 aborted 字段不进入投影", () => {
+		// SDK 1.1.0 起 agent_settled 带 aborted；协议当前不含该字段，
+		// 因此投影必须显式构造，不得透传事件对象。
+		expect(projectPiEvent({ type: "agent_settled", aborted: true }, SID)).toEqual({
+			type: "agent_settled",
+			sessionId: SID,
+		});
+	});
+
 	it("thinking 阶段和 delta 进入事件，但限制单次正文大小", () => {
 		const start = projectPiEvent({ type: "thinking_start" }, SID);
 		expect(start).toEqual({

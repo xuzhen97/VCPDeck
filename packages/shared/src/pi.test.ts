@@ -375,6 +375,19 @@ describe("parsePiEvent", () => {
 		expect(ev.event.type).toBe("agent_end");
 	});
 
+	it("agent_settled 带未知字段 aborted 时被严格 parser 拒绝", () => {
+		// SDK 1.1.0 给 agent_settled 增加了 aborted；协议当前不含它，
+		// 客户端投影不输出该字段，因此一旦出现就应被严格校验拦住。
+		expect(() =>
+			parsePiEvent({
+				clientId: "c1",
+				sessionId: "s1",
+				runId: "run-1",
+				event: { type: "agent_settled", sessionId: "s1", aborted: true },
+			}),
+		).toThrow();
+	});
+
 	it("接受并严格校验 extension_resolved", () => {
 		const event = parsePiEvent({
 			clientId: "client-1",

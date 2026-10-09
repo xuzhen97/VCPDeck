@@ -166,8 +166,9 @@ expect(wrapper.isRunning()).toBe(true);
 
 // 命令自己启动的 Agent 工作结束会发 agent_settled；
 // 但命令尚未完成，不得据此对外宣称完成。
+// SDK 1.1.0 起 `agent_settled` 事件带必填的 `aborted`（取消与完成需可区分）。
 inner.resolvePrompt();
-inner.emit({ type: "agent_settled" });
+inner.emit({ type: "agent_settled", aborted: false });
 await Promise.resolve();
 expect(events).not.toContain("prompt_done");
 expect(wrapper.isRunning()).toBe(true);

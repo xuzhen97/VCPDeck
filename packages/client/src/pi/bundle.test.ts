@@ -47,7 +47,7 @@ async function makeTree(
 	const manifest = {
 		protocolVersion: 1,
 		bundleVersion: "0.11.0",
-		piSdkVersion: overrides.sdkVersion ?? "0.86.0",
+		piSdkVersion: overrides.sdkVersion ?? "1.1.0",
 		resources: [
 			{
 				id: "vcp.tool-policy",
@@ -65,7 +65,7 @@ async function makeTree(
 	return { appDir, versionDir, root };
 }
 
-const resolveFor = (fixture: Pick<Fixture, "appDir" | "versionDir">, sdkVersion = "0.86.0") =>
+const resolveFor = (fixture: Pick<Fixture, "appDir" | "versionDir">, sdkVersion = "1.1.0") =>
 	resolveVerifiedPiBundle({
 		selfDir: join(fixture.versionDir, "client"),
 		appDir: fixture.appDir,
@@ -90,7 +90,7 @@ describe("resolveVerifiedPiBundle", () => {
 		const bundle = await resolveVerifiedPiBundle({
 			selfDir: join(fixture.versionDir, "client", "dist"),
 			appDir: fixture.appDir,
-			sdkVersion: "0.86.0",
+			sdkVersion: "1.1.0",
 		});
 
 		expect(bundle?.resourceIds).toEqual(["vcp.tool-policy"]);
@@ -117,7 +117,7 @@ describe("resolveVerifiedPiBundle", () => {
 			resolveVerifiedPiBundle({
 				selfDir: outside,
 				appDir: outside,
-				sdkVersion: "0.86.0",
+				sdkVersion: "1.1.0",
 			}),
 		).resolves.toBeNull();
 	});

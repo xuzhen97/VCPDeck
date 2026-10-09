@@ -1,6 +1,6 @@
 # 远程 Pi 会话设计
 
-> 状态：Current｜维护责任：Pi/Client 维护者｜最后核验：2026-10-08｜适用版本：当前 `main`，Pi SDK `0.86.0`
+> 状态：Current｜维护责任：Pi/Client 维护者｜最后核验：2026-10-09｜适用版本：当前 `main`，Pi SDK `1.1.0`
 
 本文描述当前已经实现的人机交互式远程 Pi Session：Browser 通过 Server 控制目标机器上的 Pi SDK Worker，实时查看回答并管理持续 Session。运行态和正文归属见 [ADR-0007](../adr/0007-client-owned-interactive-runtime.md)，会话、每轮 Run 与会话操作审计的独立模型见 [ADR-0041](../adr/0041-agent-session-run-and-audit-separation.md)。**Pi 的模型策略、Provider 凭据与 Client 绑定由 Server 集中管理，Client 使用 VCPDeck 专属隔离运行时**，见 [ADR-0029](../adr/0029-server-managed-isolated-pi-runtime.md) 与 [`remote-pi-control-plane.md`](./remote-pi-control-plane.md)。协议字段与 parser 以 `packages/shared/src/pi.ts`、`packages/shared/src/pi-admin.ts` 为准。
 
@@ -40,7 +40,7 @@ flowchart LR
     Server -->|PI_RUNTIME_SPEC / PI_RUNTIME_ACK| Client
     Server --> PiConfig[(PiProfile / PiCredential 密文 / ClientBinding)]
     Client <-->|IPC| Worker[项目级 Pi Worker]
-    Worker --> SDK[Pi SDK 0.86.0]
+    Worker --> SDK[Pi SDK 1.1.0]
     SDK --> DataRoot[VCPDeck 数据根\nagentDir / Session JSONL / cache]
     Worker --> Project[目标项目与工具]
     NativePi[用户原生 Pi] -.->|互不共享| DataRoot
@@ -80,11 +80,13 @@ Client 注册时安全上报 `agent.pi` capabilityDetails。探测顺序为：
 当前 Client 锁定：
 
 ```text
-@earendil-works/pi-agent-core@0.86.0
-@earendil-works/pi-coding-agent@0.86.0
+@earendil-works/pi-agent-core@1.1.0
+@earendil-works/pi-coding-agent@1.1.0
 ```
 
 Client 不再读取目标机器用户 Pi 的 agentDir、模型凭据、全局设置或受信资源；SDK 版本的事实来源是运行时 `VERSION` 导出（禁止硬编码版本字符串）。Pi SDK 升级不是普通依赖刷新，必须按第 12 节执行兼容验证。
+
+图片链路（1.1.0 起）改由 SDK 的 Photon WASM 管线处理，因此 `@silvia-odwyer/photon-node` 必须作为**外部保留依赖**同时出现在 `EXTERNAL_DEPS.client` 与 SDK 单文件打包的 `external` 中；内联它会因 wasm 定位失效而让所有图片被静默替换成省略提示（回归门禁：`scripts/pi-image-pipeline.test.ts`）。
 
 ## 4. 项目目录与 Worker
 

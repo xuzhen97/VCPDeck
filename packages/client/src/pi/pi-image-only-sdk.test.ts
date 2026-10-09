@@ -44,7 +44,10 @@ it("真实 Pi SDK 把空文本图片作为 user message 写入并从 JSONL 恢�
 	try {
 		const created = await createAgentSession({ cwd: root, agentDir: root, model: model as never, modelRuntime: modelRuntime as never, sessionManager: manager, settingsManager, resourceLoader, tools: [] });
 		session = created.session;
-		await session.prompt("", { images: [{ type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==" }] });
+		// 夹具用 8x8 真实尺寸 PNG：SDK 1.1.0 的缩放管线对 1x1 退化图返回 null，
+		// 会把图片替换成 "[Image omitted: ...]" 而掩盖本用例真正要验证的结构。
+		// 本用例验证的是「空文本 + 图片」的写入与恢复，不涉及缩放边界。
+		await session.prompt("", { images: [{ type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGOQqziBFTEMLQkABkZXgRDDjAEAAAAASUVORK5CYII=" }] });
 		const user = (seen as { messages: Array<{ role: string; content: Array<{ type: string; text?: string }> }> }).messages.find((m) => m.role === "user");
 		expect(user?.content.map((item) => item.type)).toEqual(["text", "image"]);
 		expect(user?.content[0]?.text).toBe("");

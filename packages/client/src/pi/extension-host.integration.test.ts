@@ -1,5 +1,5 @@
 /**
- * 受信扩展的宿主一致闸门（真实 Pi SDK 0.86.0 集成）。
+ * 受信扩展的宿主一致闸门（真实 Pi SDK 1.1.0 集成）。
  *
  * 锁定四条生产依赖，任何一条被上游改动破坏都会让网页承诺失真：
  * 1. `createAgentSessionFromServices({ tools })` 是**全工具 allowlist**：只传内置工具名时，
@@ -13,6 +13,11 @@
  *    模板展开。
  * 4. 扩展同名注册会被 SDK 静默去重（命令被改写为 `name:2`），冲突必须在宿主侧
  *    装配前拒绝，而不是让操作者面对歧义调用名。
+ *
+ * 1.1.0 复核（本文件用例均在 1.1.0 下实跑通过）：上游新增了对重名的 warning，并允许
+ * 第三方扩展**替换内置扩展**（`builtin:` 路径 + `isBuiltinExtension`）。那套语义只覆盖
+ * 内置扩展与“可替换”扩展，不改变我们需要的不变量：内置工具同名与跨扩展命令歧义仍
+ * 必须在装配前由宿主拒绝，不能依赖上游 warning 降级为可用面变化。
  */
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

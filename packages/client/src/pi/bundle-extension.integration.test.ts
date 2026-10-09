@@ -72,6 +72,22 @@ describe("Bundle 扩展加载面（真实 SDK）", () => {
 		}
 	});
 
+	it("1.1.0 起的内建扩展不进入受信加载面（安全相关）", async () => {
+		const { result } = await loadWith({ noExtensions: true });
+		const paths = result.extensions.map((extension) => extension.path);
+
+		// 上游 0.99 起在 SDK 内注册内建扩展（以 `builtin:` 路径标识，如 mcp / codemode /
+		// tool-search / llama.cpp）。若 `noExtensions: true` 不再过滤它们，工具面会被静默
+		// 放大（`activateRuntimeTools` 按运行时实际注册集合激活），因此必须锁定。
+		expect(paths.filter((path) => path.startsWith("builtin:"))).toEqual([]);
+		const toolNames = result.extensions.flatMap((extension) => [
+			...extension.tools.keys(),
+		]);
+		for (const builtinTool of ["codemode", "tool_search"]) {
+			expect(toolNames).not.toContain(builtinTool);
+		}
+	});
+
 	it("加载出的策略扩展注册了 tool_call 处理器并返回阻塞决策", async () => {
 		const { result } = await loadWith({ noExtensions: true });
 		const [extension] = result.extensions;

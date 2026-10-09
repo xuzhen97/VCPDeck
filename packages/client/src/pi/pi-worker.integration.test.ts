@@ -639,7 +639,7 @@ describe.skipIf(!hasWorker)("Pi Worker 子进程集成", { timeout: 30_000 }, ()
 				powershell: null,
 				pathDirs: [],
 			}),
-			forkProbeWorker: async () => ({ sdkVersion: "0.86.0", providerIds: ["anthropic"], error: null }),
+			forkProbeWorker: async () => ({ sdkVersion: "1.1.0", providerIds: ["anthropic"], error: null }),
 			ensureDataRootWritable: async () => true,
 			resolveBundle: async () => null,
 		});

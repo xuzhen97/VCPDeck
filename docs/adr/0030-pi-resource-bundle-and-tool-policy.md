@@ -15,7 +15,7 @@ ADR-0029 已确定：Pi SDK 与受信资源随 Client Release 发布、Server �
 2. 策略对「未列出的工具」与「审批超时」的默认判定；
 3. Bundle 资源（扩展）如何在**不落盘、不进环境变量**的前提下取得 Server 下发的策略。
 
-第 3 点由 SDK 现状强制：Pi 0.86.0 没有提供任何自定义数据通道（`SessionStartEvent` 只有 `reason`/`previousSessionFile`，`ExtensionContext` 与 `ExtensionBindings` 均无自定义槽位，`ExtensionFactory` 不接收参数）。同时 Pi 的 `bash` 工具会派生子进程并继承环境变量，因此「用环境变量传策略」会把控制面策略暴露给模型可执行的任意命令。
+第 3 点由 SDK 现状强制：Pi 0.86.0 没有提供任何自定义数据通道（`SessionStartEvent` 只有 `reason`/`previousSessionFile`，`ExtensionContext` 与 `ExtensionBindings` 均无自定义槽位，`ExtensionFactory` 不接收参数）。**该论据已在 Pi 1.1.0 上复核仍成立**（`ExtensionFactory` 仍为 `(pi) => void | Promise<void>`，`SessionStartEvent` 字段未变），因此决策 3 的 host bridge 方案继续有效。同时 Pi 的 `bash` 工具会派生子进程并继承环境变量，因此「用环境变量传策略」会把控制面策略暴露给模型可执行的任意命令。
 
 ## 决策
 

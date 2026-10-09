@@ -147,6 +147,9 @@ export function createPiSessionReader(
 	function entryToMessage(entry: SessionEntry): PiMessage | null {
 		switch (entry.type) {
 			case "message": {
+				// SAFETY: SDK 的 message 是 provider 消息联合类型；本读取器只按需读取
+				// role/content/toolCallId，缺失或多余字段一律按不存在处理，因此断言为
+				// 一个宽松结构视图不会引入未校验的使用。
 				const msg = entry.message as unknown as {
 					role?: string;
 					content?: unknown;
@@ -256,15 +259,24 @@ export function createPiSessionReader(
 					role: "custom",
 					kind: "compaction",
 				};
-			case "custom_message":
+			case "context_edit":
+				// ADR-0031：投影（网页历史与原生导入）只呈现"发生过什么"。
+				// `context_edit` 是模型上下文编辑（省略/替换），SDK 只在
+				// buildSessionProjection() 应用它；本读取器走 buildContextEntries()
+				// + entryToMessage()，故意不应用。显式返回 null，而非依赖 default
+				// 兜底，避免日后 default 变化时静默改变语义。
+				return null;
+			case "custom_message": {
+				// SAFETY: custom_message 条目可选携带 customType；读不到时回退 "custom"，
+				// 因此断言为可选字段视图、只用于取该字符串是安全的。
+				const customType = (entry as unknown as { customType?: string })
+					.customType;
 				return {
 					id: entry.id,
 					role: "custom",
-					kind: String(
-						(entry as unknown as { customType?: string }).customType ??
-							"custom",
-					),
+					kind: String(customType ?? "custom"),
 				};
+			}
 			default:
 				return null;
 		}
@@ -277,6 +289,8 @@ export function createPiSessionReader(
 	): Promise<{ messages: PiMessage[]; nextCursor: string | null }> {
 		const path = await resolvePath(sessionId);
 		const sm = (await getSdk()).SessionManager.open(path, sessionDir);
+		// SAFETY: SDK 是运行时动态 import 的，SessionEntry 只作类型视图；
+		// getEntries() 返回的就是会话条目数组，这里只做结构对齐，不改运行时值。
 		const entries = sm.getEntries() as unknown as SessionEntry[];
 		const byId = new Map<string, SessionEntry>();
 		for (const e of entries) byId.set(e.id, e);
@@ -335,6 +349,8 @@ export function createPiSessionReader(
 			const sm = (await getSdk()).SessionManager.open(path, sessionDir);
 			const header = sm.getHeader();
 			const leafId = sm.getLeafId();
+			// SAFETY: getTree() 的节点形状由 SDK 拥有；本处只读 entry.id/entry.type
+			// 与子节点字段，缺失时按空处理，不依赖未列举字段。
 			const tree = sm.getTree() as unknown as Array<{
 				entry: { id: string; type: string };
 				children: unknown[];
@@ -393,6 +409,7 @@ export function createPiSessionReader(
 			if (!entry || entry.type !== "message") {
 				throw piError("PI_SESSION_NOT_FOUND", "Entry not found");
 			}
+			// SAFETY: 只读消息的 content 数组；非数组或缺失时上层按空内容处理。
 			const content = (entry.message as unknown as { content?: unknown })
 				.content;
 			if (!Array.isArray(content) || !isRecord(content[blockIndex])) {
@@ -470,6 +487,7 @@ export function createPiSessionReader(
 			const sm = (await getSdk()).SessionManager.open(sourcePath, sessionDir);
 			const targetCwd = sm.getCwd() || cwd;
 			const dir = sm.getSessionDir();
+			// SAFETY: 同 getEntries() 的类型视图对齐，只用于按 id 查找目标条目。
 			const entries = sm.getEntries() as unknown as SessionEntry[];
 			const target = entries.find((e) => e.id === upToMessageId);
 			if (!target) throw piError("PI_SESSION_NOT_FOUND", "Message not found");

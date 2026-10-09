@@ -118,6 +118,9 @@ export const EXTERNAL_DEPS: Record<"server" | "client", string[]> = {
 		"node-datachannel",
 		"@node-datachannel/win32-x64-msvc",
 		"@node-datachannel/linux-x64-gnu",
+		// 单文件 SDK 的图片链路依赖：resizeImage 走 Photon WASM，它必须作为真实包
+		// 存在于发行布局（内联会让 wasm 定位失效，见 scripts/pi-image-pipeline.test.ts）。
+		"@silvia-odwyer/photon-node",
 	],
 };
 

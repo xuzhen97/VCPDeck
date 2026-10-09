@@ -1021,7 +1021,11 @@ flowchart LR
 | §18 Frontend 复用 | `packages/frontend/src/pi/`（新增 Adapter） | Plan 3 |
 | §25 测试与发布门禁 | `packages/client/src/pi/*.test.ts`、新增 native Pi 零污染集成测试 | Plan 1（隔离部分） |
 
-### 28.4 Pi SDK 版本事实（目标 0.86.0）
+### 28.4 Pi SDK 版本事实（本节写于目标 0.86.0 时期；当前事实为 1.1.0）
+
+> 后续已升级到 `1.1.0`（2026-10-09，见 `CHANGELOG.md`）。本节表格保留当时的决策记录；
+> “现状”一行中的 `0.86.0` 为当时事实，当前事实请以 `packages/client/package.json` 与
+> [`remote-pi.md`](./remote-pi.md) 为准。
 
 | 项 | 事实 |
 | --- | --- |

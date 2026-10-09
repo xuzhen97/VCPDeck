@@ -2,6 +2,17 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## 未发布
+
+**升级 Pi SDK 到 `1.1.0`，并修复单文件 SDK 产物下图片被静默丢弃的问题。**
+
+- **Pi SDK `0.86.0` → `1.1.0`**（`pi-coding-agent`、`pi-agent-core`、`pi-ai` 同步；`packages/client` 与 `packages/frontend` 均为精确版本）。已核验构建期自检断言的 SDK 导出、`AgentSession` 方法面与 `ResourceLoader` 选项面在 1.1.0 上均存在；`noExtensions: true` 仍会排除 0.99 起新增的内建扩展（`mcp`/`codemode`/`tool-search`/`llama.cpp`），工具面不会被意外放大。
+- **修复发布态图片链路（静默失败）**：1.1.0 起 SDK 的图片处理改走 Photon WASM 管线，而 Client 发布时把 SDK 打成单文件；`@silvia-odwyer/photon-node` 一旦被内联，其 wasm 定位失效，**所有图片会被静默替换成省略提示**（无错误码、无审计）。现将该包同时加入 SDK 单文件打包的 `external` 与 `EXTERNAL_DEPS.client`，并新增构建期回归门禁 `scripts/pi-image-pipeline.test.ts`（含内联对照组，防止门禁退化为永真）。
+- **会话 `context_edit` 条目显式处理**：会话读取器只呈现原始历史（ADR-0031 定位），现有显式分支与回归测试，不再依赖 `default` 兜底。
+- **事件边界锁定**：`agent_settled.aborted`（1.1.0 新增）不进入 VCPDeck 投影协议；新增的 `agent_before_settle` 与带边界字段的 `turn_end` 按既有兜底语义处理，均有测试锁定。
+- **测试夹具**：纯图片 Prompt 用例改用 8×8 真实尺寸 PNG（1.1.0 对 1×1 退化图会判为无法缩放）；新增 SDK 版本防漂移守卫。
+- **需注意的数据层影响**：上游 1.0.3 将 Azure Provider 从 `azure-openai-responses` 重命名为 `azure`。存量 Pi Profile 若引用旧名，升级后该模型会落入不可用集合（`unavailableModels`），需在 Profile 中重新选择 Provider。
+
 ## [0.17.1] - 2026-10-09
 
 **重新发布 0.17.0 的内容，并修复导致其服务端自更新失败的原因。**

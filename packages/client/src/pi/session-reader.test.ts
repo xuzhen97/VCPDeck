@@ -271,6 +271,28 @@ describe("PiSessionReader", () => {
 			code: "PI_SESSION_NOT_FOUND",
 		});
 	});
+
+	it("context_edit 条目不产生消息，也不影响相邻 message 的投影", async () => {
+		const { cwd, sessionDir } = await makeDirs();
+		await writeSession(sessionDir, cwd, "s1", [
+			msg("m1", null, "user", [text("hi")]),
+			{
+				type: "context_edit",
+				id: "m2",
+				parentId: "m1",
+				timestamp: new Date().toISOString(),
+				targetId: "m1",
+				replacement: null,
+			},
+		]);
+
+		const reader = createPiSessionReader(cwd, sessionDir);
+		const page = await reader.context("s1");
+
+		// 投影语义 = 原始历史：context_edit 属于模型上下文编辑（省略/替换），
+		// 不由 Session 读取器应用，因此既不产生 message 也不影响 m1。
+		expect(page.messages.map((m) => m.id)).toEqual(["m1"]);
+	});
 });
 
 async function readdirFiles(dir: string): Promise<string[]> {

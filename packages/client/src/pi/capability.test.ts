@@ -27,7 +27,7 @@ function fakeEnv(overrides: Partial<ProbeEnv> = {}): ProbeEnv {
 		nodeVersion: "22.19.0",
 		platform: "win32",
 		resolveShells: bashFrom("git-bash", "C:\\Program Files\\Git\\bin\\bash.exe"),
-		forkProbeWorker: async () => ({ sdkVersion: "0.86.0", providerIds: ["anthropic", "openai"], error: null }),
+		forkProbeWorker: async () => ({ sdkVersion: "1.1.0", providerIds: ["anthropic", "openai"], error: null }),
 		ensureDataRootWritable: async () => true,
 		resolveBundle: async () => null,
 		...overrides,
@@ -39,7 +39,7 @@ describe("probePiCapability", () => {
 		const result = await probePiCapability(fakeEnv());
 		expect(result).toMatchObject({
 			available: true,
-			sdkVersion: "0.86.0",
+			sdkVersion: "1.1.0",
 			nodeVersion: "22.19.0",
 			shellKind: "git-bash",
 			sessionJobProtocolVersion: 3,
@@ -122,7 +122,7 @@ describe("probePiCapability", () => {
 	it("本机无已认证模型不再判定不可用（判定迁移到 RuntimeSpec ready）", async () => {
 		// 探测结果只保留 SDK 版本；模型可用性由 Server 下发的 RuntimeSpec 决定。
 		const forkProbeWorker = vi.fn(async () => ({
-			sdkVersion: "0.86.0",
+			sdkVersion: "1.1.0",
 			providerIds: ["anthropic", "openai"],
 			error: null,
 		}));
@@ -163,7 +163,7 @@ describe("probePiCapability 的 Bundle 能力上报", () => {
 		manifest: {
 			protocolVersion: 1,
 			bundleVersion: "0.11.0",
-			piSdkVersion: "0.86.0",
+			piSdkVersion: "1.1.0",
 			resources: [],
 		},
 		resourceIds: ["vcp.tool-policy"],
@@ -184,7 +184,7 @@ describe("probePiCapability 的 Bundle 能力上报", () => {
 		expect(status.bundle).toEqual({
 			protocolVersion: 1,
 			bundleVersion: "0.11.0",
-			piSdkVersion: "0.86.0",
+			piSdkVersion: "1.1.0",
 			resourceIds: ["vcp.tool-policy"],
 		});
 		expect(JSON.stringify(status.bundle)).not.toContain("extensions/");
