@@ -756,9 +756,19 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   @SubscribeMessage(Events.JOB_CANCEL_FAILED)
-  handleJobCancelFailed(@MessageBody() data: JobCancelFailed) {
+  async handleJobCancelFailed(@MessageBody() data: JobCancelFailed) {
     console.error(`[ws] cancel failed: ${data.jobId} - ${data.reason}`);
+    // 客户端明确回答“没有这个 Job” → 它不可能再收敛。若留在 running/disconnected，会永久
+    // 占住该 Client 的并发槽并让发布 drain 等不到收敛（2026-10-10 生产事故），因此收尾。
+    const next = await this.jobService.failOrphaned(data.jobId, data.reason);
+    const job = await this.jobService.findById(data.jobId);
+    this.server.emit(Events.JOB_UPDATE, {
+      jobId: data.jobId,
+      type: job?.type ?? "exec",
+      status: JobStatus.ERROR,
+    } satisfies JobUpdate);
     this.server.emit(Events.JOB_CANCEL_FAILED, data);
+    if (next) this.sendDispatch(next);
   }
 
   // ── Public API (called by controller) ──

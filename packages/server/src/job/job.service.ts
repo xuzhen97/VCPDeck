@@ -498,6 +498,42 @@ export class JobService {
     return this.scheduler.onFinished(job.clientId);
   }
 
+  /**
+   * 客户端确认它已不再持有该 Job（收到 JOB_CANCEL_FAILED，reason `Job not found`）时收尾。
+   *
+   * 典型来源：Client 换代/重启后内存里的 Job 映射丢失，此后再没人会上报它的终态。
+   * 不在此收尾，它会永久停在 running/disconnected：占住该 Client 的并发槽
+   * （MAX_CONCURRENT_JOBS），并让发布 drain 永远等不到收敛 —— 发版被它自己卡死
+   * （2026-10-10 生产：两条 17 小时的 exec Job 阻塞了整个发布）。
+   *
+   * 返回该 Client 可继续派发的载荷（若有）。
+   */
+  async failOrphaned(
+    jobId: string,
+    reason: string,
+  ): Promise<DispatchPayload | null> {
+    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+    if (!job) return null;
+    if (
+      job.status !== "running" &&
+      job.status !== "waiting_input" &&
+      job.status !== "disconnected"
+    ) {
+      // 已是终态（或 pending 由 cancel 直接处理）→ 不覆盖既有结果。
+      return null;
+    }
+    await this.prisma.job.update({
+      where: { id: jobId },
+      data: {
+        status: "error",
+        finishedAt: new Date(),
+        errorCode: "JOB_ORPHANED",
+        errorMessage: reason.slice(0, 200),
+      },
+    });
+    return this.scheduler.onFinished(job.clientId);
+  }
+
   async markDisconnected(clientId: string) {
     await this.prisma.job.updateMany({
       where: { clientId, status: { in: ["running", "waiting_input"] } },

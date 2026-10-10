@@ -608,3 +608,70 @@ describe("JobService 安全 payload 投影", () => {
 		expect(JSON.stringify(page)).not.toContain("TOP_SECRET");
 	});
 });
+
+describe("JobService failOrphaned", () => {
+	function makeOrphanDeps(job: Record<string, unknown> | null) {
+		const prisma = mockPrisma([]) as any;
+		prisma.job.findUnique.mockResolvedValue(job);
+		prisma.job.update.mockResolvedValue({ ...(job ?? {}), status: "error" });
+		const scheduler = { onFinished: vi.fn().mockResolvedValue(null) } as any;
+		const storage = { getBackendConfig: vi.fn() } as never;
+		const service = new JobService(prisma, scheduler, mockFileService(), storage);
+		return { service, prisma, scheduler };
+	}
+
+	it("客户端确认不再持有该 Job 时按 error 收尾，并推进该 Client 的队列", async () => {
+		const { service, prisma, scheduler } = makeOrphanDeps({
+			id: "j1",
+			clientId: "c1",
+			status: "running",
+			type: "exec",
+		});
+		scheduler.onFinished.mockResolvedValue({
+			jobId: "next",
+			clientId: "c1",
+			type: "exec",
+			payload: {},
+		});
+
+		const next = await service.failOrphaned("j1", "Job not found");
+
+		expect(prisma.job.update).toHaveBeenCalledWith({
+			where: { id: "j1" },
+			data: expect.objectContaining({
+				status: "error",
+				errorCode: "JOB_ORPHANED",
+				errorMessage: "Job not found",
+			}),
+		});
+		expect(scheduler.onFinished).toHaveBeenCalledWith("c1");
+		expect(next).toMatchObject({ jobId: "next" });
+	});
+
+	it("disconnected 也属于可收尾态（Client 换代后留下的孤儿）", async () => {
+		const { service, prisma, scheduler } = makeOrphanDeps({
+			id: "j3",
+			clientId: "c1",
+			status: "disconnected",
+			type: "exec",
+		});
+
+		await service.failOrphaned("j3", "Job not found");
+
+		expect(prisma.job.update).toHaveBeenCalled();
+		expect(scheduler.onFinished).toHaveBeenCalledWith("c1");
+	});
+
+	it("已是终态的 Job 不被覆盖", async () => {
+		const { service, prisma, scheduler } = makeOrphanDeps({
+			id: "j2",
+			clientId: "c1",
+			status: "done",
+			type: "exec",
+		});
+
+		expect(await service.failOrphaned("j2", "Job not found")).toBeNull();
+		expect(prisma.job.update).not.toHaveBeenCalled();
+		expect(scheduler.onFinished).not.toHaveBeenCalled();
+	});
+});

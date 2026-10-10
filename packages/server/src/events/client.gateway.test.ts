@@ -44,6 +44,9 @@ function makeGateway(reconciliation = makeReconciliation()) {
 	const jobService = {
 		markDone: vi.fn().mockResolvedValue(null),
 		markDisconnected: vi.fn(async () => {}),
+		// JOB_CANCEL_FAILED 的收尾路径（2026-10-10 生产事故）
+		failOrphaned: vi.fn().mockResolvedValue(null),
+		findById: vi.fn().mockResolvedValue(undefined),
 	};
 	const fileService = {
 		confirmUpload: vi.fn().mockResolvedValue({
@@ -1026,5 +1029,62 @@ describe("ClientGateway Git SSH 分发（ADR-0037/0038）", () => {
 		]);
 		await gateway.sweepStaleClients();
 		expect(gitSsh.onDisconnected).toHaveBeenCalledWith("c1", "socket-7");
+	});
+});
+
+describe("ClientGateway.handleJobCancelFailed", () => {
+	it("客户端确认不再持有该 Job 时收尾为 error 并推进该 Client 队列", async () => {
+		const { gateway, jobService, emit } = makeGateway();
+		// harness 的 emit 间谍只覆盖 server.to().emit；job:update 走 server.emit，需按既有套路打点。
+		const updates: unknown[] = [];
+		const serverEmit = (gateway.server as { emit: (...a: unknown[]) => unknown })
+			.emit;
+		(gateway.server as { emit: unknown }).emit = (
+			event: string,
+			payload?: unknown,
+		) => {
+			if (event === "job:update") updates.push(payload);
+			return serverEmit?.(event, payload);
+		};
+		jobService.failOrphaned.mockResolvedValue({
+			jobId: "next-job",
+			clientId: "c1",
+			type: "exec",
+			payload: { mode: "command", command: "echo next" },
+			timeout: null,
+		});
+		jobService.findById.mockResolvedValue({ id: "job-1", type: "exec" });
+
+		await gateway.handleJobCancelFailed({
+			jobId: "job-1",
+			reason: "Job not found",
+		} as never);
+
+		expect(jobService.failOrphaned).toHaveBeenCalledWith("job-1", "Job not found");
+		expect(updates).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ jobId: "job-1", status: "error" }),
+			]),
+		);
+		expect(emit).toHaveBeenCalledWith(
+			"job:dispatch",
+			expect.objectContaining({ jobId: "next-job" }),
+		);
+	});
+
+	it("收尾失败（Job 已是终态）时不覆盖结果、也不派发", async () => {
+		const { gateway, jobService, emit } = makeGateway();
+		jobService.failOrphaned.mockResolvedValue(null);
+		jobService.findById.mockResolvedValue({ id: "job-9", type: "exec" });
+
+		await gateway.handleJobCancelFailed({
+			jobId: "job-9",
+			reason: "Job not found",
+		} as never);
+
+		expect(emit).not.toHaveBeenCalledWith(
+			"job:dispatch",
+			expect.anything(),
+		);
 	});
 });
