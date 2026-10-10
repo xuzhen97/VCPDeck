@@ -4,11 +4,11 @@
 
 ## 未发布
 
-## [0.18.1] - 2026-10-10
+## [0.18.2] - 2026-10-10
 
-**重新发布 0.18.0 的内容，并修复导致其发版失败的两个 Job 生命周期缺陷。**
+**重新发布 0.18.x 的内容，并修复导致 0.18.1 发版失败的构件行尾漂移。**
 
-> 0.18.0 的 Release 在 drain 阶段失败、**从未部署**（生产保持 0.17.1，客户端未被触碰）。按「同一版本号不得复用」改用 0.18.1。
+> 0.18.0（drain 等待 Job 收敛超时）与 0.18.1（preStart 迁移摘要不符）两次发版均失败、**从未部署**（生产保持 0.17.1，客户端未被触碰）。按「同一版本号不得复用」改用 0.18.2。
 
 ### Breaking
 
@@ -26,6 +26,7 @@
 - **发布态图片链路静默失败**：1.1.0 起 SDK 的图片处理改走 Photon WASM 管线，而 Client 发布时把 SDK 打成单文件；`@silvia-odwyer/photon-node` 一旦被内联，其 wasm 定位失效，**所有图片会被静默替换成省略提示**（无错误码、无审计）。现将该包同时加入 SDK 单文件打包的 `external` 与 `EXTERNAL_DEPS.client`，并在 `verifyPiSdkBundle()` 增加构建期断言（发布构建即拦截），另加回归门禁 `scripts/pi-image-pipeline.test.ts`（含内联对照组，防止门禁退化为永真）。
 - **分离子进程持有 Job 管道导致 Job 永久 `running`**：脚本用 `Start-Process` 分离出的长驻子进程（redis/java/vite 等）会继承 Job 的 stdout/stderr 管道并长期持有，于是脚本几秒就退出、Job 却永远不结算 —— 占住该 Client 的并发槽，且让发布 drain 永远等不到收敛（0.18.0 发版失败的直接原因）。现以 `exit`（进程本体退出）为准 + 1s 有限输出排空窗口，`close` 先到则仍立即结算。
 - **孤儿 Job 在服务端无收敛路径**：客户端回答 `JOB_CANCEL_FAILED`（Job not found）时，服务端只把它转发给浏览器、不用来终结 Job，于是这类 Job 在 API 上也无出路。现按 `error` + `JOB_ORPHANED` 收尾，并复用 `onFinished` 推进该 Client 的待派发队列。
+- **发布构件迁移 SQL 行尾漂移导致 `preStart` 拒绝执行**：构件把 `migration.sql` 原样拷成 `agent-session-migration.sql`，而迁移脚本按 `sha256(SQL)` 与库里 `AgentMigration.sqlDigest` 比对（记账值对应 LF）；在 `core.autocrlf=true` 的机器上工作区副本是 CRLF，摘要不匹配 → `preStart` 判定「库与部署不一致」并拒绝，发版失败（0.18.1 的直接原因）。现拷贝时显式归一行尾为 LF，并加构建期断言；已核验构件内 SQL 的 sha256 与生产记账完全一致。
 
 ## [0.17.1] - 2026-10-09
 
