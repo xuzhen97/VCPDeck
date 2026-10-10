@@ -366,9 +366,28 @@ async function stagePackage(
 			join(pkgDir, "prisma", "agent-session-migration.cjs"),
 			join(target, "prisma", "agent-session-migration.cjs"),
 		);
-		cpSync(
-			join(pkgDir, "prisma", "migrations", "20261008000000_agent_session_run_audit", "migration.sql"),
+		// **行尾必须归一为 LF**：迁移脚本按 sha256(SQL 内容) 与库里的
+		// AgentMigration.sqlDigest 比对，而生产记账（0.17.1 部署时写入）对应 LF 版本。
+		// 直接 cpSync 工作区副本时，在 core.autocrlf=true 的机器上会带上 CRLF，
+		// 摘要不再匹配 → preStart 判定“库与部署不一致”并拒绝 → 发布失败
+		// （2026-10-10 的 0.18.0 / 0.18.1 两次发版即为此原因）。
+		const migrationSql = readFileSync(
+			join(
+				pkgDir,
+				"prisma",
+				"migrations",
+				"20261008000000_agent_session_run_audit",
+				"migration.sql",
+			),
+			"utf8",
+		).replace(/\r\n/g, "\n");
+		if (migrationSql.includes("\r")) {
+			throw new Error("[pack-release] 迁移 SQL 行尾归一失败（仍含 CR）");
+		}
+		writeFileSync(
 			join(target, "prisma", "agent-session-migration.sql"),
+			migrationSql,
+			"utf8",
 		);
 		// 构件自检:迁移脚本必须能按 cwd=构件 server 目录找到 SQL。
 		// 0.17.0 首次发布就因构件布局与脚本假设不一致而在生产 preStart 失败。
