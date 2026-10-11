@@ -55,6 +55,7 @@ export * from "./pi-bundle.js";
 
 // ── 交互式终端协议 ──
 export * from "./terminal.js";
+export * from "./session-host.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { PiCapabilityStatus } from "./pi.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
