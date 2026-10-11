@@ -1,0 +1,24 @@
+{
+  "name": "@vcpdeck/session-host",
+  "version": "0.18.2",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10.26.0"
+  },
+  "dependencies": {
+    "@vcpdeck/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "3.2.7"
+  }
+}
