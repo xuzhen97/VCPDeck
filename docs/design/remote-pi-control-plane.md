@@ -554,7 +554,25 @@ sequenceDiagram
 
 Server 不建立动态 JavaScript 代码分发链。Bundle 放版本目录，Session 放稳定 data root。Profile 引用了旧 Bundle 不存在的资源时 fail closed。
 
-> **落地状态（Plan 2）**：已实现。Bundle 位于 `<app-dir>/apps/<version>/pi-resources/`，Client 从自身模块位置定位、严格解析 manifest 并逐资源校验 sha256（拒绝绝对路径、`..` 与符号链接逃逸），校验结果只驻留内存；Client 在 REGISTER 上报 `capabilityDetails.pi.bundle`（版本事实 + 资源 ID），Server 仅向兼容 Bundle 的 Client 下发带 `requiredBundle` 的 Spec。首发 Bundle 只含 VCPDeck 自有的工具策略扩展（Skills/Prompts 目录已声明支持但为空）。`skills/vcpdeck` 未进 Bundle：那会让远程 Pi 具备 VCPDeck 控制面能力，需要独立的授权设计。
+> **落地状态（Plan 2）**：已实现。Bundle 位于 `<app-dir>/apps/<version>/pi-resources/`，Client 从自身模块位置定位、严格解析 manifest 并逐资源校验 sha256（拒绝绝对路径、`..` 与符号链接逃逸），校验结果只驻留内存；Client 在 REGISTER 上报 `capabilityDetails.pi.bundle`（版本事实 + 资源 ID），Server 仅向兼容 Bundle 的 Client 下发带 `requiredBundle` 的 Spec。`skills/vcpdeck` 未进 Bundle：那会让远程 Pi 具备 VCPDeck 控制面能力，需要独立的授权设计。
+
+> **落地状态（ADR-0042）**：Bundle 除 `vcp.tool-policy` 外还包含一个**标准社区扩展** `community.pi-simplify@0.2.3`（MIT，源码原样复用，只注册 `/simplify` 命令并经 `pi.exec` 读取 git diff）。资源选择集中在 `scripts/pi-extension-sources.ts`，dev 与 release 共用 `scripts/pi-resource-bundle.ts` 的同一 builder，公共资源的 ID/版本/路径/sha256 逐字节一致（dev 额外含 `vcp.dev-fixture` 验收夹具，不进发布产物）。标准包资源发现复用 SDK 公开的 `DefaultPackageManager.resolveExtensionSources()`，不另写解析器；打包产物中宿主 Pi 虚拟模块（`@earendil-works/pi-*`、`typebox` 等）保持 external，其他第三方说明符必须内联，否则构建失败（Bundle 只校验入口文件，无法校验旁路依赖树）。扩展仍需在 Profile 中显式启用，**不自动为存量 Profile 打开**；Skills/Prompt 模板/主题仍不随包加载。
+
+#### 12.1 扩展的来源与“源码安装”
+
+**没有运行期安装。** 不论扩展来自哪里，都必须在构建期进入 Bundle，并由 Client 校验 manifest + sha256 后加载；目标机上不存在“现编译、现拉取”的路径。扩展也不能来自用户原生 `~/.pi`、项目 `.pi/extensions` 或运行中的 `npm/git install`。
+
+当前支持的三条构建期来源（均在 `scripts/pi-extension-sources.ts` 登记，新增只改这一处）：
+
+| 来源 | 登记方式 | 适用与受信程度 |
+| --- | --- | --- |
+| 仓库内自有源码 | `kind: "local"` + `entry`（如 `packages/client/src/pi-bundle/<name>/index.ts`） | 自有代码；入口可多文件，相对 import 一并打包进单文件 |
+| **vendor 进仓库的第三方源码** | `kind: "local"` + `entry` + **必填** `licenseFile` | 源码被拷进仓库时使用；许可原文随 Bundle 复制到 `licenses/<id>-LICENSE.txt`，因为编译后的单文件已看不到原始声明 |
+| 已安装的标准 Pi 包 | `kind: "package"` + `packageName` + 精确 `version` + `licenseFile` | 受信度最高：版本由 lockfile 与 npm integrity 锚定，构建期用官方解析器读取其声明的 extension 资源 |
+
+**不开放**：构建期从 `git:` 源克隆（缺完整性锚点，且让构建依赖网络）；指向仓库外的任意绝对路径（Release 无法从仓库本身复现）。如需这两种，应先决定固定来源与校验方式，作为新决策另行评估。
+
+新增或修改扩展的完整流程：登记来源（`pnpm add -Dw -E <pkg>@<version> --ignore-scripts` 仅用于 `package` 源）→ 保留许可原文 → `pnpm test:pi-resources` → `pnpm release` → 更新 Client → 在 Profile 中显式启用。一个包只接受**一个** extension 入口，多入口直接拒绝；依赖外部文件/WASM/native 布局的包本期不支持。
 
 ## 13. Credential 与 Secret
 

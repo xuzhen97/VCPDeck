@@ -31,6 +31,7 @@ model Client {
   frpMappings        FrpMapping[]
   terminalSessions   TerminalSession[]
   agentSessions      AgentSession[]
+  sessionHostInstances SessionHostInstance[]
 }
 
 model Job {
@@ -499,4 +500,49 @@ model GitSshTarget {
   lastSentVersion Int?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// ── 会话宿主实例元数据（ADR-0046 / 实施 Plan Task 5） ──
+// Server 只保存控制面最小元数据：不保存 PID、工作目录、终端正文或宿主令牌。
+// 状态语义：可用性未确认（available=false）或宿主已更换时只能落 unknown；
+// 只有同一 hostId 明确不持有该实例、或宿主自报 stopped 时才落 stopped。
+// 表结构变更随 Server 启动的 prisma db push 生效（本仓库既有升级方式）。
+model SessionHostInstance {
+  id         String    @id
+  clientId   String
+  client     Client    @relation(fields: [clientId], references: [id])
+  instanceId String
+  hostId     String // 最近一次报告该实例的宿主身份；宿主重启会改变
+  kind       String
+  state      String    @default("unknown")
+  startedAt  DateTime
+  lastSeq    Int       @default(0)
+  lastSeenAt DateTime  @default(now())
+  endedAt    DateTime?
+  endReason  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([clientId, instanceId])
+  @@index([clientId, state])
+  @@index([clientId, updatedAt])
+}
+
+// ── 会话宿主最小审计（只记生命周期与操作者，不记正文） ──
+// 刻意不建外键：审计是只追加的生命周期日志，按宿主实例身份（instanceId）归属，
+// 不应因实例行被清理而失效或阻塞写入。
+model SessionHostAuditEvent {
+  id         String   @id
+  instanceId String // 宿主实例身份（非行主键）
+  clientId   String
+  event      String
+  identityId String?
+  actorName  String?
+  source     String?
+  result     String   @default("ok")
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([clientId, instanceId, createdAt])
 }

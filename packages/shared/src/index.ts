@@ -246,6 +246,8 @@ export const Events = {
 	TERMINAL_SESSION_STATE: "terminal:session-state",
 	TERMINAL_RESYNC_REQUIRED: "terminal:resync-required",
 	TERMINAL_ERROR: "terminal:error",
+	// 会话宿主（独立宿主）事件：与旧 TERMINAL_STATE 对账语义互不复用。
+	SESSION_HOST_STATE: "session-host:state",
 	UPDATE_REQUEST: "update:request",
 	UPDATE_READY: "update:ready",
 	UPDATE_FAILED: "update:failed",

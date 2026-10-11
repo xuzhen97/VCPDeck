@@ -18,6 +18,7 @@ import { PiRunService } from "../pi/pi-run.service.js";
 import { PiRuntimeService } from "../pi/pi-runtime.service.js";
 import { TerminalService } from "../terminal/terminal.service.js";
 import { TerminalRequestBroker } from "../terminal/terminal-request-broker.js";
+import { SessionHostService } from "../session-host/session-host.service.js";
 import { ReleaseOrchestrator } from "../release/release.orchestrator.js";
 import { GatewayUpdateChannel } from "../release/update-channel.js";
 import { TunnelSessionService } from "../tunnel/tunnel-session.service.js";
@@ -34,6 +35,7 @@ import {
   parseTerminalOutputChunk,
   parseMachineRegister,
   parseTerminalStateReport,
+  parseSessionHostStatusReport,
   parseTunnelClose,
   type JobProgress,
 } from "@vcpdeck/shared";
@@ -107,6 +109,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(GitSshService)
     private readonly gitSsh?: GitSshService,
+    // 会话宿主对账（可选注入：旧测试构造保持兼容）
+    @Optional()
+    @Inject(SessionHostService)
+    private readonly sessionHost?: SessionHostService,
   ) {}
 
   onModuleInit() {
@@ -485,6 +491,21 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     } catch {
       // 非法报告忽略
       return { acceptedSessionIds: [], closeSessionIds: [] };
+    }
+  }
+
+  // ── 会话宿主对账（新路径；刻意不复用 TERMINAL_STATE 语义） ──
+
+  @SubscribeMessage(Events.SESSION_HOST_STATE)
+  async handleSessionHostState(@ConnectedSocket() client: Socket, @MessageBody() data: unknown) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId || !this.sessionHost) return { unreachable: [], stopped: [] };
+    try {
+      const report = parseSessionHostStatusReport(data);
+      return await this.sessionHost.reconcile(clientId, report);
+    } catch {
+      // 非法报告一律忽略：绝不用坏数据把实例判成已退出。
+      return { unreachable: [], stopped: [] };
     }
   }
 

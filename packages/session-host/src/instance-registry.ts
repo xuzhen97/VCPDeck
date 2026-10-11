@@ -43,7 +43,8 @@ export interface InstanceRegistry {
 	};
 	list(): SessionHostInstanceInfo[];
 	get(instanceId: string): RegistryInstance | undefined;
-	stop(instanceId: string): void;
+	/** 终止实例并返回退出确认结果；未确认时不冒充已退出。 */
+	stop(instanceId: string): Promise<{ exited: boolean }>;
 	size(): number;
 }
 
@@ -115,12 +116,12 @@ export function createInstanceRegistry(options: InstanceRegistryOptions): Instan
 			return byId.get(instanceId);
 		},
 
-		stop(instanceId) {
+		async stop(instanceId) {
 			const record = byId.get(instanceId);
 			if (record === undefined) {
 				throw new SessionHostOperationError("SESSION_HOST_INSTANCE_NOT_FOUND", "实例不存在或已结束");
 			}
-			record.session.stop();
+			return record.session.stop();
 		},
 
 		size() {

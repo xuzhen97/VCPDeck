@@ -65,6 +65,22 @@ export interface SessionHostStatusReport {
 	instances: SessionHostInstanceInfo[];
 }
 
+/**
+ * Server 侧保存的实例元数据投影（列表用）。
+ *
+ * 只含控制面信息：不含 PID、工作目录、终端正文或宿主令牌。
+ * `lastSeenAt` 是最近一次由宿主确认观察到该实例的时间；
+ * `endedAt`/`endReason` 只在确认结束后写入。
+ */
+export interface SessionHostInstanceRecord extends SessionHostInstanceInfo {
+	clientId: string;
+	/** 最近一次报告该实例的宿主身份；宿主重启会改变。 */
+	hostId: string;
+	lastSeenAt: string;
+	endedAt: string | null;
+	endReason: string | null;
+}
+
 // ── 协议异常 ──
 export class SessionHostProtocolError extends Error {
 	readonly code = "SESSION_HOST_PROTOCOL_INVALID" as const;

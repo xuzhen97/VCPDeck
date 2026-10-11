@@ -15,7 +15,10 @@
     "pnpm": ">=10.26.0"
   },
   "dependencies": {
-    "@vcpdeck/shared": "workspace:*"
+    "@lydell/node-pty": "1.2.0-beta.15",
+    "@vcpdeck/shared": "workspace:*",
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

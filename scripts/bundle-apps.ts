@@ -8,8 +8,9 @@
  *    必须各自打成独立文件，否则 fork(__dirname/...) 找不到入口；
  *  - 保留 tsc 构建作为类型检查门禁，esbuild 不负责类型检查。
  */
-import { build, type BuildOptions } from "esbuild";
+import { build, type BuildOptions, type Metafile } from "esbuild";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { isBuiltin } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -256,24 +257,87 @@ export const CLIENT_EXTERNAL = [
 ];
 
 /**
- * Pi Resource Bundle 策略扩展：打成**自包含 ESM 单文件**。
+ * 宿主 Pi 为扩展提供的**虚拟模块**（ADR-0042 决策 1）。
  *
- * 两个约束（都来自实测）：
+ * 该表与 SDK 1.1.0 的 `dist/core/extensions/virtual-modules.js` 的 `VIRTUAL_MODULES`
+ * 键集合一一对应：这些说明符在单文件 SDK 发布形态下由 SDK 自己映射到内存模块，
+ * 因此扩展产物必须**保持 external**，绝不能把第二份 SDK 打进 Bundle
+ * （重复 registry / 重复类，且与宿主不是同一实例）。
+ *
+ * 升级 SDK 时必须回归核对本表：上游新增或移除虚拟模块都应在这里显式反映。
+ */
+export const PI_EXTENSION_HOST_MODULES = [
+	"@earendil-works/pi-coding-agent",
+	"@earendil-works/pi-agent-core",
+	"@earendil-works/pi-tui",
+	"@earendil-works/pi-ai",
+	"@earendil-works/pi-ai/compat",
+	"@earendil-works/pi-ai/oauth",
+	"@earendil-works/pi-ai/providers/all",
+	"typebox",
+	"typebox/compile",
+	"typebox/value",
+	"@sinclair/typebox",
+	"@sinclair/typebox/compile",
+	"@sinclair/typebox/value",
+	"@mariozechner/pi-coding-agent",
+	"@mariozechner/pi-agent-core",
+	"@mariozechner/pi-tui",
+	"@mariozechner/pi-ai",
+	"@mariozechner/pi-ai/compat",
+	"@mariozechner/pi-ai/oauth",
+	"@mariozechner/pi-ai/providers/all",
+] as const;
+
+/**
+ * 产物导入面自检：除宿主虚拟模块与 Node 内置模块外，不允许任何外部说明符。
+ *
+ * 理由：Release Bundle 只对入口文件做 sha256 校验，不校验旁路依赖树。产物里若残留
+ * 裸 import，运行期就会去目标机 `node_modules` 取代码，等于绕过受信发布与校验。
+ */
+function assertPiExtensionImports(metafile: Metafile, outfile: string): void {
+	const allowed = new Set<string>(PI_EXTENSION_HOST_MODULES);
+	const unexpected = new Set<string>();
+	for (const output of Object.values(metafile.outputs)) {
+		for (const entry of output.imports) {
+			if (entry.external !== true) continue;
+			if (allowed.has(entry.path)) continue;
+			if (isBuiltin(entry.path)) continue;
+			unexpected.add(entry.path);
+		}
+	}
+	if (unexpected.size > 0) {
+		throw new Error(
+			`[bundle-apps] 扩展产物含未打包的非宿主说明符 ${[...unexpected].join(", ")}（${outfile}）；` +
+				"Bundle 无法校验旁路依赖，必须打包进单文件或改用宿主提供的虚拟模块",
+		);
+	}
+}
+
+/**
+ * Pi Resource Bundle 扩展：打成**自包含 ESM 单文件**。
+ *
+ * 三个约束（都来自实测）：
  * - 必须 ESM：Pi 的扩展加载器用 `jiti.import(path, { default: true })` 取工厂，
  *   esbuild 的 CJS 包装（`exports.default`）在该取法下取不到工厂，而 `export default` 可以；
- * - 必须自包含：不 external 任何依赖，避免依赖目标机上 node_modules 的布局。
+ * - 宿主虚拟模块必须 external，其余依赖必须自包含（不依赖目标机 node_modules 布局）；
+ * - 产物导入面在构建期自检，不允许残留未打包的第三方说明符。
  */
 export async function bundlePiExtension(
 	outfile: string,
-	/** 入口源码路径（相对仓库根）；默认受信工具策略扩展。 */
+	/** 入口源码路径（相对仓库根或绝对路径）；默认受信工具策略扩展。 */
 	entry = "packages/client/src/pi-bundle/tool-policy/index.ts",
 ): Promise<void> {
-	await build({
-		...baseOptions("packages/client/tsconfig.json", []),
+	const result = await build({
+		...baseOptions("packages/client/tsconfig.json", [
+			...PI_EXTENSION_HOST_MODULES,
+		]),
 		format: "esm",
 		entryPoints: [resolve(ROOT, entry)],
 		outfile,
+		metafile: true,
 	});
+	assertPiExtensionImports(result.metafile, outfile);
 }
 
 /**

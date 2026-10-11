@@ -50,24 +50,60 @@ const IDLE_RESET_EVENT_TYPES = new Set([
 ]);
 
 /**
- * Bundle 资源加载面：只加载已校验的 Bundle 扩展，并彻底关闭项目/用户资源发现。
+ * 必须保持关闭的 SDK 内置扩展名（不带 `builtin:` 前缀）。
  *
- * SDK 语义（已由 `bundle-extension.integration.test.ts` 用真实 SDK 锁定）：
- * `noExtensions: true` 只丢弃「发现来的」扩展，仍保留 `additionalExtensionPaths`。
- * 没有扩展时也不传 `additionalExtensionPaths`（等价于完全不加载扩展）。
+ * 名字取自 SDK 内部注册的内置扩展工厂（`isBuiltinExtension` 标记）。
+ * `bundle-extension.integration.test.ts` 会断言生产加载面下不出现任何 `builtin:` 资源，
+ * 因此上游改名或新增会在这个门禁上暴露，而不是静默放大能力面。
+ */
+export const PI_DISABLED_BUILTIN_EXTENSIONS = [
+	"mcp",
+	"codemode",
+	"tool-search",
+	"tool_search",
+	"llama-cpp",
+] as const;
+
+/**
+ * 资源加载面（ADR-0043）：加载已校验 Bundle 扩展，并让**项目本地资源生效**。
+ *
+ * 取舍：
+ * - 项目目录里的 `.pi/extensions`、skills、prompt 模板与 context 文件属于项目自身特性，
+ *   无条件生效——不引入 Server policy 或审批（ADR-0043 决策 1）；
+ * - `noThemes: true` 保持：终端主题与 rpc 模式的网页交互无关；
+ * - 内置扩展（`builtin:*`）仍不加载（由 SDK 的 noExtensions 默认行为与宿主装配共同保证）；
+ * - `agentDir` 是 VCPDeck 数据根且保持为空，因此**用户级**资源发现无内容，
+ *   全局 `~/.pi` 仍零接触。
+ *
+ * 没有扩展时也不传 `additionalExtensionPaths`。
  */
 export function bundleLoaderOptions(
 	extensionPaths: readonly string[],
 ): Record<string, unknown> {
-	const base = {
-		noExtensions: true,
-		noSkills: true,
-		noPromptTemplates: true,
-		noContextFiles: true,
+const base = {
+		noThemes: true,
+		// 内置扩展默认是「启用」的（`addAutoDiscoveredResources` 会把每个 `builtin:<name>`
+		// 登记为资源，除非 settings 里出现 `-builtin:<name>`）。以前靠 `noExtensions: true`
+		// 挡住；现在为了项目资源生效去掉了它，就必须显式关掉内置扩展——否则 `mcp` 会与
+		// 受信 Bundle 中的 MCP 扩展双向重复，`codemode` / `tool_search` 也会静默放大工具面
+		// （ADR-0043 决策 3）。SDK 升级时须把新增内置扩展补进名单。
+		disabledBuiltinExtensions: [...PI_DISABLED_BUILTIN_EXTENSIONS],
 	};
 	return extensionPaths.length > 0
 		? { ...base, additionalExtensionPaths: [...extensionPaths] }
 		: base;
+}
+
+/**
+ * 项目信任钩子（ADR-0043 决策 1）：无条件信任项目目录。
+ *
+ * 必须由宿主直接给出，**不读写原生 `ProjectTrustStore`**——全局 Pi 环境零占用是硬约束，
+ * 复用用户的 trust 状态会同时破坏隔离与可预测性。
+ */
+export function resourceLoaderReloadOptions(): {
+	resolveProjectTrust: () => Promise<boolean>;
+} {
+	return { resolveProjectTrust: async () => true };
 }
 
 export interface PiAgentSessionOptions {
@@ -177,10 +213,7 @@ export function startPiAgentSession(
 			resourceLoaderOptions: bundleLoaderOptions(
 				options.bundleExtensionPaths ?? [],
 			),
-			resourceLoaderReloadOptions: {
-				// Plan 1：项目本地资源一律不加载，不做信任交互，不读写用户 trust store。
-				resolveProjectTrust: async () => false,
-			},
+			resourceLoaderReloadOptions: resourceLoaderReloadOptions(),
 		});
 
 		// 模型 scope：只允许 RuntimeSpec 允许且凭据可用的模型。

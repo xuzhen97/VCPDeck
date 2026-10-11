@@ -9,7 +9,7 @@
  *   注册的工具整体过滤掉（已由 `extension-host.integration.test.ts` 用真实 SDK 锁定）；
  * - 会话构建后按**运行时实际注册集合**激活工具（内置 + 扩展），仅剔除平台不存在的 shell；
  * - 只把已校验 Bundle 的扩展入口放进 `resourceLoaderOptions.additionalExtensionPaths`，
- *   并关闭发现面（`noExtensions` 等）；
+ *   并让项目资源生效（ADR-0043；内置扩展显式关闭）；
  * - 会话创建前已安装进程内执行模式桥接 v3（扩展在 factory 阶段读它）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -129,7 +129,7 @@ describe("startPiAgentSession 的执行模式与 Bundle 接线", () => {
 		wrapper.destroy();
 	});
 
-	it("只把已校验 Bundle 扩展入口放进加载面，并关闭资源发现", async () => {
+	it("只把已校验 Bundle 扩展入口放进加载面，并让项目资源生效且内置扩展关闭", async () => {
 		const wrapper = await startPiAgentSession(
 			baseOptions({
 				bundleExtensionPaths: [
@@ -138,15 +138,28 @@ describe("startPiAgentSession 的执行模式与 Bundle 接线", () => {
 			}),
 		);
 
+		// ADR-0043：不再设 noExtensions/noSkills/noPromptTemplates/noContextFiles
+		// （项目本地资源属于项目自身特性，无条件生效）；但内置扩展必须显式关闭，
+		// 因为去掉 noExtensions 后它们默认是启用的。
 		expect(captured.services[0]?.resourceLoaderOptions).toMatchObject({
 			additionalExtensionPaths: [
 				"/app/apps/0.11.0/pi-resources/extensions/vcp-tool-policy/index.js",
 			],
-			noExtensions: true,
-			noSkills: true,
-			noPromptTemplates: true,
-			noContextFiles: true,
+			noThemes: true,
+			disabledBuiltinExtensions: expect.arrayContaining(["mcp"]),
 		});
+		const options = captured.services[0]?.resourceLoaderOptions as Record<
+			string,
+			unknown
+		>;
+		for (const closed of [
+			"noExtensions",
+			"noSkills",
+			"noPromptTemplates",
+			"noContextFiles",
+		]) {
+			expect(options[closed]).toBeUndefined();
+		}
 		expect(captured.services[0]?.resourceLoaderReloadOptions).toBeDefined();
 		wrapper.destroy();
 	});

@@ -2,10 +2,10 @@
  * Bundle 扩展加载面事实（真实 SDK，不构造 AgentSession）。
  *
  * 锁定两条生产依赖：
- * 1. `noExtensions: true` 只丢弃「发现来的」扩展（项目 `.pi/extensions`、agentDir 等来源），
- *    仍然保留 `additionalExtensionPaths`（SDK 实现见 `DefaultResourceLoader.loadCurrentExtensionSet`：
- *    `noExtensions ? cliEnabledExtensions : mergePaths(cliEnabledExtensions, enabledExtensions)`）。
- *    因此「只加载已校验 Bundle 扩展」的正确口径是 `noExtensions: true` + `additionalExtensionPaths`。
+ * 1. `bundleLoaderOptions()`（生产加载面，ADR-0043）会让**项目本地扩展生效**
+ *    （`.pi/extensions`、skills、prompts、context 文件），同时继续通过
+ *    `additionalExtensionPaths` 加载已校验的 Bundle 扩展；`agentDir`（VCPDeck 数据根，
+ *    保持为空）的用户级扩展不加载，终端主题仍关闭。
  * 2. 注入路径下的 `default` 导出工厂会被加载并注册 `tool_call` 处理器，可用于策略拦截。
  *
  * 集成点：`createAgentSessionServices({ ..., resourceLoaderOptions })`（不是 `resourceLoader`）。
@@ -14,6 +14,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { bundleLoaderOptions, resourceLoaderReloadOptions } from "./agent-session.js";
 
 /** Bundle 策略扩展形状：default 导出工厂 + tool_call 处理器 */
 const POLICY_EXTENSION = `export default function (pi) {
@@ -21,6 +22,9 @@ const POLICY_EXTENSION = `export default function (pi) {
 }
 `;
 
+// 注意：SDK 的项目/agentDir 自动发现**只认 `.ts` 与 `.js`**（`collectAutoExtensionEntries`
+// 的 `entry.name.endsWith(".ts") || entry.name.endsWith(".js")`）。用 `.mjs` 会让
+// 「不被加载」类断言变成空洞断言，因此诱饵必须是 `.js`。
 const DECOY_EXTENSION = `export default function () { globalThis.__vcpDecoyLoaded = true; }
 `;
 
@@ -32,8 +36,8 @@ async function makeTree() {
 	await mkdir(join(agentDir, "extensions"), { recursive: true });
 	await mkdir(join(cwd, "bundle"), { recursive: true });
 	// 诱饵：项目本地扩展与 agentDir 扩展都不得被加载（设计 §15、ADR-0029 决策 7）
-	await writeFile(join(cwd, ".pi", "extensions", "decoy-project.mjs"), DECOY_EXTENSION);
-	await writeFile(join(agentDir, "extensions", "decoy-agent.mjs"), DECOY_EXTENSION);
+	await writeFile(join(cwd, ".pi", "extensions", "decoy-project.js"), DECOY_EXTENSION);
+	await writeFile(join(agentDir, "extensions", "decoy-agent.js"), DECOY_EXTENSION);
 	await writeFile(ourPath, POLICY_EXTENSION);
 	return { cwd, agentDir, ourPath };
 }
@@ -104,16 +108,36 @@ describe("Bundle 扩展加载面（真实 SDK）", () => {
 		});
 	});
 
-	it("未开启 noExtensions 时会额外加载发现来的扩展（对照组）", async () => {
-		const { result } = await loadWith({ noExtensions: false });
-		const paths = result.extensions.map((extension) => extension.path);
+	it("生产加载面：项目扩展与数据根扩展生效，Bundle 路径仍加载，内置扩展仍关闭", async () => {
+		const sdk = await import("@earendil-works/pi-coding-agent");
+		const { cwd, agentDir, ourPath } = await makeTree();
+		const loader = new sdk.DefaultResourceLoader({
+			cwd,
+			agentDir,
+			settingsManager: sdk.SettingsManager.inMemory(),
+			...bundleLoaderOptions([ourPath]),
+		});
+		await loader.reload(resourceLoaderReloadOptions());
+		const paths = loader
+			.getExtensions()
+			.extensions.map((extension) => extension.path);
 
-		// 对照组只要求「项目/agentDir 的发现来源确实参与加载」；
-		// 若该 SDK 版本在 inMemory settings 下不加载项目扩展，则跳过该断言而不是伪造结论。
-		if (paths.length > 1) {
-			expect(paths.some((path) => path.includes("decoy"))).toBe(true);
-		} else {
-			expect(paths).toHaveLength(1);
+		// ADR-0043：项目目录内容属于项目自身特性，无条件生效
+		expect(paths.some((path) => path.includes("decoy-project.js"))).toBe(true);
+		// VCPDeck 数据根（agentDir）是**我们自己的**地盘，不是原生 `~/.pi`：允许作为
+		// 第二个扩展来源。代价是同版本 Client 之间可能不一致，已在 ADR-0043 记录为显式例外。
+		expect(paths.some((path) => path.includes("decoy-agent.js"))).toBe(true);
+		// Bundle 路径始终加载
+		expect(paths).toContain(ourPath);
+		// 内置扩展必须显式保持关闭（靠 noExtensions 已经不成立）
+		expect(paths.filter((path) => path.startsWith("builtin:"))).toEqual([]);
+		const toolNames = loader
+			.getExtensions()
+			.extensions.flatMap((extension) => [...extension.tools.keys()]);
+		for (const builtinTool of ["codemode", "tool_search"]) {
+			expect(toolNames).not.toContain(builtinTool);
 		}
+		// 终端主题与 rpc 模式无关，保持关闭
+		expect(loader.getThemes().themes).toEqual([]);
 	});
 });

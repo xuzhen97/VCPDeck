@@ -14,9 +14,13 @@ function fakeSession(instanceId: string): PtySession & { stopCalls: number } {
 		pendingBytes: 0,
 		write() {},
 		resize() {},
-		stop() {
+		async snapshot() {
+			return { seq: 0, snapshot: "", cols: 80, rows: 24 };
+		},
+		async stop() {
 			stopCalls += 1;
 			state = "stopped";
+			return { exited: true };
 		},
 		get stopCalls() {
 			return stopCalls;
@@ -59,10 +63,10 @@ describe("受管实例登记表", () => {
 		expect(registry.size()).toBe(1);
 	});
 
-	it("实例已停止后重放同一 operationId 仍复用原身份，不重启", () => {
+	it("实例已停止后重放同一 operationId 仍复用原身份，不重启", async () => {
 		const { registry, spawned } = build();
 		const first = registry.start({ operationId: "op_1", kind: "pi", cwd: "/w" });
-		registry.stop(first.instanceId);
+		await registry.stop(first.instanceId);
 		const replay = registry.start({ operationId: "op_1", kind: "pi", cwd: "/w" });
 		expect(replay.instanceId).toBe(first.instanceId);
 		expect(registry.get(first.instanceId)?.session.state).toBe("stopped");
@@ -93,14 +97,32 @@ describe("受管实例登记表", () => {
 		expect(registry.list().every((i) => i.state === "running")).toBe(true);
 	});
 
-	it("stop 未知身份给出 NOT_FOUND，不静默成功", () => {
+	it("stop 未知身份给出 NOT_FOUND，不静默成功", async () => {
 		const { registry } = build();
+		await expect(registry.stop("inst_missing")).rejects.toBeInstanceOf(SessionHostOperationError);
 		try {
-			registry.stop("inst_missing");
+			await registry.stop("inst_missing");
 			throw new Error("本应抛出");
 		} catch (error) {
 			expect((error as SessionHostOperationError).code).toBe("SESSION_HOST_INSTANCE_NOT_FOUND");
 		}
+	});
+
+	it("stop 把退出确认结果如实透传，未确认时不冒充已退出", async () => {
+		let next = 0;
+		const exits = [true, false];
+		const registry = createInstanceRegistry({
+			createId: () => `inst_${++next}`,
+			now: () => "2026-10-10T00:00:00.000Z",
+			start: ({ instanceId }) => ({
+				...fakeSession(instanceId),
+				stop: async () => ({ exited: exits.shift() ?? false }),
+			}),
+		});
+		const a = registry.start({ operationId: "op_1", kind: "pi", cwd: "/w" });
+		const b = registry.start({ operationId: "op_2", kind: "pi", cwd: "/w" });
+		expect(await registry.stop(a.instanceId)).toEqual({ exited: true });
+		expect(await registry.stop(b.instanceId)).toEqual({ exited: false });
 	});
 
 	it("list 不泄露 cwd 与 operationId", () => {
@@ -111,10 +133,10 @@ describe("受管实例登记表", () => {
 		expect(JSON.stringify(registry.list())).not.toContain("secret");
 	});
 
-	it("stop 后状态转为 stopped", () => {
+	it("stop 后状态转为 stopped", async () => {
 		const { registry } = build();
 		const { instanceId } = registry.start({ operationId: "op_1", kind: "pi", cwd: "/w" });
-		registry.stop(instanceId);
+		await registry.stop(instanceId);
 		expect(registry.get(instanceId)?.session.state).toBe("stopped");
 	});
 });

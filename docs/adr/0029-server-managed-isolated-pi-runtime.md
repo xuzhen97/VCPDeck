@@ -1,6 +1,6 @@
 # ADR-0029：Server 管理 Pi 配置，Client 使用隔离的 VCPDeck Pi Runtime
 
-- 状态：Proposed
+- 状态：Rejected（2026-10-11：方向由 [ADR-0048](./0048-client-slimming-and-pi-feature-surface-on-server.md) 否决）
 - 日期：2026-09-20
 - 决策者：项目维护者
 - 关联：[`docs/design/remote-pi-control-plane.md`](../design/remote-pi-control-plane.md)、[`docs/design/remote-pi.md`](../design/remote-pi.md)、[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0008](./0008-pi-session-job-and-run-lifecycle.md)、[`docs/roadmap.md`](../roadmap.md)

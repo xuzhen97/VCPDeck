@@ -4,6 +4,17 @@
 
 ## 未发布
 
+### Added
+
+- **Pi 扩展改为按官方标准复用社区包**（[ADR-0042](./docs/adr/0042-standard-pi-community-extensions.md)）：Client Release 的 Pi Resource Bundle 除自有工具策略扩展外，还固定交付标准社区扩展 `community.pi-simplify@0.2.3`（MIT），提供 `/simplify` 命令（审查最近改动并应用简化）。扩展源码原样复用官方 Pi 扩展 API，资源选择集中在 `scripts/pi-extension-sources.ts`，dev 与 release 共用同一 builder，公共资源的 ID/版本/路径/sha256 逐字节一致。新增 `pnpm test:pi-resources` 门禁。
+
+### 说明
+
+- 新资源**不会自动为存量 Pi Profile 启用**：需在 Profile 中显式勾选；未启用时行为不变。
+- Bundle 只包含扩展资源；Skills、Prompt 模板与主题仍不随包加载。
+- 扩展在网页中的能力仍受既有边界约束（不支持任意 TUI、Session 替换与 Runtime reload）；`/simplify` 会读取项目 git diff 并触发一次 Agent 工作，因此在 `supervised` 模式下其工具调用同样需要逐次批准。
+- 扩展的构建期来源（自有源码 / vendor 进仓库的第三方源码 / 已固定版本的标准包）与各自受信程度见 [`docs/design/remote-pi-control-plane.md`](./docs/design/remote-pi-control-plane.md) §12.1；vendor 第三方源码时许可原文随 Bundle 复制。
+
 ## [0.18.2] - 2026-10-10
 
 **重新发布 0.18.x 的内容，并修复导致 0.18.1 发版失败的构件行尾漂移。**

@@ -66,6 +66,8 @@ pnpm test
 
 脚本级自检：`bash scripts/install-coturn.test.sh`（coturn 发行版/地址/IPv4 纯函数）与 `pnpm exec tsx scripts/pack-release-deps.test.ts`（node-datachannel 双平台离线装配与平台裁剪）。
 
+Pi Resource Bundle 门禁：`pnpm test:pi-resources`（ADR-0042）——覆盖标准包资源解析（只取 extension、版本/路径/唯一入口校验）、扩展产物导入面（宿主 Pi 虚拟模块保持 external、未打包第三方说明符即失败）、dev/release 公共资源逐字节一致，以及在**单文件 SDK 发布布局**下用独立 node 子进程加载真实社区扩展并驱动其命令处理器。该门禁不依赖用户原生 Pi、不访问网络、不调用真实模型。
+
 按包：
 
 ```bash
@@ -115,6 +117,7 @@ AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明�
 | 远程文件/路径 | 双端 parser、Windows/Linux 认证 root、UNC/盘符、symlink/junction、不存在目标父链、文本上限、覆盖/临时文件、大小/SHA、取消、断流、失败后下一 Job 派发、重连和 Socket/Job 归属 |
 | Terminal | 协议 parser、operator/viewer/token、snapshot/output 同序列、上游 gap/resync、UTF-8 上限、持续输入速率、generation、SQLite 状态、首次/重复 attach-detach TTL、expired 上报、真实 PTY 和进程树 |
 | Pi | capability/协议 parser、Owner/Observer、runId/CAS、cwd/projectKey、Session 树、交互/非阻塞 Extension 投影与 Trust、图片、SSE、重连/重启、隐私和真实模型 smoke |
+| Pi Resource Bundle（ADR-0042） | `pnpm test:pi-resources`：标准包资源解析（只取 extension、版本/入口唯一/路径穿越拒绝）、扩展产物导入面（宿主虚拟模块 external、未打包第三方说明符拒绝）、dev/release 公共资源逐字节一致、单文件 SDK 发布布局下真实社区扩展加载与命令行为（受控 exec 与真实 git 双路径）、Client 校验篡改/版本不符/缺失 fail closed、多版本共存与 Session 数据不受影响 |
 | Storage Provider | 签名篡改/过期、上传下载、Provider 故障、对象永久缺失分类、公开分享和 File 保留锁 |
 | Storage 阿里云盘真环境验收 | `node scripts/test-release-alibaba.cjs`（ADR-0019 一键端到端）：脚本自建同一临时 DB、Server/Client Launcher，按会话把两个 Release 分片直接 PUT Provider，验证 Server 本地无目标 zip、下载 302、更新与清理；仅首次输入 clientId、浏览器 OAuth code 或 3001 端口冲突时需人工介入 |
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |

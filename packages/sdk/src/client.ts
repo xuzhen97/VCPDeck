@@ -8,6 +8,7 @@ import { createJobsApi } from "./jobs.js";
 import { createPiApi } from "./pi.js";
 import { createGitSshApi } from "./git-ssh.js";
 import { createReleasesApi } from "./releases.js";
+import { createSessionHostApi } from "./session-host.js";
 import { createStorageApi } from "./storage.js";
 import { createStorageSharesApi } from "./storage-shares.js";
 import { createTerminalsApi } from "./terminal.js";
@@ -71,6 +72,7 @@ export class VcpDeckClient {
 	/** Git SSH 共享密钥管理（ADR-0037）。 */
 	readonly gitSsh;
 	readonly releases;
+	readonly sessionHost;
 	readonly terminals;
 	readonly tunnels;
 	readonly health = {
@@ -94,6 +96,7 @@ export class VcpDeckClient {
 		this.pi = createPiApi(this);
 		this.gitSsh = createGitSshApi(this);
 		this.releases = createReleasesApi(this);
+		this.sessionHost = createSessionHostApi(this);
 		this.terminals = createTerminalsApi(this);
 		this.tunnels = createTunnelsApi(this);
 	}

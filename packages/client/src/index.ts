@@ -59,6 +59,13 @@ import {
 } from "./frpc-daemon.js";
 import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge.js";
 import { attachTunnelBridge, type TunnelBridge } from "./tunnel/tunnel-bridge.js";
+import { attachSessionHostBridge } from "./session-host/bridge.js";
+import { createSessionHostClient } from "./session-host/client.js";
+import {
+	createSessionHostSupervisor,
+	defaultControlFile,
+	defaultHostEntry,
+} from "./session-host/supervisor.js";
 import { createNodeDataChannelPeer, probeP2pBackend } from "./tunnel/node-datachannel-peer.js";
 import { ClientLauncher } from "./launcher-control.js";
 import * as net from "node:net";
@@ -70,6 +77,10 @@ import { join } from "node:path";
 const SERVER_BASE = process.env.VCPDECK_SERVER || "http://localhost:3001";
 const SERVER_URL = SERVER_BASE + "/client";
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
+/** 会话宿主控制文件路径：由部署（安装脚本/守护定义）提供；未配置表示宿主未安装，不挂桥。 */
+const SESSION_HOST_CONTROL_FILE = process.env.VCPDECK_SESSION_HOST_CONTROL_FILE || "";
+/** 宿主启动 pi/dsh 所需的命令（JSON）；未配置则不启动宿主（不猜可执行文件）。 */
+const SESSION_HOST_COMMANDS = process.env.VCPDECK_SESSION_HOST_COMMANDS || "";
 
 /**
  * M1 迁移验证专用模式（仅 Linux A2 迁移由安装器设置，全新安装/稳态永不进入）：
@@ -384,6 +395,8 @@ export function connect(): Socket {
 			frpShuttingDown = true;
 			tunnelBridge?.dispose();
 			frpBridge.dispose();
+			// 宿主是 Client 的子进程：随 Client 一同结束（ADR-0046，允许中断但不伪装）。
+			void sessionHostSupervisor?.stop();
 			void shutdownFrpRuntime()
 				.catch(() => {
 					console.error("[frp] 停机释放失败（忽略）");
@@ -413,6 +426,29 @@ export function connect(): Socket {
 		clientId: CLIENT_ID,
 		manager: terminalManager,
 	});
+
+	// 会话宿主对账桥：与旧 Terminal 对账并存且互不影响（只发 SESSION_HOST_STATE）。
+	// ADR-0046：宿主由 Client 作为**子进程**启动，随 Client 生命周期结束；
+	// 未配置启动命令或未安装宿主时不挂桥（不猜路径、不伪造宿主状态）。
+	let sessionHostSupervisor: ReturnType<typeof createSessionHostSupervisor> | null = null;
+	if (SESSION_HOST_COMMANDS && !verifyOnly) {
+		try {
+			const controlFile = SESSION_HOST_CONTROL_FILE || defaultControlFile();
+			const hostEntry = process.env.VCPDECK_SESSION_HOST_ENTRY || defaultHostEntry(process.argv[1]);
+			const commands = JSON.parse(SESSION_HOST_COMMANDS) as Record<string, { file: string; args?: string[] }>;
+			if (hostEntry) {
+				sessionHostSupervisor = createSessionHostSupervisor({ hostEntry, controlFile, commands });
+				// 启动失败不是致命错误：对账链路会如实上报「宿主不可达」。
+				void sessionHostSupervisor.start();
+				attachSessionHostBridge(socket, {
+					clientHost: createSessionHostClient({ controlFile }),
+				});
+			}
+		} catch {
+			// 配置非法或平台不支持：不启动宿主、不挂桥，也不回显配置内容。
+			sessionHostSupervisor = null;
+		}
+	}
 
 	// 连接后：探测终端能力并发现 Shell（幂等，不阻塞注册超过 3 秒）
 	let terminalReady: Promise<void> | null = null;

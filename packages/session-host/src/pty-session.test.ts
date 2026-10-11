@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { type PtyProcessHandle, type PtySessionFrame, createPtySession } from "./pty-session.js";
+import {
+	type PtyProcessHandle,
+	type PtyScreen,
+	type PtySessionFrame,
+	SnapshotTooLargeError,
+	createPtySession,
+} from "./pty-session.js";
 
 /** 假 PTY：记录 pause 调用次数；显式提供 pause，使任何调用都可被断言抓住。 */
-function fakeHandle() {
+function fakeHandle(options: { autoExitOnKill?: boolean; exitCode?: number } = {}) {
 	const dataListener = { current: undefined as ((c: string) => void) | undefined };
 	const exitListener = { current: undefined as ((e: { exitCode: number; signal?: number }) => void) | undefined };
 	const counters = { pauseCalls: 0, killed: 0, written: [] as string[] };
@@ -19,6 +25,7 @@ function fakeHandle() {
 		resize() {},
 		kill() {
 			counters.killed += 1;
+			if (options.autoExitOnKill) exitListener.current?.({ exitCode: options.exitCode ?? 0 });
 		},
 		pause() {
 			counters.pauseCalls += 1;
@@ -42,8 +49,47 @@ function fakeHandle() {
 	return handle as typeof handle & PtyProcessHandle;
 }
 
-function build(overrides: { busy?: () => boolean; maxBacklogBytes?: number } = {}) {
-	const handle = fakeHandle();
+/** 假画面：可指定写回调是否异步完成，用于验证快照会等待画面排空。 */
+function fakeScreen(options: { async?: boolean } = {}) {
+	let cols = 80;
+	let rows = 24;
+	const chunks: string[] = [];
+	const screen = {
+		get cols() {
+			return cols;
+		},
+		get rows() {
+			return rows;
+		},
+		write(data: string, done?: () => void) {
+			chunks.push(data);
+			if (options.async) queueMicrotask(() => done?.());
+			else done?.();
+		},
+		resize(c: number, r: number) {
+			cols = c;
+			rows = r;
+		},
+		serialize() {
+			return chunks.join("");
+		},
+		dispose() {},
+	};
+	return { screen: screen as PtyScreen, chunks };
+}
+
+function build(
+	overrides: {
+		busy?: () => boolean;
+		maxBacklogBytes?: number;
+		maxSnapshotBytes?: number;
+		exitGraceMs?: number;
+		autoExitOnKill?: boolean;
+		asyncScreen?: boolean;
+	} = {},
+) {
+	const handle = fakeHandle({ autoExitOnKill: overrides.autoExitOnKill });
+	const { screen, chunks } = fakeScreen({ async: overrides.asyncScreen });
 	/** attempts：宿主尝试发出的全部帧（含被消费者拒收的）。 */
 	const attempts: PtySessionFrame[] = [];
 	/** accepted：消费者真正接收的帧。 */
@@ -53,7 +99,10 @@ function build(overrides: { busy?: () => boolean; maxBacklogBytes?: number } = {
 		kind: "pi",
 		cwd: "/w",
 		maxBacklogBytes: overrides.maxBacklogBytes,
+		maxSnapshotBytes: overrides.maxSnapshotBytes,
+		exitGraceMs: overrides.exitGraceMs,
 		spawn: () => handle,
+		screen,
 		emit: (frame) => {
 			attempts.push(frame);
 			const busy = overrides.busy?.() ?? false;
@@ -61,7 +110,7 @@ function build(overrides: { busy?: () => boolean; maxBacklogBytes?: number } = {
 			return !busy;
 		},
 	});
-	return { handle, attempts, accepted, session };
+	return { handle, screen, chunks, attempts, accepted, session };
 }
 
 describe("受管 PTY 实例", () => {
@@ -136,11 +185,85 @@ describe("受管 PTY 实例", () => {
 		bad.handle.exit(1);
 		expect(bad.session.state).toBe("failed");
 	});
+});
 
-	it("显式停止置 stopped 并终止子进程", () => {
+describe("受管 PTY 实例：画面", () => {
+	it("输出按序喂给画面", () => {
+		const { handle, chunks } = build();
+		handle.fire("one");
+		handle.fire("two");
+		expect(chunks).toEqual(["one", "two"]);
+	});
+
+	it("快照返回 seq、画面正文与尺寸", async () => {
 		const { handle, session } = build();
-		session.stop();
-		expect(session.state).toBe("stopped");
+		handle.fire("hello ");
+		handle.fire("world");
+		const snapshot = await session.snapshot();
+		expect(snapshot.snapshot).toBe("hello world");
+		expect(snapshot.seq).toBe(2);
+		expect(snapshot.cols).toBe(80);
+		expect(snapshot.rows).toBe(24);
+	});
+
+	it("快照等待尚未完成的画面写入", async () => {
+		const { handle, session } = build({ asyncScreen: true });
+		handle.fire("deferred");
+		const snapshot = await session.snapshot();
+		expect(snapshot.snapshot).toBe("deferred");
+	});
+
+	it("resize 同步画面尺寸", async () => {
+		const { session } = build();
+		session.resize(120, 30);
+		const snapshot = await session.snapshot();
+		expect(snapshot.cols).toBe(120);
+		expect(snapshot.rows).toBe(30);
+	});
+
+	it("快照超过上限时明确失败，不截断后假装完整", async () => {
+		const { handle, session } = build({ maxSnapshotBytes: 4 });
+		handle.fire("12345");
+		await expect(session.snapshot()).rejects.toBeInstanceOf(SnapshotTooLargeError);
+	});
+});
+
+describe("受管 PTY 实例：停止确认", () => {
+	it("确认退出后才报告 exited: true", async () => {
+		const { handle, session } = build({ autoExitOnKill: true });
+		const result = await session.stop();
+		expect(result).toEqual({ exited: true });
 		expect(handle.killed).toBe(1);
+		expect(session.state).toBe("stopped");
+	});
+
+	it("已退出的实例再次 stop 立即返回确认结果", async () => {
+		const { session } = build({ autoExitOnKill: true });
+		await session.stop();
+		const again = await session.stop();
+		expect(again).toEqual({ exited: true });
+	});
+
+	it("自然退出后 stop 不再重复终止，直接确认已退出", async () => {
+		const { handle, session } = build({ exitGraceMs: 10 });
+		handle.exit(0);
+		const result = await session.stop();
+		expect(result).toEqual({ exited: true });
+		expect(handle.killed).toBe(0);
+	});
+
+	it("未在宽限期内退出时报告 exited: false，且不伪装成已停止", async () => {
+		const { session } = build({ exitGraceMs: 10 });
+		const result = await session.stop();
+		expect(result).toEqual({ exited: false });
+		// 未确认退出就不得把状态改成已停止。
+		expect(session.state).toBe("running");
+	});
+
+	it("显式停止后收到非零退出仍记为 stopped，不误报为失败", async () => {
+		const { handle, session } = build({ exitGraceMs: 10 });
+		await session.stop();
+		handle.exit(1);
+		expect(session.state).toBe("stopped");
 	});
 });

@@ -11,6 +11,7 @@
     "release": "npx tsx scripts/pack-release.ts",
     "download:frp": "npx tsx scripts/download-frp.ts",
     "test:frp": "node scripts/test-frp.cjs",
+    "test:pi-resources": "tsx --test scripts/pi-resource-bundle.test.ts scripts/pi-extension-bundle.test.ts scripts/pi-community-release.test.ts",
     "test:cli": "node scripts/test-cli-capabilities.cjs",
     "test:vcp-plugin": "node scripts/test-vcp-plugin.cjs",
     "vcpdeck:link": "node scripts/link-cli.cjs"
@@ -20,6 +21,7 @@
     "@types/node": "^26.1.1",
     "archiver": "^8.0.0",
     "esbuild": "^0.24.2",
+    "pi-simplify": "0.2.3",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2"
   }

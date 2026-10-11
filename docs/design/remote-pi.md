@@ -23,7 +23,7 @@
 - 无人值守的自主 Agent 任务；
 - 多机器任务编排、定时巡检或结果聚合；
 - 由 Server 下发 Pi settings 文件（配置始终以 RuntimeSpec 快照下发，不做文件同步）；
-- Skills、Prompt 模板或 Pi Package 的内容分发与任意 Pi Package 安装（首发 Bundle 只含 VCPDeck 自有的工具策略扩展）；
+- Skills、Prompt 模板或 Pi Package 的内容分发与**任意** Pi Package 安装：Bundle 当前含自有策略扩展与固定版本的标准社区扩展 `community.pi-simplify@0.2.3`（详见 [`remote-pi-control-plane.md`](./remote-pi-control-plane.md) §12），但选包仍由维护者在构建期完成，Client 不提供安装/更新/卸载入口，Skills/Prompt 模板/主题不随包加载；
 - 机群级 Pi 用量、资源版本或独立审计控制台；
 - 不可信代码沙箱或容器隔离；
 - Server 端对 Session 正文的永久镜像、全文检索或跨 Client 迁移。

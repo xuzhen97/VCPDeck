@@ -1,6 +1,6 @@
 # 架构决策记录（ADR）
 
-> 维护责任：架构维护者｜最后核验：2026-08-15
+> 维护责任：架构维护者｜最后核验：2026-10-11
 
 ADR 记录会长期影响系统结构、数据、协议、安全或运维的决策。ADR 一经 Accepted 不修改结论；后续变化用新 ADR supersede。
 
@@ -87,8 +87,8 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0026](./0026-browser-client-webrtc-tcp-tunnel.md) | Accepted | 浏览器与 Client 使用 WebRTC 通用 TCP 隧道，ICE 直连优先并以 coturn 中继兜底 |
 | [0027](./0027-system-level-client-installation-and-clean-migration.md) | Accepted | Windows 使用 SYSTEM 开机任务、Linux 保持 systemd/sudo-all；旧 PM2 保留身份后清理式迁移，并提示不合规 Client 人工升级 |
 | [0028](./0028-windows-desktop-capture-engine-in-session-vnc.md) | Accepted | Windows 桌面查看复用交互会话内的 VNC 服务端作为抓屏引擎，不自建会话内捕获组件 |
-| [0029](./0029-server-managed-isolated-pi-runtime.md) | Proposed | Server 统一管理 Pi 配置/凭据/策略，Client 使用与用户原生 Pi 隔离的 VCPDeck Runtime，受信资源随 Client Release 发布 |
-| [0030](./0030-pi-resource-bundle-and-tool-policy.md) | Proposed | Pi Bundle 位于版本目录并由 Client 逐资源校验；工具策略默认拒绝、审批超时即拒绝；策略经进程内桥接传递，不落盘不进环境变量 |
+| [0029](./0029-server-managed-isolated-pi-runtime.md) | Rejected（方向由 ADR-0048 否决） | Server 统一管理 Pi 配置/凭据/策略，Client 使用与用户原生 Pi 隔离的 VCPDeck Runtime，受信资源随 Client Release 发布 |
+| [0030](./0030-pi-resource-bundle-and-tool-policy.md) | Rejected（方向由 ADR-0048 否决） | Pi Bundle 位于版本目录并由 Client 逐资源校验；工具策略默认拒绝、审批超时即拒绝；策略经进程内桥接传递，不落盘不进环境变量 |
 | [0031](./0031-native-pi-session-explicit-import.md) | Proposed | 用户原生 Pi Session 的显式导入是唯一允许接触用户 Pi 的路径：只读、单向、只操作副本，源根不可覆盖，预览正文受限不落盘 |
 | [0032](./0032-pi-web-renderer-vendoring.md) | Proposed | Pi Web 消息渲染层原样拷入 `packages/frontend/src/pi-web/`（vendored，MIT 随行）；Shared DTO 与渲染模型只经 Pi UI Adapter 翻译，移植子树零协议 import，上游手动 cherry-pick |
 | [0033](./0033-pi-tool-approval-mode.md) | Superseded by ADR-0034 | Tool Policy 与 Execution Mode 分层：Approval 逐次审批、Auto 受策略自动执行、YOLO 跳过 Tool Policy 但只信任当前 Runtime 已加载工具；RuntimeSpec v4 / bridge v2 |
@@ -100,3 +100,10 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0039](./0039-pi-two-mode-execution.md) | Accepted（尚未实现） | 删除逐工具三桶，采用 supervised/automatic；保留 Session 覆盖与 Run 固化，旧受限配置显式确认迁移 |
 | [0040](./0040-pi-extension-web-interaction.md) | Accepted（尚未实现） | 受信扩展命令复用 Owner/Run 控制；网页提供有限 UI 与 Client 内存状态恢复，不支持任意 TUI、Session 替换或 Runtime reload |
 | [0041](./0041-agent-session-run-and-audit-separation.md) | Accepted（已实现） | Agent Session、Run 摘要与会话操作审计独立于 Job；移除会话完成语义，保留最小审计与精确 Run 对账 |
+| [0042](./0042-standard-pi-community-extensions.md) | Superseded by ADR-0048 | 以官方 Pi 扩展 API 与包声明为标准，社区扩展及依赖锁定版本随 Client Release 统一交付；dev/release 共用构建输入，保留资源门控与有限网页兼容边界 |
+| [0043](./0043-project-local-pi-resources-unconditional-trust.md) | Accepted（待实施） | 项目本地 Pi 资源（`.pi/`、`.mcp.json`、skills、prompts、context 文件）无条件生效，不引入 policy/审批；全局 `~/.pi` 仍零占用；允许读机器全局 MCP 配置作为显式例外 |
+| [0044](./0044-pi-bundle-tree-delivery-and-verification.md) | Superseded by ADR-0048 | Bundle 资源升级为单文件/目录树判别联合，以确定性 `treeSha256`（含 mode、不跟随符号链接）覆盖目录全部内容；协议升 v2；构建期剔除宿主模块并按平台裁剪原生 |
+| [0045](./0045-central-pi-and-native-agent-environments.md) | Accepted（尚未实施；2026-10-10 修订：平台收窄为 Windows+Linux，系统级账户；2026-10-11 由 ADR-0048 补充外置 Agent 能力面与迁移顺序） | 中央 Pi 为可选操作者，目标机 Pi/DSH 使用自身原生环境（非用户个人配置）；Client 退出 SDK/Bundle 管理，人和 Agent 共用原生 TUI/Web，替代路径验收后退役旧体系并保留历史 |
+| [0046](./0046-independent-session-host-and-client-restart-survival.md) | Accepted（尚未实施；2026-10-10 修订：平台收窄为 Windows+Linux、系统级账户，且保活要求收窄为仅接入层；候选方案 5 的适用范围由 ADR-0048 限定） | 通用会话宿主独立持有工作进程与 PTY，**接入层断开不中断工作**（页面关闭/Server 断线/Socket 重连）；Client 重启或更新中断工作可以接受，但必须如实上报中断并提供会话接续路径，不得伪装仍在运行 |
+| [0047](./0047-dsh-web-access-via-authenticated-reverse-proxy.md) | Accepted（尚未实施） | DSH 保持 loopback-only，由宿主内受认证反向代理（含 WebSocket upgrade）统一对外；不关闭 DSH 自身 Host/Origin 与 Cookie 校验，双层认证互不替代 |
+| [0048](./0048-client-slimming-and-pi-feature-surface-on-server.md) | Proposed（2026-10-11） | **Client 瘦身**：Pi 功能面的权威在 Server；Client 退为通用能力底座（不内嵌 Pi SDK、不交付 Bundle）；目标机 Pi/DSH 由环境自带，Client 只按 Server 下发的明确命令启动/接入/停止；交互进程与 DSH 反代仍驻目标机；Server 通用能力对外开放给外置 Agent（沿用 CLI/插件面）；先可用、再切换、最后删除 Client 侧实现 |

@@ -2917,6 +2917,136 @@ var require_terminal = __commonJS({
   }
 });
 
+// ../shared/dist/session-host.js
+var require_session_host = __commonJS({
+  "../shared/dist/session-host.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.SessionHostProtocolError = exports2.SESSION_HOST_KINDS = exports2.SESSION_HOST_STATES = exports2.SESSION_HOST_ERROR_CODES = void 0;
+    exports2.sessionHostError = sessionHostError;
+    exports2.safeSessionHostErrorMessage = safeSessionHostErrorMessage;
+    exports2.isSessionHostState = isSessionHostState;
+    exports2.isSessionHostKind = isSessionHostKind;
+    exports2.parseSessionHostStartRequest = parseSessionHostStartRequest;
+    exports2.parseSessionHostStopRequest = parseSessionHostStopRequest;
+    exports2.parseSessionHostStatusReport = parseSessionHostStatusReport;
+    exports2.SESSION_HOST_ERROR_CODES = [
+      "SESSION_HOST_PROTOCOL_INVALID",
+      "SESSION_HOST_UNAVAILABLE",
+      "SESSION_HOST_INSTANCE_NOT_FOUND",
+      "SESSION_HOST_INSTANCE_CONFLICT",
+      "SESSION_HOST_INSTANCE_LIMIT_REACHED",
+      "SESSION_HOST_OUTPUT_BACKLOG_EXCEEDED",
+      "SESSION_HOST_NOT_CONFIRMED",
+      "SESSION_HOST_INTERRUPTED_BY_CLIENT_UPDATE"
+    ];
+    function sessionHostError(code, message) {
+      return { code, message };
+    }
+    function safeSessionHostErrorMessage(value2) {
+      return typeof value2 === "string" && value2.length > 0 ? value2.slice(0, 200) : "Session host operation failed";
+    }
+    exports2.SESSION_HOST_STATES = ["running", "stopped", "failed", "unknown"];
+    exports2.SESSION_HOST_KINDS = ["pi", "dsh"];
+    function isSessionHostState(v) {
+      return typeof v === "string" && exports2.SESSION_HOST_STATES.includes(v);
+    }
+    function isSessionHostKind(v) {
+      return typeof v === "string" && exports2.SESSION_HOST_KINDS.includes(v);
+    }
+    var SessionHostProtocolError = class extends Error {
+      code = "SESSION_HOST_PROTOCOL_INVALID";
+      constructor(message) {
+        super(message);
+        this.name = "SessionHostProtocolError";
+      }
+    };
+    exports2.SessionHostProtocolError = SessionHostProtocolError;
+    function isRecord2(v) {
+      return typeof v === "object" && v !== null && !Array.isArray(v);
+    }
+    function assertRecord(v, what) {
+      if (!isRecord2(v))
+        throw new SessionHostProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+    }
+    function assertKeys(v, allowed, what) {
+      for (const key of Object.keys(v)) {
+        if (!allowed.has(key))
+          throw new SessionHostProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+    }
+    function assertString(v, what, maxLength) {
+      if (typeof v !== "string" || v.length === 0)
+        throw new SessionHostProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      if (maxLength !== void 0 && v.length > maxLength) {
+        throw new SessionHostProtocolError(`${what} \u8D85\u8FC7 ${maxLength} \u5B57\u7B26\u4E0A\u9650`);
+      }
+    }
+    function assertNonNegativeInt(v, what) {
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+        throw new SessionHostProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570`);
+      }
+    }
+    function assertDate(v, what) {
+      assertString(v, what, 64);
+      if (Number.isNaN(Date.parse(v)))
+        throw new SessionHostProtocolError(`${what} \u4E0D\u662F\u5408\u6CD5\u65E5\u671F`);
+    }
+    function parseSessionHostStartRequest(v) {
+      assertRecord(v, "sessionHost.start");
+      assertKeys(v, /* @__PURE__ */ new Set(["operationId", "kind", "cwd"]), "sessionHost.start");
+      assertString(v.operationId, "sessionHost.start.operationId", 128);
+      if (!isSessionHostKind(v.kind))
+        throw new SessionHostProtocolError("sessionHost.start.kind \u4E0D\u53D7\u652F\u6301");
+      assertString(v.cwd, "sessionHost.start.cwd", 1024);
+      return { operationId: v.operationId, kind: v.kind, cwd: v.cwd };
+    }
+    function parseSessionHostStopRequest(v) {
+      assertRecord(v, "sessionHost.stop");
+      assertKeys(v, /* @__PURE__ */ new Set(["instanceId"]), "sessionHost.stop");
+      assertString(v.instanceId, "sessionHost.stop.instanceId", 128);
+      return { instanceId: v.instanceId };
+    }
+    function parseSessionHostStatusReport(v) {
+      assertRecord(v, "sessionHost.report");
+      assertKeys(v, /* @__PURE__ */ new Set(["available", "hostId", "instances"]), "sessionHost.report");
+      if (typeof v.available !== "boolean")
+        throw new SessionHostProtocolError("sessionHost.report.available \u5FC5\u987B\u662F\u5E03\u5C14");
+      if (!Array.isArray(v.instances))
+        throw new SessionHostProtocolError("sessionHost.report.instances \u5FC5\u987B\u662F\u6570\u7EC4");
+      if (!v.available) {
+        if (v.hostId !== null) {
+          throw new SessionHostProtocolError("sessionHost.report \u4E0D\u53EF\u7528\u65F6 hostId \u5FC5\u987B\u4E3A null");
+        }
+        if (v.instances.length !== 0) {
+          throw new SessionHostProtocolError("sessionHost.report \u4E0D\u53EF\u7528\u65F6\u4E0D\u5F97\u643A\u5E26\u5B9E\u4F8B");
+        }
+        return { available: false, hostId: null, instances: [] };
+      }
+      assertString(v.hostId, "sessionHost.report.hostId", 128);
+      const instances = v.instances.map((item) => {
+        assertRecord(item, "sessionHost.instance");
+        assertKeys(item, /* @__PURE__ */ new Set(["instanceId", "kind", "state", "startedAt", "lastSeq"]), "sessionHost.instance");
+        assertString(item.instanceId, "sessionHost.instance.instanceId", 128);
+        if (!isSessionHostKind(item.kind))
+          throw new SessionHostProtocolError("sessionHost.instance.kind \u4E0D\u53D7\u652F\u6301");
+        if (!isSessionHostState(item.state))
+          throw new SessionHostProtocolError("sessionHost.instance.state \u4E0D\u53D7\u652F\u6301");
+        assertDate(item.startedAt, "sessionHost.instance.startedAt");
+        assertNonNegativeInt(item.lastSeq, "sessionHost.instance.lastSeq");
+        return {
+          instanceId: item.instanceId,
+          kind: item.kind,
+          state: item.state,
+          startedAt: item.startedAt,
+          lastSeq: item.lastSeq
+        };
+      });
+      return { available: true, hostId: v.hostId, instances };
+    }
+  }
+});
+
 // ../shared/dist/pi-admin.js
 var require_pi_admin = __commonJS({
   "../shared/dist/pi-admin.js"(exports2) {
@@ -4264,6 +4394,7 @@ var require_dist = __commonJS({
     __exportStar(require_pi_extension(), exports2);
     __exportStar(require_pi_bundle(), exports2);
     __exportStar(require_terminal(), exports2);
+    __exportStar(require_session_host(), exports2);
     __exportStar(require_pi_admin(), exports2);
     var pi_js_1 = require_pi();
     Object.defineProperty(exports2, "isPiRunTerminal", { enumerable: true, get: function() {
@@ -4420,6 +4551,8 @@ var require_dist = __commonJS({
       TERMINAL_SESSION_STATE: "terminal:session-state",
       TERMINAL_RESYNC_REQUIRED: "terminal:resync-required",
       TERMINAL_ERROR: "terminal:error",
+      // 会话宿主（独立宿主）事件：与旧 TERMINAL_STATE 对账语义互不复用。
+      SESSION_HOST_STATE: "session-host:state",
       UPDATE_REQUEST: "update:request",
       UPDATE_READY: "update:ready",
       UPDATE_FAILED: "update:failed",
@@ -5256,6 +5389,28 @@ var init_releases = __esm({
   }
 });
 
+// ../sdk/dist/session-host.js
+function createSessionHostApi(client) {
+  return {
+    listInstances: (options, signal) => {
+      const params = new URLSearchParams();
+      if (options?.clientId)
+        params.set("clientId", options.clientId);
+      if (options?.page)
+        params.set("page", String(options.page));
+      if (options?.pageSize)
+        params.set("pageSize", String(options.pageSize));
+      const qs = params.toString();
+      return client.request("GET", `/api/session-host/instances${qs ? `?${qs}` : ""}`, void 0, signal);
+    }
+  };
+}
+var init_session_host = __esm({
+  "../sdk/dist/session-host.js"() {
+    "use strict";
+  }
+});
+
 // ../sdk/dist/storage.js
 function createStorageApi(client) {
   return {
@@ -5388,6 +5543,7 @@ var init_client = __esm({
     init_pi();
     init_git_ssh();
     init_releases();
+    init_session_host();
     init_storage();
     init_storage_shares();
     init_terminal();
@@ -5422,6 +5578,7 @@ var init_client = __esm({
       /** Git SSH 共享密钥管理（ADR-0037）。 */
       gitSsh;
       releases;
+      sessionHost;
       terminals;
       tunnels;
       health = {
@@ -5444,6 +5601,7 @@ var init_client = __esm({
         this.pi = createPiApi(this);
         this.gitSsh = createGitSshApi(this);
         this.releases = createReleasesApi(this);
+        this.sessionHost = createSessionHostApi(this);
         this.terminals = createTerminalsApi(this);
         this.tunnels = createTunnelsApi(this);
       }
@@ -5508,6 +5666,7 @@ var init_dist = __esm({
     init_jobs();
     init_pi();
     init_releases();
+    init_session_host();
     init_storage();
     init_storage_shares();
     init_terminal();

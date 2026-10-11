@@ -129,6 +129,11 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		onDisconnected: vi.fn(async () => {}),
 		applyAck: vi.fn(async () => {}),
 	};
+	const sessionHost = {
+		reconcile: vi.fn(
+			async (): Promise<{ unreachable: string[]; stopped: string[] }> => ({ unreachable: [], stopped: [] }),
+		),
+	};
 	const gateway = new ClientGateway(
 		clientService as never,
 		jobService as never,
@@ -146,6 +151,7 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		// 位置 14 = piRuntime（旧测试保持未注入）
 		undefined as never,
 		gitSsh as never,
+		sessionHost as never,
 	);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
@@ -166,6 +172,7 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		reconciliation,
 		tunnelSessions,
 		gitSsh,
+		sessionHost,
 		emit,
 		to,
 	};
@@ -566,6 +573,45 @@ describe("ClientGateway terminal routing", () => {
 		} as never);
 		expect(terminalService.handleClientState).not.toHaveBeenCalled();
 		expect(result).toEqual({ acceptedSessionIds: [], closeSessionIds: [] });
+	});
+
+	it("SESSION_HOST_STATE 解析后交给 service 并原样 ack", async () => {
+		const { gateway, sessionHost } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		sessionHost.reconcile.mockResolvedValue({ unreachable: ["inst_1"], stopped: [] });
+		const result = await gateway.handleSessionHostState(socket, {
+			available: false,
+			hostId: null,
+			instances: [],
+		});
+		expect(sessionHost.reconcile).toHaveBeenCalledWith("c1", {
+			available: false,
+			hostId: null,
+			instances: [],
+		});
+		expect(result).toEqual({ unreachable: ["inst_1"], stopped: [] });
+	});
+
+	it("非法 SESSION_HOST_STATE 不交给 service，绝不用坏数据判死实例", async () => {
+		const { gateway, sessionHost } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		const result = await gateway.handleSessionHostState(socket, {
+			available: true,
+			hostId: "h1",
+			instances: [{ instanceId: "i1", kind: "pi", state: "zombie", startedAt: "2026-01-01T00:00:00Z", lastSeq: 0 }],
+		});
+		expect(sessionHost.reconcile).not.toHaveBeenCalled();
+		expect(result).toEqual({ unreachable: [], stopped: [] });
+	});
+
+	it("未绑定 clientId 的 SESSION_HOST_STATE 不对账", async () => {
+		const { gateway, sessionHost } = makeGateway();
+		const socket = makeSocket();
+		const result = await gateway.handleSessionHostState(socket, { available: false, hostId: null, instances: [] });
+		expect(sessionHost.reconcile).not.toHaveBeenCalled();
+		expect(result).toEqual({ unreachable: [], stopped: [] });
 	});
 
 	it("断线通知 terminal service 但不终结会话", async () => {

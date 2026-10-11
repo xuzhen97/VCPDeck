@@ -139,6 +139,46 @@ test("buildEnvContent 只写固定 7 个键，且 0640 root:vcpdeck 语义", () 
 	);
 });
 
+test("宿主启动命令可选写入 launcher.env；未提供不写、非法值直接失败", () => {
+	const { resolveSessionHostCommands } = require("./install-client-linux.cjs");
+	const base = {
+		serverOrigin: "https://a.example.com:3001",
+		psk: "SECRET_PSK",
+		clientId: "abc-123",
+	};
+	const prior = process.env.VCPDECK_SESSION_HOST_COMMANDS;
+	try {
+		delete process.env.VCPDECK_SESSION_HOST_COMMANDS;
+		// 未配置：不写该键（宿主不启动，对账链路会如实显示不可达），也不猜可执行文件。
+		assert.ok(!buildEnvContent(base).includes("VCPDECK_SESSION_HOST_COMMANDS"));
+		assert.equal(resolveSessionHostCommands(), "");
+
+		process.env.VCPDECK_SESSION_HOST_COMMANDS = JSON.stringify({
+			pi: { file: "/usr/local/bin/pi" },
+		});
+		assert.ok(
+			buildEnvContent(base).includes(
+				'VCPDECK_SESSION_HOST_COMMANDS={"pi":{"file":"/usr/local/bin/pi"}}',
+			),
+		);
+
+		// 非法值必须让安装失败，而不是把坏配置写进 launcher.env。
+		process.env.VCPDECK_SESSION_HOST_COMMANDS = "{not json";
+		assert.throws(() => buildEnvContent(base));
+		assert.throws(
+			() => resolveSessionHostCommands(JSON.stringify({ node: { file: "x" } })),
+			/未知环境类型/,
+		);
+		assert.throws(
+			() => resolveSessionHostCommands(JSON.stringify({ pi: { file: "" } })),
+			/file 必须是非空字符串/,
+		);
+	} finally {
+		if (prior === undefined) delete process.env.VCPDECK_SESSION_HOST_COMMANDS;
+		else process.env.VCPDECK_SESSION_HOST_COMMANDS = prior;
+	}
+});
+
 test("planFreshInstall 按固定阶段顺序推进到 done", () => {
 	const plan = planFreshInstall({ fresh: true });
 	assert.deepEqual(

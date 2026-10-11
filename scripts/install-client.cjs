@@ -213,6 +213,53 @@ function ensureClientId(path = join(homedir(), ".vcpdeck", "client-id"), dryRunR
 	return id;
 }
 
+/**
+ * 可选的宿主启动命令（JSON）。
+ *
+ * ADR-0045：Pi/DSH 独立安装于 Client 系统级账户，路径只能由操作者提供；
+ * 未提供时宿主不启动（对账链路会如实显示「不可达」），**绝不猜可执行文件**。
+ * 非法值直接让安装失败，不把坏配置写进 launcher.env。
+ */
+function resolveSessionHostCommands(raw = process.env.VCPDECK_SESSION_HOST_COMMANDS) {
+	const value = typeof raw === "string" ? raw.trim() : "";
+	if (!value) return "";
+	let parsed;
+	try {
+		parsed = JSON.parse(value);
+	} catch {
+		throw new Error("VCPDECK_SESSION_HOST_COMMANDS 不是合法 JSON");
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error("VCPDECK_SESSION_HOST_COMMANDS 必须是对象");
+	}
+	for (const [kind, command] of Object.entries(parsed)) {
+		if (kind !== "pi" && kind !== "dsh") {
+			throw new Error(`VCPDECK_SESSION_HOST_COMMANDS 含未知环境类型: ${kind}`);
+		}
+		if (
+			!command ||
+			typeof command !== "object" ||
+			typeof command.file !== "string" ||
+			command.file.length === 0
+		) {
+			throw new Error(`VCPDECK_SESSION_HOST_COMMANDS.${kind}.file 必须是非空字符串`);
+		}
+		const commandArgs = command.args;
+		if (
+			commandArgs !== undefined &&
+			(!Array.isArray(commandArgs) || commandArgs.some((item) => typeof item !== "string"))
+		) {
+			throw new Error(`VCPDECK_SESSION_HOST_COMMANDS.${kind}.args 必须是字符串数组`);
+		}
+	}
+	return JSON.stringify(parsed);
+}
+
+function sessionHostCommandLines() {
+	const value = resolveSessionHostCommands();
+	return value ? [`VCPDECK_SESSION_HOST_COMMANDS=${value}`] : [];
+}
+
 function writeLauncherEnv(appDir, serverOrigin, psk, clientId) {
 	const path = join(appDir, "launcher.env");
 	const content = [
@@ -222,6 +269,7 @@ function writeLauncherEnv(appDir, serverOrigin, psk, clientId) {
 		`VCPDECK_SERVER=${serverOrigin}`,
 		`VCPDECK_PSK=${psk}`,
 		`VCPDECK_CLIENT_ID=${clientId}`,
+		...sessionHostCommandLines(),
 		"",
 	].join("\n");
 	mkdirSync(appDir, { recursive: true });
@@ -1157,6 +1205,7 @@ async function runWindowsInstall(options) {
 			`VCPDECK_PSK=${bootstrap.psk}`,
 			`VCPDECK_CLIENT_ID=${clientId}`,
 			"VCPDECK_INSTALLATION_MODE=windows-system-task",
+			...sessionHostCommandLines(),
 			"",
 		].join("\n");
 		const envPath = join(WINDOWS_APP_DIR, "launcher.env");
@@ -1623,6 +1672,7 @@ module.exports = {
 	buildWindowsSystemTaskXml,
 	classifyWindowsSystemTask,
 	findMachineGit,
+	resolveSessionHostCommands,
 	ensureOptionalMachineGit,
 	discoverLegacyWindowsInstall,
 	removeTreeWithRetries,

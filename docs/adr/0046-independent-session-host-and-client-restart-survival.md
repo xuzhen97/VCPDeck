@@ -8,6 +8,7 @@
 - 实施状态：尚未实施；Accepted 表示组件与生命周期边界已批准，不表示两平台保活、部署或协议已经验证。
 - 修订：2026-10-10 —— 平台范围收窄为 Windows + Linux（macOS 不支持）；运行账户确定为 Client 系统级账户。
 - 修订（第二次）：2026-10-10 —— 维护者决定**收窄保活要求**：仅要求“接入层断开不中断工作”；**Client 重启/更新导致工作被中断可以接受**，但必须如实上报中断、不得伪装仍在运行，且必须提供恢复会话的路径。原“Client 更新不得终止宿主”的要求被取代（见决策 2、决策 4）。
+- 修订（第三次）：2026-10-11 —— [ADR-0048](./0048-client-slimming-and-pi-feature-surface-on-server.md) 限定候选方案 5 的适用范围：被拒绝的是“把交互式工作进程搬到 Server 上运行”，**不适用于“Pi 功能面”的归属**。本 ADR 结论不变。
 - 关联：[ADR-0003](./0003-separate-launcher-for-updates.md)、[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0027](./0027-system-level-client-installation-and-clean-migration.md)、[ADR-0045](./0045-central-pi-and-native-agent-environments.md)、[`remote-terminal.md`](../design/remote-terminal.md)、[`compatibility.md`](../compatibility.md)
 
 ## 背景
