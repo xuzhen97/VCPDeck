@@ -340,6 +340,39 @@ describe("ClientGateway 连接与身份生命周期", () => {
 		expect(jobService.markDisconnected).not.toHaveBeenCalled();
 		expect(frpService.markInactiveByClientId).not.toHaveBeenCalled();
 	});
+
+	it("0.18.2 客户端带已退役 pi 摘要仍能注册（0.19.0 事故回归）", async () => {
+		// 0.19.0 把 pi 当"未知字段"抛错，导致全集群旧客户端连上又被踢。
+		const { gateway, clientService } = makeGateway();
+		const socket = makeSocket();
+		socket.disconnect = vi.fn();
+		await gateway.handleRegister(socket, {
+			clientId: "c1",
+			hostname: "host",
+			os: "win32",
+			cpuModel: "cpu",
+			totalMemMB: 1024,
+			clientVersion: "0.18.2",
+			capabilities: ["exec", "agent.pi"],
+			capabilityDetails: {
+				pi: {
+					available: true,
+					sdkVersion: "0.86.0",
+					nodeVersion: "24.16.0",
+					shellKind: "path",
+				},
+			} as never,
+		});
+
+		expect(socket.disconnect).not.toHaveBeenCalled();
+		expect(socket.data.clientId).toBe("c1");
+		expect(socket.emit).toHaveBeenCalledWith("ack", { event: "register" });
+		expect(clientService.register).toHaveBeenCalled();
+		const registerCalls = (
+			clientService.register as unknown as { mock: { calls: unknown[][] } }
+		).mock.calls;
+		expect(registerCalls[0]?.[0]).not.toHaveProperty("capabilityDetails.pi");
+	});
 });
 
 describe("ClientGateway terminal routing", () => {

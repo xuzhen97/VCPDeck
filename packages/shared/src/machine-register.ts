@@ -60,6 +60,15 @@ export interface PrivilegedCapabilityStatus {
 	runAsUser: string;
 }
 
+/**
+ * ADR-0049 已退役、但仍可能由旧 Client 上报的 `capabilityDetails` 键。
+ *
+ * 契约：**接受并丢弃**（不持久化、不投影）。退役字段必须容忍，不能让旧 Client
+ * 因为“未知字段”被整条注册拒绝（0.19.0 曾因此让全集群掉线）。
+ * 仅容纳“曾有定义、现已退役”的键；真正未知的键仍严格拒绝。
+ */
+const RETIRED_DETAIL_KEYS = new Set(["pi"]);
+
 /** 机器注册消息（Client → Server，/client Socket.IO）。 */
 export interface MachineRegister {
 	clientId: string;
@@ -268,6 +277,9 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 		if (!isRecord(details)) throw new Error("capabilityDetails 必须为对象");
 		const known = ["terminal", "frp", "privileged", "p2pTunnel", "gitSsh"] as const;
 		for (const key of Object.keys(details)) {
+			// ADR-0049 退役的键：旧 Client（如 0.18.2）仍会带 pi 摘要，
+			// 接受并丢弃，否则整个集群会因“未知字段”被拒注册。
+			if (RETIRED_DETAIL_KEYS.has(key)) continue;
 			if (!known.includes(key as (typeof known)[number])) {
 				throw new Error(`capabilityDetails 含未知字段 ${key}`);
 			}

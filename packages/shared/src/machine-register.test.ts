@@ -35,16 +35,40 @@ function validRegister(overrides: Partial<MachineRegister> = {}): MachineRegiste
 }
 
 describe("parseMachineRegister", () => {
-	it("拒绝已退役的 capabilityDetails.pi 字段", () => {
-		expect(() =>
-			parseMachineRegister(
-				validRegister({
-					capabilityDetails: {
-						pi: { available: true, sdkVersion: "0.86.0" },
-					} as never,
-				}),
-			),
-		).toThrow(/未知字段/);
+	it("容忍并忽略已退役的 capabilityDetails.pi（0.18.2 客户端仍会上报）", () => {
+		// ADR-0049 退役 Pi 后，旧 Client 仍会带上 pi 摘要；严格拒绝会让整集群注册失败。
+		// 契约：接受注册、丢弃 pi 字段（不持久化、不投影），其余字段照常解析。
+		const parsed = parseMachineRegister(
+			validRegister({
+				capabilityDetails: {
+					pi: {
+						available: true,
+						sdkVersion: "0.86.0",
+						nodeVersion: "24.16.0",
+						shellKind: "path",
+						sessionProtocolVersion: 4,
+						configMode: "server-authoritative",
+					},
+					frp: { available: false, code: "FRPC_NOT_FOUND" },
+				} as never,
+			}),
+		);
+		expect(parsed.capabilityDetails).not.toHaveProperty("pi");
+		expect(parsed.capabilityDetails?.frp).toEqual({
+			available: false,
+			code: "FRPC_NOT_FOUND",
+		});
+	});
+
+	it("容忍 available:false 形状的已退役 pi 摘要", () => {
+		const parsed = parseMachineRegister(
+			validRegister({
+				capabilityDetails: {
+					pi: { available: false, code: "PI_BASH_NOT_FOUND", message: "bash 缺失" },
+				} as never,
+			}),
+		);
+		expect(parsed.capabilityDetails).not.toHaveProperty("pi");
 	});
 
 	it("接受含 privileged + installation 的新 Client 注册", () => {
@@ -67,7 +91,7 @@ describe("parseMachineRegister", () => {
 		expect(parsed.capabilityDetails?.frp).toEqual({ available: false, code: "FRPC_NOT_FOUND" });
 	});
 
-	it("拒绝 capabilityDetails 中的未知字段", () => {
+	it("拒绝 capabilityDetails 中的真正未知字段（保留严格边界）", () => {
 		expect(() =>
 			parseMachineRegister(
 				validRegister({
