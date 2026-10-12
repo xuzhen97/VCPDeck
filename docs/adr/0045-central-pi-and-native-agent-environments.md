@@ -1,11 +1,11 @@
 # ADR-0045：中央 Pi 编排与目标机原生 Agent 环境
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0049
 - 日期：2026-10-10
 - 决策者：项目维护者
 - 实施状态：尚未实施；Accepted 表示长期方向已批准，不表示中央 Pi、原生环境接入或旧体系退役已交付。
 - 修订：2026-10-10 —— 维护者决定：平台范围收窄为 Windows + Linux，**不支持 macOS**；并明确“原生配置”指 Agent 应用自身安装与配置，**不是**用户个人主目录配置；运行账户确定为 Client 系统级账户（见决策 2）。
-- 关联：[ADR-0001](./0001-control-plane-and-outbound-clients.md)、[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0009](./0009-trusted-operator-security-domain.md)、[ADR-0041](./0041-agent-session-run-and-audit-separation.md)、[ADR-0042](./0042-standard-pi-community-extensions.md)、[ADR-0043](./0043-project-local-pi-resources-unconditional-trust.md)、[ADR-0044](./0044-pi-bundle-tree-delivery-and-verification.md)、[`remote-pi.md`](../design/remote-pi.md)、[`remote-terminal.md`](../design/remote-terminal.md)
+- 关联：[ADR-0001](./0001-control-plane-and-outbound-clients.md)、[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0009](./0009-trusted-operator-security-domain.md)、[ADR-0041](./0041-agent-session-run-and-audit-separation.md)、[ADR-0042](./0042-standard-pi-community-extensions.md)、[ADR-0043](./0043-project-local-pi-resources-unconditional-trust.md)、[ADR-0044](./0044-pi-bundle-tree-delivery-and-verification.md)、[`remote-pi.md`](../../docs/archive/design/remote-pi.md)、[`remote-terminal.md`](../design/remote-terminal.md)
 
 ## 背景
 

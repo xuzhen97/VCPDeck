@@ -8,7 +8,6 @@ import type {
 	GitSshCapability,
 	MachineRegister,
 	P2pTunnelCapabilityStatus,
-	PiCapabilityStatus,
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
 import { FRP_RECONCILE_PROTOCOL_VERSION, VERSION } from "@vcpdeck/shared";
@@ -34,7 +33,6 @@ export const CLIENT_ID =
 
 /**
  * 构造机器注册消息。
- * @param piStatus Pi 能力探测结果（可选）
  * @param terminalStatus 终端能力探测结果（可选）
  * @param runtimeSecurity 运行时安全摘要：非交互特权能力（capabilityDetails.privileged）
  *   与安装模式（顶层 installation）；缺省不上报，不新增可执行 capability 字符串。
@@ -51,7 +49,6 @@ export function isMigrationVerifyOnly(env: NodeJS.ProcessEnv = process.env): boo
 }
 
 export function getRegisterInfo(
-	piStatus?: PiCapabilityStatus,
 	terminalStatus?: TerminalCapabilityStatus,
 	runtimeSecurity?: RuntimeSecurityInfo,
 	env: NodeJS.ProcessEnv = process.env,
@@ -66,9 +63,6 @@ export function getRegisterInfo(
 		if (isFrpAvailable()) {
 			caps.push("frp");
 		}
-		if (piStatus?.available) {
-			caps.push("agent.pi");
-		}
 		if (terminalStatus?.available) {
 			caps.push("terminal.pty");
 		}
@@ -79,7 +73,6 @@ export function getRegisterInfo(
 	}
 	const capabilityDetails: MachineRegister["capabilityDetails"] = {};
 	if (!verifyOnly) {
-		if (piStatus !== undefined) capabilityDetails.pi = piStatus;
 		if (terminalStatus !== undefined) capabilityDetails.terminal = terminalStatus;
 		// FRP 能力：按 frpc 可探测性声明；协商固定为 protocol v1（不按应用版本猜测）。
 		const frpStatus: FrpCapabilityStatus = isFrpAvailable()

@@ -6,7 +6,7 @@
  *   1. 同步 SDK/Shared/CLI/VCPDeckBridge 版本与 Shared 运行时版本 → 全量构建
  *      （shared/sdk/cli/vcp-plugin/server/client/launcher/frontend）→ 多平台 frp 下载
  *   2. esbuild 将业务代码 + 纯 JS 依赖打成少量单文件（原生模块、Prisma 运行时、
- *      Pi SDK 等外部保留，staging 只安装这部分依赖）
+ *      原生模块与 Prisma 运行时等外部保留，staging 只安装这部分依赖）
  *   3. staging 组装：launcher/、server/ 与 client/（Launcher 单文件 + 业务构件与精简依赖）
  *   4. 产出 win-x64 / linux-x64 两份 zip（均含 Launcher、Server、Client；archiver，构建机平台无关），供分发与自动
  *      更新上传（Server 按目标机平台选择对应包）；linux frp 裸 ELF 从 .gz 内存解压
@@ -37,10 +37,8 @@ import { ZipArchive } from "archiver";
 import {
 	bundleClient,
 	bundleLauncher,
-	bundlePiSdk,
 	bundleServer,
 } from "./bundle-apps.js";
-import { buildPiResourceBundle as buildPiResourceBundleFiles } from "./pi-resource-bundle.js";
 import { copyInstallerAsset } from "./release-installer-assets.js";
 
 const ROOT = resolve(__dirname, "..");
@@ -99,7 +97,7 @@ function run(argv: string[], label: string): void {
  * 版本优先取源码 package.json 的声明；平台绑定包（构建机可能未安装目标平台）
  * 从父包 optionalDependencies 取精确版本。
  */
-export const EXTERNAL_DEPS: Record<"server" | "client" | "session-host", string[]> = {
+export const EXTERNAL_DEPS: Record<"server" | "client", string[]> = {
 	server: [
 		"@prisma/client-runtime-utils",
 		"@prisma/adapter-libsql",
@@ -108,8 +106,6 @@ export const EXTERNAL_DEPS: Record<"server" | "client" | "session-host", string[
 		"@libsql/linux-x64-gnu",
 		"prisma",
 	],
-	// Pi SDK 不在此列：它以单文件产物直接写入 node_modules（见 bundlePiSdk），
-	// 安装真依赖树会退回「按文件数计费」的首开成本。
 	client: [
 		"@lydell/node-pty",
 		"@lydell/node-pty-win32-x64",
@@ -117,18 +113,6 @@ export const EXTERNAL_DEPS: Record<"server" | "client" | "session-host", string[
 		"node-datachannel",
 		"@node-datachannel/win32-x64-msvc",
 		"@node-datachannel/linux-x64-gnu",
-		// 单文件 SDK 的图片链路依赖：resizeImage 走 Photon WASM，它必须作为真实包
-		// 存在于发行布局（内联会让 wasm 定位失效，见 scripts/pi-image-pipeline.test.ts）。
-		"@silvia-odwyer/photon-node",
-	],
-	// 宿主不打 esbuild 单文件：三个 native 依赖都是延迟动态 import，
-	// 必须作为真实包存在于发行布局（缺失时宿主会降级为「原生后端不可用」，而非启动失败）。
-	"session-host": [
-		"@lydell/node-pty",
-		"@lydell/node-pty-win32-x64",
-		"@lydell/node-pty-linux-x64",
-		"@xterm/headless",
-		"@xterm/addon-serialize",
 	],
 };
 
@@ -199,7 +183,7 @@ function compareVersions(a: string, b: string): number {
 }
 
 function resolveExternalDeps(
-	pkgName: "server" | "client" | "session-host",
+	pkgName: "server" | "client",
 ): Record<string, string> {
 	const srcPkg = readPkgJson(join(ROOT, "packages", pkgName, "package.json"));
 	const deps: Record<string, string> = {};
@@ -220,66 +204,11 @@ function resolveExternalDeps(
 	return deps;
 }
 
-/** Pi SDK 版本事实：取源码 package.json 声明（与打包外部保留依赖同源）。 */
-function piSdkVersionFromClientPackage(): string {
-	const pkg = readPkgJson(join(ROOT, "packages", "client", "package.json"));
-	const declared = pkg.dependencies?.["@earendil-works/pi-coding-agent"];
-	if (!declared) {
-		throw new Error(
-			"[pack-release] packages/client 未声明 @earendil-works/pi-coding-agent",
-		);
-	}
-	return declared;
-}
 
-/**
- * 构建 Pi Resource Bundle（随 Client Release 发布，ADR-0030 决策 1 / ADR-0042 决策 2）：
- * 资源选择与打包细节全部交给统一 builder，本函数只负责「发布位置 + 版本事实」。
- *
- * 位置：版本目录**根**（`apps/<version>/pi-resources/`，与 `client/` 并列）。
- * 选版本级而非 client/ 内，是为了让 Client 只凭「自己在版本目录内」即可定位 Bundle
- * （`resolveVerifiedPiBundle`），不依赖构件子目录命名；回滚/更新与版本天然一致。
- *
- * 导出供测试直接验证发布产物，避免只能靠源码字符串断言。
- */
-export async function buildPiResourceBundle(
-	versionDir: string,
-	releaseVersion: string,
-): Promise<void> {
-	const manifest = await buildPiResourceBundleFiles({
-		root: join(versionDir, "pi-resources"),
-		bundleVersion: releaseVersion,
-		piSdkVersion: piSdkVersionFromClientPackage(),
-	});
-	console.log(
-		`[pack-release] Pi Resource Bundle: ${manifest.resources.length} 个资源（${manifest.resources
-			.map((resource) => `${resource.id}@${resource.version}`)
-			.join(", ")}），bundleVersion=${releaseVersion}`,
-	);
-}
 
 /** 构件自检用的 CJS 加载器（pack-release 自身是 ESM）。 */
 const stageRequire = createRequire(import.meta.url);
 
-/**
- * 构件自检:用构件自带的迁移脚本与 SQL,校验它能在构件布局下定位 SQL。
- * 0.17.0 首次发布就因构件布局与脚本的路径假设不一致而在生产 preStart 失败
- * (MODULE_NOT_FOUND),随后启动断言又会因找不到 SQL 而 fail closed;
- * 这两类问题必须在构建阶段暴露,而不是等生产发布。
- */
-function assertStagedMigrationResolvable(serverTarget: string): void {
-	const script = join(serverTarget, "prisma", "agent-session-migration.cjs");
-	if (!existsSync(script)) {
-		throw new Error(`构件缺少迁移脚本: ${script}`);
-	}
-	const { resolveMigrationSqlPath } = stageRequire(script) as {
-		resolveMigrationSqlPath: (baseDir?: string) => string;
-	};
-	const resolved = resolveMigrationSqlPath(serverTarget);
-	if (!existsSync(resolved)) {
-		throw new Error(`构件迁移 SQL 无法解析: ${resolved}`);
-	}
-}
 
 /** 组装单个构件的生产部署目录（esbuild 单文件 + frp + 外部依赖精简安装） */
 async function stagePackage(
@@ -320,7 +249,6 @@ async function stagePackage(
 		if (existsSync(p)) rmSync(p, { force: true });
 	}
 
-	// 2. esbuild 打包（server 单文件；client 主进程 + pi/probe 两个 fork worker）
 	console.log(`[pack-release] ${pkgName} esbuild 打包`);
 	if (pkgName === "server") {
 		await bundleServer(join(target, "dist", "main.js"));
@@ -329,14 +257,6 @@ async function stagePackage(
 			{
 				entry: "packages/client/src/index.ts",
 				outfile: join(target, "dist", "index.js"),
-			},
-			{
-				entry: "packages/client/src/pi/worker.ts",
-				outfile: join(target, "dist", "pi", "worker.js"),
-			},
-			{
-				entry: "packages/client/src/pi/probe-worker.ts",
-				outfile: join(target, "dist", "probe-worker.js"),
 			},
 		]);
 	}
@@ -352,39 +272,7 @@ async function stagePackage(
 		);
 		// Prisma 7 CLI 强制要求 config 文件(preStart db push 与运行时共用 DATABASE_URL)
 		cpSync(join(pkgDir, "prisma.config.cjs"), join(target, "prisma.config.cjs"));
-		// Agent 显式迁移(ADR-0041):preStart 先迁移后 db push。
-		// 落位在 `<server>/prisma/` 与源码布局一致:构建后的 dist/main.js 以
-		// `../prisma/agent-session-migration.cjs` 引用它,且迁移脚本按
-		// `<cwd>/prisma/agent-session-migration.sql` 定位 SQL。
-		cpSync(
-			join(pkgDir, "prisma", "agent-session-migration.cjs"),
-			join(target, "prisma", "agent-session-migration.cjs"),
-		);
-		// **行尾必须归一为 LF**：迁移脚本按 sha256(SQL 内容) 与库里的
-		// AgentMigration.sqlDigest 比对，而生产记账（0.17.1 部署时写入）对应 LF 版本。
-		// 直接 cpSync 工作区副本时，在 core.autocrlf=true 的机器上会带上 CRLF，
-		// 摘要不再匹配 → preStart 判定“库与部署不一致”并拒绝 → 发布失败
-		// （2026-10-10 的 0.18.0 / 0.18.1 两次发版即为此原因）。
-		const migrationSql = readFileSync(
-			join(
-				pkgDir,
-				"prisma",
-				"migrations",
-				"20261008000000_agent_session_run_audit",
-				"migration.sql",
-			),
-			"utf8",
-		).replace(/\r\n/g, "\n");
-		if (migrationSql.includes("\r")) {
-			throw new Error("[pack-release] 迁移 SQL 行尾归一失败（仍含 CR）");
-		}
-		writeFileSync(
-			join(target, "prisma", "agent-session-migration.sql"),
-			migrationSql,
-			"utf8",
-		);
-		// （构件自检见下方依赖安装之后：迁移脚本顶层 require @prisma/adapter-libsql，
-		//  依赖树未装好时加载必然 MODULE_NOT_FOUND）
+		// ADR-0049 后构件不再分发 Agent 迁移脚本：preStart 只剩 db push。
 		// Frontend 构建产物 → <server>/public，由 ServeStatic 同源托管（见 ADR-0013）
 		// （frontend 已在 main() 中先于 staging 构建，此处校验防遗漏）
 		const frontendDist = join(ROOT, "packages", "frontend", "dist");
@@ -476,21 +364,6 @@ async function stagePackage(
 		);
 	}
 
-	// 构件自检:迁移脚本必须能按 cwd=构件 server 目录找到 SQL。
-	// 0.17.0 首次发布就因构件布局与脚本假设不一致而在生产 preStart 失败。
-	// 必须在外部依赖安装**之后**：迁移脚本顶层 require @prisma/adapter-libsql，
-	// 依赖树未装好时加载必然 MODULE_NOT_FOUND。
-	if (pkgName === "server") assertStagedMigrationResolvable(target);
-
-	// Pi SDK 单文件产物写到 node_modules 下（按包名解析），使 src 里的
-	// `import("@earendil-works/pi-coding-agent")` 无需改动即可命中（见 bundlePiSdk）。
-	// 必须在依赖安装**之后**：pnpm install 会清掉不在依赖图里的 node_modules 条目。
-	if (pkgName === "client") {
-		const sdkEntry = await bundlePiSdk(
-			join(target, "node_modules", "@earendil-works", "pi-coding-agent"),
-		);
-		console.log(`[pack-release] Pi SDK 单文件: ${sdkEntry}`);
-	}
 }
 
 /**
@@ -521,87 +394,6 @@ export const VARIANT_EXCLUDES: Record<ArchiveVariant, string[]> = {
 };
 
 /** 递归收集 staging 文件（正斜杠相对路径），按目录级排除列表过滤 */
-/**
- * 会话宿主构件（ADR-0046：无系统守护、不要求版本目录之外）。
- *
- * 与 `client/` 并列落在版本目录里，由 Client 从自身位置推导后作为子进程启动；
- * 因此不需要 manifest 条目，也不参与 Launcher 的构件切换。
- * 宿主是 tsc 产物而非 esbuild 单文件，`type: module` 必须保留（否则 dist/*.js 会被当 CJS）。
- */
-export async function stageSessionHost(stagingDir: string): Promise<void> {
-	const pkgDir = join(ROOT, "packages", "session-host");
-	const target = join(stagingDir, "session-host");
-	mkdirSync(join(target, "dist"), { recursive: true });
-	// tsc 会把 *.test.ts 一起编进 dist；构件不得带测试产物（体积 + 误跑 PTY 风险）。
-	for (const entry of readdirSync(join(pkgDir, "dist"))) {
-		if (entry.includes(".test.")) continue;
-		cpSync(join(pkgDir, "dist", entry), join(target, "dist", entry), {
-			recursive: true,
-		});
-	}
-
-	// 运行时需要 shared：workspace 依赖不进 zip，按目录内联同一份构建产物。
-	const sharedDist = join(ROOT, "packages", "shared", "dist");
-	const sharedTarget = join(target, "node_modules", "@vcpdeck", "shared");
-	mkdirSync(join(sharedTarget, "dist"), { recursive: true });
-	// shared 的 dist 同样含 *.test.*；构件不得带测试产物。
-	for (const entry of readdirSync(sharedDist)) {
-		if (entry.includes(".test.")) continue;
-		cpSync(join(sharedDist, entry), join(sharedTarget, "dist", entry), {
-			recursive: true,
-		});
-	}
-	cpSync(
-		join(ROOT, "packages", "shared", "package.json"),
-		join(sharedTarget, "package.json"),
-	);
-
-	// 外部原生依赖装真实依赖树（hoisted：真实目录、无软链，解压即用）。
-	writeFileSync(
-		join(target, "package.json"),
-		JSON.stringify(
-			{
-				name: "@vcpdeck/session-host-release",
-				version: "0.0.0",
-				private: true,
-				type: "module",
-				dependencies: resolveExternalDeps("session-host"),
-			},
-			null,
-			2,
-		),
-	);
-	writeFileSync(
-		join(target, "pnpm-workspace.yaml"),
-		[
-			"supportedArchitectures:",
-			"  os: [win32, linux]",
-			"  cpu: [x64]",
-			"nodeLinker: hoisted",
-			"",
-		].join("\n"),
-	);
-	console.log("[pack-release] session-host 外部依赖安装");
-	try {
-		if (process.platform === "win32") {
-			execFileSync(
-				"cmd.exe",
-				["/c", "pnpm", "install", "--prod", "--ignore-scripts", "--prefer-offline"],
-				{ cwd: target, stdio: "inherit" },
-			);
-		} else {
-			execFileSync(
-				"pnpm",
-				["install", "--prod", "--ignore-scripts", "--prefer-offline"],
-				{ cwd: target, stdio: "inherit" },
-			);
-		}
-	} catch (e) {
-		throw new Error(
-			`session-host 外部依赖安装失败: ${e instanceof Error ? e.message : String(e)}`,
-		);
-	}
-}
 
 function collectFiles(
 	root: string,
@@ -727,9 +519,6 @@ async function main(): Promise<void> {
 		await bundleLauncher(join(stagingDir, "launcher", "dist", "main.js"));
 		await stagePackage("server", stagingDir);
 		await stagePackage("client", stagingDir);
-		await stageSessionHost(stagingDir);
-		// Pi Resource Bundle 随 Release 发布在版本目录根（与 client/ 并列，docs/adr/0030）
-		await buildPiResourceBundle(stagingDir, args.version);
 		writeFileSync(
 			join(stagingDir, "manifest.json"),
 			JSON.stringify(
@@ -744,7 +533,7 @@ async function main(): Promise<void> {
 							dir: "server",
 							entry: "dist/main.js",
 							// 不依赖 PATH/.bin（shell 执行时环境无 node_modules/.bin）
-							preStart: "node prisma/agent-session-migration.cjs && node node_modules/prisma/build/index.js db push",
+							preStart: "node node_modules/prisma/build/index.js db push",
 						},
 						client: { dir: "client", entry: "dist/index.js" },
 					},

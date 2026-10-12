@@ -108,9 +108,6 @@ export function dispatch(job: JobDispatch, socket: Socket) {
 				{ ...(job as any).payload, _jobId: job.jobId },
 				socket,
 			);
-		case "agent.run":
-			throw new Error(`Job type "${job.type}" not yet implemented`);
-		default:
-			throw new Error(`Unknown job type: ${(job as any).type}`);
+		default:			throw new Error(`Unknown job type: ${(job as any).type}`);
 	}
 }

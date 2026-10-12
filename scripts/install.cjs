@@ -482,26 +482,11 @@ async function collectEnvArgs(args, io = { input: stdin, output: stdout }) {
 	}
 }
 
-/** 初始化数据库:在版本目录内执行 Agent 显式迁移后 prisma db push(使用 DATABASE_URL) */
+/** 初始化数据库:在版本目录内执行 prisma db push(使用 DATABASE_URL)。
+ *  ADR-0049:Agent 专用能力已退役,初始化不再执行 Agent 迁移;历史迁移脚本与 SQL
+ *  仍随源码保留,供需要时人工执行。 */
 function initDatabase(versionDir, dbUrl, env = process.env) {
 	const serverDir = join(versionDir, "server");
-	// ADR-0041:Agent 迁移先于 db push;新构件才携带脚本,旧构件沿用原初始化。
-	// 路径与源码布局一致(`<server>/prisma/`),迁移脚本以 cwd 为锚点定位 SQL。
-	const migrationScript = join(serverDir, "prisma", "agent-session-migration.cjs");
-	if (existsSync(migrationScript)) {
-		console.log("[install] 执行 Agent 会话迁移...");
-		try {
-			execFileSync("node", [migrationScript], {
-				cwd: serverDir,
-				stdio: "inherit",
-				env: { ...env, DATABASE_URL: dbUrl || env.DATABASE_URL },
-			});
-		} catch (e) {
-			fail(`Agent 会话迁移失败: ${e.message}`);
-		}
-	} else {
-		console.warn("[install] 构件未携带 Agent 迁移脚本,跳过(旧版本构件)");
-	}
 	console.log("[install] 初始化数据库(prisma db push)...");
 	try {
 		execFileSync("node", ["node_modules/prisma/build/index.js", "db", "push"], {

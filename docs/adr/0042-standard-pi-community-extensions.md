@@ -4,7 +4,7 @@
 - 日期：2026-10-10
 - 决策者：项目维护者
 - 实施状态：已实施（资源选择与统一构建、社区扩展随 Release 交付、发布布局验收与 `pnpm test:pi-resources` 门禁均已落地）。
-- 关联：[ADR-0036](./0036-pi-sdk-single-file-and-shell-capability.md)、[ADR-0039](./0039-pi-two-mode-execution.md)、[ADR-0040](./0040-pi-extension-web-interaction.md)、[`remote-pi-control-plane.md`](../design/remote-pi-control-plane.md)
+- 关联：[ADR-0036](./0036-pi-sdk-single-file-and-shell-capability.md)、[ADR-0039](./0039-pi-two-mode-execution.md)、[ADR-0040](./0040-pi-extension-web-interaction.md)、[`remote-pi-control-plane.md`](../../docs/archive/design/remote-pi-control-plane.md)
 
 ## 背景
 

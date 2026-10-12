@@ -42,7 +42,6 @@ describe("ConsoleShell", () => {
 		);
 		for (const label of [
 			"概览",
-			"Agent",
 			"机器",
 			"任务",
 			"映射",
@@ -51,7 +50,7 @@ describe("ConsoleShell", () => {
 		]) {
 			expect(navigation.getByRole("link", { name: label })).toBeVisible();
 		}
-		for (const gone of ["存储", "FRP"]) {
+		for (const gone of ["存储", "FRP", "Agent"]) {
 			expect(
 				navigation.queryByRole("link", { name: gone }),
 			).not.toBeInTheDocument();
@@ -114,13 +113,12 @@ describe("ConsoleShell", () => {
 		expect(screen.queryByTestId("sidebar-back")).not.toBeInTheDocument();
 	});
 
-	it("drops main paddings and scrolling for the full-bleed chat view", () => {
+	it("退役的对话深链接不再获得满高布局", () => {
 		renderShell("/agent/chat");
 
 		const main = screen.getByRole("main");
-		expect(main).toHaveClass("overflow-hidden");
-		expect(main).not.toHaveClass("p-4");
-		expect(main).not.toHaveClass("overflow-y-auto");
+		expect(main).not.toHaveClass("overflow-hidden");
+		expect(main).toHaveClass("p-4");
 	});
 
 	it("keeps the Back label span so collapsing hides it together with nav labels", () => {

@@ -1,6 +1,6 @@
 # ADR-0035：Pi Prompt 允许空文本与有效图片组合
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0049
 - 日期：2026-09-27
 - 决策者：项目维护者
 - 关联：[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0008](./0008-pi-session-job-and-run-lifecycle.md)、[ADR-0034](./0034-pi-session-execution-mode-override.md)、[`docs/protocols.md`](../protocols.md)

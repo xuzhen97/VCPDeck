@@ -64,7 +64,7 @@ export interface GitSshStore {
 /**
  * 解析受管根目录：`<数据根>/git-ssh`。
  *
- * 数据根优先级与 Pi 运行时一致（`VCPDECK_CLIENT_DATA_DIR` → `VCPDECK_APP_DIR/data`），
+ * 数据根优先级与运行目录约定一致（`VCPDECK_CLIENT_DATA_DIR` → `VCPDECK_APP_DIR/data`），
  * 且必须位于版本目录之外，否则 Release 切换/回滚会带走或丢失密钥。
  */
 export function resolveGitSshRoot(

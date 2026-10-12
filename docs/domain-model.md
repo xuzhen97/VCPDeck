@@ -36,7 +36,6 @@ TODO、工作流、聊天和 VCPToolBox 桥接目前没有落地数据模型，�
 | FrpMapping | `id` | SQLite；实际进程在 Client | 目标服务到 FRPS 的映射 |
 | TerminalSession | `id` | SQLite；PTY 在 Client | 只持久化元数据，不保存正文 |
 | TerminalAuditEvent | `id` | SQLite | 终端生命周期最小审计 |
-| Pi Session（AgentSession） | `id` / `sessionId` | SQLite + 远程 Pi JSONL | 独立控制面实体；Server 保存所有权、控制配置与生命周期元数据，正文由远程 Pi 管理 |
 | AgentRun | `id` / `runId` | SQLite | 单轮 Prompt 的执行摘要与审计；终态为 succeeded/failed/aborted |
 | AgentAuditEvent | `id` | SQLite | 会话创建、导入、归档、恢复、删除、执行模式变更等控制面最小审计；不保存正文 |
 | Release | `version` | SQLite + Storage Provider/发布文件目录 | 全局更新状态、平台构件元数据和各 Client 结果 |
@@ -82,10 +81,9 @@ Capability 是能力声明，不是用户权限：
 - `file.read`
 - `file.write`
 - `frp`（`capabilityDetails` 可含 `available` 与 `reconcileProtocolVersion=1` 恢复对账协商）
-- `agent.pi`
 - `terminal.pty`
 
-Pi 和终端还通过 `capabilityDetails` 上报协议及运行环境摘要。Server 必须在使用相应能力前校验声明和详细状态。
+终端还通过 `capabilityDetails` 上报协议及运行环境摘要。Server 必须在使用相应能力前校验声明和详细状态。
 
 ## 5. Job
 
@@ -142,7 +140,7 @@ stateDiagram-v2
 
 File 记录只保存 Storage 对象元数据；import/export 正文由当前 Storage Provider 保存。轻量文件 Job 是另一条数据路径：`file.writeText` 的完整 content 进入 Job payload，`file.readText` 的完整 content 进入 Job result，并随 SQLite 一起持久化和备份。
 
-典型 File 状态为 `pending` → `completed`，删除时短暂进入 `deleting`，Provider 删除失败恢复原状态；并可通过 `expiresAt` 进入清理范围。`purpose` 区分普通 Job 文件、Pi 临时附件等用途。Storage Share 状态不单独存储：撤销优先，其次是底层对象已确认失效或 File 已删除，否则为 active。
+典型 File 状态为 `pending` → `completed`，删除时短暂进入 `deleting`，Provider 删除失败恢复原状态；并可通过 `expiresAt` 进入清理范围。`purpose` 区分普通 Job 文件等用途。Storage Share 状态不单独存储：撤销优先，其次是底层对象已确认失效或 File 已删除，否则为 active。
 
 不变量：
 
@@ -193,7 +191,6 @@ starting → detached/active → exited | interrupted | expired | closed | error
 
 已写入审计的操作：创建（`created`）、导入（`imported`）、重命名（`renamed`）、归档（`archived`）、恢复（`restored`，含归档会话被新 Prompt 自动恢复）、删除（`deleted`，跨网络操作按 `requested` → `ok`/`failed` 区分请求与已确认结果）、执行模式变更（`execution_mode_changed`）。
 
-导入结果的 `PiImportRunResult` 携带可选 `sessionId`（仅 Client 实际复制成功时上报），Server 据此登记会话控制面并写 `imported` 审计；未上报该字段的旧 Client 与 `rejected` 条目不登记，不臆造会话。
 
 会话生命周期：
 
@@ -232,10 +229,9 @@ stateDiagram-v2
 - 同一会话只允许一个未结算 Run，状态转换与结算均绑定精确 sessionId/runId 并做条件更新；
 - Server 持久化所有权、控制配置、Run 摘要与会话操作审计，不保存 prompt、回复、thinking、图片、扩展输入、工具参数或工具输出；
 - 删除会话不级联删除 Run 摘要与审计事件，审计保留稳定 sessionId；
-- Session JSONL 和 Pi 配置保存在远程用户的 Pi 目录；
 - `projectKey` 是 Client 进程级随机 secret 对 canonical cwd 的 HMAC，只用于内存互斥/对账，Client 重启后变化且不持久化；
 - Server 与 Client 的 `PI_SESSION_PROTOCOL_VERSION` 必须精确相等，当前为 `4`；
-- 完整 Worker、Extension、断线、迁移与兼容边界见 [`design/remote-pi.md`](./design/remote-pi.md)。
+- 完整 Worker、Extension、断线、迁移与兼容边界见 [`design/remote-pi.md`](./archive/design/remote-pi.md)。
 
 ## 10. Release 与 Launcher
 

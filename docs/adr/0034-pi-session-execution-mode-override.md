@@ -1,9 +1,9 @@
 # ADR-0034：Pi 会话级持久执行模式覆盖
 
-- 状态：Accepted（工具策略与模式语义由 ADR-0039 替代，其余会话控制约束保留）
+- 状态：Superseded by ADR-0049（此前工具策略与模式语义由 ADR-0039 替代；以下正文为历史）
 - 日期：2026-09-26
 - 决策者：项目维护者
-- 关联：[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0008](./0008-pi-session-job-and-run-lifecycle.md)、[ADR-0009](./0009-trusted-operator-security-domain.md)、[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0030](./0030-pi-resource-bundle-and-tool-policy.md)、[ADR-0033](./0033-pi-tool-approval-mode.md)、[`docs/design/remote-pi.md`](../design/remote-pi.md)、[`docs/design/pi-tool-approval-mode.md`](../design/pi-tool-approval-mode.md)
+- 关联：[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0008](./0008-pi-session-job-and-run-lifecycle.md)、[ADR-0009](./0009-trusted-operator-security-domain.md)、[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0030](./0030-pi-resource-bundle-and-tool-policy.md)、[ADR-0033](./0033-pi-tool-approval-mode.md)、[`docs/design/remote-pi.md`](../../docs/archive/design/remote-pi.md)、[`docs/design/pi-tool-approval-mode.md`](../../docs/archive/design/pi-tool-approval-mode.md)
 
 ## 后续决策范围
 

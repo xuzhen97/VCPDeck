@@ -147,7 +147,7 @@ describe("JobDetailPage 下载链接", () => {
 	});
 });
 
-it("Pi 会话任务不再提供完成入口(ADR-0041)", async () => {
+it("历史会话 Job 详情不再提供完成动作(ADR-0041)", async () => {
 	const session: JobInfo = {
 		...exportJob,
 		type: "agent.session",

@@ -14,7 +14,6 @@
     }
   },
   "include": ["src"],
-  "exclude": ["src/pi-web/components/ChatInput.tsx"],
   "references": [
     { "path": "./tsconfig.node.json" }
   ]

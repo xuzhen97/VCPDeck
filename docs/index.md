@@ -36,8 +36,6 @@
 | [`adr/README.md`](./adr/README.md) | 架构决策记录及新增规则 |
 | [`roadmap.md`](./roadmap.md) | 已完成、近期候选和长期方向，不代表交付承诺 |
 | [`design/README.md`](./design/README.md) | 当前专题设计文档索引及权威性说明（含 [`design/cli.md`](./design/cli.md) 多环境 CLI、[`design/p2p-tunnel.md`](./design/p2p-tunnel.md) P2P 回环隧道与 coturn） |
-| [`design/remote-pi-control-plane.md`](./design/remote-pi-control-plane.md) | 部分实现：Plan 1/1.1/2/2.1/2.2 已落地（集中 Profile/Credential/绑定与 Provider、RuntimeSpec v5 门控、隔离数据根、受信 Resource Bundle 与逐资源校验、工具执行模式(ADR-0039 两模式 supervised/automatic)、会话级执行模式覆盖与 `/agent/chat` 多项目导航与图标化布局、图片粘贴与纯图片 Prompt、Session 显式导入、受信扩展网页交互(ADR-0040 命令/通知/持续文本状态)）；项目本地资源与 UI renderer 复用仍为 Proposal。 |
-| [`design/pi-tool-approval-mode.md`](./design/pi-tool-approval-mode.md) | **已被 ADR-0039 替代(历史参考)**:旧版逐工具三桶与 Approval/Auto/YOLO 分层设计;现行两模式语义见 ADR-0039 与 remote-pi-control-plane.md。 |
 | [`archive/README.md`](./archive/README.md) | 历史计划、过期设计和验证记录的归档规则 |
 
 ## 文档状态约定

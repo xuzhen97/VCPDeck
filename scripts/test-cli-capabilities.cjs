@@ -8,7 +8,7 @@
  * 复用一键测试机制：隔离数据库启动真实 Server（3001 端口）+ 真实 Client，
  * 然后通过 CLI 构建产物（packages/cli/dist/index.js）逐域验证：
  *   clients / jobs（含失败输出闭环）/ files 全套（含 Storage 直传往返）/
- *   frp 只读查询 / storage status / terminal 生命周期 / pi 查询（有 capability 时）
+ *   frp 只读查询 / storage status / terminal 生命周期（pi 命令仅验证已退役）
  *
  * 隔离约定（不污染全局）：
  *   - CLI 假 HOME 指向 <repo>/.tmp/cli-e2e/home（配置与凭据引用均在此）
@@ -755,43 +755,16 @@ async function testTerminalLifecycle(hasPty) {
 	}
 }
 
-async function testPiQueries(hasPi) {
-	console.log("\n--- pi 查询（models/sessions） ---");
-	if (!hasPi) {
-		skip("pi models/sessions", "客户端无 agent.pi capability（未安装 pi CLI）");
-		return;
-	}
-	{
-		const { code, out, err } = await cli([
-			"pi",
-			"models",
-			clientId,
-			`--root=${testRoot}`,
-			"--json",
-		]);
-		const parsed = parseJsonOutput(out);
-		if (code === 0 && (Array.isArray(parsed) || parsed?.models)) {
-			pass("pi models 查询正常");
-		} else {
-			fail("pi models", `code=${code} err=${err.slice(0, 120)}`);
-		}
-	}
-	{
-		const { code, out, err } = await cli([
-			"pi",
-			"sessions",
-			clientId,
-			`--root=${testRoot}`,
-			"--json",
-		]);
-		const parsed = parseJsonOutput(out);
-		const rows =
-			Array.isArray(parsed) ? parsed : (parsed?.data ?? parsed?.sessions);
-		if (code === 0 && rows !== undefined) {
-			pass("pi sessions 查询正常", `${Array.isArray(rows) ? rows.length : "?"} 个`);
-		} else {
-			fail("pi sessions", `code=${code} err=${err.slice(0, 120)}`);
-		}
+async function testRetiredPiCommands() {
+
+	console.log("");
+	console.log("--- 已退役的 pi 命令 ---");
+	// ADR-0049：pi 子命令已退役，必须以非零退出且不得转成普通 shell 执行。
+	const { code, err } = await cli(["pi", "models", clientId, "--json"]);
+	if (code !== 0) {
+		pass("pi 命令已退役（非零退出）", `code=${code}`);
+	} else {
+		fail("pi 命令仍可执行", `err=${String(err).slice(0, 120)}`);
 	}
 }
 
@@ -962,7 +935,6 @@ async function main() {
 		(c) => (c.id ?? c.clientId) === clientId,
 	);
 	const caps = meRow?.capabilities ?? [];
-	const hasPi = caps.includes("agent.pi");
 	const hasPty = caps.includes("terminal.pty");
 
 	// 8. 逐组执行
@@ -971,7 +943,7 @@ async function main() {
 	await testFileTransferRoundtrip();
 	await testReadonlyQueries();
 	await testTerminalLifecycle(hasPty);
-	await testPiQueries(hasPi);
+	await testRetiredPiCommands();
 	await testErrorPaths();
 
 	// 9. 清理远端工作目录（尽力而为）

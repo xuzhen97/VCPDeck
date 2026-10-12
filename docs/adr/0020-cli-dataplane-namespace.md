@@ -1,6 +1,6 @@
 # ADR-0020：CLI 复用 /app 数据面命名空间接入终端与 Pi 交互
 
-- 状态：Accepted
+- 状态：Accepted（Pi 调用范围由 ADR-0049 退役；Terminal 数据面规则保留）
 - 日期：2026-08-22
 - 决策者：项目维护者
 - 关联：[`docs/design/cli.md`](../design/cli.md)、[`docs/design/remote-terminal.md`](../design/remote-terminal.md)、[`ADR-0007`](./0007-client-owned-interactive-runtime.md)、[`ADR-0011`](./0011-server-side-opaque-authentication-and-actor-context.md)、[`ADR-0017`](./0017-cli-multi-environment-configuration.md)

@@ -173,13 +173,6 @@ function MachineCard({ client }: { client: ClientInfo }) {
 							</Link>
 						);
 					})}
-					<Link
-						className="inline-flex items-center gap-1 text-primary"
-						to={`/agent/chat?client=${encodeURIComponent(client.clientId)}`}
-					>
-						<BrainCircuit className="size-4" />
-						Agent 对话
-					</Link>
 				</div>
 			</CardContent>
 		</Card>

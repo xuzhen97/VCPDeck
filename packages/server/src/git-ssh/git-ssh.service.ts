@@ -61,7 +61,7 @@ export class GitSshService {
 		@Optional() private readonly keyGenerator: () => GeneratedGitSshKeyPair = generateGitSshEd25519KeyPair,
 	) {}
 
-	/** 由 ClientGateway.afterInit 绑定真实发送通道（同 PiRequestBroker 模式）。 */
+	/** 由 ClientGateway.afterInit 绑定真实发送通道（按 socketId 精确定向）。 */
 	bindSender(sender: GitSshSender): void {
 		this.sender = sender;
 	}

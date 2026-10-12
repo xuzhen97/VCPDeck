@@ -3,7 +3,7 @@
 - 状态：Rejected（2026-10-11：方向由 [ADR-0048](./0048-client-slimming-and-pi-feature-surface-on-server.md) 否决）
 - 日期：2026-09-22
 - 决策者：项目维护者
-- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0033](./0033-pi-tool-approval-mode.md)、[`docs/design/remote-pi-control-plane.md`](../design/remote-pi-control-plane.md)、[`docs/security.md`](../security.md)、[`docs/deployment.md`](../deployment.md)
+- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0033](./0033-pi-tool-approval-mode.md)、[`docs/design/remote-pi-control-plane.md`](../../docs/archive/design/remote-pi-control-plane.md)、[`docs/security.md`](../security.md)、[`docs/deployment.md`](../deployment.md)
 
 ## 背景
 

@@ -1,10 +1,10 @@
 # ADR-0043：项目本地 Pi 资源无条件加载
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0049
 - 日期：2026-10-10
 - 决策者：项目维护者
 - 实施状态：待实施；Accepted 表示决策已批准，不表示加载面已放开。
-- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0040](./0040-pi-extension-web-interaction.md)、[ADR-0042](./0042-standard-pi-community-extensions.md)、[`remote-pi-control-plane.md`](../design/remote-pi-control-plane.md)
+- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0040](./0040-pi-extension-web-interaction.md)、[ADR-0042](./0042-standard-pi-community-extensions.md)、[`remote-pi-control-plane.md`](../../docs/archive/design/remote-pi-control-plane.md)
 
 ## 背景
 

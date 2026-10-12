@@ -56,7 +56,7 @@ Server 首次启动前复制 `packages/server/.env.example` 并设置管理员�
 
 ## 5. 协议变更
 
-修改 REST、Socket.IO、SSE、Job、Terminal、Pi、Release 或 Launcher 协议时：
+修改 REST、Socket.IO、SSE、Job、Terminal、Release 或 Launcher 协议时：
 
 - 先更新 Shared 类型、事件名、错误码和 parse 函数；
 - 判断是否兼容，必要时增加协议版本；
@@ -78,9 +78,9 @@ Server 首次启动前复制 `packages/server/.env.example` 并设置管理员�
 
 - 所有边界输入都必须校验；
 - 错误对象保持稳定 `code`、正确 `statusCode` 和安全 message；
-- 不记录 stack、密钥、签名 URL、命令正文、路径/文件内容、终端/Pi 正文；
+- 不记录 stack、密钥、签名 URL、命令正文、路径/文件内容、终端 正文；
 - 不把 Frontend 检查当作授权；
-- Job、PTY、Pi、文件和 FRP 测试不得执行真实破坏性操作；
+- Job、PTY、文件和 FRP 测试不得执行真实破坏性操作；
 - 新依赖需要说明必要性、许可证、维护状态和供应链风险。
 
 ## 8. 测试要求
@@ -94,7 +94,7 @@ pnpm build
 pnpm test
 ```
 
-FRP、Terminal、Pi、Release 等按 [`docs/testing.md`](./docs/testing.md) 增加专项测试。测试跳过不能视为通过。
+FRP、Terminal、Release 等按 [`docs/testing.md`](./docs/testing.md) 增加专项测试。测试跳过不能视为通过。
 
 ## 9. 文档与 ADR
 

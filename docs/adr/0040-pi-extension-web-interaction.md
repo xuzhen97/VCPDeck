@@ -1,10 +1,10 @@
 # ADR-0040：受信 Pi 扩展的网页交互边界
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0049
 - 日期：2026-10-07
 - 决策者：项目维护者
 - 实施状态：尚未实现；本 ADR 确定目标边界，不表示当前端到端交互已补齐。
-- 关联：[ADR-0005](./0005-shared-contracts-and-communication-channels.md)、[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0008](./0008-pi-session-job-and-run-lifecycle.md)、[ADR-0036](./0036-pi-sdk-single-file-and-shell-capability.md)、[ADR-0039](./0039-pi-two-mode-execution.md)、[`remote-pi.md`](../design/remote-pi.md)
+- 关联：[ADR-0005](./0005-shared-contracts-and-communication-channels.md)、[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0008](./0008-pi-session-job-and-run-lifecycle.md)、[ADR-0036](./0036-pi-sdk-single-file-and-shell-capability.md)、[ADR-0039](./0039-pi-two-mode-execution.md)、[`remote-pi.md`](../../docs/archive/design/remote-pi.md)
 
 ## 背景
 

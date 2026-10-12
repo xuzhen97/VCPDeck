@@ -11,7 +11,6 @@
 | REST | `/api/*` | 资源管理、控制命令、查询 | Cookie 或 Bearer；公开端点除外 |
 | Socket.IO | `/client` | Server ↔ Client 控制通道 | PSK handshake |
 | Socket.IO | `/app` | Browser ↔ Server 终端 | Cookie 或 handshake Bearer |
-| SSE | `/api/clients/:clientId/pi/agent/:sessionId/events` | Pi 事件流 | Cookie/Bearer HTTP 认证 |
 | 签名 URL | `/api/storage/upload/*`、`download/*` 或外部 URL | 文件正文 | 签名、过期时间和范围 |
 | 本机 HTTP | Launcher 随机 `127.0.0.1` 端口 | `/prepare`、`/apply` | `x-launcher-token` |
 
@@ -49,7 +48,7 @@
 | --- | --- |
 | `/api/auth` | 登录、登出、当前身份、Credential |
 | `/api/identities` | admin 身份管理 |
-| `/api/clients` | 在线 Client、别名、终端和 Pi 子资源 |
+| `/api/clients` | 在线 Client、别名和终端子资源 |
 | `/api/jobs` | Job 创建、分页查询、详情和取消 |
 | `/api/files` | 文件上传/导出会话及进度 |
 | `/api/storage` | 签名能力、文件流、Provider 配置和 Storage Share 管理 |
@@ -59,7 +58,7 @@
 | `/api/releases` | 发布上传、列表和构件下载 |
 | `/api/health`、`/api/status` | 浅健康与版本/发布状态 |
 
-完整端点优先通过 `packages/sdk/src/` 使用；Pi 与终端的详细动作分别见 `packages/sdk/src/pi.ts`、`terminal.ts`。
+完整端点优先通过 `packages/sdk/src/` 使用；终端的详细动作见 `packages/sdk/src/terminal.ts`。
 
 ### 2.3 分页
 
@@ -194,8 +193,6 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 | `job:stdout/stderr/progress/done` | Client → Server | Job 过程与终局 |
 | `job:cancel` | Server → Client | 请求取消 |
 | `job:cancelled/cancel-failed` | Client → Server | 取消结果 |
-| `pi:request` | Server → Client | Pi 动作请求 |
-| `pi:response/event/state` | Client → Server | Pi 响应、事件和权威状态 |
 | `terminal:request` | Server → Client | PTY 创建、attach、输入等请求 |
 | `terminal:response/output/exit/state` | Client → Server | PTY 响应、输出和对账 |
 | `update:request` | Server → Client | 请求准备目标版本 |
@@ -205,7 +202,7 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 | `frp:state-ack` | Server → Client | 严格确认（accepted + action）；Client 只接受当前 connection generation 的 ack |
 | `tunnel.prepare/attach/signal/state/close` | 跨 `/app` 与 `/client` | P2P 隧道信令（offer/answer、trickle candidate、状态、关闭）；大流量走 DataChannel 不经 Server |
 
-所有跨信任边界 payload 长期必须先通过 Shared parse 函数或等价严格校验，再进入领域服务。Pi/Terminal 当前已采用严格 parser；exec 和文件 Job 的双端校验仍有本文件所列实现偏移。
+所有跨信任边界 payload 长期必须先通过 Shared parse 函数或等价严格校验，再进入领域服务。Terminal 当前已采用严格 parser；exec 和文件 Job 的双端校验仍有本文件所列实现偏移。
 
 ### 3.3 Job 对账
 
@@ -249,50 +246,11 @@ Server 推送事件：
 
 Client REGISTER 后上报 generationId 和内存 Session。Server 当前按“DB/报告集合是否存在”对账，没有保存或比较 generationId；DB 非终态但本次未上报的会话会被标为 interrupted。Client 本地 30 分钟 expired 当前不主动上报 Server，attach/detach 也未完整同步 SQLite active/detached 时间字段。完整事实见 [`design/remote-terminal.md`](./design/remote-terminal.md)。
 
-## 5. Pi REST + SSE
+## 5. 远程 Agent（已退役）
 
-Pi 的控制命令走 REST，持续事件走 SSE：
-
-```text
-REST command → Server ownership/CAS → pi:request → Client Worker
-Client event → pi:event → Server projection → SSE subscribers
-```
-
-SSE：
-
-- session 级订阅；
-- 30 秒心跳；
-- EventSource 可自动重连；
-- 事件用于实时投影，不是持久消息队列；
-- 断线恢复应重新读取 Session detail/context 和权威 Agent state，不能仅依赖补收事件。
-
-Pi 使用精确协议版本 `PI_SESSION_PROTOCOL_VERSION = 4`。不匹配时 Server 返回 `PI_CLIENT_UNSUPPORTED`，不得尝试猜测兼容。v4 移除了请求、事件与会话状态报文中的 `jobId` 字段：会话、轮次与会话操作审计不再复用 Job（[ADR-0041](adr/0041-agent-session-run-and-audit-separation.md)）。
-
-Pi 本地能力（`capabilityDetails.pi`）的语义（[ADR-0036](adr/0036-pi-sdk-single-file-and-shell-capability.md)）：
-
-- `available:false` 只表示 Node 版本不足、Release 内 Pi SDK 无法加载或 VCPDeck data root 不可写；
-- **缺 Bash 不是不可用**。`shellKind` 只是诊断值：Windows 上 `bash` 与 `powershell` 是并列的内置工具，无 Git Bash 时仅 `bash` 工具从集合中移除（POSIX 无 bash 时 SDK 自身退到 `sh`）；
-- Client 上报的真实原因码（`PI_NODE_UNSUPPORTED` / `PI_BASH_NOT_FOUND` / `PI_RUNTIME_UNAVAILABLE`）必须保留到 `PiRuntimeStatus.reasonCode`，不得统一覆盖成 `PI_CLIENT_UNSUPPORTED`；后者只用于「未上报能力」与「协议版本/`configMode` 不匹配」。
-
-自 v2 起，`agent.prompt` 必须携带 `executionMode`（`approval | auto | yolo`）且拒绝未知 payload 字段，缺失或非法时 Client 立即 fail closed（[ADR-0034](adr/0034-pi-session-execution-mode-override.md)）。自 v4 起，会话快照独立于 Job：新增 `GET .../session` 返回 `PiSessionSnapshot`（`sessionId`、会话状态 `available|archived`、`activeRun`、`executionModeOverride`、`effectiveExecutionMode`、`ownerName`、`isOwner`），并提供 `.../archive`、`.../restore`、`.../runs`、`.../audit` 与 `.../runs/:runId` 控制端点；原 `.../complete` 端点仅保留安全拒绝，不得把旧 complete 静默映射为成功或归档。
-
-当前协议不变量：
-
-- 一个 Session 对应一个 `AgentSession` 实体（标识符仍是 `sessionId`），不再对应 Job，也不再有 `jobId === sessionId` 的约定；每次 Prompt 使用独立 `runId`；
-- 每轮 Run 由权威执行报告自动结算为 `succeeded`、`failed` 或 `aborted`（携带安全 `errorCode`），终态不重新激活；；
-- 会话本身只有 `available | archived` 控制态，没有 done/error/cancelled 生命周期；
-- Agent 控制端点不创建、不更新、也不出现在普通 Job 列表/统计中；旧 `agent.session` Job 仅作为只读历史保留；
-- Server 只持久化会话所有权、控制配置、Run 摘要与会话操作审计，不保存 prompt、回复、thinking、图片正文、Extension 输入、工具参数或工具输出。
-- `/client` 使用严格解析的 `PI_REQUEST/PI_RESPONSE/PI_EVENT/PI_STATE`，未知 action/event/额外字段明确拒绝；
-- cwd 以 Files roots 的 `{rootDir,relativePath}` 表达，由 Client realpath/canonicalize 并拒绝 symlink 越界；
-- 同一 Client 的同一 projectKey 只允许一个活动 Run，Client 重启后 projectKey 重新生成；
-- 新 Socket generation 必须先完成 PI_STATE 对账；此前控制请求返回 `PI_STATE_PENDING`；
-- Session 只保存 Owner、控制态、当前未结算 runId、可空的会话执行模式覆盖值和安全错误，不保存 prompt、正文、thinking、真实 cwd 或 Extension 输入；每个 Run 在接纳时固化实际模式，运行中不热切换；
-- 只有 `select/confirm/input/editor` Extension 请求进入 `waiting_input`；
-- 图片最多 10 张、单张 10 MiB、总量 100 MiB，临时上传引用 TTL 15 分钟；`prompt` 为空或仅空白仅在携带至少一张通过服务端校验的图片时合法，否则不创建 Run（[ADR-0035](adr/0035-pi-image-only-prompt.md)）；
-- SSE 和 Broker 都不是持久队列，断线期间增量可能丢失，必须从远程 Session/context 和权威 state 恢复。
-
-完整当前行为见 [`design/remote-pi.md`](./design/remote-pi.md)。
+Pi 专用 REST、SSE 事件流、协议版本与能力摘要已按
+[ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md) 退役；
+当前协议面只有基础能力（Job、文件、FRP、Terminal、Tunnel、Git SSH、Release）。
 
 ## 6. 远程文件与 Storage 协议
 

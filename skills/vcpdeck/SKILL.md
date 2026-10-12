@@ -1,12 +1,12 @@
 ---
 name: vcpdeck
-description: Operate VCPDeck (remote machines, Jobs, files, Terminal, Pi, FRP, Storage, Release) through its CLI. Use when the user asks to use VCPDeck from Pi: list Client machines and online status, query/diagnose/cancel Jobs, run remote commands, browse/read/write/transfer files, dispatch tasks to a remote Pi agent, inspect FRP/Storage, manage Terminal sessions, or publish/update VCPDeck. Destructive operations require explicit user confirmation.
+description: Operate VCPDeck (remote machines, Jobs, files, Terminal, FRP, Storage, Release) through its CLI. Use when the user asks to use VCPDeck from Pi: list Client machines and online status, query/diagnose/cancel Jobs, run remote commands, browse/read/write/transfer files, inspect FRP/Storage, manage Terminal sessions, or publish/update VCPDeck. Destructive operations require explicit user confirmation.
 compatibility: Requires Node.js 24+, the bundled vcpdeck.cjs CLI beside this file, and network access to the VCPDeck Server. Individual capabilities may have additional requirements; Release packaging also requires the VCPDeck repository and pnpm 10.26+.
 ---
 
 # VCPDeck CLI
 
-本 Skill 是 **VCPDeck CLI 的统一能力入口**，负责说明当前可用命令、调用方式、安全边界和操作流程。Release/自更新只是当前首先落地的一项功能；后续 CLI 与 Server 能力逐步对齐时，在本 Skill 中继续增加机器、Job、文件、Terminal、Pi、FRP、Storage 等功能说明。
+本 Skill 是 **VCPDeck CLI 的统一能力入口**，负责说明当前可用命令、调用方式、安全边界和操作流程。Release/自更新只是当前首先落地的一项功能；后续 CLI 与 Server 能力逐步对齐时，在本 Skill 中继续增加机器、Job、文件、Terminal、FRP、Storage 等功能说明。
 
 Skill 不实现 HTTP、认证、轮询或业务状态机。它调用同目录的 `vcpdeck.cjs`；CLI 复用 `@vcpdeck/sdk` 访问 Server，Server 仍是业务状态和远程操作的控制面。
 
@@ -37,7 +37,6 @@ pnpm --filter @vcpdeck/cli build
 | 文件浏览（只读） | `files roots/list/stat/read` | 已实现 | 授权根探测、目录列表、元信息与文本读取（默认上限 256KB）；`--json` 供 Agent 解析 |
 | 文件写入（写操作） | `files write/mkdir/delete/move` | 已实现 | 覆盖写/递归建目录/删除（不可恢复）/移动重命名；**必须先取得用户明确确认**（确认门见功能章节） |
 | 文件传输（写操作） | `files download/upload` | 已实现 | 经 Storage Provider 直传链路（Server 只签名不承载字节）；download 校验 sha256；**必须先取得用户明确确认** |
-| Pi 子任务（写操作） | `pi models/sessions/new/run/abort` | 已实现 | 在目标机驱动 Pi Agent 执行子任务并取回回复；**最强确认门：必须先取得用户明确确认** |
 | FRP 查询（只读） | `frp instances/mappings` | 已实现 | 服务实例与映射状态；凭据字段（token/密码）绝不进入输出 |
 | FRP 映射写操作 | `frp mapping create/delete` | 已实现 | Client frpc 动作与 FRPS Dashboard 双重确认；**必须先取得用户明确确认** |
 | Storage 查询（只读） | `storage status` | 已实现 | 当前激活的存储后端类型 |
@@ -191,7 +190,7 @@ GET 天然幂等，失败可直接重试；网络错误或非 2xx 时 CLI 非零
 
 ### 成功判定与已知限制
 
-成功判定：命令零退出且 JSON 数组可解析。已知限制：只有列表查询，没有单机详情过滤；机器上的命令执行用 `jobs run`，交互式终端与 Pi 子任务分别见 Terminal/Pi 功能章节。
+成功判定：命令零退出且 JSON 数组可解析。已知限制：只有列表查询，没有单机详情过滤；机器上的命令执行用 `jobs run`，交互式终端见 Terminal 功能章节。
 
 ### 与 Server 能力的对齐情况
 
@@ -303,52 +302,6 @@ node "<vcpdeck-cli>" files upload <client> <localPath> <remotePath> [--root=<dir
 **直传约束**：字节流不经过 Server——阿里云后端为 Provider 预签名 URL 直传；Local 后端经 Server 中转是无外部存储时的固有行为。签名 URL 不输出、不落盘、不进日志。
 
 确认门要求：展示源/目标路径、文件大小、是否覆盖（download 覆盖本地同名文件；upload 默认拒绝覆盖远端已存在文件，`--overwrite` 解锁），取得明确确认后执行。传输非幂等：网络结果不明时先用只读命令核对两侧状态，不盲目重传。大文件传输耗时较长，CLI 有进度输出，不要在未完成时重复触发。
-
-## 功能：Pi 子任务（远端 Agent 驱动）
-
-### 可用命令
-
-```bash
-node "<vcpdeck-cli>" pi models <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]
-node "<vcpdeck-cli>" pi sessions <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]
-node "<vcpdeck-cli>" pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]
-node "<vcpdeck-cli>" pi run <client> "提示词" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]
-node "<vcpdeck-cli>" pi attach <client> [--cwd=<path>] [--session=<id>] [--root=<dir>] [--env=<name>]  # 交互式对话 REPL；/exit 或 Ctrl+D 退出
-node "<vcpdeck-cli>" pi abort <client> --session=<id> [--env=<name>] [--json]
-```
-
-以 CLI `--help` 为命令事实来源。目标机必须具备 `pi` capability。
-
-### 功能语义与运行循环
-
-`run` 在目标机的 Pi Agent 上执行子任务：提交提示词 → 轮询 agent.state 至 `idle`（默认超时 600 秒，可调）→ 从会话上下文提取最后一条助手文本回复并输出。缺省自动创建新会话（子任务隔离）；`--session=<id>` 复用既有会话延续上下文（先 open 再 prompt）。`waiting_for_extension_input` 表示 Pi 在等待扩展输入，CLI 会明确报错——需在 Frontend 处理或 `pi abort` 中止。`complete` 是中断标记不是等待，Agent 不得用它等待任务完成。
-
-授权根与文件域一致：显式 `--root` 优先，缺省探测唯一根，多根 fail closed；`--cwd` 为相对路径（缺省 `.`），是 Pi 在目标机上的工作目录。
-
-`attach` 为交互式对话模式：readline 循环内每行作为提示词下发，等待 idle 后打印最后一条助手回复，循环继续；`/abort` 中止当前运行、`/state` 查看状态、`/exit` 或 Ctrl+D 退出。单轮超时或扩展输入等待只报告不退出，可继续输入。
-
-### 确认门（最强级，强制）
-
-**pi run 让 AI Agent 以工具能力在目标机上执行任务——它可以读写文件、执行命令、访问网络。**执行前必须向用户展示并取得明确确认：
-
-1. 目标机器与工作目录（cwd）；
-2. 完整提示词原文；
-3. 超时与会话策略（新建/复用）；
-4. 预期影响：Pi 的行为不可完全预测，生产机器上慎用。
-
-用户未明确同意前不得执行；“查看模型/列出会话”类只读意图绝不能升级为 run。运行可持续数分钟，不要在未完成时重复触发。
-
-### 敏感内容与结果处理
-
-提示词与回复都可能含敏感信息：回复先给摘要，原样输出前征得同意；不得写入日志或长期存储。回复为空时用 `--json` 查看完整上下文排查。
-
-### 幂等性与已知限制
-
-`models/sessions` 只读幂等；`new/run/prompt` 非幂等（重复提交会重复执行子任务）。已知限制：未暴露 fork/clone/navigate/compact/setModel/thinkingLevel/附件；不支持图片输入；扩展输入需到 Frontend 处理。
-
-### 与 Server 能力的对齐情况
-
-已对齐：模型列表、会话列表、会话创建/打开、子任务下发与回复提取、中止。未对齐：会话高级操作与多模态输入。
 
 ## 功能：FRP 映射与 Storage 状态
 

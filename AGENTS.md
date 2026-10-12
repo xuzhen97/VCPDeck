@@ -2,7 +2,7 @@
 
 ## 1. 核心规则
 
-- VCPDeck 是个人 AI 协作驾驶台；当前能力包括远程机器、Job、文件、Terminal、Pi、FRP、Storage 和 Release/更新。
+- VCPDeck 是个人 AI 协作驾驶台；当前能力包括远程机器、Job、文件、Terminal、FRP、Storage 和 Release/更新。
 - **当前运行事实**以代码、`packages/shared/src/`、Prisma schema 和配置读取逻辑为准；**长期决策意图**以有效 Accepted ADR 为准；Current 文档负责解释当前边界。
 - 开发前先读 [`docs/index.md`](./docs/index.md)、相关 Current 专题和 Accepted ADR。
 - 代码、ADR 与 Current 文档冲突时停止猜测并报告，由维护者确认长期方向。
@@ -33,17 +33,17 @@ packages/
   shared/    跨运行时协议、事件、枚举、DTO 和 parser；无内部依赖
   sdk/       类型安全 REST 客户端；只依赖 shared
   server/    NestJS 中心控制面、Socket.IO/SSE、Prisma
-  client/    目标机器代理：Job、Files、FRP、PTY、Pi
+  client/    目标机器代理：Job、Files、FRP、PTY
   frontend/  React + Vite 驾驶台
-  cli/       命令入口和 Pi Skill 构件
+  cli/       命令入口和 Skill 构件
   launcher/  Server/Client 守护、更新和回退
 ```
 
 - Frontend、SDK 和 CLI 不直接控制目标机器；所有业务操作先进入 Server。
 - Server 与 Client/Frontend 通过 Shared 契约和网络协议协作，不跨包引用彼此源码。
-- `/client` Socket.IO 用于 Server ↔ Client；`/app` Socket.IO 当前用于 Browser Terminal；SSE 用于 Pi 事件投影。
+- `/client` Socket.IO 用于 Server ↔ Client；`/app` Socket.IO 当前用于 Browser Terminal。
 - 需要持久化、调度、取消、恢复或审计的远程操作使用 Typed Job；Terminal 使用专门 Session，不是普通 Job。
-- PTY、Pi Worker/Session 和 frpc 等实时资源在 Client；Server 保存控制面状态和最小审计。
+- PTY 和 frpc 等实时资源在 Client；Server 保存控制面状态和最小审计。
 - 新目录、包或运行组件必须服务当前阶段验收；新增运行组件或数据权威变化必须先写 ADR。
 
 ## 5. 协议与数据约束
@@ -59,9 +59,9 @@ packages/
 
 - 当前是少量可信操作者单信任域；任意有效业务 Identity 都是远程操作员，admin 只额外管理身份。
 - `/client` 使用 PSK；REST 使用 Cookie/Bearer，只有显式 `@Public()` 端点公开。
-- 命令、脚本、stdout/stderr、环境变量、路径、Job payload/result、终端/Pi 正文和文件内容都可能敏感；日志与错误默认脱敏。
+- 命令、脚本、stdout/stderr、环境变量、路径、Job payload/result、终端正文和文件内容都可能敏感；日志与错误默认脱敏。
 - Client 不执行未通过协议与 capability 校验的输入。
-- 远程命令、Terminal、Pi 和 Files 继承 Client OS 账户权限，不是沙箱。
+- 远程命令、Terminal 和 Files 继承 Client OS 账户权限，不是沙箱。
 - 示例和测试不得执行真实破坏性命令或使用真实凭据。
 
 ## 7. 代码与文档风格

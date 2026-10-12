@@ -13,7 +13,6 @@
 | Storage | [`storage.md`](./storage.md) | 当前 File/Provider、Local/Alibaba 数据路径、状态、安全与恢复边界 |
 | FRP | [`frp.md`](./frp.md) | 当前 FrpsInstance、Mapping、Typed Job、frpc、凭据和恢复边界 |
 | 远程终端 | [`remote-terminal.md`](./remote-terminal.md) | 当前 PTY、Session、attach、控制权、snapshot、重连和失败边界 |
-| 远程 Pi | [`remote-pi.md`](./remote-pi.md) | 当前 Worker、Session/Run、REST/SSE、Extension、隐私、重连与兼容边界 |
 | Release/更新 | [`release-and-update.md`](./release-and-update.md) | 当前 Release 编排、Launcher、更新、回退和故障边界 |
 | CLI | [`cli.md`](./cli.md) | 当前 CLI 多环境配置、选择优先级、命令、安全和扩展边界 |
 | 远程执行 | [`remote-execution.md`](./remote-execution.md) | 当前 command/script、输出、取消、安全边界与 runtime registry 迁移 |
@@ -25,8 +24,6 @@
 
 | 领域 | 文档 | 状态与用途 |
 | --- | --- | --- |
-| 远程 Pi 集中治理 | [`remote-pi-control-plane.md`](./remote-pi-control-plane.md) | 部分实现（Plan 1/1.1/2/2.1/2.2 已落地：集中 Profile/Credential/绑定与 Provider、RuntimeSpec v3→v4 门控、Client 隔离数据根、受信 Resource Bundle 与逐资源校验、默认拒绝的工具策略与审批链路、Approval/Auto/YOLO 执行模式、Session 显式导入）；项目本地资源加载与 UI renderer 复用仍为 Proposal。|
-| Pi 工具执行模式 | [`pi-tool-approval-mode.md`](./pi-tool-approval-mode.md) | 已实现（Plan 2.2）：Profile 级 `approval / auto / yolo`；Approval/Auto 使用既有三桶策略，YOLO 跳过 Tool Policy 但不突破 Runtime/Resource/OS 边界；RuntimeSpec v4、bridge v2 与 resource v2 已落地。 |
 
 ## 新专题模板
 

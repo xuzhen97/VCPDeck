@@ -4,7 +4,6 @@
 
 ## 1. 运行基线
 
-运维对象包括：Frontend 静态站点、Server、SQLite、Storage、Client、Launcher、frpc/FRPS，以及远程 Pi/PTY 运行环境。
 
 当前仅使用 stdout/stderr 日志，没有统一结构化日志、指标或 tracing。生产环境必须由 Launcher/服务管理器和日志采集器接管进程输出。
 
@@ -14,10 +13,10 @@
 
 ```bash
 pnpm dev       # Server + Frontend
-pnpm dev:all   # Server + Frontend + Client（自带 Pi Bundle 布局引导，无需额外环境变量）
+pnpm dev:all   # Server + Frontend + Client（无需额外环境变量）
 ```
 
-`dev:all` 里 Client 的 Pi Bundle 无需手工配置：Client 按发布规则要求 `<appDir>/apps/<version>/pi-resources/`（ADR-0030），dev 下由 `scripts/ensure-dev-app-layout.cjs` 维护 `<repo>/.tmp/devapp/apps -> packages` 链接，`scripts/dev-client.cjs` 再以该目录作为 `VCPDECK_APP_DIR` 启动 Client。显式设置 `VCPDECK_APP_DIR` / `VCPDECK_CLIENT_DATA_DIR` 时以调用方为准（发布安装不受影响）。
+`dev:all` 不需要准备 Agent 资源：Pi Bundle 布局与对应脚本已随 ADR-0049 退役。
 
 构建后直接运行：
 
@@ -26,7 +25,7 @@ pnpm --filter @vcpdeck/server start
 pnpm --filter @vcpdeck/client start
 ```
 
-长期环境优先由 Launcher 启动 Server/Client；也可用 PM2 等外部进程管理器守护 Launcher 本身（只托管 Launcher，不托管业务进程，见 [`deployment.md`](./deployment.md) §4.6）；停止 Launcher 前应确认没有进行中的 Release、Job、Terminal 或 Pi run。
+长期环境优先由 Launcher 启动 Server/Client；也可用 PM2 等外部进程管理器守护 Launcher 本身（只托管 Launcher，不托管业务进程，见 [`deployment.md`](./deployment.md) §4.6）；停止 Launcher 前应确认没有进行中的 Release、Job 或 Terminal。
 
 变更监管进程（Launcher 及其进程管理器，如 PM2）前必须先具备**不依赖 Server 的带外通道**（SSH、云控制台或本地救援脚本），并至少完成一次成功的只读检查（`pm2 ls`、`launcher.env` 可解析）。Server 是唯一控制通道，Launcher 又决定 Server 存活：用 VCPDeck 自身去重启 Launcher，一旦新进程未被接管就会同时失去修复通道。
 
@@ -62,7 +61,7 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 - **无人值守开机自启**：`vcpdeck-client.service` 为 `enabled` + `Restart=always`，开机由 systemd 拉起，无需用户登录/linger。验证链：`systemctl status vcpdeck-client.service`（active）→ Server 控制面 `online=true` 且版本/能力齐备。
 - **迁移（M1）**：存量 PM2 安装直接重跑同一条安装命令即可（无需 `--migrate`，安装器自动探测存量 PM2 源）；已有 A2 身份且无旧 PM2 候选时按幂等修复处理，不变更身份；若 A2 与有效旧 PM2 同时存在则恢复未完成迁移，以旧身份覆盖误生成的 A2 身份并清理旧 PM2。自动探测范围包括 `/home`、`/var/home` 下用户的 `~/.vcpdeck/launcher-client`、root 的旧安装、ADR-0018 时代的固定目录 `/opt/vcpdeck/launcher-client`，以及 nvm/系统全局安装的 PM2；旧条目可自定义名称，`pm_exec_path` 指向 node、脚本在 `args` 的旧形式也支持。其他 PM2 应用（含 PM2 托管的 VCPDeck Server 与 VCP ToolBox）一律保留；探测不到、查询失败、条目歧义或名称非法时 fail closed。迁移以旧 `launcher.env` 的 `VCPDECK_SERVER` 为权威（Server 归属保留）：从公网入口执行安装命令也会沿用旧 Origin，bootstrap/配置/验收全部走它；旧 Origin 不可达时报 `LINUX_MIGRATION_SERVER_UNREACHABLE` 且不动旧安装。全部材料校验成功后才清理式迁移：核对并删除旧 VCPDeck PM2 entry → `pm2 save` → 无其他 PM2 应用时停用旧自启（否则保留）→ 删除旧 app-dir 与旧安装状态 → 启动 `vcpdeck-client.service` 并全能力验收。**失败只记录阶段状态并保留 A2 现场，可用同一命令重跑，不会 resurrect 或恢复旧 PM2**。迁移前若 `client-id` 非法、PM2 未 online、PM2 entry 指向其他目录、旧 app-dir 不是来源用户的 `.vcpdeck/launcher-client`（或 ADR-0018 固定旧目录）或有进行中 Release，安装器直接拒绝；多用户机器源不唯一时用 `--migrate-from-user=<name>`，需强制重装时用 `--migrate=false`。
 - **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。非 systemd 单元会被拒绝（走 PM2 卸载）。
-- **root 等价风险**：该 Client 可执行任意 root 命令；Job/Terminal/Pi 操作前确认在可信运维域内（Server 仅记录控制面/Job/Session 审计，见 [`security.md`](./security.md) §4.5）。
+- **root 等价风险**：该 Client 可执行任意 root 命令；Job/Terminal 操作前确认在可信运维域内（Server 仅记录控制面/Job/Session 审计，见 [`security.md`](./security.md) §4.5）。
 
 ## 3. 健康与就绪检查
 
@@ -75,7 +74,7 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 | Storage | 配置页/签名上传下载小文件、公开分享抽查 | 验证 Provider、正文路径和公开分享状态 |
 | FRPS | 实例 probe + Dashboard | 验证 Dashboard/连接配置 |
 | Launcher | `control.json`、进程和日志 | 检查守护与本机控制通道 |
-| Terminal/Pi | capability + 小型真实操作 | 浅健康不会验证这些能力 |
+| Terminal | capability + 小型真实操作 | 浅健康不会验证这些能力 |
 
 建议每 1–5 分钟外部探测 `/api/health`，每 5–15 分钟执行带认证的深检查；不要频繁创建真实远程 Job 作为存活探针。
 
@@ -113,7 +112,6 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 - 不直接手工删除 Release archive 或 Launcher 版本目录；按固定保留策略执行清理，异常时先保留现场；
 - 检查长期 disconnected Job、interrupted Terminal 和 failed Client update；
 - 复核 Credential、禁用身份、不再使用的 Token、过期/撤销 Session，以及是否仍有可用 admin；
-- 在非生产目标机执行最小 Job、文件、终端和 Pi 回归。
 
 ### 每月或每次发布前
 
@@ -127,7 +125,7 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 ### 5.1 Git SSH 共享密钥运维
 
 - **启用**：无需任何手工配置。「设置 → Git 密钥」直接生成密钥（首次生成时 Server 自动在版本目录外的数据根创建受限根密钥文件 `<VCPDECK_APP_DIR | Server 工作目录>/data/git-ssh/root.key`）→ 复制公钥并在 Git 服务登记（VCPDeck 不代管仓库权限）→ 勾选目标机器保存。离线机器在重连后自动同步；「待同步」表示尚未收到 Client 确认。旧部署显式指定 `VCPDECK_GIT_SSH_KEY_FILE` 时该路径优先且只读。
-- **观察**：`重复连接（已暂停下发）` 表示同一 Client ID 存在多个连接，先消除重复进程；`不支持` 表示目标机未上报兼容能力（缺 SSH、版本过旧或数据根不可写）。Windows 系统 OpenSSH 的版本串为 `OpenSSH_for_Windows_X.Y`，Client 现能识别它并在版本 >= 7.6 时使用受管配置。Server 在新选机、换钥及重连下发私钥前均核对当前注册 socket 的能力；能力恢复并重注册后自动补发，取消选机仍可发送不含私钥的清理指令。`已安装` 仅代表本地私钥副本写入成功，不代表 Git 服务授权成功，仍需确认 Client 上报的 Git SSH 能力可用，并用**未覆盖 `core.sshCommand`** 的 VCPDeck Job/Terminal/Pi 验证实际访问。
+- **观察**：`重复连接（已暂停下发）` 表示同一 Client ID 存在多个连接，先消除重复进程；`不支持` 表示目标机未上报兼容能力（缺 SSH、版本过旧或数据根不可写）。Windows 系统 OpenSSH 的版本串为 `OpenSSH_for_Windows_X.Y`，Client 现能识别它并在版本 >= 7.6 时使用受管配置。Server 在新选机、换钥及重连下发私钥前均核对当前注册 socket 的能力；能力恢复并重注册后自动补发，取消选机仍可发送不含私钥的清理指令。`已安装` 仅代表本地私钥副本写入成功，不代表 Git 服务授权成功，仍需确认 Client 上报的 Git SSH 能力可用，并用**未覆盖 `core.sshCommand`** 的 VCPDeck Job/Terminal 验证实际访问。
 - **主机公钥变化**：Client 首次连接自动记录（TOFU）；已记录主机公钥变化时拒绝连接。核对 Git 服务真实指纹后，在目标机删除 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh/known_hosts` 中对应条目再重试；**不得**改为关闭主机校验。
 - **根密钥缺失、损坏或不匹配**：生成与换代一律以 `GIT_SSH_KEY_UNAVAILABLE` 拒绝，且**不会**自动重建（重建会让既有私钥永久不可读）。只能从备份恢复与该数据库**配对**的根密钥文件；若两者已同时丢失，需在 Git 服务撤销旧公钥、轮换新密钥并重新分发。
 - **取消某台机器**：从选机列表移除。这只清理该机本地受管副本；要真正阻断访问，必须在 Git 服务删除旧公钥并轮换。
@@ -143,7 +141,6 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 5. Git SSH 根密钥文件（缺省 `<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`，或显式 `VCPDECK_GIT_SSH_KEY_FILE`）——必须与 SQLite **同批次**备份且分开存放，只恢复数据库无法解密既有私钥；
 6. Launcher state/current/apps（至少保留当前和上一版本）；
 7. FRPS 独立配置；
-8. 远程 Pi Session 如需业务恢复，应由各目标机器单独备份。
 
 推荐一致性顺序：
 
@@ -307,18 +304,11 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 - 关闭/过期后的进程树清理是尽力而为，检查 daemonized/脱离 PTY 的残留进程；
 - 详细恢复边界见 [`design/remote-terminal.md`](./design/remote-terminal.md)。
 
-### Pi 不可用
+### 远程 Agent（已退役）
 
-- 检查 `agent.pi` capabilityDetails；
-- Node 是否至少 22.19.0，Bash、Pi agentDir、锁定 SDK、模型和认证是否满足探测；
-- `PI_SESSION_PROTOCOL_VERSION`（当前 4）是否匹配；
-- 检查目标项目路径是否在允许的 file roots，realpath 后是否仍在 root 内；
-- `PI_STATE_PENDING` 表示新 Socket generation 尚未完成权威对账，应等待而不是新建 Run；
-- `PI_CLIENT_RESTARTED` 表示原活动 Run 不可恢复，不能伪造成功；会话本身仍可用（失败只属于那一轮），Session JSONL 仍存在时可直接发起下一轮 Prompt；
-- Browser/SSE 断线后重新读取 Session detail/context 和 Agent state，不等待事件补传；
-- Server 重启后等待 Client PI_STATE 重建项目锁和活动 Run；
-- Session 正文不在 SQLite；Server 只保存会话所有权、Run 摘要与会话操作审计，恢复对话历史需要目标机器 Pi Session 备份；
-- 归档只管理会话入口、不结算当前 Run 也不删除远端内容；删除会话会保留 Run 摘要与审计事件（仅保留稳定 sessionId）。
+Pi／DSH 专用集成已按 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md)
+退役，不再存在“Pi 不可用”这一类故障面。历史会话数据保留在目标机器与历史表中，但不再提供
+业务入口；如需备份，应在目标机器侧单独进行。
 
 ### Storage 分享与下载失效
 
@@ -365,7 +355,7 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 
 ## 9. 目标机桌面查看的前置条件
 
-「远程桌面」Tab 只做两件事：经 P2P 隧道回环转发 + 浏览器侧渲染。**抓屏引擎在目标机的交互会话内**（见 [ADR-0028](../adr/0028-windows-desktop-capture-engine-in-session-vnc.md)），因此以下前提由运维准备：
+「远程桌面」Tab 只做两件事：经 P2P 隧道回环转发 + 浏览器侧渲染。**抓屏引擎在目标机的交互会话内**（见 [ADR-0028](./adr/0028-windows-desktop-capture-engine-in-session-vnc.md)），因此以下前提由运维准备：
 
 > 目标机安装与配置 UltraVNC 的完整可复现步骤、官方校验值、验收判据与实测坑，见 [`design/windows-ultravnc-setup.md`](./design/windows-ultravnc-setup.md)。
 

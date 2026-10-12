@@ -8,7 +8,7 @@ export interface TerminalCapabilityEnv {
 
 /**
  * 延迟探测 node-pty 后端。
- * - 动态 import：加载失败只禁用终端能力，不影响 exec/files/FRP/Pi；
+ * - 动态 import：加载失败只禁用终端能力，不影响 exec/files/FRP；
  * - 错误消息安全化：不包含本地路径或 stack。
  */
 export async function probeTerminalCapability(

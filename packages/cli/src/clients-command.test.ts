@@ -49,7 +49,7 @@ function clientInfo(overrides: Partial<ClientInfo> = {}): ClientInfo {
 		cpuModel: "Test CPU",
 		totalMemMB: 32_768,
 		clientVersion: "0.2.5",
-		capabilities: ["pi", "terminal"],
+		capabilities: ["exec", "terminal"],
 		capabilityDetails: {},
 		online: true,
 		cpuPercent: 12.4,

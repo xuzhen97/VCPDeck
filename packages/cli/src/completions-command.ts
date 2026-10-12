@@ -32,7 +32,6 @@ const COMMAND_TREE: Record<string, string[]> = {
 		"download",
 		"upload",
 	],
-	pi: ["models", "sessions", "new", "run", "attach", "abort"],
 	terminal: ["shells", "list", "close", "attach"],
 	frp: ["instances", "mappings", "mapping"],
 	storage: ["status"],

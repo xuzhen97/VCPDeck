@@ -8,9 +8,7 @@ import { FileModule } from "../file/file.module.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
 import { FrpModule } from "../frp/frp.module.js";
 import { StorageModule } from "../storage/storage.module.js";
-import { PiModule } from "../pi/pi.module.js";
 import { TerminalModule } from "../terminal/terminal.module.js";
-import { SessionHostModule } from "../session-host/session-host.module.js";
 import { ReleaseModule } from "../release/release.module.js";
 import { TunnelModule } from "../tunnel/tunnel.module.js";
 import { GitSshModule } from "../git-ssh/git-ssh.module.js";
@@ -24,9 +22,7 @@ import { GitSshModule } from "../git-ssh/git-ssh.module.js";
 		StorageModule,
 		forwardRef(() => FrpModule),
 		forwardRef(() => ReleaseModule),
-		PiModule,
 		TerminalModule,
-		SessionHostModule,
 		TunnelModule,
 		GitSshModule,
 	],

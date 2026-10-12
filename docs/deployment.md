@@ -11,7 +11,7 @@
 最小部署包含：
 
 - 一台控制面主机：Server、SQLite、可选 Local Storage、Server Launcher；
-- 每台目标机器：Client、Client Launcher、frpc、Pi/PTY 运行环境；
+- 每台目标机器：Client、Client Launcher、frpc/PTY 运行环境；
 - 可选 FRPS 实例；
 - 可选阿里云存储后端。
 
@@ -24,7 +24,6 @@ Client 主动连接 Server，因此目标机器无需向 Server 开放入站控�
 - pnpm workspace 开发/源码部署；
 - Node.js 24+（发布 manifest 默认 `>=24`）；
 - Server 需要可写的数据库、Storage 和 Release 目录；
-- Client 的远程 Pi 依赖本机 Pi 配置、模型认证和受支持 Shell；
 - 交互式终端依赖 `@lydell/node-pty` 预编译后端（随包携带 win-x64/linux-x64 预编译，Linux 仅 glibc；Alpine/musl 目标机终端能力不可用）；
 - FRP 能力需要匹配平台的 frpc/frps 构件（win-x64 与 linux-x64 均随包）；
 - 目标机不再需要编译工具链或网络下载依赖引擎（详见 ADR-0012）。
@@ -46,7 +45,7 @@ pnpm dev
 pnpm dev:all
 ```
 
-`pnpm dev:all` 无需额外环境变量：Client 定位 Pi Resource Bundle 依赖发布布局（`<app-dir>/apps/<version>/pi-resources/`，ADR-0030），dev 由此自动引导（`scripts/ensure-dev-app-layout.cjs` 维护 `.tmp/devapp/apps` 链接，`scripts/dev-client.cjs` 注入 appDir）。
+`pnpm dev:all` 无需额外环境变量；Pi Resource Bundle 布局已随 ADR-0049 退役，dev 不再需要 Agent 资源引导。
 
 生产构件统一为 zip，每次发版产出两份按平台分开的包（详见 [ADR-0012](./adr/0012-bundled-release-artifacts.md)）：
 
@@ -56,7 +55,7 @@ pnpm release --version=x.y.z
 
 - `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`：对应平台构件（均含 `launcher/`、`server/`、`client/`），既供手动分发，也供自动更新上传（两个平台各上传一次）；首次安装时 Launcher 放入 `<app-dir>/dist/main.js`，已有 Launcher 默认保留；
 - `dist/VCPDeckBridge.zip`：VCPToolBox 插件商店下载构件；`pnpm release` 会同步版本并重建，必须与源码、manifest 和 `plugins.json` 一起提交，不能按普通 `dist` 忽略；
-- 业务代码为 esbuild 单文件，仅原生/引擎/SDK 依赖保留为 node_modules。Linux 目标机自动更新依赖系统 `unzip` 命令（手动分发无此要求）。发布前应完成发布验收冒烟（Server 启动与 `/api/status`、Client 注册与能力上报、终端与 Pi 探测），不建议将工作区源码目录直接当作长期版本目录。
+- 业务代码为 esbuild 单文件，仅原生/引擎依赖保留为 node_modules。Linux 目标机自动更新依赖系统 `unzip` 命令（手动分发无此要求）。发布前应完成发布验收冒烟（Server 启动与 `/api/status`、Client 注册与能力上报、终端探测），不建议将工作区源码目录直接当作长期版本目录。
 
 ## 4. 配置
 
@@ -74,8 +73,7 @@ pnpm release --version=x.y.z
 | `DATABASE_URL` | `file:./prisma/dev.db` | SQLite URL；相对路径依赖 Server 工作目录 |
 | `VCPDECK_RELEASES_DIR` | `./data/releases`（install 引导默认 `<app-dir>/releases`） | **Local 后端**的发布构件目录；必须为**版本目录外绝对路径**，否则自更新切换版本后目录漂移、构件丢失。配置外部存储后端（OSS/网盘）后，发布包转存 Provider，此目录不再承载新构件 |
 | `VCPDECK_PSK` | `vcpdeck-dev-psk` | `/client` PSK，生产必须随机替换 |
-| `VCPDECK_PI_CREDENTIAL_KEY_FILE` | 未设 = Pi 配置不可用（**本地 dev 例外**：`pnpm dev` / `pnpm dev:all` 会自动生成 `.tmp/dev-secrets/pi-credential.key` 并写入 `packages/server/.env`） | Pi Provider 凭据的加密根密钥（文件内容为 base64 的 32 字节）。**生产必须位于 Server 进程外**（如 `/etc/vcpdeck/pi-credential.key`，`0640 root:serverUser`）；缺失或长度不符时凭据写入与 RuntimeSpec 组装 fail closed，Server 启动与其他能力不受影响 |
-| `VCPDECK_GIT_SSH_KEY_FILE` | 未设 = Server 自行创建并管理根密钥 | Git SSH 共享私钥的加密根密钥（文件内容为 base64 的 32 字节）。**缺省无需配置**：首次在「设置 → Git 密钥」点击生成时，Server 自动在版本目录外的数据根创建受限文件 `<VCPDECK_APP_DIR | Server 工作目录>/data/git-ssh/root.key`（POSIX 目录 `0700`/文件 `0600`；Windows 关闭继承并授权运行账户、SYSTEM 与 Administrators），重启与自更新后复用，并发首次创建只产生一把密钥。仍可显式指定路径兼容旧部署（如 `/etc/vcpdeck/git-ssh.key`，`0640 root:serverUser`），显式路径**优先且只读**，不可读时直接 fail closed，**不自动回退也不另建**。必须与 Pi 凭据根密钥**分开**；密钥缺失/损坏/与既有密文不匹配时生成与分发 fail closed（`GIT_SSH_KEY_UNAVAILABLE`），**绝不静默换钥**，否则既有私钥将永久无法解密。该文件必须与 SQLite 配对备份。Client 侧不保存根密钥，只在 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh` 保存受管私钥副本 |
+| `VCPDECK_GIT_SSH_KEY_FILE` | 未设 = Server 自行创建并管理根密钥 | Git SSH 共享私钥的加密根密钥（文件内容为 base64 的 32 字节）。**缺省无需配置**：首次在「设置 → Git 密钥」点击生成时，Server 自动在版本目录外的数据根创建受限文件 `<VCPDECK_APP_DIR | Server 工作目录>/data/git-ssh/root.key`（POSIX 目录 `0700`/文件 `0600`；Windows 关闭继承并授权运行账户、SYSTEM 与 Administrators），重启与自更新后复用，并发首次创建只产生一把密钥。仍可显式指定路径兼容旧部署（如 `/etc/vcpdeck/git-ssh.key`，`0640 root:serverUser`），显式路径**优先且只读**，不可读时直接 fail closed，**不自动回退也不另建**。必须与其它受管密钥**分开**；密钥缺失/损坏/与既有密文不匹配时生成与分发 fail closed（`GIT_SSH_KEY_UNAVAILABLE`），**绝不静默换钥**，否则既有私钥将永久无法解密。该文件必须与 SQLite 配对备份。Client 侧不保存根密钥，只在 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh` 保存受管私钥副本 |
 | `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | 引擎级可信 Origin 白名单之一（与 `VCPDECK_FRONTEND_ORIGIN` 并列）；socket.io CORS 只在引擎层生效，`/app` 与 `/client` 共用同一判定 |
 | `VCPDECK_PORT` | `3001` | Server 监听端口（1–65535 整数）；改端口时必须同步配置 Client `VCPDECK_SERVER` 与 Server Launcher `VCPDECK_PROBE_URL` |
 | `PUBLIC_SHARE_BASE_URL` | 空（回退 `SERVER_URL`） | VCPDeckBridge 公开分享链接基地址；只接受 HTTP(S)，反向代理部署时应配置为外部公开地址 |
@@ -111,9 +109,8 @@ Token 是与 Identity 关联的服务端 Credential，CLI 与 SDK 可共用；�
 | `VCPDECK_CLIENT_ID` | 自动生成 | 可选固定 ID；默认保存在 `~/.vcpdeck/client-id` |
 | `VCPDECK_FRPC_PATH` | 随构件探测 | 自定义 frpc 路径 |
 | `VCPDECK_FRPC_WORK_DIR` | Client 默认目录 | frpc 配置/运行目录 |
-| `PI_CODING_AGENT_DIR` | `~/.pi/agent` | 远程 Pi 配置与 Session 根目录 |
 
-Client 使用运行账户的权限执行命令、文件、PTY 和 Pi。应为其创建权限受控的专用账户，不能仅依赖 UI 确认。
+Client 使用运行账户的权限执行命令、文件与 PTY。应为其创建权限受控的专用账户，不能仅依赖 UI 确认。
 
 ### 4.4 Launcher
 
@@ -220,7 +217,7 @@ Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 `w
   - `/etc/vcpdeck/client.env`：敏感环境（含 PSK，权限 `0640 root:vcpdeck`）；
   - `/etc/sudoers.d/vcpdeck-client`：`vcpdeck ALL=(ALL:ALL) NOPASSWD: ALL`；
   - `/etc/systemd/system/vcpdeck-client.service`：systemd 单元，`User=vcpdeck`、`Restart=always`，开机自启。
-- **专用账户**：`vcpdeck`，锁定密码、`/bin/bash`、独立 HOME；安装器不创建任何直接登录凭据。该账户是 **root 等价** Client：Job、Terminal、Pi 可显式 `sudo -n` 调用任意 root 命令。
+- **专用账户**：`vcpdeck`，锁定密码、`/bin/bash`、独立 HOME；安装器不创建任何直接登录凭据。该账户是 **root 等价** Client：Job、Terminal、可显式 `sudo -n` 调用任意 root 命令。
 - **Launcher 边界**：systemd 只守护稳定 Launcher；Launcher 继续负责业务版本切换与回退。Launcher 自升级用受限 transient `systemd-run`（脱 Client cgroup、`Timeout`、`KillMode=process`、无 `PrivateNetwork`/`NewerCredentials`），单元内不直接替换自身可执行文件。
 - **M1 迁移**：存量 PM2 安装无需额外参数：不带 `--migrate` 时安装器会**自动探测**存量 PM2 源并改走清理式迁移（与 Windows 行为一致，页面固定命令即可）；已有 A2 身份且无旧 PM2 候选时按幂等修复处理，不变更身份；若 A2 与有效旧 PM2 同时存在则视为未完成迁移，优先恢复清理式迁移并以旧身份覆盖误生成的 A2 身份。自动探测范围包括 `/home`、`/var/home` 下用户的 `~/.vcpdeck/launcher-client`、root 的旧安装、ADR-0018 时代的固定目录 `/opt/vcpdeck/launcher-client`，以及 nvm/系统全局安装的 PM2；旧条目可以自定义名称，`pm_exec_path` 指向 node、脚本放在 `args` 的旧形式也支持。其他 PM2 应用（含 PM2 托管的 VCPDeck Server 与 VCP ToolBox）一律保留；探测不到、查询失败、条目歧义或名称非法时 fail closed。迁移以旧 `launcher.env` 的 `VCPDECK_SERVER` 为权威并保留该 Origin：loopback 与公网入口指向同一 Server 时，从任一入口执行都能直接升级，bootstrap、写入的 ENV 与验收均走旧 Origin；旧 Origin 不可达时报 `LINUX_MIGRATION_SERVER_UNREACHABLE` 且不动旧安装。多源歧义或有源但校验不通过时 fail closed（透出稳定原因），需要强制重装时传 `--migrate=false`（也可显式 `--migrate=true` / `--migrate-from-user=<name>`）。迁移保留 `client-id`、Server Origin 与显示名称，保留无关 PM2 应用；全部材料校验成功后才清理旧 VCPDeck PM2 entry、旧自启与旧运行目录，再启动 A2 稳态服务并全能力验收。失败只记录阶段状态并保留 A2 现场，可用同一命令重跑；**不会 resurrect 或恢复旧 PM2**（ADR-0027）。
 - **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。
@@ -251,9 +248,7 @@ sudo bash "./install-coturn.sh" \
 - `data/releases` 或 `VCPDECK_RELEASES_DIR`；Release 清理只删除归档正文，不删除 Release 审计行和 `clientStates`；
 - Launcher `VCPDECK_APP_DIR`；其中 `apps/retention.json` 记录成功切换历史，状态损坏时 Launcher 会暂停本地旧版本自动删除；
 - Client 身份：Windows/旧版 Linux 在 `~/.vcpdeck/client-id`；**Linux A2** 在 `/var/lib/vcpdeck-client/client-id`（迁移时从旧目录保留）；Linux A2 专用账户 HOME 在 `/var/lib/vcpdeck-client/home`；
-- **Pi Resource Bundle**：随 Client Release 位于版本目录内 `<app-dir>/apps/<version>/pi-resources/`（`manifest.json` + `extensions/`），**不放数据根**：更新与回滚天然与版本一致，Session 不会被带走；Client 按自身模块路径定位并逐资源校验 sha256，校验失败即不上报 Bundle 能力且不加载任何资源；Profile 启用资源后，只有上报兼容 Bundle 的 Client 才会收到 RuntimeSpec；
-- **VCPDeck Pi 数据根**（`VCPDECK_CLIENT_DATA_DIR`，由安装器写入 Client env）：Windows SYSTEM 为 `C:\ProgramData\VCPDeck\Client\data`，Linux A2 为 `/var/lib/vcpdeck-client`，通用部署回退 `<VCPDECK_APP_DIR>/data`；其下 `pi/` 保存 agentDir、`sessions/<namespace>/`、cache、tmp、diagnostics 与 `install-secret`。**它必须位于版本目录之外**，Release 切换与回滚不会移动或删除它；
-- Pi Provider 凭据密文（Server SQLite）与 `VCPDECK_PI_CREDENTIAL_KEY_FILE` 指向的根密钥文件（Client 侧不保存任何凭据）；
+- **VCPDeck 数据根**（`VCPDECK_CLIENT_DATA_DIR`，由安装器写入 Client env）：Windows SYSTEM 为 `C:\ProgramData\VCPDeck\Client\data`，Linux A2 为 `/var/lib/vcpdeck-client`，通用部署回退 `<VCPDECK_APP_DIR>/data`；其下 `pi/` 保存 agentDir、`sessions/<namespace>/`、cache、tmp、diagnostics 与 `install-secret`。**它必须位于版本目录之外**，Release 切换与回滚不会移动或删除它；
 - **Git SSH 共享私钥密文**（Server SQLite）与根密钥文件（缺省为 `<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`，或 `VCPDECK_GIT_SSH_KEY_FILE` 指定的路径）——两者必须**同批次**备份且分开存放、不得与密文放在同一介质：只恢复数据库而缺少对应根密钥无法解密既有私钥。零配置启用不等于无需备份；Client 侧受管副本（`<VCPDECK_CLIENT_DATA_DIR>/git-ssh`）不需要备份，丢失后重新分发即可；
 - frpc 工作目录（需要恢复映射运行信息时）。
 
@@ -278,23 +273,11 @@ prisma db push
 6. 验证关键查询和 Job 创建；
 7. 再进入 Client 更新阶段。
 
-### 6.1 Agent 会话模型切换（Pi 协议 v4）
+### 6.1 Agent 会话模型迁移（已退役）
 
-Agent 会话、Run 与会话操作审计已从 Job 移出（[ADR-0041](./adr/0041-agent-session-run-and-audit-separation.md)），`PI_SESSION_PROTOCOL_VERSION` 升到 `4`。该切换新旧模型双向不兼容，必须按顺序执行：
+Pi 会话模型与 v4 协议迁移已按 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md)
+退役：启动、安装与升级流程都不再执行 Agent 迁移，历史 Agent／Pi 表与数据保留不动。
 
-1. 暂停用户新 Prompt；等待或中止已有 Agent 回合并由**旧** Client 权威确认；
-2. 确认 `pending` / `running` / `waiting_input` / `disconnected` 的回合与未确认删除预约全部清零；
-3. 对 SQLite 与 Storage 做一致性备份，并保留旧版本构件；
-4. 停止旧 Server 与旧 Client；
-5. 新构件启动时执行**显式 Agent migration**（Server 启动前自动断言并 fail closed），成功后同步 schema 并启动 Server；
-6. 升级 Client；v4 注册与对账成功后再恢复 Agent 控制；离线的旧 Client 只影响 Pi 能力，不影响其普通 Job 能力；
-7. 验证连续两轮、失败轮、停止、归档/恢复、审计查询，且普通 Job 列表不含 Agent。
-
-Agent migration 遇到旧模型遗留的活动回合或删除预约时直接报错阻塞，不自行假设终态；不提供直接改库把活动 Run “改成功”的恢复命令。
-
-本版迁移是 **expand-only**（只新增三张表与一个关系字段，不删除、不改名、不收紧任何既有字段），因此**回退不需要恢复备份**：Launcher 回退只切应用版本、不逆转数据库，旧版本代码继续读写同一数据库即可启动运行。回退的代价是**可见性**：新模型产生的 Run 与会话审计在旧控制面不可见，且旧版本会重新看到迁移时刻意保留的 `agent.session` Job 行。唯一会失败的路径是**用旧版本的 `prisma db push`**（例如用旧发布包执行 `install.cjs --force`）——它会把新增表视为多余并索要 `--accept-data-loss`；此时按 §9.7 切换 `current` 的路径回退，不要跑旧版本的 push。回退演练只在隔离库与 mock Client 上进行。
-
-上述第 3 步的备份仍然是发布纪律（数据安全与灾难恢复），不是回退的前置条件；对应的 contract 清理（删除遗留 Job 行与不再使用的模式列）推迟到本版稳定后的后续发布。
 
 ## 7. Frontend 托管
 
@@ -342,7 +325,7 @@ location / {
 6. 登录并立即确认/更新管理员凭据；当前无法通过业务 API 创建第二个 admin，且最后 admin 可被禁用后锁死管理面，应保护 bootstrap admin 并避免自禁用；
 7. 验证 `GET /` 返回驾驶台首页（随包 Frontend 同源托管）；
 8. 在目标机器配置 `VCPDECK_SERVER`、相同 PSK 后启动 Client；
-9. 检查 Client 在线、能力、Job、文件和终端/Pi；
+9. 检查 Client 在线、能力、Job、文件和终端；
 10. 如使用 FRP，创建并 probe FRPS 实例后再建映射；
 11. 配置备份、日志采集和定期恢复演练。
 
@@ -436,7 +419,7 @@ node packages/cli/dist/index.js release wait x.y.z --env=prod --timeout=1800
 
 Launcher 的自动回退只覆盖“新版本探活失败”。需要人工回滚时：
 
-1. 停止 Server Launcher（确认没有进行中的 Release/Job/Terminal/Pi）；
+1. 停止 Server Launcher（确认没有进行中的 Release/Job/Terminal）；
 2. 备份当前数据库与日志；
 3. 将 current 指回上一版本：Windows 写 `apps/state.json` 的 `current`，Linux 重建 `apps/current` 软链；或直接用上一版本发布包重新执行 `install.cjs --artifact=server --force`；
 4. 若 schema 已变化且旧 Server 无法读取，恢复与旧版本匹配的数据库备份（Launcher 回退不回退数据库）；

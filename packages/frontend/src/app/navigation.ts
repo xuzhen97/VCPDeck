@@ -1,18 +1,14 @@
 import {
-	Bot,
 	Cable,
-	Cpu,
 	Database,
 	KeyRound,
 	LayoutDashboard,
 	ListTodo,
 	Lock,
-	MessageSquare,
 	MonitorCog,
 	Network,
 	Rocket,
 	Settings,
-	SlidersHorizontal,
 	UserRound,
 	Users,
 	type LucideIcon,
@@ -50,18 +46,6 @@ export interface NavModule {
  */
 export const MODULES: NavModule[] = [
 	{ id: "dashboard", path: "/dashboard", label: "概览", icon: LayoutDashboard },
-	{
-		id: "agent",
-		path: "/agent",
-		label: "Agent",
-		icon: Bot,
-		sub: [
-			{ path: "/agent/chat", label: "对话", icon: MessageSquare, fullBleed: true },
-			{ path: "/agent/profile", label: "Profile", icon: SlidersHorizontal },
-			{ path: "/agent/provider", label: "Provider", icon: KeyRound },
-			{ path: "/agent/runtime", label: "Client 运行时", icon: Cpu },
-		],
-	},
 	{ id: "machines", path: "/machines", label: "机器", icon: MonitorCog },
 	{ id: "jobs", path: "/jobs", label: "任务", icon: ListTodo },
 	{ id: "frp", path: "/frp", label: "映射", icon: Cable },
@@ -90,8 +74,8 @@ export const MODULES: NavModule[] = [
 /**
  * 按段边界前缀匹配模块。
  *
- * 未匹配时返回 `undefined` 而不是猜测：`/agentxyz` 不属于 `agent`，
- * `/machines/client-1/files` 属于 `machines`（该模块无二级，仍显示一级导航）。
+ * 未匹配时返回 `undefined` 而不是猜测：`/machines/client-1/files` 属于 `machines`
+ * （该模块无二级，仍显示一级导航）；退役的 `/agent/*` 不再属于任何模块。
  */
 export function resolveModule(pathname: string): NavModule | undefined {
 	return MODULES.find(

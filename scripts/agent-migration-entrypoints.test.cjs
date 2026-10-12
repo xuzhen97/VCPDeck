@@ -1,8 +1,8 @@
 /**
- * Agent 迁移入口接线测试(ADR-0041 Task 1)。
+ * 基础服务启动与 Agent 迁移解耦测试（ADR-0049）。
  *
- * 验证:开发/发布/安装三条路径中,显式迁移先于 prisma db push 与启动;
- * 迁移非零退出时阻止后续;Release staging 携带迁移脚本与 SQL。
+ * 验证：dev/start、install、隔离测试库与 Release preStart 都不再自动执行 Agent 迁移；
+ * 同时历史迁移脚本与 SQL 仍保留在源码中（非破坏性退役，不删除历史数据资产）。
  */
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
@@ -15,53 +15,65 @@ function read(p) {
 	return fs.readFileSync(path.join(ROOT, p), "utf8");
 }
 
-test("Server dev/start 脚本在 prisma generate 后、db push 前执行 Agent 迁移", () => {
+test("Server dev/start 脚本不再执行 Agent 迁移", () => {
 	const pkg = JSON.parse(read("packages/server/package.json"));
 	for (const scriptName of ["start", "dev"]) {
 		const script = pkg.scripts[scriptName];
 		assert.ok(script, `${scriptName} 脚本存在`);
-		const genIndex = script.indexOf("prisma generate");
-		const migIndex = script.indexOf("agent-session-migration");
-		const pushIndex = script.indexOf("prisma db push");
-		assert.ok(migIndex > genIndex, `${scriptName}: 迁移在 generate 之后`);
-		assert.ok(pushIndex > migIndex, `${scriptName}: db push 在迁移之后`);
+		assert.doesNotMatch(
+			script,
+			/agent-session-migration/,
+			`${scriptName}: 不再自动执行 Agent 迁移`,
+		);
+		// 基础 schema 同步仍保留（不带 --accept-data-loss）
+		assert.match(script, /prisma db push/);
 	}
 });
 
-test("Server main.ts 启动前断言迁移就绪", () => {
+test("Server main.ts 启动不再断言 Agent 迁移就绪", () => {
 	const main = read("packages/server/src/main.ts");
-	assert.match(main, /assertAgentMigrationReady/);
-	// readiness 失败必须先于 listen
-	const assertIndex = main.indexOf("assertAgentMigrationReady");
-	const listenIndex = main.indexOf(".listen(");
-	assert.ok(assertIndex > -1 && listenIndex > assertIndex, "就绪检查先于监听");
+	assert.doesNotMatch(main, /assertAgentMigrationReady/);
+	assert.doesNotMatch(main, /agent-session-migration/);
 });
 
-test("Release preStart 先执行 Agent 迁移再 db push", () => {
+test("Release preStart 只做 db push，不再先跑 Agent 迁移", () => {
 	const pack = read("scripts/pack-release.ts");
-	// 路径与源码布局一致(`prisma/` 子目录),否则打包后的 dist/main.js
-	// 与 preStart 都会找不到迁移脚本(0.17.0 首次发布失败的原因)。
-	assert.match(pack, /preStart:\s*"node prisma\/agent-session-migration\.cjs && node node_modules\/prisma\/build\/index\.js db push"/);
+	assert.match(pack, /preStart:/);
+	const preStartLine = pack
+		.split(/\r?\n/)
+		.find((line) => line.includes("preStart:"));
+	assert.ok(preStartLine, "preStart 行存在");
+	assert.doesNotMatch(preStartLine, /agent-session-migration/);
+	assert.match(preStartLine, /db push/);
 });
 
-test("安装脚本 initDatabase 先迁移后 push", () => {
+test("安装脚本 initDatabase 不再调用 Agent 迁移，但仍执行 db push", () => {
 	const install = read("scripts/install.cjs");
-	const initIndex = install.indexOf("initDatabase");
-	const migrationRef = install.indexOf("agent-session-migration");
-	assert.ok(initIndex > -1 && migrationRef > -1);
-	// 迁移调用应在 db push 前执行(出现顺序)
-	const migrationCall = install.indexOf("agent-session-migration", initIndex);
-	const pushCall = install.indexOf('"db"', initIndex);
-	assert.ok(migrationCall > initIndex, "initDatabase 内引用迁移");
-	assert.ok(pushCall > migrationCall, "push 在迁移之后");
+	const initIndex = install.indexOf("function initDatabase");
+	assert.ok(initIndex > -1, "initDatabase 存在");
+	const initBody = install.slice(initIndex, initIndex + 2000);
+	assert.doesNotMatch(initBody, /agent-session-migration/);
+	assert.match(initBody, /db push|"db",\s*"push"/);
 });
 
-test("pack-release 为 server staging 携带迁移脚本与 SQL,并做构件自检", () => {
-	const pack = read("scripts/pack-release.ts");
-	assert.match(pack, /agent-session-migration\.cjs/);
-	assert.match(pack, /20261008000000_agent_session_run_audit/);
-	// 落位到 `prisma/` 子目录(与源码布局一致),并断言构件自检被调用。
-	assert.match(pack, /join\(target, "prisma", "agent-session-migration\.cjs"\)/);
-	assert.match(pack, /join\(target, "prisma", "agent-session-migration\.sql"\)/);
-	assert.match(pack, /assertStagedMigrationResolvable\(target\)/);
+test("隔离集成测试库不再预先执行 Agent 迁移", () => {
+	const helper = read("scripts/integration-test-db.cjs");
+	assert.doesNotMatch(helper, /agent-session-migration/);
+	assert.match(helper, /db/);
+});
+
+test("历史迁移脚本与 SQL 仍保留（非破坏性退役）", () => {
+	assert.ok(
+		fs.existsSync(path.join(ROOT, "packages/server/prisma/agent-session-migration.cjs")),
+		"迁移脚本保留",
+	);
+	assert.ok(
+		fs.existsSync(
+			path.join(
+				ROOT,
+				"packages/server/prisma/migrations/20261008000000_agent_session_run_audit",
+			),
+		),
+		"历史迁移目录保留",
+	);
 });

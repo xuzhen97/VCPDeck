@@ -2,7 +2,7 @@
  * VCPDeck Git SSH 进程环境注入（Client 侧）。
  *
  * 权威边界见 docs/adr/0037 决策 3/4 与 docs/adr/0038：
- * - 只有 VCPDeck 启动的 Job/Terminal/Pi 及其子进程使用受管密钥；
+ * - 只有 VCPDeck 启动的 Job/Terminal 及其子进程使用受管密钥；
  * - 不修改用户或整机 SSH 配置，不把私钥正文放进环境变量；
  * - 不限制 Git 服务主机，但要求主机公钥校验可用：首次自动记录（TOFU），
  *   已记录主机公钥变化时由 OpenSSH 拒绝连接（`accept-new`），不得降级为 `no`；

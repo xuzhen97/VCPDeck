@@ -49,100 +49,14 @@ export type {
 } from "./git-ssh.js";
 
 // ── 远程 Pi 协议 ──
-export * from "./pi.js";
-export * from "./pi-extension.js";
-export * from "./pi-bundle.js";
 
 // ── 交互式终端协议 ──
 export * from "./terminal.js";
-export * from "./session-host.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
-import type { PiCapabilityStatus } from "./pi.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
 import type { P2pTunnelCapabilityStatus } from "./tunnel.js";
 import type { GitSshCapability } from "./git-ssh.js";
 // 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
-export type {
-	PaginatedPiResult,
-	PiClientBindingInfo,
-	PiCredentialCreateInput,
-	PiCredentialInfo,
-	PiCredentialUpdateInput,
-	PiProfileCreateInput,
-	PiProfileInfo,
-	PiProfileUpdateInput,
-	PiProviderCreateInput,
-	PiProviderCredentialInput,
-	PiProviderDiscoveryInput,
-	PiProviderDiscoveryResult,
-	PiProviderInfo,
-	PiProviderUpdateInput,
-	PiRuntimeStatus,
-} from "./pi-admin.js";
-export * from "./pi-admin.js";
-export type {
-	PiAgentState,
-	PiAttachmentDescriptor,
-	PiCapabilityStatus,
-	PiClientEvent,
-	PiConfigState,
-	PiCredentialLease,
-	PiCredentialLeaseEntry,
-	PiCredentialLeaseEntryV2,
-	PiCredentialLeaseV2,
-	PiCwdRef,
-	PiErrorCode,
-	PiEvent,
-	PiExtensionUiRequest,
-	PiImagePlaceholder,
-	PiMessage,
-	PiMessageContent,
-	PiModelRef,
-	PiPromptAccepted,
-	PiProjectKey,
-	PiRequest,
-	PiResponse,
-	PiRunSummary,
-	PiRuntimeAck,
-	PiRuntimeSpecMessage,
-	PiRuntimeSpecMessageV4,
-	PiRuntimeSpecV1,
-	PiRuntimeSpecV4,
-	PiSessionCreated,
-	PiSessionSnapshot,
-	PiSessionControlStatus,
-	PiRunInfo,
-	PiRunStatus,
-	PiRunKind,
-	PiAuditEventInfo,
-	PiAuditEventType,
-	PiAuditEventResult,
-	PiSessionOpenResult,
-	PiStateAck,
-	PiSessionContextPage,
-	PiSessionDetail,
-	PiSessionInfo,
-	PiSessionTreeNode,
-	PiStateReport,
-	PiTextContent,
-	PiThinkingLevel,
-	PiThinkingPlaceholder,
-	PiToolCallContent,
-	PiModelInfo,
-	PiProviderModelInfo,
-	PiProviderProtocol,
-	PiRuntimeProviderSpec,
-	PiRuntimeSpecMessageV3,
-	PiRuntimeSpecV3,
-	PiToolExecutionMode,
-} from "./pi.js";
-export {
-	isPiRunTerminal,
-	PI_SESSION_PROTOCOL_VERSION,
-	parsePiSessionSnapshot,
-	parsePiRunInfo,
-	parsePiAuditEventInfo,
-} from "./pi.js";
 export type {
 	ReleaseArchiveAvailableInfo,
 	ReleaseArchiveDeletingInfo,
@@ -178,35 +92,6 @@ export {
 	platformFromOs,
 	isReleaseArchiveAvailable,
 } from "./update.js";
-export {
-	PI_ERROR_CODES,
-	PI_RUNTIME_SPEC_PROTOCOL_VERSION,
-	PI_RUNTIME_SPEC_V1_PROTOCOL_VERSION,
-	PI_SESSION_JOB_PROTOCOL_VERSION,
-	PI_THINKING_LEVELS,
-	PI_TOOL_EXECUTION_MODES,
-	isPiAgentIdle,
-	isPiThinkingLevel,
-	isPiToolExecutionMode,
-	parsePiAgentState,
-	parsePiCredentialLeaseV2,
-	parsePiRuntimeAck,
-	parsePiRuntimeSpecMessage,
-	parsePiRuntimeSpecMessageV3,
-	parsePiRuntimeSpecMessageV4,
-	parsePiRuntimeSpecV1,
-	parsePiRuntimeSpecV3,
-	parsePiRuntimeSpecV4,
-	safePiErrorMessage,
-} from "./pi.js";
-export {
-	PiAdminProtocolError,
-	parsePiCredentialCreateInput,
-	parsePiCredentialUpdateInput,
-	parsePiProfileCreateInput,
-	parsePiProfileUpdateInput,
-	parsePiProviderDiscoveryInput,
-} from "./pi-admin.js";
 
 // ── Event names ──
 export const Events = {
@@ -222,12 +107,6 @@ export const Events = {
 	JOB_CANCEL_FAILED: "job:cancel-failed",
 	JOB_UPDATE: "job:update",
 	STATUS_REPORT: "status:report",
-	PI_REQUEST: "pi:request",
-	PI_RESPONSE: "pi:response",
-	PI_EVENT: "pi:event",
-	PI_STATE: "pi:state",
-	PI_RUNTIME_SPEC: "pi:runtime-spec",
-	PI_RUNTIME_ACK: "pi:runtime-ack",
 	TERMINAL_REQUEST: "terminal:request",
 	TERMINAL_RESPONSE: "terminal:response",
 	TERMINAL_OUTPUT: "terminal:output",
@@ -246,8 +125,6 @@ export const Events = {
 	TERMINAL_SESSION_STATE: "terminal:session-state",
 	TERMINAL_RESYNC_REQUIRED: "terminal:resync-required",
 	TERMINAL_ERROR: "terminal:error",
-	// 会话宿主（独立宿主）事件：与旧 TERMINAL_STATE 对账语义互不复用。
-	SESSION_HOST_STATE: "session-host:state",
 	UPDATE_REQUEST: "update:request",
 	UPDATE_READY: "update:ready",
 	UPDATE_FAILED: "update:failed",
@@ -275,8 +152,6 @@ export enum JobType {
 	FILE_MOVE = "file.move",
 	FILE_EXPORT = "file.export",
 	FILE_IMPORT = "file.import",
-	AGENT_RUN = "agent.run",
-	AGENT_SESSION = "agent.session",
 	FRP_CREATE = "frp.create",
 	FRP_DELETE = "frp.delete",
 	FRP_LIST = "frp.list",
@@ -304,7 +179,6 @@ import {
 	getClientInstallationCompliance,
 	parseMachineInstallation,
 	parseMachineRegister,
-	parsePiModelCatalogStatus,
 	parsePrivilegedCapabilityStatus,
 } from "./machine-register.js";
 import type {
@@ -320,7 +194,6 @@ export {
 	getClientInstallationCompliance,
 	parseMachineInstallation,
 	parseMachineRegister,
-	parsePiModelCatalogStatus,
 	parsePrivilegedCapabilityStatus,
 	type ClientInstallationCompliance,
 	type MachineInstallationStatus,
@@ -471,9 +344,8 @@ export interface ClientInfo {
 	totalMemMB: number;
 	clientVersion: string;
 	capabilities: string[];
-	/** 解析后的能力摘要（pi/terminal/frp/privileged/gitSsh；无探测/损坏时为 {}） */
+	/** 解析后的能力摘要（terminal/frp/privileged/gitSsh；无探测/损坏时为 {}） */
 	capabilityDetails: {
-		pi?: PiCapabilityStatus;
 		terminal?: TerminalCapabilityStatus;
 		frp?: FrpCapabilityStatus;
 		/** 可选：非交互特权能力摘要（旧 Client 缺省） */
@@ -1179,10 +1051,3 @@ export type {
 	TunnelSignal,
 	TunnelSdpDescription,
 } from "./tunnel.js";
-
-export {
-	PI_READ_ACTIONS,
-	PI_WORKER_ACTIONS,
-	isPiReadAction,
-	isPiWorkerAction,
-} from "./pi.js";

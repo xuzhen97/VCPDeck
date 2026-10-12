@@ -11,7 +11,7 @@ function job(): JobInfo {
 }
 
 describe("DashboardPage", () => {
-	it("展示 Pi 会话与空闲状态", async () => {
+	it("展示历史 Job 的原始类型与空闲状态", async () => {
 		const client = {
 			auth: { me: vi.fn(async () => ({ id: "i1", username: "user", displayName: "User", isAdmin: true, disabledAt: null, createdAt: "2026-08-08T00:00:00.000Z" })) },
 			clients: { list: vi.fn(async () => []) },
@@ -20,7 +20,7 @@ describe("DashboardPage", () => {
 			aliyundrive: { status: vi.fn(async () => ({ authorized: false, configured: false })) },
 		} as unknown as VcpDeckClient;
 		render(<SdkProvider client={client}><AuthProvider><DashboardPage /></AuthProvider></SdkProvider>);
-		expect(await screen.findByText("Pi 会话")).toBeVisible();
+		expect(await screen.findByText("agent.session")).toBeVisible();
 		expect(screen.getByText("空闲")).toBeVisible();
 	});
 });

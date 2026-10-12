@@ -1044,17 +1044,12 @@ Client
 127.0.0.1:5432
 ```
 
-## DSH
+## DSH（已退役）
 
-```text
-VCPDesk
-   ↓
-P2P Tunnel
-   ↓
-Remote Client
-   ↓
-DSH Local API
-```
+DSH 专用接入与反向代理已按
+[ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md) 退役；
+本文档其余部分描述的 P2P 隧道与远程桌面能力不受影响。
+
 
 ## 文件传输
 
@@ -1078,7 +1073,7 @@ flowchart TB
         SSH[SSH]
         HTTP[HTTP]
         FILES[Files]
-        DSH[DSH]
+        Retired[已退役：DSH 接入]
         AGENT[AI Agent]
     end
 
@@ -1094,7 +1089,7 @@ flowchart TB
     SSH --> TM
     HTTP --> TM
     FILES --> TM
-    DSH --> TM
+    Retired --> TM
     AGENT --> TM
 
     TM --> LAN

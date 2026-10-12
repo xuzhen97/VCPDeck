@@ -3,7 +3,7 @@
 - 状态：Rejected（2026-10-11：方向由 [ADR-0048](./0048-client-slimming-and-pi-feature-surface-on-server.md) 否决）
 - 日期：2026-09-20
 - 决策者：项目维护者
-- 关联：[`docs/design/remote-pi-control-plane.md`](../design/remote-pi-control-plane.md)、[`docs/design/remote-pi.md`](../design/remote-pi.md)、[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0008](./0008-pi-session-job-and-run-lifecycle.md)、[`docs/roadmap.md`](../roadmap.md)
+- 关联：[`docs/design/remote-pi-control-plane.md`](../../docs/archive/design/remote-pi-control-plane.md)、[`docs/design/remote-pi.md`](../../docs/archive/design/remote-pi.md)、[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0008](./0008-pi-session-job-and-run-lifecycle.md)、[`docs/roadmap.md`](../roadmap.md)
 
 ## 背景
 

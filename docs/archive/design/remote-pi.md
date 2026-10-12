@@ -1,0 +1,382 @@
+> **已归档（2026-10-12）**：本文描述的是已被 [ADR-0049](../../adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md)
+> 退役的 Pi 专用集成。内容仅作历史参考，**不是当前实现依据**；当前能力以代码、Shared 契约与 Current 文档为准。
+
+# 远程 Pi 会话设计
+
+> 状态：Current｜维护责任：Pi/Client 维护者｜最后核验：2026-10-09｜适用版本：当前 `main`，Pi SDK `1.1.0`
+
+本文描述当前已经实现的人机交互式远程 Pi Session：Browser 通过 Server 控制目标机器上的 Pi SDK Worker，实时查看回答并管理持续 Session。运行态和正文归属见 [ADR-0007](../../adr/0007-client-owned-interactive-runtime.md)，会话、每轮 Run 与会话操作审计的独立模型见 [ADR-0041](../../adr/0041-agent-session-run-and-audit-separation.md)。**Pi 的模型策略、Provider 凭据与 Client 绑定由 Server 集中管理，Client 使用 VCPDeck 专属隔离运行时**，见 [ADR-0029](../../adr/0029-server-managed-isolated-pi-runtime.md) 与 [`remote-pi-control-plane.md`](../../../docs/archive/design/remote-pi-control-plane.md)。协议字段与 parser 以 `packages/shared/src/pi.ts`、`packages/shared/src/pi-admin.ts` 为准。
+
+## 1. 范围与非目标
+
+当前能力包括：
+
+- 从 Files roots 选择受控项目目录；
+- 新建、打开、重命名、删除、fork、clone 和树内导航 Session；
+- Prompt、Steer、Follow-up、中止、Compact 和中止 Compact；
+- 查看历史、分支和工具调用投影；
+- 从本机用户原生 Pi **显式导入**旧会话（只读发现、逐条预览、单向幂等复制，源零污染）；
+- 查询并切换当前 Session 的模型和 thinking level；
+- 处理受支持的 Extension UI 对话；
+- 上传图片作为单次 Prompt 的临时附件；
+- Browser 刷新、Socket 重连和 Server 状态恢复后的重新附着与对账。
+
+当前不包括：
+
+- 无人值守的自主 Agent 任务；
+- 多机器任务编排、定时巡检或结果聚合；
+- 由 Server 下发 Pi settings 文件（配置始终以 RuntimeSpec 快照下发，不做文件同步）；
+- Skills、Prompt 模板或 Pi Package 的内容分发与**任意** Pi Package 安装：Bundle 当前含自有策略扩展与固定版本的标准社区扩展 `community.pi-simplify@0.2.3`（详见 [`remote-pi-control-plane.md`](../../../docs/archive/design/remote-pi-control-plane.md) §12），但选包仍由维护者在构建期完成，Client 不提供安装/更新/卸载入口，Skills/Prompt 模板/主题不随包加载；
+- 机群级 Pi 用量、资源版本或独立审计控制台；
+- 不可信代码沙箱或容器隔离；
+- Server 端对 Session 正文的永久镜像、全文检索或跨 Client 迁移。
+
+上述候选只能进入 [`roadmap.md`](../../roadmap.md)。**已实现的集中能力**：模型、thinking、Provider 凭据、Client→Profile 绑定，工具权限策略（默认拒绝的 `allow`/`confirm`/`deny` 与审批链路），以及受信 Resource Bundle 随 Client Release 发布与逐资源校验；受信 Resource Bundle 随 Client Release 发布与逐资源校验，以及旧会话的显式导入（源根固定只读、80 字符预览、单向复制只操作副本）；**仍是候选**：项目本地资源加载、Skills/Prompt 内容进 Bundle、UI renderer 复用、机群用量与审计。实施时必须完成安全、协议、数据和 ADR 评审，不能把阶段性草案当作已接受方案。
+
+## 2. 运行组件与职责
+
+```mermaid
+flowchart LR
+    Browser[Frontend Pi Panel] -->|REST 控制与历史读取| Server[Server PiController]
+    Server -->|SSE 实时投影| Browser
+    Server <-->|PI_REQUEST / PI_RESPONSE / PI_EVENT / PI_STATE| Client[Client Pi Supervisor]
+    Server -->|PI_RUNTIME_SPEC / PI_RUNTIME_ACK| Client
+    Server --> PiConfig[(PiProfile / PiCredential 密文 / ClientBinding)]
+    Client <-->|IPC| Worker[项目级 Pi Worker]
+    Worker --> SDK[Pi SDK 1.1.0]
+    SDK --> DataRoot[VCPDeck 数据根\nagentDir / Session JSONL / cache]
+    Worker --> Project[目标项目与工具]
+    NativePi[用户原生 Pi] -.->|互不共享| DataRoot
+```
+
+| 组件 | 当前职责 | 不负责 |
+| --- | --- | --- |
+| Frontend Agent 面板 | 在全局 `Agent` 模块的「对话」二级项内：先选择目标机器（必须在线且 Pi 能力可用，否则不可选并标出原因），再进行项目/Session 选择、三栏对话、SSE 消费、Owner 控件和 Extension 对话；配置面（Profile / Provider / Client 运行时）同属该模块 | 保存权威 Session、直接连接 Client |
+| SDK `pi` API | 封装 Pi REST；提供 session 级 SSE path | 管理 EventSource 重连和 Server 状态机 |
+| Server `PiController` | 认证后的 REST、Owner 校验、项目锁编排、请求/响应映射 | 运行 Pi SDK、保存完整正文 |
+| `PiSessionService` | `AgentSession` 会话控制面：Owner 校验、归档/恢复、执行模式覆盖、删除预约与审计列表 | 解析 Session JSONL |
+| `PiRunService` | `AgentRun` 每轮执行摘要、`session.activeRunId` CAS、连接 generation、项目锁和重连对账 | 解析 Session JSONL |
+| Request/Event Broker | 关联请求 ack、投影事件、SSE 扇出和结算检查 | 作为持久消息队列 |
+| Client Pi Supervisor | canonical cwd 校验、每项目 Worker、活动 Run、请求超时、PI_STATE 与 RuntimeSpec 接纳/换代 | 用户身份和持久业务状态 |
+| Server PiRuntimeService / Registry | 构建并下发 `PiRuntimeSpecV4`（含 `toolPolicy`、必填 `toolExecutionMode` 与可选 `requiredBundle`）与运行期凭据 lease，按 Client 上报的 Bundle 能力门控，维护 desired/active revision 与就绪门控 | 运行 Pi SDK、保存正文 |
+| Pi Worker | 动态加载 Pi SDK、读取/修改 Session、运行 Agent、投影 SDK 事件 | 向 Server 暴露本地路径或凭据 |
+| Pi Session JSONL | 对话、分支、模型、thinking 和工具结果的正文事实来源 | 表达 Server Owner 和控制面生命周期 |
+
+VCPDeck 直接嵌入 `@earendil-works/pi-coding-agent` SDK，并通过 `child_process.fork()` 隔离项目 Worker；当前不调用全局 `pi`、`pi.cmd` 或 `pi --mode rpc`。Client 构建为 CJS，而 Pi SDK 为 ESM-only，因此 Worker 相关模块在运行时动态 import SDK。
+
+Worker 只使用 VCPDeck 自己的数据根：`agentDir`、Session 目录、settings（纯内存）与凭据（内存注入）都不来自用户原生 Pi；唯一共享区域是用户明确选择的项目 cwd。
+
+## 3. 运行要求与能力探测
+
+Client 注册时安全上报 `agent.pi` capabilityDetails。探测顺序为：
+
+1. Node.js 至少 `22.19.0`；
+2. Bash 可用；Windows 按 Git Bash、PATH 顺序探测，其他平台从 PATH 探测；
+3. VCPDeck Pi 数据根可写；
+4. SDK probe Worker 可以启动并回报 SDK 版本；
+5. 上报 `sdkVersion`、`nodeVersion`、安全 `shellKind`、`piSessionProtocolVersion`、`runtimeSpecProtocolVersion` 与 `configMode: "server-authoritative"`。
+
+任一项失败只禁用 Pi，不应影响 exec、Files、Terminal 或 FRP。能力摘要不能包含 Bash 路径、agentDir、API key、模型凭据或环境变量。
+
+缺 `runtimeSpecProtocolVersion` / `configMode` 视为「旧 Client，不支持隔离运行时」，Server 必须判定 Pi 不可用。**模型可用性不再由目标机器已认证模型决定**：是否就绪由 Server 下发的 RuntimeSpec 与运行期凭据共同决定。
+
+当前 Client 锁定：
+
+```text
+@earendil-works/pi-agent-core@1.1.0
+@earendil-works/pi-coding-agent@1.1.0
+```
+
+Client 不再读取目标机器用户 Pi 的 agentDir、模型凭据、全局设置或受信资源；SDK 版本的事实来源是运行时 `VERSION` 导出（禁止硬编码版本字符串）。Pi SDK 升级不是普通依赖刷新，必须按第 12 节执行兼容验证。
+
+图片链路（1.1.0 起）改由 SDK 的 Photon WASM 管线处理，因此 `@silvia-odwyer/photon-node` 必须作为**外部保留依赖**同时出现在 `EXTERNAL_DEPS.client` 与 SDK 单文件打包的 `external` 中；内联它会因 wasm 定位失效而让所有图片被静默替换成省略提示（回归门禁：`scripts/pi-image-pipeline.test.ts`）。
+
+## 4. 项目目录与 Worker
+
+Browser 只提交 Files roots 产生的：
+
+```ts
+{ rootDir, relativePath }
+```
+
+Client 执行以下检查：
+
+- root 与目标目录都经过 `realpath()`；
+- root 必须属于当前允许 roots；
+- 目标必须仍位于 canonical root 内，拒绝 traversal 和 symlink 越界；
+- 目标必须是可访问目录；
+- Windows canonical 比较大小写不敏感。
+
+Client 使用进程级随机 secret 计算 `HMAC-SHA-256(canonical cwd)` 作为 `projectKey`。它只用于本次 Client 进程内的项目互斥和 Server 内存对账，不包含 cwd，不写 Job/日志/数据库；Client 重启后会变化。
+
+Session 目录名另用**安装级持久 secret**（`<dataRoot>/pi/install-secret`，0600）派生同构的 64 位不透明 namespace，因此 Session 在 Client 重启与 Release 更新后仍可定位。两者共用同一派生函数、不同 secret。
+
+Supervisor 按 canonical 项目维护 Worker。相同项目复用同一 Worker，不同项目可以并行；同一项目同一时刻只允许一个活动 Run。Worker 和 AgentSession 空闲约 10 分钟后会优雅关闭，Session JSONL 保留，后续请求可重新创建 Worker 并打开 Session。
+
+## 5. 会话、Run 与控制面
+
+### 5.1 身份模型
+
+- 一个远程 Pi Session 对应一个 `AgentSession` 实体，标识符仍是 `sessionId`；不再对应 Job，也不再要求 `jobId === sessionId`；
+- `AgentSession` 保存固定 Owner、会话控制态（`available` / `archived`）、可选执行模式覆盖、当前未结算 Run 指针与最小安全元数据；
+- 每次 Prompt 创建一个 `AgentRun`（独立 UUID `runId`），保存发起者、可核实的执行时间、状态与安全结果摘要；
+- `runId` 隔离连续 Prompt、迟到事件、计时器、控制请求和项目锁；
+- 普通 Job 与 Agent 完全分离：新 Agent 操作不创建/更新 Job，也不出现在 Job 列表、统计与通用任务控制中；旧 `agent.session` / `agent.run` Job 行仅作为只读历史保留，不参与当前 Prompt 模型。
+
+新建 Session 的操作者成为 Owner。打开远程已有但数据库尚无 `AgentSession` 的 Session 时，当前操作者经远端校验后幂等补建同 `sessionId` 的会话并成为 Owner。其他有效身份可作为只读 Observer 查看当前可访问的 Session 历史和事件，但不能执行控制动作。
+
+Owner 才能 Prompt、Steer、Follow-up、Abort、Compact、回答 Extension UI、切换模型/thinking、归档/恢复会话、修改 Session、修改执行模式与删除。会话没有“完成”动作。当前系统仍是 ADR-0009 的单信任域；Owner 是会话控制约束，不是资源级保密或多租户隔离。
+
+### 5.2 会话控制态与 Run 状态
+
+会话控制态（`AgentSession.status`）：
+
+```mermaid
+stateDiagram-v2
+    [*] --> available: new/open/import
+    available --> archived: Owner 归档
+    archived --> available: Owner 恢复或新 Prompt 重新激活
+    available --> deleted: 删除已确认
+    archived --> deleted: 删除已确认
+```
+
+单轮 Run 状态（`AgentRun.status`）：
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: Server 已持久化 runId
+    pending --> running: Client 接受本轮
+    pending --> failed: Client 拒绝/不可恢复
+    running --> waiting_input: 受支持的 Extension UI
+    waiting_input --> running: 回答/取消/超时
+    running --> succeeded: 权威执行完成
+    running --> failed: Worker/协议错误
+    running --> aborted: 中止已确认
+    pending --> disconnected: Client 断线
+    running --> disconnected: Client 断线
+    waiting_input --> disconnected: Client 断线
+    disconnected --> running: matching PI_STATE
+    disconnected --> waiting_input: matching PI_STATE
+    disconnected --> succeeded: 远端已结算
+    disconnected --> failed: 不可恢复（如 PI_CLIENT_RESTARTED）
+```
+
+语义：
+
+- 会话没有 done/error/cancelled 生命周期；失败、中止只属于某一轮 Run，终态不再重新激活；某轮失败不使会话永久失效，Owner 可直接发起下一轮；
+- `pending`：Server 已持久化 runId 并指向 `activeRunId`，正在派发或等待 Client 接受；
+- `running`：当前 Run 正在生成、调用工具或压缩；
+- `waiting_input`：受支持的 Extension UI 正阻塞当前 Run；
+- `succeeded` / `failed` / `aborted`：Run 终态，携带安全 `errorCode`；结算时清空 `activeRunId`；
+- `disconnected`：连接状态不确定，不是终态；
+- `archived`：只整理会话入口，不结算当前 Run、不删除远端内容；归档会话在收到新 Prompt 时原子恢复为 `available` 并写入 `restored` 审计事件。
+
+活动转换以 `sessionId + runId + 允许源状态` 做数据库条件更新（`activeRunId` CAS）。旧 Run 的事件、settlement timer 或重连报告不能覆盖新 Run。Agent 执行不占普通 Job 的三项并发槽。
+
+## 6. 请求与事件链路
+
+一次 Prompt：
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as Server
+    participant C as Client Supervisor
+    participant W as Pi Worker/SDK
+
+    B->>S: POST prompt + submissionId + cwdRef
+    S->>S: Owner/ready/project lock/CAS，创建 AgentRun 并指向 activeRunId
+    S-->>B: SSE run_created
+    S->>C: PI_REQUEST agent.prompt
+    C->>W: IPC request
+    W-->>C: accepted + projected events
+    C-->>S: PI_RESPONSE / PI_EVENT
+    S-->>B: REST accepted / SSE events
+    W-->>C: prompt_done + agent_settled
+    S->>W: grace 后查询 agent.state
+    S->>S: matching run CAS → succeeded/aborted
+```
+
+规则：
+
+- REST 承担有明确结果的控制和历史读取；
+- `/client` Socket.IO 承担 Server ↔ Client 的 `PI_REQUEST/PI_RESPONSE/PI_EVENT/PI_STATE`；
+- SSE 是 session 级实时投影，每 30 秒发送心跳，不是持久队列；
+- Worker 的 `agent.state` 在某项目已有活动 run 时必须报告非空闲，即使 wrapper 正在创建、附件正在准备，或 SDK 尚未把 `prompting` 置为 true；不带 `runId` 的 CLI 状态轮询与带当前 `runId` 的 Server `open`/settlement 查询均遵守此规则。旧 run 或其它会话仍按严格身份校验，不能据此读取/控制当前 run。否则 Server `open` 可把仍在进行的 Job 错误结算为 `idle`，放行下一条发送，但 Client 项目锁仍正确持有，返回 `PI_PROJECT_BUSY`；CLI 则可能提前返回空回复；
+- Server 先发布 `run_created(submissionId, runId)` 再派发，避免首个 Agent 事件早于 Browser 建立 run 关联；
+- 请求、事件与会话状态报文不再携带 `jobId`；parse 失败、额外字段或 `sessionId`/`runId` 不匹配一律拒绝。
+- `prompt_done` 或 `agent_settled` 触发 30 秒可取消 grace，之后重新查询权威 `agent.state`；只有确实空闲才把该 Run 结算为 `succeeded`，并清空会话 `activeRunId`；
+- 结算携带安全 `errorCode`：Client 未接受报 `failed`，中止已确认报 `aborted`，二者都不重新激活；
+- 网络超时不代表 Prompt 未执行。Server 会尽量查询 state，调用方不能自动盲重试创建新 Run；
+- SSE 断线后应重新读取 Session detail/context、会话快照（含 `activeRun`）和 Agent state，不能期待事件补传。
+
+Shared 当前定义的动作组包括：
+
+- capability/models/project；
+- Session list/get/context/entryContent/new/rename/delete/fork/clone/navigate；
+- Agent state/prompt/steer/followUp/abort/compact/abortCompact；
+- model/thinking 切换；
+- Extension response。
+
+Shared 和 Worker 还定义/实现了 `agent.commands`、`agent.stats`，但当前 Server Controller、SDK 和 Frontend 没有对应外部入口，不能将其声明为当前用户能力。
+
+所有 Socket payload 必须经过 Shared 的 `parsePiRequest()`、`parsePiResponse()`、`parsePiEvent()` 或 `parsePiStateReport()`。未知 action、event、额外字段、错误码或不匹配的 `sessionId/runId` 必须拒绝。控制端点返回的会话快照与 Run 摘要经 `parsePiSessionSnapshot()` / `parsePiRunInfo()` 校验。
+
+## 7. Session 内容与 Pi SDK
+
+Session JSONL 位于 VCPDeck 数据根的 `<dataRoot>/pi/sessions/<namespace>/`，由 Pi SDK `SessionManager` 管理，所有读写都显式绑定该目录（不依赖 SDK 默认目录）。其树结构通过 `id/parentId` 表达分支，VCPDeck 不自行定义另一种正文格式。
+
+当前行为：
+
+- Session 列表和历史由 Client 读取并投影；
+- context 使用 cursor 分页，不一次加载无限历史；
+- tree 投影压缩单链并限制深度；
+- fork 从指定历史消息创建新 Session；
+- clone 复制当前活动分支；
+- navigate 在当前 Session 树内切换 leaf；
+- 模型和 thinking 切换由 Pi SDK写入 Session 历史；
+- Compact 由 Pi SDK完成，Server 只控制生命周期和事件；
+- Worker 创建/替换 Session 后重新绑定该 Session 的事件与 Extension UI。
+
+Server 不应直接解析远程 JSONL 或依赖上游未稳定的内部字段。Pi SDK 升级若改变 Session 迁移、Runtime API、事件或资源加载语义，必须先在 Client 兼容层中吸收。
+
+## 8. Extension UI 与 Project Trust
+
+当前端到端协议只接受四类交互式 UI：
+
+```text
+select / confirm / input / editor
+```
+
+它们会进入 `waiting_input`。Client 同时展示一个阻塞请求，其余在 Worker 内存排队；回答、取消或超时后依次激活。未显式指定时，阻塞对话默认 30 分钟超时。
+
+Client 的 Pi UI 适配器还会生成 `notify/setStatus/setWidget/setTitle/set_editor_text` 等非阻塞 `extension_request`，但当前 Server 边界的 `parsePiEvent()` 使用交互式 allowlist，会拒绝并丢弃这些事件；它们不属于当前端到端保证。`custom` UI 返回 `undefined`，其本地“不支持”通知同样不保证抵达 Browser。这是协议投影偏移，修复时必须同步 Shared parser、Frontend 语义和测试，不能仅放宽一端。
+
+项目本地资源的当前边界：
+
+- **项目本地资源一律不加载**：`.pi/extensions`、项目 settings、`.agents/skills` 等不会进入 VCPDeck 会话；
+- 不再存在项目信任交互（`ProjectTrustStore` 已移除），也不读写目标机器用户 Pi 的 trust store；
+- 资源来源只允许 VCPDeck 自己控制的位置：受信 Resource Bundle 随 Client Release 发布在版本目录根（`apps/<version>/pi-resources/`），Client 按自身模块位置定位并逐资源校验 `sha256`，校验失败即不上报 Bundle 能力且不加载任何资源；
+- 项目 cwd 仍是双方唯一共享区域：VCPDeck Pi 与用户原生 Pi 可以同时修改项目源码，这不属于状态污染。
+
+工具策略当前**默认拒绝**：`approval` / `auto` 下 `allow ∪ confirm` 作为 SDK 原生工具白名单下发，`deny` 进入排除面，未出现在任何桶的工具不可用；Profile 级执行模式决定策略如何被执行（[ADR-0033](../../adr/0033-pi-tool-approval-mode.md)）：`approval` 下 `confirm` 由随 Bundle 发布的扩展拦截 `tool_call`，经既有 Extension UI 链路**每次调用**审批，拒绝/取消/超时一律判定为拒绝（`PI_TOOL_POLICY_REJECTED`）且会话继续；`auto` 下 `confirm` 直接执行但 `deny`/未列出仍阻塞；`yolo` 跳过三桶判定，暴露当前 Runtime 已注册/加载的内置工具全集（不加载未启用资源、不绕过 Runtime 或 OS 权限）。策略与模式经进程内 host bridge（v2）传递，不落盘、不进环境变量，桥接缺失/版本不符/模式非法时阻塞全部工具调用；执行模式随 Profile revision 换代，一个 Run 内不热切换。Pi 工具与 shell 仍以 Client 运行账户权限执行——**策略不是 OS 沙箱**，高风险任务必须在真实隔离边界中运行。
+
+## 9. 图片与实时投影
+
+Prompt 图片使用临时 Storage 对象：
+
+- 每次最多 10 张；
+- 单张最多 10 MiB；
+- 总量最多 100 MiB；
+- 允许 PNG、JPEG、GIF、WebP；
+- 上传引用 TTL 为 15 分钟；
+- Client 下载后校验 SHA-256、MIME 和文件魔数，再转换给 SDK；
+- 拒绝、失败或过期时按临时附件生命周期清理。
+
+Pi 原生事件先在 Client 裁剪：
+
+- 丢弃不需要的 turn 和工具流式更新；
+- message update 只投影受限文本，而不是完整 partial 对象；
+- thinking 单次文本最多 16 KiB；
+- 单个投影事件 JSON 最大 256 KiB，超过时退化为 `history_changed`；
+- 未识别事件不会透传原始对象，只提示历史变化。
+
+SSE 实时内容只供当前订阅者使用。Browser 重新打开 Session 时从远程 JSONL 的安全投影恢复历史，不把短暂 thinking 流当作永久记录。
+
+thinking 正文的两条路径：
+
+1. **实时**：`thinking_progress`（`start`/`delta`/`end`）经 SSE 流式下发（单次 ≤ 16 KiB），前端在当前回合内默认展开实时显示；`end` 后折叠为「已思考 N 秒」摘要（正文保留在本轮块中，不写入任何持久化）。
+2. **历史**：`context` 投影只包含 deferred thinking 占位（`text` 不填充、正文不进入分页），正文只在用户展开该思考块时经 `session.entryContent` 按需取回一次（与历史图片同一寻址/惰性模式）；未注入取数实现或取数失败时显示不可用提示，不伪造内容。
+
+无论哪条路径，thinking 正文都不落盘到 Server、不进 Job payload/result、不进日志与审计。
+
+## 10. 断线、重启与删除
+
+### Browser/SSE 断线
+
+只取消订阅，不停止 Worker 或 Run。重连后重新 open、读取 context/state 并建立新 SSE；期间实时增量可能丢失，但远程已持久化的 Session 历史仍可读取。
+
+### Client Socket 重连
+
+每个新 Socket generation 注册后必须重新发送 `PI_STATE`。Server 完成数据库状态、项目锁和活动 Run 对账前，该 Client 的 Pi 请求返回 `PI_STATE_PENDING`。匹配的 Run 恢复 `running/waiting_input`；Server 已关闭的 Run 返回 `closedRunIds`，Client 必须中止并再次报告。
+
+### Client/Worker 重启
+
+Worker 异常退出会以安全 `errorCode` 把当前 Run 结算为 `failed`（如 `PI_WORKER_EXITED`）。Client 重启后如果数据库中的未结算 Run 不在权威报告中，Server 将其置为 `failed / PI_CLIENT_RESTARTED` 并清空 `activeRunId`；不能伪装恢复。Session JSONL 仍在磁盘时，会话本身仍为 `available`，Owner 可直接发起下一轮 Prompt。
+
+### Server 重启
+
+SQLite 中的 `AgentSession` / `AgentRun` / `AgentAuditEvent` 保留，但 Broker、SSE 和项目锁是内存态。Client 重新连接并报告状态后重建运行态；在完成 generation 对账前不接受远程 Pi 控制。
+
+### 审计覆盖
+
+会话控制面操作写入 `AgentAuditEvent`：创建、导入、重命名、归档、恢复、删除（`requested` → `ok`/`failed`）与执行模式变更。
+导入逐条结果携带可选 `sessionId`（Client 由副本文件路径推导，与 `session.get/clone` 同一约定）：Server 对 `imported` 与 `alreadyImported` 且带该字段的条目做幂等登记（`ensureSession` 只在真实创建时写 `imported` 审计），`rejected` 与未上报字段的旧 Client 不登记。
+
+### 归档与删除
+
+归档只由 Owner 触发，只把会话控制态置为 `archived`：不结算当前 Run、不删除远端对话；新 Prompt 会自动恢复并记录 `restored` 审计事件。
+
+删除只有 Owner 可执行，且会话不得有未结算 Run。Server 先以 CAS 写入带 delete token 的 reservation，再请求 Client 删除远程 Session；确认不存在后清空 reservation。明确失败且远程 Session 仍存在时可精确回滚；timeout/断线表示结果不确定，reservation 保留并允许幂等重试，不能直接宣称删除成功。删除不级联删除 `AgentRun` 与审计事件，审计保留稳定 `sessionId`。
+
+
+## 11. 数据、安全与运维
+
+### 数据权威
+
+| 数据 | 权威位置 | Server 持久化 |
+| --- | --- | --- |
+| Session 对话、工具结果、分支、模型和 thinking 历史 | VCPDeck 数据根 `<dataRoot>/pi/sessions/` | 否 |
+| Pi 模型策略、thinking、Client→Profile 绑定 | Server SQLite | 是 |
+| Provider 凭据 | Server SQLite（密文 + 安全元数据） | 是（密文） |
+| 运行期凭据明文 | Server 解密窗口 + Client Worker 内存 | 否 |
+| VCPDeck settings / 缓存 / 临时文件 | VCPDeck 数据根 `<dataRoot>/pi/` | 否 |
+| Worker、活动 Agent、Extension 队列 | Client 内存 | 否 |
+| Owner、会话控制态、执行模式覆盖、当前未结算 runId 和稳定错误 | Server SQLite | 是 |
+| 每轮 Run 摘要（发起者、执行时间、状态、安全错误码）与会话操作审计 | Server SQLite | 是 |
+| projectKey、cwdRef 和真实 cwd | Client/Server 临时内存 | 不写数据库 |
+| 实时投影和 SSE subscriber | Client/Server/Browser 内存 | 否 |
+| 临时图片 | Storage Provider + File 元数据 | TTL 内保存 |
+
+禁止将 prompt、回答、thinking、Tool 参数/结果、Extension 输入、图片正文、真实 cwd、projectKey、签名 URL、Provider 原始错误或凭据写入 Job、`AgentSession` / `AgentRun` / `AgentAuditEvent`、普通日志或遥测。Server 只持久化 allowlist 中的稳定错误码和安全消息；本次不引入逐工具审计。
+
+### 权限边界
+
+Pi 工具、Extensions、Skills、项目构建和 shell 都继承 Client OS 运行账户权限。Project Trust 只控制是否加载项目资源，不限制已启动 Agent 的工具行为。高风险、非完全可信或无人值守任务必须在 OS、容器、VM 或其他真实隔离边界中运行；当前远程 Pi 不提供这种隔离。
+
+### 备份与容量
+
+- SQLite 备份不包含 Session 正文与凭据明文（凭据只有密文，且根密钥在 Server 进程外部）；
+- 需要恢复 Pi 历史时，必须在每台目标机器备份 VCPDeck 数据根（`VCPDECK_CLIENT_DATA_DIR`）下的 `pi/`，并按敏感数据加密；
+- 删除、清理或迁移 Pi Session 前应确认目标机器备份和 Pi SDK 版本；
+- Server 无法仅凭 Run 摘要重建丢失的 JSONL；删除会话后审计仍可查询，但不包含正文。
+- 长历史通过分页读取，但模型上下文、工具输出和 Session 文件容量仍由目标机器及 Pi SDK管理。
+
+## 12. 兼容、变更与测试门禁
+
+`PI_SESSION_PROTOCOL_VERSION` 为 `4`，`PI_RUNTIME_SPEC_PROTOCOL_VERSION` 为 `4`。Pi 会话协议要求 Server 与 Client 精确相等；不匹配时 Server 返回 `PI_CLIENT_UNSUPPORTED`；RuntimeSpec 只接受 Client 能真正施加的字段，未知字段或不支持的 `schemaVersion` 一律 fail closed（[ADR-0029](../../adr/0029-server-managed-isolated-pi-runtime.md) 决策 10）；Server 只向上报 `runtimeSpecProtocolVersion=4` 的 Client 下发 Spec，v3 及更旧一律不下发（Pi 明确不可用，不回退本机 Pi）。Frontend 应与 Server 同版本部署，Pi SDK 两个包保持同一锁定版本。
+
+**部署顺序硬要求**：新 Client 的 `PI_STATE` 会携带 `runtimeRevision` / `configState`，导入响应也会携带 `sessionId`，旧 Server 的严格 parser 会拒绝这两类消息，因此必须 **Server 先行**升级，禁止新 Client 配旧 Server。
+
+升级 Pi SDK 或修改本专题涉及的协议时至少验证：
+
+- capability 探测、Node/Bash/数据根不可写的降级，以及 `runtimeSpecProtocolVersion`/`configMode` 缺失时的禁用；
+- **native Pi 零污染门禁**：预置用户 `~/.pi`（settings/models/credentials/Session/可执行 Extension）后跑 capability、Session 新建与列表、Prompt、Client 重启，整个目录递归清单与内容 hash 必须 0 created / 0 modified / 0 deleted，且 native-only Session 不可见、哨兵 Extension 未执行；
+- Shared request/response/event/state parser 对未知和超限输入的拒绝；
+- 会话不再创建 Job、连续 Prompt 的不同 runId、`activeRunId` CAS 与所有迟到事件竞态；
+- Prompt 接受、同步失败、异步失败、Steer、Follow-up、Abort、Compact；
+- Session list/open/new/rename/delete/fork/clone/navigate 和 JSONL 迁移；
+- Owner/Observer、归档/恢复（含新 Prompt 自动恢复）、失败后继续、项目锁和 symlink 越界；
+- 四类交互式 Extension 队列、超时和 Project Trust，以及非阻塞 UI 当前被边界拒绝的兼容行为；
+- 图片数量、大小、MIME、SHA、魔数、TTL 和清理；
+- Event 投影大小、thinking 裁剪、SSE 刷新和历史恢复；
+- Browser 断线、Socket 重连、Server 重启、Worker 崩溃和 Client 重启；
+- 会话操作审计的查询与分页，且审计/`AgentRun` 中不出现正文与敏感字段；
+- 旧 `agent.session` Job 行不再参与 Pi 控制，且普通 Job 列表/统计不含 Agent；
+- Agent migration 在旧模型遗留活跃 Run 或删除预约时 fail closed；
+- RuntimeSpec 严格解析（未知字段/schemaVersion/超限）、revision 换代（活跃 Run drain）、Server 门控（未就绪不下发请求）、ACL 级凭据不回显；
+- 模型 scope 只来自 Spec 的 allowedModels ∩ 凭据可用集合，历史模型越界时切换而不扩大范围；
+- Windows/Linux 真实目标机器和至少一个真实模型 smoke；
+- SQLite、日志和错误中没有 Pi 正文、路径、凭据或签名 URL。
+
+任何新增自主任务、工具策略、资源分发、Server 正文镜像、并行 Run、Owner 转移或沙箱边界都超出当前专题，必须先评估新的领域模型、协议版本、安全授权和 ADR。

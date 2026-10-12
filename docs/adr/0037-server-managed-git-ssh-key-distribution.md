@@ -1,6 +1,6 @@
 # ADR-0037：Server 集中管理共享 Git SSH 密钥并向 Client 分发
 
-- 状态：Accepted
+- 状态：Accepted（Pi 消费路径由 ADR-0049 退役；共享 Git SSH 密钥与 Job／Terminal 规则保留）
 - 日期：2026-09-30
 - 决策者：项目维护者
 - 关联：[ADR-0009](./0009-trusted-operator-security-domain.md)、[ADR-0023](./0023-linux-system-client-and-root-equivalent-account.md)、[ADR-0027](./0027-system-level-client-installation-and-clean-migration.md)、[`docs/security.md`](../security.md)

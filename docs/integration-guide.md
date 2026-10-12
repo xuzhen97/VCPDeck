@@ -29,7 +29,7 @@
 | Release 上传与自更新 | 已实现 | 已实现更新配合 | 已实现审计页 | 已实现双平台上传 | CLI 总 Skill 中已实现该功能章节 | 上传后 Server 先自更新，再逐台更新在线 Client |
 | `agent.run` | 仅有类型占位 | 未实现 | 未实现 | 未实现 | 未实现 | 不得调用 |
 
-当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘、发布审计和账号设置。VCPDeck Skill 是 CLI 的统一能力入口；机器、Job、文件、Terminal、Pi、FRP 映射、Storage 状态与 Release 等章节均以 CLI 当前 help/源码为准。
+当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘、发布审计和账号设置。VCPDeck Skill 是 CLI 的统一能力入口；机器、Job、文件、Terminal、FRP 映射、Storage 状态与 Release 等章节均以 CLI 当前 help/源码为准。
 
 > **安全提示：** 当前任意已认证身份都等价于远程机器操作员，可执行 shell、操作文件并修改 Storage/FRP；Job 也不按身份隔离。只向可信操作者发放账号和 Token。
 

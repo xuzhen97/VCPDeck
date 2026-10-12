@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
 	getClientInstallationCompliance,
-	parsePiCapabilityStatus,
 	parseMachineInstallation,
 	parseMachineRegister,
 	parsePrivilegedCapabilityStatus,
@@ -36,145 +35,16 @@ function validRegister(overrides: Partial<MachineRegister> = {}): MachineRegiste
 }
 
 describe("parseMachineRegister", () => {
-	it("pi 含未知字段时拒绝", () => {
+	it("拒绝已退役的 capabilityDetails.pi 字段", () => {
 		expect(() =>
 			parseMachineRegister(
 				validRegister({
 					capabilityDetails: {
-						pi: { available: true, sdkVersion: "0.86.0", surprise: 1 } as never,
-					},
+						pi: { available: true, sdkVersion: "0.86.0" },
+					} as never,
 				}),
 			),
 		).toThrow(/未知字段/);
-	});
-
-	it("旧 Client 缺 runtimeSpecProtocolVersion/configMode 时仍解析通过", () => {
-		const parsed = parseMachineRegister(
-			validRegister({
-				capabilityDetails: {
-					pi: {
-						available: true,
-						sdkVersion: "0.84.0",
-						nodeVersion: "22.19.0",
-						shellKind: "git-bash",
-					},
-				},
-			}),
-		);
-		expect(parsed.capabilityDetails?.pi).toEqual({
-			available: true,
-			sdkVersion: "0.84.0",
-			nodeVersion: "22.19.0",
-			shellKind: "git-bash",
-		});
-	});
-
-	it("新 Client 的隔离模式字段被解析", () => {
-		const parsed = parseMachineRegister(
-			validRegister({
-				capabilityDetails: {
-					pi: {
-						available: true,
-						sdkVersion: "0.86.0",
-						nodeVersion: "22.19.0",
-						shellKind: "git-bash",
-						sessionJobProtocolVersion: 1,
-						runtimeSpecProtocolVersion: 1,
-						configMode: "server-authoritative",
-					},
-				},
-			}),
-		);
-		expect(parsed.capabilityDetails?.pi).toMatchObject({
-			runtimeSpecProtocolVersion: 1,
-			configMode: "server-authoritative",
-		});
-	});
-
-	it("解析内置模型目录摘要（仅 Provider ID）", () => {
-		const parsed = parseMachineRegister(
-			validRegister({
-				capabilityDetails: {
-					pi: {
-						available: true,
-						sdkVersion: "0.86.0",
-						nodeVersion: "22.19.0",
-						shellKind: "git-bash",
-						modelCatalog: {
-							sdkVersion: "0.86.0",
-							providerIds: ["anthropic", "openai"],
-						},
-					},
-				},
-			}),
-		);
-		expect(parsed.capabilityDetails?.pi).toMatchObject({
-			modelCatalog: { sdkVersion: "0.86.0", providerIds: ["anthropic", "openai"] },
-		});
-	});
-
-	it("拒绝非法模型目录摘要", () => {
-		const withPi = (pi: unknown) =>
-			validRegister({ capabilityDetails: { pi: pi as never } });
-		const base = {
-			available: true,
-			sdkVersion: "0.86.0",
-			nodeVersion: "22.19.0",
-			shellKind: "system",
-		};
-		expect(() =>
-			parseMachineRegister(
-				withPi({
-					...base,
-					modelCatalog: { sdkVersion: "0.86.0", providerIds: ["a", "a"] },
-				}),
-			),
-		).toThrow(/重复/);
-		expect(() =>
-			parseMachineRegister(
-				withPi({ ...base, modelCatalog: { sdkVersion: "0.86.0", providerIds: [] } }),
-			),
-		).toThrow(/providerIds/);
-		expect(() =>
-			parseMachineRegister(
-				withPi({
-					...base,
-					modelCatalog: { sdkVersion: "0.86.0", providerIds: ["a"], models: [] },
-				}),
-			),
-		).toThrow(/modelCatalog/);
-	});
-
-	it("非法 shellKind / configMode / 协议版本被拒绝", () => {
-		const withPi = (pi: unknown) =>
-			validRegister({ capabilityDetails: { pi: pi as never } });
-		expect(() =>
-			parseMachineRegister(
-				withPi({ available: true, sdkVersion: "1", nodeVersion: "1", shellKind: "weird" }),
-			),
-		).toThrow(/shellKind/);
-		expect(() =>
-			parseMachineRegister(
-				withPi({
-					available: true,
-					sdkVersion: "1",
-					nodeVersion: "1",
-					shellKind: "system",
-					configMode: "local",
-				}),
-			),
-		).toThrow(/configMode/);
-		expect(() =>
-			parseMachineRegister(
-				withPi({
-					available: true,
-					sdkVersion: "1",
-					nodeVersion: "1",
-					shellKind: "system",
-					runtimeSpecProtocolVersion: 0,
-				}),
-			),
-		).toThrow(/runtimeSpecProtocolVersion/);
 	});
 
 	it("接受含 privileged + installation 的新 Client 注册", () => {
@@ -542,77 +412,5 @@ describe("parseMachineRegister gitSsh 能力（ADR-0037/0038）", () => {
 			}),
 		);
 		expect(parsed.capabilityDetails?.gitSsh).toBeUndefined();
-	});
-});
-
-describe("parsePiCapabilityStatus 的 bundle 能力", () => {
-	const base = {
-		available: true,
-		sdkVersion: "0.86.0",
-		nodeVersion: "22.19.0",
-		shellKind: "system",
-		sessionJobProtocolVersion: 1,
-		runtimeSpecProtocolVersion: 3,
-		configMode: "server-authoritative",
-	} as const;
-
-	it("接受合法 bundle 能力", () => {
-		const parsed = parsePiCapabilityStatus({
-			...base,
-			bundle: {
-				protocolVersion: 1,
-				bundleVersion: "0.11.0",
-				piSdkVersion: "0.86.0",
-				resourceIds: ["vcp.tool-policy"],
-			},
-		});
-		expect(parsed).toMatchObject({
-			bundle: {
-				protocolVersion: 1,
-				bundleVersion: "0.11.0",
-				piSdkVersion: "0.86.0",
-				resourceIds: ["vcp.tool-policy"],
-			},
-		});
-	});
-
-	it("缺失 bundle 视为未报告（无可用 Bundle）", () => {
-		const parsed = parsePiCapabilityStatus({ ...base });
-		expect(parsed.available).toBe(true);
-		if (!parsed.available) throw new Error("expected available capability");
-		expect(parsed.bundle).toBeUndefined();
-	});
-
-	it("bundle 含未知字段时拒绝", () => {
-		expect(() =>
-			parsePiCapabilityStatus({
-				...base,
-				bundle: {
-					protocolVersion: 1,
-					bundleVersion: "0.11.0",
-					piSdkVersion: "0.86.0",
-					resourceIds: ["vcp.tool-policy"],
-					paths: ["/etc/passwd"],
-				},
-			}),
-		).toThrow(/未知字段/);
-	});
-
-	it("resourceIds 为空或重复时拒绝", () => {
-		const bundle = {
-			protocolVersion: 1,
-			bundleVersion: "0.11.0",
-			piSdkVersion: "0.86.0",
-			resourceIds: [] as string[],
-		};
-		expect(() => parsePiCapabilityStatus({ ...base, bundle })).toThrow(
-			/resourceIds/,
-		);
-		expect(() =>
-			parsePiCapabilityStatus({
-				...base,
-				bundle: { ...bundle, resourceIds: ["a", "a"] },
-			}),
-		).toThrow(/重复/);
 	});
 });

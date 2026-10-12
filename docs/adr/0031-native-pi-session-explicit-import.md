@@ -1,9 +1,9 @@
 # ADR-0031：用户原生 Pi Session 的显式导入（首次受限读取）
 
-- 状态：Proposed
+- 状态：Rejected（专用集成由 ADR-0049 退役，不再推进本提案）
 - 日期：2026-09-23
 - 决策者：项目维护者
-- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)（决策 2/3 的唯一例外）、[`docs/design/remote-pi-control-plane.md`](../design/remote-pi-control-plane.md) §21、[`docs/design/remote-pi.md`](../design/remote-pi.md)、[`docs/security.md`](../security.md)
+- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)（决策 2/3 的唯一例外）、[`docs/design/remote-pi-control-plane.md`](../../docs/archive/design/remote-pi-control-plane.md) §21、[`docs/design/remote-pi.md`](../../docs/archive/design/remote-pi.md)、[`docs/security.md`](../security.md)
 
 ## 背景
 

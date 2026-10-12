@@ -86,7 +86,7 @@ client/
   dist/pi/worker.js       # fork worker 独立 bundle
   dist/probe-worker.js    # 能力探测 worker 独立 bundle
   dist/frp/               # win-x64 + linux-x64 frpc（linux 为裸 ELF + .gz 副本）
-  node_modules/           # 仅外部保留：Pi SDK + @lydell/node-pty 双平台预编译
+  node_modules/           # 仅外部保留：@lydell/node-pty 与 node-datachannel 双平台预编译
 ```
 
 外部保留清单与理由、esbuild 选项、staging 安装配置见 ADR-0012。
@@ -211,7 +211,7 @@ sequenceDiagram
 
 1. `/prepare` 立即受理并在业务进程仍运行时后台完成下载、SHA-256 校验和解压（响应不等待下载完成，避免请求方 HTTP 默认超时在下载完成前切断连接）；
 2. prepare 成功后才进入 drain，避免在长下载期间提前停止派发；
-3. `ServerDrain` 只等待 `running/waiting_input` Job，不等待 Terminal 或 Pi 真实进程完全退出；
+3. `ServerDrain` 只等待 `running/waiting_input` Job，不等待 Terminal 真实进程完全退出；
 4. 新 Server 启动后，从 SQLite 中的活动 Release 恢复，而不是依赖旧进程内存；
 5. `/api/status.serverVersion` 必须与目标版本完全相同，才进入 Client 阶段；
 6. Launcher 回退应用版本，不回退数据库和其他持久数据。
@@ -234,7 +234,7 @@ sequenceDiagram
     C->>C: draining=true，拒绝新 Job
     C->>L: POST /prepare
     L->>L: 下载、校验、解压
-    C->>C: 等待 executor 跟踪的 running Job（有超时；不覆盖 Pi Worker）
+    C->>C: 等待 executor 跟踪的 running Job（有超时）
     C->>S: update:ready
     C->>L: POST /apply
     L->>L: 停 Client、切换、启动、稳定窗口探活
@@ -249,7 +249,7 @@ sequenceDiagram
 
 Client 收到有效更新请求后先设置本地 drain，再调用 prepare，因此下载和解压期间 dispatcher 已拒绝新 Job。等待达到上限后，Client 仍会继续 ready/apply，所以它是“有界尽力等待”，不是所有任务完成的强保证。
 
-当前 **Client** drain 查询复用 `executor.ts` 的活动 Job 集合，主要覆盖该 executor 跟踪的命令进程；它不构成对 File transfer、Terminal PTY 或 Pi Worker 的统一运行态屏障。因此即使查询为空，也不能推断 Client 上所有远程活动都已安全收敛。
+当前 **Client** drain 查询复用 `executor.ts` 的活动 Job 集合，主要覆盖该 executor 跟踪的命令进程；它不构成对 File transfer 或 Terminal PTY 的统一运行态屏障。因此即使查询为空，也不能推断 Client 上所有远程活动都已安全收敛。
 
 **Server** drain 则同时等待普通 Job 与 `AgentRun`：ADR-0041 之后 Agent 执行不再写 Job，只查 Job 会让发布在活跃 Agent 回合上直接切换。
 
@@ -257,7 +257,6 @@ Client 更新会停止整个 Client 进程：
 
 - 未完成的普通子进程可能被终止；
 - PTY 不能由 Server 恢复，重连后应收敛为 `interrupted`；
-- Pi Worker/run 可能中断，必须按 Session/Run 身份重新对账；
 - Server 中存在元数据不代表 Client 运行态仍可恢复。
 
 Client Launcher 的健康判定是新 Client 进程连续存活约 3 秒，不验证其已成功注册 Server 或完成能力探测。Server 以目标版本重连注册作为该 Client 更新的最终成功信号。
@@ -370,7 +369,7 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 | preStart 失败 | 不进入 current 切换，旧进程通常仍运行 | 修复迁移/权限；核对是否已有部分 DB 副作用 |
 | Server drain 超时 | Release 标为 failed；drain 抛错路径自动解除闸门、编排器失败路径显式 `release()`，Job 派发随即恢复 | 无需重启；检查活跃 Job 与 Agent Run 为何未收敛（drain 同时等待两者，见 [ADR-0041](../adr/0041-agent-session-run-and-audit-separation.md)）后可重新发布 |
 | 新 Server 探活失败 | Launcher 尝试回退 previous current | 确认旧 Server 与当前 DB 兼容 |
-| Client drain 超时 | 继续 apply，未完成运行态可能被终止 | 重连后对账 Job/Terminal/Pi，不伪造成功 |
+| Client drain 超时 | 继续 apply，未完成运行态可能被终止 | 重连后对账 Job/Terminal，不伪造成功 |
 | Client 重连版本不符 | Client 标记 failed | 检查 Launcher 日志和 previous 回退原因 |
 | Client 离线 | 不阻塞 Release done | 后续注册时补更 |
 | 上传时已有活动 Release | 新上传记录可能停留 `uploaded` | 等活动 Release 完成后人工核对并重新触发/重新发布 |

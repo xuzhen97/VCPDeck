@@ -10,7 +10,6 @@ VCPDeck 当前是一个以 Server 为控制中心、以 Client 为远程执行�
 
 - 统一管理多台目标机器的在线状态和能力；
 - 通过持久化 Job 调度远程命令、文件和 FRP 操作；
-- 在浏览器中提供远程终端和远程 Pi 会话；
 - 将身份、任务状态、会话元数据和发布状态集中保存在 Server；
 - 通过独立 Launcher 守护并更新 Server 与 Client。
 
@@ -25,10 +24,10 @@ VCPDeck 当前是一个以 Server 为控制中心、以 Client 为远程执行�
    Client 通过 Socket.IO 主动连接 Server，不要求 Server 直接访问目标机器。FRP 用于暴露明确配置的网络服务，不替代控制通道。
 
 3. **持久状态与实时资源分离**  
-   身份、Job、文件元数据、FRP 映射、终端会话元数据和发布记录由 Server 持久化；进程、PTY、Pi 会话和 frpc 等实时资源实际运行在 Client。
+   身份、Job、文件元数据、FRP 映射、终端会话元数据和发布记录由 Server 持久化；进程、PTY 和 frpc 等实时资源实际运行在 Client。
 
 4. **控制流与数据流按场景分工**  
-   REST 负责资源和命令入口，Socket.IO 负责双向实时控制，SSE 负责远程 Pi 的浏览器事件流，文件内容根据存储后端走 Server 中转或外部存储直传。P2P 隧道的 HTTP 字节流走 Browser ↔ Client 的 WebRTC DataChannel 直连（coturn TURN 兜底），大流量不经 Server 转发，Server 只做信令与 Session 权威。
+   REST 负责资源和命令入口，Socket.IO 负责双向实时控制，文件内容根据存储后端走 Server 中转或外部存储直传。P2P 隧道的 HTTP 字节流走 Browser ↔ Client 的 WebRTC DataChannel 直连（coturn TURN 兜底），大流量不经 Server 转发，Server 只做信令与 Session 权威。
 
 5. **进程生命周期独立于业务进程**  
    Launcher 在 Server/Client 进程之外负责拉起、探活、版本切换和失败回退，避免业务进程自行替换自身。
@@ -47,8 +46,8 @@ flowchart LR
     Server <-->|Socket.IO 客户端控制通道| ClientA[VCPDeck Client A]
     Server <-->|Socket.IO 客户端控制通道| ClientB[VCPDeck Client B]
 
-    ClientA --> HostA[目标机器资源<br/>Shell / 文件系统 / PTY / Pi]
-    ClientB --> HostB[目标机器资源<br/>Shell / 文件系统 / PTY / Pi]
+    ClientA --> HostA[目标机器资源<br/>Shell / 文件系统 / PTY]
+    ClientB --> HostB[目标机器资源<br/>Shell / 文件系统 / PTY]
 
     Server --> Database[(SQLite)]
     Server --> Storage[文件存储后端]
@@ -81,7 +80,7 @@ flowchart TB
         AppWs[Socket.IO /app]
         ClientWs[Socket.IO /client]
         Sse[SSE Endpoint]
-        Services[领域 Services<br/>Auth / Client / Job / File / FRP / Pi / Terminal / Release]
+        Services[领域 Services<br/>Auth / Client / Job / File / FRP / Terminal / Release]
         Prisma[Prisma 数据访问]
         StorageSvc[Storage Provider 抽象]
         Db[(SQLite)]
@@ -92,14 +91,12 @@ flowchart TB
         Client[Client Agent]
         Executor[命令与文件执行器]
         Terminal[PTY 与终端快照]
-        PiRuntime[Pi 会话运行时]
         Frpc[frpc]
         Os[操作系统资源]
     end
 
     Browser -->|REST| Http
     Browser <-->|终端事件| AppWs
-    Sse -->|Pi 事件| Browser
     Cli -->|REST| Http
     SdkUser -->|REST| Http
 
@@ -112,25 +109,23 @@ flowchart TB
     Prisma --> Db
     StorageSvc --> FileStore
 
-    ClientWs <-->|注册、心跳、Job、Pi、终端、更新| Client
+    ClientWs <-->|注册、心跳、Job、终端、更新| Client
     Client --> Executor
     Client --> Terminal
-    Client --> PiRuntime
     Client --> Frpc
     Executor --> Os
     Terminal --> Os
-    PiRuntime --> Os
 ```
 
 ### 4.2 组件职责
 
 | 组件 | 运行位置 | 主要职责 | 不负责 |
 | --- | --- | --- | --- |
-| Frontend | 浏览器 | 驾驶台交互、REST 调用、终端渲染、消费 Pi SSE | 直接访问数据库或远程机器 |
+| Frontend | 浏览器 | 驾驶台交互、REST 调用、终端渲染 | 直接访问数据库或远程机器 |
 | SDK | 浏览器或 Node.js 调用方 | 类型安全的 REST API 封装和错误归一化 | Socket.IO/SSE 生命周期、服务端业务状态机 |
-| CLI | 操作员机器或自动化环境 | 管理用户级/项目级目标环境；当前负责发布包上传；构建 Pi Skill 的单文件入口 | 承担 Server/Client 运行逻辑，或让项目配置直接定义 Server/凭据 |
+| CLI | 操作员机器或自动化环境 | 管理用户级/项目级目标环境；当前负责发布包上传；构建 Skill 的单文件入口 | 承担 Server/Client 运行逻辑，或让项目配置直接定义 Server/凭据 |
 | Server | 控制面主机 | 认证、资源 API、Client 连接、Job 调度、状态持久化、实时流代理、更新编排 | 直接在远程机器执行命令或持有远程 PTY |
-| Client | 每台目标机器 | 能力探测、命令与文件操作、PTY、Pi、frpc、P2P 隧道（DataChannel 回环 TCP）、状态上报 | 用户身份管理和全局业务状态持久化 |
+| Client | 每台目标机器 | 能力探测、命令与文件操作、PTY、frpc、P2P 隧道（DataChannel 回环 TCP）、状态上报 | 用户身份管理和全局业务状态持久化 |
 | Launcher | Server/Client 所在主机 | 守护业务进程、准备 Node.js、应用更新、探活和回退 | Job 调度与业务协议处理 |
 | SQLite | Server 主机 | 保存控制面关系数据和状态记录 | 保存终端正文、PTY 或远程进程内存 |
 | Storage Provider | Server 本地或外部存储 | 保存跨机器传输的文件内容和发布构件 | 作为 Job 队列或业务数据库 |
@@ -145,7 +140,6 @@ flowchart LR
     Rest[REST Controllers]
     ClientGateway[ClientGateway<br/>/client]
     AppGateway[AppGateway<br/>/app]
-    SseController[Pi SSE]
 
     Rest --> Domain[领域 Services]
     ClientGateway <--> Domain
@@ -154,14 +148,14 @@ flowchart LR
 
     Domain --> Prisma[PrismaService]
     Domain --> Storage[StorageService]
-    Domain --> Brokers[Pi / Terminal Broker]
+    Domain --> Brokers[Terminal Broker]
     Brokers --> ClientGateway
 ```
 
 主要边界如下：
 
 - **REST Controllers**：验证 HTTP 输入、取得操作者身份并调用领域服务；
-- **ClientGateway**：维护 `/client` namespace，处理注册、心跳、Job、Pi、终端和更新事件；
+- **ClientGateway**：维护 `/client` namespace，处理注册、心跳、Job、终端和更新事件；
 - **AppGateway**：维护 `/app` namespace，认证浏览器连接并代理交互式终端；
 - **领域 Services**：拥有业务状态转换和资源约束，不把规则放入 Frontend 或 Client；
 - **Broker**：关联 Server 发出的请求与 Client 的响应，隔离 Gateway 和具体领域状态机；
@@ -179,20 +173,19 @@ Client 启动后完成能力探测并连接 Server。其内部职责可分为：
 - **Executor**：以子进程执行命令，流式上报输出，并支持超时和取消；
 - **File/Transfer Handler**：执行远程文件操作并与 Storage 完成导入/导出；当前 rootDir 绑定、symlink 和不存在目标父链校验仍有缺口，详见 [`design/remote-files.md`](./design/remote-files.md)；
 - **Terminal Manager**：创建和管理 PTY，生成 headless 快照，处理断线保留与进程清理；当前 snapshot/output 序列、上游 gap、持久状态同步和本地过期上报仍有偏移，详见 [`design/remote-terminal.md`](./design/remote-terminal.md)；
-- **Pi Supervisor**：在目标项目上下文中管理 Pi worker 和会话；
 - **FRP Daemon**：管理 frpc 配置和进程；
 - **Update Handler**：配合本机 Launcher 准备并应用新版本。
 
-Client 的长期要求是只接受 Shared 定义并经过运行时解析的消息。Pi/Terminal 已有严格 parser；exec 和文件 Job 仍存在 Client 侧宽泛断言及文件 payload 缺双端 parser 的实现偏移。命令、路径和环境等不可信输入必须在进入具体执行器前完成校验。
+Client 的长期要求是只接受 Shared 定义并经过运行时解析的消息。Terminal 已有严格 parser；exec 和文件 Job 仍存在 Client 侧宽泛断言及文件 payload 缺双端 parser 的实现偏移。命令、路径和环境等不可信输入必须在进入具体执行器前完成校验。
 
 ## 7. 通信边界
 
 | 通道 | 方向 | 用途 | 认证与状态 |
 | --- | --- | --- | --- |
-| REST `/api/*` | Browser/SDK/CLI → Server | 登录、资源 CRUD、Job、文件、FRP、Pi、终端元数据和发布 | Cookie 会话或 Bearer Token；少量健康/登录端点公开 |
-| Socket.IO `/client` | Server ↔ Client | 注册、心跳、Job、文件、FRP、Pi、终端、更新 | PSK；连接与 Client 记录绑定 |
+| REST `/api/*` | Browser/SDK/CLI → Server | 登录、资源 CRUD、Job、文件、FRP、终端元数据和发布 | Cookie 会话或 Bearer Token；少量健康/登录端点公开 |
+| Socket.IO `/client` | Server ↔ Client | 注册、心跳、Job、文件、FRP、终端、更新 | PSK；连接与 Client 记录绑定 |
 | Socket.IO `/app` | Browser ↔ Server | 终端 attach、输入、输出、resize、控制权和重同步 | Cookie 会话或握手 Bearer Token |
-| SSE | Server → Browser | 远程 Pi session 事件 | Cookie 会话；EventSource 自动重连 |
+| SSE | — | 当前无事件生产者（Pi 投影已随 ADR-0049 退役） | — |
 | 签名文件 URL | Browser/Client ↔ Storage | 文件和发布构件的数据传输 | 短期签名、过期时间及完整性校验 |
 | FRP | Client frpc ↔ FRPS | 暴露用户明确创建的 TCP/HTTP 映射 | FRPS Token 和实例配置 |
 | Launcher 本机控制通道 | Server/Client → 本机 Launcher | 准备与应用更新 | 仅本机监听并使用随机控制 Token |
@@ -201,7 +194,7 @@ Client 的长期要求是只接受 Shared 定义并经过运行时解析的消�
 
 ## 8. 数据归属
 
-**Git SSH 共享密钥（ADR-0037 / ADR-0038）**：私钥密文、版本与选机期望状态由 Server 权威保存（根密钥在 Server 进程外文件）；Client 只在自身数据根保留受管副本（`<VCPDECK_CLIENT_DATA_DIR>/git-ssh`，跨 Release 保留），并仅为 VCPDeck 启动的 Job、Terminal、Pi 注入受限 SSH 配置。管理面只投影公钥、指纹与分发状态，永不返回私钥。
+**Git SSH 共享密钥（ADR-0037 / ADR-0038）**：私钥密文、版本与选机期望状态由 Server 权威保存（根密钥在 Server 进程外文件）；Client 只在自身数据根保留受管副本（`<VCPDECK_CLIENT_DATA_DIR>/git-ssh`，跨 Release 保留），并仅为 VCPDeck 启动的 Job 与 Terminal 注入受限 SSH 配置。管理面只投影公钥、指纹与分发状态，永不返回私钥。
 
 | 数据或资源 | 权威位置 | 持久性说明 |
 | --- | --- | --- |
@@ -213,7 +206,6 @@ Client 的长期要求是只接受 Shared 定义并经过运行时解析的消�
 | FRPS 实例和映射配置 | Server / SQLite | 持久化；实际 frpc 进程在 Client |
 | 终端会话元数据与生命周期审计 | Server / SQLite | 持久化，但不记录终端正文、快照和重连 Token |
 | 活跃 PTY、终端输出缓存和快照 | Client 内存 | Client 是活跃终端资源的权威；断线后按保留策略清理 |
-| 远程 Pi 运行状态 | Server 状态机 + Client 会话 | Server 管理所有权和生命周期，Client 持有实际 Pi worker/session |
 | Release 及各 Client 更新状态 | Server / SQLite | 持久化并可在 Server 重启后恢复编排 |
 | 当前版本、历史版本和回退点 | 各主机 Launcher 目录 | 由 Launcher 管理，不存入业务进程内存作为唯一事实来源 |
 
@@ -270,25 +262,12 @@ sequenceDiagram
 
 Server 管理会话元数据、浏览器 attachment、operator/viewer 控制权和最小审计；Client 管理真实 PTY。浏览器断线不等价于关闭 PTY，重新 attach 时通过 snapshot 和序号恢复；当前 snapshotSeq 与网络 output seq 并非严格同一计数点，不能把恢复链路描述为无缺口持久流。
 
-### 9.3 远程 Pi
+### 9.3 远程 Agent（已退役）
 
-```mermaid
-sequenceDiagram
-    participant Browser as Frontend
-    participant Server as Server
-    participant Client as Client
-    participant Pi as Pi Worker
+Pi／DSH 专用集成已按 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md) 退役：
+不再有 Agent 会话、Run、扩展交互或 SSE 事件投影。历史设计见
+[`archive/design/remote-pi.md`](./archive/design/remote-pi.md)。
 
-    Browser->>Server: REST 创建/控制 Pi session
-    Server->>Server: 校验身份、所有权和运行状态
-    Server->>Client: PI_REQUEST
-    Client->>Pi: 创建或操作会话
-    Pi-->>Client: 响应和事件
-    Client-->>Server: PI_RESPONSE / PI_EVENT
-    Server-->>Browser: REST 响应 / SSE 事件
-```
-
-REST 承担有明确结果的控制命令，SSE 承担持续事件流。Server 维护 session/run 的所有权、锁和重连对账；实际 Agent 会话运行在目标机器的 Client。
 
 ### 9.4 文件传输
 
@@ -361,7 +340,7 @@ flowchart TB
         ClientLauncher[Launcher]
         ClientProcess[Client]
         Frpc[frpc]
-        Pty[Shell / PTY / Pi / 文件系统]
+        Pty[Shell / PTY / 文件系统]
         ClientLauncher --> ClientProcess
         ClientProcess --> Frpc
         ClientProcess --> Pty
@@ -394,7 +373,7 @@ Client 和 Server 都可以由 Launcher 守护。SQLite 与本地 Storage 应放
 
 - **Client 断线**：Server 保留持久状态，待 Client 重连后对账；不会把断线简单等同于执行失败；
 - **Server 重启**：SQLite 中的业务状态保留，在线 socket、SSE 订阅和内存 Broker 需要重新建立；
-- **Frontend 刷新**：资源状态从 REST 恢复，终端通过重新 attach 获取 snapshot，Pi 事件流重新订阅；
+- **Frontend 刷新**：资源状态从 REST 恢复，终端通过重新 attach 获取 snapshot；
 - **Storage 故障**：影响文件正文传输，但不应绕过 Job 和文件元数据的状态约束；
 - **Launcher 更新失败**：由本机版本目录和健康探测执行回退，并向全局编排报告结果；
 - **FRPS 故障**：只影响相应映射，不影响 Client 到 Server 的 Socket.IO 控制连接；当前同一 Client 仅有单个 frpc runtime，Server 多实例模型不等于该 Client 可同时连接多个 FRPS，详见 [`design/frp.md`](./design/frp.md)。
@@ -432,7 +411,6 @@ shared  ←  sdk  ←  frontend
 - 一级导航（`概览 / Agent / 机器 / 任务 / 映射 / 发版 / 设置`）与各模块二级项来自 `packages/frontend/src/app/navigation.ts` 的模块注册表，该注册表是导航层级的唯一事实来源；`ConsoleShell` 按当前路径做**段边界前缀匹配**（`/agentxyz` 不属于 `agent`）。
 - 注册表声明了 `sub` 的模块（当前为 `Agent` 与 `设置`）在其路径下渲染二级导航，一级导航整体消失；未声明 `sub` 的模块（如 `/machines/:id/files`）仍显示一级导航并按模块高亮。
 - 一级状态下**不渲染**返回入口（条件渲染而非 `hidden`：`display:flex` 会覆盖 `hidden`）；二级状态下侧栏左下角渲染「返回全局导航」，窄屏横向导航以其为首项。Back 的目标是「最近一个不渲染二级导航的**目标**路径」，冷启动深链缺少该记录时回落 `/dashboard`。
-- `Agent` 是 Pi 交互的唯一入口：配置面（Profile / Provider / Client 运行时）与对话面（先选择目标机器再进入三栏对话）位于同一模块的二级导航下；`存储`是`设置`模块的二级项。旧路径 `/pi/*`、`/storage`、`/machines/:id/pi` 仅作为兼容重定向保留。
 - 对话视图（`/agent/chat`）是满高、无外层内边距的三栏布局，由注册表以 `fullBleed` 标记，主内容区据此切换滚动与内边距行为。
 
 ## 14. 相关文档
@@ -442,7 +420,6 @@ shared  ←  sdk  ←  frontend
 - [远程文件设计](./design/remote-files.md) — 文件 Typed Job、目标路径、轻量操作、导入/导出和失败边界
 - [Storage 子系统设计](./design/storage.md) — File/Provider、Local/Alibaba 数据路径和故障边界
 - [远程终端设计](./design/remote-terminal.md) — PTY、Session、attach、控制权、snapshot、重连和失败边界
-- [远程 Pi 会话设计](./design/remote-pi.md) — Worker、Session/Run、REST/SSE、隐私和重连边界
 - [身份与认证设计](./design/identity-and-authentication.md) — Identity、Cookie、Bearer、Actor、admin 和撤销边界
 - [FRP 设计](./design/frp.md) — FrpsInstance、Mapping、Typed Job、frpc、凭据和恢复边界
 - [Release 与自更新设计](./design/release-and-update.md) — Release 编排、Launcher、更新和回退边界

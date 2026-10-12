@@ -19,8 +19,6 @@ export function SettingsPage() {
 	const section = /^\/settings\/([^/]+)/.exec(location.pathname)?.[1] ?? "profile";
 	if (section === "identities" && !identity?.isAdmin)
 		return <Navigate to="/settings/profile" replace />;
-	// 兼容旧入口：Pi 设置已并入 Agent 模块
-	if (section === "pi") return <Navigate to="/agent/profile" replace />;
 	if (!["profile", "tokens", "network", "storage", "git-ssh", "identities"].includes(section))
 		return <Navigate to="/settings/profile" replace />;
 	return (

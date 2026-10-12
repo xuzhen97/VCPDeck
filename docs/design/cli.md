@@ -6,7 +6,7 @@
 
 ## 1. 定位与边界
 
-CLI 是操作员和 Pi Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访问 Server。当前已落地：
+CLI 是操作员与 Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访问 Server。当前已落地：
 
 - 多环境注册、查看、选择与项目默认环境；
 - `clients list` 已注册 Client 只读列表查询；
@@ -15,7 +15,6 @@ CLI 是操作员和 Pi Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访�
 - `files roots/list/stat/read` 文件只读浏览（授权根探测、目录列表、元信息、文本读取）；
 - `files write/mkdir/delete/move` 文件写操作（覆盖写、递归建目录、删除、移动，确认门由调用方负责）；
 - `files download/upload` 文件传输（Storage Provider 直传链路，Server 只签名；download 校验 sha256）；
-- `pi models/sessions/new/run/abort` Pi 子任务（在目标机驱动 Pi Agent 并取回回复）；
 - `frp instances/mappings` FRP 状态查询与 `frp mapping create/delete` 完整映射写操作；
 - `storage status` 存储后端状态只读查询；
 - `terminal shells/list/close` Terminal 生命周期管理；
@@ -205,26 +204,13 @@ vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwri
 
 写操作语义（由 Client 权威定义）：`write` 原子覆盖写（tmp+rename），内容来自 `--input` 或 stdin，不进命令行参数；`mkdir` 递归创建；`delete` 非递归遇非空目录报 `PATH_CONFLICT`，`--recursive` 解锁；`move` 目标存在默认拒绝，`--overwrite` 解锁。所有写操作执行前输出目标摘要（机器、授权根、路径、影响）；确认门由调用方负责，删除不可恢复且 `--recursive` 删除整个目录树必须单独强调。写操作非幂等，网络结果不明时先用只读命令核对权威状态。
 
-已知非能力：无（本节能力已对齐 Server 文件域；Terminal/Pi 等其他域见对应章节）。传输链路：`download` 导出后经 Server 签发的短期下载令牌从 Storage 拉取并校验 sha256；`upload` 经 upload-sessions 协商后分片直传 Provider（403 仅刷新该分片 URL），完成后由 Client 从存储拉取导入。字节流不经过 Server——阿里云为 Provider 预签名 URL 直传，Local 后端经 Server 中转是无外部存储时的固有行为；签名 URL 不输出、不落盘、不进日志。传输非幂等，网络结果不明时先用只读命令核对两侧状态。
+已知非能力：无（本节能力已对齐 Server 文件域；Terminal 等其他域见对应章节）。传输链路：`download` 导出后经 Server 签发的短期下载令牌从 Storage 拉取并校验 sha256；`upload` 经 upload-sessions 协商后分片直传 Provider（403 仅刷新该分片 URL），完成后由 Client 从存储拉取导入。字节流不经过 Server——阿里云为 Provider 预签名 URL 直传，Local 后端经 Server 中转是无外部存储时的固有行为；签名 URL 不输出、不落盘、不进日志。传输非幂等，网络结果不明时先用只读命令核对两侧状态。
 
-## 9. Pi 命令
+## 9. 远程 Agent（已退役）
 
-```text
-vcpdeck pi models <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]
-vcpdeck pi sessions <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]
-vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]
-vcpdeck pi run <client> "提示词" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]
-vcpdeck pi attach <client> [--cwd=<path>] [--session=<id>] [--root=<dir>] [--env=<name>]
-vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]
-```
-
-Pi 子任务通过 Server Pi 命名空间驱动目标机上的 Pi Agent（要求 `pi` capability）。运行循环：`prompt` 提交即返回 → 轮询 `agent.state` 至 `idle`（默认超时 600 秒）→ `context` 提取最后一条 assistant 消息的文本回复。注意 Server 的 `complete` 是中断标记而非等待，CLI 不使用它等待任务。授权根与文件域同规则。`waiting_for_extension_input` 时明确报错，需到 Frontend 处理扩展输入。
-
-会话策略：`run` 缺省自动创建新会话（子任务隔离）；`--session` 复用既有会话（先 open 再 prompt）。`run/prompt/new` 非幂等——重复提交会重复执行子任务。已知限制：未暴露 fork/clone/navigate/compact/setModel/附件与图片输入。
-
-`attach` 为交互式 REPL：readline 循环内每行作为提示词下发，等待 idle 后打印最后一条助手回复；`/abort`、`/state` 内建命令与 `/exit`/Ctrl+D 退出；单轮超时不退出 REPL，报告后可继续。
-
-Windows Git Bash 会话注意：MSYS 会把 `/etc` 这类绝对路径参数改写为宿主安装路径（如 `C:/Program Files/Git/etc`），传 POSIX 风格路径时用 `MSYS_NO_PATHCONV=1` 或改用 Windows 形式。盘符根路径统一写正斜杠形式（`--root=D:/`）：`--root="D:\\"` 的尾反斜杠会转义闭引号，命令未执行即报 shell 引号错误；两种形式与授权根匹配等价，显式根由 Client 侧授权校验 fail closed。
+`vcpdeck pi ...` 命令与 Server Pi 命名空间已按
+[ADR-0049](../adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md) 退役；
+CLI 只保留基础能力命令。
 
 ## 10. Terminal 命令
 
@@ -272,7 +258,7 @@ vcpdeck storage status [--env=<name>] [--json]
 
 ## 13. Skill 安装与当前项目 cwd
 
-正式版本通过 Pi 用户级 Git package 安装：
+正式版本通过用户级 Git package 安装（供 Pi Agent 使用）：
 
 ```bash
 pi install git:github.com/xuzhen97/VCPDeck@v0.12.0
@@ -325,7 +311,7 @@ pnpm \
 - `terminal shells/list/close` 覆盖 shell 探测、会话列表 `--status` 本地过滤和关闭流程（先取详情再删除）；
 - `completions bash/powershell` 覆盖命令树与环境名嵌入、配置缺失降级、未知类型拒绝和用法输出。
 
-当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 FRP 实例写操作、Storage 后端切换、Client rename 与 Pi 高级会话操作（fork/clone/navigate/compact/setModel/附件）。
+当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 FRP 实例写操作、Storage 后端切换、Client rename。
 
 ## 16. 全局安装与 Shell 补全
 

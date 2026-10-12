@@ -17,11 +17,10 @@
 
 - 权限沙箱或容器；
 - 可重新 attach 的交互终端；
-- Pi Session；
 - 可靠日志或无限输出存储；
 - 脚本 Artifact、版本库或复用系统。
 
-需要 PTY、持续交互和重新附着时使用 Terminal；需要 Agent 会话时使用 Pi；超大脚本、需要真实文件名或相对模块目录时，应使用受控 File/Storage 方案，而不是无限扩大 Job payload。
+需要 PTY、持续交互和重新附着时使用 Terminal；超大脚本、需要真实文件名或相对模块目录时，应使用受控 File/Storage 方案，而不是无限扩大 Job payload。
 
 ## 2. 当前组件职责
 

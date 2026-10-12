@@ -12,30 +12,20 @@ import { JobService } from "../job/job.service.js";
 import { FileService } from "../file/file.service.js";
 import { FrpService } from "../frp/frp.service.js";
 import { FrpReconciliationService } from "../frp/frp-reconciliation.service.js";
-import { PiRequestBroker } from "../pi/pi-request-broker.js";
-import { PiEventBroker } from "../pi/pi-event-broker.js";
-import { PiRunService } from "../pi/pi-run.service.js";
-import { PiRuntimeService } from "../pi/pi-runtime.service.js";
 import { TerminalService } from "../terminal/terminal.service.js";
 import { TerminalRequestBroker } from "../terminal/terminal-request-broker.js";
-import { SessionHostService } from "../session-host/session-host.service.js";
 import { ReleaseOrchestrator } from "../release/release.orchestrator.js";
 import { GatewayUpdateChannel } from "../release/update-channel.js";
 import { TunnelSessionService } from "../tunnel/tunnel-session.service.js";
 import {
   Events,
   JobStatus,
-  parsePiEvent,
-  parsePiResponse,
-  parsePiRuntimeAck,
-  parsePiStateReport,
   parseGitSshAck,
   parseTerminalClientResponse,
   parseTerminalExitReport,
   parseTerminalOutputChunk,
   parseMachineRegister,
   parseTerminalStateReport,
-  parseSessionHostStatusReport,
   parseTunnelClose,
   type JobProgress,
 } from "@vcpdeck/shared";
@@ -50,9 +40,6 @@ import type {
   JobUpdate,
   JobDispatch,
   DispatchPayload,
-  PiEvent,
-  PiResponse,
-  PiStateReport,
   TerminalClientResponse,
   TerminalOutputChunk,
   TerminalExitReport,
@@ -82,9 +69,6 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Inject(JobService) private readonly jobService: JobService,
     @Inject(FileService) private readonly fileService: FileService,
     @Inject(FrpService) private readonly frpService: FrpService,
-    @Inject(PiRequestBroker) private readonly piRequests: PiRequestBroker,
-    @Inject(PiEventBroker) private readonly piEvents: PiEventBroker,
-    @Inject(PiRunService) private readonly piRuns: PiRunService,
   	@Inject(TerminalService) private readonly terminalService: TerminalService,
     @Inject(TerminalRequestBroker) private readonly terminalBroker: TerminalRequestBroker,
     // 更新编排（forwardRef 解开 ReleaseModule ↔ EventsModule 循环）
@@ -101,18 +85,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(TunnelSessionService)
     private readonly tunnelSessions?: TunnelSessionService,
-    // Pi RuntimeSpec 下发（可选注入：旧测试构造保持兼容）
-    @Optional()
-    @Inject(PiRuntimeService)
-    private readonly piRuntime?: PiRuntimeService,
     // Git SSH 共享密钥分发（可选注入：旧测试构造保持兼容）
     @Optional()
     @Inject(GitSshService)
     private readonly gitSsh?: GitSshService,
-    // 会话宿主对账（可选注入：旧测试构造保持兼容）
-    @Optional()
-    @Inject(SessionHostService)
-    private readonly sessionHost?: SessionHostService,
   ) {}
 
   onModuleInit() {
@@ -128,17 +104,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     this.staleClientTimer = null;
   }
 
-  // ── Pi request 发送通道（避免与 PiModule 循环依赖） ──
   afterInit() {
     this.frpReconciliation?.bindDispatcher((socketId, dispatch) =>
       this.sendReconcileDispatch(socketId, dispatch),
     );
-    this.piRequests.bindEmitter((socketId, request) => {
-      this.server.to(socketId).emit(Events.PI_REQUEST, request);
-    });
-    this.piRuntime?.bindSender((socketId, message) => {
-      this.server.to(socketId).emit(Events.PI_RUNTIME_SPEC, message);
-    });
     // Git SSH 指令按 socketId 精准发送（绝不向 clientId room 广播私钥）。
     this.gitSsh?.bindSender((socketId, command) => {
       this.server.to(socketId).emit(Events.GIT_SSH_COMMAND, command);
@@ -182,9 +151,11 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
         console.log(`[ws] duplicate connection kept online: ${clientId}`);
         return;
       }
+      // 确认无存活连接（Client 真的离线）后才收敛业务状态：
+      // 重复/残留 socket 断开不得把在跑的 Job 与 FRP 映射判死。
+      await this.convergeOfflineClient(clientId);
     } else {
       // 未完成 REGISTER 的 socket 也可能持有 broker pending request。
-      this.piRequests.disconnect(client.id);
       this.terminalBroker.disconnect(client.id);
     }
     await this.clientService.markOfflineBySocketId(client.id);
@@ -216,25 +187,30 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     const expired = await this.clientService.expireStaleClients();
     for (const client of expired) {
       if (client.socketId) await this.cleanupClientConnection(client.clientId, client.socketId);
+      // 心跳超时已由 expireStaleClients 原子置为离线，可安全收敛。
+      await this.convergeOfflineClient(client.clientId);
       console.log(`[ws] heartbeat timeout: ${client.clientId}`);
     }
   }
 
   private async cleanupClientConnection(clientId: string, socketId: string): Promise<void> {
     this.untrackSocket(clientId, socketId);
-    // 必须在 generation 队列外先释放等待 response 的 REST lease，避免断线死锁。
-    this.piRequests.disconnect(socketId);
+    // 该 socket 上的 REST lease 全部失败（防串线）。
     this.terminalBroker.disconnect(socketId);
     this.tunnelSessions?.disconnectClient(clientId, socketId);
     // FRP 恢复周期只回收匹配 socket 的租约（service 内部判断）。
     void this.frpReconciliation?.disconnect(clientId, socketId);
-    if (await this.piRuns.disconnectGeneration(clientId, socketId)) {
-      await this.jobService.markDisconnected(clientId);
-      await this.frpService.markInactiveByClientId(clientId);
-    }
-    await this.piRuntime?.onDisconnected(clientId, socketId);
     await this.gitSsh?.onDisconnected(clientId, socketId);
     await this.terminalService.handleClientDisconnect(clientId, socketId);
+  }
+
+  /**
+   * 客户端确认离线后的业务收敛：在跑的 Job 置 disconnected、FRP 映射置 inactive。
+   * 只允许在「无存活连接」或「心跳超时已判离线」时调用。
+   */
+  private async convergeOfflineClient(clientId: string): Promise<void> {
+    await this.jobService.markDisconnected(clientId);
+    await this.frpService.markInactiveByClientId(clientId);
   }
 
   // ── Client events ──
@@ -256,15 +232,8 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     client.data.clientId = register.clientId;
     this.trackSocket(register.clientId, client.id);
     client.join(register.clientId);
-    await this.piRuns.markReconcilePending(register.clientId, client.id);
     await this.terminalService.handleClientRegistered(register.clientId, client.id);
     this.orchestrator.onClientRegistered(register.clientId, register.clientVersion);
-    // 注册后立即下发 RuntimeSpec；无绑定时登记 desired=null（Pi 不可用）。
-    await this.piRuntime?.onClientRegistered(
-      register.clientId,
-      register.capabilityDetails?.pi,
-      client.id,
-    );
     // 必须先回 REGISTER ack 再下发：Client 的 Git SSH 桥只处理 ack 之后的指令（fail closed），
     // 顺序颠倒会让本次 install 被静默丢弃、永不产生回执，目标状态永久卡在 pending。
     client.emit("ack", { event: Events.REGISTER });
@@ -324,60 +293,6 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
 	handleUpdateFailed(@MessageBody() data: UpdateFailed) {
 		this.orchestrator.onUpdateFailed(data.clientId, data.releaseVersion, data.reason);
 	}
-
-  // ── Pi 事件（复用现有 PSK 连接） ──
-
-  @SubscribeMessage(Events.PI_RESPONSE)
-  async handlePiResponse(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: PiResponse,
-  ) {
-    if (typeof client.data.clientId !== "string") return;
-    try {
-      const parsed = parsePiResponse(data);
-      // response 不进入 generation queue；pending lease 直接校验 socketId。
-      this.piRequests.resolve(client.id, parsed);
-    } catch {
-      // 非法响应忽略
-    }
-  }
-
-  @SubscribeMessage(Events.PI_EVENT)
-  async handlePiEvent(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: PiEvent,
-  ) {
-    const clientId = client.data.clientId as string | undefined;
-    if (!clientId) return;
-    try {
-      const parsed = parsePiEvent(data);
-      if (parsed.clientId !== clientId) return; // 身份绑定：禁止伪造其他 Client 事件
-      await this.piRuns.withReconciledSocket(clientId, client.id, () =>
-        this.piEvents.publish(parsed),
-      );
-    } catch {
-      // 非法事件忽略
-    }
-  }
-
-  @SubscribeMessage(Events.PI_RUNTIME_ACK)
-  async handlePiRuntimeAck(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ) {
-    const clientId = client.data.clientId as string | undefined;
-    if (!clientId) return { ok: false };
-    try {
-      const ack = parsePiRuntimeAck(data);
-      if (ack.clientId !== clientId) return { ok: false }; // 身份绑定
-      this.piRuntime?.applyAck(ack, client.id);
-      return { ok: true };
-    } catch {
-      // 非法 ACK 忽略：不改变任何状态，Pi 保持未就绪（fail closed）。
-      return { ok: false };
-    }
-  }
-
   /**
    * Git SSH 安装/清理回执。
    *
@@ -399,29 +314,6 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       return { ok: false };
     }
   }
-
-  @SubscribeMessage(Events.PI_STATE)
-  async handlePiState(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: PiStateReport,
-  ) {
-    const clientId = client.data.clientId as string | undefined;
-    if (!clientId) return;
-    try {
-      const parsed = parsePiStateReport(data);
-      if (parsed.clientId !== clientId) return; // 身份绑定
-      const result = await this.piRuns.reconcileGeneration(clientId, client.id, parsed);
-      this.piRuntime?.onState(clientId, {
-        runtimeRevision: parsed.runtimeRevision,
-        configState: parsed.configState,
-      }, client.id);
-      return result;
-    } catch {
-      // 非法报告忽略
-      return { acceptedRunIds: [], closedRunIds: [], reportAgain: false };
-    }
-  }
-
   @SubscribeMessage(Events.HEARTBEAT)
   async handleHeartbeat(@MessageBody() data: Heartbeat) {
     await this.clientService.heartbeat(data);
@@ -493,22 +385,6 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       return { acceptedSessionIds: [], closeSessionIds: [] };
     }
   }
-
-  // ── 会话宿主对账（新路径；刻意不复用 TERMINAL_STATE 语义） ──
-
-  @SubscribeMessage(Events.SESSION_HOST_STATE)
-  async handleSessionHostState(@ConnectedSocket() client: Socket, @MessageBody() data: unknown) {
-    const clientId = client.data.clientId as string | undefined;
-    if (!clientId || !this.sessionHost) return { unreachable: [], stopped: [] };
-    try {
-      const report = parseSessionHostStatusReport(data);
-      return await this.sessionHost.reconcile(clientId, report);
-    } catch {
-      // 非法报告一律忽略：绝不用坏数据把实例判成已退出。
-      return { unreachable: [], stopped: [] };
-    }
-  }
-
   // ── P2P 隧道事件（身份来自 socket 绑定的 clientId；严格解析在 service 内） ──
 
   @SubscribeMessage(Events.TUNNEL_SIGNAL)

@@ -1,9 +1,9 @@
 # ADR-0036：Pi SDK 单文件发布与 shell 能力平台化
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0049（基础命令与 Terminal 的既有 shell 实现不据此删除）
 - 日期：2026-09-28
 - 决策者：项目维护者
-- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0030](./0030-pi-resource-bundle-and-tool-policy.md)、[ADR-0012](./0012-bundled-release-artifacts.md)、[`docs/design/remote-pi-control-plane.md`](../design/remote-pi-control-plane.md) §16、[`docs/protocols.md`](../protocols.md)
+- 关联：[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0030](./0030-pi-resource-bundle-and-tool-policy.md)、[ADR-0012](./0012-bundled-release-artifacts.md)、[`docs/design/remote-pi-control-plane.md`](../../docs/archive/design/remote-pi-control-plane.md) §16、[`docs/protocols.md`](../protocols.md)
 
 ## 背景
 

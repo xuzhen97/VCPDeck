@@ -13,7 +13,6 @@ import {
 	type ClientInfo,
 	type DiskInfo,
 	type FrpCapabilityStatus,
-	type PiCapabilityStatus,
 	type TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
 
@@ -57,7 +56,7 @@ export class ClientService {
   ) {}
 
   async register(dto: MachineRegister, socketId: string) {
-    // 持久化契约：capabilityDetails JSON 列同时承载 pi/terminal/frp/privileged 探测摘要
+    // 持久化契约：capabilityDetails JSON 列同时承载 terminal/frp/privileged 探测摘要
     // 与 installation 安装模式摘要（旧 Client 无 installation 字段时不写入，不推断）。
     const storedDetails: Record<string, unknown> = { ...(dto.capabilityDetails ?? {}) };
     if (dto.installation !== undefined) {
@@ -302,7 +301,6 @@ export class ClientService {
     json: string,
   ): {
     details: {
-      pi?: PiCapabilityStatus;
       terminal?: TerminalCapabilityStatus;
       frp?: FrpCapabilityStatus;
       privileged?: PrivilegedCapabilityStatus;
@@ -313,7 +311,6 @@ export class ClientService {
   } {
     const result: {
       details: {
-        pi?: PiCapabilityStatus;
         terminal?: TerminalCapabilityStatus;
         frp?: FrpCapabilityStatus;
         privileged?: PrivilegedCapabilityStatus;
@@ -331,10 +328,6 @@ export class ClientService {
     }
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return result;
     const record = raw as Record<string, unknown>;
-    if (record.pi !== undefined) {
-      // 沿用既有行为：pi 摘要透传（与 ADR-0023 前的投影一致，不放宽也不新增加严）。
-      result.details.pi = record.pi as PiCapabilityStatus;
-    }
     if (record.terminal !== undefined) {
       result.details.terminal = record.terminal as TerminalCapabilityStatus;
     }

@@ -40,7 +40,7 @@ function job(overrides: Partial<JobInfo>): JobInfo {
 	};
 }
 
-it("shows Session Job labels and supports the idle filter", async () => {
+it("shows historical Session Job rows with the raw type and supports the idle filter", async () => {
 	const list = vi.fn().mockResolvedValue({
 		data: [
 			job({
@@ -67,7 +67,7 @@ it("shows Session Job labels and supports the idle filter", async () => {
 			</SdkProvider>
 		</MemoryRouter>,
 	);
-	expect((await screen.findAllByText("Pi 会话"))[0]).toBeVisible();
+	expect((await screen.findAllByText("agent.session"))[0]).toBeVisible();
 	expect(screen.getAllByText("空闲")[0]).toBeVisible();
 	await userEvent.selectOptions(screen.getByLabelText("按状态筛选"), "idle");
 	await waitFor(() =>
@@ -461,7 +461,7 @@ it("shows the permanent download link in the job drawer for a completed file.imp
 	expect(downloadUrl).toHaveBeenCalledWith("aliyun-fileid-456");
 });
 
-it("抽屉里不再提供 Pi 会话完成动作(ADR-0041)", async () => {
+it("历史会话 Job 抽屉不再提供 Pi 会话完成动作(ADR-0041)", async () => {
 	const session = job({
 		jobId: "s1",
 		type: "agent.session",
@@ -491,7 +491,7 @@ it("抽屉里不再提供 Pi 会话完成动作(ADR-0041)", async () => {
 	);
 
 	const table = await screen.findByRole("table", { name: "任务记录" });
-	await userEvent.click(within(table).getAllByText("Pi 会话")[0]);
+	await userEvent.click(within(table).getAllByText("agent.session")[0]);
 	const dialog = screen.getByRole("dialog", { name: "任务详情" });
 	// 会话完成语义已移除:抽屉里没有完成入口。
 	expect(

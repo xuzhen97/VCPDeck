@@ -76,7 +76,7 @@ Server 中的 TerminalSession `status` 不是活跃 PTY 的完整实时镜像。
 
 ## 4. Capability、Shell 与 PTY
 
-Client 仅在 `node-pty` 延迟探测成功且发现可用 Shell 时声明 `terminal.pty`。原生模块不可用会禁用 Terminal capability，但不应阻止 exec、Files、FRP 或 Pi。
+Client 仅在 `node-pty` 延迟探测成功且发现可用 Shell 时声明 `terminal.pty`。原生模块不可用会禁用 Terminal capability，但不应阻止 exec、Files 或 FRP。
 
 Shell 探测顺序：
 
@@ -252,7 +252,7 @@ Client 重启后真实 PTY 消失，旧会话应收敛为 interrupted，不能�
 - xterm 把输出作为终端控制序列处理，不使用 `dangerouslySetInnerHTML`；
 - 当前不启用远端 OSC 52 自动写浏览器剪贴板；
 - input、output、snapshot、尺寸和 backlog 有单次/内存边界，但持续输入速率限制尚未实现；
-- Server 端 operator/viewer 校验是写协调，无法限制同一可信操作者通过 exec、Files 或 Pi 达成相同 OS 副作用；
+- Server 端 operator/viewer 校验是写协调，无法限制同一可信操作者通过 exec 或 Files 达成相同 OS 副作用；
 - UI 必须持续提示 Terminal 继承 Client OS 权限、不是沙箱。
 
 ## 12. 运维与恢复

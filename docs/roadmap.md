@@ -10,9 +10,8 @@
 - FRPS 实例及 FRP 映射；
 - Cookie/Bearer 身份认证和身份管理；
 - 浏览器交互式终端；
-- 人机交互式远程 Pi Session；
 - Release、Launcher、Server/Client 更新基础实现；
-- CLI 全域命令对齐控制面能力（jobs/files/frp/storage/terminal/pi），支持 TUI 终端直连与 Pi 交互 REPL，并有真实 Server+Client 的 CLI 能力端到端测试；
+- CLI 全域命令对齐控制面能力（jobs/files/frp/storage/terminal），支持 TUI 终端直连，并有真实 Server+Client 的 CLI 能力端到端测试；
 - React 驾驶台和框架无关 SDK。
 
 ## 2. 近期优先级：可靠性与安全基线
@@ -26,7 +25,7 @@
 7. 修复 Terminal snapshot/output seq 统一、上游 gap resync、UTF-8 snapshot/backlog 上限和持续输入速率限制；
 8. 完成 Terminal generation 对账、SQLite active/detached 时间同步、Client 断线通知、创建超时收敛、首次/重复 attach-detach TTL 重入和本地 expired 终态上报，并建立 Windows/Linux 真实 PTY 矩阵；
 9. 确认 FRP 长期多实例方向：每 Client 强制单 FrpsInstance，或每实例独立 frpc runtime；以新 ADR 实施 secret 脱敏/存储、默认实例原子性、严格 parser、真实 active、Client 重启恢复、可靠删除和 Actor 审计；
-10. 完成 exec 断线终局补报，修复 Pi 非阻塞 Extension UI 的 Shared/Client/Server 投影偏移，并完成 Server 重启窗口 Job 对账和 Windows/Linux 全链路 Release E2E，统一 archive 格式；
+10. 完成 exec 断线终局补报，并完成 Server 重启窗口 Job 对账和 Windows/Linux 全链路 Release E2E，统一 archive 格式；
 11. 修复 Release drain 失败后的派发恢复、重复版本构件覆盖和活动 Release 并发上传边界；
 12. 增加构件数字签名、严格 manifest/archive 校验和 Launcher 最低版本强制校验；
 13. 增加结构化脱敏日志、监控指标和告警；
@@ -52,14 +51,10 @@
 - TODO 驱动的任务管理、标签和结果审核；
 - 可复用工作流、规则和自动触发；
 - VCPToolBox 双向桥接与 Agent 对话；
-- Client 侧自主 Pi Agent 子任务及单机/多机编排；
-- Pi 工具权限/审批策略与受信 Resource Bundle 通道已落地（Plan 2：`pi-resources/` 随 Release 发布、manifest sha256 校验、默认拒绝 + 每次调用审批）；**Profile 级 Approval/Auto/YOLO 执行模式已完成（Plan 2.2 / ADR-0033）**：RuntimeSpec v4、bridge v2 与 `vcp.tool-policy` v2 落地；Auto 保持三桶能力面但取消 `confirm` 交互，YOLO 跳过 Tool Policy 但只信任当前 Runtime 已注册/加载的工具，既有 Profile 迁移为 `approval`，见 [`design/pi-tool-approval-mode.md`](./design/pi-tool-approval-mode.md) 与 [ADR-0033](./adr/0033-pi-tool-approval-mode.md)；**仍未实现**：项目本地资源加载（默认关闭）、Skills/Prompts 内容进 Bundle、Session 级模式 override、Risk Guard 与机群用量/审计；见 [`design/remote-pi-control-plane.md`](./design/remote-pi-control-plane.md)、[ADR-0029](./adr/0029-server-managed-isolated-pi-runtime.md) 与 [ADR-0030](./adr/0030-pi-resource-bundle-and-tool-policy.md)；**Session 显式导入已完成**（Plan 2.1：只读发现 + 显式预览 + 单向幂等复制）；
-- **Pi 展示层复用已完成（Plan 3 / ADR-0032）**：前端消息时间轴按 `examples/pi-web` 原样拷入渲染层（`packages/frontend/src/pi-web/`）+ Pi UI Adapter 唯一翻译点 + 降级护栏，保留 VCPDeck Server/Owner/Run 控制语义与 Composer/会话列表/连接管理；
 - 主动监控巡检和异常任务生成；
 - 移动端或轻量只读端。
 
-这些方向当前不是系统已实现能力。进入开发前需要基于届时锁定的 Pi SDK 重新调研，并完成独立需求、领域模型、安全边界、兼容策略和 ADR；不得把历史 Pi 能力调研或“完全管控”草案当作已接受设计。
-
+这些方向当前不是系统已实现能力。Pi／DSH 专用集成已按 ADR-0049 退役，任何重新引入都必须先重新评估成本并另立 ADR。
 ## 5. 明确暂不承诺
 
 - 公网多租户 SaaS；

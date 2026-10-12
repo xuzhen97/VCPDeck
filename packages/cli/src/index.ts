@@ -1,13 +1,12 @@
 /**
  * VCPDeck CLI 入口。
  *
- * 当前能力：多环境配置、Client 列表查询、Job 查询/执行/取消与失败现场、文件只读浏览与写操作/传输、FRP 查询与映射增删、Storage 查询、Terminal 生命周期与 PTY 直连、Pi 子任务与交互 REPL、Release 双平台上传及 Server/Client 自更新终态验收。
+ * 当前能力：多环境配置、Client 列表查询、Job 查询/执行/取消与失败现场、文件只读浏览与写操作/传输、FRP 查询与映射增删、Storage 查询、Terminal 生命周期与 PTY 直连、Release 双平台上传及 Server/Client 自更新终态验收。
  */
 import { VERSION } from "@vcpdeck/shared";
 import { runEnvCommand } from "./env-command.js";
 import { runFilesCommand } from "./files-command.js";
 import { runJobsCommand } from "./jobs-command.js";
-import { runPiCommand } from "./pi-command.js";
 import { runFrpCommand } from "./frp-command.js";
 import { runClientsCommand } from "./clients-command.js";
 import { runReleaseCommand } from "./release-command.js";
@@ -33,10 +32,6 @@ export async function run(
 		}
 		if (command === "env") {
 			await runEnvCommand(subcommand, rest, { log });
-			return 0;
-		}
-		if (command === "pi") {
-			await runPiCommand(subcommand, rest, { log });
 			return 0;
 		}
 		if (command === "frp") {
@@ -132,13 +127,6 @@ export function helpText(): string {
 		"  vcpdeck files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
 		"  vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]",
 		"  vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
-		"",
-		"Pi:",
-		"  vcpdeck pi models <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]",
-		"  vcpdeck pi sessions <client> [--cwd=<path>] [--root=<dir>] [--env=<name>] [--json]",
-		"  vcpdeck pi new <client> --cwd=<path> [--root=<dir>] [--env=<name>] [--json]",
-		"  vcpdeck pi run <client> \"提示词\" --cwd=<path> [--session=<id>] [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]",
-		"  vcpdeck pi abort <client> --session=<id> [--env=<name>] [--json]",
 		"",
 		"FRP:",
 		"  vcpdeck frp instances [--page=<n>] [--env=<name>] [--json]",

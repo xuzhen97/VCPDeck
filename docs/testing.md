@@ -4,7 +4,7 @@
 
 ## 1. 目标
 
-测试必须覆盖的不只是成功 API，还包括跨进程协议、断线对账、路径/凭据安全、状态机并发、真实 PTY/Pi/FRP 和发布回退。
+测试必须覆盖的不只是成功 API，还包括跨进程协议、断线对账、路径/凭据安全、状态机并发、真实 PTY/FRP 和发布回退。
 
 ## 2. 测试层次
 
@@ -12,11 +12,11 @@
 | --- | --- | --- |
 | Shared 单元测试 | Vitest，`packages/shared/src/*.test.ts` | parse 函数、错误码、状态和边界常量 |
 | Server 单元测试 | Vitest，模块旁测试 | Service 状态机、Controller 映射、Prisma mock |
-| Client 单元测试 | Vitest | dispatcher、executor、文件路径、PTY/Pi supervisor |
+| Client 单元测试 | Vitest | dispatcher、executor、文件路径、PTY/终端 supervisor |
 | SDK 单元测试 | Vitest | URL、认证头、分页、错误归一化 |
 | CLI 单元/本地集成测试 | Vitest，`packages/cli/src/*.test.ts` | 多环境严格配置、选择优先级、项目查找、凭据引用、命令与 Release SDK 接线 |
 | Frontend 组件测试 | Vitest + Testing Library + jsdom | 路由、状态、交互、敏感信息不渲染 |
-| 包内集成测试 | `*.integration.test.ts` | Server Gateway/Broker、Client Pi Worker、Terminal |
+| 包内集成测试 | `*.integration.test.ts` | Server Gateway/Broker、Client、Terminal |
 | 项目 E2E | `scripts/test.cjs` | 真实 Server + mock/真实 Client + REST/WS |
 | CLI 能力 E2E | `scripts/test-cli-capabilities.cjs` | 真实 Server + Client 上驱动 CLI 构建产物，逐域验证 clients/jobs/files/frp/storage/terminal/pi 与错误路径（临时物全部隔离在 `.tmp/cli-e2e/`） |
 | VCP 插件 E2E | `scripts/test-vcp-plugin.cjs` | 真实 VCPToolBox `ToolCallParser` 解析工具块 + 隔离 Server/Client/FRPS；22 个动作及公开 Storage Share 下载、图片预览、撤销删除锁验证（临时物隔离在 `.tmp/vcp-plugin-e2e/`） |
@@ -66,7 +66,6 @@ pnpm test
 
 脚本级自检：`bash scripts/install-coturn.test.sh`（coturn 发行版/地址/IPv4 纯函数）与 `pnpm exec tsx scripts/pack-release-deps.test.ts`（node-datachannel 双平台离线装配与平台裁剪）。
 
-Pi Resource Bundle 门禁：`pnpm test:pi-resources`（ADR-0042）——覆盖标准包资源解析（只取 extension、版本/路径/唯一入口校验）、扩展产物导入面（宿主 Pi 虚拟模块保持 external、未打包第三方说明符即失败）、dev/release 公共资源逐字节一致，以及在**单文件 SDK 发布布局**下用独立 node 子进程加载真实社区扩展并驱动其命令处理器。该门禁不依赖用户原生 Pi、不访问网络、不调用真实模型。
 
 按包：
 
@@ -116,8 +115,6 @@ AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明�
 | Exec command/script | 双端 parser、runtime capability、stdin、大小/输出截断、cwd root、timeout、进程树取消、最终输出留痕 |
 | 远程文件/路径 | 双端 parser、Windows/Linux 认证 root、UNC/盘符、symlink/junction、不存在目标父链、文本上限、覆盖/临时文件、大小/SHA、取消、断流、失败后下一 Job 派发、重连和 Socket/Job 归属 |
 | Terminal | 协议 parser、operator/viewer/token、snapshot/output 同序列、上游 gap/resync、UTF-8 上限、持续输入速率、generation、SQLite 状态、首次/重复 attach-detach TTL、expired 上报、真实 PTY 和进程树 |
-| Pi | capability/协议 parser、Owner/Observer、runId/CAS、cwd/projectKey、Session 树、交互/非阻塞 Extension 投影与 Trust、图片、SSE、重连/重启、隐私和真实模型 smoke |
-| Pi Resource Bundle（ADR-0042） | `pnpm test:pi-resources`：标准包资源解析（只取 extension、版本/入口唯一/路径穿越拒绝）、扩展产物导入面（宿主虚拟模块 external、未打包第三方说明符拒绝）、dev/release 公共资源逐字节一致、单文件 SDK 发布布局下真实社区扩展加载与命令行为（受控 exec 与真实 git 双路径）、Client 校验篡改/版本不符/缺失 fail closed、多版本共存与 Session 数据不受影响 |
 | Storage Provider | 签名篡改/过期、上传下载、Provider 故障、对象永久缺失分类、公开分享和 File 保留锁 |
 | Storage 阿里云盘真环境验收 | `node scripts/test-release-alibaba.cjs`（ADR-0019 一键端到端）：脚本自建同一临时 DB、Server/Client Launcher，按会话把两个 Release 分片直接 PUT Provider，验证 Server 本地无目标 zip、下载 302、更新与清理；仅首次输入 clientId、浏览器 OAuth code 或 3001 端口冲突时需人工介入 |
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |
@@ -155,10 +152,8 @@ AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明�
 - Client 一键安装在 Windows x64 与 Linux x64/glibc/systemd 的真实空机、A2 固定布局和账户权限、既有 Linux PM2 M1 迁移、冷重启/无人登录恢复，以及 Windows 登录恢复矩阵；
 - 真实 node-pty；
 - FRP E2E；
-- Pi Worker 集成、锁定 SDK 的 Session JSONL 打开/迁移与真实模型 smoke；
-- **Pi Resource Bundle 门禁**：- **导入专项门禁**：摘要响应不含正文与源文件完整绝对路径（canary）；预览文本 ≤ 80 字符且不进存储/Job/日志（canary）；源文件导入前后 hash 不变；二次导入幂等且目标内容不变；副本校验失败无半成品；`sourceName` 含路径逃逸字符时整请求被拒（400）。
+- **导入专项门禁**：摘要响应不含正文与源文件完整绝对路径（canary）；预览文本 ≤ 80 字符且不进存储/Job/日志（canary）；源文件导入前后 hash 不变；二次导入幂等且目标内容不变；副本校验失败无半成品；`sourceName` 含路径逃逸字符时整请求被拒（400）。
 manifest 严格解析（路径逃逸/未知键/摘要格式）、逐资源 sha256 校验（篡改/缺失/符号链接逃逸/SDK 版本不符 → 不上报能力且不加载）、Client 二次校验 `requiredBundle`（缺资源 → `PI_BUNDLE_UNAVAILABLE`）、v4 契约与「上报 < 4 不下发」（含 v3 Client）、SDK 内置工具名与工具目录一致性（SDK 新增工具时该测试失败，强制显式决定归属桶）、默认拒绝与三模式完整矩阵（`approval`/`auto`/`yolo` × `allow`/`confirm`/`deny`/未列出，含审批、拒绝、超时与 UI 调用次数）、执行模式损坏列与 bridge v2 非法输入的 fail closed、YOLO 不扩大资源加载面；
-- **native Pi 零污染门禁**：预置用户 `~/.pi` 后跑 capability、Session 新建/列表、Prompt 与 Client 重启，该目录递归清单与内容 hash 必须 0 created / 0 modified / 0 deleted（**含旧会话导入链路：列目录、预览、导入**）该目录递归清单与内容 hash 必须 0 created / 0 modified / 0 deleted，native-only Session 不可见、哨兵 Extension 未执行；未安装用户 Pi 的全新机器仍可用；
 - RuntimeSpec 门控与换代：未 ready 时 WORKER_ACTIONS 返回 `PI_CONFIG_UNAVAILABLE` 且不 fork Worker；活跃 Run 期间配置变更只 drain、Run 结束换代；Server 侧同一门控；
 - Launcher 更新/回退；
 - 从上一支持版本数据库升级；
@@ -174,12 +169,10 @@ Release 不得只凭构建成功发布。至少确认：
 - exec command/script、stdin、输出边界、timeout、进程树取消和断线对账；
 - 文件浏览、文本留痕、写/移/删覆盖、导入/导出、Local/Alibaba 完整性差异、取消/断线和 Storage；
 - Terminal attach/input/resync/close、snapshot/seq、控制权、Client/Server 重启、TTL/expired 和真实 PTY；
-- Pi Session CRUD/fork/clone、prompt/steer/follow-up/compact/abort、Extension 对话框、图片、SSE、Worker/Client/Server reconnect；
 - Agent 会话与 Run 独立于 Job（ADR-0041）：归档/恢复、失败后继续、每轮自动结算、会话操作审计分页、普通 Job 列表不含 Agent、Server drain 同时等待 Agent Run、显式 Agent migration 在遗留活跃 Run/删除预约时 fail closed；
-- Pi 配置链路：Profile/Credential/绑定 CRUD、凭据只回安全元数据、RuntimeSpec 下发与 ACK、模型 scope 等于 allowedModels ∩ 凭据可用、Server 先行升级；
 - FRPS probe、单实例映射、frpc 退出/重启、删除孤儿和凭据不泄漏；
 - Windows/Linux 构件从上传到 Server 更新、Client 逐台更新、离线补更和失败回退的完整链路；Alibaba 后端必须证明上传/下载正文均不经过 Server；
-- 同一 Git Tag 的 Pi Skill 安装/升级与 SDK/Shared 仓库外安装；
+- 同一 Git Tag 的 Skill 安装/升级与 SDK/Shared 仓库外安装；
 - 数据库和 Storage 恢复；
 - CHANGELOG/compatibility/deployment/operations 已更新。
 
@@ -188,7 +181,7 @@ Release 不得只凭构建成功发布。至少确认：
 `docs/verification/` 保存某次环境验收的证据，应记录：
 
 - 日期、提交、应用版本和协议版本；
-- OS/Node/FRP/Pi/数据库环境；
+- OS/Node/FRP/数据库环境；
 - 命令与结果摘要（脱敏）；
 - 失败、跳过项和已知限制；
 - 验收人。
@@ -200,7 +193,6 @@ Release 不得只凭构建成功发布。至少确认：
 ## 9. 当前缺口
 
 - 缺完整浏览器 E2E；
-- 缺独立、可重复的真实机器 Pi 专项验收矩阵；
 - Server 重启窗口内 Job 结果不丢的真实环境验证未完成；
 - Terminal snapshot/output seq、上游 gap、UTF-8 snapshot/backlog 上限、持续输入速率、generation、持久状态、首次/重复 attach-detach TTL 和本地 expired 收敛仍缺完整自动化和真实平台门禁；
 - 尚未建立持续、可重复的 Windows/Linux 真实 PTY 验收矩阵；

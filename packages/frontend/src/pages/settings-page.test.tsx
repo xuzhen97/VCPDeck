@@ -178,11 +178,11 @@ describe("SettingsPage", () => {
 		expect(tokens.revoke).toHaveBeenCalledWith("t1");
 	});
 
-	it("旧 Pi 设置地址重定向到 Agent 模块的 Profile", async () => {
+	it("旧 Pi 设置地址落入既有未知段兜底，不再跳转 Agent", async () => {
 		renderSettings(true, "/settings/pi");
 		await waitFor(() =>
 			expect(screen.getByLabelText("当前位置")).toHaveTextContent(
-				"/agent/profile",
+				"/settings/profile",
 			),
 		);
 	});

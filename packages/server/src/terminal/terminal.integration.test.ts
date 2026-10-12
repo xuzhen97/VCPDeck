@@ -56,25 +56,6 @@ function makeHarness() {
 			markInactiveByClientId: vi.fn(async () => {}),
 			updateStatus: vi.fn(),
 		} as never,
-		{
-			bindEmitter: vi.fn(),
-			request: vi.fn(),
-			resolve: vi.fn(),
-			disconnect: vi.fn(),
-		} as never,
-		{ publish: vi.fn(), stream: vi.fn() } as never,
-		{
-			markReconcilePending: vi.fn(async () => {}),
-			reconcileGeneration: vi.fn(async () => ({
-				acceptedRunIds: [],
-				closedRunIds: [],
-				reportAgain: false,
-			})),
-			withReconciledSocket: vi.fn(
-				async (_c: string, _s: string, op: () => Promise<void>) => op(),
-			),
-			disconnectGeneration: vi.fn(async () => true),
-		} as never,
 		service as never,
 		broker as never,
 		{

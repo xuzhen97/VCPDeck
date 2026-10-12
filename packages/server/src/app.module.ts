@@ -7,7 +7,6 @@ import { StorageModule } from "./storage/storage.module.js";
 import { FileModule } from "./file/file.module.js";
 import { FrpModule } from "./frp/frp.module.js";
 import { TunnelModule } from "./tunnel/tunnel.module.js";
-import { PiModule } from "./pi/pi.module.js";
 import { ReleaseModule } from "./release/release.module.js";
 import { ClientInstallerModule } from "./client-installer/client-installer.module.js";
 import { GitSshModule } from "./git-ssh/git-ssh.module.js";
@@ -22,7 +21,6 @@ import { GitSshModule } from "./git-ssh/git-ssh.module.js";
 		FileModule,
 		FrpModule,
 		TunnelModule,
-		PiModule,
 		ReleaseModule,
 		ClientInstallerModule,
 		GitSshModule,

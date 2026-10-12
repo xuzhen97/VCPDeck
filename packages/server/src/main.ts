@@ -5,8 +5,6 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module.js";
 import cookieParser from "cookie-parser";
 import { PrismaService } from "./prisma/prisma.service.js";
-import { assertAgentMigrationReady, resolveMigrationSqlPath } from "../prisma/agent-session-migration.cjs";
-import { resolveDatabaseUrl } from "./prisma/database-url.js";
 import { FrpsInstancesService } from "./frp/frp-instances.service.js";
 import { FrpReconciliationService } from "./frp/frp-reconciliation.service.js";
 import { ReleaseOrchestrator } from "./release/release.orchestrator.js";
@@ -57,20 +55,6 @@ async function bootstrapAdmin(prisma: PrismaService) {
 }
 
 async function bootstrap() {
-	// Agent 迁移就绪检查(ADR-0041):迁移未应用或与部署不一致时拒绝启动;
-	// 正常启动路径已由 pre-start 显式迁移,此处只读校验,不自行改库。
-	try {
-		await assertAgentMigrationReady({
-			url: resolveDatabaseUrl(),
-			// 路径解析由迁移模块统一负责(源码布局与发布构件布局不同),
-			// 不在此处重复一份 layout 知识。
-			sqlPath: resolveMigrationSqlPath(),
-		});
-	} catch (error) {
-		console.error("[bootstrap] Agent 迁移未就绪:", error instanceof Error ? error.message : error);
-		process.exit(1);
-	}
-
 	const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
 	// socket.io 同源 CORS（SPA 单包交付：页面与 API 同源 :3001 时 /app 也放行）；

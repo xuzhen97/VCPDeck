@@ -73,7 +73,7 @@ Capability 是 Client 能力声明，不是用户权限。Server 创建 Job 时�
 
 | Job | 当前实现 | 重要边界 |
 | --- | --- | --- |
-| `file.roots` | Windows 探测可访问的 `A:\\`–`Z:\\`；Linux/macOS 通常返回 `/`，根读取失败时回退 home | 返回值用于 UI/Pi 选根，但普通文件 Job 的 `rootDir` 当前未强制来自该列表 |
+| `file.roots` | Windows 探测可访问的 `A:\\`–`Z:\\`；Linux/macOS 通常返回 `/`，根读取失败时回退 home | 返回值用于 UI 选根，但普通文件 Job 的 `rootDir` 当前未强制来自该列表 |
 | `file.list` | `readdir(...,{withFileTypes:true})` 后并发 `stat` | 单个 entry 的 stat 失败会被忽略；非目录类型统一投影为 `file` |
 | `file.stat` | 返回名称、`file/dir`、大小和 mtime | 名称从请求 path 取末段；其他特殊文件投影为 `file` |
 | `file.readText` | 先 stat，再按 UTF-8 整体读取 | SDK/Frontend 默认 `maxBytes=262144`，但调用方可提交其他值，当前没有全局硬上限 |

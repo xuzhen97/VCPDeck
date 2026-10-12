@@ -61,7 +61,9 @@ model Job {
   updatedAt    DateTime  @updatedAt
 }
 
-// ── Agent 会话/执行/审计(ADR-0041):脱离 Job 的独立控制面实体 ──
+// ── Agent 会话/执行/审计(ADR-0041)：**已退役**(ADR-0049)。
+// 仅保留最小存储定义以承载历史数据；不再有 Service/Controller 写入或读取。
+// 物理清理需独立的备份与清理设计，见 ADR-0049 决策 6。
 // Session 是长期资源,不使用 Job done/error/cancelled 语义;
 // Run 由权威执行报告自动结算;审计只保存安全元数据,不保存对话正文。
 model AgentSession {
@@ -374,7 +376,9 @@ model TerminalAuditEvent {
 }
 
 // ── 远程 Pi 集中配置（Plan 1：Profile / Credential / Binding） ──
-// 权威边界见 docs/design/remote-pi-control-plane.md §6 与 ADR-0029：
+// ── Pi Profile/Provider/Credential（ADR-0029）：**已退役**(ADR-0049)。
+// 仅保留最小存储定义以承载历史数据；不再有业务入口。
+// 历史权威边界见 docs/design/remote-pi-control-plane.md §6 与 ADR-0029：
 // Profile/Credential/Binding 只由 Server 持久化，Client 不落盘；
 // Credential 只存密文与安全元数据，明文不得进入普通 API、日志或审计。
 model PiProfile {
@@ -507,6 +511,7 @@ model GitSshTarget {
 // 状态语义：可用性未确认（available=false）或宿主已更换时只能落 unknown；
 // 只有同一 hostId 明确不持有该实例、或宿主自报 stopped 时才落 stopped。
 // 表结构变更随 Server 启动的 prisma db push 生效（本仓库既有升级方式）。
+/// **已退役**(ADR-0049)：会话宿主能力已移除，仅保留历史数据定义。
 model SessionHostInstance {
   id         String    @id
   clientId   String

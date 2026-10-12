@@ -1,6 +1,6 @@
 # Pi Web 渲染层拷入（vendored）与 Pi UI Adapter 隔离
 
-- Status: Proposed
+- Status: Rejected（专用集成由 ADR-0049 退役，不再推进本提案）
 - Date: 2026-09-23
 
 ## Context

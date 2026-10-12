@@ -4,27 +4,13 @@ import type {
 	GitSshCapability,
 	MachineRegister,
 	P2pTunnelCapabilityStatus,
-	PiCapabilityStatus,
-	PiEvent,
-	PiStateAck,
 	StatusReport,
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
-import { parsePiRequest } from "@vcpdeck/shared";
 import { CLIENT_ID, getRegisterInfo } from "./register.js";
 import { getHeartbeat } from "./heartbeat.js";
 import { killJob, getRunningJobIds, getStatusReport } from "./executor.js";
 import { dispatch } from "./dispatcher.js";
-import {
-	createPiSupervisor,
-	type PiSupervisor,
-	type PiWorkerHandle,
-} from "./pi/supervisor.js";
-import type { PiWorkerRequestMessage } from "./pi/worker-protocol.js";
-import { getCachedClientBundle, probePiCapability, PROBE_WORKER_TIMEOUT_MS } from "./pi/capability.js";
-import { applyShellPathDirs, resolvePiShells } from "./pi/shell.js";
-import { resolveVcpPiRuntimePaths } from "./pi/runtime-paths.js";
-import { evaluateRuntimeSpec } from "./pi/runtime-spec.js";
 import {
 	detectInstallationInfo,
 	probePrivilegedCapability,
@@ -59,33 +45,20 @@ import {
 } from "./frpc-daemon.js";
 import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge.js";
 import { attachTunnelBridge, type TunnelBridge } from "./tunnel/tunnel-bridge.js";
-import { attachSessionHostBridge } from "./session-host/bridge.js";
-import { createSessionHostClient } from "./session-host/client.js";
-import {
-	createSessionHostSupervisor,
-	defaultControlFile,
-	defaultHostEntry,
-} from "./session-host/supervisor.js";
 import { createNodeDataChannelPeer, probeP2pBackend } from "./tunnel/node-datachannel-peer.js";
 import { ClientLauncher } from "./launcher-control.js";
 import * as net from "node:net";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { fork } from "node:child_process";
-import { join } from "node:path";
 
 const SERVER_BASE = process.env.VCPDECK_SERVER || "http://localhost:3001";
 const SERVER_URL = SERVER_BASE + "/client";
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
-/** 会话宿主控制文件路径：由部署（安装脚本/守护定义）提供；未配置表示宿主未安装，不挂桥。 */
-const SESSION_HOST_CONTROL_FILE = process.env.VCPDECK_SESSION_HOST_CONTROL_FILE || "";
-/** 宿主启动 pi/dsh 所需的命令（JSON）；未配置则不启动宿主（不猜可执行文件）。 */
-const SESSION_HOST_COMMANDS = process.env.VCPDECK_SESSION_HOST_COMMANDS || "";
 
 /**
  * M1 迁移验证专用模式（仅 Linux A2 迁移由安装器设置，全新安装/稳态永不进入）：
  * Client 仍执行 REGISTER 与心跳供 Server 验证身份/版本/安装/特权，
- * 但不挂载任何 operational 处理器（Job dispatch/cancel、Files、Terminal、Pi、FRP），
+ * 但不挂载任何 operational 处理器（Job dispatch/cancel、Files、Terminal、FRP），
  * 使迁移失败回退前不产生任何业务副作用。
  */
 export function isMigrationVerifyOnly(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -93,23 +66,7 @@ export function isMigrationVerifyOnly(env: NodeJS.ProcessEnv = process.env): boo
 }
 
 function main() {
-	void installPiShellPath().finally(() => connect());
-}
-
-/**
- * 启动时把解析到的 shell 目录前置到进程 PATH。
- *
- * 原因：Pi SDK 解析 PowerShell 只走 `findExecutableOnPath`（内部 `where`/`which`），
- * 而 Client 以 SYSTEM 计划任务运行时 PATH 可能被裁剪。在这里统一修正后，主进程及其所有
- * 子进程（Pi worker、exec Job、PTY）都继承同一份 PATH，SDK 的解析结果不再随环境漂移。
- * 非致命：解析失败不影响连接与其它能力。
- */
-async function installPiShellPath(): Promise<void> {
-	try {
-		applyShellPathDirs(await resolvePiShells());
-	} catch {
-		// 探测失败：保持原环境，Pi 的 shell 工具会在调用时报稳定错误。
-	}
+	connect();
 }
 
 // Auto-run when executed directly: node dist/index.js
@@ -117,43 +74,12 @@ if (require.main === module) {
 	main();
 }
 
-/** 真实 fork 项目 Worker（cwd 通过 argv 传入） */
-function forkProjectWorker(cwd: string): PiWorkerHandle {
-	// 第一层隔离（防御性兜底）：Worker 环境指向 VCPDeck 数据根。
-	// 不提供 fallback：解析失败时本身 fail closed。
-	const paths = resolveVcpPiRuntimePaths();
-	const child = fork(join(__dirname, "pi", "worker.js"), [cwd], {
-		stdio: ["ignore", "ignore", "ignore", "ipc"],
-		// 受管 Git SSH 注入同样作用于 Pi Worker 及其子进程（不改 process.env 全局）。
-		env: applyGitSshEnv({
-			...process.env,
-			PI_CODING_AGENT_DIR: paths.agentDir,
-			PI_SESSION_DIR: paths.sessionsRoot,
-		}),
-	});
-	return {
-		send: (msg: PiWorkerRequestMessage) => child.send(msg),
-		onMessage: (listener) => {
-			child.on("message", listener);
-			return () => child.removeListener("message", listener);
-		},
-		onExit: (listener) => {
-			child.on("exit", (code) => listener(code ?? 0));
-			return () => child.removeListener("exit", listener);
-		},
-		kill: () => child.kill(),
-	};
-}
-
-export interface PiBridgeDeps {
+export interface ClientBridgeDeps {
 	clientId: string;
-	supervisor: PiSupervisor;
-	getPiStatus: () => Promise<PiCapabilityStatus>;
 	getTerminalStatus: () => Promise<TerminalCapabilityStatus>;
 	/** 运行时安全摘要：非交互特权探测 + 安装模式；每次连接探测一次，失败降级为未报告。 */
 	getRuntimeSecurity: () => Promise<RuntimeSecurityInfo | undefined>;
 	getRegister: (
-		piStatus: PiCapabilityStatus | undefined,
 		terminalStatus: TerminalCapabilityStatus | undefined,
 		runtimeSecurity: RuntimeSecurityInfo | undefined,
 		gitSshStatus: GitSshCapability | undefined,
@@ -161,130 +87,23 @@ export interface PiBridgeDeps {
 	getStatusReport: () => StatusReport;
 }
 
-export interface PiBridge {
-	/** connect handler 中调用：探测 → REGISTER(ack) → STATUS_REPORT + PI_STATE */
+export interface ClientBridge {
+	/** connect handler 中调用：探测 → REGISTER(ack) → STATUS_REPORT */
 	onConnected: () => Promise<void>;
 }
 
 /**
- * 绑定 Pi Socket 桥：PI_REQUEST 响应、PI_EVENT 转发、注册后状态上报。
- * Server 完成 register 后通过 ack callback 或现有 "ack" event 通知。
+ * 绑定 Client Socket 桥：REGISTER 与注册后的 STATUS_REPORT。
+ * Server 完成 register 后通过 "ack" event 通知。
  */
-export function attachPiBridge(
+export function attachClientBridge(
 	socket: Socket,
-	deps: PiBridgeDeps,
+	deps: ClientBridgeDeps,
 	opts: { verifyOnly?: boolean } = {},
-): PiBridge {
+): ClientBridge {
 	const verifyOnly = opts.verifyOnly === true;
-	// 迁移验证模式：不挂载任何 Pi 工作处理器（不下发、不响应、不转发事件）。
-	if (!verifyOnly) {
-		// 请求响应（信任边界：先 parse 再交给 supervisor）
-		socket.on(Events.PI_REQUEST, (raw: unknown) => {
-			try {
-				const request = parsePiRequest(raw);
-				void deps.supervisor.request(request).then((response) => {
-					if (socket.connected) socket.emit(Events.PI_RESPONSE, response);
-				});
-			} catch {
-				const requestId =
-					typeof raw === "object" &&
-					raw !== null &&
-					"requestId" in raw &&
-					typeof (raw as { requestId: unknown }).requestId === "string"
-						? (raw as { requestId: string }).requestId
-						: "";
-				if (socket.connected) {
-					socket.emit(Events.PI_RESPONSE, {
-						requestId,
-						ok: false,
-						error: { code: "PI_PROTOCOL_INVALID", message: "Invalid request" },
-					});
-				}
-			}
-		});
-
-		// supervisor 事件转发（断线期间不发送；Worker 继续运行）
-		deps.supervisor.onEvent((event: PiEvent) => {
-			if (socket.connected) socket.emit(Events.PI_EVENT, event);
-		});
-
-		// RuntimeSpec 接纳：严格解析 → 登记运行配置 → 回 ACK。
-		// 非 ready 时 supervisor 会拒绝 WORKER_ACTIONS（fail closed，不 fallback 本机 Pi）。
-		socket.on(Events.PI_RUNTIME_SPEC, (raw: unknown) => {
-			// Bundle 已在 REGISTER 前的探测中校验并缓存（只读，不再触发探测）；
-			// 需要资源但本地缺失时，evaluateRuntimeSpec 的二次校验会 fail closed。
-			const cachedBundle = getCachedClientBundle();
-			void evaluateRuntimeSpec(raw, {
-				bundleExtensionPaths: cachedBundle?.bundle?.extensionPaths ?? [],
-				bundleResourceIds: cachedBundle?.bundle?.resourceIds ?? [],
-			})
-				.then((state) => {
-					deps.supervisor.setRuntimeConfig(state);
-					if (!socket.connected) return;
-					socket.emit(Events.PI_RUNTIME_ACK, {
-						clientId: deps.clientId,
-						specId: state.config?.spec.specId ?? null,
-						runtimeRevision: state.runtimeRevision,
-						configState: state.configState,
-						...(state.reasonCode ? { reasonCode: state.reasonCode } : {}),
-						...(state.config
-							? {
-									resolvedModels: state.config.resolvedModels,
-									activeRuntimeRevision: deps.supervisor.activeRuntimeRevision(),
-									unavailableModels: state.config.unavailableModels,
-								}
-							: {}),
-					});
-				})
-				.catch(() => {
-					// 兜底：任何未预期异常都不得默认放行，登记为 incompatible。
-					deps.supervisor.setRuntimeConfig({
-						configState: "incompatible",
-						reasonCode: "PI_RUNTIME_SPEC_INCOMPATIBLE",
-						runtimeRevision: null,
-						config: null,
-					});
-				});
-		});
-	}
-
 	let connectionGeneration = 0;
 	let currentRegistered: (() => void) | null = null;
-
-	function scheduleControlledReconnect(generation: number): void {
-		socket.disconnect();
-		setTimeout(() => {
-			if (generation === connectionGeneration && !socket.connected)
-				socket.connect();
-		}, 100);
-	}
-
-	function reportState(
-		generation: number,
-		retry = 0,
-		closureConfirmed = false,
-	): void {
-		if (generation !== connectionGeneration || !socket.connected) return;
-		socket.emit(
-			Events.PI_STATE,
-			deps.supervisor.getStateReport(),
-			async (raw?: Partial<PiStateAck>) => {
-				if (generation !== connectionGeneration) return;
-				const ack: PiStateAck = {
-					acceptedRunIds: raw?.acceptedRunIds ?? [],
-					closedRunIds: raw?.closedRunIds ?? [],
-					reportAgain: raw?.reportAgain ?? false,
-				};
-				const { allClosed } = await deps.supervisor.applyStateAck(ack);
-				if (generation !== connectionGeneration) return;
-				if (!ack.reportAgain) return;
-				if (allClosed && !closureConfirmed) reportState(generation, retry, true);
-				else if (!allClosed && retry < 2)
-					setTimeout(() => reportState(generation, retry + 1), 100);
-				else scheduleControlledReconnect(generation);
-			},
-		);
-	}
 
 	// 兼容旧 Server：现有 "ack" event，始终绑定当前连接代次
 	socket.on("ack", (data: { event?: string }) => {
@@ -293,6 +112,7 @@ export function attachPiBridge(
 
 	return {
 		async onConnected() {
+			// 连接代次：探测很慢时可能已被更新的连接取代，旧代次不得再发 REGISTER。
 			const generation = ++connectionGeneration;
 			let reported = false;
 			const onRegistered = () => {
@@ -301,33 +121,20 @@ export function attachPiBridge(
 				// 迁移验证模式：只做身份/安全验证，不下发任何工作状态。
 				if (verifyOnly) return;
 				socket.emit(Events.STATUS_REPORT, deps.getStatusReport());
-				reportState(generation);
 			};
 			currentRegistered = onRegistered;
-			// Pi 探测预算：单文件 SDK 产物的真实成本约百毫秒级（见 capability.ts
-			// PROBE_WORKER_TIMEOUT_MS），这里比 worker 上限多留 4s，保证 worker 自己
-			// 的失败原因（崩溃 / 卡死）能回传到 REGISTER，而不是被降级成「无 Pi 字段」。
-			const piStatus = await Promise.race([
-				deps.getPiStatus(),
-				new Promise<undefined>((resolve) =>
-					setTimeout(
-						() => resolve(undefined),
-						PROBE_WORKER_TIMEOUT_MS + 4_000,
-					),
-				),
-			]).catch(() => undefined);
 			const terminalStatus = await deps.getTerminalStatus().catch(() => undefined);
 			// 运行时安全摘要：探测超时/失败降级为未报告（deps 内部已包 3s 超时），不阻塞注册。
 			const runtimeSecurity = await deps.getRuntimeSecurity().catch(() => undefined);
 			// Git SSH 能力与注入结论必须在 REGISTER 前就绪：Server 只向已上报能力的 Client 下发密钥。
 			const gitSshStatus = await probeGitSshCapabilityForClient().catch(() => undefined);
 			await refreshGitSshEnv();
-			if (generation === connectionGeneration)
-				socket.emit(
-					Events.REGISTER,
-					deps.getRegister(piStatus, terminalStatus, runtimeSecurity, gitSshStatus),
-					onRegistered,
-				);
+			if (generation !== connectionGeneration) return;
+			socket.emit(
+				Events.REGISTER,
+				deps.getRegister(terminalStatus, runtimeSecurity, gitSshStatus),
+				onRegistered,
+			);
 		},
 	};
 }
@@ -395,8 +202,6 @@ export function connect(): Socket {
 			frpShuttingDown = true;
 			tunnelBridge?.dispose();
 			frpBridge.dispose();
-			// 宿主是 Client 的子进程：随 Client 一同结束（ADR-0046，允许中断但不伪装）。
-			void sessionHostSupervisor?.stop();
 			void shutdownFrpRuntime()
 				.catch(() => {
 					console.error("[frp] 停机释放失败（忽略）");
@@ -404,11 +209,6 @@ export function connect(): Socket {
 				.finally(() => process.exit(0));
 		});
 	}
-
-	const supervisor = createPiSupervisor({
-		clientId: CLIENT_ID,
-		forkWorker: forkProjectWorker,
-	});
 
 	// ── 终端能力（延迟探测；失败仅禁用 Terminal Tab） ──
 	const terminalGenerationId = randomUUID();
@@ -427,29 +227,6 @@ export function connect(): Socket {
 		manager: terminalManager,
 	});
 
-	// 会话宿主对账桥：与旧 Terminal 对账并存且互不影响（只发 SESSION_HOST_STATE）。
-	// ADR-0046：宿主由 Client 作为**子进程**启动，随 Client 生命周期结束；
-	// 未配置启动命令或未安装宿主时不挂桥（不猜路径、不伪造宿主状态）。
-	let sessionHostSupervisor: ReturnType<typeof createSessionHostSupervisor> | null = null;
-	if (SESSION_HOST_COMMANDS && !verifyOnly) {
-		try {
-			const controlFile = SESSION_HOST_CONTROL_FILE || defaultControlFile();
-			const hostEntry = process.env.VCPDECK_SESSION_HOST_ENTRY || defaultHostEntry(process.argv[1]);
-			const commands = JSON.parse(SESSION_HOST_COMMANDS) as Record<string, { file: string; args?: string[] }>;
-			if (hostEntry) {
-				sessionHostSupervisor = createSessionHostSupervisor({ hostEntry, controlFile, commands });
-				// 启动失败不是致命错误：对账链路会如实上报「宿主不可达」。
-				void sessionHostSupervisor.start();
-				attachSessionHostBridge(socket, {
-					clientHost: createSessionHostClient({ controlFile }),
-				});
-			}
-		} catch {
-			// 配置非法或平台不支持：不启动宿主、不挂桥，也不回显配置内容。
-			sessionHostSupervisor = null;
-		}
-	}
-
 	// 连接后：探测终端能力并发现 Shell（幂等，不阻塞注册超过 3 秒）
 	let terminalReady: Promise<void> | null = null;
 	function ensureTerminalReady(): Promise<void> {
@@ -464,8 +241,7 @@ export function connect(): Socket {
 		return terminalReady;
 	}
 
-	// 能力探测上限：终端/特权探测保持 3s；Pi 探测需覆盖 SDK worker 加载，单独放宽
-	//（见下方 getPiStatus），两者都不得阻塞 REGISTER 超过各自上限。
+	// 能力探测上限：终端/特权探测 3s，均不得阻塞 REGISTER。
 	function probeWithTimeout<T>(probe: () => Promise<T>, timeoutMs = 3000): Promise<T> {
 		return new Promise<T>((resolve, reject) => {
 			let settled = false;
@@ -491,12 +267,10 @@ export function connect(): Socket {
 		});
 	}
 
-	const bridge = attachPiBridge(
+	const bridge = attachClientBridge(
 		socket,
 		{
 		clientId: CLIENT_ID,
-		supervisor,
-		getPiStatus: () => probeWithTimeout(probePiCapability, PROBE_WORKER_TIMEOUT_MS + 4_000),
 		getTerminalStatus: () => probeWithTimeout(probeTerminalCapability),
 		// 特权探测仅 Linux；非 Linux 两项均为 undefined → 整体未报告（保持 Windows 原语义）。
 		// sudo 探测包统一 3s 超时：超时可视为非交互 sudo 不可用，失败关闭且不阻塞 REGISTER。
@@ -510,9 +284,8 @@ export function connect(): Socket {
 				if (installation !== undefined) info.installation = installation;
 				return info;
 			}),
-		getRegister: (piStatus, terminalStatus, runtimeSecurity, gitSshStatus) =>
+		getRegister: (terminalStatus, runtimeSecurity, gitSshStatus) =>
 			getRegisterInfo(
-				piStatus,
 				terminalStatus,
 				runtimeSecurity,
 				process.env,

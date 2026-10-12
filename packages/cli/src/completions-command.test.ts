@@ -55,7 +55,6 @@ describe("completions command", () => {
 			"clients",
 			"jobs",
 			"files",
-			"pi",
 			"terminal",
 			"frp",
 			"storage",
@@ -63,10 +62,9 @@ describe("completions command", () => {
 		]) {
 			expect(text).toContain(cmd);
 		}
-		expect(text).toContain("--env=prod");
-		expect(text).toContain("--env=staging");
-		expect(text).toContain("roots list stat read");
-		expect(text).toContain("models sessions new run attach abort");
+		// 退役的 Pi 专用命令不再出现在补全中
+		expect(text).not.toContain("models sessions new run attach abort");
+		expect(text).not.toContain("--env=prod pi");
 	});
 
 	it("powershell：包含 Register-ArgumentCompleter 与环境名候选", async () => {

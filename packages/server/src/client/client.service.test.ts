@@ -110,12 +110,7 @@ describe("ClientService 别名注册", () => {
 			{
 				...registerDto,
 				capabilityDetails: {
-					pi: {
-						available: true,
-						sdkVersion: "0.84.0",
-						nodeVersion: "22.19.0",
-						shellKind: "git-bash",
-					},
+					terminal: { available: true, backend: "conpty" },
 				},
 			},
 			"socket-1",
@@ -126,10 +121,10 @@ describe("ClientService 别名注册", () => {
 		expect(upsert).toHaveBeenCalledWith(
 			expect.objectContaining({
 				create: expect.objectContaining({
-					capabilityDetails: expect.stringContaining('"sdkVersion":"0.84.0"'),
+					capabilityDetails: expect.stringContaining('"backend":"conpty"'),
 				}),
 				update: expect.objectContaining({
-					capabilityDetails: expect.stringContaining('"shellKind":"git-bash"'),
+					capabilityDetails: expect.stringContaining('"backend":"conpty"'),
 				}),
 			}),
 		);
@@ -436,16 +431,16 @@ describe("ClientService listOnline", () => {
 			{
 				...clientRow,
 				capabilityDetails:
-					'{"pi":{"available":true,"sdkVersion":"0.84.0","nodeVersion":"22.19.0","shellKind":"git-bash"}}',
+					'{"terminal":{"available":true,"backend":"conpty"}}',
 			},
 		]);
 		const prisma = prismaMock({ findMany }) as never;
 		const service = new ClientService(prisma);
 
 		const [client] = await service.listOnline();
-		expect(client?.capabilityDetails.pi).toMatchObject({ available: true });
-		expect(client?.capabilityDetails.pi).toMatchObject({
-			sdkVersion: "0.84.0",
+		expect(client?.capabilityDetails.terminal).toMatchObject({ available: true });
+		expect(client?.capabilityDetails.terminal).toMatchObject({
+			backend: "conpty",
 		});
 	});
 
@@ -503,7 +498,7 @@ describe("ClientService listOnline", () => {
 			{
 				...clientRow,
 				capabilityDetails: JSON.stringify({
-					pi: { available: true, sdkVersion: "0.84.0" },
+					terminal: { available: true, backend: "conpty" },
 					frp: { available: "yes" },
 				}),
 			},
@@ -512,7 +507,7 @@ describe("ClientService listOnline", () => {
 		const service = new ClientService(prisma);
 
 		const [client] = await service.listOnline();
-		expect(client?.capabilityDetails.pi).toMatchObject({ available: true });
+		expect(client?.capabilityDetails.terminal).toMatchObject({ available: true });
 		expect(client?.capabilityDetails.frp).toBeUndefined();
 	});
 });

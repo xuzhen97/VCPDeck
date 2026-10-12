@@ -1,7 +1,7 @@
 /**
  * ClientUpdateChannel 网关实现。
  *
- * 与 PiRequestBroker 同模式：不直接依赖 ClientGateway（避免 ReleaseModule ↔
+ * 与其它受管通道同模式：不直接依赖 ClientGateway（避免 ReleaseModule ↔
  * EventsModule provider 循环），由 ClientGateway.afterInit 将发送函数绑定进来。
  * Client 更新指令经 room（clientId）下发；详见 docs/design/release-and-update.md。
  */

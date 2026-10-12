@@ -1,12 +1,12 @@
 # VCPDeck
 
-你的个人 AI 协作驾驶台。当前阶段已形成远程机器管理、命令与文件操作、交互式终端、远程 Pi、FRP 和自更新的核心闭环。
+你的个人 AI 协作驾驶台。当前阶段已形成远程机器管理、命令与文件操作、交互式终端、FRP 和自更新的核心闭环。
 
 ## 项目定位
 
 VCPDeck 是面向个人工作流的独立控制面，不是 VCPToolBox 的后台管理面板。
 
-- **VCPDeck 当前负责**：可信操作者、远程机器、Job、文件、终端、Pi Session、FRP 和发布更新；
+- **VCPDeck 当前负责**：可信操作者、远程机器、Job、文件、终端、FRP 和发布更新；
 - **VCPToolBox 负责**：Agent 身份、知识库、RAG 和插件生态；
 - **长期愿景**：在现有远程执行基础上增加 TODO、工作流、聊天和 VCPToolBox 双向集成。
 
@@ -18,7 +18,6 @@ VCPDeck 是面向个人工作流的独立控制面，不是 VCPToolBox 的后台
 - Typed Job、命令/脚本执行、取消和状态对账；
 - 远程文件浏览、读写、导入/导出及本地/阿里云 Storage；
 - 交互式远程终端，包括 PTY、快照、重连和控制权；
-- 人机交互式远程 Pi Session，包括 REST 控制、SSE 事件和运行状态机；
 - FRPS 实例与 FRP 映射管理；
 - Cookie/Bearer 身份认证、操作审计和 React 驾驶台；
 - Release、Launcher、Server/Client 更新与失败回退基础实现；
@@ -26,7 +25,7 @@ VCPDeck 是面向个人工作流的独立控制面，不是 VCPToolBox 的后台
 
 ## 当前架构
 
-VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server；每台目标机器上的 Client 通过 PSK 主动建立 Socket.IO 出站连接，实际执行命令、文件、PTY、Pi 和 frpc。Server 使用 SQLite 保存控制面状态，Launcher 独立守护并更新 Server/Client。
+VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server；每台目标机器上的 Client 通过 PSK 主动建立 Socket.IO 出站连接，实际执行命令、文件、PTY 和 frpc。Server 使用 SQLite 保存控制面状态，Launcher 独立守护并更新 Server/Client。
 
 完整架构图、通信边界和关键链路见 [`docs/architecture.md`](docs/architecture.md)。
 
@@ -143,7 +142,7 @@ const jobs = await client.jobs.list({ status: JobStatus.RUNNING });
 - pnpm 10.26+
 - Git
 
-远程 Pi 依赖目标机器已经配置可用的 Pi 模型凭据；交互式终端依赖 `node-pty` 能在当前平台正常安装。完整运行条件见 [`docs/deployment.md`](docs/deployment.md)。
+交互式终端依赖 `node-pty` 能在当前平台正常安装。完整运行条件见 [`docs/deployment.md`](docs/deployment.md)。
 
 ### 初始化依赖
 

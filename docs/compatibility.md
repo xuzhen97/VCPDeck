@@ -11,16 +11,12 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | 维度 | 当前机制 | 保证 |
 | --- | --- | --- |
 | Server ↔ Client 通用协议 | Shared 事件与 DTO；Client 上报版本/capability | 没有独立通用协议版本；同版本最安全 |
-| Server ↔ Client Pi（协议） | `PI_SESSION_PROTOCOL_VERSION=4`；capabilityDetails 含 SDK/Node/shell 安全摘要；`agent.prompt` 必须携带合法 `executionMode`，会话快照必须返回 `executionModeOverride` 与 `effectiveExecutionMode`；空文本 `prompt` 仅在携带至少一张通过服务端校验的图片时合法；导入逐条结果可携带 `sessionId`（供 Server 记录导入审计，旧 Client 可缺省） | 必须精确匹配，不匹配明确拒绝 Pi；旧协议 Client 不得静默忽略新模式字段（见 [ADR-0034](../adr/0034-pi-session-execution-mode-override.md)）。纯图片组合不升版本号：同代旧 Client 会以 `PI_PROTOCOL_INVALID` 明确拒绝该类请求（fail closed，不静默改造正文），因此该能力只在 Server/Client 同为本次发布后才可用（见 [ADR-0035](../adr/0035-pi-image-only-prompt.md)） |
-| Pi 会话模型切换（v2/v3 → v4） | 会话、Run 与会话操作审计从 Job 移出（[ADR-0041](../adr/0041-agent-session-run-and-audit-separation.md)）；`PI_SESSION_PROTOCOL_VERSION` 由 3 升到 4，移除请求/事件/状态报文中的 `jobId`；Server 启动前执行显式 Agent migration | 双向不兼容：v4 Server 拒绝旧协议 Client 的 Pi 控制和注册对账，旧 Server 也无法读取新会话模型；升级前必须停收新 Prompt、按旧协议结算或明确安全终止活跃 Run 与删除预约，再停旧进程升级。该迁移是 **expand-only**（仅新增表与字段，见 §6），回退只需 Launcher 切回上一版本 binary，旧版本可继续读写同一数据库；回退代价是新模型产生的 Run/审计在旧控制面不可见，且旧版本会重新看到迁移时刻意保留的 `agent.session` Job 行；不要用旧版本执行 `prisma db push` |
-| Server ↔ Client Pi（运行配置） | `PI_RUNTIME_SPEC_PROTOCOL_VERSION=4`；Server 只下发 `PiRuntimeSpecV4`（含 `toolPolicy` 与必填 `toolExecutionMode`，可选 `requiredBundle`）+ 运行期凭据 lease，Client 回 `PI_RUNTIME_ACK` | 未知字段或不支持的 `schemaVersion` fail closed；**上报 < 4 的 Client 一律不下发任何 Spec**（Pi 明确不可用，不回退用户本机 Pi），禁用 v3/v4 双协议回退 |
-| Pi Resource Bundle | `pi-resources/manifest.json` 的 `protocolVersion=1`，声明 `bundleVersion`（= Release 版本）、`piSdkVersion` 与逐资源 `sha256` | Client 逐资源校验；缺失/篡改/SDK 版本不符 → 不上报 Bundle 能力且不加载资源；Profile 需要资源而目标 Client 未上报兼容 Bundle → 不下发 Spec |
 | Server ↔ Client Git SSH（受管密钥） | `GIT_SSH_PROTOCOL_VERSION=1`；Client 上报 `capabilityDetails.gitSsh`（`{ available: true, protocolVersion: 1 }`，否则 `{ available: false, code: "GIT_SSH_UNAVAILABLE" }`） | 未上报能力、协议不匹配或本机无法安全持久化 → **不下发私钥**（含 Client 先注册、后选机和换钥的路径）；恢复能力并重注册后自动补发。清理指令不含私钥，仍可下发。`installed` 仅代表本地副本落盘，不证明 Git 服务授权或实际访问成功。受管副本位于 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh`，Client 升级/回滚不删除；不阻塞其它能力 |
 | Server ↔ Client Terminal | `terminal.pty` capabilityDetails + Shared 严格运行时解析 | 无独立数字版本；缺能力时拒绝，seq/generation/state 变化需整套同版本发布 |
 | Server ↔ Client P2P 隧道 | `P2P_TUNNEL_PROTOCOL_VERSION=1`；capabilityDetails.p2pTunnel 摘要 | 版本不匹配或无能力时不执行数据面，UI 提示不支持；旧 Client 缺省视为 unsupported |
 | Server ↔ Frontend | REST/Socket.IO/SSE | Frontend 应与 Server 同一发布版本部署 |
 | SDK ↔ Server | REST DTO 和错误 | SDK/Shared 可从同一 Git Tag 子目录安装；只支持与 Server 同版本的标准组合 |
-| CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | Pi 用户级 Git package 安装；升级必须显式切换 Tag；`0.2.1+` CLI 支持 Alibaba Release 分片直传 |
+| CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | 用户级 Git package 安装；升级必须显式切换 Tag；`0.2.1+` CLI 支持 Alibaba Release 分片直传 |
 | CLI 配置 | 用户级/项目级 JSON `version=1`（ADR-0017） | `--token-env` 成为推荐入口但仍写入既有 Bearer 结构；0.1.0 password/Bearer 配置与 `--auth=bearer` 保持兼容；`--server` 直连保持兼容 |
 | Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry、`apps/retention.json` | 新安装使用带本地版本保留能力的 Launcher；旧 Launcher 不会因业务 Release 自动升级，存量机器需执行一次性迁移脚本；`launcherMinVersion` 字段仍未执行校验 |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
@@ -37,9 +33,6 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | 新 Server | 上一版本 Client | 同版本 Frontend | 仅更新窗口临时存在；依赖 capability，必须完成补更 |
 | 旧 Server | 新 Client | 任意 | 不支持主动部署；Server 更新顺序必须在 Client 之前 |
 | 任意发布版本 | 未打 Tag 的工作区构建 | 任意 | 不支持 |
-| Pi 协议版本不同 | 任意 | 任意 | Pi 功能明确不可用，其他 capability 可继续评估 |
-| Pi Bundle 资源缺失 | 需要 Bundle 资源的 Profile | 未上报兼容 Bundle 的 Client | 不下发 RuntimeSpec；该 Client 的 Pi 保持不可用（不降级为「只加载部分资源」） |
-| Pi 显式导入（`session.import.list/preview/run`） | 新 Pi action + `sourceName` 纯文件名标识；请求 payload 与响应均严格解析 | 旧 Client 收到该 action → 未知 action 拒绝（400 `PI_PROTOCOL_INVALID`，仅该功能不可用）；旧 Server 无路由（404）；未就绪 → 400 `PI_CONFIG_UNAVAILABLE`；上游响应不合法 → 502 |
 
 “支持”表示进入发布验收矩阵，不表示所有历史版本永久兼容。
 
@@ -51,15 +44,12 @@ Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x
 
 **系统级部署契约（ADR-0027）**：Client 注册上报 `installation.mode` 与 `capabilityDetails.privileged`。当前合规组合只有 `windows-system-task` + `windows-system`（Windows）与 `systemd-root-equivalent` + `sudo-all`（Linux）。旧 Client 缺字段、`legacy-pm2`、平台与模式不匹配、特权模式/可用性不满足都只记“未报告”或稳定不合规原因，**不猜测、不推断为合规**；`Shared` 的 `getClientInstallationCompliance` 是唯一判定入口。该判定**独立于业务 Release 版本**：`clientVersion` 已是最新仍可能提示“需要人工升级”。存量迁移不在 Server 上批量下发，需在目标机手动执行对应平台的安装命令。
 
-### 远程 Pi 升级顺序（强制 Server 先行）
+### 远程 Agent 升级顺序（已退役）
 
-新 Client 的 `PI_STATE` 携带 `runtimeRevision` 与 `configState`，旧 Server 的严格 parser 会拒绝该消息。因此：
+Pi 专用协议与能力摘要已按 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md)
+退役，不再存在 Pi 协议版本协商、RuntimeSpec 门控或隔离边界回退要求。基础能力的升级顺序仍按上节执行
+（Server 先行、Client 受控补更）；旧 Pi Client 注册时其专用字段会被严格拒绝，升级说明必须写明这一点。
 
-1. 先升级 Server（可接受旧 Client：无隔离能力时禁用 Pi）；
-2. 再升级 Client；
-3. 禁止新 Client 配旧 Server。
-
-跨隔离边界回退旧 Client 会重新带回「读用户本机 Pi」的行为，必须先禁用该 Client 的 Pi，并在回退窗口不运行 Pi。
 
 ## 4. 升级顺序
 
@@ -94,9 +84,8 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 
 - 改变字段语义、默认值或状态转换；
 - 修改认证方式、Cookie、opaque token/摘要、ActorContext、公开端点、签名算法、文件 root ID 或路径规则；
-- 改变 Job dispatcher、文件 payload/result、Pi/Terminal 对账语义；
+- 改变 Job dispatcher、文件 payload/result、Terminal 对账语义；
 - 改变 Terminal snapshot/output seq、generation、Session 状态、attachment/token 或限制常量；
-- 升级 Pi SDK、Session JSONL 版本、Worker Runtime API 或事件投影；
 - 将 exec script 从 `executable + args` 迁移到 runtime ID；
 - 数据库字段改名、非空约束或数据回填；
 - Release manifest、上传会话或 Launcher 控制协议变化；
@@ -156,7 +145,7 @@ manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身�
 - Shared、Server、Client、Frontend、SDK、CLI 全量构建，Skill `vcpdeck.cjs --help` 冒烟；
 - 在仓库外用 pnpm 10.26+ 从同一 Git Tag 安装 SDK/Shared，验证 JavaScript 导入、TypeScript 类型和目标项目单文件打包；
 - Server 与同版本真实 Client 的注册、Job、文件 parser/root/导入导出/取消和重连；
-- Pi 协议版本、锁定 SDK 版本、Session 打开/迁移和 Worker 重连；Terminal capability、真实 PTY、snapshot/seq、控制权和重连；
+- Terminal capability、真实 PTY、snapshot/seq、控制权和重连；
 - 数据库从上一支持版本升级；
 - Launcher 正常更新和失败回退（含瞬时下载失败的最多三次有界重试）；
 - Release archive `available/deleting/cleaned` 消费分流、Server 清理 CAS/Provider 恢复、上传会话宽限和 Launcher `retention.json` 损坏保护；

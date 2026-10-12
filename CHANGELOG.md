@@ -4,6 +4,24 @@
 
 ## 未发布
 
+### Removed（破坏性）
+
+- **退役全部 Pi／DSH 专用集成**（[ADR-0049](./docs/adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md)）：删除 Agent 聊天、会话与 Run 编排、历史导入与投影、模型／凭据／Profile、工具策略与扩展交互、内嵌 Pi SDK／Worker、Pi Bundle 与资源校验，以及 DSH 专用接入与反向代理；新增的会话宿主（`packages/session-host` 与 Client／Server 接线）一并退役。
+- **页面同步精简**：移除 Agent 模块（对话／Profile／Provider／Client 运行时）、机器详情中的 Agent 入口与旧 `/pi/*` 重定向；`/agent/*` 与 `/pi/*` 走既有兜底路由，不再提供聊天或专用配置入口。
+- **调用面退出**：Shared 契约中的 Pi 事件、能力摘要与 Agent Job 类型，Server 的 Pi／session-host 模块与端点，SDK 的 `pi`／`sessionHost` 域，CLI 的 `pi` 命令与补全，以及 VCPDeckBridge 的专用动作全部移除；Agent 专用 Job 类型不再接受新建（返回 `INVALID_JOB_TYPE`）。
+- **发行与开发布局退出专用构件**：Release 不再打包 Pi SDK、Photon、Pi Resource Bundle 与会话宿主，`preStart`／安装器／dev 入口不再执行 Agent 迁移或 Pi 资源引导；移除 `@earendil-works/pi-*`、Photon 等依赖。
+
+### Changed
+
+- 服务启动不再要求 Agent 迁移就绪：`main.ts`、Server `start`／`dev`、安装器与隔离测试库都只做基础 `prisma db push`；历史迁移脚本与 SQL 保留，供需要时人工执行。
+
+### 说明（升级与数据边界）
+
+- **数据非破坏性**：不清空已有 Agent／Pi／session-host 表，不重写或删除历史迁移，不卸载或修改目标机器上用户自行安装的 Pi／DSH；物理清理需要独立的备份与清理设计。
+- **升级要求**：整套同版本部署，Server 先行、Client 受控补更。旧 Pi Client 注册时其专用字段会被严格拒绝，不承诺无缝兼容；升级说明需按停机步骤正常退出旧进程。
+- 保留基础能力不变：机器、Typed Job、文件、Terminal（PTY）、FRP、Storage、Git SSH、P2P 隧道、身份认证、Launcher／Release 与通用 CLI／SDK。
+
+
 ### Added
 
 - **Pi 扩展改为按官方标准复用社区包**（[ADR-0042](./docs/adr/0042-standard-pi-community-extensions.md)）：Client Release 的 Pi Resource Bundle 除自有工具策略扩展外，还固定交付标准社区扩展 `community.pi-simplify@0.2.3`（MIT），提供 `/simplify` 命令（审查最近改动并应用简化）。扩展源码原样复用官方 Pi 扩展 API，资源选择集中在 `scripts/pi-extension-sources.ts`，dev 与 release 共用同一 builder，公共资源的 ID/版本/路径/sha256 逐字节一致。新增 `pnpm test:pi-resources` 门禁。
@@ -13,7 +31,7 @@
 - 新资源**不会自动为存量 Pi Profile 启用**：需在 Profile 中显式勾选；未启用时行为不变。
 - Bundle 只包含扩展资源；Skills、Prompt 模板与主题仍不随包加载。
 - 扩展在网页中的能力仍受既有边界约束（不支持任意 TUI、Session 替换与 Runtime reload）；`/simplify` 会读取项目 git diff 并触发一次 Agent 工作，因此在 `supervised` 模式下其工具调用同样需要逐次批准。
-- 扩展的构建期来源（自有源码 / vendor 进仓库的第三方源码 / 已固定版本的标准包）与各自受信程度见 [`docs/design/remote-pi-control-plane.md`](./docs/design/remote-pi-control-plane.md) §12.1；vendor 第三方源码时许可原文随 Bundle 复制。
+- 扩展的构建期来源（自有源码 / vendor 进仓库的第三方源码 / 已固定版本的标准包）与各自受信程度见 [`docs/design/remote-pi-control-plane.md`](./docs/archive/design/remote-pi-control-plane.md) §12.1；vendor 第三方源码时许可原文随 Bundle 复制。
 
 ## [0.18.2] - 2026-10-10
 

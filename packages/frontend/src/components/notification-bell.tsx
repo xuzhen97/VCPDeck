@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 const POLL_MS = 500;
 const ACTIVE_STATUSES = new Set(["pending", "running", "waiting_input"]);
 const HIDDEN_JOB_TYPES = new Set([
+	// 已退役的 Agent 专用 Job（ADR-0049）：历史行不产生通知。
 	"agent.run",
 	"agent.session",
 	"file.roots",

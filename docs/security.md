@@ -4,7 +4,7 @@
 
 ## 1. 安全结论
 
-VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可以执行远程命令、操作文件、创建终端、控制 Pi、修改 Storage/FRP 并读取共享 Job 元数据。admin 只额外管理身份；系统没有细粒度 RBAC、多租户或按资源授权。
+VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可以执行远程命令、操作文件、创建终端、控制 修改 Storage/FRP 并读取共享 Job 元数据。admin 只额外管理身份；系统没有细粒度 RBAC、多租户或按资源授权。
 
 因此部署边界必须是“少量可信操作者 + 受控网络 + 专用运行账户”，不能按公网多租户 SaaS 的安全假设部署。
 
@@ -17,10 +17,9 @@ VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可
 - 阿里云 clientSecret/accessToken/refreshToken；
 - Storage 签名 URL；
 - Storage Share 的长期公开 URL（Token 是 bearer capability；数据库仅保存其 SHA-256 哈希）；
-- 命令、脚本、环境变量、路径、终端正文、Pi prompt/响应和文件内容；
+- 命令、脚本、环境变量、路径、终端正文、prompt/响应和文件内容；
 - Release 构件、上传分片 URL及下载路径；
 - Client 一键安装 bootstrap 响应和目标机 `launcher.env`；
-- SQLite 数据库和远程 Pi Session；
 - **Git SSH 共享私钥及其加密根密钥**（Server 侧密文 + 自动创建或显式指定的根密钥文件 + 获选 Client 的受管副本）；
 
 这些内容不得进入普通日志、遥测、截图、Agent 回复、Issue 或未经加密的备份。
@@ -74,13 +73,13 @@ Server 是控制面信任中心，但仍必须把 REST body、Socket payload、�
 
 ### 4.4 授权缺口
 
-当前任意有效业务身份可访问所有 Client/Job/Storage/FRP/Pi/Terminal。Frontend 隐藏按钮和“确认操作”不是授权边界。若增加非完全可信用户，必须先设计资源级授权和审计，不能只增加 UI 角色。
+当前任意有效业务身份可访问所有 Client/Job/Storage/FRP/Terminal。Frontend 隐藏按钮和“确认操作”不是授权边界。若增加非完全可信用户，必须先设计资源级授权和审计，不能只增加 UI 角色。
 
 ### 4.5 提升权限 Client
 
-Windows 一键安装（ADR-0027）在 `NT AUTHORITY\SYSTEM`（SID `S-1-5-18`）下注册 `\VCPDeck\Client` 开机任务，因此 Launcher、Client、Job、Terminal、Files 和 Pi 以 **LocalSystem（root 等价）** 身份运行，**无需用户登录**；它使用 `C:\ProgramData\VCPDeck\Client` 的独立运行目录与私有 Node，不继承安装者的用户 Profile/环境，也不因此把管理员身份授予标准用户。任务 action、`launcher.env` 与 Client 根目录以 `icacls` 关闭继承并只授权 SYSTEM 与 Administrators；目录使用可继承的 `(OI)(CI)F`，否则子目录会失去全部 ACE 而拒绝所有人访问。Client 注册上报 `installation.mode=windows-system-task` 与 `capabilityDetails.privileged.mode=windows-system`；旧 Client 缺字段时只判“未报告”，控制面不得推断为低权限或已经合规。
+Windows 一键安装（ADR-0027）在 `NT AUTHORITY\SYSTEM`（SID `S-1-5-18`）下注册 `\VCPDeck\Client` 开机任务，因此 Launcher、Client、Job、Terminal 和 Files 以 **LocalSystem（root 等价）** 身份运行，**无需用户登录**；它使用 `C:\ProgramData\VCPDeck\Client` 的独立运行目录与私有 Node，不继承安装者的用户 Profile/环境，也不因此把管理员身份授予标准用户。任务 action、`launcher.env` 与 Client 根目录以 `icacls` 关闭继承并只授权 SYSTEM 与 Administrators；目录使用可继承的 `(OI)(CI)F`，否则子目录会失去全部 ACE 而拒绝所有人访问。Client 注册上报 `installation.mode=windows-system-task` 与 `capabilityDetails.privileged.mode=windows-system`；旧 Client 缺字段时只判“未报告”，控制面不得推断为低权限或已经合规。
 
-Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 等价** Client：Job、Terminal、Pi 可显式 `sudo -n` 执行任意 root 命令，不受沙箱限制，继承目标机 OS 账户的全部权限。
+Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 等价** Client：Job、Terminal、可显式 `sudo -n` 执行任意 root 命令，不受沙箱限制，继承目标机 OS 账户的全部权限。
 
 - **审计边界**：Server 只记录控制面、Job 输出与 Session 生命周期；**不**声称完整的主机级 root-shell 审计，也不防目标机本地篡改。需要强审计/隔离的目标机不应作为 root 等价 Client。
 - **上报与展示**：Client 注册上报 `capabilityDetails.privileged`（`sudo-all`/`windows-system`/`unavailable`）与 `installation.mode`；Server 用 Shared `getClientInstallationCompliance` 统一判定，驾驶台与 CLI 显式展示系统级部署或“需要人工升级：<稳定原因>”，`jobs run`/`pi run` 执行前提示“Server 仅记录控制面/Job/Session 审计”。旧 Client 未上报时按“未报告”展示，不推断为任何能力。
@@ -88,23 +87,21 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 
 ## 5. 输入与执行安全
 
-- Shared 的 Pi/Terminal parse 函数是跨信任边界的强制入口；
+- Shared 的 Terminal parse 函数是跨信任边界的强制入口；
 - Job type、payload、timeout、capability 必须在 Server 和 Client 两侧校验；
-- `exec` 和 Pi 最终继承 Client 运行账户权限，不是沙箱；command 当前使用系统 Shell，script 当前允许外部提交任意 `executable + args`；
+- `exec` 最终继承 Client 运行账户权限，不是沙箱；command 当前使用系统 Shell，script 当前允许外部提交任意 `executable + args`；
 - ADR-0010 已决定把 script 迁移到 Client 持有的 runtime ID，但该 registry 尚未实现，不能当作当前保护；
 - 工作目录应来自受控 file roots/canonical path；exec 当前只校验 cwd 为非空字符串，仍可由可信调用方提交任意路径；
 - Shell、PTY、frpc 和子进程启动参数应尽量使用参数数组；command 模式是显式保留的任意 Shell 入口；
 - FRP 当前把 authToken/dashboardPassword 明文存入 SQLite 并通过 REST 返回，authToken 还进入 Job payload 和 Client TOML；同一 Client 单 frpc 与 Server 多实例模型不一致，详见 [`design/frp.md`](./design/frp.md)；
 - 文件路径长期必须防止 traversal、symlink/junction 越界和平台路径差异；当前普通文件 Job 的 `rootDir` 未绑定 `file.roots`，`resolveSafePath()` 还会吞掉 symlink 越界异常并缺少不存在目标父链校验，Files root 目前不是完整授权边界；
 - 未知事件、字段、状态和错误码应拒绝，不做宽松猜测。
-- **Git SSH 受管密钥不全局生效**：Client 只为 VCPDeck 自己创建的 Job、Terminal、Pi 子进程注入 `GIT_SSH_COMMAND`（指向受限 `ssh_config`），不修改整机或用户 SSH 配置，也不把私钥正文放进环境变量；未安装受管密钥时会移除继承来的 `GIT_SSH_COMMAND`。同账户进程仍可读取可用私钥，因此这不是同账户隔离。Server 侧的加密根密钥在首次生成时自动创建于版本目录外的数据根（受限权限），不再要求操作者手工生成文件；已有密文而根密钥缺失/损坏/错绑时拒绝生成与换代，不会静默换钥。该根密钥与 SQLite 同机，**只保护单独泄露的数据库备份/文件**，不构成整机或数据根失陷后的保密保证，两者必须配对备份。
+- **Git SSH 受管密钥不全局生效**：Client 只为 VCPDeck 自己创建的 Job、Terminal、子进程注入 `GIT_SSH_COMMAND`（指向受限 `ssh_config`），不修改整机或用户 SSH 配置，也不把私钥正文放进环境变量；未安装受管密钥时会移除继承来的 `GIT_SSH_COMMAND`。同账户进程仍可读取可用私钥，因此这不是同账户隔离。Server 侧的加密根密钥在首次生成时自动创建于版本目录外的数据根（受限权限），不再要求操作者手工生成文件；已有密文而根密钥缺失/损坏/错绑时拒绝生成与换代，不会静默换钥。该根密钥与 SQLite 同机，**只保护单独泄露的数据库备份/文件**，不构成整机或数据根失陷后的保密保证，两者必须配对备份。
 
 ## 6. 数据最小化
 
 - Job payload 可能包含敏感 command、script、executable、args、cwd、文件路径和 `file.writeText` 正文；最终 stdout/stderr 及 `file.readText` 正文当前进入 Job result 和数据库备份，列表、详情、日志与保留策略必须按敏感数据处理；
 - Server 不持久化终端正文、快照、输入和 reconnect token；
-- Server 不持久化 Pi prompt、正文、thinking、图片正文、Extension 输入、工具参数/输出和真实 cwd；
-- Pi 侧 Server 持久化限于会话所有权、控制态（`available`/`archived`）、执行模式覆盖、每轮 Run 摘要与会话操作审计事件；本次不引入逐工具审计（[ADR-0041](./adr/0041-agent-session-run-and-audit-separation.md)）；
 - TerminalAudit 仅记录生命周期；
 - P2P 隧道的 coturn 配置只存 URL/realm；TURN shared secret 仅存 `VCPDECK_TURN_SECRET_FILE` 指向的 `0640` 文件，临时凭据、SDP、candidate 与 HTTP 正文均不落库、不进日志；
 - 错误 message 不得包含 stack、文件内容、Token、签名 URL或原始外部 API 响应；
@@ -125,41 +122,14 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 - running 文件 Job 的 cancel/timeout 当前不会可靠中止 fs、HTTP 或分片操作，断线终局也没有持久补报；结果不明时不得自动重试写、移、删或 import；
 - 文件 Job payload 和 Gateway progress/done/cancelled 仍缺严格双端 parser 与当前 Socket/Job Client 再绑定校验。
 
-## 8. 终端与 Pi
+## 8. 终端
 
-### Terminal
+终端是长生命周期交互资源，正文与快照不进入 Server 数据库；终端会话元数据、attachment/operator lease 与
+生命周期审计由 Server 保存。真实 PTY、scrollback 与快照在 Client（见 [ADR-0007](./adr/0007-client-owned-interactive-runtime.md)
+的 Terminal 部分）。
 
-- 只有 operator 可以输入；viewer 只读；takeover 有 30 秒重连保护和冲突处理；
-- Browser 只提交 shellId/尺寸，不能提交 executable、args、cwd 或 env；
-- 单次输入、尺寸、输出块、snapshot 和 backlog 有目标上限，但当前没有持续输入速率限制，`TERMINAL_RATE_LIMITED` 仅为预留错误；snapshot raw 回退和 sync backlog 也尚非严格 UTF-8 字节上限；
-- reconnect token 明文位于 Browser sessionStorage，Server 只保存内存 hash；Server 重启后原控制 lease 不能凭旧 token 单独恢复；
-- 浏览器或 Client/Server 连接断开不自动等价于关闭 PTY，必须防止遗留高权限会话；从未 attach、重复 attach/detach TTL 重入和本地 expired 上报还有已知缺口；
-- 终端正文不进入 Server DB 和普通日志；
-- PTY/进程树清理是尽力而为，daemonized/脱离进程组的进程和已发生副作用不会被 Terminal 关闭撤销；
-- 完整当前边界见 [`design/remote-terminal.md`](./design/remote-terminal.md)。
-
-### Pi
-
-- Owner 校验、project lock 与 Server 执行；Owner 约束写入限制，但不构成多租户隔离边界；
-- 会话生命周期与每轮执行独立于 Job；归档/恢复只改会话入口，删除会话保留 Run 摘要与审计事件（仅稳定 sessionId），不保留正文；
-- cwd 只来自 Files roots 并经 Client realpath/canonicalize；`projectKey` 是进程级随机 secret 对 canonical cwd 的 HMAC，不泄露真实路径，Client 重启后变化；
-- Session 目录名使用安装级持久 secret 派生的不透明 namespace，不含路径信息；
-- **Pi 配置与凭据的权威在 Server**：模型策略、thinking、Client→Profile 绑定持久化在 Server SQLite；Provider 凭据只以密文（AES-256-GCM + `keyVersion`）落库，根密钥来自 Server 进程外的 `VCPDECK_PI_CREDENTIAL_KEY_FILE`，不与密文同库形成等价明文；
-- 凭据明文只允许存在于 Server 受控解密窗口与 Client Worker 运行内存；凭据经 **IPC** 下发，禁止写入 argv、环境变量、磁盘、日志、Job payload/result、capability 或审计正文；
-- **Client 不读取用户原生 Pi**：不读 `~/.pi` 的 settings/models/auth/trust/Session，也不向其写入；VCPDeck Pi 与用户 Pi 唯一共享区域是用户选择的项目 cwd；
-- Pi 运行配置（RuntimeSpec）只接受 Client 能真正施加的字段，未知字段与不支持的 `schemaVersion` fail closed；未就绪时拒绝需要 Worker 的动作，不回退本机 Pi；
-- Pi 工具、Extensions、Skills 与项目构建都继承 Client OS 运行账户权限；**项目本地资源当前一律不加载**，不存在项目信任交互；
-- **工具策略默认拒绝**：`allow`/`confirm`/`deny` 三桶互斥，`allow ∪ confirm` 作为 SDK 原生工具白名单下发，`deny` 同时进入排除面；**未出现在任何桶的工具不可用**，新增工具（新 SDK 版本、新扩展注册的工具）不会自动获得可用面；
-- **`confirm` 的执行取决于 Profile 级工具执行模式（ADR-0033）**：`approval` 下 `confirm` 每次调用都走既有 Extension UI 链路（拒绝/取消/30 分钟超时一律判定为拒绝，返回 `PI_TOOL_POLICY_REJECTED`，会话继续）；`auto` 下 `confirm` 工具直接执行，但 `deny` 与未列出工具仍被阻塞；`yolo` 跳过 Tool Policy 三桶判定，仅限当前 Runtime 已注册/加载的工具，**不**加载未启用资源、也不绕过 Runtime/OS 权限。工具参数不回显到持久化层，策略决策不持久化审计；
-- **工具执行模式与策略同源且不可热替换**：`toolExecutionMode` 随 RuntimeSpec v4 下发、随 Profile revision 换代；一个 Run 内不得切换模式；非法模式或损坏列 fail closed（`PI_CONFIG_UNAVAILABLE` / `PI_POLICY_UNAVAILABLE`）；`auto`/`yolo` 不为 Tool Policy 创建审批 UI，但其他受信 Bundle Extension 自行调用的 `ctx.ui.confirm()` 仍会产生独立交互。
-- **策略与 Bundle 资源不落盘、不进环境变量**：策略经进程内 host bridge 交给随 Release 发布的策略扩展（写盘会与「Client 不落盘 Server 下发的配置」冲突；环境变量会被 Pi 的 `bash` 工具派生子进程继承）；host bridge 缺失或版本不符时策略扩展阻塞所有工具调用（`PI_POLICY_UNAVAILABLE`）；
-- **Bundle 只从版本目录加载且逐资源校验 sha256**：校验失败不上报 Bundle 能力、不加载资源；Server 只保存与引用 resource ID，不下发资源内容；
-- **旧会话显式导入是唯一允许接触用户原生 Pi 的路径**（ADR-0031）：源根固定为 `~/.pi/agent/sessions` 且不可参数覆盖，只读 `*.jsonl`（不跟随符号链接）；传输标识只接受纯文件名（禁 `/`、`\`、`..`、NUL）；源文件不修改、不删除、不改名、不移动；导入是单向复制、按同名文件幂等、导入后只操作副本。
-- **预览是正文片段的唯一出口**：逐条显式确认后才读取、按 80 字符截断；正文与源文件完整绝对路径不得进入 Server 存储、Job payload/result、日志或审计（由 canary 测试守住）。
-- Extension UI 仍只接受 `select/confirm/input/editor` 四类交互式对话框；
-- 当前没有平台级 tools allowlist、bash 命令级风险分类或沙箱边界；`yolo` 不改变这一事实。
-
-**native Pi 零污染门禁**：预置用户 `~/.pi` 后执行 capability、Session 新建/列表、Prompt 与 Client 重启，必须满足该目录递归清单与内容 hash「0 created / 0 modified / 0 deleted」，native-only Session 对 VCPDeck 不可见，哨兵 Extension 不被执行。
+> Pi／DSH 专用集成已按 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md)
+> 退役：不再有 Pi 凭据、Bundle、RuntimeSpec 或 Extension 威胁面，相关小节与凭据表项已移除。
 
 ## 9. Release 与供应链
 
@@ -200,11 +170,8 @@ Alibaba Release 上传的数据面直接连接 Provider：Server 只签发/刷�
 | Storage/OAuth Token | Storage config | 最小权限；撤销后验证状态 |
 | Local signSecret | `StorageBackendConfig.config` | 自动生成后持久化；疑似泄露时轮换，旧 URL 随即失效 |
 | TURN shared secret | `VCPDECK_TURN_SECRET_FILE` 指向的 `root:serverUser` `0640` 文件 | 不进 DB/REST/Web；轮换后旧 24h 临时凭据到期自然失效 |
-| Pi Provider 凭据（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录） | 通过 UI/API 轮换或撤销；撤销后立即从 RuntimeSpec 组装中排除 |
-| Pi 凭据根密钥 | `VCPDECK_PI_CREDENTIAL_KEY_FILE` 指向的 Server 进程外文件 | 不进 DB/REST/Web/日志；缺失或非法时 Pi 配置写入与 Spec 组装 fail closed（Server 启动与其他能力不受影响）；轮换需要重新加密既有密文 |
-| Pi Session 数据根 secret | `<VCPDECK_CLIENT_DATA_DIR>/pi/install-secret`（0600） | 丢失会导致既有 Session 目录不可定位；删除前必须确认无历史 Session 依赖 |
 | Git SSH 共享私钥（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录）；获选 Client 的 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh/id_ed25519`（POSIX 0600；Windows 用 `icacls` 关闭继承并授权 SYSTEM、Administrators **与当前运行账户**，收紧后回读校验当前账户仍可写——Client 未必以 SYSTEM 运行，漏授权会把运行账户挡在目录外导致安装必然失败） | 轮换需在 Git 服务删除旧公钥并登记新公钥，再重新分发；本地清理不等于 Git 服务已撤销 |
-| Git SSH 根密钥 | 缺省由 Server 在版本目录外的数据根自动创建（`<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`；POSIX 目录 `0700`/文件 `0600`，Windows ACL 授权运行账户、SYSTEM 与 Administrators）；显式 `VCPDECK_GIT_SSH_KEY_FILE`（与 Pi 凭据密钥分离）优先且只读 | 不进 DB/REST/Web/日志；缺失/损坏/错绑时生成与换代 fail closed（Server 启动与其他能力不受影响）；**必须与 SQLite 配对备份**，只恢复数据库无法解密既有私钥；绝不因文件缺失而重建 |
+| Git SSH 根密钥 | 缺省由 Server 在版本目录外的数据根自动创建（`<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`；POSIX 目录 `0700`/文件 `0600`，Windows ACL 授权运行账户、SYSTEM 与 Administrators）；显式 `VCPDECK_GIT_SSH_KEY_FILE`（与其它受管密钥分离）优先且只读 | 不进 DB/REST/Web/日志；缺失/损坏/错绑时生成与换代 fail closed（Server 启动与其他能力不受影响）；**必须与 SQLite 配对备份**，只恢复数据库无法解密既有私钥；绝不因文件缺失而重建 |
 
 PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 Client → 更新 Server PSK并重启 → 更新各 Client → 验证注册。
 
@@ -218,7 +185,6 @@ PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 
 - 路径 traversal、认证 root、symlink/junction、不存在目标父链和跨 root；
 - exec 双端 parser、runtime capability、script/output/cwd 大小与路径边界、进程树取消；
 - Terminal parser、operator/viewer/token、snapshot/output 同序列、上游 gap、UTF-8 上限、持续输入速率、generation、TTL/过期上报、真实 PTY 和进程树；
-- Pi parse fuzz、大小限制、未知字段；
 - 文件 Job 双端 parser、Socket/Job 归属、文本大小、覆盖、临时文件清理、取消、断线和 import SHA-256；
 - 签名 URL 过期、篡改、动作混用；
 - Release SHA-256 篡改与 zip 路径穿越；

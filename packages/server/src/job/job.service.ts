@@ -313,6 +313,14 @@ export class JobService {
     },
     actor: ActorContext,
   ): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
+    // ADR-0049：Agent 专用 Job 类型已退役。历史行仍可读（列表按类型过滤），
+    // 但不再接受新建，也不降级为普通 shell。
+    if (AGENT_JOB_TYPES.includes(params.type)) {
+      throw Object.assign(new Error("Agent job types are retired"), {
+        code: "INVALID_JOB_TYPE",
+        statusCode: 400,
+      });
+    }
     const client = await this.prisma.client.findUnique({
       where: { id: params.clientId },
     });
@@ -621,8 +629,8 @@ export class JobService {
     const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 20));
     const where: Record<string, unknown> = {};
     if (options.clientId) where.clientId = options.clientId;
-    // ADR-0041:Agent 会话/执行已脱离 Job;历史遗留行与存量 agent.run
-    // 不得再出现在通用 Job 列表或统计中(审计改由 Agent 专属接口提供)。
+    // ADR-0049:Agent 专用能力已退役;历史遗留行与存量 agent.run
+    // 不得再出现在通用 Job 列表或统计中(只保留最小退役数据过滤)。
     where.type = { notIn: AGENT_JOB_TYPES };
     if (options.status === "active") {
       where.status = { in: ["pending", "running", "waiting_input"] };

@@ -27,8 +27,6 @@ const JOB_TYPE_LABEL: Record<string, string> = {
 	"frp.create": "创建映射",
 	"frp.delete": "删除映射",
 	"frp.list": "读取映射",
-	"agent.run": "Pi 运行",
-	"agent.session": "Pi 会话",
 };
 
 function jobTypeLabel(type: string): string {

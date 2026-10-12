@@ -1,10 +1,10 @@
 # ADR-0041：Agent Session、Run 与最小审计独立于 Job
 
-- 状态：Accepted（已实现，2026-10-08）
+- 状态：Superseded by ADR-0049（旧实现与数据仅为历史；不恢复 Pi Session Job）
 - 日期：2026-10-08
 - 决策者：项目维护者
 - 替代：ADR-0008；局部替代 ADR-0004 决策第 9 条的 Pi Session 复用 Job 约束
-- 关联：[`domain-model.md`](../domain-model.md)、[`protocols.md`](../protocols.md)、[`compatibility.md`](../compatibility.md)、[`remote-pi.md`](../design/remote-pi.md)
+- 关联：[`domain-model.md`](../domain-model.md)、[`protocols.md`](../protocols.md)、[`compatibility.md`](../compatibility.md)、[`remote-pi.md`](../../docs/archive/design/remote-pi.md)
 
 ## 背景
 

@@ -72,7 +72,7 @@ describe("MachinesPage", () => {
 				totalMemMB: 16384,
 				disks: [],
 				clientVersion: "0.0.0",
-				capabilities: ["exec", "file.read", "frp", "agent.pi", "terminal.pty"],
+				capabilities: ["exec", "file.read", "frp", "terminal.pty"],
 				capabilityDetails: {},
 				online: true,
 				cpuPercent: null,
@@ -89,9 +89,9 @@ describe("MachinesPage", () => {
 			"/machines/client-1/overview",
 		);
 		expect(screen.getByRole("img", { name: "Windows" })).toBeVisible();
-		for (const label of ["命令执行", "文件操作", "Pi 运行"])
+		for (const label of ["命令执行", "文件操作"])
 			expect(screen.getByText(label)).toBeVisible();
-		expect(screen.queryByText("agent.pi")).not.toBeInTheDocument();
+		expect(screen.queryByText("Pi 运行")).not.toBeInTheDocument();
 		expect(screen.getAllByText("终端").length).toBeGreaterThanOrEqual(1);
 		expect(screen.queryByText("terminal.pty")).not.toBeInTheDocument();
 		expect(screen.getAllByText("映射").length).toBeGreaterThanOrEqual(1);
@@ -116,10 +116,7 @@ describe("MachinesPage", () => {
 			"href",
 			"/machines/client-1/jobs",
 		);
-		expect(screen.getByRole("link", { name: "Agent 对话" })).toHaveAttribute(
-			"href",
-			"/agent/chat?client=client-1",
-		);
+			expect(screen.queryByRole("link", { name: "Agent 对话" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("link", { name: "Pi" })).not.toBeInTheDocument();
 		expect(screen.getByRole("link", { name: "终端" })).toHaveAttribute(
 			"href",

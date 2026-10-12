@@ -6,7 +6,6 @@ import { FRP_RECONCILE_PROTOCOL_VERSION, P2P_TUNNEL_PROTOCOL_VERSION, VERSION } 
 import { getRegisterInfo } from "./register.js";
 import type {
 	P2pTunnelCapabilityStatus,
-	PiCapabilityStatus,
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
 
@@ -36,8 +35,7 @@ describe("getRegisterInfo", () => {
 
 	it("上报 gitSsh 能力；未提供时保持未报告（Server 因此不下发密钥）", () => {
 		const withGitSsh = getRegisterInfo(
-			undefined,
-			undefined,
+		undefined,
 			undefined,
 			process.env,
 			undefined,
@@ -52,8 +50,7 @@ describe("getRegisterInfo", () => {
 
 	it("能力不可用时的稳定原因码被原样上报", () => {
 		const info = getRegisterInfo(
-			undefined,
-			undefined,
+		undefined,
 			undefined,
 			process.env,
 			undefined,
@@ -66,7 +63,7 @@ describe("getRegisterInfo", () => {
 	});
 
 	it("frpc 可用时声明 frp 能力与 protocol v1", () => {
-		const info = getRegisterInfo(undefined, undefined);
+		const info = getRegisterInfo( undefined);
 		expect(info.capabilities).toContain("frp");
 		expect(info.capabilityDetails?.frp).toEqual({
 			available: true,
@@ -78,7 +75,7 @@ describe("getRegisterInfo", () => {
 		const saved = process.env.VCPDECK_FRPC_PATH;
 		delete process.env.VCPDECK_FRPC_PATH;
 		try {
-			const info = getRegisterInfo(undefined, undefined);
+			const info = getRegisterInfo( undefined);
 			expect(info.capabilities).not.toContain("frp");
 			expect(info.capabilityDetails?.frp).toEqual({
 				available: false,
@@ -88,37 +85,10 @@ describe("getRegisterInfo", () => {
 			if (saved !== undefined) process.env.VCPDECK_FRPC_PATH = saved;
 		}
 	});
-	it("可用状态包含 agent.pi 及安全 details", () => {
-		const status: PiCapabilityStatus = {
-			available: true,
-			sdkVersion: "0.84.0",
-			nodeVersion: "22.19.0",
-			shellKind: "git-bash",
-		};
-		const info = getRegisterInfo(status);
-		expect(info.capabilities).toContain("agent.pi");
-		expect(info.capabilities).not.toContain("pi.probe");
-		expect(info.capabilityDetails?.pi).toMatchObject({ available: true });
-	});
-
-	it("不可用状态不声明 Pi 能力，仅保留 details 原因", () => {
-		const status: PiCapabilityStatus = {
-			available: false,
-			code: "PI_BASH_NOT_FOUND",
-			message: "no bash",
-		};
-		const info = getRegisterInfo(status);
-		expect(info.capabilities).not.toContain("pi.probe");
+	it("不再声明已退役的 agent.pi 能力与 pi 详情", () => {
+		const info = getRegisterInfo();
 		expect(info.capabilities).not.toContain("agent.pi");
-		expect(info.capabilityDetails?.pi).toMatchObject({ available: false });
-	});
-
-	it("无探测时不声明 Pi 能力（frp details 独立存在）", () => {
-		const info = getRegisterInfo(undefined);
-		expect(info.capabilities).not.toContain("pi.probe");
-		expect(info.capabilities).not.toContain("agent.pi");
-		expect(info.capabilityDetails?.pi).toBeUndefined();
-		expect(info.capabilityDetails?.terminal).toBeUndefined();
+		expect(info.capabilityDetails).not.toHaveProperty("pi");
 		expect(info.capabilityDetails?.frp).toMatchObject({ available: true });
 	});
 
@@ -127,7 +97,7 @@ describe("getRegisterInfo", () => {
 			available: true,
 			backend: "conpty",
 		};
-		const info = getRegisterInfo(undefined, terminalStatus);
+		const info = getRegisterInfo( terminalStatus);
 		expect(info.capabilities).toContain("terminal.pty");
 		expect(info.capabilityDetails?.terminal).toMatchObject({ available: true });
 	});
@@ -138,7 +108,7 @@ describe("getRegisterInfo", () => {
 			code: "TERMINAL_NATIVE_BACKEND_UNAVAILABLE",
 			message: "no backend",
 		};
-		const info = getRegisterInfo(undefined, terminalStatus);
+		const info = getRegisterInfo( terminalStatus);
 		expect(info.capabilities).not.toContain("terminal.pty");
 		expect(info.capabilityDetails?.terminal).toMatchObject({
 			available: false,
@@ -146,14 +116,14 @@ describe("getRegisterInfo", () => {
 	});
 
 	it("无终端探测时不声明能力", () => {
-		const info = getRegisterInfo(undefined, undefined);
+		const info = getRegisterInfo( undefined);
 		expect(info.capabilities).not.toContain("terminal.pty");
 		expect(info.capabilityDetails?.terminal).toBeUndefined();
 	});
 
 	it("native 后端可用时声明 tunnel.p2p 能力与 details；不可用只上报稳定 code", () => {
 		const ok: P2pTunnelCapabilityStatus = { available: true, protocolVersion: P2P_TUNNEL_PROTOCOL_VERSION };
-		const withP2p = getRegisterInfo(undefined, undefined, undefined, process.env, ok);
+		const withP2p = getRegisterInfo( undefined,undefined,process.env,ok);
 		expect(withP2p.capabilities).toContain("tunnel.p2p");
 		expect(withP2p.capabilityDetails?.p2pTunnel).toEqual(ok);
 
@@ -162,19 +132,18 @@ describe("getRegisterInfo", () => {
 			protocolVersion: P2P_TUNNEL_PROTOCOL_VERSION,
 			code: "P2P_NATIVE_BACKEND_UNAVAILABLE",
 		};
-		const withBad = getRegisterInfo(undefined, undefined, undefined, process.env, unavailable);
+		const withBad = getRegisterInfo( undefined,undefined,process.env,unavailable);
 		expect(withBad.capabilities).not.toContain("tunnel.p2p");
 		expect(withBad.capabilityDetails?.p2pTunnel).toEqual(unavailable);
 
-		const none = getRegisterInfo(undefined, undefined, undefined, process.env);
+		const none = getRegisterInfo( undefined,undefined,process.env);
 		expect(none.capabilities).not.toContain("tunnel.p2p");
 		expect(none.capabilityDetails).not.toHaveProperty("p2pTunnel");
 	});
 
 	it("A2 运行时安全摘要序列化：privileged + installation 上报，无路径或凭据", () => {
 		const info = getRegisterInfo(
-			undefined,
-			undefined,
+		undefined,
 			{
 				privileged: {
 					available: true,
@@ -202,8 +171,7 @@ describe("getRegisterInfo", () => {
 
 	it("Windows SYSTEM 运行时安全摘要序列化：windows-system + windows-system-task 上报（ADR-0027）", () => {
 		const info = getRegisterInfo(
-			undefined,
-			undefined,
+		undefined,
 			{
 				privileged: {
 					available: true,
@@ -233,8 +201,7 @@ describe("getRegisterInfo", () => {
 
 	it("仅 sudo 不可用（legacy Linux）时只报告 privileged=unavailable + legacy-pm2", () => {
 		const info = getRegisterInfo(
-			undefined,
-			undefined,
+		undefined,
 			{
 				privileged: {
 					available: false,
@@ -261,7 +228,7 @@ describe("getRegisterInfo", () => {
 		};
 
 		it("verify-only：不发布任何 operational 能力，但保留身份/版本/安装/特权", () => {
-			const info = getRegisterInfo(undefined, undefined, a2Security, {
+			const info = getRegisterInfo( undefined,a2Security,{
 				...process.env,
 				VCPDECK_MIGRATION_VERIFY_ONLY: "1",
 			});
@@ -281,18 +248,12 @@ describe("getRegisterInfo", () => {
 			});
 		});
 
-		it("verify-only 即使探测到 Pi/Terminal/FRP 可用也不声明", () => {
-			const piStatus: PiCapabilityStatus = {
-				available: true,
-				sdkVersion: "0.84.0",
-				nodeVersion: "22.19.0",
-				shellKind: "git-bash",
-			};
+		it("verify-only 即使探测到 Terminal/FRP 可用也不声明", () => {
 			const terminalStatus: TerminalCapabilityStatus = {
 				available: true,
 				backend: "conpty",
 			};
-			const info = getRegisterInfo(piStatus, terminalStatus, a2Security, {
+			const info = getRegisterInfo(terminalStatus, a2Security, {
 				...process.env,
 				VCPDECK_MIGRATION_VERIFY_ONLY: "1",
 			});
@@ -303,23 +264,17 @@ describe("getRegisterInfo", () => {
 		});
 
 		it("稳态（无 verify-only）照常发布 operational 能力", () => {
-			const info = getRegisterInfo(undefined, undefined, a2Security);
+			const info = getRegisterInfo( undefined,a2Security);
 			expect(info.capabilities).toContain("exec");
 			expect(info.capabilityDetails).toHaveProperty("frp");
 		});
 	});
 
 	it("序列化结果不包含本地路径或凭据", () => {
-		const status: PiCapabilityStatus = {
-			available: true,
-			sdkVersion: "0.84.0",
-			nodeVersion: "22.19.0",
-			shellKind: "configured",
-		};
 		vi.spyOn(require("node:os"), "homedir").mockReturnValue(
 			"C:\\Users\\secret-user",
 		);
-		const info = getRegisterInfo(status);
+		const info = getRegisterInfo();
 		expect(JSON.stringify(info)).not.toContain("secret-user");
 		expect(JSON.stringify(info)).not.toContain("C:\\");
 		vi.restoreAllMocks();

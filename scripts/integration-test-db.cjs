@@ -40,18 +40,7 @@ function assertIntegrationTestDb(context) {
 
 function initializeIntegrationTestDb(context, serverDir) {
 	assertIntegrationTestDb(context);
-	// ADR-0041:Server 启动前要求显式 Agent migration 已应用。隔离库按与生产相同的
-	// 顺序初始化:先跑显式迁移建 Agent 表与版本标记(全新库无存量可迁移),
-	// 再 db push 同步其余 schema。
-	execFileSync(
-		process.execPath,
-		[path.join("prisma", "agent-session-migration.cjs")],
-		{
-			cwd: serverDir,
-			env: { ...process.env, DATABASE_URL: context.databaseUrl },
-			stdio: "inherit",
-		},
-	);
+	// ADR-0049:Agent 专用能力已退役,启动不再依赖 Agent 迁移;隔离库只做 schema 同步。
 	execFileSync(
 		process.execPath,
 		[

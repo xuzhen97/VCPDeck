@@ -41,7 +41,6 @@ const CAPABILITY_LABELS: Record<string, string> = {
 	"file.read": "文件操作",
 	"file.write": "文件操作",
 	frp: "映射",
-	"agent.pi": "Pi 运行",
 	"terminal.pty": "终端",
 };
 

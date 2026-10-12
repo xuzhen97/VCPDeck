@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClientGateway } from "./client.gateway.js";
-import type { PiEvent, PiStateAck, PiStateReport } from "@vcpdeck/shared";
 import type { Socket } from "socket.io";
 
 function makeSocket(id = "socket-1") {
@@ -59,34 +58,6 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		failClientOperation: vi.fn(),
 		markInactiveByClientId: vi.fn(async () => {}),
 	};
-	const piRequests = {
-		bindEmitter: vi.fn(),
-		request: vi.fn(),
-		resolve: vi.fn(),
-		disconnect: vi.fn(),
-	};
-	const piEvents = {
-		publish: vi.fn(async () => {}),
-		stream: vi.fn(),
-	};
-	const piRuns = {
-		markReconcilePending: vi.fn(async () => {}),
-		reconcileGeneration: vi.fn(
-			async (): Promise<PiStateAck> => ({
-				acceptedRunIds: [],
-				closedRunIds: [],
-				reportAgain: false,
-			}),
-		),
-		withReconciledSocket: vi.fn(
-			async (
-				_clientId: string,
-				_socketId: string,
-				operation: () => Promise<void>,
-			) => operation(),
-		),
-		disconnectGeneration: vi.fn(async () => true),
-	};
 	const terminalService = {
 		handleClientResponse: vi.fn(async () => {}),
 		handleClientOutput: vi.fn(async () => {}),
@@ -129,29 +100,18 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		onDisconnected: vi.fn(async () => {}),
 		applyAck: vi.fn(async () => {}),
 	};
-	const sessionHost = {
-		reconcile: vi.fn(
-			async (): Promise<{ unreachable: string[]; stopped: string[] }> => ({ unreachable: [], stopped: [] }),
-		),
-	};
 	const gateway = new ClientGateway(
 		clientService as never,
 		jobService as never,
 		fileService as never,
 		frpService as never,
-		piRequests as never,
-		piEvents as never,
-		piRuns as never,
 		terminalService as never,
 		terminalBroker as never,
 		orchestrator as never,
 		updateChannel as never,
 		reconciliation as never,
 		tunnelSessions as never,
-		// 位置 14 = piRuntime（旧测试保持未注入）
-		undefined as never,
 		gitSsh as never,
-		sessionHost as never,
 	);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
@@ -162,9 +122,6 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		jobService,
 		fileService,
 		frpService,
-		piRequests,
-		piEvents,
-		piRuns,
 		terminalService,
 		terminalBroker,
 		orchestrator,
@@ -172,25 +129,11 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		reconciliation,
 		tunnelSessions,
 		gitSsh,
-		sessionHost,
 		emit,
 		to,
 	};
 }
 
-const report: PiStateReport = {
-	clientId: "c1",
-	runs: [],
-	runtimeRevision: null,
-	configState: "pending",
-};
-
-const event: PiEvent = {
-	clientId: "c1",
-	sessionId: "s1",
-	runId: "r1",
-	event: { type: "agent_start", sessionId: "s1" },
-};
 
 describe("ClientGateway client liveness", () => {
 	it("Gateway 初始化后每 5 秒扫描一次心跳超时", async () => {
@@ -207,11 +150,10 @@ describe("ClientGateway client liveness", () => {
 	});
 
 	it("未注册 Socket 断开时也释放 broker pending 请求", async () => {
-		const { gateway, piRequests, terminalBroker } = makeGateway();
+		const { gateway, terminalBroker } = makeGateway();
 
 		await gateway.handleDisconnect(makeSocket());
 
-		expect(piRequests.disconnect).toHaveBeenCalledWith("socket-1");
 		expect(terminalBroker.disconnect).toHaveBeenCalledWith("socket-1");
 	});
 
@@ -219,7 +161,6 @@ describe("ClientGateway client liveness", () => {
 		const {
 			gateway,
 			clientService,
-			piRuns,
 			jobService,
 			frpService,
 			terminalService,
@@ -230,7 +171,6 @@ describe("ClientGateway client liveness", () => {
 
 		await gateway.sweepStaleClients();
 
-		expect(piRuns.disconnectGeneration).toHaveBeenCalledWith("c1", "socket-1");
 		expect(jobService.markDisconnected).toHaveBeenCalledWith("c1");
 		expect(frpService.markInactiveByClientId).toHaveBeenCalledWith("c1");
 		expect(terminalService.handleClientDisconnect).toHaveBeenCalledWith(
@@ -240,26 +180,10 @@ describe("ClientGateway client liveness", () => {
 	});
 });
 
-describe("ClientGateway Pi generation routing", () => {
-	it("afterInit 精确投递 socketId，不使用 clientId room", () => {
-		const { gateway, piRequests, to, emit } = makeGateway();
-		gateway.afterInit();
-		const binder = piRequests.bindEmitter.mock.calls[0]?.[0];
-		binder("socket-2", { requestId: "r1", action: "sessions.list" });
-		expect(to).toHaveBeenCalledWith("socket-2");
-		expect(emit).toHaveBeenCalledWith(
-			"pi:request",
-			expect.objectContaining({ requestId: "r1" }),
-		);
-	});
-
-	it("REGISTER 在 ack 前绑定身份并进入 pending generation", async () => {
-		const { gateway, piRuns } = makeGateway();
+describe("ClientGateway 连接与身份生命周期", () => {
+	it("REGISTER 绑定身份并持久化，且先回 ack", async () => {
+		const { gateway, clientService } = makeGateway();
 		const socket = makeSocket();
-		const order: string[] = [];
-		piRuns.markReconcilePending.mockImplementation(async () => {
-			order.push("pending");
-		});
 		await gateway.handleRegister(socket, {
 			clientId: "c1",
 			hostname: "host",
@@ -267,12 +191,25 @@ describe("ClientGateway Pi generation routing", () => {
 			cpuModel: "cpu",
 			totalMemMB: 1024,
 			clientVersion: "1",
-			capabilities: ["agent.pi"],
+			capabilities: ["exec"],
 			capabilityDetails: {},
 		});
 		expect(socket.data.clientId).toBe("c1");
-		expect(piRuns.markReconcilePending).toHaveBeenCalledWith("c1", "socket-1");
-		expect(order).toEqual(["pending"]);
+		expect(clientService.register).toHaveBeenCalledWith(
+			expect.objectContaining({ clientId: "c1" }),
+			"socket-1",
+		);
+		expect(socket.emit).toHaveBeenCalledWith("ack", { event: "register" });
+	});
+
+	it("断线时标记 Job 为 disconnected 并收敛 FRP，不再由 Pi generation 门控", async () => {
+		const { gateway, jobService, frpService, terminalBroker } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		await gateway.handleDisconnect(socket);
+		expect(terminalBroker.disconnect).toHaveBeenCalledWith("socket-1");
+		expect(jobService.markDisconnected).toHaveBeenCalledWith("c1");
+		expect(frpService.markInactiveByClientId).toHaveBeenCalledWith("c1");
 	});
 
 	it("REGISTER 先回 ack 再下发 Git SSH，否则指令会被 Client 的未注册门禁丢弃", async () => {
@@ -364,65 +301,6 @@ describe("ClientGateway Pi generation routing", () => {
 		expect(socket2.disconnect).toHaveBeenCalled();
 	});
 
-	it("PI_STATE 只经 reconcileGeneration 并原样 ack", async () => {
-		const { gateway, piRuns, piEvents } = makeGateway();
-		const socket = makeSocket();
-		socket.data.clientId = "c1";
-		const expected = {
-			acceptedRunIds: ["run-idle"],
-			closedRunIds: ["run-stale"],
-			reportAgain: true,
-		};
-		piRuns.reconcileGeneration.mockResolvedValue(expected);
-		const result = await gateway.handlePiState(socket, report);
-		expect(piRuns.reconcileGeneration).toHaveBeenCalledWith(
-			"c1",
-			"socket-1",
-			report,
-		);
-		expect(result).toEqual(expected);
-		expect(piEvents).not.toHaveProperty("handleState");
-	});
-
-	it("PI_RESPONSE 直接按响应 socket resolve，不查 DB socketId", async () => {
-		const { gateway, piRequests, clientService } = makeGateway();
-		const socket = makeSocket("old-socket");
-		socket.data.clientId = "c1";
-		const response = { requestId: "r1", ok: true, data: {} } as const;
-		await gateway.handlePiResponse(socket, response);
-		expect(piRequests.resolve).toHaveBeenCalledWith("old-socket", response);
-		expect(clientService.getClientIdBySocketId).not.toHaveBeenCalled();
-	});
-
-	it("旧 socket 的迟到 PI_EVENT 不进入状态机", async () => {
-		const { gateway, piRuns, piEvents } = makeGateway();
-		const socket = makeSocket("old-socket");
-		socket.data.clientId = "c1";
-		piRuns.withReconciledSocket.mockRejectedValue(
-			Object.assign(new Error("stale"), { code: "PI_STATE_PENDING" }),
-		);
-		await gateway.handlePiEvent(socket, event);
-		expect(piEvents.publish).not.toHaveBeenCalled();
-	});
-
-	it("断线先失败 socket pending request，再处理 matching generation", async () => {
-		const { gateway, piRequests, piRuns } = makeGateway();
-		const socket = makeSocket();
-		socket.data.clientId = "c1";
-		const order: string[] = [];
-		piRequests.disconnect.mockImplementation(() => {
-			order.push("request-disconnected");
-		});
-		piRuns.disconnectGeneration.mockImplementation(async () => {
-			order.push("generation-disconnected");
-			return true;
-		});
-		await gateway.handleDisconnect(socket);
-		expect(piRequests.disconnect).toHaveBeenCalledWith("socket-1");
-		expect(piRuns.disconnectGeneration).toHaveBeenCalledWith("c1", "socket-1");
-		expect(order).toEqual(["request-disconnected", "generation-disconnected"]);
-	});
-
 	it("同一 Client 仍有存活连接时不置离线，只把 socket lease 切给存活连接", async () => {
 		const { gateway, clientService } = makeGateway();
 		const socket = makeSocket();
@@ -447,6 +325,20 @@ describe("ClientGateway Pi generation routing", () => {
 		expect(clientService.markOfflineBySocketId).toHaveBeenCalledWith("socket-1");
 		expect(clientService.bindSocket).not.toHaveBeenCalled();
 		expect(gateway["survivingSocketId"]("c1")).toBeNull();
+	});
+
+	it("重复 socket 断线且仍有存活连接时，不收敛 Job/FRP 状态", async () => {
+		const { gateway, jobService, frpService, clientService } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		gateway["trackSocket"]("c1", "socket-9");
+
+		await gateway.handleDisconnect(socket);
+
+		// 机器仍在线（lease 已切给存活连接）：不得把在跑的 Job 与 FRP 映射判死。
+		expect(clientService.bindSocket).toHaveBeenCalledWith("c1", "socket-9");
+		expect(jobService.markDisconnected).not.toHaveBeenCalled();
+		expect(frpService.markInactiveByClientId).not.toHaveBeenCalled();
 	});
 });
 
@@ -575,44 +467,6 @@ describe("ClientGateway terminal routing", () => {
 		expect(result).toEqual({ acceptedSessionIds: [], closeSessionIds: [] });
 	});
 
-	it("SESSION_HOST_STATE 解析后交给 service 并原样 ack", async () => {
-		const { gateway, sessionHost } = makeGateway();
-		const socket = makeSocket();
-		socket.data.clientId = "c1";
-		sessionHost.reconcile.mockResolvedValue({ unreachable: ["inst_1"], stopped: [] });
-		const result = await gateway.handleSessionHostState(socket, {
-			available: false,
-			hostId: null,
-			instances: [],
-		});
-		expect(sessionHost.reconcile).toHaveBeenCalledWith("c1", {
-			available: false,
-			hostId: null,
-			instances: [],
-		});
-		expect(result).toEqual({ unreachable: ["inst_1"], stopped: [] });
-	});
-
-	it("非法 SESSION_HOST_STATE 不交给 service，绝不用坏数据判死实例", async () => {
-		const { gateway, sessionHost } = makeGateway();
-		const socket = makeSocket();
-		socket.data.clientId = "c1";
-		const result = await gateway.handleSessionHostState(socket, {
-			available: true,
-			hostId: "h1",
-			instances: [{ instanceId: "i1", kind: "pi", state: "zombie", startedAt: "2026-01-01T00:00:00Z", lastSeq: 0 }],
-		});
-		expect(sessionHost.reconcile).not.toHaveBeenCalled();
-		expect(result).toEqual({ unreachable: [], stopped: [] });
-	});
-
-	it("未绑定 clientId 的 SESSION_HOST_STATE 不对账", async () => {
-		const { gateway, sessionHost } = makeGateway();
-		const socket = makeSocket();
-		const result = await gateway.handleSessionHostState(socket, { available: false, hostId: null, instances: [] });
-		expect(sessionHost.reconcile).not.toHaveBeenCalled();
-		expect(result).toEqual({ unreachable: [], stopped: [] });
-	});
 
 	it("断线通知 terminal service 但不终结会话", async () => {
 		const { gateway, terminalService } = makeGateway();

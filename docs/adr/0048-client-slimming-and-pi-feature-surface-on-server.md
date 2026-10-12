@@ -1,10 +1,10 @@
 # ADR-0048：Client 瘦身与 Pi 功能面归 Server
 
-- 状态：Accepted
+- 状态：Superseded by ADR-0049
 - 日期：2026-10-11
 - 决策者：项目维护者
 - 实施状态：尚未实施；本 ADR 只批准方向与边界，不表示迁移已完成、也不表示任何一侧已瘦身。
-- 关联：[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0020](./0020-cli-dataplane-namespace.md)、[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0030](./0030-pi-resource-bundle-and-tool-policy.md)、[ADR-0036](./0036-pi-sdk-single-file-and-shell-capability.md)、[ADR-0039](./0039-pi-two-mode-execution.md)、[ADR-0041](./0041-agent-session-run-and-audit-separation.md)、[ADR-0042](./0042-standard-pi-community-extensions.md)、[ADR-0043](./0043-project-local-pi-resources-unconditional-trust.md)、[ADR-0044](./0044-pi-bundle-tree-delivery-and-verification.md)、[ADR-0045](./0045-central-pi-and-native-agent-environments.md)、[ADR-0046](./0046-independent-session-host-and-client-restart-survival.md)、[ADR-0047](./0047-dsh-web-access-via-authenticated-reverse-proxy.md)、[`remote-pi.md`](../design/remote-pi.md)、[`remote-pi-control-plane.md`](../design/remote-pi-control-plane.md)
+- 关联：[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0020](./0020-cli-dataplane-namespace.md)、[ADR-0029](./0029-server-managed-isolated-pi-runtime.md)、[ADR-0030](./0030-pi-resource-bundle-and-tool-policy.md)、[ADR-0036](./0036-pi-sdk-single-file-and-shell-capability.md)、[ADR-0039](./0039-pi-two-mode-execution.md)、[ADR-0041](./0041-agent-session-run-and-audit-separation.md)、[ADR-0042](./0042-standard-pi-community-extensions.md)、[ADR-0043](./0043-project-local-pi-resources-unconditional-trust.md)、[ADR-0044](./0044-pi-bundle-tree-delivery-and-verification.md)、[ADR-0045](./0045-central-pi-and-native-agent-environments.md)、[ADR-0046](./0046-independent-session-host-and-client-restart-survival.md)、[ADR-0047](./0047-dsh-web-access-via-authenticated-reverse-proxy.md)、[`remote-pi.md`](../../docs/archive/design/remote-pi.md)、[`remote-pi-control-plane.md`](../../docs/archive/design/remote-pi-control-plane.md)
 
 ## 背景
 

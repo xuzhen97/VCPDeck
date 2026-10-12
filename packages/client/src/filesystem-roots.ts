@@ -1,7 +1,7 @@
 import { readdir, access } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 
-/** 发现客户端可访问的根路径（Files 与 Pi 共用） */
+/** 发现客户端可访问的根路径（Files 使用） */
 export async function discoverRoots(): Promise<string[]> {
 	if (platform() === "win32") {
 		const results = await Promise.allSettled(

@@ -10,7 +10,7 @@
 
 ### 目标
 
-- 为远程文件导入、导出和 Pi 临时附件提供统一 Storage 能力；Pi 附件当前使用 Local 风格的 Server 上传/下载 URL，不走 Alibaba 直传会话；
+- 为远程文件导入与导出提供统一 Storage 能力；当前使用 Local 风格的 Server 上传/下载 URL，不走 Alibaba 直传会话；
 - 由 Server 统一管理 File 元数据、传输会话、短期能力和完成状态；
 - 根据 Provider 能力选择 Server 中转或外部直传；
 - 避免把 import/export 对象正文放进 SQLite、Job JSON 或 Socket.IO 消息；轻量 `readText/writeText` 文本不属于 Storage 数据面，当前仍进入 Job；

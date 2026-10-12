@@ -1,9 +1,9 @@
 # ADR-0007：远程交互运行态驻留 Client，Server 最小持久化
 
-- 状态：Accepted
+- 状态：Accepted（Pi 条款由 ADR-0049 退役；Terminal 与适用的共同原则保留）
 - 日期：2026-08-15（补录既有决策）
 - 决策者：项目维护者
-- 关联：[`docs/design/remote-terminal.md`](../design/remote-terminal.md)、[`docs/design/remote-pi.md`](../design/remote-pi.md)、[`docs/security.md`](../security.md)
+- 关联：[`docs/design/remote-terminal.md`](../design/remote-terminal.md)、[`docs/design/remote-pi.md`](../../docs/archive/design/remote-pi.md)、[`docs/security.md`](../security.md)
 
 ## 背景
 

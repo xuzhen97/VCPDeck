@@ -675,3 +675,63 @@ describe("JobService failOrphaned", () => {
 		expect(scheduler.onFinished).not.toHaveBeenCalled();
 	});
 });
+
+describe("JobService.create() 退役类型守卫", () => {
+	const actor: ActorContext = {
+		identityId: "identity-1",
+		displayName: "测试用户",
+		isAdmin: false,
+		credentialId: null,
+		sessionId: "session-1",
+		source: "web",
+		requestId: "request-1",
+	};
+
+	it("拒绝新建已退役的 Agent Job 类型，不落库也不派发", async () => {
+		const prisma = mockPrisma([]) as any;
+		prisma.client.findUnique.mockResolvedValue({
+			id: "c1",
+			online: true,
+			capabilities: ["exec"],
+		});
+		const scheduler = { tryDispatch: vi.fn() } as any;
+		const service = new JobService(
+			prisma,
+			scheduler,
+			mockFileService(),
+			{ getBackendConfig: vi.fn() } as never,
+		);
+
+		for (const type of ["agent.session", "agent.run"]) {
+			await expect(
+				service.create({ clientId: "c1", type, payload: {} }, actor),
+			).rejects.toMatchObject({ code: "INVALID_JOB_TYPE" });
+		}
+		expect(prisma.job.create).not.toHaveBeenCalled();
+		expect(scheduler.tryDispatch).not.toHaveBeenCalled();
+	});
+
+	it("基础 Job 类型仍可创建", async () => {
+		const prisma = mockPrisma([]) as any;
+		prisma.client.findUnique.mockResolvedValue({
+			id: "c1",
+			online: true,
+			capabilities: ["exec"],
+		});
+		prisma.job.create.mockResolvedValue({ id: "j1" });
+		const scheduler = { tryDispatch: vi.fn().mockResolvedValue(null) } as any;
+		const service = new JobService(
+			prisma,
+			scheduler,
+			mockFileService(),
+			{ getBackendConfig: vi.fn() } as never,
+		);
+
+		const created = await service.create(
+			{ clientId: "c1", type: "exec", payload: { command: "echo hi" } },
+			actor,
+		);
+		expect(created.result.jobId).toBeTruthy();
+		expect(prisma.job.create).toHaveBeenCalledTimes(1);
+	});
+});

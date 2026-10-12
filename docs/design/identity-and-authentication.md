@@ -25,7 +25,7 @@
 - OAuth、OIDC、SSO、JWT 或 Refresh Token；
 - 自助注册、邮箱验证、密码找回或 MFA；
 - Role/Permission/Group/Policy、多租户或资源级授权；
-- 每 Client、项目、Job、File、Terminal 或 Pi 的访问隔离；
+- 每 Client、项目、Job、File 或 Terminal 的访问隔离；
 - 通用机器到机器 service account 类型；
 - 完整不可抵赖审计、合规 Session 管理或集中密钥管理；
 - 登录速率限制、失败锁定、验证码或异常登录检测。
@@ -229,17 +229,16 @@ POST /api/identities/:id/enable
 
 当前授权模型：
 
-- 任意有效业务 Identity 都可访问所有 Client、Job、Files、Storage、FRP、Terminal、Pi 和 Release 业务面；
+- 任意有效业务 Identity 都可访问所有 Client、Job、Files、Storage、FRP、Terminal 和 Release 业务面；
 - admin 只额外调用 Identity 管理接口；
 - Frontend 隐藏按钮、页面路由和确认弹窗都不是授权边界；
-- Job/Client/File/Terminal/Pi/FRP 当前不按 Identity 隔离。
+- Job/Client/File/Terminal/FRP 当前不按 Identity 隔离。
 
 Actor 审计当前是局部实现：
 
 - 通用 Job 可保存 createdByIdentityId、createdByName 和 createdVia；
 - TerminalAudit 保存部分生命周期 Actor；
 - Release 保存上传者名称和来源；
-- Pi 保存 Owner 及部分控制身份；
 - FRP service 直接创建的内部 Job 当前没有写 createdBy 字段；
 - 不是所有修改、取消、输入、文件副作用和配置变更都有统一持久审计。
 
@@ -280,14 +279,14 @@ Actor 审计当前是局部实现：
 - 反向代理日志是否出现 Authorization/Cookie/login body；
 - 是否存在本不应长期运行的 `/app` Socket 或 Terminal；
 - SQLite 中过期/撤销 Session 和 Credential 的增长；
-- Job、Terminal、Pi、Release 与 FRP 审计是否能关联实际 Actor。
+- Job、Terminal、Release 与 FRP 审计是否能关联实际 Actor。
 
 凭证泄漏处理：
 
 1. 隔离入口并保留日志/数据库证据；
 2. 撤销具体 Credential；必要时 disable Identity 以阻止全部新请求；
 3. 主动断开既有 `/app` Socket 或重启 Server；
-4. 核对该 Identity 的 Job、TerminalAudit、Pi、Release、FRP 和反向代理记录；
+4. 核对该 Identity 的 Job、TerminalAudit、Release、FRP 和反向代理记录；
 5. 修改密码不会自动撤销 Session/Token，必须分别处理；
 6. 确认后再 enable，且不要让泄漏 Credential 因 enable 重新生效。
 
