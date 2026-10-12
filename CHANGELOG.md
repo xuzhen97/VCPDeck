@@ -2,6 +2,15 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.19.2] - 2026-10-12
+
+### Fixed（客户端自愈与注册加固）
+
+- **客户端连接自愈**（2026-10-12 事故根因）：`socket.io` 对**服务端主动断开**（`io server disconnect`）不会自动重连，旧客户端只在 `disconnect` 里打日志，于是"进程还活着但 socket 永久死亡、服务端修好也不自愈"。现在：服务端主动断开时按指数退避显式重连；连续 5 分钟未能连上（含 `connect_error` 从未连上）则主动退出，交给 Launcher 既有的崩溃拉起重试；重新连上即撤销看门狗；被反复踢时不断重试而不退出。
+- **注册重试**：未拿到注册成功确认（服务端拒绝、或 ack 回调收到 `{ok:false}`）时按退避重发 REGISTER；同时修正"把 `{ok:false}` 当作注册成功"的隐患。
+- **服务端加固**：注册载荷非法时**不再断开连接**（PSK 已在握手阶段把守），只回稳定错误码 `REGISTER_INVALID` 并保留连接。配合客户端注册重试，**载荷不被接受的客户端会在服务端修复/升级后自动恢复**，不再需要人工重启每台机器。错误 PSK 仍然 fail closed 断开。
+- 文档：[`compatibility.md`](./docs/compatibility.md) 新增"退役字段必须容忍并忽略"规则与**跨版本注册矩阵**发布门禁；[`release-and-update.md`](./docs/design/release-and-update.md) 新增 §7.1 连接自愈契约与故障恢复表项；[`operations.md`](./docs/operations.md) 新增"客户端在线列表为空"的排障与恢复路径（含一键重装）。
+
 ## [0.19.1] - 2026-10-12
 
 ### Fixed（修复 0.19.0 的注册兼容性缺陷）
