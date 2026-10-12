@@ -261,6 +261,16 @@ Client 更新会停止整个 Client 进程：
 
 Client Launcher 的健康判定是新 Client 进程连续存活约 3 秒，不验证其已成功注册 Server 或完成能力探测。Server 以目标版本重连注册作为该 Client 更新的最终成功信号。
 
+### 7.1 连接自愈与看门狗（2026-10-12 事故后新增）
+
+`socket.io` 对**服务端主动断开**（`io server disconnect`）**不会自动重连**：只有客户端才能重新 `connect()`。旧实现只在 `disconnect` 里打日志，于是一旦被服务端断开，进程还活着但 socket 永久死亡，**服务端之后修好也不会自愈**（2026-10-12 全集群长期不可用的直接原因）。当前契约：
+
+- `disconnect` 按 reason 处理：`io server disconnect` → 带指数退避（1s→最大 30s）显式 `socket.connect()`；其余 reason（如 `transport close`）交给 `socket.io` 既有重连；
+- “静默假死”看门狗：从最后一次成功 `connect` 起算，连续 **5 分钟**未能连上（含 `connect_error` 从未连上）则主动 `exit(1)`，交给 Launcher 既有的崩溃拉起重试；重新连上即撤销看门狗；
+- 被反复踢掉时会不断按退避重试而**不退出**（每次 `connect` 会重置看门狗），因此服务端恢复后客户端能自行恢复。
+
+仍需注意的非对称性：Launcher 对 **client 构件**的健康判定仍是“进程连续存活约 3 秒”，它不感知业务连通性（对 **server 构件**才是 HTTP `/api/status` + 版本比对）；因此“进程活着但连不上”的兜底依赖客户端自觉退出，Launcher 独立探活尚未实现。
+
 ## 8. Launcher 模型
 
 ### 8.1 目录和 current
@@ -372,6 +382,8 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 | Client drain 超时 | 继续 apply，未完成运行态可能被终止 | 重连后对账 Job/Terminal，不伪造成功 |
 | Client 重连版本不符 | Client 标记 failed | 检查 Launcher 日志和 previous 回退原因 |
 | Client 离线 | 不阻塞 Release done | 后续注册时补更 |
+| Client 被服务端主动断开（`io server disconnect`） | 客户端带指数退避显式重连（`socket.io` 不会自动重连）；持续被踢则不断重试而不退出 | 无需人工；服务器恢复后自动重连（见 §7.1） |
+| Client 进程存活但长时间连不上（网络中断/Server 不可达） | 连续 5 分钟未能连上则 `exit(1)`，由 Launcher 崩溃拉起重试 | 已自动恢复；反复失败则检查网络与 Server 可达性 |
 | 上传时已有活动 Release | 新上传记录可能停留 `uploaded` | 等活动 Release 完成后人工核对并重新触发/重新发布 |
 | 重复版本上传 | 当前文件移动发生在 DB 重复检查前，存在覆盖既有 archive 的风险 | 不复用版本号；核对 archive SHA 和 Release 记录 |
 | 非 Windows archive | 扩展名和解压器可能不匹配 | 当前不要声称支持；先修复格式协议并做真实演练 |

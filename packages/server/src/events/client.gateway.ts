@@ -224,8 +224,12 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       // 信任边界：跨信任边界输入必须运行时校验；非法消息不持久化、不进入任何状态机。
       register = parseMachineRegister(data);
     } catch {
-      client.emit("error", "invalid register");
-      client.disconnect();
+      // 加固（2026-10-12 事故）：非法注册载荷**不断开连接**。
+      // PSK 已在握手阶段把关（handleConnection 对错误 PSK 仍 fail closed 断开），
+      // 此处只是“载荷不被接受”：断开会让旧客户端（如 0.18.2 带已退役 pi 字段）
+      // 连上即被踢且 socket.io 不会自动重连 → 永久静默。
+      // 保留连接 + 稳定错误码，客户端按退避重试 REGISTER，服务端修复/升级后自动恢复。
+      client.emit("error", { code: "REGISTER_INVALID", message: "invalid register" });
       return { ok: false };
     }
     await this.clientService.register(register, client.id);

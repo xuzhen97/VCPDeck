@@ -270,7 +270,7 @@ describe("ClientGateway 连接与身份生命周期", () => {
 		);
 	});
 
-	it("非法 REGISTER（缺 hostname / 非法 privileged mode）不持久化并断开", async () => {
+	it("非法 REGISTER（缺 hostname / 非法 privileged mode）不持久化且不断开连接", async () => {
 		const { gateway, clientService } = makeGateway();
 		const socket = makeSocket();
 		socket.disconnect = vi.fn();
@@ -284,7 +284,13 @@ describe("ClientGateway 连接与身份生命周期", () => {
 		});
 		expect(clientService.register).not.toHaveBeenCalled();
 		expect(socket.data.clientId).toBeUndefined();
-		expect(socket.disconnect).toHaveBeenCalled();
+		// 加固（2026-10-12 事故）：载荷非法不再断开连接，只回稳定错误码；
+		// 断开会让旧客户端连上即被踢且 socket.io 不自动重连 → 永久静默。
+		expect(socket.disconnect).not.toHaveBeenCalled();
+		expect(socket.emit).toHaveBeenCalledWith("error", {
+			code: "REGISTER_INVALID",
+			message: "invalid register",
+		});
 
 		const socket2 = makeSocket("socket-2");
 		socket2.disconnect = vi.fn();
@@ -298,7 +304,7 @@ describe("ClientGateway 连接与身份生命周期", () => {
 			capabilities: ["exec"],
 			capabilityDetails: { privileged: { available: true, mode: "root" } },
 		});
-		expect(socket2.disconnect).toHaveBeenCalled();
+		expect(socket2.disconnect).not.toHaveBeenCalled();
 	});
 
 	it("同一 Client 仍有存活连接时不置离线，只把 socket lease 切给存活连接", async () => {
@@ -339,6 +345,21 @@ describe("ClientGateway 连接与身份生命周期", () => {
 		expect(clientService.bindSocket).toHaveBeenCalledWith("c1", "socket-9");
 		expect(jobService.markDisconnected).not.toHaveBeenCalled();
 		expect(frpService.markInactiveByClientId).not.toHaveBeenCalled();
+	});
+
+	it("错误 PSK 仍然 fail closed 断开（加固不得削弱握手认证）", () => {
+		vi.stubEnv("VCPDECK_PSK", "test-psk");
+		const { gateway } = makeGateway();
+		const socket = makeSocket();
+		socket.disconnect = vi.fn();
+		(socket as unknown as { handshake: { auth: { psk: string } } }).handshake = {
+			auth: { psk: "wrong-psk" },
+		};
+
+		gateway.handleConnection(socket);
+
+		expect(socket.emit).toHaveBeenCalledWith("error", "invalid PSK");
+		expect(socket.disconnect).toHaveBeenCalled();
 	});
 
 	it("0.18.2 客户端带已退役 pi 摘要仍能注册（0.19.0 事故回归）", async () => {

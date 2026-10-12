@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Socket } from "socket.io-client";
 import { Events, type StatusReport } from "@vcpdeck/shared";
-import { attachClientBridge, isMigrationVerifyOnly } from "./index.js";
+import {
+	attachClientBridge,
+	attachConnectionRecovery,
+	isMigrationVerifyOnly,
+} from "./index.js";
 
 function fakeSocket() {
 	const handlers: Record<string, Array<(...a: unknown[]) => unknown>> = {};
@@ -128,5 +132,122 @@ describe("isMigrationVerifyOnly", () => {
 		expect(isMigrationVerifyOnly({ VCPDECK_MIGRATION_VERIFY_ONLY: "1" })).toBe(true);
 		expect(isMigrationVerifyOnly({})).toBe(false);
 		expect(isMigrationVerifyOnly({ VCPDECK_MIGRATION_VERIFY_ONLY: "0" })).toBe(false);
+	});
+});
+
+describe("attachConnectionRecovery 断开自愈", () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	it("服务端主动断开时手动重连（socket.io 对 io server disconnect 不会自动重连）", () => {
+		const { socket, handlers } = fakeSocket();
+		socket.connect = vi.fn();
+		attachConnectionRecovery(socket, { exit: vi.fn() });
+		handlers["disconnect"]?.[0]?.("io server disconnect");
+		expect(socket.connect).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(1_000);
+		expect(socket.connect).toHaveBeenCalledTimes(1);
+	});
+
+	it("反复被踢时按退避继续重连（不放弃）", () => {
+		const { socket, handlers } = fakeSocket();
+		socket.connect = vi.fn();
+		attachConnectionRecovery(socket, { exit: vi.fn() });
+		handlers["disconnect"]?.[0]?.("io server disconnect");
+		vi.advanceTimersByTime(1_000);
+		handlers["disconnect"]?.[0]?.("io server disconnect");
+		vi.advanceTimersByTime(1_000);
+		expect(socket.connect).toHaveBeenCalledTimes(1);
+		vi.advanceTimersByTime(1_000);
+		expect(socket.connect).toHaveBeenCalledTimes(2);
+	});
+
+	it("传输层断开交给 socket.io 自动重连，不重复手动连", () => {
+		const { socket, handlers } = fakeSocket();
+		socket.connect = vi.fn();
+		attachConnectionRecovery(socket, { exit: vi.fn() });
+		handlers["disconnect"]?.[0]?.("transport close");
+		vi.advanceTimersByTime(60_000);
+		expect(socket.connect).not.toHaveBeenCalled();
+	});
+
+	it("长时间连不上时退出进程，交给 Launcher 拉起（不再静默假死）", () => {
+		const { socket, handlers } = fakeSocket();
+		socket.connect = vi.fn();
+		const exit = vi.fn();
+		attachConnectionRecovery(socket, { exit });
+		handlers["disconnect"]?.[0]?.("io server disconnect");
+		vi.advanceTimersByTime(5 * 60 * 1000 - 1);
+		expect(exit).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(1);
+		expect(exit).toHaveBeenCalledWith(1);
+	});
+
+	it("从未连上过（connect_error）也会被看门狗兜住", () => {
+		const { socket, handlers } = fakeSocket();
+		const exit = vi.fn();
+		attachConnectionRecovery(socket, { exit });
+		handlers["connect_error"]?.[0]?.(new Error("x"));
+		vi.advanceTimersByTime(5 * 60 * 1000);
+		expect(exit).toHaveBeenCalledWith(1);
+	});
+
+	it("重新连上后撤销看门狗", () => {
+		const { socket, handlers } = fakeSocket();
+		socket.connect = vi.fn();
+		const exit = vi.fn();
+		attachConnectionRecovery(socket, { exit });
+		handlers["disconnect"]?.[0]?.("io server disconnect");
+		vi.advanceTimersByTime(4 * 60 * 1000);
+		handlers["connect"]?.[0]?.();
+		vi.advanceTimersByTime(30 * 60 * 1000);
+		expect(exit).not.toHaveBeenCalled();
+	});
+});
+
+describe("注册重试（服务端拒绝后自愈）", () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	const registerEmits = (emits: Array<{ event: string; args: unknown[] }>) =>
+		emits.filter((e) => e.event === Events.REGISTER);
+
+	it("未收到 ack 时按退避重发 REGISTER，收到 ack 后停止", async () => {
+		const { socket, handlers, emits } = fakeSocket();
+		const { deps } = makeDeps();
+		const bridge = attachClientBridge(socket, deps as never);
+		await bridge.onConnected();
+		expect(registerEmits(emits)).toHaveLength(1);
+
+		vi.advanceTimersByTime(10_000);
+		expect(registerEmits(emits)).toHaveLength(2);
+
+		handlers["ack"]?.[0]?.({ event: Events.REGISTER });
+		vi.advanceTimersByTime(10 * 60 * 1000);
+		expect(registerEmits(emits)).toHaveLength(2);
+	});
+
+	it("服务端返回 ok:false（拒绝注册）不算注册成功，继续重试", async () => {
+		const { socket, emits } = fakeSocket();
+		const { deps } = makeDeps();
+		const bridge = attachClientBridge(socket, deps as never);
+		await bridge.onConnected();
+		const first = registerEmits(emits)[0] as { args: unknown[] };
+		// socket.io ack 回调收到 handler 返回值
+		(first.args[1] as (r: { ok: boolean }) => void)({ ok: false });
+		vi.advanceTimersByTime(20_000);
+		expect(registerEmits(emits).length).toBeGreaterThanOrEqual(2);
+		// 拒绝期间不得下发 STATUS_REPORT
+		expect(emits.some((e) => e.event === Events.STATUS_REPORT)).toBe(false);
+	});
+
+	it("服务端主动回 error 后继续重试", async () => {
+		const { socket, handlers, emits } = fakeSocket();
+		const { deps } = makeDeps();
+		const bridge = attachClientBridge(socket, deps as never);
+		await bridge.onConnected();
+		handlers["error"]?.[0]?.({ code: "REGISTER_INVALID" });
+		vi.advanceTimersByTime(30_000);
+		expect(registerEmits(emits).length).toBeGreaterThanOrEqual(2);
 	});
 });

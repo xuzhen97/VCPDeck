@@ -1,6 +1,6 @@
 # VCPDeck 兼容性与升级策略
 
-> 状态：Current｜维护责任：发布维护者｜最后核验：2026-10-12｜适用版本：`0.19.1` / 当前 `main`
+> 状态：Current｜维护责任：发布维护者｜最后核验：2026-10-12｜适用版本：`0.19.2` / 当前 `main`
 
 ## 1. 当前结论
 
@@ -101,6 +101,12 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 
 破坏性变化必须：新增 ADR、提升相应协议版本、提供升级路径、更新 CHANGELOG，并验证旧版本得到明确拒绝而不是错误执行。
 
+**退役字段必须“容忍并忽略”，不能“未知即抛错”。** 严格 parser 对已删除字段直接报错，会让**仍在旧版本的客户端整条注册/请求失败**：2026-10-12 的 0.19.0 事故正是如此 —— `parseMachineRegister` 把已退役的 `capabilityDetails.pi` 当未知键抛错，全部 0.18.2 客户端“连上即被踢”，集群整体掉线。退役一个入站字段属于 5.3 破坏性变化，必须：
+
+- 把该键加入显式的“已退役、接受并丢弃”白名单（不持久化、不投影），而不是靠“未知即拒绝”；
+- 该白名单至少保留一个发布周期，等集群全部升级后再单独决策收紧；
+- 在发布门禁里用**上一版本真实客户端载荷**验证仍能得到 ack（见 §8）。
+
 ADR-0010 已决定 exec script 迁移到 Client runtime registry。当前 Shared/Frontend/Server/Client 仍使用 `executable + args`；实施时必须先部署能声明 `exec.script.<runtime>` 的 Client，再切换调用方，并为旧 payload 设置有限兼容窗口。不得只凭应用版本猜测支持情况。
 
 远程文件当前仍由调用方提交 `rootDir`，且 Shared `FileTransferResult.sha256` 与 Alibaba/当前 import 的实际结果存在偏移。迁移到 Client 认证 root ID、严格文件 parser、统一取消/对账或调整摘要字段时，必须作为 Server/Client/SDK/Frontend 双端协议变更发布；旧 Client 应按 capability/协议明确拒绝，不能把新 root ID 当作普通路径传给旧 handler。
@@ -145,6 +151,7 @@ manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身�
 - Shared、Server、Client、Frontend、SDK、CLI 全量构建，Skill `vcpdeck.cjs --help` 冒烟；
 - 在仓库外用 pnpm 10.26+ 从同一 Git Tag 安装 SDK/Shared，验证 JavaScript 导入、TypeScript 类型和目标项目单文件打包；
 - Server 与同版本真实 Client 的注册、Job、文件 parser/root/导入导出/取消和重连；
+- **跨版本注册矩阵**：用**上一个已发布版本的真实客户端载荷**（不是同版本）对新 Server 发起注册，必须得到 ack；新增或退役 `capabilityDetails` 字段、capability 字符串、注册字段时必测（2026-10-12 事故即此门禁缺失）；
 - Terminal capability、真实 PTY、snapshot/seq、控制权和重连；
 - 数据库从上一支持版本升级；
 - Launcher 正常更新和失败回退（含瞬时下载失败的最多三次有界重试）；

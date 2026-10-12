@@ -55,6 +55,16 @@ const SERVER_BASE = process.env.VCPDECK_SERVER || "http://localhost:3001";
 const SERVER_URL = SERVER_BASE + "/client";
 const PSK = process.env.VCPDECK_PSK || "vcpdeck-dev-psk";
 
+// 以下常量必须在任何函数被调用前完成初始化（main() 在模块前部就会调用 connect()）。
+/** 未拿到注册成功确认时的重试退避（服务端拒绝/升级后自动恢复）。 */
+const REGISTER_RETRY_BASE_MS = 10_000;
+const REGISTER_RETRY_MAX_MS = 60_000;
+/** 断开后仍未能重连超过该时长，就退出进程交给 Launcher 拉起。 */
+const CONNECTION_EXIT_AFTER_MS = 5 * 60 * 1000;
+/** 服务端主动断开后的手动重连退避。 */
+const MANUAL_RECONNECT_BASE_MS = 1_000;
+const MANUAL_RECONNECT_MAX_MS = 30_000;
+
 /**
  * M1 迁移验证专用模式（仅 Linux A2 迁移由安装器设置，全新安装/稳态永不进入）：
  * Client 仍执行 REGISTER 与心跳供 Server 验证身份/版本/安装/特权，
@@ -95,6 +105,10 @@ export interface ClientBridge {
 /**
  * 绑定 Client Socket 桥：REGISTER 与注册后的 STATUS_REPORT。
  * Server 完成 register 后通过 "ack" event 通知。
+ *
+ * 2026-10-12 事故后加固：未拿到注册成功确认时按退避**重发 REGISTER**。
+ * 配合 0.19.2 起「服务端对非法注册不断开连接」的行为，协议不匹配的客户端会
+ * 保持连接并不断重试，服务端修复/升级后**自动恢复**，不再需要人工重启机器。
  */
 export function attachClientBridge(
 	socket: Socket,
@@ -104,11 +118,47 @@ export function attachClientBridge(
 	const verifyOnly = opts.verifyOnly === true;
 	let connectionGeneration = 0;
 	let currentRegistered: (() => void) | null = null;
+	let retryTimer: ReturnType<typeof setTimeout> | null = null;
+	let retryAttempt = 0;
+	/** 最近一次 REGISTER 载荷与 ack 回调：未注册成功时按退避重发。 */
+	let pendingRegister: {
+		payload: unknown;
+		onAck: (result?: unknown) => void;
+	} | null = null;
+
+	const clearRetry = (): void => {
+		if (retryTimer) {
+			clearTimeout(retryTimer);
+			retryTimer = null;
+		}
+	};
+	const scheduleRetry = (): void => {
+		if (!pendingRegister) return;
+		clearRetry();
+		const delay = Math.min(
+			REGISTER_RETRY_BASE_MS * 2 ** retryAttempt,
+			REGISTER_RETRY_MAX_MS,
+		);
+		retryAttempt += 1;
+		retryTimer = setTimeout(() => {
+			retryTimer = null;
+			if (!pendingRegister) return;
+			socket.emit(Events.REGISTER, pendingRegister.payload, pendingRegister.onAck);
+		}, delay);
+	};
 
 	// 兼容旧 Server：现有 "ack" event，始终绑定当前连接代次
 	socket.on("ack", (data: { event?: string }) => {
 		if (data?.event === Events.REGISTER) currentRegistered?.();
 	});
+	// 服务端拒绝注册（0.19.2+ 不再断开连接）：记日志并重试；旧 Server 会直接断开，
+	// 由 attachConnectionRecovery 负责重连后重新注册。
+	socket.on("error", (payload: unknown) => {
+		console.warn(`[vcpdeck] server rejected register: ${JSON.stringify(payload)}`);
+		scheduleRetry();
+	});
+	// 断开后不再重发；重连（onConnected）会重新注册。
+	socket.on("disconnect", () => clearRetry());
 
 	return {
 		async onConnected() {
@@ -118,9 +168,24 @@ export function attachClientBridge(
 			const onRegistered = () => {
 				if (generation !== connectionGeneration || reported) return;
 				reported = true;
+				clearRetry();
+				retryAttempt = 0;
+				pendingRegister = null;
 				// 迁移验证模式：只做身份/安全验证，不下发任何工作状态。
 				if (verifyOnly) return;
 				socket.emit(Events.STATUS_REPORT, deps.getStatusReport());
+			};
+			/** socket.io ack 回调拿到的是 handler 返回值；{ok:false} 表示被拒，不算注册成功。 */
+			const onAck = (result?: unknown) => {
+				if (
+					typeof result === "object" &&
+					result !== null &&
+					(result as { ok?: unknown }).ok === false
+				) {
+					scheduleRetry();
+					return;
+				}
+				onRegistered();
 			};
 			currentRegistered = onRegistered;
 			const terminalStatus = await deps.getTerminalStatus().catch(() => undefined);
@@ -130,13 +195,92 @@ export function attachClientBridge(
 			const gitSshStatus = await probeGitSshCapabilityForClient().catch(() => undefined);
 			await refreshGitSshEnv();
 			if (generation !== connectionGeneration) return;
-			socket.emit(
-				Events.REGISTER,
-				deps.getRegister(terminalStatus, runtimeSecurity, gitSshStatus),
-				onRegistered,
+			const payload = deps.getRegister(
+				terminalStatus,
+				runtimeSecurity,
+				gitSshStatus,
 			);
+			pendingRegister = { payload, onAck };
+			socket.emit(Events.REGISTER, payload, onAck);
+			// 未拿到注册成功确认（ack 事件或 {ok:true}）前一直按退避重试。
+			scheduleRetry();
 		},
 	};
+}
+
+/**
+ * 连接自愈（2026-10-12 事故）。
+ *
+ * socket.io 对“服务端主动断开”（`io server disconnect`）**不会自动重连**，
+ * 必须客户端显式 `socket.connect()`；旧实现只在 `disconnect` 里打日志，
+ * 一被服务端踢就进程活着、socket 永久死亡，服务端修好也不自愈。
+ * 另外：长时间连不上则退出进程，交给 Launcher 的崩溃拉起（不再静默假死）。
+ */
+export interface ConnectionRecoveryOptions {
+	/** 连续未能连上的退出阈值（默认 5 分钟）。 */
+	exitAfterMs?: number;
+	/** 进程退出实现（默认 process.exit；测试可注入）。 */
+	exit?: (code: number) => void;
+}
+
+export function attachConnectionRecovery(
+	socket: Socket,
+	options: ConnectionRecoveryOptions = {},
+): void {
+	const exitAfterMs = options.exitAfterMs ?? CONNECTION_EXIT_AFTER_MS;
+	const exit = options.exit ?? ((code: number) => process.exit(code));
+	let watchdog: ReturnType<typeof setTimeout> | null = null;
+	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	let reconnectAttempt = 0;
+
+	const clearWatchdog = (): void => {
+		if (watchdog) {
+			clearTimeout(watchdog);
+			watchdog = null;
+		}
+	};
+	const clearReconnect = (): void => {
+		if (reconnectTimer) {
+			clearTimeout(reconnectTimer);
+			reconnectTimer = null;
+		}
+	};
+	// 只要一直连不上（含从未连上过）就走同一条退出路径。
+	const armWatchdog = (): void => {
+		if (watchdog) return;
+		watchdog = setTimeout(() => {
+			watchdog = null;
+			console.error(
+				`[vcpdeck] 已连续 ${Math.round(exitAfterMs / 1000)} 秒未能连上 Server，退出以避免静默假死`,
+			);
+			exit(1);
+		}, exitAfterMs);
+	};
+
+	socket.on("connect", () => {
+		reconnectAttempt = 0;
+		clearReconnect();
+		clearWatchdog();
+	});
+
+	socket.on("disconnect", (reason: string) => {
+		if (reason === "io server disconnect") {
+			// 服务端主动断开：socket.io 不会自动重连，这里显式重试（指数退避）。
+			clearReconnect();
+			const delay = Math.min(
+				MANUAL_RECONNECT_BASE_MS * 2 ** reconnectAttempt,
+				MANUAL_RECONNECT_MAX_MS,
+			);
+			reconnectAttempt += 1;
+			reconnectTimer = setTimeout(() => {
+				reconnectTimer = null;
+				socket.connect();
+			}, delay);
+		}
+		armWatchdog();
+	});
+
+	socket.on("connect_error", () => armWatchdog());
 }
 
 export function connect(): Socket {
@@ -149,6 +293,9 @@ export function connect(): Socket {
 
 	// M1 迁移验证模式：仍注册/心跳，但不挂载任何 operational 处理器。
 	const verifyOnly = isMigrationVerifyOnly();
+
+	// 连接自愈必须先挂：服务端主动断开不会自动重连。
+	attachConnectionRecovery(socket);
 
 	// Git SSH 受管密钥桥：只有 REGISTER ack 之后才处理 Server 下发的密钥指令；
 	// 数据根非法时既不挂载处理器也不上报能力（fail closed）。
