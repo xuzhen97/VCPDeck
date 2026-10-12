@@ -40,7 +40,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.19.0";
+    exports2.VERSION = "0.19.1";
   }
 });
 
@@ -1542,6 +1542,7 @@ var require_machine_register = __commonJS({
       WINDOWS_SYSTEM: "windows-system",
       UNAVAILABLE: "unavailable"
     };
+    var RETIRED_DETAIL_KEYS = /* @__PURE__ */ new Set(["pi"]);
     function isRecord2(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
@@ -1652,6 +1653,8 @@ var require_machine_register = __commonJS({
           throw new Error("capabilityDetails \u5FC5\u987B\u4E3A\u5BF9\u8C61");
         const known = ["terminal", "frp", "privileged", "p2pTunnel", "gitSsh"];
         for (const key of Object.keys(details)) {
+          if (RETIRED_DETAIL_KEYS.has(key))
+            continue;
           if (!known.includes(key)) {
             throw new Error(`capabilityDetails \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
           }
