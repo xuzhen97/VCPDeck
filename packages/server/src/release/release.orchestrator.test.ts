@@ -4,8 +4,11 @@ import {
 	ReleaseStatus,
 	platformFromOs,
 } from "@vcpdeck/shared";
-import type { ReleaseInfo } from "@vcpdeck/shared";
-import { ReleaseOrchestrator } from "./release.orchestrator.js";
+import type { ReleaseClientEntry, ReleaseInfo } from "@vcpdeck/shared";
+import {
+	canRetryClientUpdate,
+	ReleaseOrchestrator,
+} from "./release.orchestrator.js";
 
 /** 测试机自身平台（断言下载 URL 用，避免依赖测试运行环境） */
 const currentPlatform = platformFromOs(process.platform) ?? "win-x64";
@@ -350,6 +353,7 @@ describe("ReleaseOrchestrator", () => {
 				"c1",
 				"failed",
 				"等待重连注册超时",
+				{ kind: "transient" },
 			);
 			expect(deps.releases.markClientState).toHaveBeenCalledWith(
 				"1.2.1",
@@ -385,6 +389,7 @@ describe("ReleaseOrchestrator", () => {
 				"c1",
 				"failed",
 				"校验失败",
+				{ kind: "transient" },
 			);
 			expect(deps.releases.transitionStatus).toHaveBeenCalledWith(
 				"1.2.1",
@@ -536,11 +541,324 @@ describe("ReleaseOrchestrator", () => {
 				"c1",
 				"failed",
 				expect.stringContaining("平台不受支持"),
+				{ kind: "permanent" },
 			);
 			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
 			expect(deps.releases.transitionStatus).toHaveBeenCalledWith(
 				"1.2.1",
 				ReleaseStatus.DONE,
+			);
+		});
+	});
+
+	describe("补更重试判定", () => {
+		const now = new Date("2026-10-14T12:00:00.000Z");
+
+		/** 构造失败条目；at 以「距今多少分钟」表示，便于表达退避边界。 */
+		function failed(
+			minutesAgo: number,
+			overrides: Partial<ReleaseClientEntry> = {},
+		): ReleaseClientEntry {
+			return {
+				state: ReleaseClientState.FAILED,
+				at: new Date(now.getTime() - minutesAgo * 60_000).toISOString(),
+				...overrides,
+			};
+		}
+
+		it("从未失败过的客户端可重试", () => {
+			expect(canRetryClientUpdate(undefined, now)).toBe(true);
+		});
+
+		it("永久失败在任何情况下都不可重试", () => {
+			expect(
+				canRetryClientUpdate(
+					failed(10_000, { kind: "permanent", attempts: 0 }),
+					now,
+				),
+			).toBe(false);
+		});
+
+		it("达到尝试上限后不可重试", () => {
+			expect(
+				canRetryClientUpdate(failed(10_000, { attempts: 2 }), now),
+			).toBe(true);
+			expect(
+				canRetryClientUpdate(failed(10_000, { attempts: 3 }), now),
+			).toBe(false);
+		});
+
+		it("退避未到期不可重试，恰好到期可重试", () => {
+			// 第 0 次失败后等待 15 分钟
+			expect(canRetryClientUpdate(failed(14, { attempts: 0 }), now)).toBe(
+				false,
+			);
+			expect(canRetryClientUpdate(failed(15, { attempts: 0 }), now)).toBe(
+				true,
+			);
+			// 第 1 次失败后等待 1 小时
+			expect(canRetryClientUpdate(failed(30, { attempts: 1 }), now)).toBe(
+				false,
+			);
+			expect(canRetryClientUpdate(failed(60, { attempts: 1 }), now)).toBe(
+				true,
+			);
+			// 第 2 次失败后等待 6 小时
+			expect(canRetryClientUpdate(failed(120, { attempts: 2 }), now)).toBe(
+				false,
+			);
+			expect(canRetryClientUpdate(failed(360, { attempts: 2 }), now)).toBe(
+				true,
+			);
+		});
+
+		it("存量记录缺类别与次数时按瞬时失败与首段退避处理", () => {
+			const legacy: ReleaseClientEntry = {
+				state: ReleaseClientState.FAILED,
+				reason: "等待重连注册超时",
+				at: "2026-08-15T04:00:00.000Z",
+			};
+			expect(canRetryClientUpdate(legacy, now)).toBe(true);
+			expect(
+				canRetryClientUpdate(
+					{ ...legacy, at: new Date(now.getTime() - 60_000).toISOString() },
+					now,
+				),
+			).toBe(false);
+		});
+
+		it("可重试的 failed 客户端会被重新纳入补更", async () => {
+			const target = releaseInfo({
+				status: ReleaseStatus.UPDATING_CLIENTS,
+				clientStates: {
+					c2: {
+						state: ReleaseClientState.FAILED,
+						reason: "等待重连注册超时",
+						at: "2026-08-15T04:00:00.000Z",
+						kind: "transient",
+						attempts: 1,
+					},
+				},
+			});
+			deps.releases.getActiveRelease.mockResolvedValue(target);
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			deps.releases.findByVersion.mockResolvedValue(target);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+				{ clientId: "c2", clientVersion: "1.1.0", os: "linux 6.8 x64" },
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const phase = orchestrator.resumeAfterStartup();
+			// 更新循环串行：先派发 c1，等其重连后才轮到 c2
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+			orchestrator.onClientRegistered("c1", "1.2.1");
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledWith(
+					"c2",
+					expect.objectContaining({ releaseVersion: "1.2.1" }),
+				);
+			});
+			orchestrator.onClientRegistered("c2", "1.2.1");
+			await phase;
+		});
+
+		it("永久失败与超过上限的客户端不会被补更", async () => {
+			const target = releaseInfo({
+				status: ReleaseStatus.UPDATING_CLIENTS,
+				clientStates: {
+					c2: {
+						state: ReleaseClientState.FAILED,
+						at: "2026-08-15T04:00:00.000Z",
+						kind: "permanent",
+						attempts: 1,
+					},
+					c3: {
+						state: ReleaseClientState.FAILED,
+						at: "2026-08-15T04:00:00.000Z",
+						kind: "transient",
+						attempts: 3,
+					},
+				},
+			});
+			deps.releases.getActiveRelease.mockResolvedValue(target);
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			deps.releases.findByVersion.mockResolvedValue(target);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+				{ clientId: "c2", clientVersion: "1.1.0", os: "linux 6.8 x64" },
+				{ clientId: "c3", clientVersion: "1.1.0", os: "linux 6.8 x64" },
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const phase = orchestrator.resumeAfterStartup();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+			orchestrator.onClientRegistered("c1", "1.2.1");
+			await phase;
+
+			expect(deps.channel.sendUpdateRequest).toHaveBeenCalledWith(
+				"c1",
+				expect.objectContaining({ releaseVersion: "1.2.1" }),
+			);
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalledWith(
+				"c2",
+				expect.anything(),
+			);
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalledWith(
+				"c3",
+				expect.anything(),
+			);
+		});
+		it("周期对账与进行中的阶段共用互斥，不并发开启第二条循环", async () => {
+			const target = releaseInfo({ status: ReleaseStatus.UPDATING_CLIENTS });
+			deps.releases.getActiveRelease.mockResolvedValue(target);
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			deps.releases.findByVersion.mockResolvedValue(target);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+				{ clientId: "c2", clientVersion: "1.1.0", os: "linux 6.8 x64" },
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const phase = orchestrator.resumeAfterStartup();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+			// 阶段进行中：对账必须复用同一条循环而不是新开一条
+			const sweeps = [
+				orchestrator.sweepCatchUp(),
+				orchestrator.sweepCatchUp(),
+			];
+			orchestrator.onClientRegistered("c1", "1.2.1");
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(2);
+			});
+			orchestrator.onClientRegistered("c2", "1.2.1");
+			await Promise.all([phase, ...sweeps]);
+
+			// 每台机器只被派发一次，没有重复循环
+			expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(2);
+		});
+
+		it("周期对账在无补更目标时不派发任何请求", async () => {
+			deps.releases.getLatestActiveTarget.mockResolvedValue(null);
+
+			await orchestrator.sweepCatchUp();
+
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("人工强制重试", () => {
+		const overLimit = {
+			state: ReleaseClientState.FAILED,
+			reason: "等待重连注册超时",
+			at: "2026-10-14T00:00:00.000Z",
+			kind: "transient" as const,
+			attempts: 3,
+		};
+
+		it("已超过次数上限的瞬时失败客户端仍可被强制重试", async () => {
+			const target = releaseInfo({
+				status: ReleaseStatus.UPDATING_CLIENTS,
+				clientStates: { c1: overLimit },
+			});
+			deps.releases.findByVersion.mockResolvedValue(target);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const retry = orchestrator.retryClient("1.2.1", "c1");
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+			orchestrator.onClientRegistered("c1", "1.2.1");
+			await expect(retry).resolves.toEqual({
+				version: "1.2.1",
+				clientId: "c1",
+			});
+
+			expect(deps.channel.sendUpdateRequest).toHaveBeenCalledWith(
+				"c1",
+				expect.objectContaining({ releaseVersion: "1.2.1" }),
+			);
+		});
+
+		it("永久失败即使人工强制也不重试", async () => {
+			deps.releases.findByVersion.mockResolvedValue(
+				releaseInfo({
+					status: ReleaseStatus.DONE,
+					clientStates: {
+						c1: {
+							state: ReleaseClientState.FAILED,
+							reason: "平台不受支持或构件缺失: darwin",
+							at: "2026-10-14T00:00:00.000Z",
+							kind: "permanent",
+							attempts: 1,
+						},
+					},
+				}),
+			);
+
+			await expect(
+				orchestrator.retryClient("1.2.1", "c1"),
+			).rejects.toMatchObject({ code: "RELEASE_RETRY_NOT_ALLOWED" });
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
+		});
+
+		it("未知版本与未知机器分别返回稳定错误码", async () => {
+			deps.releases.findByVersion.mockResolvedValue(null);
+			await expect(
+				orchestrator.retryClient("9.9.9", "c1"),
+			).rejects.toMatchObject({ code: "RELEASE_NOT_FOUND" });
+
+			deps.releases.findByVersion.mockResolvedValue(
+				releaseInfo({ status: ReleaseStatus.DONE }),
+			);
+			deps.channel.listOnlineClients.mockResolvedValue([]);
+			await expect(
+				orchestrator.retryClient("1.2.1", "c9"),
+			).rejects.toMatchObject({ code: "RELEASE_CLIENT_NOT_FOUND" });
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("周期对账直接捞起失败客户端", () => {
+		it("可重试的 failed 客户端在退避到期后由对账重新派发", async () => {
+			const target = releaseInfo({
+				status: ReleaseStatus.DONE,
+				clientStates: {
+					c1: {
+						state: ReleaseClientState.FAILED,
+						reason: "等待重连注册超时",
+						at: "2026-08-15T00:00:00.000Z",
+						kind: "transient",
+						attempts: 1,
+					},
+				},
+			});
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			deps.releases.findByVersion.mockResolvedValue(target);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const sweep = orchestrator.sweepCatchUp();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+			orchestrator.onClientRegistered("c1", "1.2.1");
+			await sweep;
+
+			expect(deps.channel.sendUpdateRequest).toHaveBeenCalledWith(
+				"c1",
+				expect.objectContaining({ releaseVersion: "1.2.1" }),
 			);
 		});
 	});

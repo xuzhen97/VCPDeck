@@ -18,7 +18,7 @@ CLI 是操作员与 Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访问 S
 - `frp instances/mappings` FRP 状态查询与 `frp mapping create/delete` 完整映射写操作；
 - `storage status` 存储后端状态只读查询；
 - `terminal shells/list/close` Terminal 生命周期管理；
-- `release upload/status/wait` 双平台发布上传、权威状态查询和 Server/Client 终态等待。
+- `release upload/status/wait/retry` 双平台发布上传、权威状态查询、Server/Client 终态等待，以及人工强制重试单台客户端补更。
 
 CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 Skill 中复制 HTTP。SDK 不读取 HOME、当前目录或 CLI 配置，只接受解析后的 `baseUrl` 和认证。
 
@@ -138,7 +138,11 @@ vcpdeck release upload \
 ```bash
 vcpdeck release status x.y.z --env=prod
 vcpdeck release wait x.y.z --env=prod --timeout=1800
+vcpdeck release retry <client> --env=prod          # 省略 --version 时用当前补更目标
+vcpdeck release retry <client> --version=x.y.z --json
 ```
+
+`release retry` 是写操作：忽略退避与次数上限，但仍拒绝永久失败（`RELEASE_RETRY_NOT_ALLOWED`），执行前必须展示目标环境与机器并取得确认。机器名解析依赖在线列表，因此离线机器只能按 clientId 重试。
 
 保留的直连兼容模式：
 
@@ -166,7 +170,7 @@ vcpdeck clients list [--env=<name>] [--json]
 
 `list` 通过 SDK 请求 `/api/clients`，输出**当前在线**Client 的安全摘要（名称、hostname、OS、在线状态、CPU/内存使用率、版本）。Server 侧该端点走 `listOnline()`，离线机器不在响应里，因此 `online` 恒为 `true`。在线状态与心跳由 Server 维护，CLI 不做本地推断，输出是查询时刻快照。
 
-默认输出人类可读表格（按名称稳定排序）并附总数/在线/离线汇总；`--json` 跳过环境摘要，stdout 为纯 JSON `ClientInfo[]`，供 Agent 和脚本解析。空列表指当前无在线 Client，输出明确提示而非报错。逐台更新结果看 Frontend 发版审计页的客户端更新明细（`release status` 只有计数）。
+默认输出人类可读表格（按名称稳定排序）并附总数/在线/离线汇总与当前补更目标；落后于补更目标的机器标为 `yes`，无可用目标时标为不可判定（`—`）而不是误报落后。`--json` 跳过环境摘要，stdout 为纯 JSON `ClientInfo[]`，供 Agent 和脚本解析。空列表指当前无在线 Client，输出明确提示而非报错。逐台更新结果与失败原因用 `release status` 的逐台明细核对，或看 Frontend 发版审计页的客户端更新明细。
 
 本命令只支持命名环境（含 `--env` 临时覆盖），不提供 Release 那样的 `--server` 直连兼容模式。GET 幂等且无副作用，失败可直接重试。Server 端 `PATCH /api/clients/:id/name` 重命名尚未暴露为 CLI 命令。
 
@@ -301,6 +305,8 @@ pnpm \
 - `env check` 使用 Bearer 调用真实本地 HTTP Server 并显示 Token 身份，且不输出 Token；
 - 命名 Bearer 环境通过真实本地 HTTP Server 上传两个平台构件；
 - `release status/wait` 覆盖 Server 重启暂时不可达、成功终态、Release failed、Client failed 和超时；
+- `release retry` 覆盖机器名解析为 clientId、省略版本时取补更目标、无目标时明确失败，以及永久失败被拒时透出稳定错误码；
+- `release status` 逐台明细覆盖机器名解析、失败类别与尝试次数展示；`clients list` 覆盖落后标记的 yes/no 与「无补更目标时不可判定」；
 - `clients list` 覆盖未知子命令/选项拒绝、别名冲突、Bearer 环境请求 `/api/clients` 且不泄露 Token、人类可读表格排序与汇总、`--json` 纯 JSON 输出和空列表提示；
 - Server 端 output spool 覆盖流式追加、未知 Job 忽略、spool 读取 null 语义和 `jobs/:id/output` 端点；
 - `jobs list/get` 覆盖用法/非法参数拒绝、名称解析为 clientId、分页表格排序、失败现场展示（错误摘要 + 输出全文）、`--json` 输出和未匹配机器报错；
@@ -312,6 +318,12 @@ pnpm \
 - `frp/storage` 覆盖实例/映射表格与过滤、凭据字段脱敏、TCP/HTTP/HTTPS create、完整 Job 等待、delete、timeout、JSON 和后端状态输出；
 - `terminal shells/list/close` 覆盖 shell 探测、会话列表 `--status` 本地过滤和关闭流程（先取详情再删除）；
 - `completions bash/powershell` 覆盖命令树与环境名嵌入、配置缺失降级、未知类型拒绝和用法输出。
+
+补更相关命令的可见性与人工兜底：
+
+- `release status <version>` 在既有汇总后追加**逐台明细**（机器名、状态、失败类别、尝试次数、失败原因），使掉队机器可被发现；机器名解析失败时回退为 clientId。
+- `clients list` 增加补更目标与是否落后的标记。目标版本由 CLI 通过既有 Release 列表接口取 Shared 的 `selectLatestCatchUpTarget` 判定，**不复制规则、不新增查询接口**；无可用目标时标记为不可判定而不是误报落后。`--json` 输出仍为纯 `ClientInfo[]`，不注入额外字段。
+- `release retry <client> [--version=<version>]` 人工强制重试补更，省略版本时使用当前补更目标；服务端拒绝永久失败时返回稳定错误码 `RELEASE_RETRY_NOT_ALLOWED`。属写操作：执行前应展示目标环境与机器并取得确认。补更重试语义见 [`release-and-update.md`](./release-and-update.md) §7.2 与 [ADR-0051](../adr/0051-release-client-catch-up-retry.md)。
 
 DSH 技能注册入口的隔离测试位于 `dsh/index.test.mjs`，由根命令 `pnpm test:dsh` 运行；它不在 `pnpm -r test` 覆盖范围内（根包不是工作区成员），需在改动该入口或包分发声明时单独执行。包结构另有 `npm pack --dry-run` 与隔离 `pnpm add` 验证；真实 DSH profile 的加载验收按 [ADR-0050](../adr/0050-dsh-skill-cli-consumption.md) 单独授权执行。
 

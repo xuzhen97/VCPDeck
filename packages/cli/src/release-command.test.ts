@@ -539,4 +539,216 @@ describe("release command", () => {
 			}),
 		).rejects.toThrow("等待发版 1.2.3 超时");
 	});
+
+	describe("release status 逐台明细", () => {
+		it("列出机器名、失败类别与尝试次数", async () => {
+			const { port } = await listen((request, response) => {
+				response.setHeader("content-type", "application/json");
+				if (request.url === "/api/clients") {
+					response.end(
+						JSON.stringify([
+							{ clientId: "c1", name: "machine-a", online: true },
+						]),
+					);
+					return;
+				}
+				if (request.url?.startsWith("/api/releases?")) {
+					response.end(
+						JSON.stringify({
+							data: [
+								{
+									...release("done", {
+										c1: { state: "failed", reason: "等待重连注册超时" },
+									}),
+									clientStates: {
+										c1: {
+											state: "failed",
+											reason: "等待重连注册超时",
+											at: "2026-08-18T00:00:00.000Z",
+											kind: "transient",
+											attempts: 2,
+										},
+									},
+								},
+							],
+							total: 1,
+							page: 1,
+							pageSize: 100,
+							totalPages: 1,
+						}),
+					);
+					return;
+				}
+				response.end(JSON.stringify({ serverVersion: "1.2.3", activeRelease: null }));
+			});
+			const state = await fixture(port);
+			const logs: string[] = [];
+
+			await runReleaseCommand("status", ["1.2.3"], {
+				paths: state.paths,
+				processEnv: state.processEnv,
+				log: (message) => logs.push(message),
+			});
+
+			const summary = logs.join("\n");
+			expect(summary).toContain("逐台明细");
+			expect(summary).toContain("machine-a");
+			expect(summary).toContain("可重试");
+			expect(summary).toContain("已试 2 次");
+			expect(summary).toContain("等待重连注册超时");
+		});
+	});
+
+	describe("release retry", () => {
+		const clientInfo = {
+			clientId: "c1",
+			name: "machine-a",
+			hostname: "machine-a",
+			os: "win32 10.0.26200",
+			clientVersion: "1.1.0",
+			online: true,
+		};
+
+		it("按机器名解析 clientId 并显式指定版本重试", async () => {
+			const requests: string[] = [];
+			const { port } = await listen((request, response) => {
+				response.setHeader("content-type", "application/json");
+				requests.push(`${request.method} ${request.url}`);
+				if (request.url === "/api/clients") {
+					response.end(JSON.stringify([clientInfo]));
+					return;
+				}
+				if (request.url === "/api/releases/1.2.3/clients/c1/retry") {
+					response.end(
+						JSON.stringify({ version: "1.2.3", clientId: "c1", state: "retrying" }),
+					);
+					return;
+				}
+				response.statusCode = 404;
+				response.end(JSON.stringify({ code: "RELEASE_NOT_FOUND" }));
+			});
+			const state = await fixture(port);
+			const logs: string[] = [];
+
+			await runReleaseCommand(
+				"retry",
+				["machine-a", "--version=1.2.3"],
+				{
+					paths: state.paths,
+					processEnv: state.processEnv,
+					log: (message) => logs.push(message),
+				},
+			);
+
+			expect(requests).toContain(
+				"POST /api/releases/1.2.3/clients/c1/retry",
+			);
+			expect(logs.join("\n")).toContain("目标版本: 1.2.3");
+		});
+
+		it("省略版本时使用当前补更目标", async () => {
+			const requests: string[] = [];
+			const { port } = await listen((request, response) => {
+				response.setHeader("content-type", "application/json");
+				requests.push(`${request.method} ${request.url}`);
+				if (request.url === "/api/clients") {
+					response.end(JSON.stringify([clientInfo]));
+					return;
+				}
+				if (request.url?.startsWith("/api/releases?")) {
+					response.end(
+						JSON.stringify({
+							data: [
+								{
+									...release("done"),
+									archives: {
+										"win-x64": { sha256: "a", size: 1, fileName: "w.zip" },
+										"linux-x64": { sha256: "b", size: 2, fileName: "l.zip" },
+									},
+								},
+							],
+							total: 1,
+							page: 1,
+							pageSize: 100,
+							totalPages: 1,
+						}),
+					);
+					return;
+				}
+				if (request.url === "/api/releases/1.2.3/clients/c1/retry") {
+					response.end(
+						JSON.stringify({ version: "1.2.3", clientId: "c1", state: "retrying" }),
+					);
+					return;
+				}
+				response.statusCode = 404;
+				response.end("{}");
+			});
+			const state = await fixture(port);
+
+			await runReleaseCommand("retry", ["machine-a"], {
+				paths: state.paths,
+				processEnv: state.processEnv,
+				log: () => undefined,
+			});
+
+			expect(requests).toContain(
+				"POST /api/releases/1.2.3/clients/c1/retry",
+			);
+		});
+
+		it("没有补更目标且未指定版本时明确失败", async () => {
+			const { port } = await listen((request, response) => {
+				response.setHeader("content-type", "application/json");
+				if (request.url === "/api/clients") {
+					response.end(JSON.stringify([clientInfo]));
+					return;
+				}
+				response.end(
+					JSON.stringify({
+						data: [],
+						total: 0,
+						page: 1,
+						pageSize: 100,
+						totalPages: 0,
+					}),
+				);
+			});
+			const state = await fixture(port);
+
+			await expect(
+				runReleaseCommand("retry", ["machine-a"], {
+					paths: state.paths,
+					processEnv: state.processEnv,
+					log: () => undefined,
+				}),
+			).rejects.toThrow("没有可用的补更目标");
+		});
+
+		it("服务端拒绝永久失败时透出稳定错误码", async () => {
+			const { port } = await listen((request, response) => {
+				response.setHeader("content-type", "application/json");
+				if (request.url === "/api/clients") {
+					response.end(JSON.stringify([clientInfo]));
+					return;
+				}
+				response.statusCode = 409;
+				response.end(
+					JSON.stringify({
+						code: "RELEASE_RETRY_NOT_ALLOWED",
+						message: "客户端 c1 属于永久失败，重试不会成功",
+					}),
+				);
+			});
+			const state = await fixture(port);
+
+			await expect(
+				runReleaseCommand("retry", ["machine-a", "--version=1.2.3"], {
+					paths: state.paths,
+					processEnv: state.processEnv,
+					log: () => undefined,
+				}),
+			).rejects.toThrow(/RELEASE_RETRY_NOT_ALLOWED|永久失败/);
+		});
+	});
 });

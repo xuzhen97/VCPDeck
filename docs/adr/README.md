@@ -111,3 +111,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0048](./0048-client-slimming-and-pi-feature-surface-on-server.md) | Superseded by ADR-0049 | **Client 瘦身**：Pi 功能面的权威在 Server；Client 退为通用能力底座（不内嵌 Pi SDK、不交付 Bundle）；目标机 Pi/DSH 由环境自带，Client 只按 Server 下发的明确命令启动/接入/停止；交互进程与 DSH 反代仍驻目标机；Server 通用能力对外开放给外置 Agent（沿用 CLI/插件面）；先可用、再切换、最后删除 Client 侧实现 |
 | [0049](./0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md) | Accepted（2026-10-12，尚未实施） | 退出 Pi／DSH 专用集成与新增 session-host；同步精简页面，保留基础能力与通用 CLI／SDK；不迁移或重建 Agent 体系，不默认销毁历史数据或卸载外部程序 |
 | [0050](./0050-dsh-skill-cli-consumption.md) | Accepted（2026-10-13，尚未实施） | DSH 通过同仓库、同 Tag 的轻量 bundle 注册共用 Skill，复用预构建 CLI 消费基础能力；不恢复 Agent 托管体系 |
+| [0051](./0051-release-client-catch-up-retry.md) | Accepted（2026-10-14，尚未实施） | 客户端补更失败分级（瞬时／永久），Server 为唯一重试所有者并按递增退避有限重试；新增周期对账作为第二驱动力，与注册钩子共用互斥入口；人工重试兜底并补齐 CLI 可见性 |

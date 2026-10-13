@@ -9,10 +9,12 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
 	ReleaseClientState,
+	ReleaseRetryErrorCode,
 	ReleaseStatus,
 	VERSION,
 	platformFromOs,
 	isReleaseArchiveAvailable,
+	type ReleaseClientEntry,
 	type ReleaseInfo,
 	type ServerShutdownNotice,
 	type UpdateRequest,
@@ -20,6 +22,44 @@ import {
 import { ReleaseError, ReleaseService } from "./release.service.js";
 import { GatewayUpdateChannel } from "./update-channel.js";
 import { LauncherHttpClient } from "./launcher-client.js";
+
+/** 瞬时失败允许的自动重试次数上限；耗尽后转为需人工处理。 */
+export const CLIENT_RETRY_ATTEMPTS_LIMIT = 3;
+
+/** 递增退避：第 N 次失败后需等待的时长（毫秒）。超出长度时沿用最后一段。 */
+const CLIENT_RETRY_BACKOFF_MS = [15 * 60_000, 60 * 60_000, 6 * 60 * 60_000];
+
+/**
+ * 判断某个客户端在当前目标版本下是否还可自动重试。
+ *
+ * 这是补更重试的唯一判据，`triggerCatchUp` 与客户端更新循环必须共用它，
+ * 避免出现第二套规则。每次重试都会产生一次完整构件下载，因此次数上限
+ * 同时是带宽与磁盘开销的约束。
+ *
+ * @param entry 该客户端在当前版本中的更新条目；`undefined` 表示从未失败过
+ * @param now 当前时间，便于测试注入
+ * @param attemptsLimit 尝试次数上限
+ * @returns 是否允许再次触发补更
+ */
+export function canRetryClientUpdate(
+	entry: ReleaseClientEntry | undefined,
+	now: Date,
+	attemptsLimit: number = CLIENT_RETRY_ATTEMPTS_LIMIT,
+): boolean {
+	if (!entry) return true;
+	// 永久失败（平台不受支持或构件缺失）重试只会重复失败。
+	if (entry.kind === "permanent") return false;
+	const attempts = entry.attempts ?? 0;
+	if (attempts >= attemptsLimit) return false;
+	const backoff =
+		CLIENT_RETRY_BACKOFF_MS[
+			Math.min(attempts, CLIENT_RETRY_BACKOFF_MS.length - 1)
+		] ?? 0;
+	const at = Date.parse(entry.at);
+	// 时间不可解析时不阻塞重试：宁可多试一次，也不要让客户端永久掉队。
+	if (!Number.isFinite(at)) return true;
+	return now.getTime() - at >= backoff;
+}
 import { ServerDrain } from "../job/server-drain.js";
 import { ReleaseCleanupService } from "./release-cleanup.service.js";
 
@@ -201,6 +241,54 @@ export class ReleaseOrchestrator {
 		console.log(`[release] 客户端 ${clientId} 已就绪，等待 launcher 接管 ${version}`);
 	}
 
+	/**
+	 * 人工强制重试：自动重试耗尽或退避未到期时的唯一兜底。
+	 *
+	 * 忽略退避与次数上限，但仍拒绝永久失败（重试只会重复失败）；仍会记录尝试次数。
+	 * 复用同一条客户端阶段链路与互斥入口，不新开更新循环。
+	 */
+	async retryClient(
+		version: string,
+		clientId: string,
+	): Promise<{ version: string; clientId: string }> {
+		const release = await this.releases.findByVersion(version);
+		if (!release) {
+			throw new ReleaseError(
+				ReleaseRetryErrorCode.NOT_FOUND,
+				`release ${version} 不存在`,
+			);
+		}
+		const entry = release.clientStates[clientId];
+		if (entry?.kind === "permanent") {
+			throw new ReleaseError(
+				ReleaseRetryErrorCode.RETRY_NOT_ALLOWED,
+				`客户端 ${clientId} 属于永久失败（${entry.reason ?? "构件或平台不受支持"}），重试不会成功`,
+			);
+		}
+		const online = await this.channel.listOnlineClients();
+		if (!online.some((client) => client.clientId === clientId) && !entry) {
+			throw new ReleaseError(
+				ReleaseRetryErrorCode.CLIENT_NOT_FOUND,
+				`release ${version} 中不存在客户端 ${clientId}，且该机器当前不在线`,
+			);
+		}
+		await this.runClientPhase(version, clientId);
+		return { version, clientId };
+	}
+
+	/**
+	 * 周期对账：对当前补更目标重跑一次客户端阶段。
+	 *
+	 * 这是「客户端重连注册」之外的第二驱动力，用于救回失败后持续在线、不再重连的
+	 * 客户端。过滤（`canRetryClientUpdate`）与互斥（`runClientPhase`）都在本类内，
+	 * 因此与注册钩子共用同一条更新链路，不会并发开启第二条循环。
+	 */
+	async sweepCatchUp(): Promise<void> {
+		const target = await this.releases.getLatestActiveTarget();
+		if (!target) return;
+		await this.runClientPhase(target.version);
+	}
+
 	/** 离线补更：落后客户端注册后触发客户端阶段 */
 	private async triggerCatchUp(
 		clientId: string,
@@ -208,7 +296,7 @@ export class ReleaseOrchestrator {
 	): Promise<void> {
 		const target = (await this.releases.getLatestActiveTarget()) ?? null;
 		if (!target || clientVersion === target.version) return;
-		if (target.clientStates[clientId]?.state === ReleaseClientState.FAILED)
+		if (!canRetryClientUpdate(target.clientStates[clientId], new Date()))
 			return;
 		if (this.activePhase) {
 			this.queuedCatchUpClients.add(clientId);
@@ -218,19 +306,27 @@ export class ReleaseOrchestrator {
 	}
 
 	/** 客户端阶段互斥入口（重入时复用进行中的循环） */
-	private runClientPhase(version: string): Promise<void> {
+	private runClientPhase(
+		version: string,
+		forcedClientId?: string,
+	): Promise<void> {
 		if (!this.activePhase) {
-			this.activePhase = this.runClientPhaseLoop(version);
+			this.activePhase = this.runClientPhaseLoop(version, forcedClientId);
 		}
 		return this.activePhase;
 	}
 
 	/** 阶段收尾后在同一个 Promise 中消费登记的补更 Client。 */
-	private async runClientPhaseLoop(version: string): Promise<void> {
+	private async runClientPhaseLoop(
+		version: string,
+		forcedClientId?: string,
+	): Promise<void> {
 		try {
 			let currentVersion = version;
 			while (true) {
-				await this.runClientLoop(currentVersion);
+				await this.runClientLoop(currentVersion, forcedClientId);
+				// 强制重试只作用于本轮，避免后续循环继续绕过退避
+				forcedClientId = undefined;
 				const queued = [...this.queuedCatchUpClients];
 				this.queuedCatchUpClients.clear();
 				if (queued.length === 0) return;
@@ -256,19 +352,26 @@ export class ReleaseOrchestrator {
 	}
 
 	/** 全量依次更新：逐个等待「重连注册新版本 / 超时 / 失败」；按客户端 os 选择平台包 */
-	private async runClientLoop(version: string): Promise<void> {
+	private async runClientLoop(
+		version: string,
+		forcedClientId?: string,
+	): Promise<void> {
 		const processedClientIds = new Set<string>();
 		while (true) {
 			const release = await this.releases.findByVersion(version);
 			if (!release) return;
 			const online = await this.channel.listOnlineClients();
-			const outdated = online.filter(
-				(client) =>
-					client.clientVersion !== version &&
-					!processedClientIds.has(client.clientId) &&
-					release.clientStates[client.clientId]?.state !==
-						ReleaseClientState.FAILED,
-			);
+			const now = new Date();
+			const outdated = online.filter((client) => {
+				if (client.clientVersion === version) return false;
+				if (processedClientIds.has(client.clientId)) return false;
+				const entry = release.clientStates[client.clientId];
+				// 人工强制重试绕过退避与次数上限，但永久失败仍拒绝重试。
+				if (client.clientId === forcedClientId) {
+					return entry?.kind !== "permanent";
+				}
+				return canRetryClientUpdate(entry, now);
+			});
 			if (outdated.length === 0) {
 				if (this.queuedCatchUpClients.size > 0) {
 					this.queuedCatchUpClients.clear();
@@ -304,6 +407,7 @@ export class ReleaseOrchestrator {
 				client.clientId,
 				ReleaseClientState.FAILED,
 				`平台不受支持或构件缺失: ${client.os || "unknown"}`,
+				{ kind: "permanent" },
 			);
 			return;
 		}
@@ -334,13 +438,23 @@ export class ReleaseOrchestrator {
 			);
 		}
 		const outcome = await outcomePromise;
+		if (outcome.outcome === "done") {
+			await this.releases.markClientState(
+				version,
+				client.clientId,
+				ReleaseClientState.DONE,
+				outcome.reason,
+			);
+			return;
+		}
+		// 等待重连注册超时、注册版本不符与客户端上报失败都可能是暂时性的，
+		// 统一按瞬时失败处理，交由退避与次数上限收敛。
 		await this.releases.markClientState(
 			version,
 			client.clientId,
-			outcome.outcome === "done"
-				? ReleaseClientState.DONE
-				: ReleaseClientState.FAILED,
+			ReleaseClientState.FAILED,
 			outcome.reason,
+			{ kind: "transient" },
 		);
 	}
 

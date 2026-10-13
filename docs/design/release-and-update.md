@@ -271,6 +271,19 @@ Client Launcher 的健康判定是新 Client 进程连续存活约 3 秒，不�
 
 仍需注意的非对称性：Launcher 对 **client 构件**的健康判定仍是“进程连续存活约 3 秒”，它不感知业务连通性（对 **server 构件**才是 HTTP `/api/status` + 版本比对）；因此“进程活着但连不上”的兜底依赖客户端自觉退出，Launcher 独立探活尚未实现。
 
+### 7.2 补更重试与周期对账
+
+原先的补更语义有两个缺陷：一台客户端一旦被标记 `failed` 就被两处判断（`triggerCatchUp` 与客户端更新循环的 `outdated` 过滤）永久排除；且补更**只由「客户端重连注册」触发**，因此一台失败后持续在线、不再重连的客户端永远不会被重试（重启 Server 也无效，启动恢复只处理进行中的 Release）。该组合会造成机器永久掉队且无任何提示。
+
+当前契约（详见 [ADR-0051](../adr/0051-release-client-catch-up-retry.md)）：
+
+- **失败分级**：`ReleaseClientEntry` 增加可选 `kind`（`transient` / `permanent`）与 `attempts`。类别由写入失败的代码路径指定，**不解析 `reason` 文案**：平台不受支持或构件缺失为 `permanent`；等待重连注册超时、注册版本不符与客户端上报失败为 `transient`。
+- **单一判据**：`canRetryClientUpdate` 是唯一重试判据，两处触发点共用。`permanent` 一律不重试；`transient` 按递增退避（15 分钟 → 1 小时 → 6 小时）重试，**最多 3 次**；耗尽后停止自动重试并转为需人工处理，不自动升级为错误终局。每次重试都是一次完整构件下载，次数上限同时约束带宽与磁盘开销。
+- **尝试次数语义**：失败递增；重试进行中（`updating`）保留，**不得重置**（否则上限永远无法达到）；成功（`done`）清除类别与次数。
+- **第二驱动力**：`ReleaseCatchUpService` 周期性（默认 5 分钟）对当前补更目标重跑客户端阶段，与注册钩子共用 `runClientPhase` 互斥入口，**不并发开启第二条更新循环**。对账自身异常只记日志，不影响 Server 主流程。
+- **人工兜底**：`POST /api/releases/:version/clients/:clientId/retry`（CLI：`release retry <client>`）忽略退避与次数上限，但仍拒绝 `permanent`，并仍记录尝试次数。
+- **存量兼容**：缺 `kind` 视为 `transient`、缺 `attempts` 视为 0，因此历史失败记录会在退避满足后重新可重试；已通过校验的当前版本客户端因版本已达标而提前返回，不会产生构件下载。字段为可选，无需数据库迁移。
+
 ## 8. Launcher 模型
 
 ### 8.1 目录和 current

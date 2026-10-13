@@ -8,11 +8,12 @@ import { createReadStream } from "node:fs";
 import {
 	ReleaseStatus,
 	type PaginatedResult,
+	ReleaseClientState,
 	type ReleaseClientEntry,
-	type ReleaseClientState,
+	type ReleaseFailureKind,
 	type ReleaseInfo,
 	type ReleasePlatform,
-	isReleaseArchiveAvailable,
+	isCatchUpTarget,
 	type ReleaseArchiveAvailableInfo,
 	type ReleaseArchiveDeletingInfo,
 	type ReleaseArchiveInfo,
@@ -89,6 +90,14 @@ function normalizeEntry(
 					? { reason: entry.reason }
 					: {}),
 				at: typeof entry.at === "string" ? entry.at : fallbackAt,
+				...(entry.kind === "transient" || entry.kind === "permanent"
+					? { kind: entry.kind }
+					: {}),
+				...(typeof entry.attempts === "number" &&
+				Number.isFinite(entry.attempts) &&
+				entry.attempts > 0
+					? { attempts: entry.attempts }
+					: {}),
 			};
 		}
 	}
@@ -330,14 +339,6 @@ export class ReleaseService {
 		return toReleaseInfo(updated);
 	}
 
-	/** release 是否已包含全部支持平台的构件（补齐后才允许触发更新） */
-	hasAllArchives(release: ReleaseInfo): boolean {
-		return (
-			isReleaseArchiveAvailable(release.archives["win-x64"]) &&
-			isReleaseArchiveAvailable(release.archives["linux-x64"])
-		);
-	}
-
 	/** 分页列表（遵循 AGENTS.md 分页规范） */
 	async list(page = 1, pageSize = 20): Promise<PaginatedResult<ReleaseInfo>> {
 		const [rows, total] = await Promise.all([
@@ -510,12 +511,16 @@ export class ReleaseService {
 	/**
 	 * 记录单个客户端在 release 中的更新状态（含失败原因与时间戳，审计用）。
 	 * 返回合并后的完整状态表。
+	 *
+	 * 尝试次数语义：`failed` 递增一次；`updating` 保留既有次数（重试进行中不得重置，
+	 * 否则次数上限永远无法达到）；`done` 清除类别与次数，成功即复位。
 	 */
 	async markClientState(
 		version: string,
 		clientId: string,
 		state: ReleaseClientState,
 		reason?: string,
+		meta: { kind?: ReleaseFailureKind } = {},
 	): Promise<Record<string, ReleaseClientEntry>> {
 		const row = await this.prisma.release.findUnique({ where: { version } });
 		if (!row) {
@@ -532,11 +537,28 @@ export class ReleaseService {
 		} catch {
 			states = {};
 		}
-		states[clientId] = {
-			state,
-			...(reason ? { reason } : {}),
-			at: new Date().toISOString(),
-		};
+		const previous = states[clientId];
+		const at = new Date().toISOString();
+		if (state === ReleaseClientState.DONE) {
+			states[clientId] = { state, ...(reason ? { reason } : {}), at };
+		} else if (state === ReleaseClientState.FAILED) {
+			const kind = meta.kind ?? previous?.kind;
+			states[clientId] = {
+				state,
+				...(reason ? { reason } : {}),
+				at,
+				...(kind ? { kind } : {}),
+				attempts: (previous?.attempts ?? 0) + 1,
+			};
+		} else {
+			states[clientId] = {
+				state,
+				...(reason ? { reason } : {}),
+				at,
+				...(previous?.kind ? { kind: previous.kind } : {}),
+				...(previous?.attempts ? { attempts: previous.attempts } : {}),
+			};
+		}
 		await this.prisma.release.update({
 			where: { version },
 			data: { clientStates: JSON.stringify(states) },
@@ -559,7 +581,7 @@ export class ReleaseService {
 		});
 		for (const row of rows) {
 			const release = toReleaseInfo(row);
-			if (this.hasAllArchives(release)) return release;
+			if (isCatchUpTarget(release)) return release;
 		}
 		return null;
 	}

@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
 	ReleaseUploadErrorCode,
+	hasAllReleaseArchives,
 	parseReleaseUploadComplete,
 	parseReleaseUploadCreateInput,
 	parseReleaseUploadPartRefresh,
@@ -398,7 +399,7 @@ export class ReleaseUploadService {
 			where: { id: sessionId },
 			data: { status: "completed" },
 		});
-		if (this.releases.hasAllArchives(release)) {
+		if (hasAllReleaseArchives(release)) {
 			void this.orchestrator.startRelease(release.version).catch(
 				(error: unknown) => {
 					console.error("[release] 触发更新失败", release.version, error);

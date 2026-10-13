@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import type { IncomingMessage } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HttpException } from "@nestjs/common";
 import { ReleaseController, releaseZipPath } from "./release.controller.js";
 import { ReleaseError } from "./release.service.js";
 
@@ -12,7 +13,6 @@ function mockService() {
 	return {
 		create: vi.fn(),
 		addArchive: vi.fn(),
-		hasAllArchives: vi.fn(),
 		list: vi.fn(),
 		findByVersion,
 		findByVersionWithStorage: findByVersion,
@@ -29,7 +29,7 @@ function mockRes() {
 }
 
 function mockOrchestrator() {
-	return { startRelease: vi.fn() };
+	return { startRelease: vi.fn(), retryClient: vi.fn() };
 }
 
 function mockStorage() {
@@ -87,6 +87,61 @@ describe("ReleaseController", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
+	describe("retryClient", () => {
+		it("委派编排器并返回重试中的结果", async () => {
+			orchestrator.retryClient.mockResolvedValue({
+				version: "1.2.1",
+				clientId: "c1",
+			});
+
+			const result = await controller.retryClient("1.2.1", "c1");
+
+			expect(orchestrator.retryClient).toHaveBeenCalledWith("1.2.1", "c1");
+			expect(result).toEqual({
+				version: "1.2.1",
+				clientId: "c1",
+				state: "retrying",
+			});
+		});
+
+		it("永久失败返回 409 与稳定错误码", async () => {
+			orchestrator.retryClient.mockRejectedValue(
+				new ReleaseError(
+					"RELEASE_RETRY_NOT_ALLOWED",
+					"客户端 c1 属于永久失败，重试不会成功",
+				),
+			);
+
+			const err = await controller
+				.retryClient("1.2.1", "c1")
+				.catch((e: unknown) => e) as HttpException;
+
+			expect(err).toBeInstanceOf(HttpException);
+			expect(err.getStatus()).toBe(409);
+			expect(err.getResponse()).toMatchObject({
+				code: "RELEASE_RETRY_NOT_ALLOWED",
+			});
+		});
+
+		it("未知版本与未知机器分别返回 404", async () => {
+			orchestrator.retryClient.mockRejectedValue(
+				new ReleaseError("RELEASE_NOT_FOUND", "release 9.9.9 不存在"),
+			);
+			const notFound = await controller
+				.retryClient("9.9.9", "c1")
+				.catch((e: unknown) => e) as HttpException;
+			expect(notFound.getStatus()).toBe(404);
+
+			orchestrator.retryClient.mockRejectedValue(
+				new ReleaseError("RELEASE_CLIENT_NOT_FOUND", "不存在客户端 c9"),
+			);
+			const noClient = await controller
+				.retryClient("1.2.1", "c9")
+				.catch((e: unknown) => e) as HttpException;
+			expect(noClient.getStatus()).toBe(404);
+		});
+	});
+
 	describe("upload", () => {
 		const zipBytes = Buffer.from("zip-bytes");
 		const fakeReq = (): IncomingMessage =>
@@ -95,7 +150,6 @@ describe("ReleaseController", () => {
 		it("校验通过后落盘并创建 release（无 actor 时操作者为空）", async () => {
 			service.verifyZipSha256.mockResolvedValue(true);
 			service.findByVersion.mockResolvedValue(null);
-			service.hasAllArchives.mockReturnValue(false);
 			service.create.mockResolvedValue({ version: "1.2.1" });
 
 			const result = await controller.upload(
@@ -142,8 +196,21 @@ describe("ReleaseController", () => {
 					},
 				},
 			});
-			service.addArchive.mockResolvedValue({ version: "1.2.1" });
-			service.hasAllArchives.mockReturnValue(true);
+			service.addArchive.mockResolvedValue({
+				version: "1.2.1",
+				archives: {
+					"win-x64": {
+						sha256: "a".repeat(64),
+						size: 1,
+						fileName: "vcpdeck-1.2.1-win-x64.zip",
+					},
+					"linux-x64": {
+						sha256: "b".repeat(64),
+						size: 2,
+						fileName: "vcpdeck-1.2.1-linux-x64.zip",
+					},
+				},
+			});
 
 			const result = await controller.upload(
 				fakeReq(),
@@ -157,7 +224,7 @@ describe("ReleaseController", () => {
 				fileName: "vcpdeck-1.2.1-linux-x64.zip",
 				size: zipBytes.length,
 			});
-			expect(result.release).toEqual({ version: "1.2.1" });
+			expect(result.release).toMatchObject({ version: "1.2.1" });
 			expect(orchestrator.startRelease).toHaveBeenCalledWith("1.2.1");
 		});
 
@@ -213,7 +280,6 @@ describe("ReleaseController", () => {
 		it("actor 注入时记录操作者", async () => {
 			service.verifyZipSha256.mockResolvedValue(true);
 			service.findByVersion.mockResolvedValue(null);
-			service.hasAllArchives.mockReturnValue(false);
 			service.create.mockResolvedValue({ version: "1.2.1" });
 			const actor = {
 				identityId: "i1",

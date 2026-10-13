@@ -82,7 +82,6 @@ function fixture(options: { backend?: "local" | "alibaba"; row?: any } = {}) {
 			async (_version: string, platform: string, archive: any) =>
 				release({ [platform]: archive }) as any,
 		),
-		hasAllArchives: vi.fn(() => false),
 	};
 	const orchestrator = { startRelease: vi.fn(async () => undefined) };
 	const service = new ReleaseUploadService(
@@ -234,7 +233,13 @@ describe("ReleaseUploadService", () => {
 
 	it("两个平台齐备时触发编排", async () => {
 		const { service, releases, orchestrator } = fixture({ row: pendingRow() });
-		releases.hasAllArchives.mockReturnValue(true);
+		// 判定已移到共享纯函数，因此由数据本身（双平台构件）驱动，而不是 mock 服务方法
+		releases.create.mockResolvedValue(
+			release({
+				"win-x64": { sha256: SHA, size: 100, fileName: "win.zip" },
+				"linux-x64": { sha256: SHA, size: 200, fileName: "linux.zip" },
+			}),
+		);
 		await service.completeSession("session-1", 100);
 		await vi.waitFor(() =>
 			expect(orchestrator.startRelease).toHaveBeenCalledWith("0.2.1"),

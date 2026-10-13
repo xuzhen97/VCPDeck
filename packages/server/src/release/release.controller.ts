@@ -33,7 +33,11 @@ import { DirectUrlCache } from "./direct-url-cache.js";
 import { StorageService } from "../storage/storage.service.js";
 import { Public } from "../auth/public.decorator.js";
 import { Actor } from "../auth/actor.decorator.js";
-import type { ActorContext, ReleasePlatform } from "@vcpdeck/shared";
+import {
+	hasAllReleaseArchives,
+	type ActorContext,
+	type ReleasePlatform,
+} from "@vcpdeck/shared";
 
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
@@ -88,6 +92,8 @@ const RELEASE_ERROR_STATUS: Record<string, number> = {
 	RELEASE_INVALID_TRANSITION: 409,
 	RELEASE_SHA256_MISMATCH: 400,
 	RELEASE_DIRECT_UPLOAD_REQUIRED: 409,
+	RELEASE_CLIENT_NOT_FOUND: 404,
+	RELEASE_RETRY_NOT_ALLOWED: 409,
 };
 
 function toHttp(e: ReleaseError): HttpException {
@@ -135,6 +141,24 @@ export class ReleaseController {
 			page ? Math.max(1, parseInt(page, 10)) : undefined,
 			pageSize ? Math.min(100, Math.max(1, parseInt(pageSize, 10))) : undefined,
 		);
+	}
+
+	/**
+	 * 人工强制重试某个客户端的补更。
+	 * 自动重试耗尽或退避未到期时的唯一兜底；永久失败仍被拒绝。
+	 */
+	@Post(":version/clients/:clientId/retry")
+	async retryClient(
+		@Param("version") version: string,
+		@Param("clientId") clientId: string,
+	) {
+		try {
+			const result = await this.orchestrator.retryClient(version, clientId);
+			return { ...result, state: "retrying" };
+		} catch (e) {
+			if (e instanceof ReleaseError) throw toHttp(e);
+			throw e;
+		}
 	}
 
 	/** 更新包下载：客户端 launcher 使用，公开（完整性由 sha256 校验兑底）；按平台选包 */
@@ -289,7 +313,7 @@ export class ReleaseController {
 						createdVia: actor?.source,
 					});
 			// 两个平台构件齐备才触发自更新（不阻塞上传响应；失败由编排器落库标记）
-			if (this.service.hasAllArchives(release)) {
+			if (hasAllReleaseArchives(release)) {
 				void this.orchestrator
 					.startRelease(version)
 					.catch((e: unknown) => {

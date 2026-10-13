@@ -93,11 +93,14 @@ var require_update = __commonJS({
   "../shared/dist/update.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = void 0;
+    exports2.ReleaseRetryErrorCode = exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = void 0;
     exports2.parseReleaseUploadCreateInput = parseReleaseUploadCreateInput;
     exports2.parseReleaseUploadPartRefresh = parseReleaseUploadPartRefresh;
     exports2.parseReleaseUploadComplete = parseReleaseUploadComplete;
     exports2.isReleaseArchiveAvailable = isReleaseArchiveAvailable;
+    exports2.hasAllReleaseArchives = hasAllReleaseArchives;
+    exports2.isCatchUpTarget = isCatchUpTarget;
+    exports2.selectLatestCatchUpTarget = selectLatestCatchUpTarget3;
     exports2.platformFromOs = platformFromOs;
     var ReleaseStatus2;
     (function(ReleaseStatus3) {
@@ -121,6 +124,11 @@ var require_update = __commonJS({
       SESSION_CONFLICT: "RELEASE_UPLOAD_SESSION_CONFLICT",
       SIZE_MISMATCH: "RELEASE_UPLOAD_SIZE_MISMATCH",
       PROVIDER_FAILED: "RELEASE_UPLOAD_PROVIDER_FAILED"
+    };
+    exports2.ReleaseRetryErrorCode = {
+      NOT_FOUND: "RELEASE_NOT_FOUND",
+      CLIENT_NOT_FOUND: "RELEASE_CLIENT_NOT_FOUND",
+      RETRY_NOT_ALLOWED: "RELEASE_RETRY_NOT_ALLOWED"
     };
     function parseReleaseUploadCreateInput(value2) {
       if (!isRecord2(value2) || !hasOnlyKeys(value2, ["version", "platform", "sha256", "size"])) {
@@ -170,6 +178,30 @@ var require_update = __commonJS({
     }
     function isReleaseArchiveAvailable(archive) {
       return Boolean(archive && (archive.availability === void 0 || archive.availability === "available"));
+    }
+    function hasAllReleaseArchives(release) {
+      const archives = release.archives ?? {};
+      return isReleaseArchiveAvailable(archives["win-x64"]) && isReleaseArchiveAvailable(archives["linux-x64"]);
+    }
+    function isCatchUpTarget(release) {
+      if (release.status !== ReleaseStatus2.UPDATING_CLIENTS && release.status !== ReleaseStatus2.DONE) {
+        return false;
+      }
+      return hasAllReleaseArchives(release);
+    }
+    function selectLatestCatchUpTarget3(releases) {
+      let latest = null;
+      let latestAt = Number.NEGATIVE_INFINITY;
+      for (const release of releases) {
+        if (!isCatchUpTarget(release))
+          continue;
+        const at = Date.parse(release.createdAt);
+        if (!Number.isFinite(at) || at <= latestAt)
+          continue;
+        latest = release;
+        latestAt = at;
+      }
+      return latest;
     }
     function platformFromOs(os) {
       if (!os)
@@ -2410,6 +2442,8 @@ function createReleasesApi(client) {
       const qs = params.toString();
       return client.request("GET", `/api/releases${qs ? `?${qs}` : ""}`, void 0, signal);
     },
+    /** 人工强制重试某个客户端的补更；永久失败会被服务端拒绝。 */
+    retryClient: (version, clientId, signal) => client.request("POST", `/api/releases/${encodeURIComponent(version)}/clients/${encodeURIComponent(clientId)}/retry`, void 0, signal),
     createUploadSession: (input, signal) => client.request("POST", "/api/releases/uploads", input, signal),
     refreshUploadParts: (sessionId, partNumbers, signal) => client.request("POST", `/api/releases/uploads/${encodeURIComponent(sessionId)}/parts`, { partNumbers }, signal),
     completeUploadSession: (sessionId, uploadedBytes, signal) => client.request("POST", `/api/releases/uploads/${encodeURIComponent(sessionId)}/complete`, { uploadedBytes }, signal),
@@ -12119,23 +12153,23 @@ async function runAttach(argv, context) {
     process.exitCode = 1;
     log(`[vcpdeck] \u8FDE\u63A5\u5931\u8D25: ${err.message}`);
   });
-  socket.on(import_shared5.Events.TERMINAL_OUTPUT, (payload) => {
+  socket.on(import_shared6.Events.TERMINAL_OUTPUT, (payload) => {
     const chunk = payload;
     if (!chunk || typeof chunk.data !== "string")
       return;
     stdout.write(chunk.data);
-    socket.emit(import_shared5.Events.TERMINAL_ACK_OUTPUT, {
+    socket.emit(import_shared6.Events.TERMINAL_ACK_OUTPUT, {
       sessionId,
       attachmentId,
       seq: chunk.seq
     });
   });
-  socket.on(import_shared5.Events.TERMINAL_SNAPSHOT, (payload) => {
+  socket.on(import_shared6.Events.TERMINAL_SNAPSHOT, (payload) => {
     const snapshot = payload;
     if (typeof snapshot?.data === "string")
       stdout.write(snapshot.data);
   });
-  socket.on(import_shared5.Events.TERMINAL_EXIT, () => {
+  socket.on(import_shared6.Events.TERMINAL_EXIT, () => {
     log("\n[vcpdeck] \u4F1A\u8BDD\u5DF2\u7ED3\u675F");
     void removeReconnectToken(storePath, sessionId);
     cleanup();
@@ -12144,7 +12178,7 @@ async function runAttach(argv, context) {
     if (!closed)
       log("\n[vcpdeck] \u8FDE\u63A5\u5DF2\u65AD\u5F00");
   });
-  socket.emit(import_shared5.Events.TERMINAL_ATTACH, reconnectToken ? { sessionId, reconnectToken } : { sessionId }, async (response) => {
+  socket.emit(import_shared6.Events.TERMINAL_ATTACH, reconnectToken ? { sessionId, reconnectToken } : { sessionId }, async (response) => {
     const ack = response;
     if (!ack?.ok) {
       cleanup();
@@ -12161,7 +12195,7 @@ async function runAttach(argv, context) {
     const sendResize = () => {
       if (closed || !attachmentId)
         return;
-      socket.emit(import_shared5.Events.TERMINAL_RESIZE, {
+      socket.emit(import_shared6.Events.TERMINAL_RESIZE, {
         sessionId,
         attachmentId,
         cols: stdout.columns ?? 80,
@@ -12174,12 +12208,12 @@ async function runAttach(argv, context) {
       if (closed)
         return;
       if (buf.includes(17)) {
-        socket.emit(import_shared5.Events.TERMINAL_DETACH, { sessionId, attachmentId });
+        socket.emit(import_shared6.Events.TERMINAL_DETACH, { sessionId, attachmentId });
         cleanup();
         log("\n[vcpdeck] \u5DF2\u9000\u51FA attach");
         return;
       }
-      socket.emit(import_shared5.Events.TERMINAL_INPUT, {
+      socket.emit(import_shared6.Events.TERMINAL_INPUT, {
         sessionId,
         attachmentId,
         data: buf.toString("latin1")
@@ -12218,12 +12252,12 @@ async function removeReconnectToken(storePath, sessionId) {
   } catch {
   }
 }
-var import_shared5, import_promises5, import_node_os2, import_node_path2;
+var import_shared6, import_promises5, import_node_os2, import_node_path2;
 var init_terminal_command = __esm({
   "dist/terminal-command.js"() {
     "use strict";
     init_esm_debug3();
-    import_shared5 = __toESM(require_dist(), 1);
+    import_shared6 = __toESM(require_dist(), 1);
     import_promises5 = require("node:fs/promises");
     import_node_os2 = require("node:os");
     import_node_path2 = require("node:path");
@@ -12365,7 +12399,7 @@ var init_completions_command = __esm({
       terminal: ["shells", "list", "close", "attach"],
       frp: ["instances", "mappings", "mapping"],
       storage: ["status"],
-      release: ["status", "wait", "upload"],
+      release: ["status", "wait", "upload", "retry"],
       completions: ["bash", "powershell"]
     };
     TOP_LEVEL = [...Object.keys(COMMAND_TREE), "help"];
@@ -12380,7 +12414,7 @@ __export(index_exports, {
   run: () => run
 });
 module.exports = __toCommonJS(index_exports);
-var import_shared6 = __toESM(require_dist(), 1);
+var import_shared7 = __toESM(require_dist(), 1);
 
 // dist/env-command.js
 init_authenticated_client();
@@ -13775,6 +13809,7 @@ function parseTimeout(raw) {
 }
 
 // dist/clients-command.js
+var import_shared4 = __toESM(require_dist(), 1);
 init_authenticated_client();
 init_arguments();
 init_environment();
@@ -13819,9 +13854,9 @@ async function runListClients(argv, context) {
   log(formatEnvironmentSummary(environment));
   const client = await createAuthenticatedClient(environment);
   const clients = await client.clients.list();
-  log(formatClientsSummary(clients));
+  log(formatClientsSummary(clients, await readCatchUpTargetVersion(client)));
 }
-function formatClientsSummary(clients) {
+function formatClientsSummary(clients, targetVersion = null) {
   if (clients.length === 0)
     return "\u6CA1\u6709\u5DF2\u6CE8\u518C\u7684 Client\u3002";
   const sorted = [...clients].sort((a, b) => {
@@ -13837,11 +13872,14 @@ function formatClientsSummary(clients) {
     cpu: formatPercent(client.cpuPercent),
     mem: formatPercent(client.memPercent),
     version: client.clientVersion,
+    // 落后判定以服务端上报的 clientVersion 与当前补更目标比对，不做本地推断
+    outdated: targetVersion === null ? "\u2014" : client.clientVersion === targetVersion ? "no" : "yes",
     privilege: formatPrivilegeSummary(client)
   }));
   const onlineCount = clients.filter((client) => client.online).length;
+  const header = targetVersion === null ? `\u5171 ${clients.length} \u53F0 \xB7 \u5728\u7EBF ${onlineCount} \xB7 \u79BB\u7EBF ${clients.length - onlineCount} \xB7 \u5F53\u524D\u65E0\u8865\u66F4\u76EE\u6807` : `\u5171 ${clients.length} \u53F0 \xB7 \u5728\u7EBF ${onlineCount} \xB7 \u79BB\u7EBF ${clients.length - onlineCount} \xB7 \u8865\u66F4\u76EE\u6807 ${targetVersion}`;
   return [
-    `\u5171 ${clients.length} \u53F0 \xB7 \u5728\u7EBF ${onlineCount} \xB7 \u79BB\u7EBF ${clients.length - onlineCount}`,
+    header,
     formatTable4(rows, [
       "name",
       "hostname",
@@ -13850,9 +13888,18 @@ function formatClientsSummary(clients) {
       "cpu",
       "mem",
       "version",
+      "outdated",
       "privilege"
     ])
   ].join("\n");
+}
+async function readCatchUpTargetVersion(client) {
+  try {
+    const result = await client.releases.list({ page: 1, pageSize: 100 });
+    return (0, import_shared4.selectLatestCatchUpTarget)(result.data)?.version ?? null;
+  } catch {
+    return null;
+  }
 }
 function exclusiveAlias5(options, first, second) {
   const firstValue = stringOption(options, first);
@@ -13879,8 +13926,9 @@ var import_node_crypto2 = require("node:crypto");
 var import_node_fs3 = require("node:fs");
 var import_promises4 = require("node:fs/promises");
 init_dist();
-var import_shared4 = __toESM(require_dist(), 1);
+var import_shared5 = __toESM(require_dist(), 1);
 init_authenticated_client();
+init_client_resolver();
 init_arguments();
 init_environment();
 var VERSION_RE = /^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)\.zip$/;
@@ -13897,6 +13945,10 @@ async function runReleaseCommand(subcommand, argv, context = {}) {
     await runInspectCommand(subcommand, argv, context);
     return;
   }
+  if (subcommand === "retry") {
+    await runRetryCommand(argv, context);
+    return;
+  }
   throw new Error(releaseUsage());
 }
 function releaseUsage() {
@@ -13904,9 +13956,54 @@ function releaseUsage() {
     "Release \u547D\u4EE4:",
     "  vcpdeck release status <version> [--env=<name>]",
     "  vcpdeck release wait <version> [--env=<name>] [--timeout=<seconds>]",
+    "  vcpdeck release retry <client> [--version=<version>] [--env=<name>] [--json]",
     "  vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] [--wait] [--timeout=<seconds>]",
     "  \u517C\u5BB9\u76F4\u8FDE: \u6DFB\u52A0 --server=<url> [--username=<name> --password=<value>]"
   ].join("\n");
+}
+async function runRetryCommand(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: [
+      "env",
+      "environment",
+      "server",
+      "username",
+      "password",
+      "version"
+    ],
+    boolean: ["json"]
+  });
+  if (positionals.length !== 1)
+    throw new Error(releaseUsage());
+  const version = stringOption(options, "version");
+  if (version !== void 0 && !VERSION_INPUT_RE.test(version)) {
+    throw new Error(`\u7248\u672C\u53F7\u683C\u5F0F\u975E\u6CD5: ${version}`);
+  }
+  const environment = await resolveCommandEnvironment(options, context);
+  const log = context.log ?? console.log;
+  log(formatEnvironmentSummary(environment));
+  const client = await createAuthenticatedClient(environment);
+  const clientId = await resolveClientId(positionals[0], context.paths, context.processEnv, client);
+  const targetVersion = version ?? await resolveCatchUpTargetVersion(client);
+  const result = await client.releases.retryClient(targetVersion, clientId);
+  if (options.json) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  log([
+    `\u73AF\u5883: ${environment.name}`,
+    `\u673A\u5668: ${positionals[0]}`,
+    `\u76EE\u6807\u7248\u672C: ${result.version}`,
+    "\u5DF2\u89E6\u53D1\u8865\u66F4\uFF1B\u7EC8\u6001\u4EE5\u8BE5\u673A\u5668\u91CD\u65B0\u6CE8\u518C\u7684\u7248\u672C\u4E3A\u51C6\uFF0C\u53EF\u7528 release status \u6838\u5BF9\u3002"
+  ].join("\n"));
+}
+async function resolveCatchUpTargetVersion(client) {
+  const result = await client.releases.list({ page: 1, pageSize: 100 });
+  const target = (0, import_shared5.selectLatestCatchUpTarget)(result.data);
+  if (!target) {
+    throw new Error("\u5F53\u524D\u6CA1\u6709\u53EF\u7528\u7684\u8865\u66F4\u76EE\u6807\uFF1B\u8BF7\u7528 --version=<version> \u663E\u5F0F\u6307\u5B9A\u7248\u672C");
+  }
+  return target.version;
 }
 async function runUploadCommand(argv, context) {
   const { positionals, options } = parseCommandArgs(argv, {
@@ -13953,7 +14050,7 @@ async function runInspectCommand(subcommand, argv, context) {
   const snapshot = await readReleaseSnapshot(client, positionals[0], context.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
   if (!snapshot.release)
     throw new Error(`Release \u4E0D\u5B58\u5728: ${positionals[0]}`);
-  log(formatReleaseSummary(snapshot.release, snapshot.serverVersion));
+  log(formatReleaseSummary(snapshot.release, snapshot.serverVersion, await readClientNames(client)));
 }
 async function resolveCommandEnvironment(options, context) {
   const environment = exclusiveAlias6(options, "env", "environment");
@@ -13999,7 +14096,7 @@ async function waitForRelease(client, version, timeoutSeconds, log, context) {
         lastSummary = summary;
       }
       assertReleaseNotFailed(snapshot.release);
-      if (snapshot.release.status === import_shared4.ReleaseStatus.DONE) {
+      if (snapshot.release.status === import_shared5.ReleaseStatus.DONE) {
         assertReleaseCompleted(snapshot.release, snapshot.serverVersion);
         log(`[vcpdeck] \u53D1\u7248 ${version} \u9A8C\u6536\u5B8C\u6210`);
         return;
@@ -14040,14 +14137,38 @@ async function findRelease(client, version, signal) {
       return void 0;
   }
 }
-function formatReleaseSummary(release, serverVersion) {
+function formatReleaseSummary(release, serverVersion, clientNames = /* @__PURE__ */ new Map()) {
   const counts = countClientStates(release);
-  return [
+  const lines = [
     `\u7248\u672C: ${release.version}`,
     `Server: ${serverVersion}`,
     `Release: ${release.status}`,
     `\u5BA2\u6237\u7AEF: \u6210\u529F ${counts.done} \xB7 \u5931\u8D25 ${counts.failed} \xB7 \u8FDB\u884C\u4E2D ${counts.updating} \xB7 \u5F85\u66F4\u65B0 ${counts.pending}`
-  ].join("\n");
+  ];
+  const entries = Object.entries(release.clientStates).sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length > 0) {
+    lines.push("\u9010\u53F0\u660E\u7EC6:");
+    for (const [clientId, entry] of entries) {
+      const name = clientNames.get(clientId) ?? clientId;
+      const parts2 = [`  ${name}`, entry.state];
+      if (entry.kind)
+        parts2.push(entry.kind === "permanent" ? "\u6C38\u4E45\u5931\u8D25" : "\u53EF\u91CD\u8BD5");
+      if (entry.attempts !== void 0)
+        parts2.push(`\u5DF2\u8BD5 ${entry.attempts} \u6B21`);
+      if (entry.reason)
+        parts2.push(`\u539F\u56E0: ${entry.reason}`);
+      lines.push(parts2.join(" \xB7 "));
+    }
+  }
+  return lines.join("\n");
+}
+async function readClientNames(client) {
+  try {
+    const clients = await client.clients.list();
+    return new Map(clients.map((entry) => [entry.clientId, entry.name]));
+  } catch {
+    return /* @__PURE__ */ new Map();
+  }
 }
 function countClientStates(release) {
   const counts = {
@@ -14057,11 +14178,11 @@ function countClientStates(release) {
     pending: 0
   };
   for (const entry of Object.values(release.clientStates)) {
-    if (entry.state === import_shared4.ReleaseClientState.DONE)
+    if (entry.state === import_shared5.ReleaseClientState.DONE)
       counts.done++;
-    else if (entry.state === import_shared4.ReleaseClientState.FAILED)
+    else if (entry.state === import_shared5.ReleaseClientState.FAILED)
       counts.failed++;
-    else if (entry.state === import_shared4.ReleaseClientState.UPDATING)
+    else if (entry.state === import_shared5.ReleaseClientState.UPDATING)
       counts.updating++;
     else
       counts.pending++;
@@ -14069,7 +14190,7 @@ function countClientStates(release) {
   return counts;
 }
 function assertReleaseNotFailed(release) {
-  if (release.status === import_shared4.ReleaseStatus.FAILED) {
+  if (release.status === import_shared5.ReleaseStatus.FAILED) {
     throw new Error(`\u53D1\u7248 ${release.version} \u5931\u8D25${release.errorMessage ? `: ${release.errorMessage}` : ""}`);
   }
 }
@@ -14259,7 +14380,7 @@ async function run(argv, context = {}) {
   const [command, subcommand, ...rest] = argv;
   try {
     if (command === "version" || command === "--version" || command === "-v") {
-      log(import_shared6.VERSION);
+      log(import_shared7.VERSION);
       return 0;
     }
     if (command === "env") {

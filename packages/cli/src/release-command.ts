@@ -5,10 +5,12 @@ import { VcpDeckApiError, type VcpDeckClient } from "@vcpdeck/sdk";
 import {
 	ReleaseClientState,
 	ReleaseStatus,
+	selectLatestCatchUpTarget,
 	type ReleaseInfo,
 	type ReleasePlatform,
 } from "@vcpdeck/shared";
 import { createAuthenticatedClient } from "./authenticated-client.js";
+import { resolveClientId } from "./client-resolver.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
 import type { ConfigPaths } from "./config.js";
 import {
@@ -56,6 +58,10 @@ export async function runReleaseCommand(
 		await runInspectCommand(subcommand, argv, context);
 		return;
 	}
+	if (subcommand === "retry") {
+		await runRetryCommand(argv, context);
+		return;
+	}
 	throw new Error(releaseUsage());
 }
 
@@ -64,9 +70,74 @@ function releaseUsage(): string {
 		"Release 命令:",
 		"  vcpdeck release status <version> [--env=<name>]",
 		"  vcpdeck release wait <version> [--env=<name>] [--timeout=<seconds>]",
+		"  vcpdeck release retry <client> [--version=<version>] [--env=<name>] [--json]",
 		"  vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] [--wait] [--timeout=<seconds>]",
 		"  兼容直连: 添加 --server=<url> [--username=<name> --password=<value>]",
 	].join("\n");
+}
+
+/**
+ * 人工强制重试某个客户端的补更。
+ * 省略 `--version` 时使用当前补更目标（双平台构件齐备且已进入客户端更新阶段或已完成）。
+ */
+async function runRetryCommand(
+	argv: string[],
+	context: ReleaseCommandContext,
+): Promise<void> {
+	const { positionals, options } = parseCommandArgs(argv, {
+		value: [
+			"env",
+			"environment",
+			"server",
+			"username",
+			"password",
+			"version",
+		],
+		boolean: ["json"],
+	});
+	if (positionals.length !== 1) throw new Error(releaseUsage());
+	const version = stringOption(options, "version");
+	if (version !== undefined && !VERSION_INPUT_RE.test(version)) {
+		throw new Error(`版本号格式非法: ${version}`);
+	}
+	const environment = await resolveCommandEnvironment(options, context);
+	const log = context.log ?? console.log;
+	log(formatEnvironmentSummary(environment));
+	const client = await createAuthenticatedClient(environment);
+	const clientId = await resolveClientId(
+		positionals[0],
+		context.paths,
+		context.processEnv,
+		client,
+	);
+	const targetVersion = version ?? (await resolveCatchUpTargetVersion(client));
+	const result = await client.releases.retryClient(targetVersion, clientId);
+	if (options.json) {
+		log(JSON.stringify(result, null, 2));
+		return;
+	}
+	log(
+		[
+			`环境: ${environment.name}`,
+			`机器: ${positionals[0]}`,
+			`目标版本: ${result.version}`,
+			"已触发补更；终态以该机器重新注册的版本为准，可用 release status 核对。",
+		].join("\n"),
+	);
+}
+
+/** 读取当前补更目标版本；没有可用目标时明确失败。 */
+async function resolveCatchUpTargetVersion(
+	client: VcpDeckClient,
+): Promise<string> {
+	const result = await client.releases.list({ page: 1, pageSize: 100 });
+	const target = selectLatestCatchUpTarget(result.data);
+	if (!target) {
+		throw new Error(
+			"当前没有可用的补更目标；请用 --version=<version> 显式指定版本",
+		);
+	}
+	return target.version;
 }
 
 async function runUploadCommand(
@@ -138,7 +209,13 @@ async function runInspectCommand(
 		context.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
 	);
 	if (!snapshot.release) throw new Error(`Release 不存在: ${positionals[0]}`);
-	log(formatReleaseSummary(snapshot.release, snapshot.serverVersion));
+	log(
+		formatReleaseSummary(
+			snapshot.release,
+			snapshot.serverVersion,
+			await readClientNames(client),
+		),
+	);
 }
 
 async function resolveCommandEnvironment(
@@ -255,14 +332,42 @@ async function findRelease(
 function formatReleaseSummary(
 	release: ReleaseInfo,
 	serverVersion: string,
+	clientNames: Map<string, string> = new Map(),
 ): string {
 	const counts = countClientStates(release);
-	return [
+	const lines = [
 		`版本: ${release.version}`,
 		`Server: ${serverVersion}`,
 		`Release: ${release.status}`,
 		`客户端: 成功 ${counts.done} · 失败 ${counts.failed} · 进行中 ${counts.updating} · 待更新 ${counts.pending}`,
-	].join("\n");
+	];
+	const entries = Object.entries(release.clientStates).sort(([a], [b]) =>
+		a.localeCompare(b),
+	);
+	if (entries.length > 0) {
+		lines.push("逐台明细:");
+		for (const [clientId, entry] of entries) {
+			const name = clientNames.get(clientId) ?? clientId;
+			const parts = [`  ${name}`, entry.state];
+			if (entry.kind) parts.push(entry.kind === "permanent" ? "永久失败" : "可重试");
+			if (entry.attempts !== undefined) parts.push(`已试 ${entry.attempts} 次`);
+			if (entry.reason) parts.push(`原因: ${entry.reason}`);
+			lines.push(parts.join(" · "));
+		}
+	}
+	return lines.join("\n");
+}
+
+/** 读取机器名称映射；失败时回退为 clientId，不影响明细展示。 */
+async function readClientNames(
+	client: VcpDeckClient,
+): Promise<Map<string, string>> {
+	try {
+		const clients = await client.clients.list();
+		return new Map(clients.map((entry) => [entry.clientId, entry.name]));
+	} catch {
+		return new Map();
+	}
 }
 
 function countClientStates(release: ReleaseInfo): ReleaseClientCounts {

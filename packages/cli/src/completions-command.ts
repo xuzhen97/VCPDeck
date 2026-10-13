@@ -35,7 +35,7 @@ const COMMAND_TREE: Record<string, string[]> = {
 	terminal: ["shells", "list", "close", "attach"],
 	frp: ["instances", "mappings", "mapping"],
 	storage: ["status"],
-	release: ["status", "wait", "upload"],
+	release: ["status", "wait", "upload", "retry"],
 	completions: ["bash", "powershell"],
 };
 

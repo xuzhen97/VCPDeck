@@ -12,6 +12,7 @@ import { ReleaseUploadController } from "./release-upload.controller.js";
 import { ReleaseUploadService } from "./release-upload.service.js";
 import { ReleaseCleanupController } from "./release-cleanup.controller.js";
 import { ReleaseCleanupService } from "./release-cleanup.service.js";
+import { ReleaseCatchUpService } from "./release-catch-up.service.js";
 
 @Module({
 	imports: [JobModule, ClientModule, StorageModule],
@@ -25,6 +26,7 @@ import { ReleaseCleanupService } from "./release-cleanup.service.js";
 		ReleaseService,
 		ReleaseUploadService,
 		ReleaseCleanupService,
+		ReleaseCatchUpService,
 		ReleaseOrchestrator,
 		GatewayUpdateChannel,
 		LauncherHttpClient,

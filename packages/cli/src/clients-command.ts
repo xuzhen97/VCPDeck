@@ -1,4 +1,5 @@
-import type { ClientInfo } from "@vcpdeck/shared";
+import { selectLatestCatchUpTarget, type ClientInfo } from "@vcpdeck/shared";
+import type { VcpDeckClient } from "@vcpdeck/sdk";
 import { createAuthenticatedClient } from "./authenticated-client.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
 import type { ConfigPaths } from "./config.js";
@@ -70,11 +71,14 @@ async function runListClients(
 	log(formatEnvironmentSummary(environment));
 	const client = await createAuthenticatedClient(environment);
 	const clients = await client.clients.list();
-	log(formatClientsSummary(clients));
+	log(formatClientsSummary(clients, await readCatchUpTargetVersion(client)));
 }
 
 /** 生成人类可读的机器列表；在线优先，其余按名称稳定排序。 */
-function formatClientsSummary(clients: ClientInfo[]): string {
+function formatClientsSummary(
+	clients: ClientInfo[],
+	targetVersion: string | null = null,
+): string {
 	if (clients.length === 0) return "没有已注册的 Client。";
 	const sorted = [...clients].sort((a, b) => {
 		if (a.online !== b.online) return a.online ? -1 : 1;
@@ -88,11 +92,22 @@ function formatClientsSummary(clients: ClientInfo[]): string {
 		cpu: formatPercent(client.cpuPercent),
 		mem: formatPercent(client.memPercent),
 		version: client.clientVersion,
+		// 落后判定以服务端上报的 clientVersion 与当前补更目标比对，不做本地推断
+		outdated:
+			targetVersion === null
+				? "—"
+				: client.clientVersion === targetVersion
+					? "no"
+					: "yes",
 		privilege: formatPrivilegeSummary(client),
 	}));
 	const onlineCount = clients.filter((client) => client.online).length;
+	const header =
+		targetVersion === null
+			? `共 ${clients.length} 台 · 在线 ${onlineCount} · 离线 ${clients.length - onlineCount} · 当前无补更目标`
+			: `共 ${clients.length} 台 · 在线 ${onlineCount} · 离线 ${clients.length - onlineCount} · 补更目标 ${targetVersion}`;
 	return [
-		`共 ${clients.length} 台 · 在线 ${onlineCount} · 离线 ${clients.length - onlineCount}`,
+		header,
 		formatTable(rows, [
 			"name",
 			"hostname",
@@ -101,9 +116,22 @@ function formatClientsSummary(clients: ClientInfo[]): string {
 			"cpu",
 			"mem",
 			"version",
+			"outdated",
 			"privilege",
 		]),
 	].join("\n");
+}
+
+/** 读取当前补更目标版本；无目标或读取失败时返回 null，不影响列表输出。 */
+async function readCatchUpTargetVersion(
+	client: VcpDeckClient,
+): Promise<string | null> {
+	try {
+		const result = await client.releases.list({ page: 1, pageSize: 100 });
+		return selectLatestCatchUpTarget(result.data)?.version ?? null;
+	} catch {
+		return null;
+	}
 }
 
 function exclusiveAlias(

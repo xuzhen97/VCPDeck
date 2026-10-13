@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+	hasAllReleaseArchives,
+	isCatchUpTarget,
 	isReleaseArchiveAvailable,
 	parseReleaseUploadComplete,
 	parseReleaseUploadCreateInput,
 	parseReleaseUploadPartRefresh,
+	ReleaseStatus,
+	selectLatestCatchUpTarget,
 	type ReleaseArchiveInfo,
+	type ReleaseInfo,
 } from "./update.js";
 
 describe("Release archive 生命周期", () => {
@@ -80,5 +85,87 @@ describe("Release 上传会话 parser", () => {
 		expect(() => parseReleaseUploadComplete({ uploadedBytes: 0 })).toThrow(
 			"uploadedBytes",
 		);
+	});
+});
+
+describe("Release 补更目标判定", () => {
+	const archive = { sha256: "a".repeat(64), size: 1, fileName: "x.zip" };
+
+	/** 构造最小可用的 release，仅覆盖判定所需字段。 */
+	function release(
+		overrides: Partial<ReleaseInfo> = {},
+	): ReleaseInfo {
+		return {
+			version: "0.19.2",
+			archives: {
+				"win-x64": { ...archive },
+				"linux-x64": { ...archive },
+			},
+			status: ReleaseStatus.DONE,
+			createdAt: "2026-10-12T00:00:00.000Z",
+			updatedAt: "2026-10-12T00:00:00.000Z",
+			clientStates: {},
+			...overrides,
+		};
+	}
+
+	it("双平台构件齐备且已完成的 release 可作为补更目标", () => {
+		expect(isCatchUpTarget(release())).toBe(true);
+		expect(
+			isCatchUpTarget(release({ status: ReleaseStatus.UPDATING_CLIENTS })),
+		).toBe(true);
+	});
+
+	it("缺任一平台构件或状态不可用时不是补更目标", () => {
+		expect(
+			isCatchUpTarget(release({ archives: { "win-x64": { ...archive } } })),
+		).toBe(false);
+		expect(
+			isCatchUpTarget(
+				release({
+					archives: {
+						"win-x64": {
+							...archive,
+							availability: "cleaned",
+							cleanedAt: "2026-08-29T00:00:00.000Z",
+							cleanupReason: "retention_policy",
+						},
+						"linux-x64": { ...archive },
+					},
+				}),
+			),
+		).toBe(false);
+		expect(isCatchUpTarget(release({ status: ReleaseStatus.FAILED }))).toBe(
+			false,
+		);
+		expect(isCatchUpTarget(release({ status: ReleaseStatus.UPLOADED }))).toBe(
+			false,
+		);
+	});
+
+	it("构件齐备判定不受状态影响，补更目标判定才要求状态", () => {
+		const uploaded = release({ status: ReleaseStatus.UPLOADED });
+		expect(hasAllReleaseArchives(uploaded)).toBe(true);
+		expect(isCatchUpTarget(uploaded)).toBe(false);
+		expect(
+			hasAllReleaseArchives(release({ archives: { "win-x64": { ...archive } } })),
+		).toBe(false);
+	});
+
+	it("选出最近一条补更目标，无候选时为 null", () => {
+		const older = release({
+			version: "0.19.1",
+			createdAt: "2026-10-12T00:00:00.000Z",
+		});
+		const newer = release({
+			version: "0.19.2",
+			createdAt: "2026-10-13T00:00:00.000Z",
+		});
+		expect(selectLatestCatchUpTarget([older, newer])?.version).toBe("0.19.2");
+		expect(selectLatestCatchUpTarget([newer, older])?.version).toBe("0.19.2");
+		expect(selectLatestCatchUpTarget([])).toBeNull();
+		expect(
+			selectLatestCatchUpTarget([release({ status: ReleaseStatus.FAILED })]),
+		).toBeNull();
 	});
 });

@@ -75,6 +75,9 @@ export enum ReleaseClientState {
 	FAILED = "failed",
 }
 
+/** 客户端更新失败类别：瞬时失败值得重试，永久失败重试无用。 */
+export type ReleaseFailureKind = "transient" | "permanent";
+
 /** 单客户端更新条目（含失败原因与时间戳，审计用） */
 export interface ReleaseClientEntry {
 	state: ReleaseClientState;
@@ -82,6 +85,10 @@ export interface ReleaseClientEntry {
 	reason?: string;
 	/** 最后状态变更时间（ISO 字符串） */
 	at: string;
+	/** 失败类别；缺省视为 transient，使存量记录天然可重试 */
+	kind?: ReleaseFailureKind;
+	/** 已尝试次数；用于退避与上限判定 */
+	attempts?: number;
 }
 
 /** 发布包支持的目标平台（打包脚本产出对应的分发 zip） */
@@ -95,6 +102,13 @@ export const ReleaseUploadErrorCode = {
 	SESSION_CONFLICT: "RELEASE_UPLOAD_SESSION_CONFLICT",
 	SIZE_MISMATCH: "RELEASE_UPLOAD_SIZE_MISMATCH",
 	PROVIDER_FAILED: "RELEASE_UPLOAD_PROVIDER_FAILED",
+} as const;
+
+/** Release 人工重试稳定错误码。 */
+export const ReleaseRetryErrorCode = {
+	NOT_FOUND: "RELEASE_NOT_FOUND",
+	CLIENT_NOT_FOUND: "RELEASE_CLIENT_NOT_FOUND",
+	RETRY_NOT_ALLOWED: "RELEASE_RETRY_NOT_ALLOWED",
 } as const;
 
 /** 创建 Release 上传会话的严格输入。 */
@@ -280,6 +294,48 @@ export function isReleaseArchiveAvailable(
 		archive &&
 		(archive.availability === undefined || archive.availability === "available"),
 	);
+}
+
+/**
+ * release 是否已包含全部支持平台的可用构件。
+ * 这是「是否可以开始编排」的判据，**不含状态条件**：上传刚完成时状态仍是 uploaded。
+ */
+export function hasAllReleaseArchives(release: ReleaseInfo): boolean {
+	const archives = release.archives ?? {};
+	return (
+		isReleaseArchiveAvailable(archives["win-x64"]) &&
+		isReleaseArchiveAvailable(archives["linux-x64"])
+	);
+}
+
+/**
+ * release 是否可作为补更目标：双平台构件均可用，且已进入客户端更新阶段或已完成。
+ * 这是 Server 与 CLI 共用的唯一判定，避免两端各自复制规则产生偏差。
+ */
+export function isCatchUpTarget(release: ReleaseInfo): boolean {
+	if (
+		release.status !== ReleaseStatus.UPDATING_CLIENTS &&
+		release.status !== ReleaseStatus.DONE
+	) {
+		return false;
+	}
+	return hasAllReleaseArchives(release);
+}
+
+/** 从候选列表中选出最近一条补更目标（按 createdAt）；无候选时返回 null。 */
+export function selectLatestCatchUpTarget(
+	releases: ReleaseInfo[],
+): ReleaseInfo | null {
+	let latest: ReleaseInfo | null = null;
+	let latestAt = Number.NEGATIVE_INFINITY;
+	for (const release of releases) {
+		if (!isCatchUpTarget(release)) continue;
+		const at = Date.parse(release.createdAt);
+		if (!Number.isFinite(at) || at <= latestAt) continue;
+		latest = release;
+		latestAt = at;
+	}
+	return latest;
 }
 
 /** Release 清理固定策略。 */

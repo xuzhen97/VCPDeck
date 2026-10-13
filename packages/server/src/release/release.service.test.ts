@@ -147,40 +147,6 @@ describe("ReleaseService", () => {
 		});
 	});
 
-	describe("hasAllArchives", () => {
-		it("两个平台构件齐备返回 true", () => {
-			const info = {
-				version: "1.2.1",
-				archives: {
-					"win-x64": { sha256: "a", size: 1, fileName: "w.zip" },
-					"linux-x64": { sha256: "b", size: 2, fileName: "l.zip" },
-				},
-			};
-			expect(service.hasAllArchives(info as never)).toBe(true);
-		});
-
-		it("cleaned 平台不算可用构件", () => {
-			const base = { sha256: "a", size: 1, fileName: "x.zip" };
-			expect(
-				service.hasAllArchives({
-					archives: {
-						"win-x64": { ...base, availability: "available" },
-						"linux-x64": {
-							...base,
-							availability: "cleaned",
-							cleanedAt: "2026-08-29T00:00:00.000Z",
-							cleanupReason: "retention_policy",
-						},
-					},
-				} as never),
-			).toBe(false);
-		});
-
-		it("缺平台返回 false", () => {
-			expect(service.hasAllArchives({ archives: {} } as never)).toBe(false);
-		});
-	});
-
 	describe("archive cleanup CAS", () => {
 		it("旧记录归一化为 available", async () => {
 			prisma.release.findUnique.mockResolvedValue(dbRow());
@@ -320,6 +286,126 @@ describe("ReleaseService", () => {
 				state: "failed",
 				reason: "校验失败",
 				at: expect.any(String),
+			});
+		});
+
+		it("失败时累计尝试次数并保留既有类别", async () => {
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({
+					clientStates: JSON.stringify({
+						c1: {
+							state: "failed",
+							reason: "等待重连注册超时",
+							at: "2026-10-13T00:00:00.000Z",
+							kind: "transient",
+							attempts: 1,
+						},
+					}),
+				}),
+			);
+			prisma.release.update.mockResolvedValue(dbRow());
+
+			const states = await service.markClientState(
+				"1.2.1",
+				"c1",
+				ReleaseClientState.FAILED,
+				"等待重连注册超时",
+			);
+
+			expect(states.c1).toMatchObject({
+				state: "failed",
+				kind: "transient",
+				attempts: 2,
+			});
+		});
+
+		it("首次失败记为一次尝试，旧格式裸字符串同样兼容", async () => {
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({ clientStates: '{"c1":"failed"}' }),
+			);
+			prisma.release.update.mockResolvedValue(dbRow());
+
+			const states = await service.markClientState(
+				"1.2.1",
+				"c1",
+				ReleaseClientState.FAILED,
+				"等待重连注册超时",
+				{ kind: "transient" },
+			);
+
+			expect(states.c1).toMatchObject({
+				state: "failed",
+				kind: "transient",
+				attempts: 1,
+			});
+		});
+
+		it("重试进行中保留尝试次数，否则上限永远不会达到", async () => {
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({
+					clientStates: JSON.stringify({
+						c1: {
+							state: "failed",
+							at: "2026-10-13T00:00:00.000Z",
+							kind: "transient",
+							attempts: 2,
+						},
+					}),
+				}),
+			);
+			prisma.release.update.mockResolvedValue(dbRow());
+
+			const states = await service.markClientState(
+				"1.2.1",
+				"c1",
+				ReleaseClientState.UPDATING,
+			);
+
+			expect(states.c1).toMatchObject({ state: "updating", attempts: 2 });
+		});
+
+		it("成功后清除失败类别与尝试次数", async () => {
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({
+					clientStates: JSON.stringify({
+						c1: {
+							state: "failed",
+							at: "2026-10-13T00:00:00.000Z",
+							kind: "transient",
+							attempts: 3,
+						},
+					}),
+				}),
+			);
+			prisma.release.update.mockResolvedValue(dbRow());
+
+			const states = await service.markClientState(
+				"1.2.1",
+				"c1",
+				ReleaseClientState.DONE,
+			);
+
+			expect(states.c1).toMatchObject({ state: "done" });
+			expect(states.c1.kind).toBeUndefined();
+			expect(states.c1.attempts).toBeUndefined();
+		});
+
+		it("永久失败类别可完整读回", async () => {
+			prisma.release.findUnique.mockResolvedValue(dbRow());
+			prisma.release.update.mockResolvedValue(dbRow());
+
+			const states = await service.markClientState(
+				"1.2.1",
+				"c1",
+				ReleaseClientState.FAILED,
+				"平台不受支持或构件缺失: linux",
+				{ kind: "permanent" },
+			);
+
+			expect(states.c1).toMatchObject({
+				state: "failed",
+				kind: "permanent",
+				attempts: 1,
 			});
 		});
 	});

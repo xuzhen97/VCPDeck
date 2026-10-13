@@ -47,6 +47,18 @@ export function createReleasesApi(
 				signal,
 			);
 		},
+		/** 人工强制重试某个客户端的补更；永久失败会被服务端拒绝。 */
+		retryClient: (
+			version: string,
+			clientId: string,
+			signal?: AbortSignal,
+		) =>
+			client.request<{ version: string; clientId: string; state: string }>(
+				"POST",
+				`/api/releases/${encodeURIComponent(version)}/clients/${encodeURIComponent(clientId)}/retry`,
+				undefined,
+				signal,
+			),
 		createUploadSession: (
 			input: ReleaseUploadCreateInput,
 			signal?: AbortSignal,

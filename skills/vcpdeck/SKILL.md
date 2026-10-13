@@ -41,7 +41,7 @@ pnpm --filter @vcpdeck/cli build
 | FRP 映射写操作 | `frp mapping create/delete` | 已实现 | Client frpc 动作与 FRPS Dashboard 双重确认；**必须先取得用户明确确认** |
 | Storage 查询（只读） | `storage status` | 已实现 | 当前激活的存储后端类型 |
 | Terminal 生命周期 | `terminal new/shells/list/close` | 已实现 | 创建会话（返回 sessionId 供 attach）、Shell 探测与会话列表（只读）、关闭会话（写操作需确认）；交互式 PTY 经 attach 直连 |
-| Release / 自更新 | `release upload/status/wait` | 已实现 | 上传双平台构件；查询或等待 Server/Client 权威终态，失败或超时返回非零退出 |
+| Release / 自更新 | `release upload/status/wait/retry` | 已实现 | 上传双平台构件；查询或等待 Server/Client 权威终态；`status` 含逐台明细；`retry` 人工强制重试单台补更（写操作需确认） |
 | FRP 实例写操作、Storage 后端切换、机器写入 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明 |
 
 ## 功能：环境选择
@@ -154,6 +154,41 @@ node "<vcpdeck-cli>" release wait x.y.z --timeout=1800
 
 离线 Client 不进入本次在线更新明细，也不阻塞 `done`；其后续注册时补更，阶段期间上线的旧版本 Client 会在阶段末尾补偿扫描。若状态为 `failed`，只报告安全错误摘要和失败阶段。不要自行重复版本、删除数据库记录或覆盖 Launcher。
 
+### 补更失败与重试语义（ADR-0051）
+
+补更失败分两类，类别由服务端按写入失败的代码路径判定，**不解析原因文案**：
+
+- **瞬时失败**（等待重连注册超时、注册版本不符、客户端上报失败）：按递增退避（15 分钟 → 1 小时 → 6 小时）自动重试，**最多 3 次**；
+- **永久失败**（平台不受支持或构件缺失）：任何情况下都不重试。
+
+自动重试有**两个驱动力**：客户端重连注册，以及服务端周期对账（默认 5 分钟）。后者用于救回「失败后持续在线、不再重连」的机器——这类机器光靠注册钩子永远不会自愈。重试耗尽后转人工处理，不自动升级为错误终局。每次重试都是一次完整构件下载（单机约 95–110 MB）。
+
+### `release status` 逐台明细
+
+```bash
+node "<vcpdeck-cli>" release status x.y.z
+```
+
+除汇总计数外，还会列出**逐台明细**：机器名、状态、失败类别（可重试／永久失败）、尝试次数与失败原因。机器名解析失败时回退为 clientId。发现某台机器落后或反复失败时，从这里入手而不是只看计数。
+
+### 功能：人工重试补更（写操作，需确认门）
+
+```bash
+node "<vcpdeck-cli>" release retry <client> [--version=<version>] [--env=<name>] [--json]
+```
+
+`<client>` 接受机器名或 clientId；省略 `--version` 时使用当前补更目标（双平台构件齐备且已进入客户端更新阶段或已完成的最近版本）。
+
+- 忽略退避与次数上限，是自动重试耗尽后的**唯一兜底**；
+- 仍拒绝永久失败，返回稳定错误码 `RELEASE_RETRY_NOT_ALLOWED`（HTTP 409）；未知版本或未知机器返回 `RELEASE_NOT_FOUND` / `RELEASE_CLIENT_NOT_FOUND`（404）；
+- 属写操作：**执行前必须展示目标环境与机器并取得用户明确确认**；
+- 触发成功只代表已派发补更，终态以该机器重新注册上报的版本为准，用 `release status` 或 `clients list` 核对；
+- **已知限制**：机器名解析依赖在线列表，因此**离线机器无法通过本命令按名称重试**（服务端逻辑允许带状态记录的离线机器重试，但 CLI 侧无法解析其名称；可直接使用 clientId）。
+
+### 功能：机器版本落后标记
+
+`clients list` 除版本号外，还会显示当前补更目标与是否落后（`yes` / `no`）。无可用补更目标时标记为不可判定（`—`）而不是误报落后。落后判定由服务端上报的 `clientVersion` 与共享的目标判定得出，CLI 不做本地推断。`--json` 输出仍为纯 `ClientInfo[]`，不含这些展示列。
+
 ### 本功能当前不提供
 
 - Launcher 自动更新；Launcher 升级遵循独立人工流程和兼容检查。
@@ -186,7 +221,7 @@ node "<vcpdeck-cli>" clients list [--env=<name>] [--json]
 
 ### 幂等性与失败处置
 
-GET 天然幂等，失败可直接重试；网络错误或非 2xx 时 CLI 非零退出并输出安全错误摘要。空列表输出“没有已注册的 Client。”，指**当前没有在线 Client**，这是正常结果而非错误。响应中 `online` 恒为 `true`（只含在线机器），因此离线或从未注册的机器不会出现；刚上线、心跳尚未上报时 CPU/内存等运行时字段可能为 `null`。需要看某台机器是否曾更新到哪个版本时用 Frontend 发版审计页的客户端更新明细（`release status` 只输出成功/失败/进行中/待更新的计数，**不含逐台明细**）。
+GET 天然幂等，失败可直接重试；网络错误或非 2xx 时 CLI 非零退出并输出安全错误摘要。空列表输出“没有已注册的 Client。”，指**当前没有在线 Client**，这是正常结果而非错误。响应中 `online` 恒为 `true`（只含在线机器），因此离线或从未注册的机器不会出现；刚上线、心跳尚未上报时 CPU/内存等运行时字段可能为 `null`。人类可读输出还会显示当前补更目标与是否落后；逐台更新结果与失败原因用 `release status` 的逐台明细核对，或看 Frontend 发版审计页的客户端更新明细。
 
 ### 成功判定与已知限制
 

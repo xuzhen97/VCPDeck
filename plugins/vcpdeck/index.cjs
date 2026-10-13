@@ -85,11 +85,14 @@ var require_update = __commonJS({
   "../shared/dist/update.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = void 0;
+    exports2.ReleaseRetryErrorCode = exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = void 0;
     exports2.parseReleaseUploadCreateInput = parseReleaseUploadCreateInput;
     exports2.parseReleaseUploadPartRefresh = parseReleaseUploadPartRefresh;
     exports2.parseReleaseUploadComplete = parseReleaseUploadComplete;
     exports2.isReleaseArchiveAvailable = isReleaseArchiveAvailable;
+    exports2.hasAllReleaseArchives = hasAllReleaseArchives;
+    exports2.isCatchUpTarget = isCatchUpTarget;
+    exports2.selectLatestCatchUpTarget = selectLatestCatchUpTarget;
     exports2.platformFromOs = platformFromOs;
     var ReleaseStatus;
     (function(ReleaseStatus2) {
@@ -113,6 +116,11 @@ var require_update = __commonJS({
       SESSION_CONFLICT: "RELEASE_UPLOAD_SESSION_CONFLICT",
       SIZE_MISMATCH: "RELEASE_UPLOAD_SIZE_MISMATCH",
       PROVIDER_FAILED: "RELEASE_UPLOAD_PROVIDER_FAILED"
+    };
+    exports2.ReleaseRetryErrorCode = {
+      NOT_FOUND: "RELEASE_NOT_FOUND",
+      CLIENT_NOT_FOUND: "RELEASE_CLIENT_NOT_FOUND",
+      RETRY_NOT_ALLOWED: "RELEASE_RETRY_NOT_ALLOWED"
     };
     function parseReleaseUploadCreateInput(value) {
       if (!isRecord2(value) || !hasOnlyKeys(value, ["version", "platform", "sha256", "size"])) {
@@ -162,6 +170,30 @@ var require_update = __commonJS({
     }
     function isReleaseArchiveAvailable(archive) {
       return Boolean(archive && (archive.availability === void 0 || archive.availability === "available"));
+    }
+    function hasAllReleaseArchives(release) {
+      const archives = release.archives ?? {};
+      return isReleaseArchiveAvailable(archives["win-x64"]) && isReleaseArchiveAvailable(archives["linux-x64"]);
+    }
+    function isCatchUpTarget(release) {
+      if (release.status !== ReleaseStatus.UPDATING_CLIENTS && release.status !== ReleaseStatus.DONE) {
+        return false;
+      }
+      return hasAllReleaseArchives(release);
+    }
+    function selectLatestCatchUpTarget(releases) {
+      let latest = null;
+      let latestAt = Number.NEGATIVE_INFINITY;
+      for (const release of releases) {
+        if (!isCatchUpTarget(release))
+          continue;
+        const at = Date.parse(release.createdAt);
+        if (!Number.isFinite(at) || at <= latestAt)
+          continue;
+        latest = release;
+        latestAt = at;
+      }
+      return latest;
     }
     function platformFromOs(os) {
       if (!os)
@@ -2360,6 +2392,8 @@ function createReleasesApi(client) {
       const qs = params.toString();
       return client.request("GET", `/api/releases${qs ? `?${qs}` : ""}`, void 0, signal);
     },
+    /** 人工强制重试某个客户端的补更；永久失败会被服务端拒绝。 */
+    retryClient: (version, clientId, signal) => client.request("POST", `/api/releases/${encodeURIComponent(version)}/clients/${encodeURIComponent(clientId)}/retry`, void 0, signal),
     createUploadSession: (input, signal) => client.request("POST", "/api/releases/uploads", input, signal),
     refreshUploadParts: (sessionId, partNumbers, signal) => client.request("POST", `/api/releases/uploads/${encodeURIComponent(sessionId)}/parts`, { partNumbers }, signal),
     completeUploadSession: (sessionId, uploadedBytes, signal) => client.request("POST", `/api/releases/uploads/${encodeURIComponent(sessionId)}/complete`, { uploadedBytes }, signal),

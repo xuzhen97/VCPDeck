@@ -127,6 +127,30 @@ describe("clients command", () => {
 				authorization: request.headers.authorization,
 			});
 			response.setHeader("content-type", "application/json");
+			if (request.url?.startsWith("/api/releases?")) {
+				response.end(
+					JSON.stringify({
+						data: [
+							{
+								version: "1.2.3",
+								archives: {
+									"win-x64": { sha256: "a", size: 1, fileName: "w.zip" },
+									"linux-x64": { sha256: "b", size: 2, fileName: "l.zip" },
+								},
+								status: "done",
+								createdAt: "2026-08-18T00:00:00.000Z",
+								updatedAt: "2026-08-18T00:00:00.000Z",
+								clientStates: {},
+							},
+						],
+						total: 1,
+						page: 1,
+						pageSize: 100,
+						totalPages: 1,
+					}),
+				);
+				return;
+			}
 			response.end(
 				JSON.stringify([
 					clientInfo({
@@ -147,17 +171,100 @@ describe("clients command", () => {
 			processEnv,
 			log: (message) => lines.push(message),
 		});
-		expect(requests).toEqual([
-			{ url: "/api/clients", authorization: "Bearer vcp_test_token" },
-		]);
+		// 除机器列表外，还会读取当前补更目标用于落后标记
+		expect(requests[0]).toEqual({
+			url: "/api/clients",
+			authorization: "Bearer vcp_test_token",
+		});
+		expect(requests[1]?.url).toContain("/api/releases?");
+		expect(requests[1]?.authorization).toBe("Bearer vcp_test_token");
 		expect(lines[0]).toContain("test");
 		const summary = lines.join("\n");
 		expect(summary).toContain("共 2 台 · 在线 1 · 离线 1");
+		expect(summary).toContain("补更目标 1.2.3");
 		expect(summary.indexOf("workstation")).toBeLessThan(summary.indexOf("nas"));
 		expect(summary).toContain("online");
 		expect(summary).toContain("offline");
 		expect(summary).toContain("-");
 		expect(summary).not.toContain("vcp_test_token");
+	});
+
+	it("标出落后于补更目标的机器", async () => {
+		const { port } = await listen((request, response) => {
+			response.setHeader("content-type", "application/json");
+			if (request.url?.startsWith("/api/releases?")) {
+				response.end(
+					JSON.stringify({
+						data: [
+							{
+								version: "1.2.3",
+								archives: {
+									"win-x64": { sha256: "a", size: 1, fileName: "w.zip" },
+									"linux-x64": { sha256: "b", size: 2, fileName: "l.zip" },
+								},
+								status: "done",
+								createdAt: "2026-08-18T00:00:00.000Z",
+								updatedAt: "2026-08-18T00:00:00.000Z",
+								clientStates: {},
+							},
+						],
+						total: 1,
+						page: 1,
+						pageSize: 100,
+						totalPages: 1,
+					}),
+				);
+				return;
+			}
+			response.end(
+				JSON.stringify([
+					clientInfo({ clientId: "c-old", name: "old-box", clientVersion: "1.0.0" }),
+					clientInfo({ clientId: "c-new", name: "new-box", clientVersion: "1.2.3" }),
+				]),
+			);
+		});
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runClientsCommand("list", [], {
+			paths,
+			processEnv,
+			log: (message) => lines.push(message),
+		});
+		const summary = lines.join("\n");
+		const oldLine = summary.split("\n").find((line) => line.includes("old-box"));
+		const newLine = summary.split("\n").find((line) => line.includes("new-box"));
+		expect(oldLine).toContain("yes");
+		expect(newLine).toContain("no");
+	});
+
+	it("没有补更目标时标记为不可判定而不是误报落后", async () => {
+		const { port } = await listen((request, response) => {
+			response.setHeader("content-type", "application/json");
+			if (request.url?.startsWith("/api/releases?")) {
+				response.end(
+					JSON.stringify({
+						data: [],
+						total: 0,
+						page: 1,
+						pageSize: 100,
+						totalPages: 0,
+					}),
+				);
+				return;
+			}
+			response.end(JSON.stringify([clientInfo({ clientVersion: "1.0.0" })]));
+		});
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runClientsCommand("list", [], {
+			paths,
+			processEnv,
+			log: (message) => lines.push(message),
+		});
+		const summary = lines.join("\n");
+		expect(summary).toContain("当前无补更目标");
+		const row = summary.split("\n").find((line) => line.includes("workstation"));
+		expect(row).not.toContain("yes");
 	});
 
 	it("--json 输出原始 ClientInfo 数组", async () => {

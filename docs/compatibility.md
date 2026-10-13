@@ -72,6 +72,8 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 ### 5.1 通常兼容
 
 - REST 响应新增可选字段；
+- Release `clientStates[clientId]` 的可选 `kind` 与 `attempts` 字段（补更失败分级与尝试次数）。旧记录缺失时按 `transient` 与 0 读取，因此历史失败记录会重新可重试；旧 Server 忽略这两个字段即可，新 Server 写入不影响旧消费者解析；
+- 新增 `POST /api/releases/:version/clients/:clientId/retry`（人工重试补更）与稳定错误码 `RELEASE_CLIENT_NOT_FOUND`、`RELEASE_RETRY_NOT_ALLOWED`；旧 CLI 不会调用该端点，旧 Server 对其返回 404；
 - Release `archives[platform]` 的可选 `storage` 字段（外部存储直连信息；缺失即 Local，新旧记录互读）；
 - Release archive 的可选 `availability` 字段（旧记录缺失时按 `available` 读取）；新记录可为 `available`、`deleting` 或 `cleaned`，下载/编排/安装消费者会对清理态 fail closed；
 - `0.2.1+` 新增独立 Release 上传会话 API；新 CLI 对旧 Server 的 404 会回退 legacy raw，引导升级兼容；
