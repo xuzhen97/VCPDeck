@@ -266,7 +266,9 @@ pi install git:github.com/xuzhen97/VCPDeck@v0.12.0
 
 Pi 克隆整个仓库，从 `skills/vcpdeck/SKILL.md` 发现 Skill；同目录 `vcpdeck.cjs` 是随 Tag 提交的 CLI 单文件构件。所有项目共享这一份安装。升级到新 Tag 时再次执行 `pi install ...@vX.Y.Z`，固定 Tag 不会由 `pi update --extensions` 自动推进。
 
-Skill 调用 CLI 时从 `SKILL.md` 解析 `vcpdeck.cjs` 的绝对路径，但必须保留 Pi 当前项目为 cwd，不得切换到 Skill 安装目录。这样 `D:/a` 与 `D:/b` 可以分别命中各自最近的 `.vcpdeck.json`；用户级 `~/.vcpdeck/cli/config.json`、项目选择器和 Git package 安装互不覆盖。
+同一份 `skills/vcpdeck/SKILL.md` 也由 DeepSeek Harness（DSH）消费：仓库根包声明 DSH bundle（`dsh/index.mjs` + `dsh/cordis.patch.yml`），插件只向宿主技能注册表注册 `vcpdeck` 技能，不复制 CLI、SDK 或业务逻辑，也不向用户技能目录同步文件。DSH 的技能正文与 CLI 绝对路径由插件在实际安装实例内计算，因此以「同仓库、同固定版本 Tag」分发；包含该入口的版本发布前，Pi 仍是唯一可用的宿主入口。该入口只提供调用能力，不在 VCPDeck 内托管 Agent 运行时（见 [ADR-0050](../adr/0050-dsh-skill-cli-consumption.md)）。
+
+Skill 调用 CLI 时必须保留**宿主当前任务/项目**为 cwd，不得切换到 Skill 目录、插件目录或 VCPDeck 安装仓库。这样 `D:/a` 与 `D:/b` 可以分别命中各自最近的 `.vcpdeck.json`；用户级 `~/.vcpdeck/cli/config.json`、项目选择器和各宿主的安装方式互不覆盖。命令执行环境需提供 Node.js 24+，并让 CLI 引用的凭据环境变量对该执行进程可见。
 
 `skills/vcpdeck/SKILL.md` 通过 CLI `env current` 取得环境权威摘要，不直接读取 JSON。后续每个 CLI 业务命令都复用同一环境解析结果，并在 Skill 中新增对应功能章节。Server/SDK 已有 API 不等于 CLI 命令已落地。
 
@@ -310,6 +312,8 @@ pnpm \
 - `frp/storage` 覆盖实例/映射表格与过滤、凭据字段脱敏、TCP/HTTP/HTTPS create、完整 Job 等待、delete、timeout、JSON 和后端状态输出；
 - `terminal shells/list/close` 覆盖 shell 探测、会话列表 `--status` 本地过滤和关闭流程（先取详情再删除）；
 - `completions bash/powershell` 覆盖命令树与环境名嵌入、配置缺失降级、未知类型拒绝和用法输出。
+
+DSH 技能注册入口的隔离测试位于 `dsh/index.test.mjs`，由根命令 `pnpm test:dsh` 运行；它不在 `pnpm -r test` 覆盖范围内（根包不是工作区成员），需在改动该入口或包分发声明时单独执行。包结构另有 `npm pack --dry-run` 与隔离 `pnpm add` 验证；真实 DSH profile 的加载验收按 [ADR-0050](../adr/0050-dsh-skill-cli-consumption.md) 单独授权执行。
 
 当前已知非能力：系统凭据存储、共享环境目录、交互式密码输入、Job 输出自动清理、exec script 模式，以及 FRP 实例写操作、Storage 后端切换、Client rename。
 

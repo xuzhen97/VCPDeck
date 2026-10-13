@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### Added
+
+- **DeepSeek Harness 插件入口**：仓库根包新增 DSH bundle（`dsh/index.mjs`、`dsh/cordis.patch.yml`），向宿主技能注册表注册 `vcpdeck` 技能并给出实际安装实例内的随包 CLI 绝对路径。Pi 与 DSH 共用同一份 `skills/vcpdeck/SKILL.md`，业务链路仍是 CLI → SDK → Server → Client，不新增运行组件、原生工具或界面，也不恢复已退役的 Agent 托管体系。根包版本改由 `scripts/inject-version.cjs` 随发版参数同步，使插件构件与 Tag 版本一致。**该入口需在包含它的版本发布后才能按 Tag 安装；`v0.19.2` 不含此入口。当前仅完成包结构、打包与隔离安装验证，尚未在真实 DSH profile 中完成加载与业务验收**（见 [ADR-0050](docs/adr/0050-dsh-skill-cli-consumption.md)）。
+
 ### Fixed
 
 - **Windows 卸载必然失败**：`scripts/uninstall-client.cjs` 调 `schtasks.exe /End` 时多传了 `/F`（`/End` 不支持 `/F`，只有 `/Delete` 支持），schtasks 以"无效参数"非零退出，随后 `Query` 判定任务仍存在 → 抛错"无法停止计划任务，拒绝继续卸载"。现已去掉 `/F`，并让测试 mock 忠实模拟该非零退出（此前 mock 对任何 `/End` 都返回 0，掩盖了缺陷）。**该修复需下次发版才会进入 Server 提供的安装/卸载资产。**

@@ -1,7 +1,24 @@
 {
   "name": "vcpdeck",
+  "version": "0.19.2",
   "private": true,
   "packageManager": "pnpm@10.26.0",
+  "exports": {
+    ".": "./dsh/index.mjs",
+    "./dsh": "./dsh/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dsh/index.mjs",
+    "dsh/cordis.patch.yml",
+    "skills/vcpdeck/SKILL.md",
+    "skills/vcpdeck/vcpdeck.cjs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./dsh/cordis.patch.yml"
+    }
+  },
   "scripts": {
     "build": "pnpm -r build",
     "test": "node scripts/test.cjs",
@@ -13,6 +30,7 @@
     "test:frp": "node scripts/test-frp.cjs",
     "test:cli": "node scripts/test-cli-capabilities.cjs",
     "test:vcp-plugin": "node scripts/test-vcp-plugin.cjs",
+    "test:dsh": "node --test dsh/index.test.mjs",
     "vcpdeck:link": "node scripts/link-cli.cjs"
   },
   "devDependencies": {

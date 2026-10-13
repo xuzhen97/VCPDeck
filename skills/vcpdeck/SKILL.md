@@ -1,6 +1,6 @@
 ---
 name: vcpdeck
-description: Operate VCPDeck (remote machines, Jobs, files, Terminal, FRP, Storage, Release) through its CLI. Use when the user asks to use VCPDeck from Pi: list Client machines and online status, query/diagnose/cancel Jobs, run remote commands, browse/read/write/transfer files, inspect FRP/Storage, manage Terminal sessions, or publish/update VCPDeck. Destructive operations require explicit user confirmation.
+description: Operate VCPDeck (remote machines, Jobs, files, Terminal, FRP, Storage, Release) through its CLI. Use when the user asks to use VCPDeck from an agent host such as Pi or DeepSeek Harness: list Client machines and online status, query/diagnose/cancel Jobs, run remote commands, browse/read/write/transfer files, inspect FRP/Storage, manage Terminal sessions, or publish/update VCPDeck. Destructive operations require explicit user confirmation.
 compatibility: Requires Node.js 24+, the bundled vcpdeck.cjs CLI beside this file, and network access to the VCPDeck Server. Individual capabilities may have additional requirements; Release packaging also requires the VCPDeck repository and pnpm 10.26+.
 ---
 
@@ -12,7 +12,7 @@ Skill 不实现 HTTP、认证、轮询或业务状态机。它调用同目录的
 
 ## 入口与能力发现
 
-先从本 `SKILL.md` 解析同目录 `vcpdeck.cjs` 的绝对路径，记为 `<vcpdeck-cli>`。执行时必须保持 Pi 当前项目为工作目录，**不得 `cd` 到 Skill/安装仓库目录**，否则 CLI 无法读取当前项目的 `.vcpdeck.json`：
+先从本 `SKILL.md` 解析同目录 `vcpdeck.cjs` 的绝对路径，记为 `<vcpdeck-cli>`。执行时必须保持宿主当前任务/项目为工作目录，**不得 `cd` 到 Skill 目录、插件目录或 VCPDeck 安装仓库**，否则 CLI 无法读取当前项目的 `.vcpdeck.json`：
 
 ```bash
 node "<vcpdeck-cli>" --help

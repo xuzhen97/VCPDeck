@@ -466,6 +466,7 @@ function createArchive(
 async function main(): Promise<void> {
 	const args = parseArgs(process.argv.slice(2));
 	const preparedFiles = [
+		"package.json",
 		"packages/shared/package.json",
 		"packages/sdk/package.json",
 		"packages/cli/package.json",

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * 更新发布版本：同步 Shared 运行时版本、包版本与 VCPDeckBridge 元数据。
- * 由 pack-release（pnpm release）在构建前调用。
+ * 更新发布版本：同步 Shared 运行时版本、包版本、根包版本（DSH 插件分发包）
+ * 与 VCPDeckBridge 元数据。由 pack-release（pnpm release）在构建前调用。
  *
  * 用法:
  *   node scripts/inject-version.cjs 1.2.1
@@ -26,6 +26,11 @@ try {
 		if (name === "sdk") manifest.peerDependencies["@vcpdeck/shared"] = version;
 		fs.writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`);
 	}
+
+	const rootManifestPath = path.resolve(__dirname, "../package.json");
+	const rootManifest = JSON.parse(fs.readFileSync(rootManifestPath, "utf8"));
+	rootManifest.version = version;
+	fs.writeFileSync(rootManifestPath, `${JSON.stringify(rootManifest, null, 2)}\n`);
 
 	const pluginManifestPath = path.resolve(
 		__dirname,

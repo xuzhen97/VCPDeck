@@ -105,6 +105,19 @@ node "<vcpdeck-cli>" env check
 
 `env check` 会通过 SDK 显示 Token 对应的实际身份，但不会输出 Token。修改个人用户名不会使 Token 环境失效；用户名/密码模式仅保留兼容。
 
+### DeepSeek Harness 插件
+
+DeepSeek Harness（DSH）可以通过本仓库的 DSH bundle 插件加载同一个 `vcpdeck` 技能，并调用同一份随包 CLI。该入口随源码提供，**尚未在真实 DSH profile 中完成加载与业务验收**，正式可用性以 [ADR-0050](docs/adr/0050-dsh-skill-cli-consumption.md) 的验证与退出条件为准。它只提供技能入口：业务操作仍然经 CLI → SDK → Server → Client，不在 VCPDeck 内托管任何 Agent 运行时。
+
+安装使用 DSH 官方的插件管理能力，指向本仓库的**固定版本 Tag**（具体语法以当前 DSH 版本的官方插件管理接口为准）。`v0.19.2` 及更早的 Tag **不包含**该插件入口，需在包含它的版本发布后再安装。
+
+使用要点：
+
+- 命令执行环境需提供 Node.js 24+，并让 `VCPDECK_*` 凭据环境变量对执行进程可见；环境注册与 `env check` 用法与上文 CLI 一致；
+- 调用 CLI 时保持 DSH 当前任务/项目为工作目录，否则项目级 `.vcpdeck.json` 不生效；
+- 技能与 CLI 路径由插件在实际安装实例内计算，不依赖 PATH 或全局同名命令；
+- 安装或升级插件后可能需要重启或新开会话，才能在会话技能菜单中看到它。
+
 ### SDK 与 Shared
 
 Node.js 24+、pnpm 10.26+ 的项目可从同一 Tag 安装 SDK 和协议类型：
