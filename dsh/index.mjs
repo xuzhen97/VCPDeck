@@ -102,7 +102,36 @@ async function buildDefinition(path, signal) {
 	const skill = parseSkill(
 		await readFile(path, { encoding: "utf8", signal }),
 	);
-	const runtime = [
+	const { rank: _rank, locator: _locator, ...summary } = buildCandidate(skill);
+	return { ...summary, content: `${skill.body}${renderRuntimeBlock()}` };
+}
+
+/**
+ * 由技能元数据构造 candidate 摘要。definition 与 candidate 必须同源，
+ * 否则宿主在用户显式调用路径上会读到缺失的 invocation 并抛错。
+ * @param {{ name: string, description: string }} skill 解析后的技能元数据
+ * @returns {object} candidate 摘要
+ */
+function buildCandidate(skill) {
+	return {
+		name: skill.name,
+		description: skill.description,
+		invocation: { modelInvocable: true, userInvocable: true },
+		source: "bundled",
+		provider: PROVIDER_NAME,
+		resourceBase: { kind: "directory", path: SKILL_DIR },
+		path: SKILL_PATH,
+		rank: SKILL_RANK,
+		locator: SKILL_PATH,
+	};
+}
+
+/**
+ * 构造附加到技能正文末尾的运行时说明。
+ * @returns {string} Markdown 片段
+ */
+function renderRuntimeBlock() {
+	return [
 		"",
 		"",
 		"## 已安装的 VCPDeck CLI",
@@ -114,15 +143,6 @@ async function buildDefinition(path, signal) {
 		"```",
 		"",
 	].join("\n");
-	return {
-		name: skill.name,
-		description: skill.description,
-		content: `${skill.body}${runtime}`,
-		source: "bundled",
-		provider: PROVIDER_NAME,
-		resourceBase: { kind: "directory", path: SKILL_DIR },
-		path: SKILL_PATH,
-	};
 }
 
 /**
@@ -135,16 +155,10 @@ export function apply(ctx) {
 	const provider = {
 		name: PROVIDER_NAME,
 		async list(options = {}) {
-			const definition = await buildDefinition(SKILL_PATH, options.signal);
-			const { content: _content, ...summary } = definition;
-			return [
-				{
-					...summary,
-					invocation: { modelInvocable: true, userInvocable: true },
-					rank: SKILL_RANK,
-					locator: SKILL_PATH,
-				},
-			];
+			const skill = parseSkill(
+				await readFile(SKILL_PATH, { encoding: "utf8", signal: options.signal }),
+			);
+			return [buildCandidate(skill)];
 		},
 		async get(candidate, options = {}) {
 			const locator = candidate?.locator ?? SKILL_PATH;

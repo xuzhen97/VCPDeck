@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- **DSH 插件技能被调用即崩溃**（`Cannot read properties of undefined (reading 'userInvocable')`）：插件 `get()` 返回的技能 definition 未携带 `invocation` 字段，而宿主对该字段的缺失是静默放行，错误直到用户显式调用 `/vcpdeck`、宿主无保护地读取 `skill.invocation.userInvocable` 时才暴露。现已改为与官方 `@deepseek-ai/dsh-skill-office` 一致：candidate 与 definition 由同一构造函数派生，definition 保留全部摘要字段；新增回归用例锁定该不变量。
 - **Windows 卸载必然失败**：`scripts/uninstall-client.cjs` 调 `schtasks.exe /End` 时多传了 `/F`（`/End` 不支持 `/F`，只有 `/Delete` 支持），schtasks 以"无效参数"非零退出，随后 `Query` 判定任务仍存在 → 抛错"无法停止计划任务，拒绝继续卸载"。现已去掉 `/F`，并让测试 mock 忠实模拟该非零退出（此前 mock 对任何 `/End` 都返回 0，掩盖了缺陷）。**该修复需下次发版才会进入 Server 提供的安装/卸载资产。**
 - **运维文档错误命令**：`docs/operations.md` §2 的 Windows Client 重启命令同样带了 `/F`（该行自 v0.18.2 起就存在）。已修正，并补充"任务是 `IgnoreNew`，必须先确认 State 为 `Ready` 再 `/Run`"以及按安装路径精确结束进程的兜底命令。
 

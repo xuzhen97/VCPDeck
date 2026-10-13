@@ -120,6 +120,26 @@ test("每次加载都重新读取技能正文", async (t) => {
 	assert.ok(!second.content.includes("\n# 正文\n"));
 });
 
+test("definition 保留 candidate 的调用控制字段", async (t) => {
+	const fixture = await createFixture();
+	t.after(() => rm(fixture.root, { recursive: true, force: true }));
+	const { apply } = await importEntry(fixture.entryPath);
+	const { ctx, state } = createStubContext();
+	const cleanup = apply(ctx);
+	t.after(cleanup);
+
+	const [candidate] = await state.provider.list({});
+	const definition = await state.provider.get(candidate, {});
+	// 宿主在用户显式调用路径上无保护地读取 definition.invocation.userInvocable
+	assert.deepEqual(definition.invocation, candidate.invocation);
+	assert.equal(definition.invocation.userInvocable, true);
+	assert.equal(definition.invocation.modelInvocable, true);
+	assert.equal(definition.name, candidate.name);
+	assert.equal(definition.description, candidate.description);
+	assert.equal(definition.provider, candidate.provider);
+	assert.equal(definition.source, candidate.source);
+});
+
 test("安装构件缺失时立即失败，不改用其他 CLI", async (t) => {
 	const fixture = await createFixture();
 	t.after(() => rm(fixture.root, { recursive: true, force: true }));
