@@ -237,7 +237,9 @@ function uninstallSystemClient(adapter) {
 		throw new Error("Client ID 缺失或非法，拒绝卸载");
 	}
 	// 停止并删除 SYSTEM 开机任务（任务存在但无法停止时 fail closed）。
-	const ended = adapter.spawn("schtasks.exe", ["/End", "/TN", WIN_SYSTEM_TASK, "/F"]);
+	// `/End` 不接受 `/F`（只有 `/Delete` 接受）；带 `/F` 会直接报“无效参数”并以非零退出，
+	// 导致后续 Query 判定任务存在而永远拒绝卸载。
+	const ended = adapter.spawn("schtasks.exe", ["/End", "/TN", WIN_SYSTEM_TASK]);
 	if (ended.status !== 0 && ended.status !== null) {
 		const exists = adapter.spawn("schtasks.exe", ["/Query", "/TN", WIN_SYSTEM_TASK]);
 		if (exists.status === 0) throw new Error(`无法停止计划任务 ${WIN_SYSTEM_TASK}，拒绝继续卸载`);

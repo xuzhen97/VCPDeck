@@ -39,11 +39,22 @@ Get-ScheduledTask -TaskPath '\VCPDeck\' -TaskName 'Client'
 Get-ScheduledTaskInfo -TaskPath '\VCPDeck\' -TaskName 'Client'
 ```
 
-重启 Client 只需重启任务本身：
+重启 Client 只需重启任务本身（注意 `/End` **不接受 `/F`**，只有 `/Delete` 接受）：
 
 ```powershell
-schtasks.exe /End /TN "\VCPDeck\Client" /F
+schtasks.exe /End /TN "\VCPDeck\Client"
 schtasks.exe /Run /TN "\VCPDeck\Client"
+```
+
+任务是 `IgnoreNew`：旧实例仍在运行时 `/Run` 只会“尝试”而**不会**新建实例，所以必须先确认已停止再启动。`/End` 在任务未运行时也会返回非零，属正常。
+
+```powershell
+# State 应为 Ready（若仍是 Running，用下面的兵底按路径精确定位进程后再 /Run）
+Get-ScheduledTask -TaskPath '\VCPDeck\' -TaskName 'Client' | Select-Object State
+# 兵底：只结束本安装根下的 node 进程（不按名称批量杀，不影响其他 PM2 应用）
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object { $_.ExecutablePath -like 'C:\ProgramData\VCPDeck\Client\*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
 若开机后 Client 未恢复，先看任务状态与运行结果，再看 Client 日志：

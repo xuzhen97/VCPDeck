@@ -2,6 +2,13 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## 未发布
+
+### Fixed
+
+- **Windows 卸载必然失败**：`scripts/uninstall-client.cjs` 调 `schtasks.exe /End` 时多传了 `/F`（`/End` 不支持 `/F`，只有 `/Delete` 支持），schtasks 以"无效参数"非零退出，随后 `Query` 判定任务仍存在 → 抛错"无法停止计划任务，拒绝继续卸载"。现已去掉 `/F`，并让测试 mock 忠实模拟该非零退出（此前 mock 对任何 `/End` 都返回 0，掩盖了缺陷）。**该修复需下次发版才会进入 Server 提供的安装/卸载资产。**
+- **运维文档错误命令**：`docs/operations.md` §2 的 Windows Client 重启命令同样带了 `/F`（该行自 v0.18.2 起就存在）。已修正，并补充"任务是 `IgnoreNew`，必须先确认 State 为 `Ready` 再 `/Run`"以及按安装路径精确结束进程的兜底命令。
+
 ## [0.19.2] - 2026-10-12
 
 ### Fixed（客户端自愈与注册加固）

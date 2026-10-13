@@ -39,6 +39,11 @@ function recordingAdapter() {
 		spawn: (command, args = []) => {
 			const key = `${command}:${args.join(" ")}`;
 			records.push(key);
+			// 忠实模拟 schtasks：`/End` 不接受 `/F`（只有 `/Delete` 接受），带它会报“无效参数”并以非零退出。
+			// 否则 mock 总是返回 0，会把“卸载永远失败”这类真 bug 掩盖掉。
+			if (command === "schtasks.exe" && args[0] === "/End" && args.includes("/F")) {
+				return { status: 2, stderr: "错误: 无效参数/选项 - '/F'。" };
+			}
 			if (command === "schtasks.exe" && args[0] === "/Create" && args.join(" ").includes("\\VCPDeck\\Client")) return { status: 0 };
 			if (command === "schtasks.exe" && args[0] === "/End" && args.join(" ").includes("\\VCPDeck\\Client")) return { status: 0 };
 			if (command === "schtasks.exe" && args[0] === "/Query" && args.join(" ").includes("\\VCPDeck\\Client")) return { status: 0, stdout: taskXml };
@@ -784,7 +789,7 @@ test("系统级卸载：停任务 → 删任务 → 保留 Client ID → 删运�
 	});
 	const actions = records;
 	assert.deepEqual(actions, [
-		"schtasks.exe:/End /TN \\VCPDeck\\Client /F",
+		"schtasks.exe:/End /TN \\VCPDeck\\Client",
 		"schtasks.exe:/Delete /TN \\VCPDeck\\Client /F",
 		"write:C:\\ProgramData\\VCPDeck\\client-id",
 		"icacls:C:\\ProgramData\\VCPDeck\\client-id",
