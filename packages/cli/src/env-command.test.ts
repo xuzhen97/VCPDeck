@@ -73,13 +73,13 @@ describe("env command", () => {
 		).toEqual({});
 	});
 
-	it("默认把 token-env 注册为 Bearer，并拒绝认证参数混用", async () => {
+	it("默认把 token 注册为 Bearer，并拒绝认证参数混用及废弃的 token-env", async () => {
 		const state = await context();
 		const commandContext = { paths: state.paths, log: () => undefined };
 		const args = [
 			"prod",
 			"--server=https://deck.example",
-			"--token-env=VCPDECK_PROD_TOKEN",
+			"--token=vcp_prod_token_123",
 		];
 		await runEnvCommand("add", args, commandContext);
 		await runEnvCommand(
@@ -88,7 +88,7 @@ describe("env command", () => {
 				"legacy",
 				"--server=https://legacy.example",
 				"--auth=bearer",
-				"--token-env=LEGACY_TOKEN",
+				"--token=vcp_legacy_token_456",
 			],
 			commandContext,
 		);
@@ -96,11 +96,11 @@ describe("env command", () => {
 			.environments;
 		expect(environments.prod.auth).toEqual({
 			type: "bearer",
-			tokenEnv: "VCPDECK_PROD_TOKEN",
+			token: "vcp_prod_token_123",
 		});
 		expect(environments.legacy.auth).toEqual({
 			type: "bearer",
-			tokenEnv: "LEGACY_TOKEN",
+			token: "vcp_legacy_token_456",
 		});
 		await expect(runEnvCommand("add", args, commandContext)).rejects.toThrow(
 			"环境已存在",
@@ -109,18 +109,29 @@ describe("env command", () => {
 			runEnvCommand(
 				"add",
 				[
+					"old",
+					"--server=https://deck.example",
+					"--token-env=VCPDECK_PROD_TOKEN",
+				],
+				commandContext,
+			),
+		).rejects.toThrow("--token-env 已废弃");
+		await expect(
+			runEnvCommand(
+				"add",
+				[
 					"bad",
 					"--server=https://deck.example",
 					"--auth=bearer",
 					"--username=admin",
-					"--token-env=TOKEN",
+					"--token=TOKEN",
 				],
 				commandContext,
 			),
 		).rejects.toThrow("不接受");
 	});
 
-	it("用 Bearer Token 检查 Server 并显示对应身份", async () => {
+	it("用 Bearer Token 检查 Server 并显示对应身份，输出脱敏", async () => {
 		let authorization: string | undefined;
 		const server = createServer((request, response) => {
 			authorization = request.headers.authorization;
@@ -147,18 +158,19 @@ describe("env command", () => {
 				[
 					"prod",
 					`--server=http://127.0.0.1:${address.port}`,
-					"--token-env=VCPDECK_PROD_TOKEN",
+					"--token=secret-token-123456",
 				],
 				{ paths: state.paths, log: () => undefined },
 			);
 			await runEnvCommand("check", ["--env=prod"], {
 				paths: state.paths,
-				processEnv: { VCPDECK_PROD_TOKEN: "secret-token" },
+				processEnv: {},
 				log: (message) => state.logs.push(message),
 			});
-			expect(authorization).toBe("Bearer secret-token");
+			expect(authorization).toBe("Bearer secret-token-123456");
 			expect(state.logs.join("\n")).toContain("身份: operator (Operator) [admin]");
-			expect(state.logs.join("\n")).not.toContain("secret-token");
+			expect(state.logs.join("\n")).toContain("token: secret-...****");
+			expect(state.logs.join("\n")).not.toContain("secret-token-123456");
 		} finally {
 			await new Promise<void>((resolve, reject) =>
 				server.close((error) => (error ? reject(error) : resolve())),

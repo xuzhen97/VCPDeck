@@ -26,8 +26,17 @@ type ResolvedAuthSummary =
 	  }
 	| {
 			type: "bearer";
-			credentialEnv: string;
+			maskedToken: string;
 	  };
+
+/** 对 Token 进行脱敏展示，避免屏幕与日志泄露完整凭据。 */
+export function maskToken(token: string): string {
+	if (!token) return "****";
+	if (token.length > 8) {
+		return `${token.slice(0, 7)}...****`;
+	}
+	return "****";
+}
 
 /** 不含秘密值的环境解析摘要。 */
 export interface ResolvedEnvironmentSummary {
@@ -148,7 +157,7 @@ export function formatEnvironmentSummary(
 			`认证: password (${environment.auth.username}, ${environment.auth.credentialEnv})`,
 		);
 	} else {
-		lines.push(`认证: bearer (${environment.auth.credentialEnv})`);
+		lines.push(`认证: bearer (token: ${environment.auth.maskedToken})`);
 	}
 	return lines.join("\n");
 }
@@ -216,14 +225,11 @@ function resolveRegisteredEnvironment(options: {
 		return resolved;
 	}
 
-	const token = processEnv[environment.auth.tokenEnv];
-	if (requireCredentials && !token) {
-		throw new Error(`环境 ${name} 缺少凭据变量: ${environment.auth.tokenEnv}`);
-	}
+	const token = environment.auth.token;
 	const resolved: ResolvedEnvironment = {
 		name,
 		server: environment.server,
-		auth: { type: "bearer", credentialEnv: environment.auth.tokenEnv },
+		auth: { type: "bearer", maskedToken: maskToken(token) },
 		source,
 	};
 	if (token) resolved.credentials = { type: "bearer", token };

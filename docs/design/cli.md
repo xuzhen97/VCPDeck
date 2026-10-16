@@ -43,21 +43,21 @@ CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 S
       "server": "http://127.0.0.1:3001",
       "auth": {
         "type": "bearer",
-        "tokenEnv": "VCPDECK_DEV_TOKEN"
+        "token": "vcp_token_dev_xxxxxx"
       }
     },
     "prod": {
       "server": "https://deck.example.com",
       "auth": {
         "type": "bearer",
-        "tokenEnv": "VCPDECK_PROD_TOKEN"
+        "token": "vcp_token_prod_xxxxxx"
       }
     }
   }
 }
 ```
 
-配置只保存凭据环境变量名，不保存密码、Token 或 Cookie。非 Windows 下 CLI 将目录和文件权限收紧为 `0700` / `0600`，写入使用同目录临时文件加 rename。
+Bearer Token 直接存储在用户级配置中（见 [ADR-0052](../adr/0052-cli-direct-bearer-token-storage.md)）。非 Windows 下 CLI 将目录和文件权限收紧为 `0700` / `0600`，写入使用同目录临时文件加 rename。控制台和摘要输出对 Token 进行脱敏处理。
 
 ### 2.2 项目级选择器
 
@@ -94,20 +94,20 @@ CLI 不直接控制目标机器，不持有 Server 业务状态机，也不在 S
 
 ## 4. 环境命令
 
-推荐在 Frontend `/settings/tokens` 为 CLI 创建独立 Token，保存到本机环境变量后注册环境：
+推荐在 Frontend `/settings/tokens` 为 CLI 创建独立 Token，直接注册命名环境：
 
 ```text
 vcpdeck env list
 vcpdeck env show <name>
 vcpdeck env current [--env=<name>]
 vcpdeck env check [--env=<name>]
-vcpdeck env add <name> --server=<url> --token-env=<VAR>
+vcpdeck env add <name> --server=<url> --token=<token>
 vcpdeck env add <name> --server=<url> --auth=password --username=<name> --password-env=<VAR>  # 兼容
 vcpdeck env remove <name>
 vcpdeck env use <name> --global|--local
 ```
 
-提供 `--token-env` 时默认推断为 Bearer；显式 `--auth=bearer` 保持兼容。Token 是服务端 Credential，与 Identity 关联，CLI 与 SDK 可共用；个人资料修改用户名不会改变现有 Token 所代表的身份。Token 明文只在创建时显示一次，不进入 CLI 配置。
+提供 `--token` 时默认推断为 Bearer；显式 `--auth=bearer` 保持兼容。Token 是服务端 Credential，与 Identity 关联，CLI 与 SDK 可共用；个人资料修改用户名不会改变现有 Token 所代表的身份。Token 直接保存在用户级配置中，输出时默认脱敏展示。
 
 行为：
 

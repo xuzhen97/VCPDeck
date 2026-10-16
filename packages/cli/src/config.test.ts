@@ -28,7 +28,7 @@ afterEach(async () => {
 });
 
 describe("CLI config parser", () => {
-	it("接受仅引用环境变量的 password/bearer 环境", () => {
+	it("接受直接配置 token 的 bearer 环境与引用环境变量的 password 环境", () => {
 		expect(
 			parseCliConfig({
 				version: 1,
@@ -44,7 +44,7 @@ describe("CLI config parser", () => {
 					},
 					prod: {
 						server: "https://deck.example.com",
-						auth: { type: "bearer", tokenEnv: "VCPDECK_PROD_TOKEN" },
+						auth: { type: "bearer", token: "vcp_token_prod_123456" },
 					},
 				},
 			}),
@@ -52,7 +52,10 @@ describe("CLI config parser", () => {
 			defaultEnvironment: "dev",
 			environments: {
 				dev: { server: "http://localhost:3001" },
-				prod: { server: "https://deck.example.com" },
+				prod: {
+					server: "https://deck.example.com",
+					auth: { type: "bearer", token: "vcp_token_prod_123456" },
+				},
 			},
 		});
 	});
@@ -64,14 +67,14 @@ describe("CLI config parser", () => {
 				environments: {
 					constructor: {
 						server: "https://deck.example.com",
-						auth: { type: "bearer", tokenEnv: "TOKEN" },
+						auth: { type: "bearer", token: "vcp_token_123" },
 					},
 				},
 			}),
 		).toThrow("保留名称");
 	});
 
-	it("拒绝未知字段、明文秘密和项目内 Server", () => {
+	it("拒绝未知字段、废弃的 tokenEnv 和项目内 Server", () => {
 		expect(() =>
 			parseCliConfig({
 				version: 1,
@@ -82,6 +85,20 @@ describe("CLI config parser", () => {
 							type: "bearer",
 							tokenEnv: "TOKEN",
 							token: "secret",
+						},
+					},
+				},
+			}),
+		).toThrow("未知字段");
+		expect(() =>
+			parseCliConfig({
+				version: 1,
+				environments: {
+					prod: {
+						server: "https://deck.example.com",
+						auth: {
+							type: "bearer",
+							tokenEnv: "TOKEN",
 						},
 					},
 				},

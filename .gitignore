@@ -29,6 +29,7 @@ frps.log
 .dsh/
 .graphflow-cache/
 graphflow-out/
+.knowcode/
 # 各包构建产物（tsc/esbuild 输出，可重新构建，不入库）
 packages/*/dist/
 

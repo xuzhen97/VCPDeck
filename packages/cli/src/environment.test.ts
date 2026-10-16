@@ -27,7 +27,7 @@ async function fixture(): Promise<{
 		environments: {
 			global: {
 				server: "https://global.example",
-				auth: { type: "bearer", tokenEnv: "GLOBAL_TOKEN" },
+				auth: { type: "bearer", token: "global-token" },
 			},
 			project: {
 				server: "https://project.example",
@@ -39,11 +39,11 @@ async function fixture(): Promise<{
 			},
 			flag: {
 				server: "https://flag.example",
-				auth: { type: "bearer", tokenEnv: "FLAG_TOKEN" },
+				auth: { type: "bearer", token: "flag-token-123456" },
 			},
 			envvar: {
 				server: "https://env.example",
-				auth: { type: "bearer", tokenEnv: "ENV_TOKEN" },
+				auth: { type: "bearer", token: "env-token" },
 			},
 		},
 	});
@@ -67,10 +67,7 @@ describe("resolveEnvironment", () => {
 		);
 		const processEnv: NodeJS.ProcessEnv = {
 			VCPDECK_ENVIRONMENT: "envvar",
-			FLAG_TOKEN: "flag-token",
-			ENV_TOKEN: "env-token",
 			PROJECT_PASSWORD: "project-password",
-			GLOBAL_TOKEN: "global-token",
 		};
 
 		expect(
@@ -79,10 +76,16 @@ describe("resolveEnvironment", () => {
 				paths,
 				processEnv,
 			}),
-		).toMatchObject({ name: "flag", server: "https://flag.example" });
+		).toMatchObject({
+			name: "flag",
+			server: "https://flag.example",
+			credentials: { type: "bearer", token: "flag-token-123456" },
+			auth: { type: "bearer", maskedToken: "flag-to...****" },
+		});
 		expect(await resolveEnvironment({ paths, processEnv })).toMatchObject({
 			name: "envvar",
 			server: "https://env.example",
+			credentials: { type: "bearer", token: "env-token" },
 		});
 		delete processEnv.VCPDECK_ENVIRONMENT;
 		expect(await resolveEnvironment({ paths, processEnv })).toMatchObject({
@@ -93,6 +96,7 @@ describe("resolveEnvironment", () => {
 		expect(await resolveEnvironment({ paths, processEnv })).toMatchObject({
 			name: "global",
 			server: "https://global.example",
+			credentials: { type: "bearer", token: "global-token" },
 		});
 	});
 
@@ -103,31 +107,34 @@ describe("resolveEnvironment", () => {
 		await expect(
 			resolveEnvironment({
 				paths,
-				processEnv: { GLOBAL_TOKEN: "global-token" },
+				processEnv: {},
 			}),
 		).rejects.toThrow("不是有效 JSON");
 		await writeFile(path, JSON.stringify({ version: 1, environment: "missing" }));
 		await expect(
 			resolveEnvironment({
 				paths,
-				processEnv: { GLOBAL_TOKEN: "global-token" },
+				processEnv: {},
 			}),
 		).rejects.toThrow("环境不存在: missing");
 	});
 
-	it("凭据变量缺失时失败，current 模式可只解析安全摘要", async () => {
+	it("Bearer 环境直接从配置获取凭据并支持脱敏摘要", async () => {
 		const { paths } = await fixture();
-		await expect(
-			resolveEnvironment({ environment: "flag", paths, processEnv: {} }),
-		).rejects.toThrow("FLAG_TOKEN");
-		const summary = await resolveEnvironment({
+		const resolved = await resolveEnvironment({
 			environment: "flag",
 			paths,
 			processEnv: {},
-			requireCredentials: false,
 		});
-		expect(summary.name).toBe("flag");
-		expect("credentials" in summary).toBe(false);
+		expect(resolved.name).toBe("flag");
+		expect(resolved.credentials).toEqual({
+			type: "bearer",
+			token: "flag-token-123456",
+		});
+		expect(resolved.auth).toEqual({
+			type: "bearer",
+			maskedToken: "flag-to...****",
+		});
 	});
 
 	it("--server 与命名环境冲突，直连模式保持兼容", async () => {

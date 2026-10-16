@@ -6,6 +6,7 @@
 
 ### Added
 
+- **CLI 支持直接存储 Bearer Token**：用户级 `~/.vcpdeck/cli/config.json` 支持直接存储 `token` 字符串，彻底消除对 `tokenEnv` 宿主环境变量中转的依赖，解决跨会话和子进程环境变量丢失导致的调用失败；新增 `vcpdeck env add <name> --server=<url> --token=<token>`；在环境摘要和列表中对 Token 进行脱敏展示（保留前缀 + `...****`）；项目级选择器保持不存凭据的纯净隔离。决策见 [ADR-0052](docs/adr/0052-cli-direct-bearer-token-storage.md)。
 - **客户端补更不再永久掉队**：补更失败改为分级处理（`transient` / `permanent`，类别由写入失败的代码路径决定，不解析文案），瞬时失败按递增退避（15 分钟 → 1 小时 → 6 小时）有限重试、最多 3 次，耗尽后转人工；新增**周期对账**（默认 5 分钟）作为「客户端重连注册」之外的第二驱动力，使失败后持续在线、不再重连的机器也能自愈；新增人工兜底 `release retry <client>`（`POST /api/releases/:version/clients/:clientId/retry`），忽略退避与上限但仍拒绝永久失败。决策见 [ADR-0051](docs/adr/0051-release-client-catch-up-retry.md)，语义见 [`release-and-update.md`](docs/design/release-and-update.md) §7.2。
 - **掉队机器可见**：`release status <version>` 追加逐台明细（机器名、状态、失败类别、尝试次数、原因）；`clients list` 增加补更目标与是否落后的标记（无可用目标时标记为不可判定，不误报）。
 - **DeepSeek Harness 插件入口**：仓库根包新增 DSH bundle（`dsh/index.mjs`、`dsh/cordis.patch.yml`），向宿主技能注册表注册 `vcpdeck` 技能并给出实际安装实例内的随包 CLI 绝对路径。Pi 与 DSH 共用同一份 `skills/vcpdeck/SKILL.md`，业务链路仍是 CLI → SDK → Server → Client，不新增运行组件、原生工具或界面，也不恢复已退役的 Agent 托管体系。根包版本改由 `scripts/inject-version.cjs` 随发版参数同步，使插件构件与 Tag 版本一致。**该入口需在包含它的版本发布后才能按 Tag 安装；`v0.19.2` 不含此入口。当前仅完成包结构、打包与隔离安装验证，尚未在真实 DSH profile 中完成加载与业务验收**（见 [ADR-0050](docs/adr/0050-dsh-skill-cli-consumption.md)）。

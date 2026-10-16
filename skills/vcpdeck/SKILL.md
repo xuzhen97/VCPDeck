@@ -53,17 +53,17 @@ node "<vcpdeck-cli>" env list
 node "<vcpdeck-cli>" env current
 ```
 
-推荐先在 Frontend `/settings/tokens` 为 CLI 创建独立 Token，立即保存到本机环境变量，再注册命名环境：
+推荐先在 Frontend `/settings/tokens` 为 CLI 创建独立 Token，直接注册命名环境：
 
 ```bash
 node "<vcpdeck-cli>" env add prod \
   --server=https://deck.example.com \
-  --token-env=VCPDECK_PROD_TOKEN
+  --token=vcp_token_xxxxxxxxxxxx
 node "<vcpdeck-cli>" env use prod --global
 node "<vcpdeck-cli>" env check
 ```
 
-`env check` 通过 SDK 请求 `/api/auth/me`，安全显示该 Token 对应的真实身份；个人资料修改用户名不会改变 Token 身份。`--auth=bearer` 仍兼容但可省略。用户名/密码环境仅为旧配置和临时兼容入口，不作为新环境首选。不得把密码或 Token 值写进配置、命令或对话。
+`env check` 通过 SDK 请求 `/api/auth/me`，安全显示该 Token 对应的真实身份；个人资料修改用户名不会改变 Token 身份。`--auth=bearer` 仍兼容但可省略。用户名/密码环境仅为旧配置和临时兼容入口，不作为新环境首选。CLI 会对 Token 自动脱敏展示。
 
 环境选择顺序为：显式 `--env`、`VCPDECK_ENVIRONMENT`、最近项目配置、全局默认。执行任何业务操作前必须先运行 `env current` 展示并核对环境名、Server 和来源，并运行 `env check` 验证 Server 可达、凭据有效及 Token 身份；有副作用操作还需取得用户确认。项目配置损坏、引用不存在环境或目标 Server 不符合预期时停止，不通过 `--server` 绕过。
 
@@ -71,7 +71,7 @@ node "<vcpdeck-cli>" env check
 
 1. 执行前先用 `--help` 核对命令和参数，不能根据 Server API 猜测 CLI 行为。
 2. 向用户展示目标 Server、操作对象和预期副作用；写入、删除、执行、发布、重启等操作必须在执行前取得明确确认。
-3. 密码、Cookie、Bearer Token、PSK、签名 URL、云端凭据和敏感正文不得写入命令、日志或回复。命名环境只保存凭据环境变量名，不保存值。
+3. 密码、Cookie、PSK、签名 URL、云端凭据和敏感正文不得写入命令、日志或回复。用户级配置支持直接保存 Bearer Token，CLI 输出默认脱敏展示。
 4. 非幂等 POST 的网络结果不明时先查询权威状态，不盲目重试。
 5. CLI 成功退出只证明该命令定义的同步阶段成功；涉及异步 Job、Release 或远程运行态时，继续按对应功能说明核对终态。
 6. 只报告安全摘要、资源 ID、稳定错误码、状态和下一步，不原样输出可能含敏感信息的 payload 或外部响应。

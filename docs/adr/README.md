@@ -112,3 +112,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0049](./0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md) | Accepted（2026-10-12，尚未实施） | 退出 Pi／DSH 专用集成与新增 session-host；同步精简页面，保留基础能力与通用 CLI／SDK；不迁移或重建 Agent 体系，不默认销毁历史数据或卸载外部程序 |
 | [0050](./0050-dsh-skill-cli-consumption.md) | Accepted（2026-10-13，尚未实施） | DSH 通过同仓库、同 Tag 的轻量 bundle 注册共用 Skill，复用预构建 CLI 消费基础能力；不恢复 Agent 托管体系 |
 | [0051](./0051-release-client-catch-up-retry.md) | Accepted（2026-10-14，尚未实施） | 客户端补更失败分级（瞬时／永久），Server 为唯一重试所有者并按递增退避有限重试；新增周期对账作为第二驱动力，与注册钩子共用互斥入口；人工重试兜底并补齐 CLI 可见性 |
+| [0052](./0052-cli-direct-bearer-token-storage.md) | Accepted | 修订 ADR-0017 第 2 条，允许在受权限保护的用户级 config.json 中直接存储 Bearer Token，废除环境变量间接引用，并在输出中默认脱敏 |

@@ -14,7 +14,7 @@ import {
 	type PasswordEnvironmentConfig,
 } from "./config.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
-import { formatEnvironmentSummary, resolveEnvironment } from "./environment.js";
+import { formatEnvironmentSummary, maskToken, resolveEnvironment } from "./environment.js";
 
 export interface EnvCommandContext {
 	paths?: ConfigPaths;
@@ -64,7 +64,7 @@ function envUsage(): string {
 		"  vcpdeck env show <name>",
 		"  vcpdeck env current [--env=<name>] [--server=<url>]",
 		"  vcpdeck env check [--env=<name>]",
-		"  vcpdeck env add <name> --server=<url> --token-env=<VAR>",
+		"  vcpdeck env add <name> --server=<url> --token=<token>",
 		"  兼容密码: ... --auth=password --username=<name> --password-env=<VAR>",
 		"  vcpdeck env remove <name>",
 		"  vcpdeck env use <name> --global|--local",
@@ -161,7 +161,7 @@ async function addEnvironment(
 	log: (message: string) => void,
 ): Promise<void> {
 	const { positionals, options } = parseCommandArgs(argv, {
-		value: ["server", "auth", "username", "password-env", "token-env"],
+		value: ["server", "auth", "username", "password-env", "token-env", "token"],
 	});
 	if (positionals.length !== 1) {
 		throw new Error(
@@ -171,11 +171,14 @@ async function addEnvironment(
 	const name = positionals[0];
 	assertEnvironmentName(name);
 	const server = requiredOption(options, "server");
+	if (options["token-env"] !== undefined) {
+		throw new Error("--token-env 已废弃，请直接使用 --token=<token>");
+	}
 	const auth =
 		stringOption(options, "auth") ??
-		(stringOption(options, "token-env") ? "bearer" : undefined);
+		(stringOption(options, "token") ? "bearer" : undefined);
 	if (!auth) {
-		throw new Error("缺少 --token-env（推荐）或 --auth=password 认证参数");
+		throw new Error("缺少 --token（推荐）或 --auth=password 认证参数");
 	}
 	const environment = buildEnvironment(server, auth, options);
 	const config = await loadCliConfig(paths.globalConfigPath);
@@ -269,11 +272,13 @@ function buildEnvironment(
 		if (options.username !== undefined || options["password-env"] !== undefined) {
 			throw new Error("bearer 认证不接受 --username/--password-env");
 		}
-		const tokenEnv = requiredOption(options, "token-env");
-		assertEnvironmentVariableName(tokenEnv);
+		const token = requiredOption(options, "token");
+		if (!token.trim()) {
+			throw new Error("缺少有效的 --token");
+		}
 		return {
 			server,
-			auth: { type: "bearer", tokenEnv },
+			auth: { type: "bearer", token: token.trim() },
 		} satisfies BearerEnvironmentConfig;
 	}
 	throw new Error("--auth 必须为 password 或 bearer");
@@ -289,7 +294,7 @@ function ownEnvironment(
 function authSummary(environment: EnvironmentConfig): string {
 	return environment.auth.type === "password"
 		? `password (${environment.auth.username}, ${environment.auth.passwordEnv})`
-		: `bearer (${environment.auth.tokenEnv})`;
+		: `bearer (token: ${maskToken(environment.auth.token)})`;
 }
 
 function requiredOption(

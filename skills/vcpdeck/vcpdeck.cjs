@@ -2910,12 +2910,11 @@ function parseEnvironment(value2, name) {
     };
   }
   if (auth.type === "bearer") {
-    assertOnlyKeys(auth, ["type", "tokenEnv"], `\u73AF\u5883 ${name}.auth`);
-    if (typeof auth.tokenEnv !== "string") {
-      throw new Error(`\u73AF\u5883 ${name}.auth.tokenEnv \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+    assertOnlyKeys(auth, ["type", "token"], `\u73AF\u5883 ${name}.auth`);
+    if (typeof auth.token !== "string" || !auth.token.trim()) {
+      throw new Error(`\u73AF\u5883 ${name}.auth.token \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
     }
-    assertEnvironmentVariableName(auth.tokenEnv);
-    return { server, auth: { type: "bearer", tokenEnv: auth.tokenEnv } };
+    return { server, auth: { type: "bearer", token: auth.token.trim() } };
   }
   throw new Error(`\u73AF\u5883 ${name}.auth.type \u5FC5\u987B\u4E3A password \u6216 bearer`);
 }
@@ -3057,6 +3056,14 @@ var init_arguments = __esm({
 });
 
 // dist/environment.js
+function maskToken(token) {
+  if (!token)
+    return "****";
+  if (token.length > 8) {
+    return `${token.slice(0, 7)}...****`;
+  }
+  return "****";
+}
 async function resolveEnvironment(options = {}) {
   const paths = options.paths ?? defaultConfigPaths();
   const processEnv = options.processEnv ?? process.env;
@@ -3130,7 +3137,7 @@ function formatEnvironmentSummary(environment) {
   if (environment.auth.type === "password") {
     lines.push(`\u8BA4\u8BC1: password (${environment.auth.username}, ${environment.auth.credentialEnv})`);
   } else {
-    lines.push(`\u8BA4\u8BC1: bearer (${environment.auth.credentialEnv})`);
+    lines.push(`\u8BA4\u8BC1: bearer (token: ${environment.auth.maskedToken})`);
   }
   return lines.join("\n");
 }
@@ -3182,14 +3189,11 @@ function resolveRegisteredEnvironment(options) {
     }
     return resolved2;
   }
-  const token = processEnv[environment.auth.tokenEnv];
-  if (requireCredentials && !token) {
-    throw new Error(`\u73AF\u5883 ${name} \u7F3A\u5C11\u51ED\u636E\u53D8\u91CF: ${environment.auth.tokenEnv}`);
-  }
+  const token = environment.auth.token;
   const resolved = {
     name,
     server: environment.server,
-    auth: { type: "bearer", credentialEnv: environment.auth.tokenEnv },
+    auth: { type: "bearer", maskedToken: maskToken(token) },
     source
   };
   if (token)
@@ -12457,7 +12461,7 @@ function envUsage() {
     "  vcpdeck env show <name>",
     "  vcpdeck env current [--env=<name>] [--server=<url>]",
     "  vcpdeck env check [--env=<name>]",
-    "  vcpdeck env add <name> --server=<url> --token-env=<VAR>",
+    "  vcpdeck env add <name> --server=<url> --token=<token>",
     "  \u517C\u5BB9\u5BC6\u7801: ... --auth=password --username=<name> --password-env=<VAR>",
     "  vcpdeck env remove <name>",
     "  vcpdeck env use <name> --global|--local"
@@ -12527,7 +12531,7 @@ async function checkEnvironment(argv, paths, processEnv, log) {
 }
 async function addEnvironment(argv, paths, log) {
   const { positionals, options } = parseCommandArgs(argv, {
-    value: ["server", "auth", "username", "password-env", "token-env"]
+    value: ["server", "auth", "username", "password-env", "token-env", "token"]
   });
   if (positionals.length !== 1) {
     throw new Error("\u7528\u6CD5: vcpdeck env add <name> --server=... --auth=password|bearer ...");
@@ -12535,9 +12539,12 @@ async function addEnvironment(argv, paths, log) {
   const name = positionals[0];
   assertEnvironmentName(name);
   const server = requiredOption(options, "server");
-  const auth = stringOption(options, "auth") ?? (stringOption(options, "token-env") ? "bearer" : void 0);
+  if (options["token-env"] !== void 0) {
+    throw new Error("--token-env \u5DF2\u5E9F\u5F03\uFF0C\u8BF7\u76F4\u63A5\u4F7F\u7528 --token=<token>");
+  }
+  const auth = stringOption(options, "auth") ?? (stringOption(options, "token") ? "bearer" : void 0);
   if (!auth) {
-    throw new Error("\u7F3A\u5C11 --token-env\uFF08\u63A8\u8350\uFF09\u6216 --auth=password \u8BA4\u8BC1\u53C2\u6570");
+    throw new Error("\u7F3A\u5C11 --token\uFF08\u63A8\u8350\uFF09\u6216 --auth=password \u8BA4\u8BC1\u53C2\u6570");
   }
   const environment = buildEnvironment(server, auth, options);
   const config = await loadCliConfig(paths.globalConfigPath);
@@ -12609,11 +12616,13 @@ function buildEnvironment(serverValue, authType, options) {
     if (options.username !== void 0 || options["password-env"] !== void 0) {
       throw new Error("bearer \u8BA4\u8BC1\u4E0D\u63A5\u53D7 --username/--password-env");
     }
-    const tokenEnv = requiredOption(options, "token-env");
-    assertEnvironmentVariableName(tokenEnv);
+    const token = requiredOption(options, "token");
+    if (!token.trim()) {
+      throw new Error("\u7F3A\u5C11\u6709\u6548\u7684 --token");
+    }
     return {
       server,
-      auth: { type: "bearer", tokenEnv }
+      auth: { type: "bearer", token: token.trim() }
     };
   }
   throw new Error("--auth \u5FC5\u987B\u4E3A password \u6216 bearer");
@@ -12622,7 +12631,7 @@ function ownEnvironment(environments, name) {
   return Object.hasOwn(environments, name) ? environments[name] : void 0;
 }
 function authSummary(environment) {
-  return environment.auth.type === "password" ? `password (${environment.auth.username}, ${environment.auth.passwordEnv})` : `bearer (${environment.auth.tokenEnv})`;
+  return environment.auth.type === "password" ? `password (${environment.auth.username}, ${environment.auth.passwordEnv})` : `bearer (token: ${maskToken(environment.auth.token)})`;
 }
 function requiredOption(options, name) {
   const value2 = stringOption(options, name);

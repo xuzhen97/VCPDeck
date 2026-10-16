@@ -38,11 +38,11 @@ describe("completions command", () => {
 			environments: {
 				prod: {
 					server: "http://localhost:3001",
-					auth: { type: "bearer", tokenEnv: "VCPDECK_PROD_TOKEN" },
+					auth: { type: "bearer", token: "test-token" },
 				},
 				staging: {
 					server: "http://localhost:4001",
-					auth: { type: "bearer", tokenEnv: "VCPDECK_STAGING_TOKEN" },
+					auth: { type: "bearer", token: "test-token" },
 				},
 			},
 		});
@@ -73,7 +73,7 @@ describe("completions command", () => {
 			environments: {
 				prod: {
 					server: "http://localhost:3001",
-					auth: { type: "bearer", tokenEnv: "VCPDECK_PROD_TOKEN" },
+					auth: { type: "bearer", token: "test-token" },
 				},
 			},
 		});

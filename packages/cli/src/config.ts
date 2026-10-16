@@ -26,12 +26,12 @@ export interface PasswordEnvironmentConfig {
 	};
 }
 
-/** Bearer 登录环境；Token 只通过环境变量引用。 */
+/** Bearer 登录环境；Token 直接存储在配置中。 */
 export interface BearerEnvironmentConfig {
 	server: string;
 	auth: {
 		type: "bearer";
-		tokenEnv: string;
+		token: string;
 	};
 }
 
@@ -256,12 +256,11 @@ function parseEnvironment(value: unknown, name: string): EnvironmentConfig {
 		};
 	}
 	if (auth.type === "bearer") {
-		assertOnlyKeys(auth, ["type", "tokenEnv"], `环境 ${name}.auth`);
-		if (typeof auth.tokenEnv !== "string") {
-			throw new Error(`环境 ${name}.auth.tokenEnv 必须是字符串`);
+		assertOnlyKeys(auth, ["type", "token"], `环境 ${name}.auth`);
+		if (typeof auth.token !== "string" || !auth.token.trim()) {
+			throw new Error(`环境 ${name}.auth.token 必须是非空字符串`);
 		}
-		assertEnvironmentVariableName(auth.tokenEnv);
-		return { server, auth: { type: "bearer", tokenEnv: auth.tokenEnv } };
+		return { server, auth: { type: "bearer", token: auth.token.trim() } };
 	}
 	throw new Error(`环境 ${name}.auth.type 必须为 password 或 bearer`);
 }

@@ -22,7 +22,7 @@ async function fixture(port: number): Promise<{
 		environments: {
 			test: {
 				server: `http://127.0.0.1:${port}`,
-				auth: { type: "bearer", tokenEnv: "VCPDECK_TEST_TOKEN" },
+				auth: { type: "bearer", token: "vcp_test_token" },
 			},
 		},
 	});
