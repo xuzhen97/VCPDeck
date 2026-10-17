@@ -21,17 +21,18 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "test": "node scripts/test.cjs",
+    "test": "node scripts/tests/e2e/test.cjs",
+    "test:scripts": "node --test scripts/tests/unit/*.test.cjs && tsx --test scripts/tests/unit/*.test.ts",
     "dev": "pnpm --filter @vcpdeck/shared --filter @vcpdeck/sdk build && pnpm --parallel --filter @vcpdeck/shared --filter @vcpdeck/frontend --filter @vcpdeck/server dev",
     "dev:all": "pnpm --filter @vcpdeck/shared --filter @vcpdeck/sdk build && pnpm --parallel --filter @vcpdeck/shared --filter @vcpdeck/frontend --filter @vcpdeck/server --filter @vcpdeck/client dev",
     "lint": "npx --yes @biomejs/biome@^2 lint packages scripts",
-    "release": "npx tsx scripts/pack-release.ts",
-    "download:frp": "npx tsx scripts/download-frp.ts",
-    "test:frp": "node scripts/test-frp.cjs",
-    "test:cli": "node scripts/test-cli-capabilities.cjs",
-    "test:vcp-plugin": "node scripts/test-vcp-plugin.cjs",
+    "release": "npx tsx scripts/build/pack-release.ts",
+    "download:frp": "npx tsx scripts/build/download-frp.ts",
+    "test:frp": "node scripts/tests/manual/test-frp.cjs",
+    "test:cli": "node scripts/tests/e2e/test-cli-capabilities.cjs",
+    "test:vcp-plugin": "node scripts/tests/e2e/test-vcp-plugin.cjs",
     "test:dsh": "node --test dsh/index.test.mjs",
-    "vcpdeck:link": "node scripts/link-cli.cjs"
+    "vcpdeck:link": "node scripts/dev/link-cli.cjs"
   },
   "devDependencies": {
     "@types/archiver": "^8.0.0",

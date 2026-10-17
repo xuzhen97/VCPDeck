@@ -333,7 +333,7 @@ DSH 技能注册入口的隔离测试位于 `dsh/index.test.mjs`，由根命令 
 
 ```bash
 pnpm vcpdeck:link                              # 默认指向仓库构建产物 packages/cli/dist/index.js
-node scripts/link-cli.cjs --target=<file>     # 改指其他入口（如 Skill 内 vcpdeck.cjs 单文件包）
+node scripts/dev/link-cli.cjs --target=<file>     # 改指其他入口（如 Skill 内 vcpdeck.cjs 单文件包）
 ```
 
 向 Node 可执行文件所在目录写入两个垫片：`vcpdeck.cmd`（CMD/PowerShell）与无扩展名 `vcpdeck`（Git Bash/MSYS）；不经 npm/pnpm link，不触碰 pnpm store，入口文件更新即时生效。Git Bash/MSYS 垫片在启动 Windows `node.exe` 前设置 `MSYS2_ARG_CONV_EXCL='*'` 和 `MSYS_NO_PATHCONV=1`，防止 `/root/...` 等远端 POSIX 路径被宿主转换。直接执行 `node <vcpdeck.cjs>` 不经过该垫片，调用方仍需显式设置 `MSYS_NO_PATHCONV=1`。卸载即删除两个垫片。
@@ -354,4 +354,4 @@ node -e 'const u="https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/script
 node -e "const u='https://raw.githubusercontent.com/xuzhen97/VCPDeck/main/scripts/install-cli.cjs';const g=()=>fetch(u).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()});(async()=>{let t;for(let i=0;i<3;i++){try{t=await g();break}catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1500))}}eval(t)})().catch(e=>{console.error('安装失败:',String(e));process.exit(1)})" -- --tag=v0.8.17
 ```
 
-脚本从 GitHub raw 下载随 tag 提交的单文件 CLI 包（skills/vcpdeck/vcpdeck.cjs，esbuild 打包零 npm 依赖）到 `~/.vcpdeck/bin`，生成双垫片并自动配置 PATH（Windows 写用户 PATH；POSIX 追加 ~/.bashrc），最后自验收 `--version`。推荐固定 `--tag=<版本>`；私有仓库 raw 需凭据，可改用 git clone 后 `node scripts/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs`。
+脚本从 GitHub raw 下载随 tag 提交的单文件 CLI 包（skills/vcpdeck/vcpdeck.cjs，esbuild 打包零 npm 依赖）到 `~/.vcpdeck/bin`，生成双垫片并自动配置 PATH（Windows 写用户 PATH；POSIX 追加 ~/.bashrc），最后自验收 `--version`。推荐固定 `--tag=<版本>`；私有仓库 raw 需凭据，可改用 git clone 后 `node scripts/dev/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs`。

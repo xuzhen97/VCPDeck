@@ -37,9 +37,14 @@ vcpdeck/
 │   └── launcher/     # Server/Client 进程守护与更新器
 ├── skills/
 │   └── vcpdeck/      # Skill 描述；CLI 构建产物写入此处
-├── scripts/          # 构建、下载 FRP、coturn 安装与集成测试脚本
+├── scripts/          # 根目录保留公开安装/卸载/升级入口
+│   ├── build/        # 构建、版本注入、FRP 下载与发布装配
+│   ├── dev/          # 开发启动、CLI 垫片与真实本地 frps
+│   └── tests/        # unit / e2e / manual / helpers
 └── docs/             # 架构、协议、实现与验证文档
 ```
+
+scripts 逐文件用途、依赖与副作用见 [脚本清单](../scripts/README.md)；`pnpm test:scripts` 仅收 Node/TSX 离线回归，Shell 和真实网络/云服务/系统安装验证单列，不因归到 tests 就自动安全。
 
 依赖方向以共享协议为中心：`shared` 不依赖其他内部包；`sdk` 只依赖 `shared`；Frontend 和 CLI 消费 `sdk` 与 `shared`；Server、Client、Launcher 直接消费 `shared`。内部包通过 package export 复用，不跨包引用源码；运行时之间通过 REST、Socket.IO、SSE 和发布构件交互。
 

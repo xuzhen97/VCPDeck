@@ -1418,8 +1418,10 @@ Token 在 Frontend `/settings/tokens` 创建并与 Identity 关联；CLI 与 SDK
 | Frontend API 与页面 | `packages/frontend/src/api/`, `packages/frontend/src/pages/` |
 | Release 上传 CLI | `packages/cli/src/index.ts` |
 | VCPDeck CLI 总 Skill（当前含 Release/自更新功能） | `skills/vcpdeck/SKILL.md` |
-| 通用集成测试 | `scripts/test.cjs` |
-| FRP 集成测试 | `scripts/test-frp.cjs` |
+| 通用集成测试 | [scripts/tests/e2e/test.cjs](../scripts/tests/e2e/test.cjs)（隔离 DB，但强杀 3001 占用者） |
+| FRP 集成测试 | [scripts/tests/manual/test-frp.cjs](../scripts/tests/manual/test-frp.cjs)（开发库全量删除 frpMappings，仅专用可丢弃环境） |
+
+脚本逐项用途、依赖与副作用见 [脚本清单](../scripts/README.md)；离线回归与真实进程/云服务验收必须分开选择。
 
 ## 11. 交互式终端（Terminal Tab）
 

@@ -2,7 +2,7 @@
 
 > 状态：Current｜维护责任：网络/Client 维护者｜最后核验：2026-09-19｜适用版本：当前 `main`
 >
-> 事实来源：`packages/shared/src/tunnel.ts`、`packages/server/src/tunnel/`、`packages/server/src/events/app.gateway.ts`、`packages/server/src/events/client.gateway.ts`、`packages/client/src/tunnel/`、`packages/frontend/src/tunnel/`、`scripts/install-coturn.sh`、`scripts/pack-release.ts`
+> 事实来源：`packages/shared/src/tunnel.ts`、`packages/server/src/tunnel/`、`packages/server/src/events/app.gateway.ts`、`packages/server/src/events/client.gateway.ts`、`packages/client/src/tunnel/`、`packages/frontend/src/tunnel/`、`scripts/install-coturn.sh`、`scripts/build/pack-release.ts`
 
 本文描述当前已经实现的 Browser ↔ Client WebRTC DataChannel 回环 TCP 隧道。字段级事件与 parser 以 Shared 和 [`protocols.md`](../protocols.md) 为准；长期决策（DataChannel 承载 TCP 字节流、coturn TURN 兜底、secret 文件隔离、Client 仅连回环）见 [`ADR-0026`](../adr/0026-browser-client-webrtc-tcp-tunnel.md)。
 

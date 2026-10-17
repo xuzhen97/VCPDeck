@@ -33,7 +33,7 @@
 
 | 组件 | 当前职责 |
 | --- | --- |
-| `scripts/pack-release.ts` | 同步 Shared/SDK/CLI/VCPDeckBridge 与运行时版本、构建 Shared/SDK/CLI/VCPDeckBridge/Server/Client/Frontend/Launcher、生成并验证 `skills/vcpdeck/vcpdeck.cjs`、重建插件商店 `dist/VCPDeckBridge.zip`、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
+| [`scripts/build/pack-release.ts`](../../scripts/build/pack-release.ts) | 同步 Shared/SDK/CLI/VCPDeckBridge 与运行时版本、构建 Shared/SDK/CLI/VCPDeckBridge/Server/Client/Frontend/Launcher、生成并验证 `skills/vcpdeck/vcpdeck.cjs`、重建插件商店 `dist/VCPDeckBridge.zip`、esbuild 单文件打包、组装最小外部依赖与 FRP、生成 manifest、archiver 产出 zip 并计算 SHA-256（详见 ADR-0012；Frontend 随 server 构件见 ADR-0013） |
 | CLI `release upload/status/wait` | 解析命名/项目环境（ADR-0017）、参数与文件名，读取本地 archive、计算 SHA-256 和输出安全进度；Alibaba 模式按 Server 签发的分片 URL 直接 PUT 到 Provider，Local/旧 Server 引导使用 raw stream；`wait` 仅重试安全 GET，并同时验收 Server 版本、Release 与 Client 明细 |
 | `ReleaseController` / `ReleaseUploadController` | Release 列表、Local raw 上传、外部直传会话创建/刷新/完成、构件下载和自动触发编排 |
 | `ReleaseUploadService` / `ReleaseService` | 持久化上传会话与 Release、登记 Provider 元数据、状态转换和 Client 更新明细 |
@@ -421,7 +421,7 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 - 数据库升级后应用回退；
 - Windows/Linux 真实构件从上传到 Server/Client 更新的全链路演练。
 
-详细命令和发布验收见 [`testing.md`](../testing.md)。当前 `scripts/smoke-launcher.cjs` 只证明 Launcher 局部流程，不替代真实 Server/Client 和数据库升级演练。
+详细命令和发布验收见 [`testing.md`](../testing.md)。当前 [`scripts/tests/e2e/smoke-launcher.cjs`](../../scripts/tests/e2e/smoke-launcher.cjs) 只证明 Launcher 局部流程，不替代真实 Server/Client 和数据库升级演练。
 
 ## 14. 扩展规则与已知缺口
 

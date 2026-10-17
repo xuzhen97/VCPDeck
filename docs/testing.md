@@ -17,11 +17,12 @@
 | CLI 单元/本地集成测试 | Vitest，`packages/cli/src/*.test.ts` | 多环境严格配置、选择优先级、项目查找、凭据引用、命令与 Release SDK 接线 |
 | Frontend 组件测试 | Vitest + Testing Library + jsdom | 路由、状态、交互、敏感信息不渲染 |
 | 包内集成测试 | `*.integration.test.ts` | Server Gateway/Broker、Client、Terminal |
-| 项目 E2E | `scripts/test.cjs` | 真实 Server + mock/真实 Client + REST/WS |
-| CLI 能力 E2E | `scripts/test-cli-capabilities.cjs` | 真实 Server + Client 上驱动 CLI 构建产物，逐域验证 clients/jobs/files/frp/storage/terminal/pi 与错误路径（临时物全部隔离在 `.tmp/cli-e2e/`） |
-| VCP 插件 E2E | `scripts/test-vcp-plugin.cjs` | 真实 VCPToolBox `ToolCallParser` 解析工具块 + 隔离 Server/Client/FRPS；22 个动作及公开 Storage Share 下载、图片预览、撤销删除锁验证（临时物隔离在 `.tmp/vcp-plugin-e2e/`） |
-| FRP E2E | `scripts/test-frp.cjs` | 真实 frps/frpc、TCP/HTTP 映射 |
-| Launcher 冒烟 | `scripts/smoke-launcher.cjs` | prepare/apply、探活、失败回退 |
+| 脚本级离线回归 | [scripts/tests/unit/](../scripts/README.md#6-tests离线回归与公共-helper) | `pnpm test:scripts` 运行 Node/TSX；夹具、adapter、临时 SQLite/目录及 loopback；Shell 单列 |
+| 项目 E2E | [scripts/tests/e2e/test.cjs](../scripts/tests/e2e/test.cjs) | 真实 Server + mock/真实 Client + REST/WS；隔离 DB，但强杀 3001 占用者 |
+| CLI 能力 E2E | [scripts/tests/e2e/test-cli-capabilities.cjs](../scripts/tests/e2e/test-cli-capabilities.cjs) | 真实 Server + Client 驱动 CLI 构建产物；隔离 DB/假 HOME 与文件夹具，仍有端口终止和真实远端文件操作 |
+| VCP 插件 E2E | [scripts/tests/e2e/test-vcp-plugin.cjs](../scripts/tests/e2e/test-vcp-plugin.cjs) | 真实外部 VCPToolBox、Server/Client/FRPS；隔离 DB/沙箱，需构建和外部环境，不是离线回归 |
+| FRP E2E（手工） | [scripts/tests/manual/test-frp.cjs](../scripts/tests/manual/test-frp.cjs) | 真实 frps/frpc、TCP/HTTP；**使用开发库、删除全部 frpMappings、终止端口占用进程** |
+| Launcher 冒烟 | [scripts/tests/e2e/smoke-launcher.cjs](../scripts/tests/e2e/smoke-launcher.cjs) | prepare/apply、探活、失败回退；PowerShell、3999 端口和临时进程 |
 | 手工/环境验收 | `docs/verification/` | Windows PTY、外部存储、真实网络和发布演练 |
 
 ## 2.5 集成 / 真实环境测试方法论（跨网络 / 原生依赖 / 第三方服务）
@@ -57,6 +58,7 @@
 ```bash
 pnpm install
 pnpm -r test
+pnpm test:scripts
 pnpm lint
 pnpm build
 pnpm test
@@ -64,7 +66,14 @@ pnpm test
 
 `pnpm lint` 由根目录 `biome.json` 驱动（Biome，仅 linter 不含格式化；覆盖 `packages/*/src` 与 `scripts`）：错误级诊断阻塞门禁；降级为 warning 的规则（NestJS DI 未使用参数、noExplicitAny、非空断言等）为已知技术债，新增代码不应新增此类告警。
 
-脚本级自检：`bash scripts/install-coturn.test.sh`（coturn 发行版/地址/IPv4 纯函数）与 `pnpm exec tsx scripts/pack-release-deps.test.ts`（node-datachannel 双平台离线装配与平台裁剪）。
+`pnpm test:scripts` 仅运行 Node/TSX 离线脚本回归，不包含 Shell、真实 FRP、云盘、PTY 或系统安装；可能启动临时子进程、SQLite、loopback 服务并写删夹具。Shell 回归需 Bash，单列运行：
+
+```bash
+bash scripts/tests/unit/install-client-bootstrap.test.sh
+bash scripts/tests/unit/install-coturn.test.sh
+```
+
+发布依赖离线自检也可单跑 `pnpm exec tsx scripts/tests/unit/pack-release-deps.test.ts`。各文件用途、依赖、副作用及保留的公开安装根路径见 [脚本清单](../scripts/README.md)。
 
 
 按包：
@@ -79,7 +88,7 @@ pnpm --filter @vcpdeck/frontend test
 pnpm --filter @vcpdeck/launcher test
 ```
 
-FRP：
+真实 FRP 全链路（**仅专用可丢弃环境**；当前会使用开发库、删除全部 `frpMappings`，并终止 `3001` 及测试 FRPS 相关端口占用进程；先备份，不能与开发/生产实例并行）：
 
 ```bash
 pnpm download:frp
@@ -91,19 +100,28 @@ Launcher：
 
 ```bash
 pnpm --filter @vcpdeck/launcher build
-node scripts/smoke-launcher.cjs
+node scripts/tests/e2e/smoke-launcher.cjs
 ```
 
-`pnpm test` 会使用 3001 端口并重建隔离测试数据库；执行前不要让开发 Server 占用端口。FRP 测试输出 `SKIP` 不算通过。
+`pnpm test` 使用隔离临时数据库，但会强制停止 3001 占用进程；`pnpm test:cli` 同样不能与开发 Server 并行。它们的 DB 隔离不能推广到手工 FRP 脚本。FRP 输出 `SKIP` 不算通过。Launcher smoke 当前依赖 PowerShell 构造 ZIP，部分失败出口可能绕过 finally，结束后需核对进程、3999 端口和临时目录。
+
+只需为本地集成联调启动真实 frps 时，不必运行上述破坏性 FRP 脚本：
+
+```bash
+pnpm download:frp
+node scripts/dev/start-test-frps.cjs --port=17000 --dashboard-port=17500 --token=<local-test-token> --clean
+```
+
+替换为专用本地测试 Token，并保持该终端运行，按 Ctrl+C 停止。该入口真实启动 frps；Dashboard 绑定全部接口、使用 `admin/admin`，配置/输出含明文测试 Token，只用于隔离可信本地网络。实际环境变量和 Server 接线见 [脚本清单](../scripts/README.md#保留启动真实本地-frps) 与 [README](../README.md#启动本地-frps-测试实例)。
 
 CLI 能力端到端：
 
 ```bash
 pnpm build          # 需先构建 server/client/cli
-test:cli            # 即 node scripts/test-cli-capabilities.cjs
+pnpm test:cli       # 即 node scripts/tests/e2e/test-cli-capabilities.cjs
 ```
 
-AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明确同意后以 `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=<同意文本>` 前缀运行；人工 shell 无需此变量。
+隔离数据库 helper 在系统临时目录创建带随机 owner marker 的专用 DB，并在初始化/清理前校验归属、URL 与路径；当前使用 Prisma `db push`，不应笼统写成所有测试都执行 migrate/reset。若工具阻止数据库操作，应先核实命令、目标和操作者授权，不把 consent 环境变量当作通用绕过手段。
 
 ## 4. 变更对应测试
 
@@ -116,7 +134,7 @@ AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明�
 | 远程文件/路径 | 双端 parser、Windows/Linux 认证 root、UNC/盘符、symlink/junction、不存在目标父链、文本上限、覆盖/临时文件、大小/SHA、取消、断流、失败后下一 Job 派发、重连和 Socket/Job 归属 |
 | Terminal | 协议 parser、operator/viewer/token、snapshot/output 同序列、上游 gap/resync、UTF-8 上限、持续输入速率、generation、SQLite 状态、首次/重复 attach-detach TTL、expired 上报、真实 PTY 和进程树 |
 | Storage Provider | 签名篡改/过期、上传下载、Provider 故障、对象永久缺失分类、公开分享和 File 保留锁 |
-| Storage 阿里云盘真环境验收 | `node scripts/test-release-alibaba.cjs`（ADR-0019 一键端到端）：脚本自建同一临时 DB、Server/Client Launcher，按会话把两个 Release 分片直接 PUT Provider，验证 Server 本地无目标 zip、下载 302、更新与清理；仅首次输入 clientId、浏览器 OAuth code 或 3001 端口冲突时需人工介入 |
+| Storage 阿里云盘真环境验收 | `node scripts/tests/manual/test-release-alibaba.cjs`（ADR-0019 一键端到端）：脚本自建同一临时 DB、Server/Client Launcher，按会话把两个 Release 分片直接 PUT Provider，验证 Server 本地无目标 zip、下载 302、更新与清理；仅首次输入 clientId、浏览器 OAuth code 或 3001 端口冲突时需人工介入 |
 | FRP | 实例/default/迁移/parser/secret、端口、单 Client 多实例、真实 FRPS/frpc、退出/断线/重启/删除孤儿 E2E |
 | Auth/Security | 密码/Cookie/Bearer、禁用/启用、撤销/过期、修改密码、既有 Socket、最后 admin、parser/限速、Actor、防泄漏 |
 | Release/Launcher | Shared 严格 parser、Local SHA/raw、Alibaba 会话持久化/恢复/分片刷新/Provider 安全错误/URL 不落库、CLI 实际发送字节 SHA、Server 本地无正文、Windows/Linux 格式、drain、Server 恢复、Client 补更、数据库兼容和回退 |
@@ -133,14 +151,16 @@ AI Agent 会话运行时，Prisma 会拦截测试库 migrate，需操作者明�
 - 文件测试使用小型合成内容并验证清理；
 - 日志断言不得输出 command/script/file content；
 - 外部服务测试使用专用测试账户和最小权限目录；
-- E2E 失败后必须清理子进程、端口、临时 DB 和 FRP 映射。
+- E2E 失败后必须清理子进程、端口、临时 DB 和 FRP 映射；脚本里的“自动清理”不是所有异常出口都能清理的保证；
+- 真实云盘脚本会修改 OAuth/Storage 配置或上传、删除云对象；发布云盘脚本虽用临时 DB，仍会真实打包并注入版本，不能纳入离线门禁；
+- 永久链接旧脚本没有实际重启 Server，早期失败可能退出 0 且输出签名链接；终端旧脚本创建真实 PTY，存在无界 ACK 等待/缺 finally 清理。这些手工入口不能单凭退出码当作正式验收，逐项见 [脚本清单](../scripts/README.md#7-跨进程与手工入口必须显式选择)。
 
 ## 6. CI 建议门禁
 
 每个 PR：
 
 1. 格式/lint；
-2. 受影响包类型检查和单元测试；
+2. 受影响包类型检查、单元测试和 `pnpm test:scripts`（Shell 回归按环境单列）；
 3. 全量 `pnpm build`；
 4. 核心 `pnpm test`；
 5. secret scan、依赖漏洞和静态安全检查；
@@ -186,7 +206,7 @@ Release 不得只凭构建成功发布。至少确认：
 - 失败、跳过项和已知限制；
 - 验收人。
 
-- `scripts/test-release-alibaba.cjs`：ADR-0019 发布构件向阿里云盘上传/下载双向直连的唯一交互入口。直接运行后自动打包基线/目标版本、用 `install.cjs` 安装并启动隔离的 Server/Client Launcher、在同一临时 DB 中完成阿里云盘授权、按会话分片 PUT 两个平台构件、验证 `storage.mode=direct`、Server Local Release 目录无目标 zip与下载 302、等待 Server/Client 自更新、删除本测试云端对象并清理本测试进程/目录。仅在缺少 clientId、浏览器 OAuth code 或 3001 端口被其他进程占用时暂停请人处理。
+- `scripts/tests/manual/test-release-alibaba.cjs`：ADR-0019 发布构件向阿里云盘上传/下载双向直连的唯一交互入口。直接运行后自动打包基线/目标版本、用 `install.cjs` 安装并启动隔离的 Server/Client Launcher、在同一临时 DB 中完成阿里云盘授权、按会话分片 PUT 两个平台构件、验证 `storage.mode=direct`、Server Local Release 目录无目标 zip与下载 302、等待 Server/Client 自更新、删除本测试云端对象并清理本测试进程/目录。仅在缺少 clientId、浏览器 OAuth code 或 3001 端口被其他进程占用时暂停请人处理。
 
 验证文档是时间点证据，不是永久“已支持”声明。支持范围以 `compatibility.md` 和当前 CI 矩阵为准。
 

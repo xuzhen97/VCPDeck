@@ -46,7 +46,7 @@ VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server�
 - [协议说明](docs/protocols.md) — REST、Socket.IO、SSE 与兼容规则
 - [兼容策略](docs/compatibility.md) — 组件版本、升级顺序与破坏性变更规则
 - [部署指南](docs/deployment.md) / [运维手册](docs/operations.md) / [安全模型](docs/security.md)
-- [测试策略](docs/testing.md) / [CLI 与多环境配置](docs/design/cli.md) / [架构决策](docs/adr/README.md) / [路线图](docs/roadmap.md)
+- [测试策略](docs/testing.md) / [脚本用途与风险清单](scripts/README.md) / [CLI 与多环境配置](docs/design/cli.md) / [架构决策](docs/adr/README.md) / [路线图](docs/roadmap.md)
 - [参与开发](CONTRIBUTING.md) / [更新日志](CHANGELOG.md)
 
 ## 从 GitHub 安装
@@ -225,7 +225,7 @@ pnpm dev:all
 
 ### 启动本地 FRPS 测试实例
 
-`start-test-frps.cjs` 会生成临时 `frps.toml`，启动带 Dashboard 和 Token 鉴权的本地 FRPS。默认参数如下：
+[本地启动脚本](scripts/dev/start-test-frps.cjs) 会生成临时 `frps.toml`，**启动真实 frps 进程（不是 mock）**，供本地 Server/Client 集成联调。默认参数如下：
 
 | 配置 | 默认值 |
 | --- | --- |
@@ -238,20 +238,23 @@ pnpm dev:all
 在单独的终端运行：
 
 ```bash
-node scripts/start-test-frps.cjs --clean
+pnpm download:frp
+node scripts/dev/start-test-frps.cjs --clean
 ```
 
 保持该终端运行，停止时按 `Ctrl+C`。`--clean` 会在退出时删除临时配置和日志。需要自定义端口或 Token 时：
 
 ```bash
-node scripts/start-test-frps.cjs \
+node scripts/dev/start-test-frps.cjs \
   --port=17000 \
   --dashboard-port=17500 \
   --token=test-frp-token \
   --clean
 ```
 
-也可以使用环境变量覆盖默认值：`FRPS_BIN`、`FRPS_PORT`、`FRPS_DASHBOARD_PORT`、`FRPS_TOKEN`。
+也可以使用环境变量覆盖默认值：`FRPS_BIN`、`PORT`、`DASHBOARD_PORT`、`TOKEN`。这些是启动脚本的变量，不要与下文 Server 的 `FRPS_*` 配置混淆。
+
+此实例仅用于隔离、可信的本地网络：Dashboard 当前绑定 `0.0.0.0` 且使用固定 `admin/admin` 测试凭据，Token 会明文写入临时配置并输出到控制台，不能暴露到公网。请改用专用测试 Token，并同步下文 Server 配置。`--bg` 只忽略子进程输出，不是可靠后台守护。
 
 要让 VCPDeck Server 使用这台 FRPS，在 `packages/server/.env` 中补充：
 
@@ -275,13 +278,7 @@ pnpm dev:all
 
 首次启动或数据库中还没有 FRPS 实例时，Server 会从这些环境变量迁移默认实例。之后可以在前端的 FRP 页面中创建实例、执行健康检查和管理映射。FRPS Dashboard 可用于确认代理是否已注册。
 
-如果只验证 FRPS 实例管理接口，也可以在 Server 已启动后运行：
-
-```bash
-node scripts/test-frp-instances.cjs
-```
-
-该脚本使用 `http://localhost:3001`，会创建、探测、切换默认实例并删除测试实例。
+旧实例探测脚本因缺少当前认证且会切换默认实例而删除；现有 Service 测试不等于完整 HTTP/E2E 替代。当前验证边界与各脚本副作用见 [脚本清单](scripts/README.md)。
 
 ### 运行项目测试
 
@@ -304,6 +301,14 @@ pnpm --filter @vcpdeck/frontend test
 pnpm --filter @vcpdeck/launcher test
 ```
 
+#### 脚本级离线回归
+
+```bash
+pnpm test:scripts
+```
+
+该命令只运行 Node/TSX 离线回归，不包含 Shell、真实 FRP、云盘或 PTY 验证；可能使用临时文件、子进程和 loopback 服务。Shell 单列命令与逐项边界见 [脚本清单](scripts/README.md)。
+
 #### 项目端到端集成测试
 
 根目录的 `pnpm test` 会自动启动临时 Server 和 mock/真实 Client，覆盖认证、任务、文件传输等核心链路；测试结束后会清理进程和隔离的临时数据库：
@@ -316,7 +321,7 @@ pnpm test
 
 #### FRP 全链路集成测试
 
-`pnpm test:frp` 会自动启动随机端口的 FRPS、Server 和真实 Client，验证 TCP/HTTP 映射、Dashboard 代理状态、删除和错误场景，测试完成后自动清理：
+`pnpm test:frp` 是**手工、破坏性真环境入口**：会启动随机端口的 FRPS、Server 和真实 Client，验证 TCP/HTTP 映射等场景。当前脚本使用开发数据库，并删除全部 `frpMappings`，还会强制停止 `3001` 及测试 FRPS 相关端口的进程。**只在已备份、可丢弃的专用测试环境运行，不要在日常开发库或生产机运行**；自动清理不等于数据无损：
 
 ```bash
 pnpm build

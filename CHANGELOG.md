@@ -2,6 +2,17 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [Unreleased]
+
+### Changed
+
+- **脚本分类与运行边界**：内部脚本迁至 `scripts/build`、`scripts/dev`、`scripts/tests/{unit,e2e,manual,helpers}`，公开安装/卸载/Launcher 升级脚本继续保留根路径，兼容 raw URL 和发布资产；既有 pnpm 命令名保持不变，新增 `pnpm test:scripts` 仅运行 Node/TSX 离线回归，Shell 与真实环境验证单列。新增 [脚本逐项清单](scripts/README.md)，同步 Current 文档路径与风险说明。
+- **保留真实本地 FRPS 联调入口**：通过 `node scripts/dev/start-test-frps.cjs` 启动真实 frps，补齐下载/启动示例、实际环境变量名、明文测试 Token 与 Dashboard 本地网络限制。
+
+### Removed
+
+- 删除依赖过时 WS/PSK 操作员模型的旧日志入口、缺认证且会切换默认实例的旧 FRPS 实例探测脚本，以及非源码增量缓存；不将现有 Service 测试宣称为已删除 HTTP/E2E 的完整替代。本次分类不代表已修复保留脚本的开发库删除、进程终止或云服务副作用。
+
 ## [0.19.4] - 2026-10-15
 
 ### Added

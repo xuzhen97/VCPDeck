@@ -4,6 +4,8 @@
 
 本文是从零到"Server 与 Client 双向通讯"的最小可验证路径，所有命令均经过 Windows（Git Bash）端到端演练。完整边界、配置表和升级细节见 [`deployment.md`](./deployment.md)；构件打包决策见 [`ADR-0012`](./adr/0012-bundled-release-artifacts.md)；更新协议见 [`design/release-and-update.md`](./design/release-and-update.md)。
 
+脚本按 build/dev/tests 分类，逐项用途与副作用见 [脚本清单](../scripts/README.md)。公开安装/卸载/升级入口仍保留在 `scripts/` 根目录，兼容 raw URL 和发布资产布局；本演练的安装命令不迁移到内部子目录。构建与安装会写入版本/产物或目标目录，不是只读检查。
+
 > 命令平台约定：本文命令默认在 **Linux Bash / Windows Git Bash** 下执行；Windows PowerShell 变体在对应小节标注（`curl.exe`、换行符 `` ` `` 等）。
 
 ## 1. 前置条件

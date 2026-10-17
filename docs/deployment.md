@@ -122,6 +122,8 @@ Client 使用运行账户的权限执行命令、文件与 PTY。应为其创建
 
 Launcher 首次启动要求 `apps/current` 已指向可用初始版本。发布 zip 同时包含 `launcher/`、`server/`、`client/`；快速安装/卸载脚本（`install.cjs` / `uninstall.cjs`）与 zip 平级于 `dist-release/` 目录，仓库内为 `scripts/`，见 [`quickstart.md`](./quickstart.md) §3.1–3.2。安装后 Launcher 位于 `<app-dir>/dist/main.js`；通用安装脚本默认使用 Server `~/.vcpdeck/launcher`、Client `~/.vcpdeck/launcher-client`，显式 `--app-dir` 时可覆盖。Client 还可从 `/releases` 启用一键安装：Linux 新安装由 A2 systemd 部署，Windows 由平台引导脚本补齐 Node.js、PM2 和登录自启；Server 系统服务仍由运维准备。
 
+公开安装/卸载/升级脚本继续保留在 `scripts/` 根目录，兼容 GitHub raw 单文件 URL 与发布资产布局；内部 build/dev/tests 分类不改变其公开路径。逐项依赖、副作用及 systemd helper 尚未完整 CLI 接线的边界见 [脚本清单](../scripts/README.md)。安装/卸载会改系统目录、服务、权限或数据，应先核对目标与备份，不能当只读探测运行。
+
 ### 4.5 FRPS 迁移配置
 
 当数据库中不存在 FRPS 实例时，Server 可从下列变量迁移默认实例：

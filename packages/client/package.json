@@ -5,9 +5,9 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc",
-    "prebuild": "node ../../scripts/ensure-frpc.cjs",
+    "prebuild": "node ../../scripts/dev/ensure-frpc.cjs",
     "start": "node dist/index.js",
-    "dev": "pnpm build && node ../../scripts/wait-for-server.cjs && node ../../scripts/dev-client.cjs",
+    "dev": "pnpm build && node ../../scripts/dev/wait-for-server.cjs && node ../../scripts/dev/dev-client.cjs",
     "test": "vitest run"
   },
   "dependencies": {

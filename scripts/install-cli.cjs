@@ -22,7 +22,7 @@
  *   --dir=<dir>     安装目录（默认 ~/.vcpdeck/bin）
  *
  * 注意：私有仓库的 raw 下载需要该机器具备访问凭据；此时可改用
- *   git clone --depth 1 --branch <tag> 后 node scripts/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs
+ *   git clone --depth 1 --branch <tag> 后 node scripts/dev/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs
  */
 
 const fs = require("node:fs");
@@ -181,7 +181,7 @@ function main() {
 			console.error(`[vcpdeck:install] ${message}`);
 			if (/404/.test(message)) {
 				console.error(
-					"[vcpdeck:install] 未找到目标文件：请核对 --tag 与 --repo 是否正确；私有仓库请改用: git clone --depth 1 --branch <tag> 后 node scripts/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs",
+					"[vcpdeck:install] 未找到目标文件：请核对 --tag 与 --repo 是否正确；私有仓库请改用: git clone --depth 1 --branch <tag> 后 node scripts/dev/link-cli.cjs --target=skills/vcpdeck/vcpdeck.cjs",
 				);
 			} else {
 				console.error(
