@@ -48,7 +48,10 @@ describe("resolveModule", () => {
 		expect(MODULES.map((mod) => mod.id)).not.toContain("agent");
 		expect(
 			MODULES.find((mod) => mod.id === "settings")?.sub?.map((s) => s.label),
-		).toEqual(["个人资料", "Token", "网络", "Git 密钥", "存储", "身份管理"]);
+		).toEqual(["个人资料", "Token", "Git 密钥", "存储", "身份管理"]);
+		expect(
+			MODULES.find((mod) => mod.id === "settings")?.sub?.map((s) => s.path),
+		).not.toContain("/settings/network");
 		expect(MODULES.map((mod) => mod.path)).not.toContain("/storage");
 	});
 });

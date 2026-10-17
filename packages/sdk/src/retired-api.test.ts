@@ -21,3 +21,17 @@ describe("退役的专用 Agent API", () => {
 		}
 	});
 });
+
+describe("退役的 P2P 隧道 API（ADR-0053）", () => {
+	it("不再导出隧道工厂", () => {
+		expect(sdk).not.toHaveProperty("createTunnelsApi");
+	});
+
+	it("客户端实例不再挂载 tunnels 域", () => {
+		const client = new VcpDeckClient({
+			baseUrl: "http://localhost:3001",
+			auth: { type: "bearer", token: "test-token" },
+		});
+		expect(client).not.toHaveProperty("tunnels");
+	});
+});

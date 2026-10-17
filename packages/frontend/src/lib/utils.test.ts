@@ -22,6 +22,11 @@ describe("MACHINE_TABS", () => {
 		expect(MACHINE_TABS.map(([, label]) => label)).not.toContain("Pi");
 	});
 
+	it("不再包含已退役的隧道与远程桌面入口（ADR-0053）", () => {
+		expect(MACHINE_TABS.map(([key]) => key)).not.toContain("tunnel");
+		expect(MACHINE_TABS.map(([key]) => key)).not.toContain("desktop");
+	});
+
 	it("保留其余机器工作区 tab 与顺序", () => {
 		expect(MACHINE_TABS.map(([key]) => key)).toEqual([
 			"overview",
@@ -30,8 +35,6 @@ describe("MACHINE_TABS", () => {
 			"frp",
 			"jobs",
 			"terminal",
-			"tunnel",
-			"desktop",
 		]);
 	});
 });

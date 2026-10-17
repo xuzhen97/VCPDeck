@@ -224,21 +224,6 @@ Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 `w
 - **M1 迁移**：存量 PM2 安装无需额外参数：不带 `--migrate` 时安装器会**自动探测**存量 PM2 源并改走清理式迁移（与 Windows 行为一致，页面固定命令即可）；已有 A2 身份且无旧 PM2 候选时按幂等修复处理，不变更身份；若 A2 与有效旧 PM2 同时存在则视为未完成迁移，优先恢复清理式迁移并以旧身份覆盖误生成的 A2 身份。自动探测范围包括 `/home`、`/var/home` 下用户的 `~/.vcpdeck/launcher-client`、root 的旧安装、ADR-0018 时代的固定目录 `/opt/vcpdeck/launcher-client`，以及 nvm/系统全局安装的 PM2；旧条目可以自定义名称，`pm_exec_path` 指向 node、脚本放在 `args` 的旧形式也支持。其他 PM2 应用（含 PM2 托管的 VCPDeck Server 与 VCP ToolBox）一律保留；探测不到、查询失败、条目歧义或名称非法时 fail closed。迁移以旧 `launcher.env` 的 `VCPDECK_SERVER` 为权威并保留该 Origin：loopback 与公网入口指向同一 Server 时，从任一入口执行都能直接升级，bootstrap、写入的 ENV 与验收均走旧 Origin；旧 Origin 不可达时报 `LINUX_MIGRATION_SERVER_UNREACHABLE` 且不动旧安装。多源歧义或有源但校验不通过时 fail closed（透出稳定原因），需要强制重装时传 `--migrate=false`（也可显式 `--migrate=true` / `--migrate-from-user=<name>`）。迁移保留 `client-id`、Server Origin 与显示名称，保留无关 PM2 应用；全部材料校验成功后才清理旧 VCPDeck PM2 entry、旧自启与旧运行目录，再启动 A2 稳态服务并全能力验收。失败只记录阶段状态并保留 A2 现场，可用同一命令重跑；**不会 resurrect 或恢复旧 PM2**（ADR-0027）。
 - **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。
 
-### 4.7 coturn / TURN 中继（P2P 隧道）
-
-启用 P2P 隧道的 TURN 兜底需在 Server 主机部署 coturn（仅 Debian/Ubuntu 与 CentOS/RHEL/Rocky/AlmaLinux）：
-
-```bash
-sudo bash "./install-coturn.sh" \
-  --server-user=<vcpdeck-server 运行用户> \
-  --external-ip=<公网 IPv4> \
-  --realm=<TURN 域名或公网 IP>
-```
-
-脚本行为：检测发行版（apt/dnf，dnf 缺包时先装 `epel-release`）；生成 32 字节 Base64 secret（**单行**）到 `/etc/vcpdeck/turn-secret`（`root:serverUser`、`0640`，重跑保留并把历史多行 secret 归一为单行）；写带 `# managed-by: vcpdeck-coturn` marker 的 `/etc/turnserver.conf`（含 `use-auth-secret=yes`，不写 secret 内容）；写 systemd drop-in `/etc/systemd/system/<unit>.d/10-auth-secret.conf`，在启动时以 `--static-auth-secret="$(cat /etc/vcpdeck/turn-secret)"` 注入与 Server 同一份 secret；启用/重启并校验 `coturn.service` active。需放行 `3478` TCP/UDP 与 `49160–49200` UDP；把 `VCPDECK_TURN_SECRET_FILE=/etc/vcpdeck/turn-secret` 加入 Server 环境。Web「设置 → 网络」只填 STUN/TURN URL 与 realm，不填 secret。详见 [`design/p2p-tunnel.md`](./design/p2p-tunnel.md)。
-
-> coturn 4.6.x 没有 `static-auth-secret-file` 配置项：写进 `/etc/turnserver.conf` 会被判为 `Bad configuration format`，coturn 启动时拿不到 secret，于是所有 TURN 分配返回 `401 Unauthorized`（客户端表现为强制 relay 时收集不到 relay candidate）。secret 只能通过 systemd drop-in 或命令行 `--static-auth-secret` 注入，且必须与 `/etc/vcpdeck/turn-secret` 同串、同样为单行。轮换 secret：覆盖 `/etc/vcpdeck/turn-secret`（单行）后执行 `systemctl restart coturn`；Server 每次签发短期凭据时读取该文件，无需重启。
-
 ## 5. 持久化目录
 
 至少持久化：

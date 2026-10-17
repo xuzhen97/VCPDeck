@@ -53,19 +53,17 @@ export async function bundleServer(outfile: string): Promise<void> {
 }
 
 /**
- * Client 业务构件外部保留的依赖：`@lydell/node-pty` 与 node-datachannel 原生平台包。
- * Pi SDK 已随 ADR-0049 退役，不再出现在发行布局。
+ * Client 业务构件外部保留的依赖：`@lydell/node-pty` 原生平台包。
+ * Pi SDK 已随 ADR-0049 退役，node-datachannel 随 ADR-0053 退役，均不再出现在发行布局。
  */
 export const CLIENT_EXTERNAL = [
 	"@lydell/*",
 	"*.node",
-	"node-datachannel",
-	"node-datachannel/*",
 ];
 
 /**
  * Client：主进程打成单文件。
- * 外部保留 @lydell/node-pty 与 node-datachannel 平台包（含原生二进制）。
+ * 外部保留 @lydell/node-pty 平台包（含原生二进制）。
  */
 export async function bundleClient(targets: BundleTarget[]): Promise<void> {
 	const options = baseOptions("packages/client/tsconfig.json", CLIENT_EXTERNAL);

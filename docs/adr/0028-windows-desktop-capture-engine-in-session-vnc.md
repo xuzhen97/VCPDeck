@@ -1,6 +1,10 @@
 # ADR-0028：Windows 桌面查看固定使用受控 UltraVNC，并在交互会话内捕获
 
-- 状态：Accepted
+> 本 ADR 已被 [ADR-0053](./0053-retire-p2p-tunnel-and-browser-remote-desktop.md) 取代：
+> 浏览器远程桌面、noVNC 集成与 UltraVNC 配置示例（`design/windows-ultravnc-setup.md`）
+> 均已删除。以下正文保留为历史结论。
+
+- 状态：Superseded by [ADR-0053](./0053-retire-p2p-tunnel-and-browser-remote-desktop.md)
 - 日期：2026-09-19
 - 决策者：项目维护者
 - 关联：[`ADR-0009`](./0009-trusted-operator-security-domain.md)、[`ADR-0023`](./0023-linux-system-client-and-root-equivalent-account.md)、[`ADR-0026`](./0026-browser-client-webrtc-tcp-tunnel.md)、[`ADR-0027`](./0027-system-level-client-installation-and-clean-migration.md)、[`design/p2p-tunnel.md`](../design/p2p-tunnel.md)、[`design/windows-ultravnc-setup.md`](../design/windows-ultravnc-setup.md)

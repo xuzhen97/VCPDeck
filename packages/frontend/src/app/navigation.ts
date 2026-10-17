@@ -6,7 +6,6 @@ import {
 	ListTodo,
 	Lock,
 	MonitorCog,
-	Network,
 	Rocket,
 	Settings,
 	UserRound,
@@ -58,7 +57,6 @@ export const MODULES: NavModule[] = [
 		sub: [
 			{ path: "/settings/profile", label: "个人资料", icon: UserRound },
 			{ path: "/settings/tokens", label: "Token", icon: KeyRound },
-			{ path: "/settings/network", label: "网络", icon: Network },
 			{ path: "/settings/git-ssh", label: "Git 密钥", icon: Lock },
 			{ path: "/settings/storage", label: "存储", icon: Database },
 			{

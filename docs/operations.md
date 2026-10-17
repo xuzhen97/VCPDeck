@@ -364,29 +364,6 @@ Pi／DSH 专用集成已按 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and
 - 自动恢复只覆盖控制通道在线的场景；Client 的 PM2/Launcher 进程丢失或机器离线仍需按本节“Client PM2 进程丢失/无法连接”独立恢复，不依赖 FRP reconcile；
 - 详细边界见 [`design/frp.md`](./design/frp.md)。
 
-## 9. 目标机桌面查看的前置条件
-
-「远程桌面」Tab 只做两件事：经 P2P 隧道回环转发 + 浏览器侧渲染。**抓屏引擎在目标机的交互会话内**（见 [ADR-0028](./adr/0028-windows-desktop-capture-engine-in-session-vnc.md)），因此以下前提由运维准备：
-
-> 目标机安装与配置 UltraVNC 的完整可复现步骤、官方校验值、验收判据与实测坑，见 [`design/windows-ultravnc-setup.md`](./design/windows-ultravnc-setup.md)。
-
-1. **会话内 VNC 服务端**：必须在目标机的**交互登录会话**里运行 VNC 服务端，并仅监听 `127.0.0.1`（推荐 5900）。
-   - Windows Client 由 `NT AUTHORITY\SYSTEM` 开机任务运行在 Session 0，**没有交互桌面**（实测 `Graphics.CopyFromScreen` 报 `The handle is invalid`），不能由 Client 自己抓屏；客户端只是从 Session 0 走回环转发（回环跨会话可用）。
-   - 建议放进用户会话自启（如 `HKCU\...\Run`），并按需要配置只读或口令。
-2. **无显示器机器的显示输出**：Windows 只在存在**活动显示输出**时才有桌面可抓；未接显示器的机器需要 HDMI 假负载（EDID 模拟器）或虚拟显示器驱动（向日葵 / ToDesk / GameViewer 等均会自带）。真无活动输出时前端会显示「未检测到活动显示输出」提示，而不是静默黑屏。
-3. **只读建议**：面板**默认只读**（不发送键鼠事件），但只读强度最终取决于客户端行为；需要更强保证时同时在服务端侧配成只读。
-4. **平台范围**：当前只承诺 Windows。Linux Client 是 root/systemd 系统级（ADR-0023），不在图形会话内，本期不提供桌面查看。
-
-常见现象对照：
-
-| 现象 | 原因 | 处理 |
-| --- | --- | --- |
-| 提示「目标端口拒绝连接」 | 目标机没有会话内 VNC 服务端，或不在该端口监听 | 在交互会话内启动 VNC 服务端并仅监听回环 |
-| 画面全黑 + 「未检测到活动显示输出」提示 | 目标机无活动显示输出 | 插 HDMI 假负载或安装虚拟显示器驱动后重连 |
-| 提示「VNC 认证失败」 | 服务端要求密码但未输入/错误 | 在凭据弹窗输入；或把服务端配成只读无口令 |
-| 连接一段时候后断开并出现「第 N 次重连中…」 | 控制面（`/app` socket）掉线，隧道会话被 Server 回收 | 会自动退避重连；持续失败时检查浏览器与 Server 之间的网络/反代超时 |
-| 放大/缩小时远端分辨率不变 | 预期行为 | 缩放只在浏览器本地完成（放大 noVNC 容器 + 滚动），面板不提供远端跟随开关，也永不发送 `SetDesktopSize` |
-
 ## 10. Release 与容量清理
 
 ### 9.1 固定策略和入口

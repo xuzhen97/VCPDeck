@@ -75,9 +75,13 @@ describe("ConsoleShell", () => {
 			screen.queryByRole("navigation", { name: "主导航" }),
 		).not.toBeInTheDocument();
 		const subnav = within(screen.getByRole("navigation", { name: "模块导航" }));
-		for (const label of ["个人资料", "Token", "网络", "存储", "身份管理"]) {
+		for (const label of ["个人资料", "Token", "存储", "身份管理"]) {
 			expect(subnav.getByRole("link", { name: label })).toBeVisible();
 		}
+		// 网络（coturn/ICE）设置已随 P2P 隧道退役（ADR-0053）
+		expect(
+			subnav.queryByRole("link", { name: "网络" }),
+		).not.toBeInTheDocument();
 		expect(screen.getByLabelText("当前位置")).toHaveTextContent("/settings");
 
 		// 窄屏横向导航在二级状态把「返回」放在首项，否则抽屉关着时无法回到一级

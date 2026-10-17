@@ -86,9 +86,9 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0023](./0023-linux-system-client-and-root-equivalent-account.md) | Accepted（旧 PM2 回退迁移策略由 ADR-0027 取代） | Linux Client 使用 systemd 系统部署与 root 等价专用账户 |
 | [0024](./0024-public-storage-share-capabilities.md) | Accepted | 使用长期 opaque capability 提供公开 Storage 分享，并以有效分享保护底层 File |
 | [0025](./0025-windows-client-highest-privilege-logon-task.md) | Superseded by ADR-0027 | 历史方案：Windows Client 使用当前用户、PM2 与最高权限登录任务 |
-| [0026](./0026-browser-client-webrtc-tcp-tunnel.md) | Accepted | 浏览器与 Client 使用 WebRTC 通用 TCP 隧道，ICE 直连优先并以 coturn 中继兜底 |
+| [0026](./0026-browser-client-webrtc-tcp-tunnel.md) | Superseded by ADR-0053 | 浏览器与 Client 使用 WebRTC 通用 TCP 隧道，ICE 直连优先并以 coturn 中继兜底 |
 | [0027](./0027-system-level-client-installation-and-clean-migration.md) | Accepted | Windows 使用 SYSTEM 开机任务、Linux 保持 systemd/sudo-all；旧 PM2 保留身份后清理式迁移，并提示不合规 Client 人工升级 |
-| [0028](./0028-windows-desktop-capture-engine-in-session-vnc.md) | Accepted | Windows 桌面查看复用交互会话内的 VNC 服务端作为抓屏引擎，不自建会话内捕获组件 |
+| [0028](./0028-windows-desktop-capture-engine-in-session-vnc.md) | Superseded by ADR-0053 | Windows 桌面查看复用交互会话内的 VNC 服务端作为抓屏引擎，不自建会话内捕获组件 |
 | [0029](./0029-server-managed-isolated-pi-runtime.md) | Rejected（方向由 ADR-0048 否决） | Server 统一管理 Pi 配置/凭据/策略，Client 使用与用户原生 Pi 隔离的 VCPDeck Runtime，受信资源随 Client Release 发布 |
 | [0030](./0030-pi-resource-bundle-and-tool-policy.md) | Rejected（方向由 ADR-0048 否决） | Pi Bundle 位于版本目录并由 Client 逐资源校验；工具策略默认拒绝、审批超时即拒绝；策略经进程内桥接传递，不落盘不进环境变量 |
 | [0031](./0031-native-pi-session-explicit-import.md) | Rejected（ADR-0049） | 用户原生 Pi Session 的显式导入是唯一允许接触用户 Pi 的路径：只读、单向、只操作副本，源根不可覆盖，预览正文受限不落盘 |
@@ -113,3 +113,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0050](./0050-dsh-skill-cli-consumption.md) | Accepted（2026-10-13，尚未实施） | DSH 通过同仓库、同 Tag 的轻量 bundle 注册共用 Skill，复用预构建 CLI 消费基础能力；不恢复 Agent 托管体系 |
 | [0051](./0051-release-client-catch-up-retry.md) | Accepted（2026-10-14，尚未实施） | 客户端补更失败分级（瞬时／永久），Server 为唯一重试所有者并按递增退避有限重试；新增周期对账作为第二驱动力，与注册钩子共用互斥入口；人工重试兜底并补齐 CLI 可见性 |
 | [0052](./0052-cli-direct-bearer-token-storage.md) | Accepted | 修订 ADR-0017 第 2 条，允许在受权限保护的用户级 config.json 中直接存储 Bearer Token，废除环境变量间接引用，并在输出中默认脱敏 |
+| [0053](./0053-retire-p2p-tunnel-and-browser-remote-desktop.md) | Accepted | 退役 P2P 隧道与浏览器远程桌面（含 coturn 与「网络」设置），删除 `TunnelConfig` 存储；网络暴露统一走 FRP，退役入站字段按兼容规则容忍并丢弃 |

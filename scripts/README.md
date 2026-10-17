@@ -22,9 +22,8 @@
 # 脚本级离线 Node + TSX 回归；先完成依赖安装，不包含 Shell 或真实环境测试
 pnpm test:scripts
 
-# Shell 回归单列：需要 Bash；不安装 coturn 或 Client
+# Shell 回归单列：需要 Bash；不安装 Client
 bash scripts/tests/unit/install-client-bootstrap.test.sh
-bash scripts/tests/unit/install-coturn.test.sh
 
 # 跨进程集成：先阅读下文端口/数据库风险
 pnpm test
@@ -69,7 +68,6 @@ node scripts/dev/start-test-frps.cjs --port=17000 --dashboard-port=17500 --token
 | [install-client-bootstrap.ps1](install-client-bootstrap.ps1) | Windows PowerShell 5.1+、x64、管理员；Server 预检与私有 Node 引导 | 下载运行时、修复 ProgramData ACL 并安装 SYSTEM 任务；不主动申请 UAC，必须预先提权 |
 | [uninstall-client-bootstrap.sh](uninstall-client-bootstrap.sh) | Bash 下载 Server 的卸载资产并用可用 Node 执行 | 联网、临时文件、真实卸载；不能仅凭此入口推断所有 systemd helper 已接线 |
 | [uninstall-client-bootstrap.ps1](uninstall-client-bootstrap.ps1) | 管理员 PowerShell；优先 ProgramData 私有 Node，下载执行卸载器 | 联网和真实 Windows 卸载，临时文件清理；必须核对目标 Server 与安装状态 |
-| [install-coturn.sh](install-coturn.sh) | Linux TURN 部署；Bash、root、apt/dnf；source 时只加载函数 | 直接执行会安装软件、写 TURN 配置与 secret、操作服务和网络设置；不是纯探测脚本 |
 | [upgrade-launcher.cjs](upgrade-launcher.cjs) | PM2 Launcher 升级；本地版本目录中的 Launcher、Node/PM2；支持 `--status` / `--dry-run` | 脱离当前进程执行停止、替换、重启及日志写入；无下载；不适用于所有部署形态 |
 | [upgrade-launcher-systemd.cjs](upgrade-launcher-systemd.cjs) | 导出 systemd 升级计划/执行 helper；依赖 adapter 和 `systemd-run` | 在服务 cgroup 外切换文件、daemon-reload、restart；尚不能当作已完成端到端接线的独立 CLI |
 | [tsconfig.json](tsconfig.json) | scripts TypeScript 项目配置，继承根配置，包含子目录 TS | 配置本身不执行程序；被类型检查/构建工具消费，增量缓存不是源码资产 |
@@ -112,14 +110,12 @@ Node 文件可用 `node --test scripts/tests/unit/<文件>.test.cjs` 单独运�
 | [uninstall-client.test.cjs](tests/unit/uninstall-client.test.cjs) | 安装状态/目录验证及卸载行为；Node、夹具 | 临时目录和模拟操作，不卸载本机 Client |
 | [install-client-bootstrap.test.sh](tests/unit/install-client-bootstrap.test.sh) | Linux 引导发行版、参数与迁移判定；Bash、fixture | 临时文件与函数调用；单列运行，不下载/安装 Client |
 | [install-client.test.cjs](tests/unit/install-client.test.cjs) | 一键安装参数、引导契约与编排；Node、夹具 | 临时文件/子进程及模拟依赖，不代表真机验收 |
-| [install-coturn.test.sh](tests/unit/install-coturn.test.sh) | source coturn 纯函数，验证发行版/地址/IPv4；Bash | 临时夹具，不安装软件或改 TURN 服务；单列运行 |
 | [install-client-linux.test.cjs](tests/unit/install-client-linux.test.cjs) | Linux A2 布局、权限、迁移/回滚、脱敏；Node、adapter | 临时目录和模拟系统操作，不创建真实 systemd 服务 |
 | [agent-session-migration.test.cjs](tests/unit/agent-session-migration.test.cjs) | 保留历史显式迁移的映射、事务与幂等；Node、Server libsql | 独立临时 SQLite；不执行开发/生产迁移，也不恢复退役运行时 |
 | [agent-migration-entrypoints.test.cjs](tests/unit/agent-migration-entrypoints.test.cjs) | 基础启动/安装/Release 不再自动执行 Agent 迁移；Node | 静态读取源码，不迁移数据库 |
 | [agent-retirement-layout.test.cjs](tests/unit/agent-retirement-layout.test.cjs) | 退役 Agent 资源不再进入开发/发布布局；Node | 静态读取代码与依赖声明，不构建/发布 |
 | [install-client-windows-system.test.cjs](tests/unit/install-client-windows-system.test.cjs) | Windows SYSTEM 任务、ACL/身份保留及迁移；Node、adapter | 临时夹具/记录调用，不改真实任务/ACL |
 | [install.test.cjs](tests/unit/install.test.cjs) | ZIP 安装、SHA、布局和 Launcher 保留；Node、夹具 | 临时文件/目录，不进行真实安装 |
-| [pack-release-deps.test.ts](tests/unit/pack-release-deps.test.ts) | node-datachannel 双平台外部依赖/平台裁剪；TSX | 读取配置/代码，不触发发布构建或网络下载 |
 | [integration-test-db.cjs](tests/helpers/integration-test-db.cjs) | E2E 公共 helper；创建系统临时目录、随机 owner marker 与隔离 DATABASE_URL，调用 Prisma `db push` | 初始化和删除临时 SQLite；清理前校验归属/路径/URL，失败关闭；不是独立测试 CLI |
 
 ## 7. 跨进程与手工入口：必须显式选择

@@ -11,8 +11,8 @@ export default defineConfig({
 			"@": sourceDir,
 		},
 	},
-	// noVNC 1.7 的 WebCodecs 能力探测使用顶层 await，dev 转换也需 es2022；
-	// 与 ADR-0011 modern evergreen 浏览器基线一致（build.target 仅影响打包，不影响 dev 转换）
+	// ADR-0011 modern evergreen 浏览器基线：dev 转换与打包均使用 es2022
+	// （build.target 仅影响打包，不影响 dev 转换）
 	esbuild: { target: "es2022" },
 	build: {
 		target: "es2022",
@@ -25,7 +25,6 @@ export default defineConfig({
 		include: ["@vcpdeck/shared"],
 		// workspace 包 dist 变化后强制重新预打包，避免陈旧缓存（如 Buffer 实现替换）
 		force: true,
-		// 依赖预打包同样需支持顶层 await（noVNC）
 		esbuildOptions: { target: "es2022" },
 	},
 	server: {

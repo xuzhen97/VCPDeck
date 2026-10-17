@@ -10,7 +10,6 @@ import { FrpModule } from "../frp/frp.module.js";
 import { StorageModule } from "../storage/storage.module.js";
 import { TerminalModule } from "../terminal/terminal.module.js";
 import { ReleaseModule } from "../release/release.module.js";
-import { TunnelModule } from "../tunnel/tunnel.module.js";
 import { GitSshModule } from "../git-ssh/git-ssh.module.js";
 
 @Module({
@@ -23,7 +22,6 @@ import { GitSshModule } from "../git-ssh/git-ssh.module.js";
 		forwardRef(() => FrpModule),
 		forwardRef(() => ReleaseModule),
 		TerminalModule,
-		TunnelModule,
 		GitSshModule,
 	],
 	providers: [ClientGateway, AppGateway],

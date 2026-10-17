@@ -474,7 +474,7 @@ describe("ClientService listOnline", () => {
 		});
 	});
 
-	it("listOnline 安全投影 p2pTunnel capability 详情（protocol v1）", async () => {
+	it("listOnline 忽略已退役的 p2pTunnel 摘要（ADR-0053）", async () => {
 		const findMany = vi.fn().mockResolvedValue([
 			{
 				...clientRow,
@@ -487,10 +487,7 @@ describe("ClientService listOnline", () => {
 		const service = new ClientService(prisma);
 
 		const [client] = await service.listOnline();
-		expect(client?.capabilityDetails.p2pTunnel).toEqual({
-			available: true,
-			protocolVersion: 1,
-		});
+		expect(client?.capabilityDetails).not.toHaveProperty("p2pTunnel");
 	});
 
 	it("frp 能力详情损坏时省略 frp 字段但保留其余详情", async () => {

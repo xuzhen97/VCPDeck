@@ -27,28 +27,28 @@
 
 ## 2.5 集成 / 真实环境测试方法论（跨网络 / 原生依赖 / 第三方服务）
 
-> 适用于「特性依赖真实网络拓扑、原生绑定、或外部服务（coturn/FRP/存储后端/真实浏览器）」的场景。单元与包内集成测试只覆盖逻辑，**真实字节流动必须另起真机验证**。以下从 P2P/coturn 隧道（ADR-0026）实战提炼，可复用于 FRP、Storage、Release 等同类特性。
+> 适用于「特性依赖真实网络拓扑、原生绑定、或外部服务（FRP/存储后端/真实浏览器）」的场景。单元与包内集成测试只覆盖逻辑，**真实字节流动必须另起真机验证**。以下从跨网络链路实战提炼，可复用于 FRP、Storage、Release 等同类特性。
 
 **（1）三层验证，逐层闭合**
 - 逻辑层：Shared parser / Service 状态机 / 前端路径分类 —— 单测覆盖（见 §2）。
-- 组件层：**每个真实依赖各验各的**，互不假设。例：coturn 能跑、凭据被接受、浏览器 WebRTC 通路通、直连隧道 E2E 通 —— 各自独立 PASS。
-- 端到端层：字节真过网络（浏览器→coturn→Client）。**只有这一层能证明「中继真的转发」**，组件层全 PASS 也不等于它 PASS。
+- 组件层：**每个真实依赖各验各的**，互不假设。例：frps 能跑、Client 的 frpc 能连上、映射端口可达、整条映射 E2E 通 —— 各自独立 PASS。
+- 端到端层：字节真过网络（客户端→frps→目标端口）。**只有这一层能证明「转发真的生效」**，组件层全 PASS 也不等于它 PASS。
 
 **（2）第三方服务用其「自带权威客户端」做 A/B 对照**
-- 别自己手写 raw 协议客户端去验服务端——**用该服务官方/自带的客户端**最可靠。例：验 coturn 用 `turnutils_uclient`（随 coturn 发行）：`空凭据→403 拒` vs `Server 签发凭据→分配 relay 端点`，一次对照即证明凭据算法与服务端兼容。
-- 同理：FRP 用 `frpc/frpc` 自带探测、存储后端用其 SDK 直连。
+- 别自己手写 raw 协议客户端去验服务端——**用该服务官方/自带的客户端**最可靠。例：验 FRP 用 `frpc/frps` 自带探测与 Dashboard API，空凭据与有效凭据各跑一次做对照；存储后端用其 SDK 直连。
+- 同理：PTY 用 `scripts/tests/e2e/terminal-smoke.cjs` 这类真实终端入口验证，而不是只断言 DTO。
 
-**（3）浏览器 WebRTC 用 Playwright 驱动系统 Chrome（headful、无代理）**
-- headless Chromium 的 `RTCPeerConnection` 可能 ICE 不启动（`iceGatheringState` 停在 `new`），**会误判**。用 Playwright MCP 驱动**系统 Chrome**（`launchPersistentContext` 默认、确认 `navigator.webdriver`、无 `--proxy-server`）才反映真实浏览器行为。
-- 测试页用**注入的凭据 + `?mode=direct|relay|relayfail`** 自驱，读 `getStats()` 的 `candidateType`/`selected pair` + DataChannel 往返判定路径。
+**（3）浏览器行为必须用真实浏览器验证**
+- headless 环境可能缺少真实浏览器的网络/渲染能力，**会误判**。需要判定浏览器侧行为时，用 Playwright 驱动**系统 Chrome**（headful、确认 `navigator.webdriver`、无 `--proxy-server`）。
+- 测试页应能自驱（注入凭据、可选模式参数），并读取可观测证据（`getStats()`、DOM 状态、网络日志）而不是只看「没报错」。
 
 **（4）网络隔离与定位技巧**
-- 用 **Vagrant/VirtualBox** 起 Linux 容器跑 coturn（Windows 无 coturn 包），`host-only` 隔离；必要时**同一服务绑多张卡**（host-only + NAT `10.0.2.15`）以区分「够不到」vs「客户端没触发」。
-- 判定「客户端是否真发包」：**在服务端看日志**（`journalctl -u coturn`）有无该源 IP 的 Allocate，比看客户端状态更硬。STUN 有回包但 TURN 0 流量 = 客户端没触发 TURN（常见于受限 VM 网络）。
+- 用隔离网络（Vagrant/VirtualBox、host-only 网段）复现跨网络问题；必要时**同一服务绑多张卡**以区分「够不到」vs「客户端没触发」。
+- 判定「客户端是否真发包」：**在服务端看日志**，比看客户端状态更硬。
 - 换网络复测仍复现 → 根因在客户端/环境，非服务端配置。
 
 **（5）区分「组件可用」与「端到端连通」，诚实记录边界**
-- 若某层在本机环境无法复现（如本机 VM 网络下浏览器 TURN 不触发），**不要硬凑**：记录「各组件独立验证可用 + 该层待两台不同网络真机复测」，逻辑上已闭合；验收文档（§8 / `docs/design/p2p-tunnel-acceptance.md`）给出真机步骤即可。
+- 若某层在本机环境无法复现（如受限 VM 网络下中继路径不触发），**不要硬凑**：记录「各组件独立验证可用 + 该层待两台不同网络真机复测」，逻辑上已闭合；验收文档给出真机步骤即可。
 - 验收文档必须含：**前置 / 步骤 / PASS-FAIL 判定 / 证据（看什么日志/状态）/ 常见 FAIL 排查**，让人能照做打勾。
 
 **（6）收尾清理**：测试 VM `vagrant destroy -f`（或 `VBoxManage unregistervm --delete`）、`.tmp/` 脚手架、测试进程与端口。`.tmp/` 被 git 忽略，不留痕。
@@ -70,10 +70,9 @@ pnpm test
 
 ```bash
 bash scripts/tests/unit/install-client-bootstrap.test.sh
-bash scripts/tests/unit/install-coturn.test.sh
 ```
 
-发布依赖离线自检也可单跑 `pnpm exec tsx scripts/tests/unit/pack-release-deps.test.ts`。各文件用途、依赖、副作用及保留的公开安装根路径见 [脚本清单](../scripts/README.md)。
+各文件用途、依赖、副作用及保留的公开安装根路径见 [脚本清单](../scripts/README.md)。
 
 
 按包：

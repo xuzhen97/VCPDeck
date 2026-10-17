@@ -7,10 +7,6 @@ import {
 	parseGitSshCapability,
 	type GitSshCapability,
 } from "./git-ssh.js";
-import {
-	parseP2pTunnelCapabilityStatus,
-	type P2pTunnelCapabilityStatus,
-} from "./tunnel.js";
 
 // ── 严格边界：字段长度上限（防御异常注册消息撑爆存储与 UI） ──
 const MAX_CLIENT_ID = 128;
@@ -61,13 +57,16 @@ export interface PrivilegedCapabilityStatus {
 }
 
 /**
- * ADR-0049 已退役、但仍可能由旧 Client 上报的 `capabilityDetails` 键。
+ * 已退役、但仍可能由旧 Client 上报的 `capabilityDetails` 键。
  *
  * 契约：**接受并丢弃**（不持久化、不投影）。退役字段必须容忍，不能让旧 Client
  * 因为“未知字段”被整条注册拒绝（0.19.0 曾因此让全集群掉线）。
  * 仅容纳“曾有定义、现已退役”的键；真正未知的键仍严格拒绝。
+ *
+ * - `pi`：ADR-0049 退役的 Pi／Agent 能力摘要。
+ * - `p2pTunnel`：ADR-0053 退役的 P2P 隧道能力摘要（原 ADR-0026）。
  */
-const RETIRED_DETAIL_KEYS = new Set(["pi"]);
+const RETIRED_DETAIL_KEYS = new Set(["pi", "p2pTunnel"]);
 
 /** 机器注册消息（Client → Server，/client Socket.IO）。 */
 export interface MachineRegister {
@@ -84,8 +83,6 @@ export interface MachineRegister {
 		frp?: FrpCapabilityStatus;
 		/** 可选：非交互特权能力摘要（ADR-0023 新 Client） */
 		privileged?: PrivilegedCapabilityStatus;
-		/** 可选：P2P 隧道能力摘要（ADR-0026 新 Client） */
-		p2pTunnel?: P2pTunnelCapabilityStatus;
 		/** 可选：Git SSH 受管密钥能力摘要（ADR-0037 新 Client）；旧 Client 缺省即未报告 */
 		gitSsh?: GitSshCapability;
 	};
@@ -275,7 +272,7 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 	if (value.capabilityDetails !== undefined) {
 		const details = value.capabilityDetails;
 		if (!isRecord(details)) throw new Error("capabilityDetails 必须为对象");
-		const known = ["terminal", "frp", "privileged", "p2pTunnel", "gitSsh"] as const;
+		const known = ["terminal", "frp", "privileged", "gitSsh"] as const;
 		for (const key of Object.keys(details)) {
 			// ADR-0049 退役的键：旧 Client（如 0.18.2）仍会带 pi 摘要，
 			// 接受并丢弃，否则整个集群会因“未知字段”被拒注册。
@@ -294,9 +291,6 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 		}
 		if (details.privileged !== undefined) {
 			parsedDetails.privileged = parsePrivilegedCapabilityStatus(details.privileged);
-		}
-		if (details.p2pTunnel !== undefined) {
-			parsedDetails.p2pTunnel = parseP2pTunnelCapabilityStatus(details.p2pTunnel);
 		}
 		if (details.gitSsh !== undefined) {
 			parsedDetails.gitSsh = parseGitSshCapability(details.gitSsh);

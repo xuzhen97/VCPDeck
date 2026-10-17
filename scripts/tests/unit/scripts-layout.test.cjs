@@ -11,7 +11,6 @@ const publicScripts = [
 	"install-cli.cjs",
 	"install.cjs",
 	"uninstall.cjs",
-	"install-coturn.sh",
 	"install-client.cjs",
 	"install-client-linux.cjs",
 	"install-client-bootstrap.sh",
@@ -143,7 +142,7 @@ test("发布资产仍从公开根入口复制，Server/Client installer 与发�
 		assert.ok(client.includes(`join(ROOT, "scripts", "${name}")`));
 		assert.ok(client.includes(`join(installerDir, "${name}")`));
 	}
-	for (const name of ["install.cjs", "uninstall.cjs", "install-coturn.sh"]) {
+	for (const name of ["install.cjs", "uninstall.cjs"]) {
 		assert.ok(pack.includes(`join(ROOT, "scripts", "${name}")`));
 		assert.ok(pack.includes(`join(ROOT, args.output, "${name}")`));
 	}

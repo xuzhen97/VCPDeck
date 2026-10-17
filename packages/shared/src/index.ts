@@ -54,7 +54,6 @@ export type {
 export * from "./terminal.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
-import type { P2pTunnelCapabilityStatus } from "./tunnel.js";
 import type { GitSshCapability } from "./git-ssh.js";
 // 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
 export type {
@@ -131,11 +130,6 @@ export const Events = {
 	SERVER_SHUTDOWN: "server:shutdown",
 	FRP_STATE: "frp:state",
 	FRP_STATE_ACK: "frp:state-ack",
-	TUNNEL_ATTACH: "tunnel:attach",
-	TUNNEL_PREPARE: "tunnel:prepare",
-	TUNNEL_SIGNAL: "tunnel:signal",
-	TUNNEL_STATE: "tunnel:state",
-	TUNNEL_CLOSE: "tunnel:close",
 	GIT_SSH_COMMAND: "git-ssh:command",
 	GIT_SSH_ACK: "git-ssh:ack",
 } as const;
@@ -350,8 +344,6 @@ export interface ClientInfo {
 		frp?: FrpCapabilityStatus;
 		/** 可选：非交互特权能力摘要（旧 Client 缺省） */
 		privileged?: PrivilegedCapabilityStatus;
-		/** 可选：P2P 隧道能力摘要（ADR-0026，旧 Client 缺省） */
-		p2pTunnel?: P2pTunnelCapabilityStatus;
 		/**
 		 * 可选：Git SSH 受管密钥能力摘要（ADR-0037，旧 Client 缺省即未报告）。
 		 * 写入路径（register parser）与本读路径必须同时声明该字段，
@@ -1018,36 +1010,3 @@ export type {
 	FrpRuntimeStateReport,
 	FrpRuntimeStatus,
 } from "./frp-runtime.js";
-
-// ── P2P TCP Tunnel Protocol v1（ADR-0026） ──
-export {
-	P2P_TUNNEL_PROTOCOL_VERSION,
-	TunnelLimits,
-	parseP2pTunnelCapabilityStatus,
-	parseTunnelBrowserAttach,
-	parseTunnelBrowserSignal,
-	parseTunnelClientSignal,
-	parseTunnelClientState,
-	parseTunnelClose,
-	parseTunnelConfigInfo,
-	parseTunnelConfigUpdate,
-	parseTunnelIceServer,
-	parseTunnelPrepare,
-	parseTunnelSessionCreated,
-	parseTunnelSessionCreateRequest,
-} from "./tunnel.js";
-export type {
-	P2pTunnelCapabilityStatus,
-	TunnelBrowserAttach,
-	TunnelClose,
-	TunnelClientState,
-	TunnelConfigInfo,
-	TunnelConfigUpdate,
-	TunnelIceCandidate,
-	TunnelIceServer,
-	TunnelPrepare,
-	TunnelSessionCreated,
-	TunnelSessionCreateRequest,
-	TunnelSignal,
-	TunnelSdpDescription,
-} from "./tunnel.js";

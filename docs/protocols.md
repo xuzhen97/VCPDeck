@@ -54,7 +54,6 @@
 | `/api/storage` | 签名能力、文件流、Provider 配置和 Storage Share 管理 |
 | `/api/aliyundrive` | 阿里云盘配置、OAuth 和授权验证 |
 | `/api/frp` | FRPS 实例和映射 |
-| `/api/tunnels` | P2P 隧道 Session 创建/回收、ICE 服务器签发、coturn 配置与 Web 设置 |
 | `/api/releases` | 发布上传、列表和构件下载 |
 | `/api/health`、`/api/status` | 浅健康与版本/发布状态 |
 
@@ -200,7 +199,6 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 | `server:shutdown` | Server → Client | Server 即将更新重启 |
 | `frp:state` | Client → Server | FRP runtime 安全快照（状态、generation、proxy 摘要）；REGISTER 确认后立即首报，之后每次状态变化上报 |
 | `frp:state-ack` | Server → Client | 严格确认（accepted + action）；Client 只接受当前 connection generation 的 ack |
-| `tunnel.prepare/attach/signal/state/close` | 跨 `/app` 与 `/client` | P2P 隧道信令（offer/answer、trickle candidate、状态、关闭）；大流量走 DataChannel 不经 Server |
 
 所有跨信任边界 payload 长期必须先通过 Shared parse 函数或等价严格校验，再进入领域服务。Terminal 当前已采用严格 parser；exec 和文件 Job 的双端校验仍有本文件所列实现偏移。
 
@@ -250,7 +248,9 @@ Client REGISTER 后上报 generationId 和内存 Session。Server 当前按“DB
 
 Pi 专用 REST、SSE 事件流、协议版本与能力摘要已按
 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md) 退役；
-当前协议面只有基础能力（Job、文件、FRP、Terminal、Tunnel、Git SSH、Release）。
+P2P 隧道协议、`tunnel:*` 事件与 `capabilityDetails.p2pTunnel` 已按
+[ADR-0053](./adr/0053-retire-p2p-tunnel-and-browser-remote-desktop.md) 退役。
+当前协议面只有基础能力（Job、文件、FRP、Terminal、Git SSH、Release）。
 
 ## 6. 远程文件与 Storage 协议
 

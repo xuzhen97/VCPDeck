@@ -5,11 +5,9 @@ import {
 	FolderOpen,
 	History,
 	LayoutDashboard,
-	Monitor,
 	Network,
 	SquareTerminal,
 	TerminalSquare,
-	Waypoints,
 	type LucideIcon,
 } from "lucide-react";
 import { useCallback } from "react";
@@ -61,8 +59,6 @@ const tabIcons: Record<string, LucideIcon> = {
 	frp: Network,
 	jobs: History,
 	terminal: SquareTerminal,
-	tunnel: Waypoints,
-	desktop: Monitor,
 };
 
 export function MachinesPage() {

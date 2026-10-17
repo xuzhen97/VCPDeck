@@ -16,8 +16,7 @@
 | 数据持久化 | SQLite、Prisma 7、libSQL adapter | 持久化机器、Job、身份、文件元数据、FRP、终端会话与发布记录 |
 | 实时通信 | Socket.IO 4、Server-Sent Events | Server ↔ Client 调度与终端使用 Socket.IO |
 | 远程终端 | node-pty、xterm.js / xterm-headless | Client 创建 PTY，Frontend 渲染终端，Server 代理会话并记录最小审计信息 |
-| FRP | frpc / frps | Client 管理 frpc 映射，Server 管理 FRPS 实例与映射元数据 |
-| P2P 隧道 | 浏览器 WebRTC、node-datachannel、coturn | Frontend 用 `RTCPeerConnection` 建 DataChannel，Client 用 `node-datachannel/polyfill` 接回环 TCP，coturn 作 TURN 兜底 |
+| FRP | frpc / frps | Client 管理 frpc 映射，Server 管理 FRPS 实例与映射元数据；目标机端口对外暴露统一走此通道 |
 | SDK | Fetch API、TypeScript | Node.js 与浏览器共用的类型安全 REST 客户端 |
 | CLI | Node.js、esbuild | 当前提供发布包上传命令，并产出 Skill 使用的单文件 CLI |
 | 进程与更新 | Node.js launcher | 守护 Server/Client，负责版本切换、探活、失败回退与崩溃重启 |

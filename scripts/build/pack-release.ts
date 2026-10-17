@@ -110,9 +110,6 @@ export const EXTERNAL_DEPS: Record<"server" | "client", string[]> = {
 		"@lydell/node-pty",
 		"@lydell/node-pty-win32-x64",
 		"@lydell/node-pty-linux-x64",
-		"node-datachannel",
-		"@node-datachannel/win32-x64-msvc",
-		"@node-datachannel/linux-x64-gnu",
 	],
 };
 
@@ -122,8 +119,6 @@ export const PLATFORM_PKG_PARENT: Record<string, string> = {
 	"@libsql/linux-x64-gnu": "libsql",
 	"@lydell/node-pty-win32-x64": "@lydell/node-pty",
 	"@lydell/node-pty-linux-x64": "@lydell/node-pty",
-	"@node-datachannel/win32-x64-msvc": "node-datachannel",
-	"@node-datachannel/linux-x64-gnu": "node-datachannel",
 };
 
 interface PkgJson {
@@ -382,14 +377,12 @@ export const VARIANT_EXCLUDES: Record<ArchiveVariant, string[]> = {
 		"server/node_modules/@libsql/linux-x64-gnu",
 		"server/node_modules/@libsql/linux-x64-musl",
 		"client/node_modules/@lydell/node-pty-linux-x64",
-		"client/node_modules/@node-datachannel/linux-x64-gnu",
 	],
 	"linux-x64": [
 		"server/dist/frp/win-x64",
 		"client/dist/frp/win-x64",
 		"server/node_modules/@libsql/win32-x64-msvc",
 		"client/node_modules/@lydell/node-pty-win32-x64",
-		"client/node_modules/@node-datachannel/win32-x64-msvc",
 	],
 };
 
@@ -552,11 +545,6 @@ async function main(): Promise<void> {
 			join(ROOT, "scripts", "uninstall.cjs"),
 			join(ROOT, args.output, "uninstall.cjs"),
 		);
-		// coturn 一键安装脚本随构件分发（ADR-0026；在 Server 主机上运行，需 root）
-		cpSync(
-			join(ROOT, "scripts", "install-coturn.sh"),
-			join(ROOT, args.output, "install-coturn.sh"),
-		);
 
 		// 3. 压缩（win-x64 / linux-x64 两份）+ linux frp 内存注入 + sha256
 		const variants: ArchiveVariant[] = ["win-x64", "linux-x64"];
@@ -583,9 +571,6 @@ async function main(): Promise<void> {
 		);
 		console.log(
 			`[pack-release] 安装/卸载脚本与 zip 平级: ${join(ROOT, args.output, "install.cjs / uninstall.cjs")}`,
-		);
-		console.log(
-			`[pack-release] coturn 安装脚本: ${join(ROOT, args.output, "install-coturn.sh")}`,
 		);
 	} catch (error) {
 		for (const [path, content] of originals) {

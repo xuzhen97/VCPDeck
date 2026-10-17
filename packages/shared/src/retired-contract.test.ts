@@ -32,3 +32,34 @@ describe("退役的 Pi／session-host 公共契约", () => {
 		}
 	});
 });
+
+describe("退役的 P2P 隧道与远程桌面公共契约（ADR-0053）", () => {
+	it("不再声明 tunnel 事件", () => {
+		const retired = Object.values(Events).filter((value) =>
+			value.startsWith("tunnel:"),
+		);
+		expect(retired).toEqual([]);
+	});
+
+	it("模块不再导出隧道协议解析器与常量", async () => {
+		const mod = (await import("./index.js")) as Record<string, unknown>;
+		for (const name of [
+			"P2P_TUNNEL_PROTOCOL_VERSION",
+			"TunnelLimits",
+			"parseP2pTunnelCapabilityStatus",
+			"parseTunnelBrowserAttach",
+			"parseTunnelBrowserSignal",
+			"parseTunnelClientSignal",
+			"parseTunnelClientState",
+			"parseTunnelClose",
+			"parseTunnelConfigInfo",
+			"parseTunnelConfigUpdate",
+			"parseTunnelIceServer",
+			"parseTunnelPrepare",
+			"parseTunnelSessionCreated",
+			"parseTunnelSessionCreateRequest",
+		]) {
+			expect(mod).not.toHaveProperty(name);
+		}
+	});
+});

@@ -1,6 +1,10 @@
 # ADR-0026：浏览器与 Client 使用 WebRTC 通用 TCP 隧道
 
-- 状态：Accepted
+> 本 ADR 已被 [ADR-0053](./0053-retire-p2p-tunnel-and-browser-remote-desktop.md) 取代：
+> 隧道协议、coturn 与相关设计专题（`design/p2p-tunnel.md`、`design/p2p-tunnel-acceptance.md`）
+> 均已删除。以下正文保留为历史结论。
+
+- 状态：Superseded by [ADR-0053](./0053-retire-p2p-tunnel-and-browser-remote-desktop.md)
 - 日期：2026-09-11
 - 决策者：项目维护者
 - 关联：`docs/architecture.md`、`docs/protocols.md`、`docs/security.md`、ADR-0001、ADR-0005、ADR-0012、ADR-0020

@@ -103,7 +103,6 @@ Linux A2 新安装的 `vcpdeck` 专用账户持有 `NOPASSWD: ALL`，是 **root 
 - Job payload 可能包含敏感 command、script、executable、args、cwd、文件路径和 `file.writeText` 正文；最终 stdout/stderr 及 `file.readText` 正文当前进入 Job result 和数据库备份，列表、详情、日志与保留策略必须按敏感数据处理；
 - Server 不持久化终端正文、快照、输入和 reconnect token；
 - TerminalAudit 仅记录生命周期；
-- P2P 隧道的 coturn 配置只存 URL/realm；TURN shared secret 仅存 `VCPDECK_TURN_SECRET_FILE` 指向的 `0640` 文件，临时凭据、SDP、candidate 与 HTTP 正文均不落库、不进日志；
 - 错误 message 不得包含 stack、文件内容、Token、签名 URL或原始外部 API 响应；
 - Release 和更新日志只记录版本、状态和安全失败摘要。
 
@@ -169,7 +168,6 @@ Alibaba Release 上传的数据面直接连接 Provider：Server 只签发/刷�
 | FRPS Token / Dashboard 密码 | Server DB、Job payload、Client TOML/FRPS 配置 | 当前明文；受控轮换并重建映射连接 |
 | Storage/OAuth Token | Storage config | 最小权限；撤销后验证状态 |
 | Local signSecret | `StorageBackendConfig.config` | 自动生成后持久化；疑似泄露时轮换，旧 URL 随即失效 |
-| TURN shared secret | `VCPDECK_TURN_SECRET_FILE` 指向的 `root:serverUser` `0640` 文件 | 不进 DB/REST/Web；轮换后旧 24h 临时凭据到期自然失效 |
 | Git SSH 共享私钥（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录）；获选 Client 的 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh/id_ed25519`（POSIX 0600；Windows 用 `icacls` 关闭继承并授权 SYSTEM、Administrators **与当前运行账户**，收紧后回读校验当前账户仍可写——Client 未必以 SYSTEM 运行，漏授权会把运行账户挡在目录外导致安装必然失败） | 轮换需在 Git 服务删除旧公钥并登记新公钥，再重新分发；本地清理不等于 Git 服务已撤销 |
 | Git SSH 根密钥 | 缺省由 Server 在版本目录外的数据根自动创建（`<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`；POSIX 目录 `0700`/文件 `0600`，Windows ACL 授权运行账户、SYSTEM 与 Administrators）；显式 `VCPDECK_GIT_SSH_KEY_FILE`（与其它受管密钥分离）优先且只读 | 不进 DB/REST/Web/日志；缺失/损坏/错绑时生成与换代 fail closed（Server 启动与其他能力不受影响）；**必须与 SQLite 配对备份**，只恢复数据库无法解密既有私钥；绝不因文件缺失而重建 |
 

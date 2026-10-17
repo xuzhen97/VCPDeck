@@ -316,20 +316,25 @@ describe("getClientInstallationCompliance（ADR-0027 合规矩阵）", () => {
 	});
 });
 
-describe("parseMachineRegister p2pTunnel 能力", () => {
-	it("接受新 Client 上报的 p2pTunnel v1 能力", () => {
+describe("parseMachineRegister 退役的 p2pTunnel 能力（ADR-0053）", () => {
+	// compatibility.md §5.3：退役入站字段必须“接受并丢弃”，
+	// 不能让仍在旧版本的 Client 因未知键被整条注册拒绝（0.19.0 事故教训）。
+	it("旧 Client 上报 p2pTunnel 时仍能注册，且该摘要不投影", () => {
+		// 旧 Client 的载荷形状已不在类型中声明，故按原始对象构造。
 		const parsed = parseMachineRegister(
 			validRegister({
 				capabilityDetails: {
 					frp: { available: true, reconcileProtocolVersion: 1 },
 					p2pTunnel: { available: true, protocolVersion: 1 },
-				},
+				} as never,
 			}),
 		);
-		expect(parsed.capabilityDetails?.p2pTunnel).toEqual({ available: true, protocolVersion: 1 });
+		expect(parsed.clientId).toBe("67f965a4-e3cf-43ba-8d84-70e14cda864c");
+		expect(parsed.capabilityDetails?.frp).toMatchObject({ available: true });
+		expect(parsed.capabilityDetails).not.toHaveProperty("p2pTunnel");
 	});
 
-	it("接受 native 后端缺失的 p2pTunnel 摘要", () => {
+	it("旧 Client 上报 native 后端缺失的摘要同样被接受并丢弃", () => {
 		const parsed = parseMachineRegister(
 			validRegister({
 				capabilityDetails: {
@@ -338,34 +343,20 @@ describe("parseMachineRegister p2pTunnel 能力", () => {
 						protocolVersion: 1,
 						code: "P2P_NATIVE_BACKEND_UNAVAILABLE",
 					},
-				},
+				} as never,
 			}),
 		);
-		expect(parsed.capabilityDetails?.p2pTunnel).toMatchObject({
-			available: false,
-			code: "P2P_NATIVE_BACKEND_UNAVAILABLE",
-		});
+		expect(parsed.capabilityDetails).not.toHaveProperty("p2pTunnel");
 	});
 
-	it("拒绝 p2pTunnel 未知协议版本", () => {
+	it("真正未知的能力键仍严格拒绝", () => {
 		expect(() =>
 			parseMachineRegister(
 				validRegister({
-					capabilityDetails: {
-						p2pTunnel: { available: true, protocolVersion: 2 } as never,
-					},
+					capabilityDetails: { tunnelV2: { available: true } } as never,
 				}),
 			),
-		).toThrow();
-	});
-
-	it("旧 Client 缺省 p2pTunnel 时保持 undefined", () => {
-		const parsed = parseMachineRegister(
-			validRegister({
-				capabilityDetails: { frp: { available: false, code: "FRPC_NOT_FOUND" } },
-			}),
-		);
-		expect(parsed.capabilityDetails?.p2pTunnel).toBeUndefined();
+		).toThrow(/未知字段/);
 	});
 });
 

@@ -6,11 +6,15 @@
 
 ### Changed
 
+- **旧 Client 注册保持兼容**：`capabilityDetails.p2pTunnel` 进入「已退役、接受并丢弃」白名单，仍在旧版本的 Client 不会被整条注册拒绝；其 `tunnel:*` 事件因新 Server 无 handler 被静默忽略，`/api/tunnels/*` 返回 404。见 `docs/compatibility.md` §5.3。
 - **脚本分类与运行边界**：内部脚本迁至 `scripts/build`、`scripts/dev`、`scripts/tests/{unit,e2e,manual,helpers}`，公开安装/卸载/Launcher 升级脚本继续保留根路径，兼容 raw URL 和发布资产；既有 pnpm 命令名保持不变，新增 `pnpm test:scripts` 仅运行 Node/TSX 离线回归，Shell 与真实环境验证单列。新增 [脚本逐项清单](scripts/README.md)，同步 Current 文档路径与风险说明。
 - **保留真实本地 FRPS 联调入口**：通过 `node scripts/dev/start-test-frps.cjs` 启动真实 frps，补齐下载/启动示例、实际环境变量名、明文测试 Token 与 Dashboard 本地网络限制。
 
 ### Removed
 
+- **退役 P2P 隧道与浏览器远程桌面**（[ADR-0053](docs/adr/0053-retire-p2p-tunnel-and-browser-remote-desktop.md)）：删除机器工作区的「隧道」「远程桌面」Tab、Frontend 的 WebRTC 数据面／noVNC 集成／UltraVNC `SetSW` 扩展、Shared 的隧道协议与 `Events.TUNNEL_*`、Server 的 `TunnelModule`（Session／Config／Controller）与两处 Gateway 信令、Client 的 `node-datachannel` 与桥接、SDK 的 `tunnels` 域。网络暴露统一由 FRP 映射承担；需要图形界面时由操作者自行部署 VNC/RDP 并经 FRP 暴露，不在 VCPDeck 界面与审计范围内。
+- **删除「设置 → 网络」与 coturn 部署面**：`/settings/network`（STUN/TURN URL 与 realm）随隧道退役移除；`scripts/install-coturn.sh`、其 Shell 单测、Release 分发与 `VCPDECK_TURN_SECRET_FILE` 读取一并删除，coturn 不再作为部署组件。`TunnelConfig` 表通过迁移删除。
+- **依赖精简**：Client 移除 `node-datachannel` 及 Windows/Linux x64 预编译包，Frontend 移除 `@novnc/novnc`；发布外部保留清单与平台裁剪规则同步收紧。
 - 删除依赖过时 WS/PSK 操作员模型的旧日志入口、缺认证且会切换默认实例的旧 FRPS 实例探测脚本，以及非源码增量缓存；不将现有 Service 测试宣称为已删除 HTTP/E2E 的完整替代。本次分类不代表已修复保留脚本的开发库删除、进程终止或云服务副作用。
 
 ## [0.19.4] - 2026-10-15

@@ -86,7 +86,7 @@ client/
   dist/pi/worker.js       # fork worker 独立 bundle
   dist/probe-worker.js    # 能力探测 worker 独立 bundle
   dist/frp/               # win-x64 + linux-x64 frpc（linux 为裸 ELF + .gz 副本）
-  node_modules/           # 仅外部保留：@lydell/node-pty 与 node-datachannel 双平台预编译
+  node_modules/           # 仅外部保留：@lydell/node-pty 双平台预编译
 ```
 
 外部保留清单与理由、esbuild 选项、staging 安装配置见 ADR-0012。

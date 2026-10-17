@@ -3,7 +3,6 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import {
 	parseFrpCapabilityStatus,
 	parseMachineInstallation,
-	parseP2pTunnelCapabilityStatus,
 	parseGitSshCapability,
 	parsePrivilegedCapabilityStatus,
 	type MachineInstallationStatus,
@@ -304,7 +303,6 @@ export class ClientService {
       terminal?: TerminalCapabilityStatus;
       frp?: FrpCapabilityStatus;
       privileged?: PrivilegedCapabilityStatus;
-      p2pTunnel?: ClientInfo["capabilityDetails"]["p2pTunnel"];
       gitSsh?: ClientInfo["capabilityDetails"]["gitSsh"];
     };
     installation: MachineInstallationStatus | null;
@@ -314,7 +312,6 @@ export class ClientService {
         terminal?: TerminalCapabilityStatus;
         frp?: FrpCapabilityStatus;
         privileged?: PrivilegedCapabilityStatus;
-        p2pTunnel?: ClientInfo["capabilityDetails"]["p2pTunnel"];
         gitSsh?: ClientInfo["capabilityDetails"]["gitSsh"];
       };
       installation: MachineInstallationStatus | null;
@@ -343,13 +340,6 @@ export class ClientService {
         result.details.privileged = parsePrivilegedCapabilityStatus(record.privileged);
       } catch {
         // privileged 摘要损坏：省略，UI 显示“未报告”，不推断为 root 等价。
-      }
-    }
-    if (record.p2pTunnel !== undefined) {
-      try {
-        result.details.p2pTunnel = parseP2pTunnelCapabilityStatus(record.p2pTunnel);
-      } catch {
-        // p2pTunnel 摘要损坏：省略，UI 不声明协议支持。
       }
     }
     if (record.gitSsh !== undefined) {

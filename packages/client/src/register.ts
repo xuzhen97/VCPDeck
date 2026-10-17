@@ -7,7 +7,6 @@ import type {
 	FrpCapabilityStatus,
 	GitSshCapability,
 	MachineRegister,
-	P2pTunnelCapabilityStatus,
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
 import { FRP_RECONCILE_PROTOCOL_VERSION, VERSION } from "@vcpdeck/shared";
@@ -52,7 +51,6 @@ export function getRegisterInfo(
 	terminalStatus?: TerminalCapabilityStatus,
 	runtimeSecurity?: RuntimeSecurityInfo,
 	env: NodeJS.ProcessEnv = process.env,
-	p2pTunnelStatus?: P2pTunnelCapabilityStatus,
 	gitSshStatus?: GitSshCapability,
 ): MachineRegister {
 	const verifyOnly = isMigrationVerifyOnly(env);
@@ -66,10 +64,6 @@ export function getRegisterInfo(
 		if (terminalStatus?.available) {
 			caps.push("terminal.pty");
 		}
-		// P2P 隧道：只有 native 后端成功加载才声明 operational 能力。
-		if (p2pTunnelStatus?.available) {
-			caps.push("tunnel.p2p");
-		}
 	}
 	const capabilityDetails: MachineRegister["capabilityDetails"] = {};
 	if (!verifyOnly) {
@@ -79,10 +73,6 @@ export function getRegisterInfo(
 			? { available: true, reconcileProtocolVersion: FRP_RECONCILE_PROTOCOL_VERSION }
 			: { available: false, code: "FRPC_NOT_FOUND" };
 		capabilityDetails.frp = frpStatus;
-		// P2P 隧道能力摘要：可用时携带 protocolVersion；不可用时上报稳定 code（不含 native 错误正文）。
-		if (p2pTunnelStatus !== undefined) {
-			capabilityDetails.p2pTunnel = p2pTunnelStatus;
-		}
 		// Git SSH 受管密钥分发能力（ADR-0037）：缺省即未报告，Server 因此不下发密钥。
 		if (gitSshStatus !== undefined) {
 			capabilityDetails.gitSsh = gitSshStatus;

@@ -13,7 +13,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | Server ↔ Client 通用协议 | Shared 事件与 DTO；Client 上报版本/capability | 没有独立通用协议版本；同版本最安全 |
 | Server ↔ Client Git SSH（受管密钥） | `GIT_SSH_PROTOCOL_VERSION=1`；Client 上报 `capabilityDetails.gitSsh`（`{ available: true, protocolVersion: 1 }`，否则 `{ available: false, code: "GIT_SSH_UNAVAILABLE" }`） | 未上报能力、协议不匹配或本机无法安全持久化 → **不下发私钥**（含 Client 先注册、后选机和换钥的路径）；恢复能力并重注册后自动补发。清理指令不含私钥，仍可下发。`installed` 仅代表本地副本落盘，不证明 Git 服务授权或实际访问成功。受管副本位于 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh`，Client 升级/回滚不删除；不阻塞其它能力 |
 | Server ↔ Client Terminal | `terminal.pty` capabilityDetails + Shared 严格运行时解析 | 无独立数字版本；缺能力时拒绝，seq/generation/state 变化需整套同版本发布 |
-| Server ↔ Client P2P 隧道 | `P2P_TUNNEL_PROTOCOL_VERSION=1`；capabilityDetails.p2pTunnel 摘要 | 版本不匹配或无能力时不执行数据面，UI 提示不支持；旧 Client 缺省视为 unsupported |
+| Server ↔ Client P2P 隧道 | **已退役**（[ADR-0053](./adr/0053-retire-p2p-tunnel-and-browser-remote-desktop.md)） | 新 Server 不再提供隧道 REST、`tunnel:*` 事件或数据面。旧 Client 上报的 `capabilityDetails.p2pTunnel` 按 §5.3 白名单**接受并丢弃**，其 `tunnel:*` 事件因无 handler 被静默忽略；旧调用方访问 `/api/tunnels/*` 得到 404 |
 | Server ↔ Frontend | REST/Socket.IO/SSE | Frontend 应与 Server 同一发布版本部署 |
 | SDK ↔ Server | REST DTO 和错误 | SDK/Shared 可从同一 Git Tag 子目录安装；只支持与 Server 同版本的标准组合 |
 | CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | 用户级 Git package 安装；升级必须显式切换 Tag；`0.2.1+` CLI 支持 Alibaba Release 分片直传 |
@@ -48,7 +48,14 @@ Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x
 
 Pi 专用协议与能力摘要已按 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md)
 退役，不再存在 Pi 协议版本协商、RuntimeSpec 门控或隔离边界回退要求。基础能力的升级顺序仍按上节执行
-（Server 先行、Client 受控补更）；旧 Pi Client 注册时其专用字段会被严格拒绝，升级说明必须写明这一点。
+（Server 先行、Client 受控补更）；旧 Pi Client 的专用字段按 §5.3 白名单**接受并丢弃**，
+不得因此拒绝整条注册。
+
+### P2P 隧道升级顺序（已退役）
+
+P2P 隧道与浏览器远程桌面已按 [ADR-0053](./adr/0053-retire-p2p-tunnel-and-browser-remote-desktop.md)
+退役，不再存在隧道协议版本协商。新 Server 对旧 Client 的 `capabilityDetails.p2pTunnel` 同样按 §5.3
+容忍并丢弃；旧 Frontend 访问已删除的 `/api/tunnels/*` 与 `tunnel:*` 事件应自行失败，不保证可用。
 
 
 ## 4. 升级顺序

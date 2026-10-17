@@ -33,14 +33,15 @@ test("根 dev 脚本不再引导 Pi 凭据密钥", () => {
 	assert.equal(pkg.devDependencies["pi-simplify"], undefined);
 });
 
-test("Client 不再声明 Pi SDK／Photon 依赖，保留 PTY 与 P2P native", () => {
+test("Client 不再声明 Pi SDK／Photon 依赖，保留 PTY，P2P native 已退役", () => {
 	const pkg = readJson("packages/client/package.json");
 	for (const dep of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
 		assert.doesNotMatch(dep, /@earendil-works\//);
 		assert.doesNotMatch(dep, /photon/);
 	}
 	assert.ok(pkg.dependencies["@lydell/node-pty"], "PTY 保留");
-	assert.ok(pkg.dependencies["node-datachannel"], "P2P native 保留");
+	// ADR-0053：P2P 隧道退役，原生依赖同步移除
+	assert.equal(pkg.dependencies["node-datachannel"], undefined);
 	assert.doesNotMatch(pkg.scripts.dev, /build-dev-pi-bundle/);
 });
 
