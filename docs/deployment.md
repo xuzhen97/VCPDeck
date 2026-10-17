@@ -265,6 +265,24 @@ prisma db push
 Pi 会话模型与 v4 协议迁移已按 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md)
 退役：启动、安装与升级流程都不再执行 Agent 迁移，历史 Agent／Pi 表与数据保留不动。
 
+### 6.2 破坏性 schema 变更（删表／删列）
+
+`prisma db push` 不带 `--accept-data-loss`，遇到删表或删列会**直接失败并拒绝启动**——包括 Launcher 的 preStart 阶段。这是有意的保护，**不要改启动脚本绕过它**。
+
+含此类变更的版本，升级或本地启动前必须由操作者显式同步一次：
+
+```bash
+# 在 Server 主机执行（发布包内为 server 目录）
+cd packages/server   # 发布构件中为 server/
+npx prisma db push --accept-data-loss
+```
+
+执行后再走正常升级流程。若已错过（Server 起不来、日志出现 `Use the --accept-data-loss flag to ignore the data loss warnings`），同样执行上述命令后重启 Server 即可。
+
+已知需要该步骤的版本：
+
+- **ADR-0053 之后的版本（含 0.19.x 的本次退役）**：`DROP TABLE "TunnelConfig"`。该表只存 STUN/TURN URL 与 realm，不含可复用业务数据。
+
 
 ## 7. Frontend 托管
 
@@ -328,7 +346,8 @@ location / {
 4. 确认版本号从未用过：同一版本重复上传会被拒绝（`RELEASE_DUPLICATE_VERSION`），且失败后不能“重试同一版本”，只能发布新版本号；
 5. 若启用 VCPDeckBridge 公开分享，配置插件 `PUBLIC_SHARE_BASE_URL` 为反向代理对外 HTTP(S) 地址；未配置时仅回退插件的 `SERVER_URL`，不能依赖转发头自动猜测；
 6. 反向代理必须对 `/api/public/storage-shares/<token>` 的访问日志脱敏，并允许公开端点的无认证请求；
-7. 若发布依赖新 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 串行升级全部 Client Launcher，再单独升级 Server Launcher；每台完成 SHA-256、守护进程、控制端口和业务版本核验后才能继续；本次版本保留能力不通过业务 Release 自动远程升级旧 Launcher。
+7. 若发布依赖新 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 串行升级全部 Client Launcher，再单独升级 Server Launcher；每台完成 SHA-256、守护进程、控制端口和业务版本核验后才能继续；本次版本保留能力不通过业务 Release 自动远程升级旧 Launcher；
+8. 若本版本的 Prisma schema 含**破坏性变更**（删表／删列），先在 Server 主机按 §6.2 执行一次 `npx prisma db push --accept-data-loss`；否则 Launcher preStart 会直接失败，新版本起不来。
 
 ### 9.2 构建并上传
 

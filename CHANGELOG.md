@@ -7,6 +7,7 @@
 ### Changed
 
 - **旧 Client 注册保持兼容**：`capabilityDetails.p2pTunnel` 进入「已退役、接受并丢弃」白名单，仍在旧版本的 Client 不会被整条注册拒绝；其 `tunnel:*` 事件因新 Server 无 handler 被静默忽略，`/api/tunnels/*` 返回 404。见 `docs/compatibility.md` §5.3。
+- **升级前置步骤（破坏性 schema 变更）**：本版本删除 `TunnelConfig` 表，而启动脚本使用**不带** `--accept-data-loss` 的 `prisma db push`（有意保护，不静默丢数据）。现有部署升级前必须先在 Server 主机执行一次 `npx prisma db push --accept-data-loss`，否则 Server 启动与 Launcher preStart 都会直接失败。步骤与判定见 `docs/deployment.md` §6.2 与 §9.1 第 8 条。
 - **脚本分类与运行边界**：内部脚本迁至 `scripts/build`、`scripts/dev`、`scripts/tests/{unit,e2e,manual,helpers}`，公开安装/卸载/Launcher 升级脚本继续保留根路径，兼容 raw URL 和发布资产；既有 pnpm 命令名保持不变，新增 `pnpm test:scripts` 仅运行 Node/TSX 离线回归，Shell 与真实环境验证单列。新增 [脚本逐项清单](scripts/README.md)，同步 Current 文档路径与风险说明。
 - **保留真实本地 FRPS 联调入口**：通过 `node scripts/dev/start-test-frps.cjs` 启动真实 frps，补齐下载/启动示例、实际环境变量名、明文测试 Token 与 Dashboard 本地网络限制。
 

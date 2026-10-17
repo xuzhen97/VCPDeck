@@ -50,6 +50,7 @@ ADR-0026 引入 Browser ↔ Client 的 WebRTC DataChannel 回环 TCP 隧道，AD
 
 - **不再能从浏览器直接查看或操作目标机桌面**。需要图形界面时，须由操作者另行部署 VNC/RDP，并通过 FRP 映射暴露，且该链路不在 VCPDeck 的界面与审计范围内。
 - 已存在的 `TunnelConfig` 数据随迁移丢失；本 ADR 认定其无业务价值。
+- **升级路径多一步人工操作**：`DROP TABLE` 属破坏性 schema 变更，而启动脚本使用不带 `--accept-data-loss` 的 `prisma db push`（有意保护）。现有部署升级前必须先在 Server 主机执行一次 `npx prisma db push --accept-data-loss`，否则 Server 与 Launcher preStart 都会失败。步骤见 [`deployment.md`](../deployment.md) §6.2。
 - 存量旧 Client 仍会声明 `tunnel.p2p` 并发送 `tunnel:*` 事件；需按第 6 条容忍，至少保留一个发布周期后再评估是否收紧白名单。
 
 ## 验证与退出条件
