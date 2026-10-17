@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-17
+
 ### Changed
 
 - **旧 Client 注册保持兼容**：`capabilityDetails.p2pTunnel` 进入「已退役、接受并丢弃」白名单，仍在旧版本的 Client 不会被整条注册拒绝；其 `tunnel:*` 事件因新 Server 无 handler 被静默忽略，`/api/tunnels/*` 返回 404。见 `docs/compatibility.md` §5.3。
