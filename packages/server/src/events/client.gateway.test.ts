@@ -1131,4 +1131,36 @@ describe("ClientGateway Job 日志相位（ADR-0054）", () => {
 			}),
 		);
 	});
+
+	it("结算前 flush 在途输出：markDone 必须等落盘完成，output_first 先落库", async () => {
+		const { gateway, jobService, jobLog } = makeGateway();
+		let release!: () => void;
+		jobService.appendOutputRaw.mockReturnValue(
+			new Promise<void>((resolve) => {
+				release = resolve;
+			}),
+		);
+
+		const stdout = gateway.handleJobStdout({
+			jobId: "job-flush",
+			text: "out",
+		});
+		const done = gateway.handleJobDone({
+			jobId: "job-flush",
+			type: "exec",
+			exitCode: 0,
+		} as never);
+
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		// 落盘还没完成时不得结算，否则 spoolBytes 会偏小、output_first 会排到 settled 之后
+		expect(jobService.markDone).not.toHaveBeenCalled();
+
+		release();
+		await Promise.all([stdout, done]);
+
+		expect(jobService.markDone).toHaveBeenCalled();
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({ jobId: "job-flush", event: "output_first" }),
+		);
+	});
 });

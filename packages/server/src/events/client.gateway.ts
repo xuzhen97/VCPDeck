@@ -69,6 +69,11 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
    * 内容相同、可接受；集合超过阈值后整体清空，避免长期运行无界增长。
    */
   private readonly outputSeen = new Set<string>();
+  /**
+   * 每 Job 的输出落盘队列：同 Job 的 chunk 串行写入，结算前 flush，
+   * 保证事件链顺序（output_first 先于 settled）与 spoolBytes 准确。
+   */
+  private readonly outputQueues = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(ClientService) private readonly clientService: ClientService,
@@ -433,16 +438,57 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   // ── Job output ──
   @SubscribeMessage(Events.JOB_STDOUT)
   async handleJobStdout(@MessageBody() data: JobOutput) {
-    await this.jobService.appendOutputRaw(data.jobId, data.text);
-    await this.recordFirstOutput(data.jobId, "stdout", data.text);
+    await this.enqueueOutput(data.jobId, "stdout", data.text);
     this.server.emit(Events.JOB_STDOUT, data);
   }
 
   @SubscribeMessage(Events.JOB_STDERR)
   async handleJobStderr(@MessageBody() data: JobOutput) {
-    await this.jobService.appendOutputRaw(data.jobId, data.text);
-    await this.recordFirstOutput(data.jobId, "stderr", data.text);
+    await this.enqueueOutput(data.jobId, "stderr", data.text);
     this.server.emit(Events.JOB_STDERR, data);
+  }
+
+  /**
+   * 按 Job 串行化输出落盘：同一 Job 的 chunk 顺序写 spool 并只记一次 output_first。
+   *
+   * 返回该 chunk 的落盘 Promise；`handleJobDone` 在结算前 flush 队列，
+   * 使事件链保持 output_first → settled 的因果顺序，`settled.spoolBytes` 也不会偏小。
+   */
+  private enqueueOutput(
+    jobId: string,
+    channel: "stdout" | "stderr",
+    text: string,
+  ): Promise<void> {
+    const previous = this.outputQueues.get(jobId) ?? Promise.resolve();
+    const next = previous
+      .then(() => this.persistOutput(jobId, channel, text))
+      .catch((error: unknown) => {
+        // 落盘失败不能中断后续 chunk；只留一行可检索的现场。
+        console.error(
+          `[job-output] job=${jobId} 输出落盘失败: ${(error as { message?: string })?.message ?? "unknown"}`,
+        );
+      });
+    this.outputQueues.set(jobId, next);
+    void next.then(() => {
+      if (this.outputQueues.get(jobId) === next) this.outputQueues.delete(jobId);
+    });
+    return next;
+  }
+
+  private async persistOutput(
+    jobId: string,
+    channel: "stdout" | "stderr",
+    text: string,
+  ): Promise<void> {
+    // 先记"首块已到达"（到达即事实），再落盘：即使 spool 写入失败，这条事件仍然成立。
+    await this.recordFirstOutput(jobId, channel, text);
+    await this.jobService.appendOutputRaw(jobId, text);
+  }
+
+  /** 结算前冲掉该 Job 在途输出落盘；socket.io 按序投递，队列已含 done 之前的所有 chunk。 */
+  private async flushOutput(jobId: string): Promise<void> {
+    const pending = this.outputQueues.get(jobId);
+    if (pending) await pending;
   }
 
   /** 只为每个 Job 记一次首块输出：用来区分"派发后一直没输出"和"有输出后卡住"。 */
@@ -511,6 +557,8 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
 
   @SubscribeMessage(Events.JOB_DONE)
   async handleJobDone(@MessageBody() data: JobDone) {
+    // 先冲掉该 Job 在途输出，再结算：保证 output_first 落在 settled 之前且 spoolBytes 准确。
+    await this.flushOutput(data.jobId);
     const raw = data as any;
     const type: string = raw.type;
 

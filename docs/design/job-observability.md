@@ -30,6 +30,8 @@ Job 此前只有终态行、`Job.result` 和一份无序 raw spool（`data/job-o
 
 因此 `grep '"jobId":"<id>"'`（运行日志）与 `vcpdeck jobs logs <jobId>`（事件链）不会漂移。写入 best-effort：数据库失败只补一条 stdout 警告，绝不阻断 Job。
 
+输出落盘按 Job 串行化，`JOB_DONE` 结算前会 flush 该 Job 的在途输出队列：因此链上 `output_first` 一定早于 `settled`，`settled.spoolBytes` 反映结算时刻的真实落盘量（快速 Job 不会因为竞态得到 0）。
+
 保留策略：每 Job 上限 200 条（超出时优先裁剪最旧的非 error 事件，错误取证最后才动）；全局 30 天 TTL，`JobLogService` 每 6 小时清理一次（timer `unref`）。Job 行本身当前不删除，事件独立清理。
 
 ## 3. 协议
