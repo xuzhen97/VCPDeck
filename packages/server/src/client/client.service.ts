@@ -1,10 +1,14 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
+	hasClientAnnotations,
+	parseClientAnnotations,
 	parseFrpCapabilityStatus,
 	parseMachineInstallation,
 	parseGitSshCapability,
 	parsePrivilegedCapabilityStatus,
+	type ClientAnnotations,
+	type ClientAnnotationsInput,
 	type MachineInstallationStatus,
 	type MachineRegister,
 	type PrivilegedCapabilityStatus,
@@ -21,6 +25,8 @@ export const CLIENT_NAME_TAKEN = "CLIENT_NAME_TAKEN";
 export const CLIENT_NOT_FOUND = "CLIENT_NOT_FOUND";
 /** 别名为空（400） */
 export const INVALID_CLIENT_NAME = "INVALID_CLIENT_NAME";
+/** 注解格式非法（400） */
+export const INVALID_CLIENT_ANNOTATIONS = "INVALID_CLIENT_ANNOTATIONS";
 /** Client 心跳超时阈值：超过两个以上心跳周期未上报即视为离线。 */
 export const CLIENT_HEARTBEAT_TIMEOUT_MS = 30_000;
 
@@ -40,6 +46,7 @@ interface ClientRow {
   clientVersion: string;
   capabilities: string;
   capabilityDetails: string;
+  annotations: string;
   disks: string;
   online: boolean;
   cpuPercent: number | null;
@@ -131,6 +138,37 @@ export class ClientService {
       // P2025: 目标记录不存在
       if ((error as { code?: string } | null)?.code === "P2025") {
         throw clientError(CLIENT_NOT_FOUND, `Client "${clientId}" not found`, 404);
+      }
+      throw error;
+    }
+    return this.toClientInfo(updated);
+  }
+
+  /**
+   * 全量替换操作者注解（ADR-0055）。
+   * 空内容写回 `{}` 以清除；注册/心跳不经过此方法，不会覆盖。
+   */
+  async updateAnnotations(
+    clientId: string,
+    input: ClientAnnotationsInput,
+    now = new Date(),
+  ): Promise<ClientInfo> {
+    const annotations = hasClientAnnotations(input)
+      ? JSON.stringify({ ...input, updatedAt: now.toISOString() })
+      : "{}";
+    let updated: ClientRow;
+    try {
+      updated = await this.prisma.client.update({
+        where: { id: clientId },
+        data: { annotations },
+      });
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === "P2025") {
+        throw clientError(
+          CLIENT_NOT_FOUND,
+          `Client "${clientId}" not found`,
+          404,
+        );
       }
       throw error;
     }
@@ -289,7 +327,25 @@ export class ClientService {
     if (installation !== null) {
       info.installation = installation;
     }
+    const annotations = this.parseStoredAnnotations(c.annotations);
+    if (annotations !== null) {
+      info.annotations = annotations;
+    }
     return info;
+  }
+
+  /**
+   * 解析持久化的注解 JSON；损坏或空值按“未补充”处理，不影响 Client 列表。
+   */
+  private parseStoredAnnotations(
+    json: string | undefined,
+  ): ClientAnnotations | null {
+    if (!json || json.trim() === "" || json === "{}") return null;
+    try {
+      return parseClientAnnotations(JSON.parse(json));
+    } catch {
+      return null;
+    }
   }
 
   /**

@@ -449,6 +449,15 @@ Frontend 应显示 Token label 并确认；CLI 要求显式 `--force`；Skill �
 [
   {
     "clientId": "machine-uuid",
+    "annotations": {
+      "publicAddress": {
+        "v4": ["203.0.113.10"],
+        "v6": [],
+        "host": "nas.example.com"
+      },
+      "notes": "动态公网 IP，靠 DDNS；仅开放 443",
+      "updatedAt": "2026-10-18T02:00:00.000Z"
+    },
     "hostname": "workstation",
     "os": "win32 10.0.26100",
     "capabilities": ["exec", "file.read", "file.write", "frp"],
@@ -464,6 +473,8 @@ Frontend 应显示 Token label 并确认；CLI 要求显式 `--force`；Skill �
 - 心跳当前只更新 `lastHeartbeatAt`，不向 REST 返回 CPU、内存、磁盘或运行 Job；
 - `lastHeartbeatAt` 在刚注册且尚未发送心跳时可能为 `null`。
 
+`annotations` 是操作者声明，不是 Client 上报事实；可能缺失、过期或与现状不一致。`publicAddress === null` 表示未声明，对象内全空表示明确没有公网地址；有地址不代表端口可达，不能用作授权或连通性保证。
+
 调用端应先根据 capability 控制功能入口：
 
 | 操作 | capability |
@@ -476,6 +487,34 @@ Frontend 应显示 Token label 并确认；CLI 要求显式 `--force`；Skill �
 注意：Server 当前没有校验 `exec` capability，只校验文件 capability；调用端仍应检查，但不能将前端检查当作安全边界。
 
 实现：`packages/server/src/client/client.service.ts`
+
+### `PUT /api/clients/:clientId/annotations`
+
+- 鉴权：需要
+- 成功：`200`，返回更新后的 `ClientInfo`
+- 请求：
+
+```json
+{
+  "annotations": {
+    "publicAddress": {
+      "v4": ["203.0.113.10"],
+      "v6": [],
+      "host": "nas.example.com"
+    },
+    "notes": "动态公网 IP，靠 DDNS"
+  }
+}
+```
+
+`publicAddress` 可为 `null`；地址数组每族最多 4 个，只做语法校验；`notes` 最多 1000 字符。全量替换，`{ "annotations": {} }` 清除注解。Server 写入 `updatedAt`，调用方提交 `updatedAt` 会被视为未知字段拒绝。
+
+错误：
+
+| HTTP | code | 场景 |
+| --- | --- | --- |
+| 400 | `INVALID_CLIENT_ANNOTATIONS` | 缺少 `annotations` 键、未知字段、非法 IP/域名、超长或字段结构错误 |
+| 404 | `CLIENT_NOT_FOUND` | Client 不存在 |
 
 ---
 

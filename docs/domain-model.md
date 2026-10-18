@@ -86,6 +86,17 @@ Capability 是能力声明，不是用户权限：
 
 终端还通过 `capabilityDetails` 上报协议及运行环境摘要。Server 必须在使用相应能力前校验声明和详细状态。
 
+### 4.4 操作者注解
+
+- `annotations` 是 Server 持有的操作者声明，与 Client 上报事实分离；注册、心跳、重连和改名都不会覆盖，Client 不能写入；
+- `publicAddress: { v4: string[]; v6: string[]; host: string | null } | null`：
+  - `null` 表示补充过但公网情况未声明；
+  - 对象内三个字段全空表示明确没有公网地址；
+  - 任一地址或 `host` 有值表示有公网地址；
+- `notes` 承载网络细节（动态 IP、NAT、端口限制）与其他 Agent/操作者需要的关键上下文；不得写入密码、密钥或令牌；
+- `updatedAt` 由 Server 写入；注解是说明性事实，未验证可达性，不参与授权，也不构成连通性保证；
+- 写入口为 `PUT /api/clients/:clientId/annotations`（全量替换，空对象清除）。
+
 ## 5. Job
 
 Job 是一次具有目标 Client、类型、输入、生命周期、结果和操作者审计的远程操作。

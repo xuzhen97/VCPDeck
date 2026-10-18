@@ -1,5 +1,17 @@
 export { VERSION } from "./version.js";
 
+// ── Client 操作者注解（ADR-0055） ──
+export {
+	hasClientAnnotations,
+	parseClientAnnotations,
+	parseClientAnnotationsInput,
+} from "./client-annotations.js";
+export type {
+	ClientAnnotations,
+	ClientAnnotationsInput,
+	ClientPublicAddress,
+} from "./client-annotations.js";
+
 // ── Client 一键安装协议 ──
 export {
 	ClientInstallerErrorCode,
@@ -76,6 +88,7 @@ export type {
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
 import type { GitSshCapability } from "./git-ssh.js";
+import type { ClientAnnotations } from "./client-annotations.js";
 // 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
 export type {
 	ReleaseArchiveAvailableInfo,
@@ -376,6 +389,8 @@ export interface ClientInfo {
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告，不推断为任何模式） */
 	installation?: MachineInstallationStatus;
+	/** 可选：操作者声明的公网地址与备注（ADR-0055；旧 Server 缺省即未补充） */
+	annotations?: ClientAnnotations;
 	online: boolean;
 	cpuPercent: number | null;
 	memPercent: number | null;

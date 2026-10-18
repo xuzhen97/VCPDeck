@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ClientService } from "./client.service.js";
+import { CLIENT_NOT_FOUND, ClientService } from "./client.service.js";
 
 /** 构造 Prisma mock：register 流程（findUnique → findFirst → upsert）与 rename 流程（findFirst → update） */
 const prismaMock = (overrides: Record<string, unknown> = {}) => ({
@@ -594,5 +594,125 @@ describe("ClientService ADR-0027 全量摘要", () => {
 		expect(sys.privilegedMode).toBe("windows-system");
 		const old = await service.getInstallerStatus("old");
 		expect(old.privilegedMode).toBeNull();
+	});
+});
+
+describe("ClientService 操作者注解", () => {
+	const annotationsInput = {
+		publicAddress: { v4: ["1.2.3.4"], v6: [], host: null },
+		notes: "动态 IP",
+	};
+	const now = new Date("2026-10-18T02:00:00.000Z");
+
+	it("更新注解时写入 Server 时间并返回投影", async () => {
+		const updatedRow = {
+			...clientRow,
+			annotations: JSON.stringify({
+				...annotationsInput,
+				updatedAt: now.toISOString(),
+			}),
+		};
+		const update = vi.fn().mockResolvedValue(updatedRow);
+		const prisma = prismaMock({ update }) as never;
+		const service = new ClientService(prisma);
+
+		const result = await service.updateAnnotations(
+			"c1",
+			annotationsInput,
+			now,
+		);
+
+		expect(update).toHaveBeenCalledWith({
+			where: { id: "c1" },
+			data: {
+				annotations: JSON.stringify({
+					...annotationsInput,
+					updatedAt: now.toISOString(),
+				}),
+			},
+		});
+		expect(result.annotations).toEqual({
+			...annotationsInput,
+			updatedAt: now.toISOString(),
+		});
+	});
+
+	it("空注解清空为 {}", async () => {
+		const update = vi.fn().mockResolvedValue({
+			...clientRow,
+			annotations: "{}",
+		});
+		const prisma = prismaMock({ update }) as never;
+		const service = new ClientService(prisma);
+
+		const result = await service.updateAnnotations(
+			"c1",
+			{ publicAddress: null, notes: null },
+			now,
+		);
+
+		expect(update).toHaveBeenCalledWith({
+			where: { id: "c1" },
+			data: { annotations: "{}" },
+		});
+		expect(result.annotations).toBeUndefined();
+	});
+
+	it("未知 Client 返回 CLIENT_NOT_FOUND", async () => {
+		const update = vi
+			.fn()
+			.mockRejectedValue(
+				Object.assign(new Error("missing"), { code: "P2025" }),
+			);
+		const prisma = prismaMock({ update }) as never;
+		const service = new ClientService(prisma);
+
+		await expect(
+			service.updateAnnotations("missing", annotationsInput, now),
+		).rejects.toMatchObject({
+			code: CLIENT_NOT_FOUND,
+			statusCode: 404,
+		});
+	});
+
+	it("注册不会写入或覆盖注解", async () => {
+		const prisma = prismaMock() as never;
+		const service = new ClientService(prisma);
+
+		await service.register(registerDto, "socket-1");
+
+		const upsert = (
+			prisma as { client: { upsert: ReturnType<typeof vi.fn> } }
+		).client.upsert;
+		const args = upsert.mock.calls[0][0] as {
+			create: Record<string, unknown>;
+			update: Record<string, unknown>;
+		};
+		expect(args.create).not.toHaveProperty("annotations");
+		expect(args.update).not.toHaveProperty("annotations");
+	});
+
+	it("投影损坏注解时省略字段", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			{ ...clientRow, annotations: "{broken" },
+			{
+				...clientRow,
+				id: "c2",
+				annotations: JSON.stringify({
+					...annotationsInput,
+					updatedAt: now.toISOString(),
+				}),
+			},
+		]);
+		const prisma = prismaMock({ findMany }) as never;
+		const service = new ClientService(prisma);
+
+		const clients = await service.listOnline();
+
+		expect(clients[0]?.annotations).toBeUndefined();
+		expect(clients[1]?.annotations).toEqual({
+			...annotationsInput,
+			updatedAt: now.toISOString(),
+		});
 	});
 });

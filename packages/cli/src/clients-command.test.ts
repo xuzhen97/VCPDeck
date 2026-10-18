@@ -268,7 +268,19 @@ describe("clients command", () => {
 	});
 
 	it("--json 输出原始 ClientInfo 数组", async () => {
-		const clients = [clientInfo()];
+		const clients = [
+			clientInfo({
+				annotations: {
+					publicAddress: {
+						v4: ["1.2.3.4"],
+						v6: [],
+						host: null,
+					},
+					notes: "动态 IP",
+					updatedAt: "2026-10-18T02:00:00.000Z",
+				},
+			}),
+		];
 		const { port } = await listen((_request, response) => {
 			response.setHeader("content-type", "application/json");
 			response.end(JSON.stringify(clients));
@@ -282,6 +294,72 @@ describe("clients command", () => {
 		});
 		const parsed = JSON.parse(lines.join("\n")) as ClientInfo[];
 		expect(parsed).toEqual(clients);
+	});
+
+	it("表格展示操作者注解的公网摘要", async () => {
+		const { port } = await listen((request, response) => {
+			response.setHeader("content-type", "application/json");
+			if (request.url?.startsWith("/api/releases?")) {
+				response.end(
+					JSON.stringify({
+						data: [],
+						total: 0,
+						page: 1,
+						pageSize: 100,
+						totalPages: 0,
+					}),
+				);
+				return;
+			}
+			response.end(
+				JSON.stringify([
+					clientInfo({
+						clientId: "c1",
+						name: "nas",
+						annotations: {
+							publicAddress: {
+								v4: ["1.2.3.4"],
+								v6: [],
+								host: "nas.example.com",
+							},
+							notes: "动态 IP",
+							updatedAt: "2026-10-18T02:00:00.000Z",
+						},
+					}),
+					clientInfo({ clientId: "c2", name: "plain" }),
+					clientInfo({
+						clientId: "c3",
+						name: "none",
+						annotations: {
+							publicAddress: { v4: [], v6: [], host: null },
+							notes: null,
+							updatedAt: "2026-10-18T02:00:00.000Z",
+						},
+					}),
+					clientInfo({
+						clientId: "c4",
+						name: "unknown",
+						annotations: {
+							publicAddress: null,
+							notes: "待确认",
+							updatedAt: "2026-10-18T02:00:00.000Z",
+						},
+					}),
+				]),
+			);
+		});
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runClientsCommand("list", [], {
+			paths,
+			processEnv,
+			log: (message) => lines.push(message),
+		});
+		const summary = lines.join("\n");
+		expect(summary).toContain("1.2.3.4,nas.example.com");
+		expect(summary).toContain("未补充");
+		expect(summary).toContain("无公网");
+		expect(summary).toContain("未声明");
 	});
 
 	it("空列表给出明确提示", async () => {

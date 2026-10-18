@@ -44,6 +44,168 @@ var require_version = __commonJS({
   }
 });
 
+// ../shared/dist/client-annotations.js
+var require_client_annotations = __commonJS({
+  "../shared/dist/client-annotations.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.parseClientAnnotationsInput = parseClientAnnotationsInput;
+    exports2.hasClientAnnotations = hasClientAnnotations;
+    exports2.parseClientAnnotations = parseClientAnnotations;
+    var MAX_PUBLIC_ADDRESSES = 4;
+    var MAX_HOST_LENGTH = 253;
+    var MAX_NOTES_LENGTH = 1e3;
+    function isRecord2(value2) {
+      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+    }
+    function isIPv4(value2) {
+      const parts2 = value2.split(".");
+      if (parts2.length !== 4)
+        return false;
+      return parts2.every((part) => /^(0|[1-9]\d{0,2})$/.test(part) && Number(part) <= 255);
+    }
+    function isIPv6(value2) {
+      if (!value2.includes(":") || value2.includes("%") || value2.length > 45 || !/^[0-9A-Fa-f:.]+$/.test(value2)) {
+        return false;
+      }
+      try {
+        const parsed = new URL(`http://[${value2}]/`);
+        return parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]");
+      } catch {
+        return false;
+      }
+    }
+    function isHostname(value2) {
+      if (value2.length === 0 || value2.length > MAX_HOST_LENGTH)
+        return false;
+      return value2.split(".").every((label) => label.length >= 1 && label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
+    }
+    function parseAddressList(value2, field, validator, label) {
+      if (value2 === void 0)
+        return [];
+      if (!Array.isArray(value2)) {
+        throw new Error(`annotations.publicAddress.${field} \u5FC5\u987B\u4E3A\u6570\u7EC4`);
+      }
+      if (value2.length > MAX_PUBLIC_ADDRESSES) {
+        throw new Error(`annotations.publicAddress.${field} \u6700\u591A ${MAX_PUBLIC_ADDRESSES} \u4E2A`);
+      }
+      const result = [];
+      for (const candidate of value2) {
+        if (typeof candidate !== "string") {
+          throw new Error(`annotations.publicAddress.${field} \u7684\u5143\u7D20\u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32`);
+        }
+        const normalized = candidate.trim();
+        if (!validator(normalized)) {
+          throw new Error(`annotations.publicAddress.${field} \u542B\u975E\u6CD5 ${label} \u5730\u5740\uFF1A${normalized}`);
+        }
+        if (result.includes(normalized)) {
+          throw new Error(`annotations.publicAddress.${field} \u4E0D\u80FD\u5305\u542B\u91CD\u590D\u5730\u5740`);
+        }
+        result.push(normalized);
+      }
+      return result;
+    }
+    function parseHost(value2) {
+      if (value2 === void 0 || value2 === null)
+        return null;
+      if (typeof value2 !== "string") {
+        throw new Error("annotations.publicAddress.host \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32\u6216 null");
+      }
+      const normalized = value2.trim().toLowerCase().replace(/\.$/, "");
+      if (normalized.length === 0)
+        return null;
+      if (!isHostname(normalized)) {
+        throw new Error("annotations.publicAddress.host \u4E0D\u662F\u5408\u6CD5\u57DF\u540D");
+      }
+      return normalized;
+    }
+    function parseNotes(value2) {
+      if (value2 === void 0 || value2 === null)
+        return null;
+      if (typeof value2 !== "string") {
+        throw new Error("annotations.notes \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32\u6216 null");
+      }
+      const normalized = value2.trim();
+      if (normalized.length === 0)
+        return null;
+      if (normalized.length > MAX_NOTES_LENGTH) {
+        throw new Error(`annotations.notes \u4E0D\u80FD\u8D85\u8FC7 ${MAX_NOTES_LENGTH} \u5B57\u7B26`);
+      }
+      if (hasControlCharacters(normalized)) {
+        throw new Error("annotations.notes \u4E0D\u80FD\u5305\u542B\u63A7\u5236\u5B57\u7B26");
+      }
+      return normalized;
+    }
+    function hasControlCharacters(value2) {
+      for (const char of value2) {
+        const code = char.codePointAt(0) ?? 0;
+        if (code <= 8 || code === 11 || code === 12 || code >= 14 && code <= 31 || code === 127) {
+          return true;
+        }
+      }
+      return false;
+    }
+    function parsePublicAddress(value2) {
+      if (value2 === void 0 || value2 === null)
+        return null;
+      if (!isRecord2(value2)) {
+        throw new Error("annotations.publicAddress \u5FC5\u987B\u4E3A\u5BF9\u8C61\u6216 null");
+      }
+      for (const key of Object.keys(value2)) {
+        if (key !== "v4" && key !== "v6" && key !== "host") {
+          throw new Error(`annotations.publicAddress \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      return {
+        v4: parseAddressList(value2.v4, "v4", isIPv4, "IPv4"),
+        v6: parseAddressList(value2.v6, "v6", isIPv6, "IPv6"),
+        host: parseHost(value2.host)
+      };
+    }
+    function parseClientAnnotationsInput(value2) {
+      if (!isRecord2(value2)) {
+        throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      }
+      for (const key of Object.keys(value2)) {
+        if (key !== "publicAddress" && key !== "notes") {
+          throw new Error(`annotations \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      return {
+        publicAddress: parsePublicAddress(value2.publicAddress),
+        notes: parseNotes(value2.notes)
+      };
+    }
+    function hasClientAnnotations(input) {
+      return input.publicAddress !== null || input.notes !== null;
+    }
+    function parseClientAnnotations(value2) {
+      if (!isRecord2(value2)) {
+        throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      }
+      if (Object.keys(value2).length === 0)
+        return null;
+      for (const key of Object.keys(value2)) {
+        if (key !== "publicAddress" && key !== "notes" && key !== "updatedAt") {
+          throw new Error(`annotations \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      const publicAddress = parsePublicAddress(value2.publicAddress);
+      const notes = parseNotes(value2.notes);
+      if (typeof value2.updatedAt !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(value2.updatedAt) || Number.isNaN(Date.parse(value2.updatedAt))) {
+        throw new Error("annotations.updatedAt \u5FC5\u987B\u4E3A ISO \u65F6\u95F4\u5B57\u7B26\u4E32");
+      }
+      if (publicAddress === null && notes === null)
+        return null;
+      return {
+        publicAddress,
+        notes,
+        updatedAt: new Date(value2.updatedAt).toISOString()
+      };
+    }
+  }
+});
+
 // ../shared/dist/client-installer.js
 var require_client_installer = __commonJS({
   "../shared/dist/client-installer.js"(exports2) {
@@ -1604,13 +1766,23 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
-    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = void 0;
+    exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
     Object.defineProperty(exports2, "VERSION", { enumerable: true, get: function() {
       return version_js_1.VERSION;
+    } });
+    var client_annotations_js_1 = require_client_annotations();
+    Object.defineProperty(exports2, "hasClientAnnotations", { enumerable: true, get: function() {
+      return client_annotations_js_1.hasClientAnnotations;
+    } });
+    Object.defineProperty(exports2, "parseClientAnnotations", { enumerable: true, get: function() {
+      return client_annotations_js_1.parseClientAnnotations;
+    } });
+    Object.defineProperty(exports2, "parseClientAnnotationsInput", { enumerable: true, get: function() {
+      return client_annotations_js_1.parseClientAnnotationsInput;
     } });
     var client_installer_js_1 = require_client_installer();
     Object.defineProperty(exports2, "ClientInstallerErrorCode", { enumerable: true, get: function() {
@@ -2024,7 +2196,9 @@ function createClientsApi(client) {
   return {
     list: (signal) => client.request("GET", "/api/clients", void 0, signal),
     /** 修改客户端别名（全局唯一；重名返回 409）。 */
-    rename: (clientId, name, signal) => client.request("PATCH", `/api/clients/${encodeURIComponent(clientId)}/name`, { name }, signal)
+    rename: (clientId, name, signal) => client.request("PATCH", `/api/clients/${encodeURIComponent(clientId)}/name`, { name }, signal),
+    /** 全量替换操作者注解（ADR-0055）；空输入清除。 */
+    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal)
   };
 }
 var init_clients = __esm({
@@ -13780,6 +13954,17 @@ async function runListClients(argv, context) {
   const clients = await client.clients.list();
   log(formatClientsSummary(clients, await readCatchUpTargetVersion(client)));
 }
+function formatNetworkAnnotation(annotations) {
+  if (!annotations)
+    return "\u672A\u8865\u5145";
+  const publicAddress = annotations.publicAddress;
+  if (publicAddress === null)
+    return "\u672A\u58F0\u660E";
+  const values = [...publicAddress.v4, ...publicAddress.v6];
+  if (publicAddress.host)
+    values.push(publicAddress.host);
+  return values.length === 0 ? "\u65E0\u516C\u7F51" : values.join(",");
+}
 function formatClientsSummary(clients, targetVersion = null) {
   if (clients.length === 0)
     return "\u6CA1\u6709\u5DF2\u6CE8\u518C\u7684 Client\u3002";
@@ -13798,7 +13983,8 @@ function formatClientsSummary(clients, targetVersion = null) {
     version: client.clientVersion,
     // 落后判定以服务端上报的 clientVersion 与当前补更目标比对，不做本地推断
     outdated: targetVersion === null ? "\u2014" : client.clientVersion === targetVersion ? "no" : "yes",
-    privilege: formatPrivilegeSummary(client)
+    privilege: formatPrivilegeSummary(client),
+    network: formatNetworkAnnotation(client.annotations)
   }));
   const onlineCount = clients.filter((client) => client.online).length;
   const header = targetVersion === null ? `\u5171 ${clients.length} \u53F0 \xB7 \u5728\u7EBF ${onlineCount} \xB7 \u79BB\u7EBF ${clients.length - onlineCount} \xB7 \u5F53\u524D\u65E0\u8865\u66F4\u76EE\u6807` : `\u5171 ${clients.length} \u53F0 \xB7 \u5728\u7EBF ${onlineCount} \xB7 \u79BB\u7EBF ${clients.length - onlineCount} \xB7 \u8865\u66F4\u76EE\u6807 ${targetVersion}`;
@@ -13813,7 +13999,8 @@ function formatClientsSummary(clients, targetVersion = null) {
       "mem",
       "version",
       "outdated",
-      "privilege"
+      "privilege",
+      "network"
     ])
   ].join("\n");
 }

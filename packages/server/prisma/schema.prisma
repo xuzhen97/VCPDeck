@@ -17,6 +17,7 @@ model Client {
   clientVersion     String
   capabilities      String    @default("[]")
   capabilityDetails String    @default("{}")
+  annotations       String    @default("{}")
   disks             String    @default("[]")
   online            Boolean   @default(false)
   lastHeartbeatAt   DateTime?

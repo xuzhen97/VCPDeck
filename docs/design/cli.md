@@ -172,6 +172,8 @@ vcpdeck clients list [--env=<name>] [--json]
 
 默认输出人类可读表格（按名称稳定排序）并附总数/在线/离线汇总与当前补更目标；落后于补更目标的机器标为 `yes`，无可用目标时标为不可判定（`—`）而不是误报落后。`--json` 跳过环境摘要，stdout 为纯 JSON `ClientInfo[]`，供 Agent 和脚本解析。空列表指当前无在线 Client，输出明确提示而非报错。逐台更新结果与失败原因用 `release status` 的逐台明细核对，或看 Frontend 发版审计页的客户端更新明细。
 
+`--json` 返回的 `ClientInfo` 现在包含可选 `annotations`（操作者声明的公网地址与备注）；人类表格新增 `network` 列，显示 `未补充`、`未声明`、`无公网` 或地址/域名摘要。注解是操作者声明，可能过期，**不能**当作端口可达、授权或连通性保证；它也不会覆盖 Client 上报的 hostname/OS/capability。离线机器的注解仍持久化，但当前 `clients list` 只返回在线机器，因此 CLI 看不到离线记录。
+
 本命令只支持命名环境（含 `--env` 临时覆盖），不提供 Release 那样的 `--server` 直连兼容模式。GET 幂等且无副作用，失败可直接重试。Server 端 `PATCH /api/clients/:id/name` 重命名尚未暴露为 CLI 命令。
 
 ## 7. Jobs 命令

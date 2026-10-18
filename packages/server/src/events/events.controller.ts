@@ -7,6 +7,7 @@ import {
   Post,
   Get,
   Patch,
+  Put,
   Body,
   Param,
   Query,
@@ -18,6 +19,7 @@ import { JobLogService } from "../job/job-log.service.js";
 import { clientPsk } from "../client/client-psk.js";
 import {
   ClientService,
+  INVALID_CLIENT_ANNOTATIONS,
   INVALID_CLIENT_NAME,
 } from "../client/client.service.js";
 import { ClientGateway } from "./client.gateway.js";
@@ -30,10 +32,24 @@ import type {
   ActorContext,
   JobStatus,
   FileUploadSessionCreate,
+  ClientAnnotationsInput,
 } from "@vcpdeck/shared";
 import { JOB_LOG_LEVELS, type JobLogLevel } from "@vcpdeck/shared";
+import { parseClientAnnotationsInput } from "@vcpdeck/shared";
 
 const INVALID_JOB_PAYLOAD = "INVALID_JOB_PAYLOAD";
+
+/** 解析注解输入；非法输入统一映射为 400。 */
+function parseAnnotationsOrThrow(value: unknown): ClientAnnotationsInput {
+  try {
+    return parseClientAnnotationsInput(value);
+  } catch (error) {
+    throw new BadRequestException({
+      code: INVALID_CLIENT_ANNOTATIONS,
+      message: (error as Error).message,
+    });
+  }
+}
 
 function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Record<string, unknown> {
   const mode = payload.mode;
@@ -339,6 +355,37 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
     }
     try {
       return await this.clientService.rename(clientId, name);
+    } catch (error) {
+      const { code, statusCode, message } = error as {
+        code?: string;
+        statusCode?: number;
+        message?: string;
+      };
+      if (!code || !statusCode) throw error;
+      throw new HttpException({ code, message }, statusCode);
+    }
+  }
+
+  /** 全量替换操作者注解；空对象清除。 */
+  @Put("clients/:clientId/annotations")
+  async updateClientAnnotations(
+    @Param("clientId") clientId: string,
+    @Body() body: unknown,
+  ) {
+    const record =
+      typeof body === "object" && body !== null
+        ? (body as Record<string, unknown>)
+        : null;
+    if (!record || !Object.hasOwn(record, "annotations")) {
+      throw new BadRequestException({
+        code: INVALID_CLIENT_ANNOTATIONS,
+        message: "annotations is required",
+      });
+    }
+
+    const input = parseAnnotationsOrThrow(record.annotations);
+    try {
+      return await this.clientService.updateAnnotations(clientId, input);
     } catch (error) {
       const { code, statusCode, message } = error as {
         code?: string;

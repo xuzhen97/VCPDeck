@@ -1,4 +1,4 @@
-import type { ClientInfo } from "@vcpdeck/shared";
+import type { ClientAnnotationsInput, ClientInfo } from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
 
 /** 创建在线 Client API。 */
@@ -12,6 +12,18 @@ export function createClientsApi(client: Pick<VcpDeckClient, "request">) {
 				"PATCH",
 				`/api/clients/${encodeURIComponent(clientId)}/name`,
 				{ name },
+				signal,
+			),
+		/** 全量替换操作者注解（ADR-0055）；空输入清除。 */
+		updateAnnotations: (
+			clientId: string,
+			annotations: ClientAnnotationsInput,
+			signal?: AbortSignal,
+		) =>
+			client.request<ClientInfo>(
+				"PUT",
+				`/api/clients/${encodeURIComponent(clientId)}/annotations`,
+				{ annotations },
 				signal,
 			),
 	};

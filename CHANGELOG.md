@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [Unreleased]
+
+### Added
+
+- **机器操作者注解**（[ADR-0055](docs/adr/0055-client-operator-annotations.md)）：Client 新增 Server 持有的 `annotations`，记录操作者补充的公网地址（IPv4/IPv6/域名）与备注；注册、心跳和重连不会覆盖，Client 不能写入。新增 `PUT /api/clients/:clientId/annotations`（全量替换，空对象清除），`GET /api/clients` 响应新增可选 `annotations`，机器详情页可编辑，`clients list --json` 可直接读取，人类表格新增 `network` 列。注解是说明性事实，未自动验证，不参与授权，也不构成连通性保证；本版本只新增带默认值的列，升级不需要 `--accept-data-loss`。
+
 ## [0.20.1] - 2026-10-18
 
 ### Added

@@ -48,7 +48,7 @@
 | --- | --- |
 | `/api/auth` | 登录、登出、当前身份、Credential |
 | `/api/identities` | admin 身份管理 |
-| `/api/clients` | 在线 Client、别名和终端子资源 |
+| `/api/clients` | 在线 Client、别名、操作者注解和终端子资源 |
 | `/api/jobs` | Job 创建、分页查询、详情、取消和日志事件链 |
 | `/api/files` | 文件上传/导出会话及进度 |
 | `/api/storage` | 签名能力、文件流、Provider 配置和 Storage Share 管理 |

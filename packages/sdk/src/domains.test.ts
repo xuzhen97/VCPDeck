@@ -127,3 +127,34 @@ it("reads a safe storage backend summary and switches the backend", async () => 
 	);
 	expect("getConfig" in client.storage).toBe(false);
 });
+
+it("clients.updateAnnotations PUTs the wrapped annotation input", async () => {
+	const input = {
+		publicAddress: { v4: ["1.2.3.4"], v6: [], host: null },
+		notes: "动态 IP",
+	};
+	const response = {
+		clientId: "c1",
+		annotations: {
+			...input,
+			updatedAt: "2026-10-18T02:00:00.000Z",
+		},
+	};
+	const fetcher = vi.fn(async () => Response.json(response));
+	const client = new VcpDeckClient({
+		baseUrl: "",
+		auth: { type: "cookie" },
+		fetch: fetcher,
+	});
+
+	const result = await client.clients.updateAnnotations("c/1", input);
+
+	expect(fetcher).toHaveBeenCalledWith(
+		"/api/clients/c%2F1/annotations",
+		expect.objectContaining({
+			method: "PUT",
+			body: JSON.stringify({ annotations: input }),
+		}),
+	);
+	expect(result).toEqual(response);
+});

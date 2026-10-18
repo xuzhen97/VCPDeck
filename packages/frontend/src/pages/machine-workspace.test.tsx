@@ -75,6 +75,7 @@ describe("MachineWorkspace overview", () => {
 		renderWorkspace([client]);
 
 		expect(await screen.findByText("workstation")).toBeVisible();
+		expect(await screen.findByText("公网与注解")).toBeVisible();
 		expect(
 			screen.getByText("workstation · win32 10.0.26200 · c1"),
 		).toBeVisible();

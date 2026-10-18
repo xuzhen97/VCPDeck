@@ -88,6 +88,7 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 - Socket payload 新增接收方明确忽略的可选字段；
 - 新增独立 API、Job 类型或事件且旧端不会收到；
 - 新增数据库表或 nullable/default 字段。
+- Client 新增可选 `annotations`（操作者声明；Server 持有、注册不覆盖）；`GET /api/clients` 为其新增可选字段，数据库新增带默认值的 `annotations` 列。旧 Server 缺省时 CLI/UI 按“未补充”处理，旧 Client 不感知；不提升协议版本。
 
 ### 5.2 需要迁移和双端发布
 

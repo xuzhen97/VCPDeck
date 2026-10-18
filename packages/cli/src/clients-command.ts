@@ -74,6 +74,18 @@ async function runListClients(
 	log(formatClientsSummary(clients, await readCatchUpTargetVersion(client)));
 }
 
+/** 把操作者注解压缩成单行网络摘要；保持 JSON 为完整事实来源。 */
+function formatNetworkAnnotation(
+	annotations: ClientInfo["annotations"],
+): string {
+	if (!annotations) return "未补充";
+	const publicAddress = annotations.publicAddress;
+	if (publicAddress === null) return "未声明";
+	const values = [...publicAddress.v4, ...publicAddress.v6];
+	if (publicAddress.host) values.push(publicAddress.host);
+	return values.length === 0 ? "无公网" : values.join(",");
+}
+
 /** 生成人类可读的机器列表；在线优先，其余按名称稳定排序。 */
 function formatClientsSummary(
 	clients: ClientInfo[],
@@ -100,6 +112,7 @@ function formatClientsSummary(
 					? "no"
 					: "yes",
 		privilege: formatPrivilegeSummary(client),
+		network: formatNetworkAnnotation(client.annotations),
 	}));
 	const onlineCount = clients.filter((client) => client.online).length;
 	const header =
@@ -118,6 +131,7 @@ function formatClientsSummary(
 			"version",
 			"outdated",
 			"privilege",
+			"network",
 		]),
 	].join("\n");
 }

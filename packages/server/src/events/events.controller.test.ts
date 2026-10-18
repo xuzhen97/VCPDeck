@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventsController } from "./events.controller.js";
 import { IS_PUBLIC_KEY } from "../auth/public.decorator.js";
+import {
+	CLIENT_NOT_FOUND,
+	INVALID_CLIENT_ANNOTATIONS,
+} from "../client/client.service.js";
 
 const TEST_PSK = "test-client-psk";
 
@@ -15,6 +19,7 @@ function makeController() {
 	} as never;
 	const clientService = {
 		rename: vi.fn(),
+		updateAnnotations: vi.fn(),
 	} as never;
 	const gateway = {
 		sendDispatch: vi.fn(),
@@ -46,7 +51,10 @@ function makeController() {
 			refreshDirectPartUrls: ReturnType<typeof vi.fn>;
 			updateUploadProgress: ReturnType<typeof vi.fn>;
 		},
-		clientService: clientService as { rename: ReturnType<typeof vi.fn> },
+		clientService: clientService as {
+			rename: ReturnType<typeof vi.fn>;
+			updateAnnotations: ReturnType<typeof vi.fn>;
+		},
 	};
 }
 
@@ -455,6 +463,71 @@ describe("EventsController GET jobs/:jobId/logs", () => {
 		});
 		await expect(controller.listJobLogs("j1", "0", "0")).rejects.toMatchObject({
 			status: 400,
+		});
+	});
+});
+
+describe("EventsController 操作者注解", () => {
+	it("解析并转发完整注解", async () => {
+		const { controller, clientService } = makeController();
+		const expected = { clientId: "c1", annotations: {} };
+		clientService.updateAnnotations.mockResolvedValue(expected);
+
+		await expect(
+			controller.updateClientAnnotations("c1", {
+				annotations: {
+					publicAddress: { v4: ["1.2.3.4"] },
+					notes: "动态 IP",
+				},
+			}),
+		).resolves.toBe(expected);
+
+		expect(clientService.updateAnnotations).toHaveBeenCalledWith("c1", {
+			publicAddress: { v4: ["1.2.3.4"], v6: [], host: null },
+			notes: "动态 IP",
+		});
+	});
+
+	it("缺少 annotations 键直接拒绝 400", async () => {
+		const { controller, clientService } = makeController();
+
+		await expect(
+			controller.updateClientAnnotations("c1", {}),
+		).rejects.toMatchObject({
+			status: 400,
+			response: { code: INVALID_CLIENT_ANNOTATIONS },
+		});
+		expect(clientService.updateAnnotations).not.toHaveBeenCalled();
+	});
+
+	it("非法地址返回 400 且不写库", async () => {
+		const { controller, clientService } = makeController();
+
+		await expect(
+			controller.updateClientAnnotations("c1", {
+				annotations: { publicAddress: { v4: ["999.1.1.1"] } },
+			}),
+		).rejects.toMatchObject({
+			status: 400,
+			response: { code: INVALID_CLIENT_ANNOTATIONS },
+		});
+		expect(clientService.updateAnnotations).not.toHaveBeenCalled();
+	});
+
+	it("服务层 404 映射为 HttpException", async () => {
+		const { controller, clientService } = makeController();
+		clientService.updateAnnotations.mockRejectedValue(
+			Object.assign(new Error("missing"), {
+				code: CLIENT_NOT_FOUND,
+				statusCode: 404,
+			}),
+		);
+
+		await expect(
+			controller.updateClientAnnotations("c1", { annotations: {} }),
+		).rejects.toMatchObject({
+			status: 404,
+			response: { code: CLIENT_NOT_FOUND },
 		});
 	});
 });

@@ -23,6 +23,7 @@ import { ExecutePanel } from "@/pages/execute-panel";
 import { FilesPanel } from "@/pages/files-panel";
 import { FrpPanel } from "@/pages/frp-panel";
 import { JobsPage } from "@/pages/jobs-page";
+import { MachineAnnotationsPanel } from "./machine-annotations-panel";
 import { TerminalPanel } from "@/pages/terminal-panel";
 
 export function MachineWorkspace() {
@@ -314,6 +315,7 @@ function Overview({ client }: { client: ClientInfo }) {
 					/>
 				</CardContent>
 			</Card>
+			<MachineAnnotationsPanel client={client} />
 		</div>
 	);
 }
