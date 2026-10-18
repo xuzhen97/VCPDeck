@@ -8,6 +8,10 @@ function makeController() {
 	const jobService = {
 		createUploadSession: vi.fn(),
 		completeUploadSession: vi.fn(),
+		findById: vi.fn(),
+	} as never;
+	const jobLogService = {
+		list: vi.fn(),
 	} as never;
 	const clientService = {
 		rename: vi.fn(),
@@ -24,6 +28,7 @@ function makeController() {
 	return {
 		controller: new EventsController(
 			jobService,
+			jobLogService,
 			clientService,
 			gateway,
 			storageService,
@@ -31,7 +36,9 @@ function makeController() {
 		jobService: jobService as {
 			createUploadSession: ReturnType<typeof vi.fn>;
 			completeUploadSession: ReturnType<typeof vi.fn>;
+			findById: ReturnType<typeof vi.fn>;
 		},
+		jobLogService: jobLogService as { list: ReturnType<typeof vi.fn> },
 		gateway: gateway as { sendDispatch: ReturnType<typeof vi.fn> },
 		storageService: storageService as {
 			createExportSession: ReturnType<typeof vi.fn>;
@@ -381,6 +388,73 @@ describe("EventsController renameClient", () => {
 		await expect(controller.renameClient("c1", "c2-name")).rejects.toMatchObject({
 			status: 409,
 			response: { code: "CLIENT_NAME_TAKEN" },
+		});
+	});
+});
+
+describe("EventsController GET jobs/:jobId/logs", () => {
+	it("Job 不存在时抛出 NotFound", async () => {
+		const { controller, jobService } = makeController();
+		jobService.findById.mockResolvedValue(null);
+
+		await expect(controller.listJobLogs("nope")).rejects.toMatchObject({
+			status: 404,
+		});
+	});
+
+	it("按 since/limit/level 透传给服务层", async () => {
+		const { controller, jobService, jobLogService } = makeController();
+		jobService.findById.mockResolvedValue({ jobId: "j1" });
+		jobLogService.list.mockResolvedValue({
+			jobId: "j1",
+			events: [],
+			nextSeq: 5,
+		});
+
+		await controller.listJobLogs("j1", "5", "20", "error");
+
+		expect(jobLogService.list).toHaveBeenCalledWith("j1", {
+			since: 5,
+			limit: 20,
+			level: "error",
+		});
+	});
+
+	it("未传可选参数时只带 jobId 查询", async () => {
+		const { controller, jobService, jobLogService } = makeController();
+		jobService.findById.mockResolvedValue({ jobId: "j1" });
+		jobLogService.list.mockResolvedValue({
+			jobId: "j1",
+			events: [],
+			nextSeq: 0,
+		});
+
+		await controller.listJobLogs("j1");
+
+		expect(jobLogService.list).toHaveBeenCalledWith("j1", {});
+	});
+
+	it("非法 level 直接 400，不进服务层", async () => {
+		const { controller, jobService, jobLogService } = makeController();
+		jobService.findById.mockResolvedValue({ jobId: "j1" });
+
+		await expect(controller.listJobLogs("j1", undefined, undefined, "debug"))
+			.rejects.toMatchObject({
+				status: 400,
+				response: { code: "INVALID_JOB_LOG_QUERY" },
+			});
+		expect(jobLogService.list).not.toHaveBeenCalled();
+	});
+
+	it("非法 since/limit 直接 400", async () => {
+		const { controller, jobService } = makeController();
+		jobService.findById.mockResolvedValue({ jobId: "j1" });
+
+		await expect(controller.listJobLogs("j1", "-1")).rejects.toMatchObject({
+			status: 400,
+		});
+		await expect(controller.listJobLogs("j1", "0", "0")).rejects.toMatchObject({
+			status: 400,
 		});
 	});
 });

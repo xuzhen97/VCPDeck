@@ -297,6 +297,105 @@ describe("jobs command", () => {
 		expect(JSON.parse(lines.join("\n"))).toEqual(page);
 	});
 
+	it("logs 展示事件链：来源、稳定码与 data", async () => {
+		const requests: string[] = [];
+		const page = {
+			jobId: "job-1",
+			nextSeq: 9,
+			events: [
+				{
+					seq: 1,
+					jobId: "job-1",
+					at: "2026-10-17T14:00:00.000Z",
+					source: "server",
+					event: "created",
+					level: "info",
+					code: null,
+					message: null,
+					data: { type: "exec", mode: "command" },
+				},
+				{
+					seq: 9,
+					jobId: "job-1",
+					at: "2026-10-17T14:00:03.000Z",
+					source: "client",
+					event: "settled",
+					level: "error",
+					code: "EXEC_FAILED",
+					message: "命令退出码非零",
+					data: { status: "error", durationMs: 3000 },
+				},
+			],
+		};
+		const { port } = await listen((request, response) => {
+			requests.push(request.url ?? "");
+			response.setHeader("content-type", "application/json");
+			response.end(JSON.stringify(page));
+		});
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runJobsCommand("logs", ["job-1"], {
+			paths,
+			processEnv,
+			log: (message) => lines.push(message),
+		});
+		expect(requests).toContain("/api/jobs/job-1/logs");
+		const output = lines.join("\n");
+		expect(output).toContain("日志事件：本页 2 条，最新 seq=9");
+		expect(output).toContain("created");
+		expect(output).toContain("settled");
+		expect(output).toContain("code=EXEC_FAILED");
+		expect(output).toContain("durationMs=3000");
+	});
+
+	it("logs 透传 since/limit/level，--json 输出原始页", async () => {
+		const requests: string[] = [];
+		const page = { jobId: "job-1", nextSeq: 3, events: [] };
+		const { port } = await listen((request, response) => {
+			requests.push(request.url ?? "");
+			response.setHeader("content-type", "application/json");
+			response.end(JSON.stringify(page));
+		});
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runJobsCommand(
+			"logs",
+			[
+				"job-1",
+				"--since",
+				"3",
+				"--limit=20",
+				"--level=error",
+				"--json",
+			],
+			{ paths, processEnv, log: (message) => lines.push(message) },
+		);
+		expect(requests).toContain(
+			"/api/jobs/job-1/logs?since=3&limit=20&level=error",
+		);
+		expect(JSON.parse(lines.join("\n"))).toEqual(page);
+	});
+
+	it("logs 拒绝非法 level 与 limit", async () => {
+		const { port } = await listen((_request, response) => {
+			response.end("{}");
+		});
+		const { paths, processEnv } = await fixture(port);
+
+		await expect(
+			runJobsCommand("logs", ["job-1", "--level=debug"], {
+				paths,
+				processEnv,
+			}),
+		).rejects.toThrow("--level");
+		await expect(
+			runJobsCommand("logs", ["job-1", "--limit=0"], {
+				paths,
+				processEnv,
+			}),
+		).rejects.toThrow("--limit");
+	});
+
 	describe("jobs run", () => {
 		it("缺少机器或命令 token 时返回用法错误", async () => {
 			await expect(runJobsCommand("run", ["workstation"])).rejects.toThrow(

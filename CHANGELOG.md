@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Job 日志事件链**（[ADR-0054](docs/adr/0054-job-log-event-chain.md)）：新增 `JobLogEvent` 表与 `GET /api/jobs/:jobId/logs`，每个 Job 一条以 `jobId` 关联的有序事件链（`created → dispatched → output_first → settled`，以及取消、断线、对账、孤儿收敛）；Server 的 Job 运行日志改为带 `jobId` 的单行 JSONL，并与事件出自同一写入点，`grep '"jobId":"<id>"'` 即可还原链路。事件不保存命令、路径或输出正文，每 Job 上限 200 条（优先裁剪最旧的非 error 事件）、保留 30 天。
+- **客户端相位上报 `job:log`**：新版本 Client 额外上报 `received/spawned/exited/local_settled/cancel_received/kill_failed/drain_timeout`，Server 校验 `jobId` 归属并限流后落库。旧 Client 不报相位时链路仍完整；新 Client 对旧 Server 发送该事件会被静默忽略，**不提升协议版本**。
+- **`vcpdeck jobs logs <jobId>`**：按 `seq` 升序读取事件链，支持 `--since`（增量游标）、`--limit`、`--level`、`--json`；Job 详情页新增只读「日志事件」时间线。排查顺序变为 `jobs list --status=error` → `jobs logs <jobId>` → `jobs get <jobId>`。
+- **取消者进入持久化审计**：`jobs cancel` 此前丢弃操作者，现在写入 `cancel_requested` 事件（操作者、来源、原状态、请求 id），可回答“谁取消的、有没有生效”。
+
 ## [0.20.0] - 2026-10-17
 
 ### Changed

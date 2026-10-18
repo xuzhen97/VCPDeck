@@ -49,7 +49,7 @@
 | `/api/auth` | 登录、登出、当前身份、Credential |
 | `/api/identities` | admin 身份管理 |
 | `/api/clients` | 在线 Client、别名和终端子资源 |
-| `/api/jobs` | Job 创建、分页查询、详情和取消 |
+| `/api/jobs` | Job 创建、分页查询、详情、取消和日志事件链 |
 | `/api/files` | 文件上传/导出会话及进度 |
 | `/api/storage` | 签名能力、文件流、Provider 配置和 Storage Share 管理 |
 | `/api/aliyundrive` | 阿里云盘配置、OAuth 和授权验证 |
@@ -168,6 +168,18 @@ Alibaba 模式下，预签名 URL 只在 `no-store` 响应和 CLI 内存中存�
 
 Client 只在收到本次 REGISTER ack、且已上报兼容 `capabilityDetails.gitSsh` 时处理指令；`installed`/`cleared` 只表示本地受管副本状态，不代表 Git 服务已授权或已撤销。
 
+### 2.10 Job 日志事件 REST 协议
+
+`GET /api/jobs/:jobId/logs?since=<seq>&limit=<1..200>&level=<info|warn|error>`（Cookie/Bearer）：按 `seq` 升序返回 Job 日志事件链，用于定位派发、进程、取消与对账环节。
+
+| 参数 | 语义 |
+| --- | --- |
+| `since` | 增量游标，只返回 `seq` 更大的事件；缺省 0 |
+| `limit` | 每页条数，服务端夹取 1..200，缺省 200 |
+| `level` | 只返回指定级别；非法值 → `INVALID_JOB_LOG_QUERY`（400） |
+
+响应 `{ jobId, events[], nextSeq }`；`events[].seq` 是全局自增序号，`nextSeq` 是下一次请求的游标（无事件时回显入参 `since`）。**返回条数小于 `limit` 即表示已到末尾**。Job 不存在返回 404。事件不复述命令、路径或 stdout/stderr 正文，正文仍在 `Job.result` 与输出 spool。契约与保留策略见 [`design/job-observability.md`](./design/job-observability.md) 与 [ADR-0054](./adr/0054-job-log-event-chain.md)。
+
 ## 3. `/client` Socket.IO 协议
 
 Client 使用 `auth.psk` 建立连接。注册成功后，Server 将 Client room 标识绑定到 `clientId`。
@@ -192,6 +204,7 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 | `job:stdout/stderr/progress/done` | Client → Server | Job 过程与终局 |
 | `job:cancel` | Server → Client | 请求取消 |
 | `job:cancelled/cancel-failed` | Client → Server | 取消结果 |
+| `job:log` | Client → Server | Job 生命周期相位（`received/spawned/exited/local_settled/cancel_received/kill_failed/drain_timeout`）；只承载相位，不承载输出正文 |
 | `terminal:request` | Server → Client | PTY 创建、attach、输入等请求 |
 | `terminal:response/output/exit/state` | Client → Server | PTY 响应、输出和对账 |
 | `update:request` | Server → Client | 请求准备目标版本 |
@@ -209,6 +222,17 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 - 重连后 Client 上报 running/waiting_input/done/error；
 - Server 按 jobId 对账并恢复状态；
 - 中间 stdout/stderr 不保证断线补传，调用方不能把实时输出当作持久审计日志。
+
+### 3.4 Job 日志相位（`job:log`）
+
+Client 在上报终态之外，另发一条只含生命周期事实的相位流：`received`（收到派发）、`spawned`、`exited`、`local_settled`、`cancel_received`、`kill_failed`、`drain_timeout`。
+
+- 载荷：`{ jobId, event, level?, code?, message?, data?, clientAt? }`；`data` 只允许扁平字符串/数字/布尔，≤8 键、序列化 ≤1 KB，`message` ≤200 字符；
+- Server 严格解析：未知事件、未知字段、嵌套 data、超长文本一律丢弃，**不影响连接与 Job**；
+- 归属校验：事件只接受 `job.clientId` 与该 socket 绑定的 `clientId` 一致的上报，防止跨 Job 注入；
+- 限流：每 Job ≤8 条、每 Client ≤30 条/分钟（内存窗口，进程重启重置）；
+- 时间权威是 Server 接收时刻；`clientAt` 只进 `data`，用于与目标机本地日志对时；
+- **不提升协议版本**：旧 Client 不报相位时事件链仍完整；新 Client 对旧 Server 发送该事件会被静默忽略。
 
 ## 4. `/app` Socket.IO 协议
 

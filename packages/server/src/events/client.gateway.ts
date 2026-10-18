@@ -20,11 +20,13 @@ import {
   Events,
   JobStatus,
   parseGitSshAck,
+  parseJobLogLine,
   parseTerminalClientResponse,
   parseTerminalExitReport,
   parseTerminalOutputChunk,
   parseMachineRegister,
   parseTerminalStateReport,
+  type JobLogLine,
   type JobProgress,
 } from "@vcpdeck/shared";
 import type {
@@ -48,6 +50,7 @@ import type {
 } from "@vcpdeck/shared";
 import { clientPsk } from "../client/client-psk.js";
 import { GitSshService } from "../git-ssh/git-ssh.service.js";
+import { JobLogService } from "../job/job-log.service.js";
 
 const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
 
@@ -61,6 +64,11 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   private staleClientTimer: ReturnType<typeof setInterval> | null = null;
   /** clientId → 已 REGISTER 的存活 socket（同一 Client 重复连接时逐个记账）。 */
   private readonly trackedSockets = new Map<string, Set<string>>();
+  /**
+   * 已记录 output_first 的 Job。首块去重依赖内存：Server 重启后可能重复记一条，
+   * 内容相同、可接受；集合超过阈值后整体清空，避免长期运行无界增长。
+   */
+  private readonly outputSeen = new Set<string>();
 
   constructor(
     @Inject(ClientService) private readonly clientService: ClientService,
@@ -83,6 +91,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(GitSshService)
     private readonly gitSsh?: GitSshService,
+    // Job 诊断事件链（ADR-0054）；测试可省略
+    @Optional()
+    @Inject(JobLogService)
+    private readonly jobLog?: JobLogService,
   ) {}
 
   onModuleInit() {
@@ -422,13 +434,74 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   @SubscribeMessage(Events.JOB_STDOUT)
   async handleJobStdout(@MessageBody() data: JobOutput) {
     await this.jobService.appendOutputRaw(data.jobId, data.text);
+    await this.recordFirstOutput(data.jobId, "stdout", data.text);
     this.server.emit(Events.JOB_STDOUT, data);
   }
 
   @SubscribeMessage(Events.JOB_STDERR)
   async handleJobStderr(@MessageBody() data: JobOutput) {
     await this.jobService.appendOutputRaw(data.jobId, data.text);
+    await this.recordFirstOutput(data.jobId, "stderr", data.text);
     this.server.emit(Events.JOB_STDERR, data);
+  }
+
+  /** 只为每个 Job 记一次首块输出：用来区分"派发后一直没输出"和"有输出后卡住"。 */
+  private async recordFirstOutput(
+    jobId: string,
+    channel: "stdout" | "stderr",
+    text: string,
+  ): Promise<void> {
+    if (!this.jobLog || this.outputSeen.has(jobId)) return;
+    if (this.outputSeen.size > 10_000) this.outputSeen.clear();
+    this.outputSeen.add(jobId);
+    await this.jobLog.record({
+      jobId,
+      event: "output_first",
+      source: "server",
+      data: { channel, bytes: Buffer.byteLength(text) },
+    });
+  }
+
+  /** Client → Server 的 Job 生命周期相位（ADR-0054）：校验归属与限流后落库。 */
+  @SubscribeMessage(Events.JOB_LOG)
+  async handleJobLog(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ) {
+    const clientId = client.data.clientId as string | undefined;
+    if (!clientId || !this.jobLog) return { ok: false };
+
+    let line: JobLogLine;
+    try {
+      line = parseJobLogLine(data);
+    } catch {
+      // 非法相位一律丢弃，不影响连接与 Job 本身
+      return { ok: false };
+    }
+    if (!(await this.jobLog.allowClientEvent(clientId, line.jobId))) {
+      return { ok: false };
+    }
+    const owner = await this.jobService.findOwnerClientId(line.jobId);
+    if (!owner || owner !== clientId) return { ok: false };
+
+    const data_: Record<string, string | number | boolean> = {
+      ...(line.data ?? {}),
+    };
+    // clientAt 只用于和客户端本地日志对时；超出 data 键数上限时宁可不存。
+    if (line.clientAt && Object.keys(data_).length < 8) {
+      data_.clientAt = line.clientAt;
+    }
+
+    await this.jobLog.record({
+      jobId: line.jobId,
+      event: line.event,
+      source: "client",
+      ...(line.level ? { level: line.level } : {}),
+      ...(line.code ? { code: line.code } : {}),
+      ...(line.message ? { message: line.message } : {}),
+      ...(Object.keys(data_).length > 0 ? { data: data_ } : {}),
+    });
+    return { ok: true };
   }
 
   @SubscribeMessage(Events.JOB_PROGRESS)
@@ -613,6 +686,13 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   @SubscribeMessage(Events.JOB_CANCEL_FAILED)
   async handleJobCancelFailed(@MessageBody() data: JobCancelFailed) {
     console.error(`[ws] cancel failed: ${data.jobId} - ${data.reason}`);
+    await this.jobLog?.record({
+      jobId: data.jobId,
+      event: "cancel_failed",
+      source: "server",
+      level: "warn",
+      message: data.reason.slice(0, 200),
+    });
     // 客户端明确回答“没有这个 Job” → 它不可能再收敛。若留在 running/disconnected，会永久
     // 占住该 Client 的并发槽并让发布 drain 等不到收敛（2026-10-10 生产事故），因此收尾。
     const next = await this.jobService.failOrphaned(data.jobId, data.reason);

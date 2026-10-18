@@ -2,6 +2,8 @@ import type {
 	JobCreate,
 	JobCreateResult,
 	JobInfo,
+	JobLogLevel,
+	JobLogPage,
 	PaginatedResult,
 } from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
@@ -55,6 +57,28 @@ export function createJobsApi(client: Pick<VcpDeckClient, "request">) {
 				undefined,
 				signal,
 			),
+		/**
+		 * 读取 Job 日志事件链（ADR-0054）。
+		 *
+		 * `since` 传上一页的 `nextSeq` 即可增量拉取；返回条数小于 `limit` 表示已到末尾。
+		 */
+		logs: (
+			jobId: string,
+			options?: { since?: number; limit?: number; level?: JobLogLevel },
+			signal?: AbortSignal,
+		) => {
+			const params = new URLSearchParams();
+			if (options?.since !== undefined) params.set("since", String(options.since));
+			if (options?.limit !== undefined) params.set("limit", String(options.limit));
+			if (options?.level) params.set("level", options.level);
+			const qs = params.toString();
+			return client.request<JobLogPage>(
+				"GET",
+				`/api/jobs/${encodeURIComponent(jobId)}/logs${qs ? `?${qs}` : ""}`,
+				undefined,
+				signal,
+			);
+		},
 		create: (input: JobCreate, signal?: AbortSignal) =>
 			client.request<JobCreateResult>("POST", "/api/jobs", input, signal),
 		cancel: (jobId: string, signal?: AbortSignal) =>

@@ -1,4 +1,4 @@
-import type { JobInfo } from "@vcpdeck/shared";
+import type { JobInfo, JobLogEvent } from "@vcpdeck/shared";
 import { Card, CardContent } from "@/components/ui/card";
 import { useCallback } from "react";
 import { useParams } from "react-router-dom";
@@ -85,8 +85,78 @@ function JobDetail({
 			<p className="text-sm text-muted-foreground">
 				为避免泄露命令、路径或凭证，详情页不展示原始 payload。
 			</p>
+			<JobLogTimeline jobId={job.jobId} />
 		</div>
 	);
+}
+
+/** Job 日志事件链（ADR-0054）：只读时间线，用于定位派发/进程/取消/对账环节。 */
+function JobLogTimeline({ jobId }: { jobId: string }) {
+	const sdk = useSdk();
+	const load = useCallback(
+		(signal: AbortSignal) => sdk.jobs.logs(jobId, undefined, signal),
+		[sdk, jobId],
+	);
+	const resource = useResource(load);
+	const failed = Boolean(resource.error);
+
+	return (
+		<Card>
+			<CardContent className="pt-6">
+				<p className="mb-2 text-xs font-medium text-muted-foreground">日志事件</p>
+				{resource.loading && <LoadingState label="正在加载日志事件…" />}
+				{failed && (
+					<ErrorState message="无法加载日志事件" onRetry={resource.reload} />
+				)}
+				{!resource.loading && !failed && (
+					<JobLogList events={resource.data?.events ?? []} />
+				)}
+			</CardContent>
+		</Card>
+	);
+}
+
+function JobLogList({ events }: { events: JobLogEvent[] }) {
+	if (events.length === 0) {
+		return (
+			<p className="text-sm text-muted-foreground">
+				暂无日志事件（可能早于日志功能上线，或 Job 尚未派发）。
+			</p>
+		);
+	}
+	return (
+		<ol className="space-y-2">
+			{events.map((event) => {
+				const detail = formatLogDetail(event);
+				return (
+					<li key={event.seq} className="text-xs">
+						<span className="mr-2 font-mono text-muted-foreground">
+							#{event.seq}
+						</span>
+						<span className="mr-2 font-medium">{event.event}</span>
+						<span className="mr-2 text-muted-foreground">
+							{event.source}/{event.level}
+						</span>
+						<span className="text-muted-foreground">{event.at}</span>
+						{detail && <span className="ml-2 break-all">{detail}</span>}
+					</li>
+				);
+			})}
+		</ol>
+	);
+}
+
+/** 事件详情：稳定码 + 脱敏短文本 + 白名单 data。 */
+function formatLogDetail(event: JobLogEvent): string {
+	const parts: string[] = [];
+	if (event.code) parts.push(`code=${event.code}`);
+	if (event.message) parts.push(`msg=${event.message}`);
+	if (event.data) {
+		for (const [key, value] of Object.entries(event.data)) {
+			parts.push(`${key}=${String(value)}`);
+		}
+	}
+	return parts.join(" ");
 }
 function Field({ label, value }: { label: string; value: string }) {
 	return (

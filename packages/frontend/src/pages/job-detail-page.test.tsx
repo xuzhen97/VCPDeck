@@ -43,11 +43,22 @@ function renderDetail(
 	downloadUrl: ReturnType<typeof vi.fn>,
 	extra: Record<string, unknown> = {},
 ) {
+	const { jobs: extraJobs, ...rest } = extra as {
+		jobs?: Record<string, unknown>;
+	} & Record<string, unknown>;
 	const client = {
 		auth: { me: vi.fn().mockResolvedValue(identity) },
-		jobs: { get: vi.fn().mockResolvedValue(job) },
+		jobs: {
+			get: vi.fn().mockResolvedValue(job),
+			logs: vi.fn().mockResolvedValue({
+				jobId: job.jobId,
+				events: [],
+				nextSeq: 0,
+			}),
+			...extraJobs,
+		},
 		storage: { downloadUrl },
-		...extra,
+		...rest,
 	} as unknown as VcpDeckClient;
 	return render(
 		<MemoryRouter initialEntries={["/jobs/job-1"]}>
@@ -162,4 +173,59 @@ it("历史会话 Job 详情不再提供完成动作(ADR-0041)", async () => {
 	expect(await screen.findByText("agent.session")).toBeVisible();
 	expect(screen.queryByRole("button", { name: "标记完成" })).toBeNull();
 	expect(get).toHaveBeenCalledTimes(1);
+});
+
+describe("JobDetailPage 日志事件时间线（ADR-0054）", () => {
+	it("按 seq 展示事件、来源与详情", async () => {
+		const logs = vi.fn().mockResolvedValue({
+			jobId: "job-1",
+			nextSeq: 2,
+			events: [
+				{
+					seq: 1,
+					jobId: "job-1",
+					at: "2026-10-17T14:00:00.000Z",
+					source: "server",
+					event: "created",
+					level: "info",
+					code: null,
+					message: null,
+					data: { type: "exec" },
+				},
+				{
+					seq: 2,
+					jobId: "job-1",
+					at: "2026-10-17T14:00:02.000Z",
+					source: "client",
+					event: "local_settled",
+					level: "warn",
+					code: "EXEC_TIMEOUT",
+					message: "timed out",
+					data: { reason: "timeout", drainTimedOut: false },
+				},
+			],
+		});
+		renderDetail(
+			{ ...exportJob, type: "exec", result: { exitCode: 1 } },
+			vi.fn(),
+			{ jobs: { logs } },
+		);
+
+		expect(await screen.findByText("日志事件")).toBeInTheDocument();
+		expect(await screen.findByText("created")).toBeInTheDocument();
+		expect(await screen.findByText("local_settled")).toBeInTheDocument();
+		expect(screen.getByText(/reason=timeout/)).toBeInTheDocument();
+		expect(logs).toHaveBeenCalledWith(
+			"job-1",
+			undefined,
+			expect.any(AbortSignal),
+		);
+	});
+
+	it("没有事件时给出明确文案", async () => {
+		renderDetail(exportJob, vi.fn());
+
+		expect(await screen.findByText("日志事件")).toBeInTheDocument();
+		expect(await screen.findByText(/暂无日志事件/)).toBeInTheDocument();
+	});
 });

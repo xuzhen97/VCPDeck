@@ -1,5 +1,11 @@
-import type { JobInfo, PaginatedResult } from "@vcpdeck/shared";
-import { JobStatus } from "@vcpdeck/shared";
+import type {
+	JobInfo,
+	JobLogEvent,
+	JobLogLevel,
+	JobLogPage,
+	PaginatedResult,
+} from "@vcpdeck/shared";
+import { JOB_LOG_LEVELS, JobStatus } from "@vcpdeck/shared";
 import { VcpDeckApiError, type VcpDeckClient } from "@vcpdeck/sdk";
 import { createAuthenticatedClient } from "./authenticated-client.js";
 import { parseCommandArgs, stringOption } from "./arguments.js";
@@ -43,6 +49,7 @@ export async function runJobsCommand(
 		subcommand === "-h" ||
 		((subcommand === "list" ||
 			subcommand === "get" ||
+			subcommand === "logs" ||
 			subcommand === "run" ||
 			subcommand === "cancel" ||
 			subcommand === undefined) &&
@@ -57,6 +64,10 @@ export async function runJobsCommand(
 	}
 	if (subcommand === "get") {
 		await runGetJob(argv, context);
+		return;
+	}
+	if (subcommand === "logs") {
+		await runJobLogs(argv, context);
 		return;
 	}
 	if (subcommand === "run") {
@@ -79,6 +90,8 @@ function jobsUsage(): string {
 		"Jobs 命令:",
 		"  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
 		"  vcpdeck jobs get <jobId> [--env=<name>] [--json]  # 含失败现场（stdout/stderr spool）",
+		"  vcpdeck jobs logs <jobId> [--since=<seq>] [--limit=<n>] [--level=<info|warn|error>] [--env=<name>] [--json]",
+		"  # 日志事件链：按 seq 升序；--since 传上一次的 nextSeq 可增量拉取",
 		"  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
 		"  # 写操作：--timeout/--wait-timeout 单位为秒；复杂命令建议作为 -- 后的单一参数；确认门由调用方负责",
 		"  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]",
@@ -154,6 +167,49 @@ async function runGetJob(
 	}
 	log(formatEnvironmentSummary(environment));
 	log(formatJobDetail(job, output));
+}
+
+/** 读取 Job 日志事件链（只读）：按 seq 升序展示，支持 --since 增量。 */
+async function runJobLogs(
+	argv: string[],
+	context: JobsCommandContext,
+): Promise<void> {
+	const { positionals, options } = parseCommandArgs(argv, {
+		value: ["env", "environment", "since", "limit", "level"],
+		boolean: ["json"],
+	});
+	if (positionals.length !== 1) throw new Error(jobsUsage());
+	const environment = await resolveEnvironment({
+		environment: exclusiveAlias(options, "env", "environment"),
+		paths: context.paths,
+		processEnv: context.processEnv,
+	});
+	const log = context.log ?? console.log;
+	const client = await createAuthenticatedClient(environment);
+	const since = parseNonNegativeInteger(
+		stringOption(options, "since"),
+		"--since",
+	);
+	const limit = parseNonNegativeInteger(
+		stringOption(options, "limit"),
+		"--limit",
+	);
+	if (limit !== undefined && limit < 1) {
+		throw new Error("--limit 必须是不小于 1 的整数");
+	}
+	const level = requireValidLevel(stringOption(options, "level"));
+
+	const page = await client.jobs.logs(positionals[0], {
+		...(since !== undefined ? { since } : {}),
+		...(limit !== undefined ? { limit } : {}),
+		...(level !== undefined ? { level } : {}),
+	});
+	if (options.json === true) {
+		log(JSON.stringify(page, null, 2));
+		return;
+	}
+	log(formatEnvironmentSummary(environment));
+	log(formatJobLogs(page));
 }
 
 /** 在目标机上执行 shell 命令（写操作）；--wait 时等待终态并带出失败现场。 */
@@ -406,6 +462,38 @@ function formatJobDetail(job: JobInfo, output: string | null): string {
 	return lines.join("\n");
 }
 
+/** 人类可读的日志事件链：seq 升序，detail 汇总 code/message/data。 */
+function formatJobLogs(page: JobLogPage): string {
+	if (page.events.length === 0) {
+		return `Job ${page.jobId} 暂无日志事件（可能早于日志功能上线，或 Job 尚未派发）。`;
+	}
+	const rows = page.events.map((event) => ({
+		seq: String(event.seq),
+		time: event.at,
+		src: event.source,
+		lvl: event.level,
+		event: event.event,
+		detail: formatJobLogDetail(event),
+	}));
+	return [
+		`Job ${page.jobId} 日志事件：本页 ${page.events.length} 条，最新 seq=${page.nextSeq}`,
+		formatTable(rows, ["seq", "time", "src", "lvl", "event", "detail"]),
+	].join("\n");
+}
+
+/** 事件详情：稳定码 + 脱敏短文本 + 白名单 data；没有则占位。 */
+function formatJobLogDetail(event: JobLogEvent): string {
+	const parts: string[] = [];
+	if (event.code) parts.push(`code=${event.code}`);
+	if (event.message) parts.push(`msg=${event.message}`);
+	if (event.data) {
+		for (const [key, value] of Object.entries(event.data)) {
+			parts.push(`${key}=${String(value)}`);
+		}
+	}
+	return parts.length > 0 ? parts.join(" ") : "-";
+}
+
 function exclusiveAlias(
 	options: Record<string, string | true>,
 	first: string,
@@ -434,6 +522,26 @@ function parsePage(raw: string | undefined): number | undefined {
 		throw new Error("--page 必须是不小于 1 的整数");
 	}
 	return page;
+}
+
+function parseNonNegativeInteger(
+	raw: string | undefined,
+	flag: string,
+): number | undefined {
+	if (raw === undefined) return undefined;
+	const value = Number(raw);
+	if (!Number.isInteger(value) || value < 0) {
+		throw new Error(`${flag} 必须是不小于 0 的整数`);
+	}
+	return value;
+}
+
+function requireValidLevel(raw: string | undefined): JobLogLevel | undefined {
+	if (raw === undefined) return undefined;
+	if (!(JOB_LOG_LEVELS as readonly string[]).includes(raw)) {
+		throw new Error(`--level 必须是 ${JOB_LOG_LEVELS.join("/")} 之一`);
+	}
+	return raw as JobLogLevel;
 }
 
 function parsePositiveSeconds(

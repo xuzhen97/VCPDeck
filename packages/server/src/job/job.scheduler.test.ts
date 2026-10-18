@@ -129,6 +129,41 @@ describe("JobScheduler", () => {
 		expect(dispatch).toBeNull();
 		expect(prisma.job.findFirst).not.toHaveBeenCalled();
 	});
+
+	it("派发成功时记录 dispatched 事件（含排队时长与并发数）", async () => {
+		const createdAt = new Date(Date.now() - 250);
+		const prisma = {
+			job: {
+				count: vi.fn().mockResolvedValue(1),
+				findFirst: vi.fn().mockResolvedValue({
+					id: "j1",
+					clientId: "c1",
+					type: "exec",
+					payload: "{}",
+					timeout: null,
+					createdAt,
+				}),
+				update: vi.fn().mockResolvedValue({}),
+			},
+		} as never;
+		const jobLog = { record: vi.fn(async (_input: unknown) => {}) };
+		const scheduler = new JobScheduler(prisma as never, undefined, jobLog as never);
+
+		await scheduler.tryDispatch("c1");
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "j1",
+				event: "dispatched",
+				source: "server",
+				data: expect.objectContaining({ runningCount: 1 }),
+			}),
+		);
+		const recorded = jobLog.record.mock.calls[0][0] as {
+			data: { queueWaitMs: number };
+		};
+		expect(recorded.data.queueWaitMs).toBeGreaterThanOrEqual(200);
+	});
 });
 
 void prismaMock;

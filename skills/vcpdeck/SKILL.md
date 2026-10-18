@@ -32,7 +32,7 @@ pnpm --filter @vcpdeck/cli build
 | --- | --- | --- | --- |
 | 多环境配置 | `env add/list/show/current/check/use/remove` | 已实现 | 用户级注册环境，项目级只选择默认环境；`check` 验证 Token 对应身份 |
 | 机器查询（只读） | `clients list` | 已实现 | 列出已注册 Client 及在线状态；`--json` 输出原始 `ClientInfo[]`，供 Agent 解析 |
-| Job 查询（只读） | `jobs list` / `jobs get` | 已实现 | 分页查询 Job 及失败现场（错误摘要 + stdout/stderr spool 全文）；`--json` 供 Agent 解析 |
+| Job 查询（只读） | `jobs list` / `jobs get` / `jobs logs` | 已实现 | 分页查询 Job、失败现场（错误摘要 + stdout/stderr spool 全文）与日志事件链（创建/派发/进程/取消/结算，含 Client 相位）；`--json` 供 Agent 解析 |
 | Job 执行/取消（写操作） | `jobs run` / `jobs cancel` | 已实现 | 在目标机执行 shell 命令；**必须先取得用户明确确认**（确认门见功能章节） |
 | 文件浏览（只读） | `files roots/list/stat/read` | 已实现 | 授权根探测、目录列表、元信息与文本读取（默认上限 256KB）；`--json` 供 Agent 解析 |
 | 文件写入（写操作） | `files write/mkdir/delete/move` | 已实现 | 覆盖写/递归建目录/删除（不可恢复）/移动重命名；**必须先取得用户明确确认**（确认门见功能章节） |
@@ -238,6 +238,7 @@ GET 天然幂等，失败可直接重试；网络错误或非 2xx 时 CLI 非零
 ```bash
 node "<vcpdeck-cli>" jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]
 node "<vcpdeck-cli>" jobs get <jobId> [--env=<name>] [--json]
+node "<vcpdeck-cli>" jobs logs <jobId> [--since=<seq>] [--limit=<n>] [--level=<info|warn|error>] [--env=<name>] [--json]
 node "<vcpdeck-cli>" jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>
 node "<vcpdeck-cli>" jobs cancel <jobId> [--env=<name>] [--json]
 ```
@@ -249,6 +250,8 @@ node "<vcpdeck-cli>" jobs cancel <jobId> [--env=<name>] [--json]
 `jobs list` 通过 SDK 请求 Server `GET /api/jobs`，返回分页 Job 摘要（`PaginatedResult`）；`--client` 接受机器名称或 ID，CLI 先查机器列表解析为 `clientId`。`jobs get` 取详情与输出 spool。`jobs run` 创建 exec Job（command 模式，`--` 后的命令 token 以空格连接后交由目标机 shell 执行，Windows 下自动 chcp 65001）；复杂命令应作为 `--` 后的单一参数传入，例如 `-- 'sudo -n true; echo $?'`，避免多 token 重组丢失原参数边界。`--timeout` 是远端进程时限，`--wait-timeout` 是 CLI 等待终态时限，两者单位均为秒。目标机必须在线，否则 Server 拒绝。`jobs cancel` 提交取消：pending 立即 `cancelled`；running 返回 `cancelling`，终态需用 `jobs get` 核对。
 
 Job 状态权威在 Server；输出 spool 由 Server 在 Client 实时上报 stdout/stderr 时旁路落盘（`<data>/job-outputs/<jobId>.log`），完整保留不封顶，只在详情路径读取。正常非零退出保存真实 exitCode；远端进程超时返回 `EXEC_TIMEOUT`，其他信号终止返回 `EXEC_SIGNALLED`，两者均保留已捕获输出。timeout/取消会按平台终止进程树，但不能回滚已提交给系统服务管理器的进程或外部副作用。`jobs get` 同时展示 Job 顶层远端进程 timeout。
+
+`jobs logs` 读取 Server 的事件链（`GET /api/jobs/:jobId/logs`）：按 `seq` 升序展示 `created/dispatched/output_first/cancel_requested/settled` 等 Server 事件，以及新版本 Client 上报的 `received/spawned/exited/local_settled/drain_timeout` 相位。用 `--since=<上一次 nextSeq>` 增量拉取；返回条数小于 `--limit` 表示已到末尾。事件保留 30 天、每 Job 上限 200 条（优先裁剪最旧的非 error 事件）。事件**不含**命令、路径或输出正文——需要正文仍用 `jobs get`；两者结合才能既看链路又看现场。灰度期旧 Client 不报相位，链里只有 Server 事件，不要把"没有 `spawned`"当成"进程没起来"。
 
 ### 确认门（写操作强制）
 
@@ -265,7 +268,7 @@ Job 状态权威在 Server；输出 spool 由 Server 在 Client 实时上报 std
 
 1. 推荐使用 `jobs run <client> --wait` 等待终态：成功输出 `result` 与全文；**失败时 CLI 非零退出并自动带出错误摘要与完整 stdout/stderr 现场**，Agent 直接定位根因；
 2. 未加 `--wait` 时用 `jobs get <jobId>` 查询；
-3. 事后排查：`jobs list --status=error` → `jobs get <jobId>`；
+3. 事后排查：`jobs list --status=error` → `jobs logs <jobId>`（看链路断在哪一环）→ `jobs get <jobId>`（取输出正文）；
 4. 需要机器上下文时用 `clients list` 核对状态。
 
 全程不需要登录目标机器。若输出显示“（无落盘输出）”，说明该 Job 执行期间没有产生 stdout/stderr 或产生早于 spool 功能上线。
@@ -278,11 +281,11 @@ Job 状态权威在 Server；输出 spool 由 Server 在 Client 实时上报 std
 
 ### 幂等性、成功判定与已知限制
 
-`list/get` GET 幂等可直接重试；`run` 非幂等（重复执行会重复创建 Job），结果不明时先查询；`cancel` 幂等（重复取消已取消 Job 由 Server 权威态决定）。`run --wait` 仅重试安全 GET，容忍 Server 重启短暂不可达，超时非零退出。成功判定：零退出且 `--json` 输出可解析。已知限制：只支持 command 模式（script 模式未暴露）；输出 spool 无自动清理；没有按时间范围过滤。
+`list/get/logs` GET 幂等可直接重试；`run` 非幂等（重复执行会重复创建 Job），结果不明时先查询；`cancel` 幂等（重复取消已取消 Job 由 Server 权威态决定）。`run --wait` 仅重试安全 GET，容忍 Server 重启短暂不可达，超时非零退出。成功判定：零退出且 `--json` 输出可解析。已知限制：只支持 command 模式（script 模式未暴露）；输出 spool 无自动清理；没有按时间范围过滤；日志事件只保留 30 天。
 
 ### 与 Server 能力的对齐情况
 
-已对齐：Job 列表/详情/输出/创建（exec command 模式）/取消。未对齐：script 模式、file.*/frp 等其他 Job 类型、SDK `jobs.wait` 的 CLI 暴露，等待后续任务落地。
+已对齐：Job 列表/详情/输出/日志事件链/创建（exec command 模式）/取消。未对齐：script 模式、file.*/frp 等其他 Job 类型、SDK `jobs.wait` 的 CLI 暴露，等待后续任务落地。
 
 ## 功能：文件管理（浏览、读取与写入）
 

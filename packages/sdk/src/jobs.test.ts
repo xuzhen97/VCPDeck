@@ -68,6 +68,42 @@ describe("jobs", () => {
 		);
 	});
 
+	it("logs 拼接 since/limit/level 并请求日志事件端点", async () => {
+		const request = vi.fn().mockResolvedValueOnce({
+			jobId: "j1",
+			events: [],
+			nextSeq: 9,
+		});
+		const controller = new AbortController();
+		const jobs = createJobsApi({ request } as never);
+
+		await expect(
+			jobs.logs("j1", { since: 9, limit: 20, level: "error" }, controller.signal),
+		).resolves.toEqual({ jobId: "j1", events: [], nextSeq: 9 });
+		expect(request).toHaveBeenCalledWith(
+			"GET",
+			"/api/jobs/j1/logs?since=9&limit=20&level=error",
+			undefined,
+			controller.signal,
+		);
+	});
+
+	it("logs 无过滤条件时不带查询串", async () => {
+		const request = vi
+			.fn()
+			.mockResolvedValueOnce({ jobId: "j1", events: [], nextSeq: 0 });
+		const jobs = createJobsApi({ request } as never);
+
+		await jobs.logs("j1");
+
+		expect(request).toHaveBeenCalledWith(
+			"GET",
+			"/api/jobs/j1/logs",
+			undefined,
+			undefined,
+		);
+	});
+
 	it("stops local waiting when aborted", async () => {
 		vi.useFakeTimers();
 		const controller = new AbortController();

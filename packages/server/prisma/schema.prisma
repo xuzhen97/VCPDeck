@@ -59,6 +59,26 @@ model Job {
   createdByName       String?
   createdVia          String?
   updatedAt    DateTime  @updatedAt
+  logEvents    JobLogEvent[]
+}
+
+// ── Job 诊断事件链(ADR-0054)：只记生命周期事实,不复述 payload/命令/输出正文。
+// seq 即自增主键,是 REST 增量拉取游标;每 Job 上限与全局 TTL 由 JobLogService 维护。
+model JobLogEvent {
+  id      Int      @id @default(autoincrement())
+  jobId   String
+  job     Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  at      DateTime @default(now())
+  source  String
+  event   String
+  level   String   @default("info")
+  code    String?
+  message String?
+  data    String?
+
+  @@index([jobId, id])
+  @@index([at])
+  @@index([level, at])
 }
 
 // ── Agent 会话/执行/审计(ADR-0041)：**已退役**(ADR-0049)。

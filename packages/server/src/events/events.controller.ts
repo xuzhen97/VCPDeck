@@ -14,6 +14,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { JobService } from "../job/job.service.js";
+import { JobLogService } from "../job/job-log.service.js";
 import { clientPsk } from "../client/client-psk.js";
 import {
   ClientService,
@@ -30,6 +31,7 @@ import type {
   JobStatus,
   FileUploadSessionCreate,
 } from "@vcpdeck/shared";
+import { JOB_LOG_LEVELS, type JobLogLevel } from "@vcpdeck/shared";
 
 const INVALID_JOB_PAYLOAD = "INVALID_JOB_PAYLOAD";
 
@@ -105,6 +107,7 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
 	}
 	constructor(
 		@Inject(JobService) private readonly jobService: JobService,
+		@Inject(JobLogService) private readonly jobLogService: JobLogService,
 		@Inject(ClientService) private readonly clientService: ClientService,
 		@Inject(ClientGateway) private readonly gateway: ClientGateway,
 		@Inject(StorageService) private readonly storageService: StorageService,
@@ -377,4 +380,72 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
     const output = await this.jobService.readJobOutput(jobId);
     return { jobId, output };
   }
+
+  /**
+   * Job 日志事件链（ADR-0054）：按 seq 升序增量拉取。
+   *
+   * `nextSeq` 是下一次请求的游标；返回条数小于 `limit` 即表示已到末尾。
+   */
+  @Get("jobs/:jobId/logs")
+  async listJobLogs(
+    @Param("jobId") jobId: string,
+    @Query("since") since?: string,
+    @Query("limit") limit?: string,
+    @Query("level") level?: string,
+  ) {
+    const job = await this.jobService.findById(jobId);
+    if (!job) throw new NotFoundException(`Job "${jobId}" not found`);
+
+    let logLevel: JobLogLevel | undefined;
+    if (level !== undefined) {
+      if (!(JOB_LOG_LEVELS as readonly string[]).includes(level)) {
+        throw new BadRequestException({
+          code: "INVALID_JOB_LOG_QUERY",
+          message: "level must be info, warn or error",
+        });
+      }
+      logLevel = level as JobLogLevel;
+    }
+
+    const sinceSeq = parseNonNegativeInteger(since, "since");
+    const limitCount = parsePositiveInteger(limit, "limit");
+
+    return this.jobLogService.list(jobId, {
+      ...(sinceSeq !== undefined ? { since: sinceSeq } : {}),
+      ...(limitCount !== undefined ? { limit: limitCount } : {}),
+      ...(logLevel !== undefined ? { level: logLevel } : {}),
+    });
+  }
+}
+
+/** 解析可选的非负整数查询参数；非法值直接拒绝，不猜测修正。 */
+function parseNonNegativeInteger(
+  raw: string | undefined,
+  field: string,
+): number | undefined {
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new BadRequestException({
+      code: "INVALID_JOB_LOG_QUERY",
+      message: `${field} must be a non-negative integer`,
+    });
+  }
+  return value;
+}
+
+/** 解析可选的正整数查询参数。 */
+function parsePositiveInteger(
+  raw: string | undefined,
+  field: string,
+): number | undefined {
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new BadRequestException({
+      code: "INVALID_JOB_LOG_QUERY",
+      message: `${field} must be a positive integer`,
+    });
+  }
+  return value;
 }

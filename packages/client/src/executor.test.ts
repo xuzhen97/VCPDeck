@@ -92,4 +92,34 @@ it("脚本已退出但被分离的孙进程仍持有管道时，仍按有限排�
 		// 孙进程还活着（20s），所以这里证明的是「不依赖 close」而不是「孙进程先结束」。
 		expect(Date.now() - started).toBeLessThan(10_000);
 	}, 30_000);
+
+	it("exec 生命周期相位按顺序上报 job:log", async () => {
+		const phases: string[] = [];
+		const done = new Promise<void>((resolve) => {
+			const socket = {
+				connected: true,
+				emit: vi.fn((event: string, data: { event?: string }) => {
+					if (event === Events.JOB_LOG && data.event) phases.push(data.event);
+					if (event === Events.JOB_DONE) resolve();
+				}),
+			} as unknown as Socket;
+
+			executeExec(
+				{
+					jobId: "phase-job",
+					mode: "command",
+					command: 'node -e "process.exit(0)"',
+				},
+				socket,
+			);
+		});
+
+		await done;
+		expect(phases).toEqual([
+			"received",
+			"spawned",
+			"exited",
+			"local_settled",
+		]);
+	}, 15_000);
 });

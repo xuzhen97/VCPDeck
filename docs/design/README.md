@@ -16,6 +16,7 @@
 | Release/更新 | [`release-and-update.md`](./release-and-update.md) | 当前 Release 编排、Launcher、更新、回退和故障边界 |
 | CLI | [`cli.md`](./cli.md) | 当前 CLI 多环境配置、选择优先级、命令、安全和扩展边界 |
 | 远程执行 | [`remote-execution.md`](./remote-execution.md) | 当前 command/script、输出、取消、安全边界与 runtime registry 迁移 |
+| Job 日志 | [`job-observability.md`](./job-observability.md) | 当前 Job 事件链、`job:log` 相位、读取面、保留与脱敏边界 |
 
 ## 候选提案（不可作为当前运行事实）
 

@@ -52,6 +52,27 @@ export type {
 
 // ── 交互式终端协议 ──
 export * from "./terminal.js";
+
+// ── Job 日志事件链（ADR-0054） ──
+export {
+	JOB_LOG_CLIENT_EVENTS,
+	JOB_LOG_LEVELS,
+	JOB_LOG_LIMITS,
+	JOB_LOG_SERVER_EVENTS,
+	JobLogProtocolError,
+	parseJobLogLine,
+} from "./job-log.js";
+export type {
+	JobLogClientEvent,
+	JobLogData,
+	JobLogDataValue,
+	JobLogEvent,
+	JobLogEventName,
+	JobLogLevel,
+	JobLogLine,
+	JobLogPage,
+	JobLogServerEvent,
+} from "./job-log.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
 import type { GitSshCapability } from "./git-ssh.js";
@@ -105,6 +126,8 @@ export const Events = {
 	JOB_CANCELLED: "job:cancelled",
 	JOB_CANCEL_FAILED: "job:cancel-failed",
 	JOB_UPDATE: "job:update",
+	/** Client → Server：Job 生命周期相位（ADR-0054），只承载相位不承载输出正文。 */
+	JOB_LOG: "job:log",
 	STATUS_REPORT: "status:report",
 	TERMINAL_REQUEST: "terminal:request",
 	TERMINAL_RESPONSE: "terminal:response",

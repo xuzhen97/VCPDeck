@@ -29,6 +29,7 @@ TODO、工作流、聊天和 VCPToolBox 桥接目前没有落地数据模型，�
 | AuthSession | `id` | SQLite | 浏览器会话摘要和过期时间 |
 | Client | `id` / `clientId` | SQLite + 在线 Socket | 持久属性在 DB；在线 lease 由当前 socket 决定 |
 | Job | `id` / `jobId` | SQLite | 远程操作的统一调度和审计信封 |
+| JobLogEvent | `id`（即 `seq`） | SQLite | Job 生命周期与诊断事件链；只存事实与白名单字段，不存命令、路径或输出正文 |
 | File | `id` | SQLite；正文在 Storage | 文件元数据和生命周期 |
 | StorageShare | `id` / `tokenHash` | SQLite；正文仍在 Storage | 长期公开只读分享、撤销审计和 File 保留关系；只保存 Token 哈希 |
 | StorageBackendConfig | 单行配置 | SQLite | 当前 Storage Provider 及配置 JSON |
@@ -135,6 +136,19 @@ stateDiagram-v2
 - exec 正常退出保存真实 exit code；超时和其他信号终止分别以 `EXEC_TIMEOUT`、`EXEC_SIGNALLED` 表达，不伪造成 exit code 1；
 - exec 断线期间中间输出可能丢失；当前无终局事件 spool，进程在断线期间结束时也可能无法在重连后补报；Client 重启后不能假定原子进程仍可对账；
 - 文件 handler/transfer 当前未完整进入 Executor 活动集合和重连状态报告，running 文件 Job 的取消、timeout 和断线终局补报不能视为可靠。
+
+### 5.3 Job 日志事件
+
+每个 Job 有一条以 `jobId` 为唯一关联键的有序事件链（[ADR-0054](./adr/0054-job-log-event-chain.md)），写入 `JobLogEvent`：
+
+- **Server 侧事件**（由 Server 在自身观察到的节点写入）：`created`、`dispatched`、`output_first`、`cancel_requested`、`cancel_confirmed`、`cancel_failed`、`client_offline`、`reconciled`、`orphaned`、`settled`；
+- **Client 侧相位**（经 `job:log` 上报）：`received`、`spawned`、`exited`、`local_settled`、`cancel_received`、`kill_failed`、`drain_timeout`；
+- `seq` 即自增主键，是 REST 增量拉取游标；时间权威是 Server 接收时刻，`clientAt` 只进 `data` 用于对时；
+- 每 Job 上限 200 条（超出时优先裁剪最旧的非 error 事件），全局保留 30 天；Job 行当前不删除，事件独立清理；
+- 写入 best-effort：落库失败只写 stdout，不阻断 Job 执行；
+- 事件**不复述**命令/脚本、env、完整路径与 stdout/stderr 正文；正文仍在 `Job.result` 与输出 spool；
+- Server 的 Job 运行日志与事件出自同一个写入点（`recordJobLog` 双写 stdout JSONL 与事件表），因此"按 jobId grep 日志"和"按 jobId 查事件链"看到的是同一条链路；
+- 已知偏移：内部 `frp.reconcile` Job 由恢复编排直接建行并结算，事件链从 `dispatched` 起，其终态以 Job 行为准。
 
 ## 6. File 与 Storage
 

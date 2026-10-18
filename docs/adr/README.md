@@ -114,3 +114,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0051](./0051-release-client-catch-up-retry.md) | Accepted（2026-10-14，尚未实施） | 客户端补更失败分级（瞬时／永久），Server 为唯一重试所有者并按递增退避有限重试；新增周期对账作为第二驱动力，与注册钩子共用互斥入口；人工重试兜底并补齐 CLI 可见性 |
 | [0052](./0052-cli-direct-bearer-token-storage.md) | Accepted | 修订 ADR-0017 第 2 条，允许在受权限保护的用户级 config.json 中直接存储 Bearer Token，废除环境变量间接引用，并在输出中默认脱敏 |
 | [0053](./0053-retire-p2p-tunnel-and-browser-remote-desktop.md) | Accepted | 退役 P2P 隧道与浏览器远程桌面（含 coturn 与「网络」设置），删除 `TunnelConfig` 存储；网络暴露统一走 FRP，退役入站字段按兼容规则容忍并丢弃 |
+| [0054](./0054-job-log-event-chain.md) | Accepted | Job 诊断采用可持久化事件链（`JobLogEvent` 表，每 Job 200 条上限、30 天 TTL）；新增 `job:log` 相位事件并校验归属与限流；Job 日志统一为带 jobId 的 JSONL 并与事件同点双写；只做 Job 维度读取，不做跨 Job 检索与输出体积治理 |

@@ -201,6 +201,7 @@ Client 的长期要求是只接受 Shared 定义并经过运行时解析的消�
 | 身份、Credential、登录会话 | Server / SQLite | 持久化；Token 以哈希形式校验 |
 | Client 清单与最后状态 | Server / SQLite | 持久化；在线连接和 socket lease 属于运行时状态 |
 | Job 状态、payload、result、进度和安全错误 | Server / SQLite | 持久化；`file.writeText` 正文进入 payload，`file.readText` 正文进入 result，命令和文本内容都应按敏感数据处理 |
+| Job 日志事件链 | Server / SQLite + stdout | 持久化生命周期事实与白名单字段；每 Job 上限 200 条、保留 30 天；不记录命令、路径与输出正文（ADR-0054） |
 | 文件元数据 | Server / SQLite | 持久化 |
 | import/export 文件正文和发布构件 | Storage Provider | 本地目录或外部存储；通过签名能力访问；`readText/writeText` 小文本例外地进入 Job |
 | FRPS 实例和映射配置 | Server / SQLite | 持久化；实际 frpc 进程在 Client |

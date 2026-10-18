@@ -30,7 +30,19 @@ function makeReconciliation(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function makeGateway(reconciliation = makeReconciliation()) {
+function makeJobLog() {
+	return {
+		record: vi.fn(async (_input: unknown) => {}),
+		allowClientEvent: vi.fn(async () => true),
+		list: vi.fn(),
+		pruneExpired: vi.fn(async () => 0),
+	};
+}
+
+function makeGateway(
+	reconciliation = makeReconciliation(),
+	jobLog = makeJobLog(),
+) {
 	const clientService = {
 		register: vi.fn(async () => {}),
 		getClientIdBySocketId: vi.fn(async () => "c1"),
@@ -46,6 +58,8 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		// JOB_CANCEL_FAILED 的收尾路径（2026-10-10 生产事故）
 		failOrphaned: vi.fn().mockResolvedValue(null),
 		findById: vi.fn().mockResolvedValue(undefined),
+		findOwnerClientId: vi.fn().mockResolvedValue("c1"),
+		appendOutputRaw: vi.fn(async () => {}),
 	};
 	const fileService = {
 		confirmUpload: vi.fn().mockResolvedValue({
@@ -104,6 +118,7 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		updateChannel as never,
 		reconciliation as never,
 		gitSsh as never,
+		jobLog as never,
 	);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
@@ -120,6 +135,7 @@ function makeGateway(reconciliation = makeReconciliation()) {
 		updateChannel,
 		reconciliation,
 		gitSsh,
+		jobLog,
 		emit,
 		to,
 	};
@@ -1001,6 +1017,118 @@ describe("ClientGateway.handleJobCancelFailed", () => {
 		expect(emit).not.toHaveBeenCalledWith(
 			"job:dispatch",
 			expect.anything(),
+		);
+	});
+});
+
+describe("ClientGateway Job 日志相位（ADR-0054）", () => {
+	it("拒绝未注册 socket 的相位上报", async () => {
+		const { gateway, jobLog } = makeGateway();
+		const socket = makeSocket();
+
+		await expect(
+			gateway.handleJobLog(socket, { jobId: "job-1", event: "received" }),
+		).resolves.toEqual({ ok: false });
+		expect(jobLog.record).not.toHaveBeenCalled();
+	});
+
+	it("拒绝非法载荷：Server 侧事件不可由 Client 上报", async () => {
+		const { gateway, jobLog } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+
+		await expect(
+			gateway.handleJobLog(socket, { jobId: "job-1", event: "settled" }),
+		).resolves.toEqual({ ok: false });
+		expect(jobLog.record).not.toHaveBeenCalled();
+	});
+
+	it("拒绝非本机 Job 的相位（防跨 Job 注入）", async () => {
+		const { gateway, jobService, jobLog } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		jobService.findOwnerClientId.mockResolvedValue("other-client");
+
+		await expect(
+			gateway.handleJobLog(socket, { jobId: "job-1", event: "exited" }),
+		).resolves.toEqual({ ok: false });
+		expect(jobLog.record).not.toHaveBeenCalled();
+	});
+
+	it("合法相位落库，source 固定为 client 并保留 clientAt", async () => {
+		const { gateway, jobLog } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+
+		await expect(
+			gateway.handleJobLog(socket, {
+				jobId: "job-1",
+				event: "local_settled",
+				level: "warn",
+				message: "timed out",
+				data: { reason: "timeout" },
+				clientAt: "2026-10-17T14:00:00.000Z",
+			}),
+		).resolves.toEqual({ ok: true });
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "job-1",
+				event: "local_settled",
+				source: "client",
+				level: "warn",
+				message: "timed out",
+				data: { reason: "timeout", clientAt: "2026-10-17T14:00:00.000Z" },
+			}),
+		);
+	});
+
+	it("限流拒绝时不落库", async () => {
+		const { gateway, jobLog } = makeGateway();
+		const socket = makeSocket();
+		socket.data.clientId = "c1";
+		jobLog.allowClientEvent.mockResolvedValue(false);
+
+		await expect(
+			gateway.handleJobLog(socket, { jobId: "job-1", event: "received" }),
+		).resolves.toEqual({ ok: false });
+		expect(jobLog.record).not.toHaveBeenCalled();
+	});
+
+	it("同一 Job 只记录一条 output_first", async () => {
+		const { gateway, jobLog } = makeGateway();
+
+		await gateway.handleJobStdout({ jobId: "job-2", text: "第一块" });
+		await gateway.handleJobStdout({ jobId: "job-2", text: "第二块" });
+
+		const firstOutputs = jobLog.record.mock.calls
+			.map((call) => call[0] as { event: string })
+			.filter((arg) => arg.event === "output_first");
+		expect(firstOutputs).toHaveLength(1);
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "job-2",
+				event: "output_first",
+				data: { channel: "stdout", bytes: 9 },
+			}),
+		);
+	});
+
+	it("取消失败写入 cancel_failed 警告", async () => {
+		const { gateway, jobLog } = makeGateway();
+
+		await gateway.handleJobCancelFailed({
+			jobId: "job-3",
+			reason: "Job not found",
+		} as never);
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "job-3",
+				event: "cancel_failed",
+				level: "warn",
+				message: "Job not found",
+			}),
 		);
 	});
 });

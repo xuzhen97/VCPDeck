@@ -1025,6 +1025,173 @@ var require_terminal = __commonJS({
   }
 });
 
+// ../shared/dist/job-log.js
+var require_job_log = __commonJS({
+  "../shared/dist/job-log.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.JobLogProtocolError = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.JOB_LOG_SERVER_EVENTS = void 0;
+    exports2.parseJobLogLine = parseJobLogLine;
+    exports2.JOB_LOG_SERVER_EVENTS = [
+      "created",
+      "dispatched",
+      "output_first",
+      "cancel_requested",
+      "cancel_confirmed",
+      "cancel_failed",
+      "client_offline",
+      "reconciled",
+      "orphaned",
+      "settled"
+    ];
+    exports2.JOB_LOG_CLIENT_EVENTS = [
+      "received",
+      "spawned",
+      "exited",
+      "local_settled",
+      "cancel_received",
+      "kill_failed",
+      "drain_timeout"
+    ];
+    exports2.JOB_LOG_LEVELS = ["info", "warn", "error"];
+    exports2.JOB_LOG_LIMITS = {
+      /** jobId 最大长度（UUID 36，留余量给未来前缀）。 */
+      maxJobId: 100,
+      /** code 最大长度。 */
+      maxCode: 64,
+      /** message 最大长度（已脱敏文本）。 */
+      maxMessage: 200,
+      /** data 最多键数。 */
+      maxDataKeys: 8,
+      /** data 序列化后的最大字节数。 */
+      maxDataBytes: 1024,
+      /** 单个字符串型 data 值的最大长度。 */
+      maxDataValue: 200,
+      /** 每 Job 事件上限（超出时优先裁剪最旧的非 error 事件）。 */
+      maxEventsPerJob: 200,
+      /** 每 Job 允许的 Client 相位事件上限。 */
+      maxClientEventsPerJob: 8,
+      /** 每 Client 每分钟允许的相位事件数。 */
+      clientEventsPerMinute: 30,
+      /** 事件全局保留天数。 */
+      retentionDays: 30
+    };
+    var JobLogProtocolError = class extends Error {
+      code = "JOB_LOG_INVALID";
+      constructor(message) {
+        super(message);
+        this.name = "JobLogProtocolError";
+      }
+    };
+    exports2.JobLogProtocolError = JobLogProtocolError;
+    var JOB_LOG_LINE_KEYS = /* @__PURE__ */ new Set([
+      "jobId",
+      "event",
+      "level",
+      "code",
+      "message",
+      "data",
+      "clientAt"
+    ]);
+    function isPlainRecord(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function requireShortString(value, field, maxLength) {
+      if (typeof value !== "string" || value === "") {
+        throw new JobLogProtocolError(`${field} must be a non-empty string`);
+      }
+      if (value.length > maxLength) {
+        throw new JobLogProtocolError(`${field} exceeds ${maxLength} characters`);
+      }
+      return value;
+    }
+    function optionalShortString(value, field, maxLength) {
+      if (value === void 0)
+        return void 0;
+      return requireShortString(value, field, maxLength);
+    }
+    function parseData(value) {
+      if (value === void 0)
+        return void 0;
+      if (!isPlainRecord(value)) {
+        throw new JobLogProtocolError("data must be a flat object");
+      }
+      const entries = Object.entries(value);
+      if (entries.length > exports2.JOB_LOG_LIMITS.maxDataKeys) {
+        throw new JobLogProtocolError(`data exceeds ${exports2.JOB_LOG_LIMITS.maxDataKeys} keys`);
+      }
+      const data = {};
+      for (const [key, item] of entries) {
+        if (key === "" || key.length > 64) {
+          throw new JobLogProtocolError("data keys must be 1-64 characters");
+        }
+        if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+          if (typeof item === "string" && item.length > exports2.JOB_LOG_LIMITS.maxDataValue) {
+            throw new JobLogProtocolError(`data.${key} exceeds ${exports2.JOB_LOG_LIMITS.maxDataValue} characters`);
+          }
+          if (typeof item === "number" && !Number.isFinite(item)) {
+            throw new JobLogProtocolError(`data.${key} must be finite`);
+          }
+          data[key] = item;
+          continue;
+        }
+        throw new JobLogProtocolError(`data.${key} must be a string, number or boolean`);
+      }
+      if (JSON.stringify(data).length > exports2.JOB_LOG_LIMITS.maxDataBytes) {
+        throw new JobLogProtocolError(`data exceeds ${exports2.JOB_LOG_LIMITS.maxDataBytes} bytes`);
+      }
+      return data;
+    }
+    function parseJobLogLine(input) {
+      if (!isPlainRecord(input)) {
+        throw new JobLogProtocolError("job log line must be an object");
+      }
+      for (const key of Object.keys(input)) {
+        if (!JOB_LOG_LINE_KEYS.has(key)) {
+          throw new JobLogProtocolError(`unknown field: ${key}`);
+        }
+      }
+      const jobId = requireShortString(input.jobId, "jobId", exports2.JOB_LOG_LIMITS.maxJobId);
+      const event = input.event;
+      if (typeof event !== "string" || !exports2.JOB_LOG_CLIENT_EVENTS.includes(event)) {
+        throw new JobLogProtocolError("event is not a client job log event");
+      }
+      let level;
+      if (input.level !== void 0) {
+        if (typeof input.level !== "string" || !exports2.JOB_LOG_LEVELS.includes(input.level)) {
+          throw new JobLogProtocolError("level must be info, warn or error");
+        }
+        level = input.level;
+      }
+      const code = optionalShortString(input.code, "code", exports2.JOB_LOG_LIMITS.maxCode);
+      const message = optionalShortString(input.message, "message", exports2.JOB_LOG_LIMITS.maxMessage);
+      const data = parseData(input.data);
+      let clientAt;
+      if (input.clientAt !== void 0) {
+        clientAt = requireShortString(input.clientAt, "clientAt", 64);
+        if (Number.isNaN(Date.parse(clientAt))) {
+          throw new JobLogProtocolError("clientAt must be an ISO 8601 timestamp");
+        }
+      }
+      const line = {
+        jobId,
+        event
+      };
+      if (level !== void 0)
+        line.level = level;
+      if (code !== void 0)
+        line.code = code;
+      if (message !== void 0)
+        line.message = message;
+      if (data !== void 0)
+        line.data = data;
+      if (clientAt !== void 0)
+        line.clientAt = clientAt;
+      return line;
+    }
+  }
+});
+
 // ../shared/dist/frp-runtime.js
 var require_frp_runtime = __commonJS({
   "../shared/dist/frp-runtime.js"(exports2) {
@@ -1429,7 +1596,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
+    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -1485,6 +1653,25 @@ var require_dist = __commonJS({
       return git_ssh_js_1.parseGitSshTargetInput;
     } });
     __exportStar(require_terminal(), exports2);
+    var job_log_js_1 = require_job_log();
+    Object.defineProperty(exports2, "JOB_LOG_CLIENT_EVENTS", { enumerable: true, get: function() {
+      return job_log_js_1.JOB_LOG_CLIENT_EVENTS;
+    } });
+    Object.defineProperty(exports2, "JOB_LOG_LEVELS", { enumerable: true, get: function() {
+      return job_log_js_1.JOB_LOG_LEVELS;
+    } });
+    Object.defineProperty(exports2, "JOB_LOG_LIMITS", { enumerable: true, get: function() {
+      return job_log_js_1.JOB_LOG_LIMITS;
+    } });
+    Object.defineProperty(exports2, "JOB_LOG_SERVER_EVENTS", { enumerable: true, get: function() {
+      return job_log_js_1.JOB_LOG_SERVER_EVENTS;
+    } });
+    Object.defineProperty(exports2, "JobLogProtocolError", { enumerable: true, get: function() {
+      return job_log_js_1.JobLogProtocolError;
+    } });
+    Object.defineProperty(exports2, "parseJobLogLine", { enumerable: true, get: function() {
+      return job_log_js_1.parseJobLogLine;
+    } });
     var update_js_1 = require_update();
     Object.defineProperty(exports2, "ReleaseClientState", { enumerable: true, get: function() {
       return update_js_1.ReleaseClientState;
@@ -1522,6 +1709,8 @@ var require_dist = __commonJS({
       JOB_CANCELLED: "job:cancelled",
       JOB_CANCEL_FAILED: "job:cancel-failed",
       JOB_UPDATE: "job:update",
+      /** Client → Server：Job 生命周期相位（ADR-0054），只承载相位不承载输出正文。 */
+      JOB_LOG: "job:log",
       STATUS_REPORT: "status:report",
       TERMINAL_REQUEST: "terminal:request",
       TERMINAL_RESPONSE: "terminal:response",
@@ -1978,6 +2167,22 @@ function createJobsApi(client) {
     get: (jobId, signal) => client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}`, void 0, signal),
     /** 获取 Job 输出 spool 全文；output 为 null 表示没有落盘输出。 */
     output: (jobId, signal) => client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}/output`, void 0, signal),
+    /**
+     * 读取 Job 日志事件链（ADR-0054）。
+     *
+     * `since` 传上一页的 `nextSeq` 即可增量拉取；返回条数小于 `limit` 表示已到末尾。
+     */
+    logs: (jobId, options, signal) => {
+      const params = new URLSearchParams();
+      if (options?.since !== void 0)
+        params.set("since", String(options.since));
+      if (options?.limit !== void 0)
+        params.set("limit", String(options.limit));
+      if (options?.level)
+        params.set("level", options.level);
+      const qs = params.toString();
+      return client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}/logs${qs ? `?${qs}` : ""}`, void 0, signal);
+    },
     create: (input, signal) => client.request("POST", "/api/jobs", input, signal),
     cancel: (jobId, signal) => client.request("POST", `/api/jobs/${encodeURIComponent(jobId)}/cancel`, void 0, signal),
     async wait(jobId, options = {}) {

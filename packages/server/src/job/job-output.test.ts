@@ -93,6 +93,7 @@ describe("EventsController GET jobs/:jobId/output", () => {
 		return {
 			controller: new EventsController(
 				jobService,
+				{ list: vi.fn() } as never,
 				{ rename: vi.fn() } as never,
 				{} as never,
 				{} as never,

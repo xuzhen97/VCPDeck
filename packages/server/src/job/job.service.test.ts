@@ -735,3 +735,255 @@ describe("JobService.create() 退役类型守卫", () => {
 		expect(prisma.job.create).toHaveBeenCalledTimes(1);
 	});
 });
+
+describe("JobService 事件链采集点（ADR-0054）", () => {
+	const actor: ActorContext = {
+		identityId: "identity-1",
+		displayName: "测试用户",
+		isAdmin: false,
+		credentialId: null,
+		sessionId: "session-1",
+		source: "web",
+		requestId: "request-1",
+	};
+
+	function makeLog() {
+		return { record: vi.fn(async (_input: unknown) => {}) };
+	}
+
+	function makeService(
+		prisma: any,
+		scheduler: any,
+		jobLog: ReturnType<typeof makeLog>,
+	): JobService {
+		return new JobService(
+			prisma,
+			scheduler,
+			mockFileService(),
+			{ getBackendConfig: vi.fn() } as never,
+			// 不存在的 spool 目录：spoolBytes 走 ENOENT 分支返回 0
+			"C:\\__vcpdeck_no_spool__",
+			jobLog as never,
+		);
+	}
+
+	it("markDone 记录 settled：错误级别、耗时与输出字节", async () => {
+		const prisma = mockPrisma([]) as any;
+		const createdAt = new Date("2026-10-17T14:00:00.000Z");
+		const finishedAt = new Date("2026-10-17T14:00:02.500Z");
+		prisma.job.update.mockResolvedValue({
+			id: "j1",
+			clientId: "c1",
+			createdAt,
+			finishedAt,
+		});
+		const jobLog = makeLog();
+		const service = makeService(
+			prisma,
+			{ onFinished: vi.fn().mockResolvedValue(null) },
+			jobLog,
+		);
+
+		await service.markDone("j1", "exec", {
+			exitCode: 2,
+			errorCode: "EXEC_FAILED",
+			errorMessage: "boom",
+			stdout: "out",
+			stderr: "err",
+		});
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "j1",
+				event: "settled",
+				source: "server",
+				level: "error",
+				code: "EXEC_FAILED",
+				message: "boom",
+				data: expect.objectContaining({
+					status: "error",
+					durationMs: 2500,
+					exitCode: 2,
+					errorCode: "EXEC_FAILED",
+					stdoutBytes: 3,
+					stderrBytes: 3,
+					spoolBytes: 0,
+				}),
+			}),
+		);
+	});
+
+	it("cancel 把操作者写进 cancel_requested（此前 actor 被丢弃）", async () => {
+		const prisma = mockPrisma([]) as any;
+		prisma.job.findUnique.mockResolvedValue({
+			id: "j1",
+			clientId: "c1",
+			type: "exec",
+			status: "running",
+		});
+		const jobLog = makeLog();
+		const service = makeService(prisma, {}, jobLog);
+
+		const result = await service.cancel("j1", actor);
+
+		expect(result).toEqual({
+			cancelled: false,
+			needsDispatch: true,
+			clientId: "c1",
+		});
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "j1",
+				event: "cancel_requested",
+				data: {
+					actor: "测试用户",
+					via: "web",
+					fromStatus: "running",
+					requestId: "request-1",
+				},
+			}),
+		);
+	});
+
+	it("markCancelled 记录 cancel_confirmed", async () => {
+		const prisma = mockPrisma([]) as any;
+		prisma.job.update.mockResolvedValue({
+			id: "j1",
+			clientId: "c1",
+			createdAt: new Date(Date.now() - 100),
+			finishedAt: new Date(),
+		});
+		const jobLog = makeLog();
+		const service = makeService(
+			prisma,
+			{ onFinished: vi.fn().mockResolvedValue(null) },
+			jobLog,
+		);
+
+		await service.markCancelled("j1");
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "j1",
+				event: "cancel_confirmed",
+				source: "server",
+			}),
+		);
+	});
+
+	it("markDisconnected 逐 Job 记录 client_offline", async () => {
+		const prisma = mockPrisma([]) as any;
+		prisma.job.findMany.mockResolvedValue([{ id: "j1", status: "running" }]);
+		prisma.job.updateMany.mockResolvedValue({ count: 1 });
+		const jobLog = makeLog();
+		const service = makeService(prisma, {}, jobLog);
+
+		await service.markDisconnected("c1");
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "j1",
+				event: "client_offline",
+				level: "warn",
+				data: { fromStatus: "running" },
+			}),
+		);
+	});
+
+	it("failOrphaned 记录 orphaned 终态", async () => {
+		const prisma = mockPrisma([]) as any;
+		prisma.job.findUnique.mockResolvedValue({
+			id: "j1",
+			clientId: "c1",
+			status: "running",
+		});
+		prisma.job.update.mockResolvedValue({});
+		const jobLog = makeLog();
+		const service = makeService(
+			prisma,
+			{ onFinished: vi.fn().mockResolvedValue(null) },
+			jobLog,
+		);
+
+		await service.failOrphaned("j1", "Job not found");
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "j1",
+				event: "orphaned",
+				level: "error",
+				code: "JOB_ORPHANED",
+				message: "Job not found",
+				data: { fromStatus: "running" },
+			}),
+		);
+	});
+
+	it("待派发 Job 取消时补 cancel_confirmed 终态事件", async () => {
+		const prisma = mockPrisma([]) as any;
+		prisma.job.findUnique.mockResolvedValue({
+			id: "j1",
+			clientId: "c1",
+			type: "exec",
+			status: "pending",
+		});
+		prisma.job.update.mockResolvedValue({});
+		const jobLog = makeLog();
+		const service = makeService(prisma, {}, jobLog);
+
+		await expect(service.cancel("j1", actor)).resolves.toEqual({
+			cancelled: true,
+			needsDispatch: false,
+		});
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "j1",
+				event: "cancel_confirmed",
+				source: "server",
+				data: { by: "server", fromStatus: "pending" },
+			}),
+		);
+	});
+
+	it("create 记录 created 事件，且不复述命令正文", async () => {
+		const prisma = mockPrisma([]) as any;
+		prisma.client.findUnique.mockResolvedValue({
+			id: "c1",
+			online: true,
+			capabilities: ["exec"],
+		});
+		prisma.job.create.mockResolvedValue({ id: "j1" });
+		const scheduler = { tryDispatch: vi.fn().mockResolvedValue(null) } as any;
+		const jobLog = makeLog();
+		const service = makeService(prisma, scheduler, jobLog);
+
+		await service.create(
+			{
+				clientId: "c1",
+				type: "exec",
+				payload: { mode: "command", command: "echo hi" },
+				timeout: 5000,
+			},
+			actor,
+		);
+
+		const created = jobLog.record.mock.calls
+			.map((call) => call[0] as { event: string })
+			.find((input) => input.event === "created");
+		expect(created).toMatchObject({
+			jobId: expect.any(String),
+			event: "created",
+			source: "server",
+			data: {
+				via: "web",
+				actor: "测试用户",
+				type: "exec",
+				mode: "command",
+				timeoutMs: 5000,
+				requestId: "request-1",
+			},
+		});
+		expect(JSON.stringify(created)).not.toContain("echo hi");
+	});
+});

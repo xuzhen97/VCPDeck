@@ -1,8 +1,9 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { JobScheduler } from "./job.scheduler.js";
+import { JobLogService } from "./job-log.service.js";
 import { JobStatus, type JobProgress } from "@vcpdeck/shared";
 import type {
   JobCreateResult,
@@ -83,6 +84,8 @@ export class JobService {
     @Inject(FileService) private readonly fileService: FileService,
     @Inject(StorageService) private readonly storage: StorageService,
     @Optional() private readonly outputDir: string = resolveJobOutputDir(),
+    // Job 诊断事件链（ADR-0054）；测试可省略，省略时只保留原有行为。
+    @Optional() @Inject(JobLogService) private readonly jobLog?: JobLogService,
   ) {}
 
   /** 创建等待浏览器上传的文件导入会话。 */
@@ -165,6 +168,7 @@ export class JobService {
         createdVia: actor.source,
       },
     });
+    await this.recordCreated(jobId, "file.import", payload, actor, null);
 
     let upload: UploadTarget;
     if (backend.kind === "alibaba") {
@@ -421,6 +425,13 @@ export class JobService {
         createdVia: actor.source,
       },
     });
+    await this.recordCreated(
+      jobId,
+      params.type,
+      finalPayload,
+      actor,
+      params.timeout ?? null,
+    );
 
     const dispatch = await this.scheduler.tryDispatch(params.clientId);
 
@@ -495,6 +506,7 @@ export class JobService {
         finishedAt: new Date(),
       },
     });
+    await this.recordSettled(job, result, effectiveStatus);
     return this.scheduler.onFinished(job.clientId);
   }
 
@@ -502,6 +514,17 @@ export class JobService {
     const job = await this.prisma.job.update({
       where: { id: jobId },
       data: { status: "cancelled", finishedAt: new Date() },
+    });
+    await this.jobLog?.record({
+      jobId,
+      event: "cancel_confirmed",
+      source: "server",
+      data: {
+        durationMs: Math.max(
+          0,
+          (job.finishedAt ?? new Date()).getTime() - job.createdAt.getTime(),
+        ),
+      },
     });
     return this.scheduler.onFinished(job.clientId);
   }
@@ -539,14 +562,37 @@ export class JobService {
         errorMessage: reason.slice(0, 200),
       },
     });
+    await this.jobLog?.record({
+      jobId,
+      event: "orphaned",
+      source: "server",
+      level: "error",
+      code: "JOB_ORPHANED",
+      message: reason.slice(0, 200),
+      data: { fromStatus: job.status },
+    });
     return this.scheduler.onFinished(job.clientId);
   }
 
   async markDisconnected(clientId: string) {
+    // 先取受影响的 Job 再收敛：updateMany 不返回行，事件链需要逐 Job 留证。
+    const affected = await this.prisma.job.findMany({
+      where: { clientId, status: { in: ["running", "waiting_input"] } },
+      select: { id: true, status: true },
+    });
     await this.prisma.job.updateMany({
       where: { clientId, status: { in: ["running", "waiting_input"] } },
       data: { status: "disconnected" },
     });
+    for (const job of affected) {
+      await this.jobLog?.record({
+        jobId: job.id,
+        event: "client_offline",
+        source: "server",
+        level: "warn",
+        data: { fromStatus: job.status },
+      });
+    }
   }
 
   async reconcileOnReconnect(
@@ -571,6 +617,12 @@ export class JobService {
             where: { id: r.jobId },
             data: { status: r.status },
           });
+          await this.jobLog?.record({
+            jobId: r.jobId,
+            event: "reconciled",
+            source: "server",
+            data: { reportedStatus: r.status, previousStatus: job.status },
+          });
         }
       } else {
         const newStatus = r.status === "done" ? "done" : "error";
@@ -582,6 +634,13 @@ export class JobService {
             finishedAt: new Date(),
           },
         });
+        await this.jobLog?.record({
+          jobId: r.jobId,
+          event: "reconciled",
+          source: "server",
+          level: newStatus === "error" ? "warn" : "info",
+          data: { reportedStatus: r.status, previousStatus: job.status },
+        });
         const d = await this.scheduler.onFinished(clientId);
         if (d) dispatches.push(d);
       }
@@ -590,7 +649,7 @@ export class JobService {
     return dispatches;
   }
 
-  async cancel(jobId: string, _actor: ActorContext): Promise<{ // ponytail: actor 预留，后续 cancel 时记录到 JobEvent
+  async cancel(jobId: string, actor: ActorContext): Promise<{
     cancelled: boolean;
     needsDispatch: boolean;
     clientId?: string;
@@ -604,10 +663,37 @@ export class JobService {
       );
     }
 
+    // 取消者必须进持久化审计：此前 actor 被丢弃，事后无法回答"谁取消的"。
+    if (
+      job.status === "pending" ||
+      job.status === "waiting_input" ||
+      job.status === "running" ||
+      job.status === "disconnected"
+    ) {
+      await this.jobLog?.record({
+        jobId,
+        event: "cancel_requested",
+        source: "server",
+        data: {
+          actor: actor.displayName,
+          via: actor.source,
+          fromStatus: job.status,
+          requestId: actor.requestId,
+        },
+      });
+    }
+
     if (job.status === "pending" || job.status === "waiting_input") {
       await this.prisma.job.update({
         where: { id: jobId },
         data: { status: "cancelled", finishedAt: new Date() },
+      });
+      // 待派发阶段由 Server 直接终结：补一条终态事件，避免链上只剩 cancel_requested。
+      await this.jobLog?.record({
+        jobId,
+        event: "cancel_confirmed",
+        source: "server",
+        data: { by: "server", fromStatus: job.status },
       });
       return { cancelled: true, needsDispatch: false };
     }
@@ -684,6 +770,85 @@ export class JobService {
     });
     if (!job) return null;
     return toJobInfo(job);
+  }
+
+  /** `job:log` 相位上报的归属校验：返回 Job 所属 clientId，不存在返回 null。 */
+  async findOwnerClientId(jobId: string): Promise<string | null> {
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+      select: { clientId: true },
+    });
+    return job?.clientId ?? null;
+  }
+
+  /** 记录 Job 出生事件：只放标识与模式，绝不放命令、脚本或参数正文。 */
+  private async recordCreated(
+    jobId: string,
+    type: string,
+    payload: Record<string, unknown>,
+    actor: ActorContext,
+    timeoutMs: number | null,
+  ): Promise<void> {
+    if (!this.jobLog) return;
+    const mode = typeof payload.mode === "string" ? payload.mode : undefined;
+    await this.jobLog.record({
+      jobId,
+      event: "created",
+      source: "server",
+      data: {
+        via: actor.source,
+        actor: actor.displayName,
+        type,
+        ...(mode ? { mode } : {}),
+        ...(timeoutMs ? { timeoutMs } : {}),
+        requestId: actor.requestId,
+      },
+    });
+  }
+
+  /** 记录终态事件：附带耗时与输出字节数，便于区分"没输出"与"输出后卡住"。 */
+  private async recordSettled(
+    job: { id: string; createdAt: Date; finishedAt: Date | null },
+    result: Record<string, unknown>,
+    status: string,
+  ): Promise<void> {
+    if (!this.jobLog) return;
+    const stdout = typeof result.stdout === "string" ? result.stdout : "";
+    const stderr = typeof result.stderr === "string" ? result.stderr : "";
+    const exitCode =
+      typeof result.exitCode === "number" ? result.exitCode : undefined;
+    const errorCode =
+      typeof result.errorCode === "string" ? result.errorCode : undefined;
+    const errorMessage =
+      typeof result.errorMessage === "string" ? result.errorMessage : undefined;
+    const finishedAt = job.finishedAt ?? new Date();
+    await this.jobLog.record({
+      jobId: job.id,
+      event: "settled",
+      source: "server",
+      level: status === "error" ? "error" : "info",
+      ...(errorCode ? { code: errorCode } : {}),
+      ...(errorMessage ? { message: errorMessage.slice(0, 200) } : {}),
+      data: {
+        status,
+        durationMs: Math.max(0, finishedAt.getTime() - job.createdAt.getTime()),
+        ...(exitCode !== undefined ? { exitCode } : {}),
+        ...(errorCode ? { errorCode } : {}),
+        stdoutBytes: Buffer.byteLength(stdout),
+        stderrBytes: Buffer.byteLength(stderr),
+        spoolBytes: await this.spoolBytes(job.id),
+      },
+    });
+  }
+
+  /** Job 输出 spool 的落盘字节数；无文件视为 0。 */
+  private async spoolBytes(jobId: string): Promise<number> {
+    try {
+      const info = await stat(join(this.outputDir, `${jobId}.log`));
+      return info.size;
+    } catch {
+      return 0;
+    }
   }
 }
 

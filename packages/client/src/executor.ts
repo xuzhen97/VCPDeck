@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { Socket } from "socket.io-client";
 import { killProcessTree } from "./terminal/process-tree.js";
 import { applyGitSshEnv } from "./git-ssh/runtime.js";
+import { emitJobLog } from "./job-log.js";
 import { Events } from "@vcpdeck/shared";
 import type {
 	JobOutput,
@@ -60,6 +61,16 @@ export function executeExec(job: ExecJob, socket: Socket) {
 	let child: ChildProcess;
 	let stdoutBuf = "";
 	let stderrBuf = "";
+	/** 相位耗时统计：spawn 与 exit 的实际时刻（毫秒）。 */
+	let spawnAt: number | null = null;
+	let exitAt: number | null = null;
+	/** exit 已到但管道未关，靠有限排空窗口强制结算。 */
+	let drainTimedOut = false;
+
+	// 相位上报：Server 据此区分"派发后没收到"与"收到但进程没起来"。
+	emitJobLog(socket, job.jobId, "received", {
+		data: { type: "exec", mode: job.mode },
+	});
 
 	if (job.mode === "command") {
 		// Windows cmd 默认输出 GBK，先切到 UTF-8 代码页
@@ -93,6 +104,15 @@ export function executeExec(job: ExecJob, socket: Socket) {
 		startTime: Date.now(),
 	};
 	activeJobs.set(job.jobId, active);
+
+	// spawn 成功（ENOENT 等失败只触发 error，不触发 spawn）。
+	child.on("spawn", () => {
+		spawnAt = Date.now();
+		emitJobLog(socket, job.jobId, "spawned", {
+			data: { pid: child.pid ?? 0, mode: job.mode },
+		});
+	});
+
 	if (job.timeout !== undefined) {
 		active.timeoutTimer = setTimeout(() => {
 			const current = activeJobs.get(job.jobId);
@@ -145,6 +165,26 @@ export function executeExec(job: ExecJob, socket: Socket) {
 		const current = activeJobs.get(job.jobId);
 		const wasCancelling = current?.cancelling ?? false;
 		const timedOut = current?.timedOut ?? false;
+		// 相位结算：只在仍持有该 Job 时上报一次（settle 为幂等闸门）。
+		if (current) {
+			const reason = timedOut
+				? "timeout"
+				: wasCancelling
+					? "cancelled"
+					: code === null
+						? "signalled"
+						: "done";
+			emitJobLog(socket, job.jobId, "local_settled", {
+				level: reason === "done" ? "info" : "warn",
+				data: {
+					reason,
+					drainTimedOut,
+					...(spawnAt !== null && exitAt !== null
+						? { spawnToExitMs: Math.max(0, exitAt - spawnAt) }
+						: {}),
+				},
+			});
+		}
 		settle(job.jobId, () => {
 			if (timedOut) {
 				socket.emit(Events.JOB_DONE, {
@@ -189,11 +229,22 @@ export function executeExec(job: ExecJob, socket: Socket) {
 	};
 
 	child.on("exit", (code, signal) => {
+		exitAt = Date.now();
+		emitJobLog(socket, job.jobId, "exited", {
+			data: {
+				...(code !== null ? { exitCode: code } : {}),
+				...(signal !== null ? { signal } : {}),
+			},
+		});
 		// 进程本体已退出：给管道一个有限排空窗口后强制结算（`close` 可能永远不来）。
-		drainTimer = setTimeout(
-			() => finalize(code, signal),
-			OUTPUT_DRAIN_GRACE_MS,
-		);
+		drainTimer = setTimeout(() => {
+			drainTimedOut = true;
+			emitJobLog(socket, job.jobId, "drain_timeout", {
+				level: "warn",
+				data: { graceMs: OUTPUT_DRAIN_GRACE_MS },
+			});
+			finalize(code, signal);
+		}, OUTPUT_DRAIN_GRACE_MS);
 		drainTimer.unref?.();
 	});
 
@@ -201,6 +252,14 @@ export function executeExec(job: ExecJob, socket: Socket) {
 
 	// ── spawn error（幂等） ──
 	child.on("error", (err) => {
+		if (activeJobs.has(job.jobId)) {
+			emitJobLog(socket, job.jobId, "local_settled", {
+				level: "error",
+				code: "EXEC_SPAWN_FAILED",
+				message: safeSpawnErrorMessage(err.message),
+				data: { reason: "spawn_error", drainTimedOut },
+			});
+		}
 		settle(job.jobId, () => {
 			socket.emit(Events.JOB_DONE, {
 				jobId: job.jobId,
@@ -217,6 +276,13 @@ export function executeExec(job: ExecJob, socket: Socket) {
 	if (job.mode === "script") {
 		child.stdin?.on("error", () => {
 			const current = activeJobs.get(job.jobId);
+			if (current) {
+				emitJobLog(socket, job.jobId, "local_settled", {
+					level: "error",
+					code: "EXEC_STDIN_FAILED",
+					data: { reason: "stdin_failed", drainTimedOut },
+				});
+			}
 			settle(job.jobId, () => {
 				if (current) void terminateActiveJob(current);
 				socket.emit(Events.JOB_DONE, {
@@ -259,6 +325,7 @@ function safeSpawnErrorMessage(msg: string): string {
 }
 
 export function killJob(jobId: string, socket: Socket) {
+	emitJobLog(socket, jobId, "cancel_received");
 	const active = activeJobs.get(jobId);
 	if (!active) {
 		socket.emit(Events.JOB_CANCEL_FAILED, {
@@ -274,12 +341,18 @@ export function killJob(jobId: string, socket: Socket) {
 		active.timeoutTimer = undefined;
 	}
 	void terminateActiveJob(active).catch((error: unknown) => {
+		const message =
+			error instanceof Error
+				? safeSpawnErrorMessage(error.message)
+				: "Cancellation failed";
+		emitJobLog(socket, jobId, "kill_failed", {
+			level: "warn",
+			code: "EXEC_KILL_FAILED",
+			message,
+		});
 		socket.emit(Events.JOB_CANCEL_FAILED, {
 			jobId,
-			reason:
-				error instanceof Error
-					? safeSpawnErrorMessage(error.message)
-					: "Cancellation failed",
+			reason: message,
 		} satisfies JobCancelFailed);
 	});
 }

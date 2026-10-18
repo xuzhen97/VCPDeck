@@ -5,7 +5,9 @@
 ## 1. 运行基线
 
 
-当前仅使用 stdout/stderr 日志，没有统一结构化日志、指标或 tracing。生产环境必须由 Launcher/服务管理器和日志采集器接管进程输出。
+Job 相关日志已是**带 `jobId` 的单行 JSON**：Server 通过 `recordJobLog` 一次调用同时写 stdout 与 `JobLogEvent` 表，Client 同构写本地 JSONL 并通过 `job:log` 上报相位。其余 Server/Client/Launcher 日志仍是普通 stdout/stderr，且没有指标与 tracing；生产环境必须由 Launcher/服务管理器和日志采集器接管进程输出。
+
+按 `jobId` 还原一条 Job 链路有两种方式：`grep '"jobId":"<id>"'`（Server 与目标机日志）或 `vcpdeck jobs logs <jobId>`（事件链，含 Client 侧 `spawned/exited/local_settled` 相位）。事件保留 30 天、每 Job 上限 200 条（优先裁剪最旧的非 error 事件）。
 
 ## 2. 启停
 
@@ -101,7 +103,9 @@ Get-Content "C:\ProgramData\VCPDeck\Client\launcher-error.log" -Tail 50 -ErrorAc
 
 不得采集或输出：密码、Cookie、Bearer Token、PSK、FRP Token、Launcher Token、签名 URL、阿里云 Token、完整 command/script、敏感路径、终端正文和文件内容。
 
-当前日志中仍有较自由的 `console.*`，接入集中日志前应进行一次脱敏审查。对外提供日志时先二次清洗。
+Job 日志事件只保存生命周期事实与白名单字段（`type/mode/exitCode/durationMs/…`），不保存命令、脚本、路径或输出正文；`message` ≤200 字符、`data` ≤8 键且仅扁平标量，超限载荷在入口被丢弃。不要为了"便于排错"往 `data` 里追加正文——那会同时突破脱敏边界与 agent 读取成本。
+
+Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行一次脱敏审查。对外提供日志时先二次清洗。
 
 ## 5. 日常巡检
 
