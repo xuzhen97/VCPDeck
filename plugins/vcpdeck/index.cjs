@@ -32,7 +32,169 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.20.1";
+    exports2.VERSION = "0.21.0";
+  }
+});
+
+// ../shared/dist/client-annotations.js
+var require_client_annotations = __commonJS({
+  "../shared/dist/client-annotations.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.parseClientAnnotationsInput = parseClientAnnotationsInput;
+    exports2.hasClientAnnotations = hasClientAnnotations;
+    exports2.parseClientAnnotations = parseClientAnnotations;
+    var MAX_PUBLIC_ADDRESSES = 4;
+    var MAX_HOST_LENGTH = 253;
+    var MAX_NOTES_LENGTH = 1e3;
+    function isRecord2(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function isIPv4(value) {
+      const parts = value.split(".");
+      if (parts.length !== 4)
+        return false;
+      return parts.every((part) => /^(0|[1-9]\d{0,2})$/.test(part) && Number(part) <= 255);
+    }
+    function isIPv6(value) {
+      if (!value.includes(":") || value.includes("%") || value.length > 45 || !/^[0-9A-Fa-f:.]+$/.test(value)) {
+        return false;
+      }
+      try {
+        const parsed = new URL(`http://[${value}]/`);
+        return parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]");
+      } catch {
+        return false;
+      }
+    }
+    function isHostname(value) {
+      if (value.length === 0 || value.length > MAX_HOST_LENGTH)
+        return false;
+      return value.split(".").every((label) => label.length >= 1 && label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
+    }
+    function parseAddressList(value, field, validator, label) {
+      if (value === void 0)
+        return [];
+      if (!Array.isArray(value)) {
+        throw new Error(`annotations.publicAddress.${field} \u5FC5\u987B\u4E3A\u6570\u7EC4`);
+      }
+      if (value.length > MAX_PUBLIC_ADDRESSES) {
+        throw new Error(`annotations.publicAddress.${field} \u6700\u591A ${MAX_PUBLIC_ADDRESSES} \u4E2A`);
+      }
+      const result = [];
+      for (const candidate of value) {
+        if (typeof candidate !== "string") {
+          throw new Error(`annotations.publicAddress.${field} \u7684\u5143\u7D20\u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32`);
+        }
+        const normalized = candidate.trim();
+        if (!validator(normalized)) {
+          throw new Error(`annotations.publicAddress.${field} \u542B\u975E\u6CD5 ${label} \u5730\u5740\uFF1A${normalized}`);
+        }
+        if (result.includes(normalized)) {
+          throw new Error(`annotations.publicAddress.${field} \u4E0D\u80FD\u5305\u542B\u91CD\u590D\u5730\u5740`);
+        }
+        result.push(normalized);
+      }
+      return result;
+    }
+    function parseHost(value) {
+      if (value === void 0 || value === null)
+        return null;
+      if (typeof value !== "string") {
+        throw new Error("annotations.publicAddress.host \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32\u6216 null");
+      }
+      const normalized = value.trim().toLowerCase().replace(/\.$/, "");
+      if (normalized.length === 0)
+        return null;
+      if (!isHostname(normalized)) {
+        throw new Error("annotations.publicAddress.host \u4E0D\u662F\u5408\u6CD5\u57DF\u540D");
+      }
+      return normalized;
+    }
+    function parseNotes(value) {
+      if (value === void 0 || value === null)
+        return null;
+      if (typeof value !== "string") {
+        throw new Error("annotations.notes \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32\u6216 null");
+      }
+      const normalized = value.trim();
+      if (normalized.length === 0)
+        return null;
+      if (normalized.length > MAX_NOTES_LENGTH) {
+        throw new Error(`annotations.notes \u4E0D\u80FD\u8D85\u8FC7 ${MAX_NOTES_LENGTH} \u5B57\u7B26`);
+      }
+      if (hasControlCharacters(normalized)) {
+        throw new Error("annotations.notes \u4E0D\u80FD\u5305\u542B\u63A7\u5236\u5B57\u7B26");
+      }
+      return normalized;
+    }
+    function hasControlCharacters(value) {
+      for (const char of value) {
+        const code = char.codePointAt(0) ?? 0;
+        if (code <= 8 || code === 11 || code === 12 || code >= 14 && code <= 31 || code === 127) {
+          return true;
+        }
+      }
+      return false;
+    }
+    function parsePublicAddress(value) {
+      if (value === void 0 || value === null)
+        return null;
+      if (!isRecord2(value)) {
+        throw new Error("annotations.publicAddress \u5FC5\u987B\u4E3A\u5BF9\u8C61\u6216 null");
+      }
+      for (const key of Object.keys(value)) {
+        if (key !== "v4" && key !== "v6" && key !== "host") {
+          throw new Error(`annotations.publicAddress \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      return {
+        v4: parseAddressList(value.v4, "v4", isIPv4, "IPv4"),
+        v6: parseAddressList(value.v6, "v6", isIPv6, "IPv6"),
+        host: parseHost(value.host)
+      };
+    }
+    function parseClientAnnotationsInput(value) {
+      if (!isRecord2(value)) {
+        throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      }
+      for (const key of Object.keys(value)) {
+        if (key !== "publicAddress" && key !== "notes") {
+          throw new Error(`annotations \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      return {
+        publicAddress: parsePublicAddress(value.publicAddress),
+        notes: parseNotes(value.notes)
+      };
+    }
+    function hasClientAnnotations(input) {
+      return input.publicAddress !== null || input.notes !== null;
+    }
+    function parseClientAnnotations(value) {
+      if (!isRecord2(value)) {
+        throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      }
+      if (Object.keys(value).length === 0)
+        return null;
+      for (const key of Object.keys(value)) {
+        if (key !== "publicAddress" && key !== "notes" && key !== "updatedAt") {
+          throw new Error(`annotations \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      const publicAddress = parsePublicAddress(value.publicAddress);
+      const notes = parseNotes(value.notes);
+      if (typeof value.updatedAt !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(value.updatedAt) || Number.isNaN(Date.parse(value.updatedAt))) {
+        throw new Error("annotations.updatedAt \u5FC5\u987B\u4E3A ISO \u65F6\u95F4\u5B57\u7B26\u4E32");
+      }
+      if (publicAddress === null && notes === null)
+        return null;
+      return {
+        publicAddress,
+        notes,
+        updatedAt: new Date(value.updatedAt).toISOString()
+      };
+    }
   }
 });
 
@@ -1575,6 +1737,345 @@ var require_machine_register = __commonJS({
   }
 });
 
+// ../shared/dist/feature.js
+var require_feature = __commonJS({
+  "../shared/dist/feature.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.FEATURE_ERROR_CODES = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_STATUSES = exports2.FEATURE_SCOPES = void 0;
+    exports2.parseFeatureInvocation = parseFeatureInvocation;
+    exports2.parseFeatureInputs = parseFeatureInputs;
+    exports2.parseFeatureVerificationReport = parseFeatureVerificationReport;
+    exports2.parseFeatureCreateInput = parseFeatureCreateInput;
+    exports2.parseFeatureUpdateInput = parseFeatureUpdateInput;
+    exports2.parseFeatureContract = parseFeatureContract;
+    exports2.getFeatureFreshness = getFeatureFreshness;
+    exports2.FEATURE_SCOPES = ["generic", "machine"];
+    exports2.FEATURE_STATUSES = ["draft", "active", "retired"];
+    exports2.FEATURE_STALE_AFTER_DAYS = 14;
+    exports2.FEATURE_VERIFICATION_SOURCES = ["cli", "agent", "api"];
+    var DAY_MS = 864e5;
+    var DEFAULT_TIMEOUT_SECONDS = 60;
+    var MAX_TIMEOUT_SECONDS = 3600;
+    var MAX_CLIENT_ID = 128;
+    var MAX_SLUG = 63;
+    var MAX_NAME = 120;
+    var MAX_SUMMARY = 500;
+    var MAX_COMMAND = 4e3;
+    var MAX_URL = 2048;
+    var MAX_OUTPUT = 2e3;
+    var MAX_NOTES = 8e3;
+    var MAX_EVIDENCE = 2e3;
+    var MAX_INPUTS = 20;
+    var MAX_INPUT_DESCRIPTION = 200;
+    var MAX_EXAMPLE = 200;
+    var MAX_OPTIONS = 20;
+    var MAX_OPTION_LENGTH = 120;
+    var SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+    var INPUT_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/;
+    var FeatureProtocolError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "FeatureProtocolError";
+      }
+    };
+    exports2.FeatureProtocolError = FeatureProtocolError;
+    exports2.FEATURE_ERROR_CODES = [
+      "FEATURE_NOT_FOUND",
+      "FEATURE_SLUG_TAKEN",
+      "INVALID_FEATURE_INPUT",
+      "INVALID_FEATURE_STATUS_TRANSITION",
+      "FEATURE_CLIENT_UNKNOWN"
+    ];
+    function isRecord2(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function rejectUnknown(value, allowed, field) {
+      for (const key of Object.keys(value)) {
+        if (!allowed.includes(key)) {
+          throw new FeatureProtocolError(`${field} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function hasControlCharacters(value) {
+      for (const char of value) {
+        const code = char.codePointAt(0) ?? 0;
+        if (code <= 8 || code === 11 || code === 12 || code >= 14 && code <= 31 || code === 127) {
+          return true;
+        }
+      }
+      return false;
+    }
+    function parseText(value, field, maxLength, allowEmpty = false) {
+      if (typeof value !== "string") {
+        throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32`);
+      }
+      const trimmed = value.trim();
+      if (!allowEmpty && trimmed.length === 0) {
+        throw new FeatureProtocolError(`${field} \u4E0D\u80FD\u4E3A\u7A7A`);
+      }
+      if (trimmed.length > maxLength) {
+        throw new FeatureProtocolError(`${field} \u4E0D\u80FD\u8D85\u8FC7 ${maxLength} \u5B57\u7B26`);
+      }
+      if (hasControlCharacters(trimmed)) {
+        throw new FeatureProtocolError(`${field} \u4E0D\u80FD\u5305\u542B\u63A7\u5236\u5B57\u7B26`);
+      }
+      return trimmed;
+    }
+    function parseTimeout(value) {
+      if (value === void 0)
+        return DEFAULT_TIMEOUT_SECONDS;
+      if (!Number.isInteger(value) || value < 1 || value > MAX_TIMEOUT_SECONDS) {
+        throw new FeatureProtocolError(`timeoutSeconds \u5FC5\u987B\u662F 1-${MAX_TIMEOUT_SECONDS} \u7684\u6574\u6570`);
+      }
+      return value;
+    }
+    function parseUrl(value, field) {
+      const url = parseText(value, field, MAX_URL);
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        throw new FeatureProtocolError(`${field} \u4E0D\u662F\u5408\u6CD5 URL`);
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new FeatureProtocolError(`${field} \u53EA\u652F\u6301 http/https`);
+      }
+      if (parsed.username !== "" || parsed.password !== "") {
+        throw new FeatureProtocolError(`${field} \u4E0D\u5F97\u5305\u542B userinfo\uFF08user:pass@\uFF09`);
+      }
+      return url;
+    }
+    function parseFeatureInvocation(value, field = "invoke") {
+      if (!isRecord2(value)) {
+        throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      }
+      if (value.kind === "command") {
+        rejectUnknown(value, ["kind", "command", "timeoutSeconds"], field);
+        return {
+          kind: "command",
+          command: parseText(value.command, `${field}.command`, MAX_COMMAND),
+          timeoutSeconds: parseTimeout(value.timeoutSeconds)
+        };
+      }
+      if (value.kind === "http") {
+        rejectUnknown(value, ["kind", "method", "url", "timeoutSeconds"], field);
+        if (value.method !== "GET" && value.method !== "POST") {
+          throw new FeatureProtocolError(`${field}.method \u5FC5\u987B\u662F GET \u6216 POST`);
+        }
+        return {
+          kind: "http",
+          method: value.method,
+          url: parseUrl(value.url, `${field}.url`),
+          timeoutSeconds: parseTimeout(value.timeoutSeconds)
+        };
+      }
+      throw new FeatureProtocolError(`${field}.kind \u5FC5\u987B\u662F command \u6216 http`);
+    }
+    function parseOptionalText(value, field, maxLength) {
+      return value === void 0 ? void 0 : parseText(value, field, maxLength);
+    }
+    function parseFeatureInputs(value) {
+      if (value === void 0)
+        return [];
+      if (!Array.isArray(value)) {
+        throw new FeatureProtocolError("inputs \u5FC5\u987B\u4E3A\u6570\u7EC4");
+      }
+      if (value.length > MAX_INPUTS) {
+        throw new FeatureProtocolError(`inputs \u6700\u591A ${MAX_INPUTS} \u9879`);
+      }
+      const seen = /* @__PURE__ */ new Set();
+      return value.map((raw, index) => {
+        const field = `inputs[${index}]`;
+        if (!isRecord2(raw)) {
+          throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+        }
+        rejectUnknown(raw, ["name", "type", "required", "description", "example", "options"], field);
+        const name = typeof raw.name === "string" ? raw.name : "";
+        if (!INPUT_NAME_PATTERN.test(name)) {
+          throw new FeatureProtocolError(`${field}.name \u683C\u5F0F\u65E0\u6548`);
+        }
+        if (seen.has(name)) {
+          throw new FeatureProtocolError(`inputs \u542B\u91CD\u590D name: ${name}`);
+        }
+        seen.add(name);
+        const type = raw.type;
+        if (type !== "string" && type !== "number" && type !== "boolean" && type !== "enum" && type !== "path") {
+          throw new FeatureProtocolError(`${field}.type \u5FC5\u987B\u662F string/number/boolean/enum/path`);
+        }
+        if (typeof raw.required !== "boolean") {
+          throw new FeatureProtocolError(`${field}.required \u5FC5\u987B\u4E3A boolean`);
+        }
+        const param = {
+          name,
+          type,
+          required: raw.required,
+          description: parseText(raw.description, `${field}.description`, MAX_INPUT_DESCRIPTION)
+        };
+        const example = parseOptionalText(raw.example, `${field}.example`, MAX_EXAMPLE);
+        if (example !== void 0)
+          param.example = example;
+        let options;
+        if (raw.options !== void 0) {
+          if (type !== "enum") {
+            throw new FeatureProtocolError(`${field}.options \u4EC5 enum \u53EF\u7528`);
+          }
+          if (!Array.isArray(raw.options) || raw.options.length === 0 || raw.options.length > MAX_OPTIONS) {
+            throw new FeatureProtocolError(`${field}.options \u5FC5\u987B\u4E3A 1-${MAX_OPTIONS} \u9879\u6570\u7EC4`);
+          }
+          options = raw.options.map((option, optionIndex) => parseText(option, `${field}.options[${optionIndex}]`, MAX_OPTION_LENGTH));
+        }
+        if (type === "enum" && options === void 0) {
+          throw new FeatureProtocolError(`${field}.options \u5728 enum \u7C7B\u578B\u4E0B\u5FC5\u586B`);
+        }
+        if (options !== void 0)
+          param.options = options;
+        return param;
+      });
+    }
+    function parseFeatureVerificationReport(value) {
+      if (!isRecord2(value)) {
+        throw new FeatureProtocolError("verification \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      }
+      rejectUnknown(value, ["ok", "durationMs", "evidence", "via"], "verification");
+      if (typeof value.ok !== "boolean") {
+        throw new FeatureProtocolError("verification.ok \u5FC5\u987B\u4E3A boolean");
+      }
+      if (value.via !== "cli" && value.via !== "agent" && value.via !== "api") {
+        throw new FeatureProtocolError("verification.via \u5FC5\u987B\u662F cli/agent/api");
+      }
+      const report = { ok: value.ok, via: value.via };
+      if (value.durationMs !== void 0) {
+        if (!Number.isInteger(value.durationMs) || value.durationMs < 0) {
+          throw new FeatureProtocolError("verification.durationMs \u5FC5\u987B\u4E3A\u975E\u8D1F\u6574\u6570");
+        }
+        report.durationMs = value.durationMs;
+      }
+      if (value.evidence !== void 0) {
+        if (typeof value.evidence !== "string") {
+          throw new FeatureProtocolError("verification.evidence \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32");
+        }
+        const evidence = value.evidence.slice(0, MAX_EVIDENCE);
+        if (hasControlCharacters(evidence.replace(/[\n\r\t]/g, " "))) {
+          throw new FeatureProtocolError("verification.evidence \u4E0D\u80FD\u5305\u542B\u63A7\u5236\u5B57\u7B26");
+        }
+        report.evidence = evidence;
+      }
+      return report;
+    }
+    function parseFeatureCreateInput(value) {
+      if (!isRecord2(value)) {
+        throw new FeatureProtocolError("\u529F\u80FD\u6761\u76EE\u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      rejectUnknown(value, [
+        "clientId",
+        "slug",
+        "name",
+        "summary",
+        "scope",
+        "invoke",
+        "verify",
+        "inputs",
+        "output",
+        "notes",
+        "sourceJobId",
+        "verification"
+      ], "feature");
+      const slug = typeof value.slug === "string" ? value.slug : "";
+      if (slug.length > MAX_SLUG || !SLUG_PATTERN.test(slug)) {
+        throw new FeatureProtocolError("slug \u5FC5\u987B\u4E3A 1-63 \u4F4D\u5C0F\u5199 kebab-case");
+      }
+      if (value.scope !== "generic" && value.scope !== "machine") {
+        throw new FeatureProtocolError("scope \u5FC5\u987B\u662F generic \u6216 machine");
+      }
+      const input = {
+        clientId: parseText(value.clientId, "clientId", MAX_CLIENT_ID),
+        slug,
+        name: parseText(value.name, "name", MAX_NAME),
+        summary: parseText(value.summary, "summary", MAX_SUMMARY),
+        scope: value.scope,
+        invoke: parseFeatureInvocation(value.invoke, "invoke"),
+        verify: parseFeatureInvocation(value.verify, "verify"),
+        inputs: parseFeatureInputs(value.inputs),
+        output: value.output === void 0 ? "" : parseText(value.output, "output", MAX_OUTPUT, true),
+        notes: value.notes === void 0 ? "" : parseText(value.notes, "notes", MAX_NOTES, true),
+        sourceJobId: value.sourceJobId === void 0 || value.sourceJobId === null ? null : parseText(value.sourceJobId, "sourceJobId", MAX_CLIENT_ID)
+      };
+      if (value.verification !== void 0) {
+        input.verification = parseFeatureVerificationReport(value.verification);
+      }
+      return input;
+    }
+    function parseFeatureUpdateInput(value) {
+      if (!isRecord2(value)) {
+        throw new FeatureProtocolError("\u66F4\u65B0\u8BF7\u6C42\u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      if (Object.keys(value).length === 0) {
+        throw new FeatureProtocolError("\u66F4\u65B0\u8BF7\u6C42\u4E0D\u80FD\u4E3A\u7A7A\u5BF9\u8C61");
+      }
+      rejectUnknown(value, [
+        "name",
+        "summary",
+        "scope",
+        "invoke",
+        "verify",
+        "inputs",
+        "output",
+        "notes",
+        "status"
+      ], "feature");
+      const input = {};
+      if (value.name !== void 0)
+        input.name = parseText(value.name, "name", MAX_NAME);
+      if (value.summary !== void 0) {
+        input.summary = parseText(value.summary, "summary", MAX_SUMMARY);
+      }
+      if (value.scope !== void 0) {
+        if (value.scope !== "generic" && value.scope !== "machine") {
+          throw new FeatureProtocolError("scope \u5FC5\u987B\u662F generic \u6216 machine");
+        }
+        input.scope = value.scope;
+      }
+      if (value.invoke !== void 0) {
+        input.invoke = parseFeatureInvocation(value.invoke, "invoke");
+      }
+      if (value.verify !== void 0) {
+        input.verify = parseFeatureInvocation(value.verify, "verify");
+      }
+      if (value.inputs !== void 0)
+        input.inputs = parseFeatureInputs(value.inputs);
+      if (value.output !== void 0) {
+        input.output = parseText(value.output, "output", MAX_OUTPUT, true);
+      }
+      if (value.notes !== void 0) {
+        input.notes = parseText(value.notes, "notes", MAX_NOTES, true);
+      }
+      if (value.status !== void 0) {
+        if (value.status !== "draft" && value.status !== "retired") {
+          throw new FeatureProtocolError("status \u53EA\u80FD\u6539\u4E3A draft \u6216 retired\uFF1Bactive \u53EA\u80FD\u7531\u9A8C\u8BC1\u4EA7\u751F");
+        }
+        input.status = value.status;
+      }
+      return input;
+    }
+    function parseFeatureContract(invoke, verify, inputs) {
+      return {
+        invoke: parseFeatureInvocation(invoke, "invoke"),
+        verify: parseFeatureInvocation(verify, "verify"),
+        inputs: parseFeatureInputs(inputs)
+      };
+    }
+    function getFeatureFreshness(lastVerifiedAt, now = /* @__PURE__ */ new Date()) {
+      if (lastVerifiedAt === null)
+        return "never";
+      const verifiedAt = new Date(lastVerifiedAt).getTime();
+      if (Number.isNaN(verifiedAt))
+        return "never";
+      return now.getTime() - verifiedAt > exports2.FEATURE_STALE_AFTER_DAYS * DAY_MS ? "stale" : "fresh";
+    }
+  }
+});
+
 // ../shared/dist/index.js
 var require_dist = __commonJS({
   "../shared/dist/index.js"(exports2) {
@@ -1596,13 +2097,23 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.VERSION = void 0;
-    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = void 0;
+    exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
     Object.defineProperty(exports2, "VERSION", { enumerable: true, get: function() {
       return version_js_1.VERSION;
+    } });
+    var client_annotations_js_1 = require_client_annotations();
+    Object.defineProperty(exports2, "hasClientAnnotations", { enumerable: true, get: function() {
+      return client_annotations_js_1.hasClientAnnotations;
+    } });
+    Object.defineProperty(exports2, "parseClientAnnotations", { enumerable: true, get: function() {
+      return client_annotations_js_1.parseClientAnnotations;
+    } });
+    Object.defineProperty(exports2, "parseClientAnnotationsInput", { enumerable: true, get: function() {
+      return client_annotations_js_1.parseClientAnnotationsInput;
     } });
     var client_installer_js_1 = require_client_installer();
     Object.defineProperty(exports2, "ClientInstallerErrorCode", { enumerable: true, get: function() {
@@ -1949,6 +2460,46 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parseFrpRuntimeStateReport", { enumerable: true, get: function() {
       return frp_runtime_js_1.parseFrpRuntimeStateReport;
     } });
+    var feature_js_1 = require_feature();
+    Object.defineProperty(exports2, "FEATURE_ERROR_CODES", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_ERROR_CODES;
+    } });
+    Object.defineProperty(exports2, "FEATURE_SCOPES", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_SCOPES;
+    } });
+    Object.defineProperty(exports2, "FEATURE_STALE_AFTER_DAYS", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_STALE_AFTER_DAYS;
+    } });
+    Object.defineProperty(exports2, "FEATURE_STATUSES", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_STATUSES;
+    } });
+    Object.defineProperty(exports2, "FEATURE_VERIFICATION_SOURCES", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_VERIFICATION_SOURCES;
+    } });
+    Object.defineProperty(exports2, "FeatureProtocolError", { enumerable: true, get: function() {
+      return feature_js_1.FeatureProtocolError;
+    } });
+    Object.defineProperty(exports2, "getFeatureFreshness", { enumerable: true, get: function() {
+      return feature_js_1.getFeatureFreshness;
+    } });
+    Object.defineProperty(exports2, "parseFeatureContract", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureContract;
+    } });
+    Object.defineProperty(exports2, "parseFeatureCreateInput", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureCreateInput;
+    } });
+    Object.defineProperty(exports2, "parseFeatureInputs", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureInputs;
+    } });
+    Object.defineProperty(exports2, "parseFeatureInvocation", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureInvocation;
+    } });
+    Object.defineProperty(exports2, "parseFeatureUpdateInput", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureUpdateInput;
+    } });
+    Object.defineProperty(exports2, "parseFeatureVerificationReport", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureVerificationReport;
+    } });
   }
 });
 
@@ -2006,7 +2557,9 @@ function createClientsApi(client) {
   return {
     list: (signal) => client.request("GET", "/api/clients", void 0, signal),
     /** 修改客户端别名（全局唯一；重名返回 409）。 */
-    rename: (clientId, name, signal) => client.request("PATCH", `/api/clients/${encodeURIComponent(clientId)}/name`, { name }, signal)
+    rename: (clientId, name, signal) => client.request("PATCH", `/api/clients/${encodeURIComponent(clientId)}/name`, { name }, signal),
+    /** 全量替换操作者注解（ADR-0055）；空输入清除。 */
+    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal)
   };
 }
 
@@ -2024,6 +2577,32 @@ function createClientInstallerApi(client) {
       const result = await client.requestRaw("GET", `/api/client-installer/clients/${encodeURIComponent(clientId)}/status`, { headers: { "x-vcpdeck-psk": psk }, signal });
       return result.data;
     }
+  };
+}
+
+// ../sdk/dist/features.js
+function createFeaturesApi(client) {
+  return {
+    list: (params = {}, signal) => {
+      const search = new URLSearchParams();
+      if (params.clientId)
+        search.set("clientId", params.clientId);
+      if (params.scope)
+        search.set("scope", params.scope);
+      if (params.status)
+        search.set("status", params.status);
+      if (params.page !== void 0)
+        search.set("page", String(params.page));
+      if (params.pageSize !== void 0)
+        search.set("pageSize", String(params.pageSize));
+      const query = search.toString();
+      return client.request("GET", query ? `/api/features?${query}` : "/api/features", void 0, signal);
+    },
+    get: (id, signal) => client.request("GET", `/api/features/${encodeURIComponent(id)}`, void 0, signal),
+    listByClient: (clientId, signal) => client.request("GET", `/api/clients/${encodeURIComponent(clientId)}/features`, void 0, signal),
+    create: (input, signal) => client.request("POST", "/api/features", input, signal),
+    update: (id, patch, signal) => client.request("PATCH", `/api/features/${encodeURIComponent(id)}`, patch, signal),
+    reportVerification: (id, report, signal) => client.request("POST", `/api/features/${encodeURIComponent(id)}/verifications`, report, signal)
   };
 }
 
@@ -2369,6 +2948,8 @@ var VcpDeckClient = class {
   identities;
   clients;
   clientInstaller;
+  /** 功能目录（ADR-0056）。 */
+  features;
   storage;
   storageShares;
   aliyundrive;
@@ -2390,6 +2971,7 @@ var VcpDeckClient = class {
     this.identities = createIdentitiesApi(this);
     this.clients = createClientsApi(this);
     this.clientInstaller = createClientInstallerApi(this);
+    this.features = createFeaturesApi(this);
     this.storage = createStorageApi(this);
     this.storageShares = createStorageSharesApi(this);
     this.aliyundrive = createAliyunDriveApi(this);

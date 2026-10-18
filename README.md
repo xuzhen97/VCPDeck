@@ -80,13 +80,13 @@ Tab 补全：`vcpdeck completions bash` 追加到 `~/.bashrc`，或 `vcpdeck com
 Node.js 24+ 环境中按稳定 Tag 用户级安装：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.20.1
+pi install git:github.com/xuzhen97/VCPDeck@v0.21.0
 ```
 
 Pi 会克隆整个仓库并发现 `skills/vcpdeck/SKILL.md`；同目录 `vcpdeck.cjs` 已随 Tag 提交，无需在安装机编译。升级或回滚需显式切换 Tag，例如：
 
 ```bash
-pi install git:github.com/xuzhen97/VCPDeck@v0.20.1
+pi install git:github.com/xuzhen97/VCPDeck@v0.21.0
 ```
 
 Skill 与 CLI 用户级只安装一份，但执行时保留当前项目 cwd，因此每个项目都可以用自己的 `.vcpdeck.json` 选择用户级已注册环境。
