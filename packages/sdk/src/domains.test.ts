@@ -158,3 +158,21 @@ it("clients.updateAnnotations PUTs the wrapped annotation input", async () => {
 	);
 	expect(result).toEqual(response);
 });
+
+it("features.listByClient hits the machine-scoped route", async () => {
+	const fetcher = vi.fn(async () =>
+		Response.json({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 1 }),
+	);
+	const client = new VcpDeckClient({
+		baseUrl: "",
+		auth: { type: "cookie" },
+		fetch: fetcher,
+	});
+
+	await client.features.listByClient("c/1");
+
+	expect(fetcher).toHaveBeenCalledWith(
+		"/api/clients/c%2F1/features",
+		expect.any(Object),
+	);
+});

@@ -24,6 +24,7 @@ import { FilesPanel } from "@/pages/files-panel";
 import { FrpPanel } from "@/pages/frp-panel";
 import { JobsPage } from "@/pages/jobs-page";
 import { MachineAnnotationsPanel } from "./machine-annotations-panel";
+import { MachineFeaturesPanel } from "./machine-features-panel";
 import { TerminalPanel } from "@/pages/terminal-panel";
 
 export function MachineWorkspace() {
@@ -240,6 +241,9 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				{tab === "frp" && <FrpPanel clientId={client.clientId} />}
 				{tab === "jobs" && <JobsPage clientId={client.clientId} />}
 				{tab === "terminal" && <TerminalPanel clientId={client.clientId} />}
+				{tab === "features" && (
+					<MachineFeaturesPanel clientId={client.clientId} />
+				)}
 				{![
 					"overview",
 					"execute",
@@ -247,6 +251,7 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 					"frp",
 					"jobs",
 					"terminal",
+					"features",
 				].includes(tab) && (
 					<Card>
 						<CardContent className="pt-6 text-sm text-muted-foreground">

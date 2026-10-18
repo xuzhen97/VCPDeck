@@ -1,4 +1,5 @@
 import {
+	Blocks,
 	Cable,
 	Database,
 	KeyRound,
@@ -48,6 +49,7 @@ export const MODULES: NavModule[] = [
 	{ id: "machines", path: "/machines", label: "机器", icon: MonitorCog },
 	{ id: "jobs", path: "/jobs", label: "任务", icon: ListTodo },
 	{ id: "frp", path: "/frp", label: "映射", icon: Cable },
+	{ id: "features", path: "/features", label: "功能", icon: Blocks },
 	{ id: "releases", path: "/releases", label: "发版", icon: Rocket },
 	{
 		id: "settings",

@@ -70,6 +70,12 @@ export async function run(
 			await runClientsCommand(subcommand, rest, { log });
 			return 0;
 		}
+		if (command === "features") {
+			// 懒加载：验证执行依赖 Job 轮询
+			const { runFeaturesCommand } = await import("./features-command.js");
+			await runFeaturesCommand(subcommand, rest, { log, error });
+			return 0;
+		}
 		if (command === "release") {
 			await runReleaseCommand(subcommand, rest, { log });
 			return 0;
@@ -108,6 +114,16 @@ export function helpText(): string {
 		"",
 		"Clients:",
 		"  vcpdeck clients list [--env=<name>] [--json]",
+		"",
+		"Features:",
+		"  vcpdeck features list [--client=<name|id>] [--scope=generic|machine] [--status=<status>] [--include-retired] [--env=<name>] [--json]",
+		"  vcpdeck features get <slug|id> [--client=<name|id>] [--env=<name>] [--json]",
+		"  vcpdeck features add --client=<name|id> --slug=<slug> --name=<name> --summary=<text> --scope=<generic|machine>",
+		"      (--invoke-command=<cmd> | --invoke-url=<url>) (--verify-command=<cmd> | --verify-url=<url>)",
+		"      [--inputs-file=<json>] [--output=<text>] [--notes-file=<path>] [--timeout=<seconds>] [--skip-verify] [--json]",
+		"  vcpdeck features verify <slug|id> [--client=<name|id>] [--env=<name>] [--json]",
+		"  vcpdeck features update <slug|id> [--client=<name|id>] [字段...] [--status=draft|retired] [--env=<name>] [--json]",
+		"  验证由 CLI 执行（command 型走 exec Job，http 型直连）；active 只能由成功验证产生",
 		"",
 		"Jobs:",
 		"  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",

@@ -31,6 +31,7 @@ export const MACHINE_TABS = [
 	["frp", "映射"],
 	["jobs", "任务记录"],
 	["terminal", "终端"],
+	["features", "功能"],
 ] as const;
 
 /** 能力 → 中文标签；未映射的能力原样透传，确保显示不遗漏 */

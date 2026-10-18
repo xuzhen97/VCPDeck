@@ -9,6 +9,7 @@ import { FrpModule } from "./frp/frp.module.js";
 import { ReleaseModule } from "./release/release.module.js";
 import { ClientInstallerModule } from "./client-installer/client-installer.module.js";
 import { GitSshModule } from "./git-ssh/git-ssh.module.js";
+import { FeatureModule } from "./feature/feature.module.js";
 
 @Module({
 	imports: [
@@ -22,6 +23,7 @@ import { GitSshModule } from "./git-ssh/git-ssh.module.js";
 		ReleaseModule,
 		ClientInstallerModule,
 		GitSshModule,
+		FeatureModule,
 	],
 })
 export class AppModule {}

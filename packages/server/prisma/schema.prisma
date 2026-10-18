@@ -33,6 +33,7 @@ model Client {
   terminalSessions   TerminalSession[]
   agentSessions      AgentSession[]
   sessionHostInstances SessionHostInstance[]
+  features           Feature[]
 }
 
 model Job {
@@ -562,4 +563,36 @@ model SessionHostAuditEvent {
 
   @@index([clientId, createdAt])
   @@index([clientId, instanceId, createdAt])
+}
+
+// ── 功能条目（ADR-0056）：操作者/Agent 声明的调用契约，按 Client 归属。
+// status 是意图，lastVerified* 是证据；active 只能由一次成功验证产生。
+model Feature {
+  id                  String    @id
+  slug                String
+  name                String
+  summary             String
+  clientId            String
+  client              Client    @relation(fields: [clientId], references: [id])
+  scope               String    @default("machine")
+  invoke              String    @default("{}")
+  verify              String    @default("{}")
+  inputs              String    @default("[]")
+  output              String    @default("")
+  notes               String    @default("")
+  status              String    @default("draft")
+  lastVerifiedAt      DateTime?
+  lastVerifiedOk      Boolean?
+  lastVerifyEvidence  String?
+  verifiedVia         String?
+  sourceJobId         String?
+  createdByIdentityId String?
+  createdByName       String?
+  createdVia          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@unique([clientId, slug])
+  @@index([status])
+  @@index([clientId, scope])
 }

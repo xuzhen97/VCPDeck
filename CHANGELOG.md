@@ -6,6 +6,9 @@
 
 ### Added
 
+- **功能目录**（[ADR-0056](docs/adr/0056-feature-registry-declared-contracts.md)）：新增 `Feature` 表与 `/api/features` 域，把「装在某台 Client 上、可被验证的设施」及其调用契约（`invoke` / `verify` / `inputs` / `output`）持久化。条目由操作者/Agent 声明，Client 不上报、注册不覆盖；用 `scope`（`generic`/`machine`）区分「可换机器复用」与「只对这台机器有语义」，不建模网络可达性（那是 FRP 与注解的事）。`status` 是意图（`draft`/`active`/`retired`），`lastVerified*` 是证据：**`active` 只能由一次成功验证产生**，手写 `active` 返回 400，验证失败自动降级 `draft`。验证由调用方（CLI/Agent）执行——`command` 型走 exec Job、`http` 型直连，Server 只记账，不做后台探测也不代抓 URL。
+- **CLI `vcpdeck features list/get/add/verify/update`**：`add` 默认内联验证一次，跑通即 `active`，失败仍落库为 `draft` 并带证据非零退出；`get`/`verify` 在 slug 命中多台机器且未指定 `--client` 时 fail closed；`--inputs-file` 承接参数表。
+- **机器「功能」Tab 与侧栏「功能」页**：列表展示作用域、状态、证据年龄（14 天阈值）与提供机器，抽屉展示契约全文与证据；常驻提示「`active` 只代表声明」。UI 只做浏览与维护，不提供验证按钮（浏览器受 CORS 限制、Server 代抓 URL 会形成 SSRF 面），改为给出可复制的验证命令。
 - **机器操作者注解**（[ADR-0055](docs/adr/0055-client-operator-annotations.md)）：Client 新增 Server 持有的 `annotations`，记录操作者补充的公网地址（IPv4/IPv6/域名）与备注；注册、心跳和重连不会覆盖，Client 不能写入。新增 `PUT /api/clients/:clientId/annotations`（全量替换，空对象清除），`GET /api/clients` 响应新增可选 `annotations`，机器详情页可编辑，`clients list --json` 可直接读取，人类表格新增 `network` 列。注解是说明性事实，未自动验证，不参与授权，也不构成连通性保证；本版本只新增带默认值的列，升级不需要 `--accept-data-loss`。
 
 ## [0.20.1] - 2026-10-18

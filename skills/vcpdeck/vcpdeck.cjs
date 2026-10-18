@@ -1745,6 +1745,345 @@ var require_machine_register = __commonJS({
   }
 });
 
+// ../shared/dist/feature.js
+var require_feature = __commonJS({
+  "../shared/dist/feature.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.FEATURE_ERROR_CODES = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_STATUSES = exports2.FEATURE_SCOPES = void 0;
+    exports2.parseFeatureInvocation = parseFeatureInvocation;
+    exports2.parseFeatureInputs = parseFeatureInputs2;
+    exports2.parseFeatureVerificationReport = parseFeatureVerificationReport;
+    exports2.parseFeatureCreateInput = parseFeatureCreateInput;
+    exports2.parseFeatureUpdateInput = parseFeatureUpdateInput;
+    exports2.parseFeatureContract = parseFeatureContract;
+    exports2.getFeatureFreshness = getFeatureFreshness;
+    exports2.FEATURE_SCOPES = ["generic", "machine"];
+    exports2.FEATURE_STATUSES = ["draft", "active", "retired"];
+    exports2.FEATURE_STALE_AFTER_DAYS = 14;
+    exports2.FEATURE_VERIFICATION_SOURCES = ["cli", "agent", "api"];
+    var DAY_MS = 864e5;
+    var DEFAULT_TIMEOUT_SECONDS = 60;
+    var MAX_TIMEOUT_SECONDS = 3600;
+    var MAX_CLIENT_ID = 128;
+    var MAX_SLUG = 63;
+    var MAX_NAME = 120;
+    var MAX_SUMMARY = 500;
+    var MAX_COMMAND = 4e3;
+    var MAX_URL = 2048;
+    var MAX_OUTPUT = 2e3;
+    var MAX_NOTES = 8e3;
+    var MAX_EVIDENCE = 2e3;
+    var MAX_INPUTS = 20;
+    var MAX_INPUT_DESCRIPTION = 200;
+    var MAX_EXAMPLE = 200;
+    var MAX_OPTIONS = 20;
+    var MAX_OPTION_LENGTH = 120;
+    var SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+    var INPUT_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/;
+    var FeatureProtocolError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "FeatureProtocolError";
+      }
+    };
+    exports2.FeatureProtocolError = FeatureProtocolError;
+    exports2.FEATURE_ERROR_CODES = [
+      "FEATURE_NOT_FOUND",
+      "FEATURE_SLUG_TAKEN",
+      "INVALID_FEATURE_INPUT",
+      "INVALID_FEATURE_STATUS_TRANSITION",
+      "FEATURE_CLIENT_UNKNOWN"
+    ];
+    function isRecord2(value2) {
+      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+    }
+    function rejectUnknown(value2, allowed, field) {
+      for (const key of Object.keys(value2)) {
+        if (!allowed.includes(key)) {
+          throw new FeatureProtocolError(`${field} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function hasControlCharacters(value2) {
+      for (const char of value2) {
+        const code = char.codePointAt(0) ?? 0;
+        if (code <= 8 || code === 11 || code === 12 || code >= 14 && code <= 31 || code === 127) {
+          return true;
+        }
+      }
+      return false;
+    }
+    function parseText(value2, field, maxLength, allowEmpty = false) {
+      if (typeof value2 !== "string") {
+        throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32`);
+      }
+      const trimmed = value2.trim();
+      if (!allowEmpty && trimmed.length === 0) {
+        throw new FeatureProtocolError(`${field} \u4E0D\u80FD\u4E3A\u7A7A`);
+      }
+      if (trimmed.length > maxLength) {
+        throw new FeatureProtocolError(`${field} \u4E0D\u80FD\u8D85\u8FC7 ${maxLength} \u5B57\u7B26`);
+      }
+      if (hasControlCharacters(trimmed)) {
+        throw new FeatureProtocolError(`${field} \u4E0D\u80FD\u5305\u542B\u63A7\u5236\u5B57\u7B26`);
+      }
+      return trimmed;
+    }
+    function parseTimeout2(value2) {
+      if (value2 === void 0)
+        return DEFAULT_TIMEOUT_SECONDS;
+      if (!Number.isInteger(value2) || value2 < 1 || value2 > MAX_TIMEOUT_SECONDS) {
+        throw new FeatureProtocolError(`timeoutSeconds \u5FC5\u987B\u662F 1-${MAX_TIMEOUT_SECONDS} \u7684\u6574\u6570`);
+      }
+      return value2;
+    }
+    function parseUrl(value2, field) {
+      const url2 = parseText(value2, field, MAX_URL);
+      let parsed;
+      try {
+        parsed = new URL(url2);
+      } catch {
+        throw new FeatureProtocolError(`${field} \u4E0D\u662F\u5408\u6CD5 URL`);
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new FeatureProtocolError(`${field} \u53EA\u652F\u6301 http/https`);
+      }
+      if (parsed.username !== "" || parsed.password !== "") {
+        throw new FeatureProtocolError(`${field} \u4E0D\u5F97\u5305\u542B userinfo\uFF08user:pass@\uFF09`);
+      }
+      return url2;
+    }
+    function parseFeatureInvocation(value2, field = "invoke") {
+      if (!isRecord2(value2)) {
+        throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      }
+      if (value2.kind === "command") {
+        rejectUnknown(value2, ["kind", "command", "timeoutSeconds"], field);
+        return {
+          kind: "command",
+          command: parseText(value2.command, `${field}.command`, MAX_COMMAND),
+          timeoutSeconds: parseTimeout2(value2.timeoutSeconds)
+        };
+      }
+      if (value2.kind === "http") {
+        rejectUnknown(value2, ["kind", "method", "url", "timeoutSeconds"], field);
+        if (value2.method !== "GET" && value2.method !== "POST") {
+          throw new FeatureProtocolError(`${field}.method \u5FC5\u987B\u662F GET \u6216 POST`);
+        }
+        return {
+          kind: "http",
+          method: value2.method,
+          url: parseUrl(value2.url, `${field}.url`),
+          timeoutSeconds: parseTimeout2(value2.timeoutSeconds)
+        };
+      }
+      throw new FeatureProtocolError(`${field}.kind \u5FC5\u987B\u662F command \u6216 http`);
+    }
+    function parseOptionalText(value2, field, maxLength) {
+      return value2 === void 0 ? void 0 : parseText(value2, field, maxLength);
+    }
+    function parseFeatureInputs2(value2) {
+      if (value2 === void 0)
+        return [];
+      if (!Array.isArray(value2)) {
+        throw new FeatureProtocolError("inputs \u5FC5\u987B\u4E3A\u6570\u7EC4");
+      }
+      if (value2.length > MAX_INPUTS) {
+        throw new FeatureProtocolError(`inputs \u6700\u591A ${MAX_INPUTS} \u9879`);
+      }
+      const seen = /* @__PURE__ */ new Set();
+      return value2.map((raw, index) => {
+        const field = `inputs[${index}]`;
+        if (!isRecord2(raw)) {
+          throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+        }
+        rejectUnknown(raw, ["name", "type", "required", "description", "example", "options"], field);
+        const name = typeof raw.name === "string" ? raw.name : "";
+        if (!INPUT_NAME_PATTERN.test(name)) {
+          throw new FeatureProtocolError(`${field}.name \u683C\u5F0F\u65E0\u6548`);
+        }
+        if (seen.has(name)) {
+          throw new FeatureProtocolError(`inputs \u542B\u91CD\u590D name: ${name}`);
+        }
+        seen.add(name);
+        const type = raw.type;
+        if (type !== "string" && type !== "number" && type !== "boolean" && type !== "enum" && type !== "path") {
+          throw new FeatureProtocolError(`${field}.type \u5FC5\u987B\u662F string/number/boolean/enum/path`);
+        }
+        if (typeof raw.required !== "boolean") {
+          throw new FeatureProtocolError(`${field}.required \u5FC5\u987B\u4E3A boolean`);
+        }
+        const param = {
+          name,
+          type,
+          required: raw.required,
+          description: parseText(raw.description, `${field}.description`, MAX_INPUT_DESCRIPTION)
+        };
+        const example = parseOptionalText(raw.example, `${field}.example`, MAX_EXAMPLE);
+        if (example !== void 0)
+          param.example = example;
+        let options;
+        if (raw.options !== void 0) {
+          if (type !== "enum") {
+            throw new FeatureProtocolError(`${field}.options \u4EC5 enum \u53EF\u7528`);
+          }
+          if (!Array.isArray(raw.options) || raw.options.length === 0 || raw.options.length > MAX_OPTIONS) {
+            throw new FeatureProtocolError(`${field}.options \u5FC5\u987B\u4E3A 1-${MAX_OPTIONS} \u9879\u6570\u7EC4`);
+          }
+          options = raw.options.map((option, optionIndex) => parseText(option, `${field}.options[${optionIndex}]`, MAX_OPTION_LENGTH));
+        }
+        if (type === "enum" && options === void 0) {
+          throw new FeatureProtocolError(`${field}.options \u5728 enum \u7C7B\u578B\u4E0B\u5FC5\u586B`);
+        }
+        if (options !== void 0)
+          param.options = options;
+        return param;
+      });
+    }
+    function parseFeatureVerificationReport(value2) {
+      if (!isRecord2(value2)) {
+        throw new FeatureProtocolError("verification \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      }
+      rejectUnknown(value2, ["ok", "durationMs", "evidence", "via"], "verification");
+      if (typeof value2.ok !== "boolean") {
+        throw new FeatureProtocolError("verification.ok \u5FC5\u987B\u4E3A boolean");
+      }
+      if (value2.via !== "cli" && value2.via !== "agent" && value2.via !== "api") {
+        throw new FeatureProtocolError("verification.via \u5FC5\u987B\u662F cli/agent/api");
+      }
+      const report = { ok: value2.ok, via: value2.via };
+      if (value2.durationMs !== void 0) {
+        if (!Number.isInteger(value2.durationMs) || value2.durationMs < 0) {
+          throw new FeatureProtocolError("verification.durationMs \u5FC5\u987B\u4E3A\u975E\u8D1F\u6574\u6570");
+        }
+        report.durationMs = value2.durationMs;
+      }
+      if (value2.evidence !== void 0) {
+        if (typeof value2.evidence !== "string") {
+          throw new FeatureProtocolError("verification.evidence \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32");
+        }
+        const evidence = value2.evidence.slice(0, MAX_EVIDENCE);
+        if (hasControlCharacters(evidence.replace(/[\n\r\t]/g, " "))) {
+          throw new FeatureProtocolError("verification.evidence \u4E0D\u80FD\u5305\u542B\u63A7\u5236\u5B57\u7B26");
+        }
+        report.evidence = evidence;
+      }
+      return report;
+    }
+    function parseFeatureCreateInput(value2) {
+      if (!isRecord2(value2)) {
+        throw new FeatureProtocolError("\u529F\u80FD\u6761\u76EE\u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      rejectUnknown(value2, [
+        "clientId",
+        "slug",
+        "name",
+        "summary",
+        "scope",
+        "invoke",
+        "verify",
+        "inputs",
+        "output",
+        "notes",
+        "sourceJobId",
+        "verification"
+      ], "feature");
+      const slug = typeof value2.slug === "string" ? value2.slug : "";
+      if (slug.length > MAX_SLUG || !SLUG_PATTERN.test(slug)) {
+        throw new FeatureProtocolError("slug \u5FC5\u987B\u4E3A 1-63 \u4F4D\u5C0F\u5199 kebab-case");
+      }
+      if (value2.scope !== "generic" && value2.scope !== "machine") {
+        throw new FeatureProtocolError("scope \u5FC5\u987B\u662F generic \u6216 machine");
+      }
+      const input = {
+        clientId: parseText(value2.clientId, "clientId", MAX_CLIENT_ID),
+        slug,
+        name: parseText(value2.name, "name", MAX_NAME),
+        summary: parseText(value2.summary, "summary", MAX_SUMMARY),
+        scope: value2.scope,
+        invoke: parseFeatureInvocation(value2.invoke, "invoke"),
+        verify: parseFeatureInvocation(value2.verify, "verify"),
+        inputs: parseFeatureInputs2(value2.inputs),
+        output: value2.output === void 0 ? "" : parseText(value2.output, "output", MAX_OUTPUT, true),
+        notes: value2.notes === void 0 ? "" : parseText(value2.notes, "notes", MAX_NOTES, true),
+        sourceJobId: value2.sourceJobId === void 0 || value2.sourceJobId === null ? null : parseText(value2.sourceJobId, "sourceJobId", MAX_CLIENT_ID)
+      };
+      if (value2.verification !== void 0) {
+        input.verification = parseFeatureVerificationReport(value2.verification);
+      }
+      return input;
+    }
+    function parseFeatureUpdateInput(value2) {
+      if (!isRecord2(value2)) {
+        throw new FeatureProtocolError("\u66F4\u65B0\u8BF7\u6C42\u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      if (Object.keys(value2).length === 0) {
+        throw new FeatureProtocolError("\u66F4\u65B0\u8BF7\u6C42\u4E0D\u80FD\u4E3A\u7A7A\u5BF9\u8C61");
+      }
+      rejectUnknown(value2, [
+        "name",
+        "summary",
+        "scope",
+        "invoke",
+        "verify",
+        "inputs",
+        "output",
+        "notes",
+        "status"
+      ], "feature");
+      const input = {};
+      if (value2.name !== void 0)
+        input.name = parseText(value2.name, "name", MAX_NAME);
+      if (value2.summary !== void 0) {
+        input.summary = parseText(value2.summary, "summary", MAX_SUMMARY);
+      }
+      if (value2.scope !== void 0) {
+        if (value2.scope !== "generic" && value2.scope !== "machine") {
+          throw new FeatureProtocolError("scope \u5FC5\u987B\u662F generic \u6216 machine");
+        }
+        input.scope = value2.scope;
+      }
+      if (value2.invoke !== void 0) {
+        input.invoke = parseFeatureInvocation(value2.invoke, "invoke");
+      }
+      if (value2.verify !== void 0) {
+        input.verify = parseFeatureInvocation(value2.verify, "verify");
+      }
+      if (value2.inputs !== void 0)
+        input.inputs = parseFeatureInputs2(value2.inputs);
+      if (value2.output !== void 0) {
+        input.output = parseText(value2.output, "output", MAX_OUTPUT, true);
+      }
+      if (value2.notes !== void 0) {
+        input.notes = parseText(value2.notes, "notes", MAX_NOTES, true);
+      }
+      if (value2.status !== void 0) {
+        if (value2.status !== "draft" && value2.status !== "retired") {
+          throw new FeatureProtocolError("status \u53EA\u80FD\u6539\u4E3A draft \u6216 retired\uFF1Bactive \u53EA\u80FD\u7531\u9A8C\u8BC1\u4EA7\u751F");
+        }
+        input.status = value2.status;
+      }
+      return input;
+    }
+    function parseFeatureContract(invoke, verify, inputs) {
+      return {
+        invoke: parseFeatureInvocation(invoke, "invoke"),
+        verify: parseFeatureInvocation(verify, "verify"),
+        inputs: parseFeatureInputs2(inputs)
+      };
+    }
+    function getFeatureFreshness(lastVerifiedAt, now = /* @__PURE__ */ new Date()) {
+      if (lastVerifiedAt === null)
+        return "never";
+      const verifiedAt = new Date(lastVerifiedAt).getTime();
+      if (Number.isNaN(verifiedAt))
+        return "never";
+      return now.getTime() - verifiedAt > exports2.FEATURE_STALE_AFTER_DAYS * DAY_MS ? "stale" : "fresh";
+    }
+  }
+});
+
 // ../shared/dist/index.js
 var require_dist = __commonJS({
   "../shared/dist/index.js"(exports2) {
@@ -1767,7 +2106,7 @@ var require_dist = __commonJS({
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -1937,17 +2276,17 @@ var require_dist = __commonJS({
       JobType2["FRP_RECONCILE"] = "frp.reconcile";
       JobType2["FILE_ROOTS"] = "file.roots";
     })(JobType || (exports2.JobType = JobType = {}));
-    var JobStatus4;
-    (function(JobStatus5) {
-      JobStatus5["IDLE"] = "idle";
-      JobStatus5["PENDING"] = "pending";
-      JobStatus5["RUNNING"] = "running";
-      JobStatus5["WAITING_INPUT"] = "waiting_input";
-      JobStatus5["DONE"] = "done";
-      JobStatus5["ERROR"] = "error";
-      JobStatus5["DISCONNECTED"] = "disconnected";
-      JobStatus5["CANCELLED"] = "cancelled";
-    })(JobStatus4 || (exports2.JobStatus = JobStatus4 = {}));
+    var JobStatus5;
+    (function(JobStatus6) {
+      JobStatus6["IDLE"] = "idle";
+      JobStatus6["PENDING"] = "pending";
+      JobStatus6["RUNNING"] = "running";
+      JobStatus6["WAITING_INPUT"] = "waiting_input";
+      JobStatus6["DONE"] = "done";
+      JobStatus6["ERROR"] = "error";
+      JobStatus6["DISCONNECTED"] = "disconnected";
+      JobStatus6["CANCELLED"] = "cancelled";
+    })(JobStatus5 || (exports2.JobStatus = JobStatus5 = {}));
     var machine_register_js_1 = require_machine_register();
     Object.defineProperty(exports2, "ClientInstallationComplianceReason", { enumerable: true, get: function() {
       return machine_register_js_1.ClientInstallationComplianceReason;
@@ -2129,6 +2468,46 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parseFrpRuntimeStateReport", { enumerable: true, get: function() {
       return frp_runtime_js_1.parseFrpRuntimeStateReport;
     } });
+    var feature_js_1 = require_feature();
+    Object.defineProperty(exports2, "FEATURE_ERROR_CODES", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_ERROR_CODES;
+    } });
+    Object.defineProperty(exports2, "FEATURE_SCOPES", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_SCOPES;
+    } });
+    Object.defineProperty(exports2, "FEATURE_STALE_AFTER_DAYS", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_STALE_AFTER_DAYS;
+    } });
+    Object.defineProperty(exports2, "FEATURE_STATUSES", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_STATUSES;
+    } });
+    Object.defineProperty(exports2, "FEATURE_VERIFICATION_SOURCES", { enumerable: true, get: function() {
+      return feature_js_1.FEATURE_VERIFICATION_SOURCES;
+    } });
+    Object.defineProperty(exports2, "FeatureProtocolError", { enumerable: true, get: function() {
+      return feature_js_1.FeatureProtocolError;
+    } });
+    Object.defineProperty(exports2, "getFeatureFreshness", { enumerable: true, get: function() {
+      return feature_js_1.getFeatureFreshness;
+    } });
+    Object.defineProperty(exports2, "parseFeatureContract", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureContract;
+    } });
+    Object.defineProperty(exports2, "parseFeatureCreateInput", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureCreateInput;
+    } });
+    Object.defineProperty(exports2, "parseFeatureInputs", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureInputs;
+    } });
+    Object.defineProperty(exports2, "parseFeatureInvocation", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureInvocation;
+    } });
+    Object.defineProperty(exports2, "parseFeatureUpdateInput", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureUpdateInput;
+    } });
+    Object.defineProperty(exports2, "parseFeatureVerificationReport", { enumerable: true, get: function() {
+      return feature_js_1.parseFeatureVerificationReport;
+    } });
   }
 });
 
@@ -2225,6 +2604,37 @@ function createClientInstallerApi(client) {
 }
 var init_client_installer = __esm({
   "../sdk/dist/client-installer.js"() {
+    "use strict";
+  }
+});
+
+// ../sdk/dist/features.js
+function createFeaturesApi(client) {
+  return {
+    list: (params = {}, signal) => {
+      const search = new URLSearchParams();
+      if (params.clientId)
+        search.set("clientId", params.clientId);
+      if (params.scope)
+        search.set("scope", params.scope);
+      if (params.status)
+        search.set("status", params.status);
+      if (params.page !== void 0)
+        search.set("page", String(params.page));
+      if (params.pageSize !== void 0)
+        search.set("pageSize", String(params.pageSize));
+      const query = search.toString();
+      return client.request("GET", query ? `/api/features?${query}` : "/api/features", void 0, signal);
+    },
+    get: (id, signal) => client.request("GET", `/api/features/${encodeURIComponent(id)}`, void 0, signal),
+    listByClient: (clientId, signal) => client.request("GET", `/api/clients/${encodeURIComponent(clientId)}/features`, void 0, signal),
+    create: (input, signal) => client.request("POST", "/api/features", input, signal),
+    update: (id, patch, signal) => client.request("PATCH", `/api/features/${encodeURIComponent(id)}`, patch, signal),
+    reportVerification: (id, report, signal) => client.request("POST", `/api/features/${encodeURIComponent(id)}/verifications`, report, signal)
+  };
+}
+var init_features = __esm({
+  "../sdk/dist/features.js"() {
     "use strict";
   }
 });
@@ -2609,6 +3019,7 @@ var init_client = __esm({
     init_auth();
     init_clients();
     init_client_installer();
+    init_features();
     init_files();
     init_frp();
     init_jobs();
@@ -2639,6 +3050,8 @@ var init_client = __esm({
       identities;
       clients;
       clientInstaller;
+      /** 功能目录（ADR-0056）。 */
+      features;
       storage;
       storageShares;
       aliyundrive;
@@ -2660,6 +3073,7 @@ var init_client = __esm({
         this.identities = createIdentitiesApi(this);
         this.clients = createClientsApi(this);
         this.clientInstaller = createClientInstallerApi(this);
+        this.features = createFeaturesApi(this);
         this.storage = createStorageApi(this);
         this.storageShares = createStorageSharesApi(this);
         this.aliyundrive = createAliyunDriveApi(this);
@@ -2723,6 +3137,7 @@ var init_dist = __esm({
     init_client();
     init_clients();
     init_client_installer();
+    init_features();
     init_files();
     init_frp();
     init_git_ssh();
@@ -3234,6 +3649,464 @@ var init_client_resolver = __esm({
     "use strict";
     init_authenticated_client();
     init_environment();
+  }
+});
+
+// dist/privileged-capability.js
+function readPrivileged(client) {
+  return client?.capabilityDetails?.privileged;
+}
+function isRootEquivalent(client) {
+  const p = readPrivileged(client);
+  return Boolean(p && p.available && p.mode === "sudo-all" && p.nonInteractive);
+}
+function formatPrivilegeSummary(client) {
+  const p = readPrivileged(client);
+  if (!p)
+    return "\u672A\u62A5\u544A";
+  if (isRootEquivalent(client))
+    return "root \u7B49\u4EF7";
+  return "root \u7B49\u4EF7\u4E0D\u53EF\u7528";
+}
+function rootEquivalentWarning(client) {
+  if (!isRootEquivalent(client))
+    return null;
+  return "\u8B66\u544A: \u8BE5\u673A\u5668\u5177\u5907 root \u7B49\u4EF7\u7279\u6743\uFF0C\u53EF\u6267\u884C\u4EFB\u610F root \u547D\u4EE4\u3002Server \u53EA\u8BB0\u5F55\u63A7\u5236\u9762 / Job / Session \u5BA1\u8BA1\uFF0C\u8BF7\u786E\u8BA4\u5728\u53EF\u4FE1\u8FD0\u7EF4\u57DF\u5185\u3002";
+}
+var init_privileged_capability = __esm({
+  "dist/privileged-capability.js"() {
+    "use strict";
+  }
+});
+
+// dist/jobs-command.js
+async function runJobsCommand(subcommand, argv, context = {}) {
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === "get" || subcommand === "logs" || subcommand === "run" || subcommand === "cancel" || subcommand === void 0) && hasHelp(argv);
+  if (helpRequested) {
+    (context.log ?? console.log)(jobsUsage());
+    return;
+  }
+  if (subcommand === "list") {
+    await runListJobs(argv, context);
+    return;
+  }
+  if (subcommand === "get") {
+    await runGetJob(argv, context);
+    return;
+  }
+  if (subcommand === "logs") {
+    await runJobLogs(argv, context);
+    return;
+  }
+  if (subcommand === "run") {
+    await runExecJob(argv, context);
+    return;
+  }
+  if (subcommand === "cancel") {
+    await runCancelJob(argv, context);
+    return;
+  }
+  throw new Error(jobsUsage());
+}
+function hasHelp(argv) {
+  return argv.includes("--help") || argv.includes("-h");
+}
+function jobsUsage() {
+  return [
+    "Jobs \u547D\u4EE4:",
+    "  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
+    "  vcpdeck jobs get <jobId> [--env=<name>] [--json]  # \u542B\u5931\u8D25\u73B0\u573A\uFF08stdout/stderr spool\uFF09",
+    "  vcpdeck jobs logs <jobId> [--since=<seq>] [--limit=<n>] [--level=<info|warn|error>] [--env=<name>] [--json]",
+    "  # \u65E5\u5FD7\u4E8B\u4EF6\u94FE\uFF1A\u6309 seq \u5347\u5E8F\uFF1B--since \u4F20\u4E0A\u4E00\u6B21\u7684 nextSeq \u53EF\u589E\u91CF\u62C9\u53D6",
+    "  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
+    "  # \u5199\u64CD\u4F5C\uFF1A--timeout/--wait-timeout \u5355\u4F4D\u4E3A\u79D2\uFF1B\u590D\u6742\u547D\u4EE4\u5EFA\u8BAE\u4F5C\u4E3A -- \u540E\u7684\u5355\u4E00\u53C2\u6570\uFF1B\u786E\u8BA4\u95E8\u7531\u8C03\u7528\u65B9\u8D1F\u8D23",
+    "  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]"
+  ].join("\n");
+}
+function parseListArgs(argv) {
+  return parseCommandArgs(argv, {
+    value: ["env", "environment", "client", "status", "page"],
+    boolean: ["json"]
+  });
+}
+async function runListJobs(argv, context) {
+  const { positionals, options } = parseListArgs(argv);
+  if (positionals.length > 0)
+    throw new Error(jobsUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias2(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const status = requireValidStatus(stringOption(options, "status"));
+  const page = parsePage(stringOption(options, "page"));
+  const clientFilter = stringOption(options, "client");
+  const log = context.log ?? console.log;
+  const client = await createAuthenticatedClient(environment);
+  const clientId = clientFilter ? await resolveClientId(clientFilter, context.paths, context.processEnv) : void 0;
+  const result = await client.jobs.list({ clientId, status, page });
+  if (options.json === true) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(formatJobsList(result));
+}
+async function runGetJob(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment"],
+    boolean: ["json"]
+  });
+  if (positionals.length !== 1)
+    throw new Error(jobsUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias2(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const log = context.log ?? console.log;
+  const client = await createAuthenticatedClient(environment);
+  const jobId = positionals[0];
+  const job = await client.jobs.get(jobId);
+  const { output } = await client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}/output`);
+  if (options.json === true) {
+    log(JSON.stringify({ ...job, output }, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(formatJobDetail(job, output));
+}
+async function runJobLogs(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "since", "limit", "level"],
+    boolean: ["json"]
+  });
+  if (positionals.length !== 1)
+    throw new Error(jobsUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias2(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const log = context.log ?? console.log;
+  const client = await createAuthenticatedClient(environment);
+  const since = parseNonNegativeInteger(stringOption(options, "since"), "--since");
+  const limit = parseNonNegativeInteger(stringOption(options, "limit"), "--limit");
+  if (limit !== void 0 && limit < 1) {
+    throw new Error("--limit \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570");
+  }
+  const level = requireValidLevel(stringOption(options, "level"));
+  const page = await client.jobs.logs(positionals[0], {
+    ...since !== void 0 ? { since } : {},
+    ...limit !== void 0 ? { limit } : {},
+    ...level !== void 0 ? { level } : {}
+  });
+  if (options.json === true) {
+    log(JSON.stringify(page, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(formatJobLogs(page));
+}
+async function runExecJob(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "cwd", "timeout", "wait-timeout"],
+    boolean: ["json", "wait"]
+  });
+  const [clientFilter, ...commandTokens] = positionals;
+  if (!clientFilter || commandTokens.length === 0) {
+    throw new Error(jobsUsage());
+  }
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias2(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const timeout = parsePositiveSeconds(stringOption(options, "timeout"), "--timeout");
+  const waitTimeout = parsePositiveSeconds(stringOption(options, "wait-timeout"), "--wait-timeout") ?? DEFAULT_WAIT_TIMEOUT_SECONDS;
+  const log = context.log ?? console.log;
+  const error = context.error ?? console.error;
+  const client = await createAuthenticatedClient(environment);
+  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const targetClient = await findClientByClientId(client, clientId);
+  const rootWarning = rootEquivalentWarning(targetClient);
+  const payload = {
+    mode: "command",
+    command: commandTokens.join(" ")
+  };
+  const cwd = stringOption(options, "cwd");
+  if (cwd)
+    payload.cwd = cwd;
+  if (commandTokens.length > 1 && commandTokens.some((token) => token.length === 0 || /\s/.test(token))) {
+    error("[vcpdeck] \u6CE8\u610F\uFF1A\u591A\u4E2A\u547D\u4EE4 token \u4EE5\u7A7A\u683C\u8FDE\u63A5\uFF0C\u542B\u7A7A\u767D token \u7684\u53C2\u6570\u8FB9\u754C\u4F1A\u4E22\u5931\uFF1B\u5EFA\u8BAE\u628A\u5B8C\u6574 shell \u547D\u4EE4\u4F5C\u4E3A -- \u540E\u7684\u5355\u4E00\u53C2\u6570");
+  }
+  if (options.json !== true) {
+    log(formatEnvironmentSummary(environment));
+    if (rootWarning)
+      error(rootWarning);
+    log(`[vcpdeck] \u5728 ${clientFilter} \u4E0A\u6267\u884C: ${payload.command}`);
+  }
+  const created = await client.jobs.create({
+    clientId,
+    type: "exec",
+    payload,
+    timeout: timeout === void 0 ? void 0 : timeout * 1e3
+  });
+  if (options.wait !== true) {
+    if (options.json === true) {
+      log(JSON.stringify(created, null, 2));
+    } else {
+      log(`[vcpdeck] Job \u5DF2\u521B\u5EFA: ${created.jobId}\uFF08${created.status}\uFF09\uFF1B\u7528 jobs get ${created.jobId} \u67E5\u8BE2\u7ED3\u679C\uFF0C\u6216\u52A0 --wait \u76F4\u63A5\u7B49\u5F85\u7EC8\u6001`);
+    }
+    return;
+  }
+  const job = await waitForTerminalJob(client, created.jobId, waitTimeout, options.json === true ? error : log, context.pollIntervalMs ?? POLL_INTERVAL_MS);
+  const output = await readJobOutputText(client, job.jobId).catch(() => null);
+  if (options.json === true) {
+    log(JSON.stringify({ ...job, output }, null, 2));
+  }
+  if (job.status !== import_shared2.JobStatus.DONE) {
+    if (options.json !== true)
+      log(formatJobDetail(job, output));
+    throw new Error(`Job ${job.jobId} \u7EC8\u6001\u4E3A ${job.status}`);
+  }
+  if (options.json !== true)
+    log(formatJobDetail(job, output));
+}
+async function waitForTerminalJob(client, jobId, timeoutSeconds, log, pollIntervalMs) {
+  const deadline = Date.now() + timeoutSeconds * 1e3;
+  let lastStatus;
+  while (Date.now() < deadline) {
+    try {
+      const job = await client.jobs.get(jobId);
+      if (TERMINAL_STATUSES2.has(job.status))
+        return job;
+      if (job.status !== lastStatus) {
+        log(`[vcpdeck] Job ${jobId} \u72B6\u6001: ${job.status}`);
+        lastStatus = job.status;
+      }
+    } catch (error) {
+      if (!isTransientReadError(error))
+        throw error;
+      log("[vcpdeck] Server \u6682\u65F6\u4E0D\u53EF\u8FBE\uFF0C\u7EE7\u7EED\u7B49\u5F85\u2026");
+    }
+    await sleep2(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
+  }
+  throw new Error(`\u7B49\u5F85 Job ${jobId} \u7EC8\u6001\u8D85\u65F6\uFF08${timeoutSeconds} \u79D2\uFF09\uFF1B\u7528 jobs get ${jobId} \u67E5\u8BE2\u5F53\u524D\u72B6\u6001`);
+}
+async function readJobOutputText(client, jobId) {
+  const { output } = await client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}/output`);
+  return output;
+}
+async function runCancelJob(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment"],
+    boolean: ["json"]
+  });
+  if (positionals.length !== 1)
+    throw new Error(jobsUsage());
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias2(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const log = context.log ?? console.log;
+  const client = await createAuthenticatedClient(environment);
+  const result = await client.jobs.cancel(positionals[0]);
+  if (options.json === true) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  log(formatEnvironmentSummary(environment));
+  log(`[vcpdeck] Job ${result.jobId} \u53D6\u6D88\u8BF7\u6C42\u5DF2\u63D0\u4EA4\uFF0C\u5F53\u524D\u72B6\u6001: ${result.status}${result.status === "cancelling" ? "\uFF08\u7B49\u5F85 Client \u786E\u8BA4\uFF0C\u7EC8\u6001\u7528 jobs get \u6838\u5BF9\uFF09" : ""}`);
+}
+function jobTypeLabel(type) {
+  return {
+    "frp.create": "\u521B\u5EFA\u6620\u5C04",
+    "frp.delete": "\u5220\u9664\u6620\u5C04",
+    "frp.list": "\u8BFB\u53D6\u6620\u5C04",
+    "frp.reconcile": "\u6062\u590D FRP \u6620\u5C04"
+  }[type] ?? type;
+}
+function formatJobsList(result) {
+  const sorted = [...result.data].sort((a, b) => {
+    const active = (job) => job.status === import_shared2.JobStatus.RUNNING || job.status === import_shared2.JobStatus.PENDING || job.status === import_shared2.JobStatus.WAITING_INPUT ? 0 : 1;
+    const byActive = active(a) - active(b);
+    if (byActive !== 0)
+      return byActive;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+  const rows = sorted.map((job) => ({
+    jobId: job.jobId,
+    client: job.clientName ?? job.clientId,
+    type: jobTypeLabel(job.type),
+    status: job.status,
+    error: job.errorCode ?? "-",
+    created: job.createdAt
+  }));
+  const body = rows.length === 0 ? ["\u5F53\u524D\u8FC7\u6EE4\u6761\u4EF6\u4E0B\u6CA1\u6709 Job\u3002"] : [
+    formatTable(rows, [
+      "jobId",
+      "client",
+      "type",
+      "status",
+      "error",
+      "created"
+    ])
+  ];
+  return [
+    `\u5171 ${result.total} \u6761 \xB7 \u7B2C ${result.page}/${result.totalPages} \u9875`,
+    ...body
+  ].join("\n");
+}
+function formatJobDetail(job, output) {
+  const lines = [
+    `Job: ${job.jobId}`,
+    `Client: ${job.clientName ?? job.clientId}`,
+    `Type: ${jobTypeLabel(job.type)}`,
+    `Status: ${job.status}`
+  ];
+  if (job.errorCode || job.errorMessage) {
+    lines.push(`Error: ${job.errorCode ?? "-"}${job.errorMessage ? ` \u2014 ${job.errorMessage}` : ""}`);
+  }
+  if (job.timeout != null)
+    lines.push(`Timeout: ${job.timeout} ms`);
+  lines.push(`Created: ${job.createdAt}`);
+  if (job.startedAt)
+    lines.push(`Started: ${job.startedAt}`);
+  if (job.finishedAt)
+    lines.push(`Finished: ${job.finishedAt}`);
+  if (job.createdByName || job.createdVia) {
+    lines.push(`Creator: ${job.createdByName ?? "-"} (${job.createdVia ?? "-"})`);
+  }
+  if (job.result && Object.keys(job.result).length > 0) {
+    lines.push(`Result: ${JSON.stringify(job.result)}`);
+  }
+  if (output === null) {
+    lines.push("\uFF08\u65E0\u843D\u76D8\u8F93\u51FA\uFF09");
+  } else {
+    lines.push("\u2500\u2500 \u8F93\u51FA\uFF08stdout/stderr\uFF09\u2500\u2500", output.trimEnd());
+  }
+  return lines.join("\n");
+}
+function formatJobLogs(page) {
+  if (page.events.length === 0) {
+    return `Job ${page.jobId} \u6682\u65E0\u65E5\u5FD7\u4E8B\u4EF6\uFF08\u53EF\u80FD\u65E9\u4E8E\u65E5\u5FD7\u529F\u80FD\u4E0A\u7EBF\uFF0C\u6216 Job \u5C1A\u672A\u6D3E\u53D1\uFF09\u3002`;
+  }
+  const rows = page.events.map((event) => ({
+    seq: String(event.seq),
+    time: event.at,
+    src: event.source,
+    lvl: event.level,
+    event: event.event,
+    detail: formatJobLogDetail(event)
+  }));
+  return [
+    `Job ${page.jobId} \u65E5\u5FD7\u4E8B\u4EF6\uFF1A\u672C\u9875 ${page.events.length} \u6761\uFF0C\u6700\u65B0 seq=${page.nextSeq}`,
+    formatTable(rows, ["seq", "time", "src", "lvl", "event", "detail"])
+  ].join("\n");
+}
+function formatJobLogDetail(event) {
+  const parts2 = [];
+  if (event.code)
+    parts2.push(`code=${event.code}`);
+  if (event.message)
+    parts2.push(`msg=${event.message}`);
+  if (event.data) {
+    for (const [key, value2] of Object.entries(event.data)) {
+      parts2.push(`${key}=${String(value2)}`);
+    }
+  }
+  return parts2.length > 0 ? parts2.join(" ") : "-";
+}
+function exclusiveAlias2(options, first, second) {
+  const firstValue = stringOption(options, first);
+  const secondValue = stringOption(options, second);
+  if (firstValue && secondValue) {
+    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
+  }
+  return firstValue ?? secondValue;
+}
+function requireValidStatus(raw) {
+  if (raw === void 0)
+    return void 0;
+  if (!STATUS_FILTERS.has(raw)) {
+    throw new Error(`--status \u5FC5\u987B\u662F ${[...STATUS_FILTERS].join("/")} \u4E4B\u4E00`);
+  }
+  return raw;
+}
+function parsePage(raw) {
+  if (raw === void 0)
+    return void 0;
+  const page = Number(raw);
+  if (!Number.isInteger(page) || page < 1) {
+    throw new Error("--page \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570");
+  }
+  return page;
+}
+function parseNonNegativeInteger(raw, flag) {
+  if (raw === void 0)
+    return void 0;
+  const value2 = Number(raw);
+  if (!Number.isInteger(value2) || value2 < 0) {
+    throw new Error(`${flag} \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 0 \u7684\u6574\u6570`);
+  }
+  return value2;
+}
+function requireValidLevel(raw) {
+  if (raw === void 0)
+    return void 0;
+  if (!import_shared2.JOB_LOG_LEVELS.includes(raw)) {
+    throw new Error(`--level \u5FC5\u987B\u662F ${import_shared2.JOB_LOG_LEVELS.join("/")} \u4E4B\u4E00`);
+  }
+  return raw;
+}
+function parsePositiveSeconds(raw, flag) {
+  if (raw === void 0)
+    return void 0;
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds < 1) {
+    throw new Error(`${flag} \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570\u79D2`);
+  }
+  return seconds;
+}
+function isTransientReadError(error) {
+  if (error instanceof VcpDeckApiError) {
+    return error.status === 0 || [502, 503, 504].includes(error.status);
+  }
+  return error instanceof Error && error.name === "AbortError";
+}
+function sleep2(ms) {
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
+}
+function formatTable(rows, columns) {
+  const widths = columns.map((column) => Math.max(column.length, ...rows.map((row) => row[column].length)));
+  const line = (cells) => cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
+  return [
+    line(columns.map((column) => column.toUpperCase())),
+    ...rows.map((row) => line(columns.map((column) => row[column])))
+  ].join("\n");
+}
+var import_shared2, STATUS_FILTERS, DEFAULT_WAIT_TIMEOUT_SECONDS, POLL_INTERVAL_MS, TERMINAL_STATUSES2;
+var init_jobs_command = __esm({
+  "dist/jobs-command.js"() {
+    "use strict";
+    import_shared2 = __toESM(require_dist(), 1);
+    init_dist();
+    init_authenticated_client();
+    init_arguments();
+    init_client_resolver();
+    init_privileged_capability();
+    init_environment();
+    STATUS_FILTERS = /* @__PURE__ */ new Set([...Object.values(import_shared2.JobStatus), "active"]);
+    DEFAULT_WAIT_TIMEOUT_SECONDS = 1800;
+    POLL_INTERVAL_MS = 2e3;
+    TERMINAL_STATUSES2 = /* @__PURE__ */ new Set([
+      import_shared2.JobStatus.DONE,
+      import_shared2.JobStatus.ERROR,
+      import_shared2.JobStatus.CANCELLED,
+      import_shared2.JobStatus.DISCONNECTED
+    ]);
   }
 });
 
@@ -12415,6 +13288,383 @@ var init_completions_command = __esm({
   }
 });
 
+// dist/features-command.js
+var features_command_exports = {};
+__export(features_command_exports, {
+  envOverrideOf: () => envOverrideOf,
+  runFeaturesCommand: () => runFeaturesCommand
+});
+function envOverrideOf(argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--")
+      break;
+    if (arg.startsWith("--env="))
+      return arg.slice("--env=".length) || void 0;
+    if (arg.startsWith("--environment=")) {
+      return arg.slice("--environment=".length) || void 0;
+    }
+    if (arg === "--env" || arg === "--environment")
+      return argv[index + 1];
+  }
+  return void 0;
+}
+async function runFeaturesCommand(subcommand, argv, context = {}) {
+  const log = context.log ?? console.log;
+  if (subcommand === void 0 || subcommand === "--help" || subcommand === "-h") {
+    log(featuresUsage());
+    return;
+  }
+  const resolveEnvironmentFn = context.resolveEnvironmentFn ?? resolveEnvironment;
+  const createClientFn = context.createClientFn ?? createAuthenticatedClient;
+  const client = context.sdk ?? await createClientFn(await resolveEnvironmentFn({
+    environment: envOverrideOf(argv),
+    paths: context.paths,
+    processEnv: context.processEnv
+  }));
+  const resolveId = context.resolveClientIdFn ?? ((filter) => resolveClientId(filter, context.paths, context.processEnv, client));
+  if (subcommand === "list") {
+    await runListFeatures(argv, client, resolveId, log);
+    return;
+  }
+  if (subcommand === "get") {
+    await runGetFeature(argv, client, resolveId, log);
+    return;
+  }
+  if (subcommand === "add") {
+    await runAddFeature(argv, client, resolveId, context, log);
+    return;
+  }
+  if (subcommand === "verify") {
+    await runVerifyFeature(argv, client, resolveId, context, log);
+    return;
+  }
+  if (subcommand === "update") {
+    await runUpdateFeature(argv, client, resolveId, log);
+    return;
+  }
+  throw new Error(featuresUsage());
+}
+function featuresUsage() {
+  return [
+    "Features \u547D\u4EE4:",
+    "  vcpdeck features list [--client=<name|id>] [--scope=generic|machine] [--status=draft|active|retired] [--include-retired] [--env=<name>] [--json]",
+    "  vcpdeck features get <slug|id> [--client=<name|id>] [--env=<name>] [--json]",
+    "  vcpdeck features add --client=<name|id> --slug=<slug> --name=<name> --summary=<text> --scope=<generic|machine> \\",
+    "      (--invoke-command=<cmd> | --invoke-url=<url>) (--verify-command=<cmd> | --verify-url=<url>) \\",
+    "      [--inputs-file=<json>] [--output=<text>] [--notes-file=<path>] [--timeout=<seconds>] [--skip-verify] [--json]",
+    "  vcpdeck features verify <slug|id> [--client=<name|id>] [--env=<name>] [--json]",
+    "  vcpdeck features update <slug|id> [--client=<name|id>] [--name=] [--summary=] [--scope=] [--invoke-command=|--invoke-url=] \\",
+    "      [--verify-command=|--verify-url=] [--inputs-file=] [--output=] [--notes-file=] [--status=draft|retired] [--json]",
+    "  \u8BF4\u660E: \u9A8C\u8BC1\u7531\u672C CLI \u6267\u884C\uFF08command \u578B\u8D70 exec Job\uFF0Chttp \u578B\u76F4\u8FDE\uFF09\uFF1Bactive \u53EA\u80FD\u7531\u6210\u529F\u9A8C\u8BC1\u4EA7\u751F"
+  ].join("\n");
+}
+async function runListFeatures(argv, client, resolveId, log) {
+  const { options } = parseCommandArgs(argv, {
+    value: ["client", "scope", "status", "env", "page", "pageSize"],
+    boolean: ["json", "include-retired"]
+  });
+  const clientFilter = stringOption(options, "client");
+  const clientId = clientFilter ? await resolveId(clientFilter) : void 0;
+  const result = await client.features.list({
+    ...clientId ? { clientId } : {},
+    ...stringOption(options, "scope") ? { scope: stringOption(options, "scope") } : {},
+    ...stringOption(options, "status") ? { status: stringOption(options, "status") } : {},
+    page: Number(stringOption(options, "page") ?? 1),
+    pageSize: Number(stringOption(options, "pageSize") ?? 20)
+  });
+  const items = options["include-retired"] === true || stringOption(options, "status") === "retired" ? result.data : result.data.filter((item) => item.status !== "retired");
+  if (options.json === true) {
+    log(JSON.stringify({ ...result, data: items }, null, 2));
+    return;
+  }
+  if (items.length === 0) {
+    log("\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u529F\u80FD\u6761\u76EE\u3002");
+    return;
+  }
+  log(formatTable3(items.map((item) => ({
+    \u529F\u80FD: item.name,
+    slug: item.slug,
+    \u4F5C\u7528\u57DF: item.scope === "generic" ? "\u901A\u7528" : "\u672C\u673A\u4E13\u5C5E",
+    \u72B6\u6001: item.status,
+    \u8BC1\u636E: freshnessLabel(item),
+    \u673A\u5668: item.clientName ?? item.clientId
+  })), ["\u529F\u80FD", "slug", "\u4F5C\u7528\u57DF", "\u72B6\u6001", "\u8BC1\u636E", "\u673A\u5668"]));
+  const hidden = result.data.length - items.length;
+  log(`
+\u5171 ${result.total} \u6761\uFF0C\u672C\u9875\u663E\u793A ${items.length} \u6761${hidden > 0 ? `\uFF08\u53E6\u6709 ${hidden} \u6761 retired \u5DF2\u9690\u85CF\uFF0C\u52A0 --include-retired \u67E5\u770B\uFF09` : ""}\u3002`);
+}
+async function runGetFeature(argv, client, resolveId, log) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["client", "env"],
+    boolean: ["json"]
+  });
+  const key = positionals[0];
+  if (!key) {
+    throw new Error("\u7528\u6CD5: vcpdeck features get <slug|id> [--client=<name|id>] [--json]");
+  }
+  const target = await resolveTarget(client, resolveId, key, stringOption(options, "client"));
+  log(options.json === true ? JSON.stringify(target, null, 2) : formatFeatureDetail(target));
+}
+async function runAddFeature(argv, client, resolveId, context, log) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: [
+      "client",
+      "slug",
+      "name",
+      "summary",
+      "scope",
+      "invoke-command",
+      "invoke-url",
+      "verify-command",
+      "verify-url",
+      "inputs-file",
+      "output",
+      "notes-file",
+      "timeout",
+      "env"
+    ],
+    boolean: ["json", "skip-verify"]
+  });
+  if (positionals.length > 0) {
+    throw new Error(`features add \u4E0D\u63A5\u53D7\u4F4D\u7F6E\u53C2\u6570: ${positionals.join(" ")}`);
+  }
+  const clientFilter = stringOption(options, "client");
+  const slug = stringOption(options, "slug");
+  const name = stringOption(options, "name");
+  const summary = stringOption(options, "summary");
+  if (!clientFilter || !slug || !name || !summary) {
+    throw new Error("features add \u5FC5\u987B\u63D0\u4F9B --client / --slug / --name / --summary");
+  }
+  const scope = stringOption(options, "scope") ?? "machine";
+  if (scope !== "generic" && scope !== "machine") {
+    throw new Error("--scope \u53EA\u63A5\u53D7 generic \u6216 machine");
+  }
+  const timeoutSeconds = Number(stringOption(options, "timeout") ?? 60);
+  const invoke = buildInvocation(stringOption(options, "invoke-command"), stringOption(options, "invoke-url"), "POST", timeoutSeconds);
+  const verify = buildInvocation(stringOption(options, "verify-command"), stringOption(options, "verify-url"), "GET", timeoutSeconds);
+  const inputsFile = stringOption(options, "inputs-file");
+  const inputs = inputsFile ? (0, import_shared7.parseFeatureInputs)(JSON.parse(await (0, import_promises6.readFile)(inputsFile, "utf8"))) : [];
+  const notesFile = stringOption(options, "notes-file");
+  const notes = notesFile ? await (0, import_promises6.readFile)(notesFile, "utf8") : "";
+  const clientId = await resolveId(clientFilter);
+  const resolved = options["skip-verify"] === true ? void 0 : await runVerification(client, clientId, verify, context.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS2, log);
+  const created = await client.features.create({
+    clientId,
+    slug,
+    name,
+    summary,
+    scope,
+    invoke,
+    verify,
+    inputs,
+    output: stringOption(options, "output") ?? "",
+    notes,
+    sourceJobId: resolved?.jobId ?? null,
+    ...resolved ? {
+      verification: {
+        ok: resolved.ok,
+        durationMs: resolved.durationMs,
+        evidence: resolved.evidence,
+        via: "cli"
+      }
+    } : {}
+  });
+  if (options.json === true) {
+    log(JSON.stringify(created, null, 2));
+  } else {
+    log(created.status === "active" ? `\u5DF2\u767B\u8BB0\u5E76\u9A8C\u8BC1\u901A\u8FC7\uFF1A${created.slug}\uFF08${created.id}\uFF09` : `\u5DF2\u767B\u8BB0\u4E3A draft\uFF1A${created.slug}\uFF08${created.id}\uFF09`);
+  }
+  if (resolved && !resolved.ok) {
+    throw new Error(`\u9A8C\u8BC1\u5931\u8D25\uFF1A${resolved.evidence}\uFF1B\u6761\u76EE\u5DF2\u4FDD\u5B58\u4E3A draft`);
+  }
+}
+async function runVerifyFeature(argv, client, resolveId, context, log) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["client", "env"],
+    boolean: ["json"]
+  });
+  const key = positionals[0];
+  if (!key) {
+    throw new Error("\u7528\u6CD5: vcpdeck features verify <slug|id> [--client=<name|id>] [--json]");
+  }
+  const target = await resolveTarget(client, resolveId, key, stringOption(options, "client"));
+  const outcome = await runVerification(client, target.clientId, target.verify, context.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS2, log);
+  const updated = await client.features.reportVerification(target.id, {
+    ok: outcome.ok,
+    durationMs: outcome.durationMs,
+    evidence: outcome.evidence,
+    via: "cli"
+  });
+  log(options.json === true ? JSON.stringify(updated, null, 2) : formatFeatureDetail(updated));
+  if (!outcome.ok) {
+    throw new Error(`\u9A8C\u8BC1\u5931\u8D25\uFF1A${outcome.evidence}\uFF1B\u6761\u76EE\u5DF2\u964D\u4E3A draft`);
+  }
+}
+async function runUpdateFeature(argv, client, resolveId, log) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: [
+      "client",
+      "name",
+      "summary",
+      "scope",
+      "invoke-command",
+      "invoke-url",
+      "verify-command",
+      "verify-url",
+      "inputs-file",
+      "output",
+      "notes-file",
+      "status",
+      "env"
+    ],
+    boolean: ["json"]
+  });
+  const key = positionals[0];
+  if (!key) {
+    throw new Error("\u7528\u6CD5: vcpdeck features update <slug|id> [--client=<name|id>] [\u5B57\u6BB5...]");
+  }
+  const status = stringOption(options, "status");
+  if (status === "active") {
+    throw new Error("status=active \u53EA\u80FD\u7531\u4E00\u6B21\u6210\u529F\u9A8C\u8BC1\u4EA7\u751F\uFF1B\u8BF7\u6539\u7528 features verify");
+  }
+  if (status !== void 0 && status !== "draft" && status !== "retired") {
+    throw new Error("--status \u53EA\u63A5\u53D7 draft \u6216 retired");
+  }
+  const target = await resolveTarget(client, resolveId, key, stringOption(options, "client"));
+  const patch = {};
+  const name = stringOption(options, "name");
+  if (name !== void 0)
+    patch.name = name;
+  const summary = stringOption(options, "summary");
+  if (summary !== void 0)
+    patch.summary = summary;
+  const scope = stringOption(options, "scope");
+  if (scope !== void 0)
+    patch.scope = scope;
+  if (stringOption(options, "invoke-command") || stringOption(options, "invoke-url")) {
+    patch.invoke = buildInvocation(stringOption(options, "invoke-command"), stringOption(options, "invoke-url"), "POST", target.invoke.timeoutSeconds);
+  }
+  if (stringOption(options, "verify-command") || stringOption(options, "verify-url")) {
+    patch.verify = buildInvocation(stringOption(options, "verify-command"), stringOption(options, "verify-url"), "GET", target.verify.timeoutSeconds);
+  }
+  const inputsFile = stringOption(options, "inputs-file");
+  if (inputsFile !== void 0) {
+    patch.inputs = (0, import_shared7.parseFeatureInputs)(JSON.parse(await (0, import_promises6.readFile)(inputsFile, "utf8")));
+  }
+  const output = stringOption(options, "output");
+  if (output !== void 0)
+    patch.output = output;
+  const notesFile = stringOption(options, "notes-file");
+  if (notesFile !== void 0)
+    patch.notes = await (0, import_promises6.readFile)(notesFile, "utf8");
+  if (status !== void 0)
+    patch.status = status;
+  if (Object.keys(patch).length === 0) {
+    throw new Error("\u6CA1\u6709\u53EF\u66F4\u65B0\u7684\u5B57\u6BB5");
+  }
+  const updated = await client.features.update(target.id, patch);
+  log(options.json === true ? JSON.stringify(updated, null, 2) : formatFeatureDetail(updated));
+}
+async function resolveTarget(client, resolveId, key, clientFilter) {
+  const clientId = clientFilter ? await resolveId(clientFilter) : void 0;
+  const result = await client.features.list({
+    ...clientId ? { clientId } : {},
+    pageSize: 100
+  });
+  const matches = result.data.filter((item) => item.slug === key || item.id === key);
+  if (matches.length === 0) {
+    throw new Error(`\u672A\u627E\u5230\u529F\u80FD "${key}"\uFF1B\u5148\u7528 vcpdeck features list \u67E5\u770B`);
+  }
+  if (matches.length > 1) {
+    throw new Error(`\u529F\u80FD "${key}" \u5B58\u5728\u4E8E\u591A\u53F0\u673A\u5668\uFF1A${matches.map((item) => item.clientName ?? item.clientId).join("\u3001")}\uFF1B\u8BF7\u7528 --client \u6307\u5B9A`);
+  }
+  return matches[0];
+}
+function buildInvocation(commandOption, urlOption, method, timeoutSeconds) {
+  if (Boolean(commandOption) === Boolean(urlOption)) {
+    throw new Error("\u5FC5\u987B\u4E14\u53EA\u80FD\u63D0\u4F9B\u547D\u4EE4\u6216 URL \u4E4B\u4E00");
+  }
+  if (commandOption) {
+    return { kind: "command", command: commandOption, timeoutSeconds };
+  }
+  return { kind: "http", method, url: urlOption ?? "", timeoutSeconds };
+}
+async function runVerification(client, clientId, verify, pollIntervalMs, log) {
+  const startedAt = Date.now();
+  if (verify.kind === "http") {
+    let evidence;
+    let ok2 = false;
+    try {
+      const response = await fetch(verify.url, {
+        method: verify.method,
+        signal: AbortSignal.timeout(verify.timeoutSeconds * 1e3)
+      });
+      ok2 = response.ok;
+      evidence = `HTTP ${response.status}`;
+    } catch (error) {
+      evidence = `\u8BF7\u6C42\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;
+    }
+    return { ok: ok2, evidence, durationMs: Date.now() - startedAt };
+  }
+  const job = await client.jobs.create({
+    clientId,
+    type: "exec",
+    payload: { mode: "command", command: verify.command },
+    timeout: verify.timeoutSeconds * 1e3
+  });
+  log(`[vcpdeck] \u9A8C\u8BC1\u547D\u4EE4\u5DF2\u4E0B\u53D1: ${job.jobId}`);
+  const terminal = await waitForTerminalJob(client, job.jobId, verify.timeoutSeconds + 30, log, pollIntervalMs);
+  const exitCode = terminal.result?.exitCode;
+  const ok = terminal.status === import_shared7.JobStatus.DONE && exitCode === 0;
+  return {
+    ok,
+    evidence: `job ${job.jobId} status=${terminal.status} exitCode=${exitCode ?? "null"}`,
+    durationMs: Date.now() - startedAt,
+    jobId: job.jobId
+  };
+}
+function freshnessLabel(feature) {
+  if (feature.freshness === "never" || feature.lastVerifiedAt === null) {
+    return feature.status === "retired" ? "\u5DF2\u9000\u5F79\uFF08\u4ECE\u672A\u9A8C\u8BC1\uFF09" : "\u4ECE\u672A\u9A8C\u8BC1";
+  }
+  const days = Math.floor((Date.now() - new Date(feature.lastVerifiedAt).getTime()) / 864e5);
+  const when = days === 0 ? "\u4ECA\u5929" : `${days} \u5929\u524D`;
+  const base = feature.lastVerifiedOk === false ? `\u6700\u65B0\u9A8C\u8BC1\u5931\u8D25\uFF08${when}\uFF09` : feature.freshness === "stale" ? `\u5DF2 ${days} \u5929\u672A\u9A8C\u8BC1` : `${when}\u901A\u8FC7`;
+  return feature.status === "retired" ? `\u5DF2\u9000\u5F79\uFF08${base}\uFF09` : base;
+}
+function formatFeatureDetail(feature) {
+  const invocation = (value2) => value2.kind === "command" ? `command: ${value2.command}\uFF08timeout ${value2.timeoutSeconds}s\uFF09` : `${value2.method} ${value2.url}\uFF08timeout ${value2.timeoutSeconds}s\uFF09`;
+  return [
+    `${feature.name}\uFF08${feature.slug}\uFF09`,
+    `  \u4F5C\u7528\u57DF: ${feature.scope === "generic" ? "\u901A\u7528" : "\u672C\u673A\u4E13\u5C5E"}`,
+    `  \u673A\u5668: ${feature.clientName ?? feature.clientId}\uFF08${feature.clientId}\uFF09`,
+    `  \u72B6\u6001: ${feature.status}\uFF5C\u8BC1\u636E: ${freshnessLabel(feature)}`,
+    `  \u8C03\u7528: ${invocation(feature.invoke)}`,
+    `  \u9A8C\u8BC1: ${invocation(feature.verify)}`,
+    feature.inputs.length > 0 ? `  \u53C2\u6570: ${feature.inputs.map((input) => `${input.name}(${input.type}${input.required ? ",\u5FC5\u586B" : ""})`).join("\u3001")}` : "  \u53C2\u6570: \u65E0",
+    `  \u4EA7\u7269: ${feature.output || "\u2014"}`,
+    `  \u5907\u6CE8: ${feature.notes || "\u2014"}`,
+    `  \u8BC1\u636E\u8BE6\u60C5: ${feature.lastVerifyEvidence ?? "\u2014"}\uFF08\u6765\u6E90 ${feature.verifiedVia ?? "\u2014"}\uFF09`,
+    `  id: ${feature.id}`
+  ].join("\n");
+}
+var import_promises6, import_shared7, DEFAULT_POLL_INTERVAL_MS2;
+var init_features_command = __esm({
+  "dist/features-command.js"() {
+    "use strict";
+    import_promises6 = require("node:fs/promises");
+    import_shared7 = __toESM(require_dist(), 1);
+    init_arguments();
+    init_authenticated_client();
+    init_client_resolver();
+    init_environment();
+    init_jobs_command();
+    init_table();
+    DEFAULT_POLL_INTERVAL_MS2 = 2e3;
+  }
+});
+
 // dist/index.js
 var index_exports = {};
 __export(index_exports, {
@@ -12422,7 +13672,7 @@ __export(index_exports, {
   run: () => run
 });
 module.exports = __toCommonJS(index_exports);
-var import_shared7 = __toESM(require_dist(), 1);
+var import_shared8 = __toESM(require_dist(), 1);
 
 // dist/env-command.js
 init_authenticated_client();
@@ -12667,456 +13917,7 @@ init_authenticated_client();
 init_arguments();
 init_client_resolver();
 init_environment();
-
-// dist/jobs-command.js
-var import_shared2 = __toESM(require_dist(), 1);
-init_dist();
-init_authenticated_client();
-init_arguments();
-init_client_resolver();
-
-// dist/privileged-capability.js
-function readPrivileged(client) {
-  return client?.capabilityDetails?.privileged;
-}
-function isRootEquivalent(client) {
-  const p = readPrivileged(client);
-  return Boolean(p && p.available && p.mode === "sudo-all" && p.nonInteractive);
-}
-function formatPrivilegeSummary(client) {
-  const p = readPrivileged(client);
-  if (!p)
-    return "\u672A\u62A5\u544A";
-  if (isRootEquivalent(client))
-    return "root \u7B49\u4EF7";
-  return "root \u7B49\u4EF7\u4E0D\u53EF\u7528";
-}
-function rootEquivalentWarning(client) {
-  if (!isRootEquivalent(client))
-    return null;
-  return "\u8B66\u544A: \u8BE5\u673A\u5668\u5177\u5907 root \u7B49\u4EF7\u7279\u6743\uFF0C\u53EF\u6267\u884C\u4EFB\u610F root \u547D\u4EE4\u3002Server \u53EA\u8BB0\u5F55\u63A7\u5236\u9762 / Job / Session \u5BA1\u8BA1\uFF0C\u8BF7\u786E\u8BA4\u5728\u53EF\u4FE1\u8FD0\u7EF4\u57DF\u5185\u3002";
-}
-
-// dist/jobs-command.js
-init_environment();
-var STATUS_FILTERS = /* @__PURE__ */ new Set([...Object.values(import_shared2.JobStatus), "active"]);
-var DEFAULT_WAIT_TIMEOUT_SECONDS = 1800;
-var POLL_INTERVAL_MS = 2e3;
-var TERMINAL_STATUSES2 = /* @__PURE__ */ new Set([
-  import_shared2.JobStatus.DONE,
-  import_shared2.JobStatus.ERROR,
-  import_shared2.JobStatus.CANCELLED,
-  import_shared2.JobStatus.DISCONNECTED
-]);
-async function runJobsCommand(subcommand, argv, context = {}) {
-  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === "get" || subcommand === "logs" || subcommand === "run" || subcommand === "cancel" || subcommand === void 0) && hasHelp(argv);
-  if (helpRequested) {
-    (context.log ?? console.log)(jobsUsage());
-    return;
-  }
-  if (subcommand === "list") {
-    await runListJobs(argv, context);
-    return;
-  }
-  if (subcommand === "get") {
-    await runGetJob(argv, context);
-    return;
-  }
-  if (subcommand === "logs") {
-    await runJobLogs(argv, context);
-    return;
-  }
-  if (subcommand === "run") {
-    await runExecJob(argv, context);
-    return;
-  }
-  if (subcommand === "cancel") {
-    await runCancelJob(argv, context);
-    return;
-  }
-  throw new Error(jobsUsage());
-}
-function hasHelp(argv) {
-  return argv.includes("--help") || argv.includes("-h");
-}
-function jobsUsage() {
-  return [
-    "Jobs \u547D\u4EE4:",
-    "  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",
-    "  vcpdeck jobs get <jobId> [--env=<name>] [--json]  # \u542B\u5931\u8D25\u73B0\u573A\uFF08stdout/stderr spool\uFF09",
-    "  vcpdeck jobs logs <jobId> [--since=<seq>] [--limit=<n>] [--level=<info|warn|error>] [--env=<name>] [--json]",
-    "  # \u65E5\u5FD7\u4E8B\u4EF6\u94FE\uFF1A\u6309 seq \u5347\u5E8F\uFF1B--since \u4F20\u4E0A\u4E00\u6B21\u7684 nextSeq \u53EF\u589E\u91CF\u62C9\u53D6",
-    "  vcpdeck jobs run <client> [--cwd=<dir>] [--timeout=<seconds>] [--wait] [--wait-timeout=<seconds>] [--env=<name>] [--json] -- <command...>",
-    "  # \u5199\u64CD\u4F5C\uFF1A--timeout/--wait-timeout \u5355\u4F4D\u4E3A\u79D2\uFF1B\u590D\u6742\u547D\u4EE4\u5EFA\u8BAE\u4F5C\u4E3A -- \u540E\u7684\u5355\u4E00\u53C2\u6570\uFF1B\u786E\u8BA4\u95E8\u7531\u8C03\u7528\u65B9\u8D1F\u8D23",
-    "  vcpdeck jobs cancel <jobId> [--env=<name>] [--json]"
-  ].join("\n");
-}
-function parseListArgs(argv) {
-  return parseCommandArgs(argv, {
-    value: ["env", "environment", "client", "status", "page"],
-    boolean: ["json"]
-  });
-}
-async function runListJobs(argv, context) {
-  const { positionals, options } = parseListArgs(argv);
-  if (positionals.length > 0)
-    throw new Error(jobsUsage());
-  const environment = await resolveEnvironment({
-    environment: exclusiveAlias2(options, "env", "environment"),
-    paths: context.paths,
-    processEnv: context.processEnv
-  });
-  const status = requireValidStatus(stringOption(options, "status"));
-  const page = parsePage(stringOption(options, "page"));
-  const clientFilter = stringOption(options, "client");
-  const log = context.log ?? console.log;
-  const client = await createAuthenticatedClient(environment);
-  const clientId = clientFilter ? await resolveClientId(clientFilter, context.paths, context.processEnv) : void 0;
-  const result = await client.jobs.list({ clientId, status, page });
-  if (options.json === true) {
-    log(JSON.stringify(result, null, 2));
-    return;
-  }
-  log(formatEnvironmentSummary(environment));
-  log(formatJobsList(result));
-}
-async function runGetJob(argv, context) {
-  const { positionals, options } = parseCommandArgs(argv, {
-    value: ["env", "environment"],
-    boolean: ["json"]
-  });
-  if (positionals.length !== 1)
-    throw new Error(jobsUsage());
-  const environment = await resolveEnvironment({
-    environment: exclusiveAlias2(options, "env", "environment"),
-    paths: context.paths,
-    processEnv: context.processEnv
-  });
-  const log = context.log ?? console.log;
-  const client = await createAuthenticatedClient(environment);
-  const jobId = positionals[0];
-  const job = await client.jobs.get(jobId);
-  const { output } = await client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}/output`);
-  if (options.json === true) {
-    log(JSON.stringify({ ...job, output }, null, 2));
-    return;
-  }
-  log(formatEnvironmentSummary(environment));
-  log(formatJobDetail(job, output));
-}
-async function runJobLogs(argv, context) {
-  const { positionals, options } = parseCommandArgs(argv, {
-    value: ["env", "environment", "since", "limit", "level"],
-    boolean: ["json"]
-  });
-  if (positionals.length !== 1)
-    throw new Error(jobsUsage());
-  const environment = await resolveEnvironment({
-    environment: exclusiveAlias2(options, "env", "environment"),
-    paths: context.paths,
-    processEnv: context.processEnv
-  });
-  const log = context.log ?? console.log;
-  const client = await createAuthenticatedClient(environment);
-  const since = parseNonNegativeInteger(stringOption(options, "since"), "--since");
-  const limit = parseNonNegativeInteger(stringOption(options, "limit"), "--limit");
-  if (limit !== void 0 && limit < 1) {
-    throw new Error("--limit \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570");
-  }
-  const level = requireValidLevel(stringOption(options, "level"));
-  const page = await client.jobs.logs(positionals[0], {
-    ...since !== void 0 ? { since } : {},
-    ...limit !== void 0 ? { limit } : {},
-    ...level !== void 0 ? { level } : {}
-  });
-  if (options.json === true) {
-    log(JSON.stringify(page, null, 2));
-    return;
-  }
-  log(formatEnvironmentSummary(environment));
-  log(formatJobLogs(page));
-}
-async function runExecJob(argv, context) {
-  const { positionals, options } = parseCommandArgs(argv, {
-    value: ["env", "environment", "cwd", "timeout", "wait-timeout"],
-    boolean: ["json", "wait"]
-  });
-  const [clientFilter, ...commandTokens] = positionals;
-  if (!clientFilter || commandTokens.length === 0) {
-    throw new Error(jobsUsage());
-  }
-  const environment = await resolveEnvironment({
-    environment: exclusiveAlias2(options, "env", "environment"),
-    paths: context.paths,
-    processEnv: context.processEnv
-  });
-  const timeout = parsePositiveSeconds(stringOption(options, "timeout"), "--timeout");
-  const waitTimeout = parsePositiveSeconds(stringOption(options, "wait-timeout"), "--wait-timeout") ?? DEFAULT_WAIT_TIMEOUT_SECONDS;
-  const log = context.log ?? console.log;
-  const error = context.error ?? console.error;
-  const client = await createAuthenticatedClient(environment);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
-  const targetClient = await findClientByClientId(client, clientId);
-  const rootWarning = rootEquivalentWarning(targetClient);
-  const payload = {
-    mode: "command",
-    command: commandTokens.join(" ")
-  };
-  const cwd = stringOption(options, "cwd");
-  if (cwd)
-    payload.cwd = cwd;
-  if (commandTokens.length > 1 && commandTokens.some((token) => token.length === 0 || /\s/.test(token))) {
-    error("[vcpdeck] \u6CE8\u610F\uFF1A\u591A\u4E2A\u547D\u4EE4 token \u4EE5\u7A7A\u683C\u8FDE\u63A5\uFF0C\u542B\u7A7A\u767D token \u7684\u53C2\u6570\u8FB9\u754C\u4F1A\u4E22\u5931\uFF1B\u5EFA\u8BAE\u628A\u5B8C\u6574 shell \u547D\u4EE4\u4F5C\u4E3A -- \u540E\u7684\u5355\u4E00\u53C2\u6570");
-  }
-  if (options.json !== true) {
-    log(formatEnvironmentSummary(environment));
-    if (rootWarning)
-      error(rootWarning);
-    log(`[vcpdeck] \u5728 ${clientFilter} \u4E0A\u6267\u884C: ${payload.command}`);
-  }
-  const created = await client.jobs.create({
-    clientId,
-    type: "exec",
-    payload,
-    timeout: timeout === void 0 ? void 0 : timeout * 1e3
-  });
-  if (options.wait !== true) {
-    if (options.json === true) {
-      log(JSON.stringify(created, null, 2));
-    } else {
-      log(`[vcpdeck] Job \u5DF2\u521B\u5EFA: ${created.jobId}\uFF08${created.status}\uFF09\uFF1B\u7528 jobs get ${created.jobId} \u67E5\u8BE2\u7ED3\u679C\uFF0C\u6216\u52A0 --wait \u76F4\u63A5\u7B49\u5F85\u7EC8\u6001`);
-    }
-    return;
-  }
-  const job = await waitForTerminalJob(client, created.jobId, waitTimeout, options.json === true ? error : log, context.pollIntervalMs ?? POLL_INTERVAL_MS);
-  const output = await readJobOutputText(client, job.jobId).catch(() => null);
-  if (options.json === true) {
-    log(JSON.stringify({ ...job, output }, null, 2));
-  }
-  if (job.status !== import_shared2.JobStatus.DONE) {
-    if (options.json !== true)
-      log(formatJobDetail(job, output));
-    throw new Error(`Job ${job.jobId} \u7EC8\u6001\u4E3A ${job.status}`);
-  }
-  if (options.json !== true)
-    log(formatJobDetail(job, output));
-}
-async function waitForTerminalJob(client, jobId, timeoutSeconds, log, pollIntervalMs) {
-  const deadline = Date.now() + timeoutSeconds * 1e3;
-  let lastStatus;
-  while (Date.now() < deadline) {
-    try {
-      const job = await client.jobs.get(jobId);
-      if (TERMINAL_STATUSES2.has(job.status))
-        return job;
-      if (job.status !== lastStatus) {
-        log(`[vcpdeck] Job ${jobId} \u72B6\u6001: ${job.status}`);
-        lastStatus = job.status;
-      }
-    } catch (error) {
-      if (!isTransientReadError(error))
-        throw error;
-      log("[vcpdeck] Server \u6682\u65F6\u4E0D\u53EF\u8FBE\uFF0C\u7EE7\u7EED\u7B49\u5F85\u2026");
-    }
-    await sleep2(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
-  }
-  throw new Error(`\u7B49\u5F85 Job ${jobId} \u7EC8\u6001\u8D85\u65F6\uFF08${timeoutSeconds} \u79D2\uFF09\uFF1B\u7528 jobs get ${jobId} \u67E5\u8BE2\u5F53\u524D\u72B6\u6001`);
-}
-async function readJobOutputText(client, jobId) {
-  const { output } = await client.request("GET", `/api/jobs/${encodeURIComponent(jobId)}/output`);
-  return output;
-}
-async function runCancelJob(argv, context) {
-  const { positionals, options } = parseCommandArgs(argv, {
-    value: ["env", "environment"],
-    boolean: ["json"]
-  });
-  if (positionals.length !== 1)
-    throw new Error(jobsUsage());
-  const environment = await resolveEnvironment({
-    environment: exclusiveAlias2(options, "env", "environment"),
-    paths: context.paths,
-    processEnv: context.processEnv
-  });
-  const log = context.log ?? console.log;
-  const client = await createAuthenticatedClient(environment);
-  const result = await client.jobs.cancel(positionals[0]);
-  if (options.json === true) {
-    log(JSON.stringify(result, null, 2));
-    return;
-  }
-  log(formatEnvironmentSummary(environment));
-  log(`[vcpdeck] Job ${result.jobId} \u53D6\u6D88\u8BF7\u6C42\u5DF2\u63D0\u4EA4\uFF0C\u5F53\u524D\u72B6\u6001: ${result.status}${result.status === "cancelling" ? "\uFF08\u7B49\u5F85 Client \u786E\u8BA4\uFF0C\u7EC8\u6001\u7528 jobs get \u6838\u5BF9\uFF09" : ""}`);
-}
-function jobTypeLabel(type) {
-  return {
-    "frp.create": "\u521B\u5EFA\u6620\u5C04",
-    "frp.delete": "\u5220\u9664\u6620\u5C04",
-    "frp.list": "\u8BFB\u53D6\u6620\u5C04",
-    "frp.reconcile": "\u6062\u590D FRP \u6620\u5C04"
-  }[type] ?? type;
-}
-function formatJobsList(result) {
-  const sorted = [...result.data].sort((a, b) => {
-    const active = (job) => job.status === import_shared2.JobStatus.RUNNING || job.status === import_shared2.JobStatus.PENDING || job.status === import_shared2.JobStatus.WAITING_INPUT ? 0 : 1;
-    const byActive = active(a) - active(b);
-    if (byActive !== 0)
-      return byActive;
-    return b.createdAt.localeCompare(a.createdAt);
-  });
-  const rows = sorted.map((job) => ({
-    jobId: job.jobId,
-    client: job.clientName ?? job.clientId,
-    type: jobTypeLabel(job.type),
-    status: job.status,
-    error: job.errorCode ?? "-",
-    created: job.createdAt
-  }));
-  const body = rows.length === 0 ? ["\u5F53\u524D\u8FC7\u6EE4\u6761\u4EF6\u4E0B\u6CA1\u6709 Job\u3002"] : [
-    formatTable(rows, [
-      "jobId",
-      "client",
-      "type",
-      "status",
-      "error",
-      "created"
-    ])
-  ];
-  return [
-    `\u5171 ${result.total} \u6761 \xB7 \u7B2C ${result.page}/${result.totalPages} \u9875`,
-    ...body
-  ].join("\n");
-}
-function formatJobDetail(job, output) {
-  const lines = [
-    `Job: ${job.jobId}`,
-    `Client: ${job.clientName ?? job.clientId}`,
-    `Type: ${jobTypeLabel(job.type)}`,
-    `Status: ${job.status}`
-  ];
-  if (job.errorCode || job.errorMessage) {
-    lines.push(`Error: ${job.errorCode ?? "-"}${job.errorMessage ? ` \u2014 ${job.errorMessage}` : ""}`);
-  }
-  if (job.timeout != null)
-    lines.push(`Timeout: ${job.timeout} ms`);
-  lines.push(`Created: ${job.createdAt}`);
-  if (job.startedAt)
-    lines.push(`Started: ${job.startedAt}`);
-  if (job.finishedAt)
-    lines.push(`Finished: ${job.finishedAt}`);
-  if (job.createdByName || job.createdVia) {
-    lines.push(`Creator: ${job.createdByName ?? "-"} (${job.createdVia ?? "-"})`);
-  }
-  if (job.result && Object.keys(job.result).length > 0) {
-    lines.push(`Result: ${JSON.stringify(job.result)}`);
-  }
-  if (output === null) {
-    lines.push("\uFF08\u65E0\u843D\u76D8\u8F93\u51FA\uFF09");
-  } else {
-    lines.push("\u2500\u2500 \u8F93\u51FA\uFF08stdout/stderr\uFF09\u2500\u2500", output.trimEnd());
-  }
-  return lines.join("\n");
-}
-function formatJobLogs(page) {
-  if (page.events.length === 0) {
-    return `Job ${page.jobId} \u6682\u65E0\u65E5\u5FD7\u4E8B\u4EF6\uFF08\u53EF\u80FD\u65E9\u4E8E\u65E5\u5FD7\u529F\u80FD\u4E0A\u7EBF\uFF0C\u6216 Job \u5C1A\u672A\u6D3E\u53D1\uFF09\u3002`;
-  }
-  const rows = page.events.map((event) => ({
-    seq: String(event.seq),
-    time: event.at,
-    src: event.source,
-    lvl: event.level,
-    event: event.event,
-    detail: formatJobLogDetail(event)
-  }));
-  return [
-    `Job ${page.jobId} \u65E5\u5FD7\u4E8B\u4EF6\uFF1A\u672C\u9875 ${page.events.length} \u6761\uFF0C\u6700\u65B0 seq=${page.nextSeq}`,
-    formatTable(rows, ["seq", "time", "src", "lvl", "event", "detail"])
-  ].join("\n");
-}
-function formatJobLogDetail(event) {
-  const parts2 = [];
-  if (event.code)
-    parts2.push(`code=${event.code}`);
-  if (event.message)
-    parts2.push(`msg=${event.message}`);
-  if (event.data) {
-    for (const [key, value2] of Object.entries(event.data)) {
-      parts2.push(`${key}=${String(value2)}`);
-    }
-  }
-  return parts2.length > 0 ? parts2.join(" ") : "-";
-}
-function exclusiveAlias2(options, first, second) {
-  const firstValue = stringOption(options, first);
-  const secondValue = stringOption(options, second);
-  if (firstValue && secondValue) {
-    throw new Error(`--${first} \u4E0E --${second} \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528`);
-  }
-  return firstValue ?? secondValue;
-}
-function requireValidStatus(raw) {
-  if (raw === void 0)
-    return void 0;
-  if (!STATUS_FILTERS.has(raw)) {
-    throw new Error(`--status \u5FC5\u987B\u662F ${[...STATUS_FILTERS].join("/")} \u4E4B\u4E00`);
-  }
-  return raw;
-}
-function parsePage(raw) {
-  if (raw === void 0)
-    return void 0;
-  const page = Number(raw);
-  if (!Number.isInteger(page) || page < 1) {
-    throw new Error("--page \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570");
-  }
-  return page;
-}
-function parseNonNegativeInteger(raw, flag) {
-  if (raw === void 0)
-    return void 0;
-  const value2 = Number(raw);
-  if (!Number.isInteger(value2) || value2 < 0) {
-    throw new Error(`${flag} \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 0 \u7684\u6574\u6570`);
-  }
-  return value2;
-}
-function requireValidLevel(raw) {
-  if (raw === void 0)
-    return void 0;
-  if (!import_shared2.JOB_LOG_LEVELS.includes(raw)) {
-    throw new Error(`--level \u5FC5\u987B\u662F ${import_shared2.JOB_LOG_LEVELS.join("/")} \u4E4B\u4E00`);
-  }
-  return raw;
-}
-function parsePositiveSeconds(raw, flag) {
-  if (raw === void 0)
-    return void 0;
-  const seconds = Number(raw);
-  if (!Number.isInteger(seconds) || seconds < 1) {
-    throw new Error(`${flag} \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570\u79D2`);
-  }
-  return seconds;
-}
-function isTransientReadError(error) {
-  if (error instanceof VcpDeckApiError) {
-    return error.status === 0 || [502, 503, 504].includes(error.status);
-  }
-  return error instanceof Error && error.name === "AbortError";
-}
-function sleep2(ms) {
-  return new Promise((resolve2) => setTimeout(resolve2, ms));
-}
-function formatTable(rows, columns) {
-  const widths = columns.map((column) => Math.max(column.length, ...rows.map((row) => row[column].length)));
-  const line = (cells) => cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
-  return [
-    line(columns.map((column) => column.toUpperCase())),
-    ...rows.map((row) => line(columns.map((column) => row[column])))
-  ].join("\n");
-}
-
-// dist/files-command.js
+init_jobs_command();
 var DEFAULT_WAIT_TIMEOUT_SECONDS2 = 120;
 var POLL_INTERVAL_MS2 = 1e3;
 async function runFilesCommand(subcommand, argv, context = {}) {
@@ -13633,6 +14434,9 @@ function formatTable2(rows, columns) {
   ].join("\n");
 }
 
+// dist/index.js
+init_jobs_command();
+
 // dist/frp-command.js
 init_dist();
 init_authenticated_client();
@@ -13911,6 +14715,7 @@ var import_shared4 = __toESM(require_dist(), 1);
 init_authenticated_client();
 init_arguments();
 init_environment();
+init_privileged_capability();
 async function runClientsCommand(subcommand, argv, context = {}) {
   const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "list" || subcommand === void 0) && hasHelp4(argv);
   if (helpRequested) {
@@ -14491,7 +15296,7 @@ async function run(argv, context = {}) {
   const [command, subcommand, ...rest] = argv;
   try {
     if (command === "version" || command === "--version" || command === "-v") {
-      log(import_shared7.VERSION);
+      log(import_shared8.VERSION);
       return 0;
     }
     if (command === "env") {
@@ -14529,6 +15334,11 @@ async function run(argv, context = {}) {
       await runClientsCommand(subcommand, rest, { log });
       return 0;
     }
+    if (command === "features") {
+      const { runFeaturesCommand: runFeaturesCommand2 } = await Promise.resolve().then(() => (init_features_command(), features_command_exports));
+      await runFeaturesCommand2(subcommand, rest, { log, error });
+      return 0;
+    }
     if (command === "release") {
       await runReleaseCommand(subcommand, rest, { log });
       return 0;
@@ -14562,6 +15372,16 @@ function helpText() {
     "",
     "Clients:",
     "  vcpdeck clients list [--env=<name>] [--json]",
+    "",
+    "Features:",
+    "  vcpdeck features list [--client=<name|id>] [--scope=generic|machine] [--status=<status>] [--include-retired] [--env=<name>] [--json]",
+    "  vcpdeck features get <slug|id> [--client=<name|id>] [--env=<name>] [--json]",
+    "  vcpdeck features add --client=<name|id> --slug=<slug> --name=<name> --summary=<text> --scope=<generic|machine>",
+    "      (--invoke-command=<cmd> | --invoke-url=<url>) (--verify-command=<cmd> | --verify-url=<url>)",
+    "      [--inputs-file=<json>] [--output=<text>] [--notes-file=<path>] [--timeout=<seconds>] [--skip-verify] [--json]",
+    "  vcpdeck features verify <slug|id> [--client=<name|id>] [--env=<name>] [--json]",
+    "  vcpdeck features update <slug|id> [--client=<name|id>] [\u5B57\u6BB5...] [--status=draft|retired] [--env=<name>] [--json]",
+    "  \u9A8C\u8BC1\u7531 CLI \u6267\u884C\uFF08command \u578B\u8D70 exec Job\uFF0Chttp \u578B\u76F4\u8FDE\uFF09\uFF1Bactive \u53EA\u80FD\u7531\u6210\u529F\u9A8C\u8BC1\u4EA7\u751F",
     "",
     "Jobs:",
     "  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",

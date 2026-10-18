@@ -11,7 +11,8 @@
 - Cookie/Bearer 身份认证和身份管理；
 - 浏览器交互式终端；
 - Release、Launcher、Server/Client 更新基础实现；
-- CLI 全域命令对齐控制面能力（jobs/files/frp/storage/terminal），支持 TUI 终端直连，并有真实 Server+Client 的 CLI 能力端到端测试；
+- CLI 全域命令对齐控制面能力（jobs/files/frp/storage/terminal/features），支持 TUI 终端直连，并有真实 Server+Client 的 CLI 能力端到端测试；
+- 功能目录（ADR-0056）：机器上的可复用设施及其调用契约，CLI `features` + 机器「功能」Tab 与全局功能页，验证由调用方执行；
 - React 驾驶台和框架无关 SDK。
 
 ## 2. 近期优先级：可靠性与安全基线
@@ -49,7 +50,7 @@
 ## 4. 产品方向候选
 
 - TODO 驱动的任务管理、标签和结果审核；
-- 可复用工作流、规则和自动触发；
+- 基于功能目录的可复用工作流、规则和自动触发（目录本身已落地，见 §1；编排、自动执行与产物回传仍未实现）；
 - VCPToolBox 双向桥接与 Agent 对话；
 - 主动监控巡检和异常任务生成；
 - 移动端或轻量只读端。

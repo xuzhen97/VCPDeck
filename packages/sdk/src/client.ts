@@ -2,6 +2,7 @@ import { createAliyunDriveApi } from "./aliyundrive.js";
 import { createAuthApi, createIdentitiesApi } from "./auth.js";
 import { createClientsApi } from "./clients.js";
 import { createClientInstallerApi } from "./client-installer.js";
+import { createFeaturesApi } from "./features.js";
 import { createFilesApi } from "./files.js";
 import { createFrpApi } from "./frp.js";
 import { createJobsApi } from "./jobs.js";
@@ -61,6 +62,8 @@ export class VcpDeckClient {
 	readonly identities;
 	readonly clients;
 	readonly clientInstaller;
+	/** 功能目录（ADR-0056）。 */
+	readonly features;
 	readonly storage;
 	readonly storageShares;
 	readonly aliyundrive;
@@ -83,6 +86,7 @@ export class VcpDeckClient {
 		this.identities = createIdentitiesApi(this);
 		this.clients = createClientsApi(this);
 		this.clientInstaller = createClientInstallerApi(this);
+		this.features = createFeaturesApi(this);
 		this.storage = createStorageApi(this);
 		this.storageShares = createStorageSharesApi(this);
 		this.aliyundrive = createAliyunDriveApi(this);

@@ -25,11 +25,12 @@
 | Storage 后端配置 | 已实现 | 不涉及 | 已实现（仅写安全字段） | 未实现 | 未实现 | 不读取 raw config |
 | 阿里云盘 OAuth | 已实现 | 不涉及 | 已实现 | 未实现 | 未实现 | 只展示安全状态，授权 URL 校验 origin |
 | FRP 映射 | 已实现 | 已实现 | 已实现 | 已实现 create/delete | 已实现确认门 | Client frpc + FRPS Dashboard 双重确认 |
+| 功能目录 | 已实现 | 不涉及 | 已实现（Tab + 全局页，无验证入口） | 已实现 list/get/add/verify/update | 已实现「功能复用」章节 | 验证由调用方执行，Server 只记账；`active` 只能由成功验证产生 |
 | Job WebSocket 实时输出 | 部分实现 | 已实现 | 未实现 | 未实现 | 未实现 | 暂不作为对接方案 |
 | Release 上传与自更新 | 已实现 | 已实现更新配合 | 已实现审计页 | 已实现双平台上传 | CLI 总 Skill 中已实现该功能章节 | 上传后 Server 先自更新，再逐台更新在线 Client |
 | `agent.run` | 仅有类型占位 | 未实现 | 未实现 | 未实现 | 未实现 | 不得调用 |
 
-当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘、发布审计和账号设置。VCPDeck Skill 是 CLI 的统一能力入口；机器、Job、文件、Terminal、FRP 映射、Storage 状态与 Release 等章节均以 CLI 当前 help/源码为准。
+当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘、功能目录、发布审计和账号设置。VCPDeck Skill 是 CLI 的统一能力入口；机器、Job、文件、Terminal、FRP 映射、Storage 状态、功能目录与 Release 等章节均以 CLI 当前 help/源码为准。
 
 > **安全提示：** 当前任意已认证身份都等价于远程机器操作员，可执行 shell、操作文件并修改 Storage/FRP；Job 也不按身份隔离。只向可信操作者发放账号和 Token。
 
@@ -1484,3 +1485,53 @@ Token 在 Frontend `/settings/tokens` 创建并与 Identity 关联；CLI 与 SDK
 - Client/机器重启后旧会话应标记为「已中断」，不会伪恢复；当前 Server 按状态报告集合对账，generationId 尚未实际参与分支判断。
 - SQLite status 不是 PTY 实时权威，排障应结合 Client 状态和 attach/snapshot。
 - REST API：`/api/clients/:clientId/terminals*`（SDK `sdk.terminals`）。
+
+---
+
+## 17. 功能目录（Feature Registry）
+
+> 决策：[ADR-0056](adr/0056-feature-registry-declared-contracts.md)；当前语义与已知偏移：[`design/feature-registry.md`](design/feature-registry.md)。
+
+功能条目把「装在某台 Client 上、可被验证的设施」及其调用契约持久化，供 Agent 先查后复用。它与 `capabilities`（Client 自报原语）是两套事实：条目由操作者/Agent 声明，Client 不上报、注册不覆盖。
+
+### 17.1 字段语义（关键）
+
+| 字段 | 含义 |
+| --- | --- |
+| `clientId` | host：功能装在哪台机器 |
+| `scope` | `generic`（产出与机器无关，可跨任务复用，多 host 互为备援）/ `machine`（产物是该机器自身状态，不可换机器） |
+| `invoke` / `verify` | `{kind:"command",command,timeoutSeconds}` 或 `{kind:"http",method,url,timeoutSeconds}` |
+| `inputs` | 参数表（≤20 项），只作契约描述，不做运行时校验 |
+| `status` | **意图**：`draft` / `active` / `retired` |
+| `freshness` | **证据年龄**：`never` / `fresh` / `stale`（14 天），读时计算，不改 `status` |
+
+`active` 只能由一次成功验证产生：`PATCH /api/features/:id` 只接受 `status: "draft" | "retired"`，提交 `active` 返回 400 `INVALID_FEATURE_INPUT`。
+
+### 17.2 REST
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/features?clientId=&scope=&status=&page=&pageSize=` | `PaginatedResult<FeatureInfo>`，pageSize 夹 1–100 |
+| `GET` | `/api/features/:id` | 未知返回 404 `FEATURE_NOT_FOUND` |
+| `GET` | `/api/clients/:clientId/features` | 机器维度列表 |
+| `POST` | `/api/features` | 可内联 `verification: {ok, durationMs?, evidence?, via}`；`ok=true` 才 `active` |
+| `PATCH` | `/api/features/:id` | 契约字段或 `status: draft\|retired` |
+| `POST` | `/api/features/:id/verifications` | 上报验证结果；`ok && status!="retired"` → `active`，失败 → `draft` |
+
+错误码：`FEATURE_CLIENT_UNKNOWN`（404）、`FEATURE_NOT_FOUND`（404）、`FEATURE_SLUG_TAKEN`（409）、`INVALID_FEATURE_INPUT`（400）、`INVALID_FEATURE_STATUS_TRANSITION`（400）。
+
+### 17.3 验证归属
+
+Server 与 Frontend 都**不**代验证：浏览器受 CORS 限制无法访问内网服务，Server 抓取任意存储 URL 会形成 SSRF 面。验证由能落到执行面的调用方执行——CLI（`vcpdeck features verify`）或 Agent——Server 只记录结果、耗时、证据摘要与来源（`verifiedVia`）。
+
+### 17.4 UI
+
+机器工作区新增「功能」Tab，侧栏新增「功能」页（跨机器）。UI 只做浏览与维护（新建/编辑/切 `draft`/`retired`），**没有验证按钮**，抽屉里给出可复制的 CLI 验证命令。
+
+### 17.5 已知限制
+
+1. 证据可信度依赖调用方，Server 不亲测；
+2. 无后台探测：条目不会自动变绿或变红，`freshness` 只暴露年龄；
+3. UI 无法刷新证据；
+4. `slug` 创建后不可改；
+5. 按名称解析 host 依赖在线列表（`clients.list` 只含在线机器），离线机器请用 clientId。

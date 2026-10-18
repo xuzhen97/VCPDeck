@@ -41,6 +41,7 @@ pnpm --filter @vcpdeck/cli build
 | FRP 映射写操作 | `frp mapping create/delete` | 已实现 | Client frpc 动作与 FRPS Dashboard 双重确认；**必须先取得用户明确确认** |
 | Storage 查询（只读） | `storage status` | 已实现 | 当前激活的存储后端类型 |
 | Terminal 生命周期 | `terminal new/shells/list/close` | 已实现 | 创建会话（返回 sessionId 供 attach）、Shell 探测与会话列表（只读）、关闭会话（写操作需确认）；交互式 PTY 经 attach 直连 |
+| 功能目录 | `features list/get/add/verify/update` | 已实现 | 查询机器上已登记的可复用设施及其调用契约；写入与验证是写操作（见「功能复用」章节） |
 | Release / 自更新 | `release upload/status/wait/retry` | 已实现 | 上传双平台构件；查询或等待 Server/Client 权威终态；`status` 含逐台明细；`retry` 人工强制重试单台补更（写操作需确认） |
 | FRP 实例写操作、Storage 后端切换、机器写入 | — | 尚未形成 CLI 命令 | 等对应 CLI 落地后再在本 Skill 中增加正式说明 |
 
@@ -396,6 +397,48 @@ node "<vcpdeck-cli>" terminal attach <client> <sessionId> [--env=<name>]  # 本�
 ### 操作分级与确认门
 
 `shells/list` 只读幂等无需确认；`close` 写操作需展示机器/会话/shell/创建者并取得明确确认；`attach` 本身不改变目标机状态（附着到既有 PTY），但接入后用户的键入即为真实操作——Skill 应提醒用户正在操作真实机器。
+
+## 功能：功能目录与复用
+
+### 可用命令
+
+```bash
+node "<vcpdeck-cli>" features list [--client=<name|id>] [--scope=generic|machine] [--status=draft|active|retired] [--include-retired] [--env=<name>] [--json]
+node "<vcpdeck-cli>" features get <slug|id> [--client=<name|id>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" features add --client=<name|id> --slug=<slug> --name=<name> --summary=<text> --scope=<generic|machine> \
+    (--invoke-command=<cmd> | --invoke-url=<url>) (--verify-command=<cmd> | --verify-url=<url>) \
+    [--inputs-file=<json>] [--output=<text>] [--notes-file=<path>] [--timeout=<seconds>] [--skip-verify] [--json]
+node "<vcpdeck-cli>" features verify <slug|id> [--client=<name|id>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" features update <slug|id> [--client=<name|id>] [字段...] [--status=draft|retired] [--env=<name>] [--json]
+```
+
+以 CLI `--help` 为命令事实来源。
+
+### 语义与权威
+
+功能条目描述「装在某台 Client 上、可被验证的设施」及其调用契约，与 `clients list` 里的 `capabilities`（Client 自报原语）是两套事实。字段要点：
+
+- `scope`：`generic` = 产出与机器无关、可跨任务复用、多台 host 互为备援；`machine` = 产物是该机器自身状态，**不得换机器顶替**；
+- `status`：意图（`draft`/`active`/`retired`）；`freshness`：证据年龄（14 天阈值，`never`/`fresh`/`stale`）；
+- **`active` 只代表声明**，不代表此刻可用；判断有效必须看 `freshness` 与 `lastVerifyEvidence`，必要时重新验证；
+- `active` 不可能被手写：`--status=active` 会被拒绝，只有成功的 `features verify` 能产生。
+
+### Agent 行为约定（重要）
+
+1. **动手前先查**：要在任一机器上实现某能力前，先 `features list --json`（找可复用设施时可加 `--scope=generic`）；命中即复用，不重复造轮子。
+2. **造完就沉淀**：交付新能力后用 `features add` 落条目，验证必须真跑通；`--skip-verify` 只在确知无法验证时使用，且必须告知用户该条目只是草案。
+3. **`stale` 先验证**：`freshness=stale` 时先 `features verify`；失败则如实报告（条目会降为 `draft`），不要当作成功继续复用。
+4. **`machine` 型不可换机器**：换机器执行会得到不同语义的产物，必须用原 host。
+5. **产物取回**：`invoke.kind=command` 或产物落在 host 本地时，用 `files download` 取回，不得假设本地可见。
+6. **禁止凭据**：条目里不得写密码/Token；URL 不得带 `user:pass@`。
+
+### 操作分级与确认门
+
+`list`/`get` 只读无需确认。`add`/`update` 是写操作，执行前必须展示环境、host、slug 与影响。`verify` 与 `add` 的内联验证会在目标机真实执行命令（`command` 型）或向 URL 发请求（`http` 型）：**追加执行前必须展示目标机器与完整命令/URL 并取得明确确认**；命令继承 Client OS 账户权限，不是沙箱。
+
+### 成功判定与已知限制
+
+成功判定：零退出且 `--json` 可解析；`add`/`verify` 验证失败时非零退出并带出证据，条目保留为 `draft`。已知限制：Server 不代验证也不后台探测；按名称解析 host 依赖在线列表，离线机器只能按 clientId 处理；`slug` 创建后不可改；UI 无验证入口。
 
 ## 后续 CLI 能力扩展规则
 

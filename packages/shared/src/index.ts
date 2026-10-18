@@ -1048,3 +1048,33 @@ export type {
 	FrpRuntimeStateReport,
 	FrpRuntimeStatus,
 } from "./frp-runtime.js";
+
+// ── 功能条目（ADR-0056）：操作者/Agent 声明的调用契约与验证证据 ──
+export {
+	FEATURE_ERROR_CODES,
+	FEATURE_SCOPES,
+	FEATURE_STALE_AFTER_DAYS,
+	FEATURE_STATUSES,
+	FEATURE_VERIFICATION_SOURCES,
+	FeatureProtocolError,
+	getFeatureFreshness,
+	parseFeatureContract,
+	parseFeatureCreateInput,
+	parseFeatureInputs,
+	parseFeatureInvocation,
+	parseFeatureUpdateInput,
+	parseFeatureVerificationReport,
+} from "./feature.js";
+export type {
+	FeatureCreateInput,
+	FeatureErrorCode,
+	FeatureFreshness,
+	FeatureInfo,
+	FeatureInputParam,
+	FeatureInvocation,
+	FeatureScope,
+	FeatureStatus,
+	FeatureUpdateInput,
+	FeatureVerification,
+	FeatureVerificationSource,
+} from "./feature.js";
