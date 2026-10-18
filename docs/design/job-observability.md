@@ -1,6 +1,6 @@
 # Job 日志与事件链
 
-> 状态：Current｜维护责任：Server/Client 维护者｜最后核验：2026-10-17｜适用版本：`0.20.0` / 当前 `main`
+> 状态：Current｜维护责任：Server/Client 维护者｜最后核验：2026-10-18｜适用版本：`0.20.1` / 当前 `main`
 >
 > 长期决策见 [ADR-0054](../adr/0054-job-log-event-chain.md)；代码与 Shared、Prisma schema 是运行事实的最终权威。
 
