@@ -10,6 +10,7 @@
 - **客户端相位上报 `job:log`**：新版本 Client 额外上报 `received/spawned/exited/local_settled/cancel_received/kill_failed/drain_timeout`，Server 校验 `jobId` 归属并限流后落库。旧 Client 不报相位时链路仍完整；新 Client 对旧 Server 发送该事件会被静默忽略，**不提升协议版本**。
 - **`vcpdeck jobs logs <jobId>`**：按 `seq` 升序读取事件链，支持 `--since`（增量游标）、`--limit`、`--level`、`--json`；Job 详情页新增只读「日志事件」时间线。排查顺序变为 `jobs list --status=error` → `jobs logs <jobId>` → `jobs get <jobId>`。
 - **取消者进入持久化审计**：`jobs cancel` 此前丢弃操作者，现在写入 `cancel_requested` 事件（操作者、来源、原状态、请求 id），可回答“谁取消的、有没有生效”。
+- **升级与回退行为（本版为增量 schema）**：只新增 `JobLogEvent` 表，升级时由 Launcher preStart 的 `prisma db push` 自动建表，**不需要** `--accept-data-loss` 或人工预执行；自动回退不还原数据库，旧版本忽略该表仍可正常启动；手工降级到不含该表的版本时，若表中已有事件，`db push` 会因数据损失保护**拒绝执行并保留数据**（空表则会被静默删除，无数据损失）。
 
 ## [0.20.0] - 2026-10-17
 
