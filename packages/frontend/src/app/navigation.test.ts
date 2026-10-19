@@ -44,10 +44,16 @@ describe("resolveModule", () => {
 			"映射",
 			"功能",
 			"开发",
+			"自动化",
 			"发版",
 			"设置",
 		]);
 		expect(MODULES.map((mod) => mod.id)).not.toContain("agent");
+		// 「开发」= 远程 DSH（人机协作），`/remote-dev` = 自动化（无人值守）
+		expect(MODULES.find((mod) => mod.id === "develop")?.path).toBe("/develop");
+		expect(
+			MODULES.find((mod) => mod.id === "develop")?.sub,
+		).toBeUndefined();
 		expect(
 			MODULES.find((mod) => mod.id === "settings")?.sub?.map((s) => s.label),
 		).toEqual(["个人资料", "Token", "Git 密钥", "存储", "身份管理"]);

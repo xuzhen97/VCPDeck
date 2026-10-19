@@ -31,6 +31,7 @@ export const MACHINE_TABS = [
 	["frp", "映射"],
 	["jobs", "任务记录"],
 	["terminal", "终端"],
+	["develop", "开发"],
 	["features", "功能"],
 ] as const;
 

@@ -6,6 +6,7 @@ import type {
 	RemoteDevClientEvent,
 	RemoteDevPortInfo,
 	RemoteDevSessionInfo,
+	RemoteDevTranscriptPayload,
 } from "@vcpdeck/shared";
 import { createAppSocket } from "../terminal/terminal-socket.js";
 
@@ -44,6 +45,8 @@ export interface RemoteDevSocket {
 	resync(sessionId: string): Promise<void>;
 	onState(cb: (payload: RemoteDevStatePayload) => void): () => void;
 	onAgentEvent(cb: (event: RemoteDevClientEvent) => void): () => void;
+	/** 附着成功后的历史回放。 */
+	onTranscript(cb: (payload: RemoteDevTranscriptPayload) => void): () => void;
 	onPortState(cb: (port: RemoteDevPortInfo) => void): () => void;
 	onClosed(cb: (payload: { sessionId: string; reason?: string }) => void): () => void;
 	onError(cb: (payload: { code: string; message: string }) => void): () => void;
@@ -124,6 +127,7 @@ export function createRemoteDevSocket(
 			request<void>(socket, Events.RDS_RESYNC, { sessionId }),
 		onState: (cb) => subscribe(Events.RDS_STATE, cb),
 		onAgentEvent: (cb) => subscribe(Events.RDS_AGENT_EVENT, cb),
+		onTranscript: (cb) => subscribe(Events.RDS_TRANSCRIPT, cb),
 		onPortState: (cb) => subscribe(Events.RDS_PORT_STATE, cb),
 		onClosed: (cb) => subscribe(Events.RDS_CLOSED, cb),
 		onError: (cb) => subscribe(Events.RDS_ERROR, cb),

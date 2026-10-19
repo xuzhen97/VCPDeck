@@ -7,6 +7,7 @@ import { ConsoleShell } from "@/app/console-shell";
 import { useAuth } from "@/auth-context";
 import { LoadingState } from "@/components/async-state";
 import { DashboardPage } from "@/pages/dashboard-page";
+import { DevelopDshPage } from "@/pages/develop-dsh-page";
 import { FrpPage } from "@/pages/frp-page";
 import { FeaturesPage } from "@/pages/machine-features-panel";
 import { JobDetailPage } from "@/pages/job-detail-page";
@@ -46,6 +47,7 @@ export function AppRoutes() {
 				<Route path="/jobs/:jobId" element={<JobDetailPage />} />
 				<Route path="/frp" element={<FrpPage />} />
 				<Route path="/features" element={<FeaturesPage />} />
+				<Route path="/develop" element={<DevelopDshPage />} />
 				<Route path="/remote-dev" element={<Navigate to="/remote-dev/new" replace />} />
 				<Route path="/remote-dev/new" element={<RemoteDevPage />} />
 				<Route path="/remote-dev/sessions" element={<RemoteDevSessionsPage />} />

@@ -14,6 +14,7 @@ import {
 	Settings,
 	UserRound,
 	Users,
+	Workflow,
 	type LucideIcon,
 } from "lucide-react";
 
@@ -53,14 +54,16 @@ export const MODULES: NavModule[] = [
 	{ id: "jobs", path: "/jobs", label: "任务", icon: ListTodo },
 	{ id: "frp", path: "/frp", label: "映射", icon: Cable },
 	{ id: "features", path: "/features", label: "功能", icon: Blocks },
+	// 「开发」= 人机协作：跨机器远程 DSH，一屏启动并直接进入完整 WebUI。
+	{ id: "develop", path: "/develop", label: "开发", icon: Code2 },
 	{
 		id: "remote-dev",
 		path: "/remote-dev",
-		label: "开发",
-		icon: Code2,
+		label: "自动化",
+		icon: Workflow,
 		sub: [
-			{ path: "/remote-dev/new", label: "新建会话", icon: Plus },
-			{ path: "/remote-dev/sessions", label: "会话历史", icon: History },
+			{ path: "/remote-dev/new", label: "新建任务", icon: Plus },
+			{ path: "/remote-dev/sessions", label: "运行记录", icon: History },
 		],
 	},
 	{ id: "releases", path: "/releases", label: "发版", icon: Rocket },

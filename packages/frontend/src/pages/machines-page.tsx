@@ -5,6 +5,7 @@ import {
 	FolderOpen,
 	History,
 	LayoutDashboard,
+	MonitorPlay,
 	Network,
 	SquareTerminal,
 	TerminalSquare,
@@ -59,7 +60,16 @@ const tabIcons: Record<string, LucideIcon> = {
 	frp: Network,
 	jobs: History,
 	terminal: SquareTerminal,
+	develop: MonitorPlay,
 };
+
+/**
+ * 卡片上只放高频入口。
+ *
+ * 映射 / 任务记录 / 功能 都有全局页，重复摆在这里只会把卡片撑成一行 tab 栏；
+ * 详情页仍然保留全部 tab。
+ */
+const CARD_TABS = ["overview", "execute", "files", "terminal", "develop"] as const;
 
 export function MachinesPage() {
 	const sdk = useSdk();
@@ -156,7 +166,8 @@ function MachineCard({ client }: { client: ClientInfo }) {
 					<StatusChip label={installation.label} tone={installation.tone} />
 				</div>
 				<div className="mt-5 flex flex-wrap gap-3 border-t border-border/60 pt-4 text-sm">
-					{MACHINE_TABS.map(([key, label]) => {
+					{CARD_TABS.map((key) => {
+						const label = MACHINE_TABS.find(([tab]) => tab === key)?.[1] ?? key;
 						const Icon = tabIcons[key];
 						return (
 							<Link

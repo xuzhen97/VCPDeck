@@ -136,7 +136,7 @@ describe("RemoteDevPage 续接", () => {
 		expect(await screen.findByText(/将续接会话 rds_old/)).toBeVisible();
 		expect(screen.getByRole("combobox", { name: "Agent" })).toBeDisabled();
 		expect(screen.getByLabelText(/Workspace/)).toBeDisabled();
-		await user.click(screen.getByRole("button", { name: "创建开发会话" }));
+		await user.click(screen.getByRole("button", { name: "创建任务" }));
 		await waitFor(() => {
 			expect(
 				(sdk as unknown as { remoteDev: { create: ReturnType<typeof vi.fn> } })
@@ -177,7 +177,7 @@ describe("RemoteDevPage 续接", () => {
 		);
 		expect(await screen.findByText(/无法读取要续接的会话/)).toBeVisible();
 		// 读不到来源时退回新建：不得把已知无效的 resumeFromSessionId 提交上去
-		await user.click(screen.getByRole("button", { name: "创建开发会话" }));
+		await user.click(screen.getByRole("button", { name: "创建任务" }));
 		await waitFor(() => {
 			expect(
 				(sdk as unknown as { remoteDev: { create: ReturnType<typeof vi.fn> } })

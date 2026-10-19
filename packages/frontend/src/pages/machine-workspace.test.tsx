@@ -255,7 +255,7 @@ describe("MachineWorkspace 名称双击编辑", () => {
 
 		expect(await screen.findByText("我的NAS")).toBeVisible();
 		expect(rename).toHaveBeenCalledWith("c1", "我的NAS");
-		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+		expect(screen.queryByRole("textbox", { name: "机器名称" })).not.toBeInTheDocument();
 	});
 
 	it("Escape 取消编辑且不调用改名", async () => {
@@ -267,7 +267,7 @@ describe("MachineWorkspace 名称双击编辑", () => {
 		fireEvent.change(input, { target: { value: "改一半" } });
 		fireEvent.keyDown(input, { key: "Escape" });
 
-		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+		expect(screen.queryByRole("textbox", { name: "机器名称" })).not.toBeInTheDocument();
 		expect(screen.getByText("workstation")).toBeVisible();
 		expect(rename).not.toHaveBeenCalled();
 	});
@@ -288,6 +288,6 @@ describe("MachineWorkspace 名称双击编辑", () => {
 		expect(await screen.findByTestId("machine-name-error")).toHaveTextContent(
 			"该名称已被其他机器占用",
 		);
-		expect(screen.getByRole("textbox")).toBeInTheDocument();
+		expect(screen.getByRole("textbox", { name: "机器名称" })).toBeInTheDocument();
 	});
 });
