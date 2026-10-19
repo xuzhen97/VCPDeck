@@ -162,3 +162,18 @@ describe("RemoteDevRuntime", () => {
 		expect(h.host.close).toHaveBeenCalledTimes(1);
 	});
 });
+
+describe("listSessions（注册时上报存活会话）", () => {
+	it("只报告仍在运行的会话，关闭后不再上报", async () => {
+		const { runtime } = makeRuntime();
+		expect(runtime.listSessions()).toEqual([]);
+
+		const created = await runtime.create(createCommand);
+		expect(runtime.listSessions()).toEqual([
+			{ sessionId: created.sessionId, generationId: created.generationId },
+		]);
+
+		await runtime.close(created.sessionId);
+		expect(runtime.listSessions()).toEqual([]);
+	});
+});

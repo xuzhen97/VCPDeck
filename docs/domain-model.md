@@ -108,6 +108,14 @@ Capability 是能力声明，不是用户权限：
 - `updatedAt` 由 Server 写入；注解是说明性事实，未验证可达性，不参与授权，也不构成连通性保证；
 - 写入口为 `PUT /api/clients/:clientId/annotations`（全量替换，空对象清除）。
 
+### 4.5 远程 DSH 地址（ADR-0059）
+
+- `dshWebUrl` 是**操作者登记**的目标机 DSH WebUI 入口（经 FRP 或内网暴露），与 Client 上报事实分离；注册、心跳、重连与改名都不会覆盖。
+- 只接受 `http/https`、不含用户名口令、长度不超过 2048；空串与 `null` 都表示清除登记。
+- Server **不验证可达性**，也不主动探测（探测会形成 SSRF 面，且目标往往只在操作者本机网络可达）；登记不参与授权。
+- 该地址可能携带一次性 token，因此只经 API 按需下发，**不得写入日志、审计正文或文档**。
+- 写入口为 `PUT /api/clients/:clientId/dsh-web`（`{ url: string | null }`）；格式非法返回 400 `INVALID_DSH_WEB_URL`。
+
 ## 5. Job
 
 Job 是一次具有目标 Client、类型、输入、生命周期、结果和操作者审计的远程操作。

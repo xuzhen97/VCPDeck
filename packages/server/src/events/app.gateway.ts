@@ -319,6 +319,14 @@ export class AppGateway {
         ports: await this.remoteDev.ports(parsed.sessionId),
         attachment,
       });
+      // 回放历史对话：单独一个事件而不是塞进 attach 响应，避免旧前端解析失败。
+      // 回放失败不影响附着本身。
+      await this.remoteDev
+        .transcript(parsed.sessionId)
+        .then((transcript) => {
+          client.emit(Events.RDS_TRANSCRIPT, transcript);
+        })
+        .catch(() => undefined);
       return { ok: true, data: attachment };
     } catch (error) {
       return this.rdsError(error);

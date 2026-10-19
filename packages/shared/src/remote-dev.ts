@@ -806,3 +806,97 @@ function parseStringArray(
 		return item;
 	});
 }
+
+// ── 会话 transcript（历史回放） ──
+
+/** 每个会话保留的 transcript 上限；超出后丢弃最早的记录。 */
+export const RDS_TRANSCRIPT_MAX_ENTRIES = 400;
+
+/** 单条 transcript 正文的字节上限。 */
+const RDS_TRANSCRIPT_MAX_TEXT_BYTES = 64 * 1024;
+
+/**
+ * 会话 transcript 的一条记录。
+ *
+ * `prompt` 是操作者发出的消息（Server 侧按操作落库）；`event` 与实时事件
+ * `rds:event` 中的 agent 事件同构，前端可以用同一套渲染回放历史对话。
+ */
+export type RemoteDevTranscriptEntry =
+	| { seq: number; at: string; kind: "prompt"; text: string }
+	| { seq: number; at: string; kind: "event"; event: AcpAdapterEvent };
+
+/** `rds:transcript` 负载：附着成功后回放该会话最近的对话。 */
+export interface RemoteDevTranscriptPayload {
+	sessionId: string;
+	entries: RemoteDevTranscriptEntry[];
+	/** 因保留上限丢弃了更早的记录时为 true。 */
+	truncated: boolean;
+}
+
+/** 严格解析 `rds:transcript` 负载；未知字段与未知 kind 一律拒绝。 */
+export function parseRemoteDevTranscriptPayload(
+	value: unknown,
+): RemoteDevTranscriptPayload {
+	if (!isRecord(value)) {
+		throw new RemoteDevProtocolError("rds:transcript 必须为对象");
+	}
+	assertKeys(value, ["sessionId", "entries", "truncated"], "rds:transcript");
+	assertString(value.sessionId, "sessionId", RDS_LIMITS.maxSessionIdBytes);
+	if (!Array.isArray(value.entries)) {
+		throw new RemoteDevProtocolError("entries 必须为数组");
+	}
+	if (value.entries.length > RDS_TRANSCRIPT_MAX_ENTRIES) {
+		throw new RemoteDevProtocolError(
+			`entries 超过 ${RDS_TRANSCRIPT_MAX_ENTRIES} 条`,
+		);
+	}
+	if (typeof value.truncated !== "boolean") {
+		throw new RemoteDevProtocolError("truncated 必须为布尔值");
+	}
+	const entries = value.entries.map((item, index) =>
+		parseRemoteDevTranscriptEntry(item, index),
+	);
+	return {
+		sessionId: value.sessionId,
+		entries,
+		truncated: value.truncated,
+	};
+}
+
+function parseRemoteDevTranscriptEntry(
+	value: unknown,
+	index: number,
+): RemoteDevTranscriptEntry {
+	const what = `entries[${index}]`;
+	if (!isRecord(value)) {
+		throw new RemoteDevProtocolError(`${what} 必须为对象`);
+	}
+	if (
+		typeof value.seq !== "number" ||
+		!Number.isInteger(value.seq) ||
+		value.seq < 0
+	) {
+		throw new RemoteDevProtocolError(`${what}.seq 必须为非负整数`);
+	}
+	assertString(value.at, `${what}.at`, 64);
+	if (value.kind === "prompt") {
+		assertKeys(value, ["seq", "at", "kind", "text"], what);
+		assertString(value.text, `${what}.text`, RDS_TRANSCRIPT_MAX_TEXT_BYTES);
+		return {
+			seq: value.seq,
+			at: value.at,
+			kind: "prompt",
+			text: value.text,
+		};
+	}
+	if (value.kind === "event") {
+		assertKeys(value, ["seq", "at", "kind", "event"], what);
+		return {
+			seq: value.seq,
+			at: value.at,
+			kind: "event",
+			event: parseAcpAdapterEvent(value.event),
+		};
+	}
+	throw new RemoteDevProtocolError(`${what}.kind 未知`);
+}

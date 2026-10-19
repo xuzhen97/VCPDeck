@@ -1,5 +1,5 @@
 import { io, type Socket } from "socket.io-client";
-import { Events } from "@vcpdeck/shared";
+import { Events, parseDshWebCommand } from "@vcpdeck/shared";
 import type {
 	GitSshCapability,
 	MachineRegister,
@@ -46,6 +46,8 @@ import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge
 import { createAcpHost } from "./acp/acp-host.js";
 import { attachAcpTaskBridge } from "./acp/acp-bridge.js";
 import { attachRemoteDevBridge } from "./remote-dev/remote-dev-bridge.js";
+import { createRemoteDevRuntime } from "./remote-dev/remote-dev-runtime.js";
+import { createDshWebHost } from "./dsh-web/dsh-web-host.js";
 import { connectRemoteDevTunnel } from "./remote-dev/remote-dev-tunnel.js";
 import { ClientLauncher } from "./launcher-control.js";
 import { randomUUID } from "node:crypto";
@@ -362,12 +364,21 @@ export function connect(): Socket {
 		clientId: CLIENT_ID,
 		manager: terminalManager,
 	});
+	// RDS runtime 由 index 持有：注册时要把仍在运行的会话上报给 Server 做对账，
+	// 否则 Client 重启后遗留的会话会一直显示"运行中"。
+	const remoteDevRuntime = verifyOnly
+		? null
+		: createRemoteDevRuntime({
+				createHost: createAcpHost,
+				emit: (event) => socket.emit(Events.RDS_EVENT, event),
+			});
 	if (!verifyOnly) {
 		attachAcpTaskBridge(socket, {
 			clientId: CLIENT_ID,
 			createHost: createAcpHost,
 		});
 		attachRemoteDevBridge(socket, {
+			...(remoteDevRuntime ? { runtime: remoteDevRuntime } : {}),
 			createHost: createAcpHost,
 			tunnelFactory: (sessionId) =>
 				connectRemoteDevTunnel({
@@ -378,6 +389,65 @@ export function connect(): Socket {
 				}),
 		});
 	}
+
+	// 远程 DSH：Server 代操作者起停本机 `dsh web`（ADR-0059 修订）。
+	// 只在本机 loopback 监听，对外由 Server 侧 FRP 映射；token 只回传给 Server。
+	const dshWebHost = verifyOnly ? null : createDshWebHost();
+	socket.on(Events.DSH_WEB_COMMAND, (raw: unknown) => {
+		void (async () => {
+			let command: ReturnType<typeof parseDshWebCommand>;
+			try {
+				command = parseDshWebCommand(raw);
+			} catch {
+				// 非法命令不进入状态机，也不回包（Server 侧有超时兜底）。
+				return;
+			}
+			if (!dshWebHost) {
+				socket.emit(Events.DSH_WEB_RESULT, {
+					requestId: command.requestId,
+					ok: false,
+					error: {
+						code: "DSH_WEB_UNAVAILABLE",
+						message: "迁移验证模式不托管 dsh web",
+					},
+				});
+				return;
+			}
+			try {
+				if (command.action === "start") {
+					const started = await dshWebHost.start({ port: command.port });
+					socket.emit(Events.DSH_WEB_RESULT, {
+						requestId: command.requestId,
+						ok: true,
+						port: started.port,
+						token: started.token,
+					});
+					return;
+				}
+				await dshWebHost.stop(command.port);
+				socket.emit(Events.DSH_WEB_RESULT, {
+					requestId: command.requestId,
+					ok: true,
+				});
+			} catch (cause) {
+				const code =
+					(cause as { code?: unknown }).code ?? "DSH_WEB_COMMAND_FAILED";
+				const message =
+					(cause as { message?: unknown }).message ?? "dsh web 命令失败";
+				socket.emit(Events.DSH_WEB_RESULT, {
+					requestId: command.requestId,
+					ok: false,
+					error: {
+						code: typeof code === "string" ? code : "DSH_WEB_COMMAND_FAILED",
+						message:
+							typeof message === "string"
+								? message.slice(0, 500)
+								: "dsh web 命令失败",
+					},
+				});
+			}
+		})();
+	});
 
 	// 连接后：探测终端能力并发现 Shell（幂等，不阻塞注册超过 3 秒）
 	let terminalReady: Promise<void> | null = null;
@@ -442,6 +512,8 @@ export function connect(): Socket {
 				runtimeSecurity,
 				process.env,
 				gitSshStatus,
+				// verifyOnly 不接管工作状态，也不该让 Server 以为"没有存活会话"
+				verifyOnly ? undefined : (remoteDevRuntime?.listSessions() ?? []),
 			),
 		getStatusReport: () => ({
 			clientId: CLIENT_ID,

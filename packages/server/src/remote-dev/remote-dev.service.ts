@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type {
 	ActorContext,
+	AcpAdapterEvent,
 	PaginatedResult,
 	RemoteDevAcpSessionReport,
 	RemoteDevClientCommand,
@@ -12,8 +13,15 @@ import type {
 	RemoteDevSessionCreateRequest,
 	RemoteDevSessionInfo,
 	RemoteDevState,
+	RemoteDevTranscriptEntry,
+	RemoteDevTranscriptPayload,
 } from "@vcpdeck/shared";
-import { RDS_LIMITS, REMOTE_DEV_TERMINAL_STATES } from "@vcpdeck/shared";
+import {
+	parseAcpAdapterEvent,
+	RDS_LIMITS,
+	RDS_TRANSCRIPT_MAX_ENTRIES,
+	REMOTE_DEV_TERMINAL_STATES,
+} from "@vcpdeck/shared";
 import { AgentRegistryService } from "../agent-registry/agent-registry.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { TerminalService } from "../terminal/terminal.service.js";
@@ -77,6 +85,85 @@ export interface RemoteDevServiceDeps {
 }
 
 const TERMINAL_STATES: readonly RemoteDevState[] = REMOTE_DEV_TERMINAL_STATES;
+
+/**
+ * 相邻 agent 事件能否合并成一条 transcript。
+ *
+ * 流式增量如果逐条落库，一次长回复会产生成百上千行；这里把连续的
+ * message/thought 增量合并、把 tool 状态就地更新，行数约等于"对话块数"。
+ * 返回 null 表示必须新起一条。
+ */
+function mergeAdjacentEvent(
+	previous: AcpAdapterEvent,
+	next: AcpAdapterEvent,
+): AcpAdapterEvent | null {
+	if (
+		previous.type === "agent.message.delta" &&
+		next.type === "agent.message.delta" &&
+		previous.messageId === next.messageId
+	) {
+		return {
+			type: "agent.message.delta",
+			messageId: previous.messageId,
+			text: previous.text + next.text,
+		};
+	}
+	if (
+		previous.type === "agent.thought.delta" &&
+		next.type === "agent.thought.delta"
+	) {
+		return {
+			type: "agent.thought.delta",
+			text: previous.text + next.text,
+		};
+	}
+	if (
+		(previous.type === "tool.started" || previous.type === "tool.updated") &&
+		next.type === "tool.updated" &&
+		previous.toolCallId === next.toolCallId
+	) {
+		const title = next.title ?? previous.title;
+		const status = next.status ?? previous.status;
+		return {
+			type: "tool.started",
+			toolCallId: previous.toolCallId,
+			title: title ?? "",
+			...(status ? { status } : {}),
+			...(next.content ? { content: next.content } : {}),
+		};
+	}
+	if (
+		previous.type === "usage.updated" &&
+		next.type === "usage.updated"
+	) {
+		return next;
+	}
+	if (previous.type === "plan.updated" && next.type === "plan.updated") {
+		return next;
+	}
+	return null;
+}
+
+/** 反序列化一条 transcript payload；损坏的行跳过而不是让整个回放失败。 */
+function readPersistedEvent(payload: string): AcpAdapterEvent | null {
+	try {
+		return parseAcpAdapterEvent(JSON.parse(payload));
+	} catch {
+		return null;
+	}
+}
+
+/** 读取落库的 prompt 正文；损坏或空文本返回 null。 */
+function readPersistedPrompt(payload: string): string | null {
+	try {
+		const parsed = JSON.parse(payload) as { text?: unknown };
+		return typeof parsed.text === "string" && parsed.text.length > 0
+			? parsed.text
+			: null;
+	} catch {
+		return null;
+	}
+}
 
 @Injectable()
 export class RemoteDevService {
@@ -347,13 +434,28 @@ export class RemoteDevService {
 		}
 		const socketId = await this.clientSocketId(session.clientId);
 		if (!socketId) throw error("RDS_CLIENT_OFFLINE", "目标 Client 不在线", 409);
-		const result = await this.request(socketId, {
-			action: "agent.prompt",
-			requestId: this.requestId(),
-			sessionId: id,
-			text,
-		}, 10 * 60_000);
+		// 先落库再做请求：一回回合的事件会持续写进 transcript，prompt 必须排在它们前面，
+		// 否则回放时用户消息会跑到 agent 回复后面。请求失败则回滚这一条。
+		const seq = await this.persistPrompt(id, text);
+		const rollback = async (): Promise<void> => {
+			await this.deps.prisma.remoteDevEvent
+				.deleteMany({ where: { sessionId: id, seq } })
+				.catch(() => undefined);
+		};
+		let result: RemoteDevCommandResult;
+		try {
+			result = await this.request(socketId, {
+				action: "agent.prompt",
+				requestId: this.requestId(),
+				sessionId: id,
+				text,
+			}, 10 * 60_000);
+		} catch (cause) {
+			await rollback();
+			throw cause;
+		}
 		if (!result.ok) {
+			await rollback();
 			throw error("RDS_COMMAND_FAILED", result.error?.message ?? "prompt 失败", 502);
 		}
 		return result.stopReason ?? "end_turn";
@@ -420,6 +522,8 @@ export class RemoteDevService {
 				where: { id: event.sessionId },
 				data: { lastSeq: Math.max(session.lastSeq, event.seq) },
 			});
+			// 落库失败不能影响实时转发：宁可丢一条回放记录，也不能让浏览器看不到当前输出。
+			await this.persistAgentEvent(event.sessionId, event.event).catch(() => undefined);
 		}
 		if (event.type === "agent.status") {
 			await this.deps.prisma.remoteDevSession.update({
@@ -660,6 +764,148 @@ export class RemoteDevService {
 				? { id: report.sessionId, generationId: report.generationId }
 				: { id: report.sessionId },
 			data: { acpSessionId: report.acpSessionId },
+		});
+	}
+
+	/**
+	 * 读取会话 transcript（供附着后回放）。
+	 *
+	 * 损坏的行直接跳过：回放失败不该让会话打不开。
+	 */
+	async transcript(id: string): Promise<RemoteDevTranscriptPayload> {
+		const rows = await this.deps.prisma.remoteDevEvent.findMany({
+			where: { sessionId: id },
+			orderBy: { seq: "asc" },
+		});
+		const entries: RemoteDevTranscriptEntry[] = [];
+		for (const row of rows) {
+			const at = row.createdAt.toISOString();
+			if (row.kind === "prompt") {
+				const text = readPersistedPrompt(row.payload);
+				if (text !== null) entries.push({ seq: row.seq, at, kind: "prompt", text });
+				continue;
+			}
+			const event = readPersistedEvent(row.payload);
+			if (event) entries.push({ seq: row.seq, at, kind: "event", event });
+		}
+		const first = rows[0];
+		return {
+			sessionId: id,
+			entries,
+			truncated: first !== undefined && first.seq > 1,
+		};
+	}
+
+	/**
+	 * Client 离线时的会话收敛。
+	 *
+	 * agent 进程活在 Client 上：socket 断开后会话不可能继续产出事件，必须停止
+	 * 对外声称 `active`。这里只降级为 `disconnected`，真正的"是否已死"由 Client
+	 * 重新注册时上报的存活列表判定（见 `reconcileClientSessions`）。
+	 */
+	async handleClientOffline(clientId: string): Promise<void> {
+		await this.deps.prisma.remoteDevSession.updateMany({
+			where: { clientId, state: { notIn: [...TERMINAL_STATES] } },
+			data: { state: "disconnected" },
+		});
+	}
+
+	/**
+	 * Client 重新注册时的会话对账（ADR-0058 修订 2026-10-19）。
+	 *
+	 * `reported` 缺省 = 旧 Client 没有上报能力，此时不做任何判定（不能凭"没上报"
+	 * 把别人的会话判死）。空数组 = 明确没有存活会话，该机器所有非终态会话收敛为
+	 * `interrupted`，从而在历史页可选「继续」。
+	 */
+	async reconcileClientSessions(
+		clientId: string,
+		reported: { sessionId: string; generationId: string }[] | undefined,
+	): Promise<void> {
+		if (reported === undefined) return;
+		const alive = new Map(reported.map((item) => [item.sessionId, item.generationId]));
+		const rows = (await this.deps.prisma.remoteDevSession.findMany({
+			where: { clientId, state: { notIn: [...TERMINAL_STATES] } },
+		})) as unknown as RemoteDevSessionRow[];
+		for (const row of rows) {
+			const generationId = alive.get(row.id);
+			if (generationId !== undefined && generationId === row.generationId) {
+				// 存活：socket 抖动后恢复，不改动其它字段。
+				if (row.state !== "active") {
+					await this.deps.prisma.remoteDevSession.update({
+						where: { id: row.id },
+						data: { state: "active" },
+					});
+				}
+				continue;
+			}
+			await this.deps.prisma.remoteDevSession.update({
+				where: { id: row.id },
+				data: {
+					state: "interrupted",
+					agentStatus: "exited",
+					closeReason: "client-restarted",
+					closedAt: row.closedAt ?? this.now,
+				},
+			});
+			await this.auditSystem(row.id, "interrupted", {
+				reason: "client-restarted",
+			});
+		}
+	}
+
+	/** 落库一条操作者 prompt；返回它的 seq 供失败时回滚。 */
+	private async persistPrompt(id: string, text: string): Promise<number> {
+		const last = await this.deps.prisma.remoteDevEvent.findFirst({
+			where: { sessionId: id },
+			orderBy: { seq: "desc" },
+			select: { seq: true },
+		});
+		const seq = (last?.seq ?? 0) + 1;
+		await this.deps.prisma.remoteDevEvent.create({
+			data: { sessionId: id, seq, kind: "prompt", payload: JSON.stringify({ text }) },
+		});
+		await this.trimTranscript(id, seq);
+		return seq;
+	}
+
+	/** 落库一条 agent 事件；可合并的增量就地更新，避免行数爆炸。 */
+	private async persistAgentEvent(
+		id: string,
+		event: AcpAdapterEvent,
+	): Promise<void> {
+		const last = await this.deps.prisma.remoteDevEvent.findFirst({
+			where: { sessionId: id },
+			orderBy: { seq: "desc" },
+		});
+		if (last?.kind === "event") {
+			const previous = readPersistedEvent(last.payload);
+			const merged = previous ? mergeAdjacentEvent(previous, event) : null;
+			if (merged) {
+				await this.deps.prisma.remoteDevEvent.update({
+					where: { id: last.id },
+					data: { payload: JSON.stringify(merged) },
+				});
+				return;
+			}
+		}
+		const seq = (last?.seq ?? 0) + 1;
+		await this.deps.prisma.remoteDevEvent.create({
+			data: {
+				sessionId: id,
+				seq,
+				kind: "event",
+				payload: JSON.stringify(event),
+			},
+		});
+		await this.trimTranscript(id, seq);
+	}
+
+	/** 按 seq 一次性截断超出保留上限的旧记录。 */
+	private async trimTranscript(id: string, seq: number): Promise<void> {
+		const cutoff = seq - RDS_TRANSCRIPT_MAX_ENTRIES;
+		if (cutoff <= 0) return;
+		await this.deps.prisma.remoteDevEvent.deleteMany({
+			where: { sessionId: id, seq: { lte: cutoff } },
 		});
 	}
 

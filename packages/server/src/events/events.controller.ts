@@ -1,4 +1,5 @@
 import {
+  Optional,
   BadRequestException,
   Controller,
   HttpException,
@@ -21,8 +22,10 @@ import {
   ClientService,
   INVALID_CLIENT_ANNOTATIONS,
   INVALID_CLIENT_NAME,
+  INVALID_DSH_WEB_URL,
 } from "../client/client.service.js";
 import { ClientGateway } from "./client.gateway.js";
+import { DshWebService } from "../dsh-web/dsh-web.service.js";
 import { StorageService } from "../storage/storage.service.js";
 import { Actor } from "../auth/actor.decorator.js";
 import { Public } from "../auth/public.decorator.js";
@@ -35,7 +38,7 @@ import type {
   ClientAnnotationsInput,
 } from "@vcpdeck/shared";
 import { JOB_LOG_LEVELS, type JobLogLevel } from "@vcpdeck/shared";
-import { parseClientAnnotationsInput } from "@vcpdeck/shared";
+import { parseClientAnnotationsInput, parseClientDshWebUrl } from "@vcpdeck/shared";
 
 const INVALID_JOB_PAYLOAD = "INVALID_JOB_PAYLOAD";
 
@@ -127,6 +130,9 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
 		@Inject(ClientService) private readonly clientService: ClientService,
 		@Inject(ClientGateway) private readonly gateway: ClientGateway,
 		@Inject(StorageService) private readonly storageService: StorageService,
+		@Optional()
+		@Inject(DshWebService)
+		private readonly dshWebService?: DshWebService,
 	) {}
 
   @Public()
@@ -386,6 +392,109 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
     const input = parseAnnotationsOrThrow(record.annotations);
     try {
       return await this.clientService.updateAnnotations(clientId, input);
+    } catch (error) {
+      const { code, statusCode, message } = error as {
+        code?: string;
+        statusCode?: number;
+        message?: string;
+      };
+      if (!code || !statusCode) throw error;
+      throw new HttpException({ code, message }, statusCode);
+    }
+  }
+
+	/** 远程 DSH 服务未装配时给出稳定错误，而不是 500。 */
+	private requireDshWeb(): DshWebService {
+		if (!this.dshWebService) {
+			throw new HttpException(
+				{ code: "DSH_WEB_UNAVAILABLE", message: "远程 DSH 通道未启用" },
+				503,
+			);
+		}
+		return this.dshWebService;
+	}
+
+	/** 远程 DSH 受管通道状态（ADR-0059 修订）。 */
+	@Get("clients/:clientId/dsh-web")
+	async getClientDshWeb(@Param("clientId") clientId: string) {
+		try {
+			return await this.requireDshWeb().status(clientId);
+		} catch (error) {
+			const { code, statusCode, message } = error as {
+				code?: string;
+				statusCode?: number;
+				message?: string;
+			};
+			if (!code || !statusCode) throw error;
+			throw new HttpException({ code, message }, statusCode);
+		}
+	}
+
+	/** 一键启动：代起 dsh web 并自动建 FRP 映射。 */
+	@Post("clients/:clientId/dsh-web/start")
+	async startClientDshWeb(@Param("clientId") clientId: string) {
+		try {
+			return await this.requireDshWeb().start(clientId);
+		} catch (error) {
+			const { code, statusCode, message } = error as {
+				code?: string;
+				statusCode?: number;
+				message?: string;
+			};
+			if (!code || !statusCode) throw error;
+			throw new HttpException({ code, message }, statusCode);
+		}
+	}
+
+	/** 一键停止：停进程、删 FRP 映射、清空地址。 */
+	@Post("clients/:clientId/dsh-web/stop")
+	async stopClientDshWeb(@Param("clientId") clientId: string) {
+		try {
+			return await this.requireDshWeb().stop(clientId);
+		} catch (error) {
+			const { code, statusCode, message } = error as {
+				code?: string;
+				statusCode?: number;
+				message?: string;
+			};
+			if (!code || !statusCode) throw error;
+			throw new HttpException({ code, message }, statusCode);
+		}
+	}
+  /**
+   * 登记/清除远程 DSH WebUI 地址（[ADR-0059]）。
+   *
+   * 只登记，不验证可达性：地址由操作者经 FRP/内网暴露，Server 不去探测
+   * （探测会形成 SSRF 面，且目标往往只在操作者本机网络可达）。
+   */
+  @Put("clients/:clientId/dsh-web")
+  async updateClientDshWeb(
+    @Param("clientId") clientId: string,
+    @Body() body: unknown,
+  ) {
+    const record =
+      typeof body === "object" && body !== null
+        ? (body as Record<string, unknown>)
+        : null;
+    if (!record || !Object.hasOwn(record, "url")) {
+      throw new BadRequestException({
+        code: INVALID_DSH_WEB_URL,
+        message: "url is required (string or null)",
+      });
+    }
+
+    let url: string | null;
+    try {
+      url = parseClientDshWebUrl(record.url);
+    } catch (error) {
+      throw new BadRequestException({
+        code: INVALID_DSH_WEB_URL,
+        message: (error as Error).message,
+      });
+    }
+
+    try {
+      return await this.clientService.setDshWebUrl(clientId, url);
     } catch (error) {
       const { code, statusCode, message } = error as {
         code?: string;

@@ -165,6 +165,14 @@ export interface MachineRegister {
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告） */
 	installation?: MachineInstallationStatus;
+	/**
+	 * 可选：注册时仍在运行的 RDS 会话（ADR-0058 修订 2026-10-19）。
+	 *
+	 * 缺省 = 旧 Client 未报告，Server 不得据此判定任何会话失效；
+	 * 空数组 = 新 Client 明确报告"没有存活会话"，Server 据此把该机器遗留的
+	 * `active`/`disconnected` 会话收敛为 `interrupted`。
+	 */
+	remoteDevSessions?: { sessionId: string; generationId: string }[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -385,5 +393,55 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 		result.installation = parseMachineInstallation(value.installation);
 	}
 
+	if (value.remoteDevSessions !== undefined) {
+		result.remoteDevSessions = parseRemoteDevSessionReports(
+			value.remoteDevSessions,
+		);
+	}
+
 	return result;
+}
+
+/** 注册时上报的存活 RDS 会话上限（Client 单机并发会话远小于此值）。 */
+const MAX_REMOTE_DEV_SESSION_REPORTS = 64;
+
+/**
+ * 解析注册时的 RDS 会话上报。
+ *
+ * 这是"谁还活着"的唯一权威来源：空数组表示明确没有存活会话，缺省表示未报告，
+ * 两者语义不同，不能合并处理。
+ */
+function parseRemoteDevSessionReports(
+	value: unknown,
+): { sessionId: string; generationId: string }[] {
+	if (!Array.isArray(value)) {
+		throw new Error("remoteDevSessions 必须为数组");
+	}
+	if (value.length > MAX_REMOTE_DEV_SESSION_REPORTS) {
+		throw new Error(
+			`remoteDevSessions 超过 ${MAX_REMOTE_DEV_SESSION_REPORTS} 项`,
+		);
+	}
+	return value.map((item, index) => {
+		if (!isRecord(item)) {
+			throw new Error(`remoteDevSessions[${index}] 必须为对象`);
+		}
+		for (const key of Object.keys(item)) {
+			if (key !== "sessionId" && key !== "generationId") {
+				throw new Error(`remoteDevSessions[${index}] 含未知字段 ${key}`);
+			}
+		}
+		return {
+			sessionId: requireString(
+				item.sessionId,
+				`remoteDevSessions[${index}].sessionId`,
+				128,
+			),
+			generationId: requireString(
+				item.generationId,
+				`remoteDevSessions[${index}].generationId`,
+				128,
+			),
+		};
+	});
 }

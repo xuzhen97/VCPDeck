@@ -429,3 +429,41 @@ describe("parseMachineRegister gitSsh 能力（ADR-0037/0038）", () => {
 		expect(parsed.capabilityDetails?.gitSsh).toBeUndefined();
 	});
 });
+
+describe("注册时的 RDS 存活上报", () => {
+	const base = {
+		clientId: "c1",
+		hostname: "host",
+		os: "win32",
+		cpuModel: "cpu",
+		totalMemMB: 1024,
+		clientVersion: "0.21.0",
+		capabilities: ["remote-dev"],
+	};
+
+	it("缺省表示旧 Client 未上报", () => {
+		expect(parseMachineRegister(base).remoteDevSessions).toBeUndefined();
+	});
+
+	it("空数组表示明确没有存活会话", () => {
+		expect(
+			parseMachineRegister({ ...base, remoteDevSessions: [] }).remoteDevSessions,
+		).toEqual([]);
+	});
+
+	it("解析存活会话并用例字段校验", () => {
+		const parsed = parseMachineRegister({
+			...base,
+			remoteDevSessions: [{ sessionId: "rds_1", generationId: "gen-1" }],
+		});
+		expect(parsed.remoteDevSessions).toEqual([
+			{ sessionId: "rds_1", generationId: "gen-1" },
+		]);
+		expect(() =>
+			parseMachineRegister({
+				...base,
+				remoteDevSessions: [{ sessionId: "rds_1", generationId: "gen-1", x: 1 }],
+			}),
+		).toThrow();
+	});
+});

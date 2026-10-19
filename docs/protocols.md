@@ -48,7 +48,7 @@
 | --- | --- |
 | `/api/auth` | 登录、登出、当前身份、Credential |
 | `/api/identities` | admin 身份管理 |
-| `/api/clients` | 在线 Client、别名、操作者注解和终端子资源 |
+| `/api/clients` | 在线 Client、别名、操作者注解、远程 DSH 地址（`dshWebUrl`，ADR-0059）和终端子资源；`PUT /api/clients/:clientId/dsh-web` 登记/清除（`{url: string \| null}`，非法返回 400 `INVALID_DSH_WEB_URL`）；`POST /api/clients/:clientId/dsh-web/start\|stop` 受管生命周期（代起 dsh web + 自动建/删 FRP 映射），`GET` 查状态 |
 | `/api/jobs` | Job 创建、分页查询、详情、取消和日志事件链 |
 | `/api/files` | 文件上传/导出会话及进度 |
 | `/api/storage` | 签名能力、文件流、Provider 配置和 Storage Share 管理 |
@@ -255,7 +255,7 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 
 | 事件 | 方向 | 语义 |
 | --- | --- | --- |
-| `register` | Client → Server | 注册静态信息、版本和 capability |
+| `register` | Client → Server | 注册静态信息、版本和 capability；可选 `remoteDevSessions: {sessionId, generationId}[]`（缺省=旧 Client 未报告，空数组=明确无存活 RDS 会话） |
 | `heartbeat` | Client → Server | 动态指标和运行 Job |
 | `status:report` | Client → Server | 通用 Job 重连对账 |
 | `job:dispatch` | Server → Client | 下发判别联合 Job |
@@ -277,6 +277,9 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 | `rds:command-result` | Client → Server | 按 `requestId` 回报；create 带 `generationId`，prompt 带 `stopReason` |
 | `rds:event` | Client → Server | RDS 归一化 ACP 事件与状态（`agent.event/agent.status/session.ended`） |
 | `rds:acp-session` | Client → Server | 创建成功后上报 ACP 侧 `sessionId`（`{sessionId, generationId, acpSessionId}`）；独立事件以便旧 Server 静默忽略 |
+| `rds:transcript` | Server → Browser | 附着成功后回放会话 transcript：`{sessionId, entries, truncated}`；`entries[]` 为 `{seq, at, kind:"prompt", text}` 或 `{seq, at, kind:"event", event}` |
+| `dshweb:command` | Server → Client | 远程 DSH 受管生命周期：`{requestId, action:"start"\|"stop", clientId, port}`；Server 分配 loopback 端口，Client 只按它启动 |
+| `dshweb:result` | Client → Server | 回执：`{requestId, ok, port?, token?, error?}`；token 只在此通道传递，不写日志 |
 
 所有跨信任边界 payload 长期必须先通过 Shared parse 函数或等价严格校验，再进入领域服务。Terminal 当前已采用严格 parser；exec 和文件 Job 的双端校验仍有本文件所列实现偏移。
 
@@ -357,9 +360,12 @@ Server 推送：
 
 - `rds:state` `{session, ports, attachment?}`；
 - `rds:agent:event`（ACP 归一化事件，带 `seq`）；
+- `rds:transcript` `{sessionId, entries, truncated}`：`rds:attach` 成功后在 `rds:state` 之后单独下发，回放该会话最近的对话（最多 400 条）；旧前端忽略未订阅事件，不影响附着；
 - `rds:port:state`；
 - `rds:closed`；
 - `rds:error` `{code, message}`。
+
+transcript 由 Server 侧落库（RemoteDevEvent）：gent.event 到达时合并写入，prompt 在命令发出前写入、失败回滚。	runcated=true 表示更早记录已按上限丢弃。
 
 ### 4.2 RDS 数据面 namespace
 

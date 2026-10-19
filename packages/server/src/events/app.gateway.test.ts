@@ -149,6 +149,11 @@ describe("AppGateway RDS handlers", () => {
 		const remoteDev = {
 			get: vi.fn().mockResolvedValue(SESSION),
 			ports: vi.fn().mockResolvedValue([]),
+			transcript: vi.fn().mockResolvedValue({
+				sessionId: "r1",
+				entries: [],
+				truncated: false,
+			}),
 		};
 		const attachments = {
 			attach: vi.fn().mockReturnValue({
@@ -166,6 +171,12 @@ describe("AppGateway RDS handlers", () => {
 			Events.RDS_STATE,
 			expect.objectContaining({ session: SESSION, ports: [] }),
 		);
+		// 附着后回放历史对话：单独事件，旧前端可忽略
+		expect(socket.emit).toHaveBeenCalledWith(Events.RDS_TRANSCRIPT, {
+			sessionId: "r1",
+			entries: [],
+			truncated: false,
+		});
 		expect(result).toEqual({
 			ok: true,
 			data: { attachmentId: "s1", mode: "operator", reconnectToken: "tok" },

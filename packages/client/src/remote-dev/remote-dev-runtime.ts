@@ -46,6 +46,13 @@ export interface RemoteDevRuntime {
 		outcome: AcpPermissionOutcome,
 	): void;
 	close(sessionId: string, reason?: string): Promise<void>;
+	/**
+	 * 仍在运行的会话（sessionId + generationId）。
+	 *
+	 * 注册到 Server 时上报，作为"谁还活着"的权威来源：Server 用它把 Client
+	 * 重启遗留的会话收敛为 `interrupted`，否则历史页会一直显示"运行中"。
+	 */
+	listSessions(): { sessionId: string; generationId: string }[];
 }
 
 interface PendingPermission {
@@ -281,6 +288,18 @@ export function createRemoteDevRuntime(
 				reason: "closed",
 			});
 			sessions.delete(sessionId);
+		},
+
+		listSessions() {
+			const alive: { sessionId: string; generationId: string }[] = [];
+			for (const session of sessions.values()) {
+				if (session.closed) continue;
+				alive.push({
+					sessionId: session.sessionId,
+					generationId: session.generationId,
+				});
+			}
+			return alive;
 		},
 	};
 }

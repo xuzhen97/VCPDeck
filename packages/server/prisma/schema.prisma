@@ -18,6 +18,14 @@ model Client {
   capabilities      String    @default("[]")
   capabilityDetails String    @default("{}")
   annotations       String    @default("{}")
+  /// 操作者登记的远程 DSH WebUI 地址（ADR-0059）；null 表示未登记
+  dshWebUrl         String?
+  /// 远程 DSH 通道状态（ADR-0059 修订）：stopped/starting/running/failed
+  dshWebState       String    @default("stopped")
+  /// 启动的 dsh web 监听端口（loopback）
+  dshWebPort        Int?
+  /// 为该端口创建的 FRP 映射 id；停止时据此清理
+  dshWebFrpMappingId String?
   disks             String    @default("[]")
   online            Boolean   @default(false)
   lastHeartbeatAt   DateTime?
@@ -648,10 +656,27 @@ model RemoteDevSession {
   cleanupStatus    String   @default("unknown")
   ports            RemoteDevPort[]
   audits           RemoteDevAuditEvent[]
+  events           RemoteDevEvent[]
 
   @@index([clientId, state])
   @@index([state, expiresAt])
   @@index([ownerIdentityId, createdAt])
+}
+
+/// 会话 transcript：按操作落库，供附着后回放（ADR-0058 修订 2026-10-19）。
+model RemoteDevEvent {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   RemoteDevSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  /// 会话内单调递增序号，回放与去重都依赖它。
+  seq       Int
+  /// prompt（操作者消息）或 event（agent 事件，payload 为 AcpAdapterEvent JSON）。
+  kind      String
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@unique([sessionId, seq])
+  @@index([sessionId, seq])
 }
 
 model RemoteDevPort {

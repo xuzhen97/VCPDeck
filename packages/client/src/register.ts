@@ -52,6 +52,7 @@ export function getRegisterInfo(
 	runtimeSecurity?: RuntimeSecurityInfo,
 	env: NodeJS.ProcessEnv = process.env,
 	gitSshStatus?: GitSshCapability,
+	remoteDevSessions?: { sessionId: string; generationId: string }[],
 ): MachineRegister {
 	const verifyOnly = isMigrationVerifyOnly(env);
 	const cpus = os.cpus();
@@ -68,6 +69,8 @@ export function getRegisterInfo(
 		caps.push("acp");
 		// RDS 依赖 ACP Host 与本地终端/端口运行时；capability 只表示宿主存在。
 		caps.push("remote-dev");
+		// 远程 DSH：本机可被代启 dsh web（ADR-0059 修订）。
+		caps.push("dsh-web");
 	}
 	const capabilityDetails: MachineRegister["capabilityDetails"] = {};
 	if (!verifyOnly) {
@@ -100,6 +103,10 @@ export function getRegisterInfo(
 	};
 	if (runtimeSecurity?.installation !== undefined) {
 		register.installation = runtimeSecurity.installation;
+	}
+	// 缺省与空数组语义不同：缺省=未报告（旧 Client），空数组=明确没有存活会话。
+	if (remoteDevSessions !== undefined) {
+		register.remoteDevSessions = remoteDevSessions;
 	}
 	return register;
 }

@@ -34,6 +34,8 @@ const clientRow = {
 	clientVersion: "1",
 	capabilities: "[]",
 	capabilityDetails: "{}",
+	annotations: "{}",
+	dshWebUrl: null,
 	disks: "[]",
 	online: true,
 	cpuPercent: null,
@@ -713,6 +715,45 @@ describe("ClientService 操作者注解", () => {
 		expect(clients[1]?.annotations).toEqual({
 			...annotationsInput,
 			updatedAt: now.toISOString(),
+		});
+	});
+});
+
+describe("ClientService 远程 DSH 地址（ADR-0059）", () => {
+	it("登记后投影下发 dshWebUrl", async () => {
+		const update = vi
+			.fn()
+			.mockResolvedValue({ ...clientRow, dshWebUrl: "https://dsh.example.com/" });
+		const prisma = prismaMock({ update }) as never;
+		const service = new ClientService(prisma);
+
+		const result = await service.setDshWebUrl("c1", "https://dsh.example.com/");
+
+		expect(update).toHaveBeenCalledWith({
+			where: { id: "c1" },
+			data: { dshWebUrl: "https://dsh.example.com/" },
+		});
+		expect(result.dshWebUrl).toBe("https://dsh.example.com/");
+	});
+
+	it("清除登记后投影不带该字段", async () => {
+		const update = vi.fn().mockResolvedValue({ ...clientRow, dshWebUrl: null });
+		const prisma = prismaMock({ update }) as never;
+		const service = new ClientService(prisma);
+
+		const result = await service.setDshWebUrl("c1", null);
+
+		expect(result.dshWebUrl).toBeUndefined();
+	});
+
+	it("Client 不存在时返回 404", async () => {
+		const update = vi.fn().mockRejectedValue({ code: "P2025" });
+		const prisma = prismaMock({ update }) as never;
+		const service = new ClientService(prisma);
+
+		await expect(service.setDshWebUrl("missing", null)).rejects.toMatchObject({
+			code: CLIENT_NOT_FOUND,
+			statusCode: 404,
 		});
 	});
 });

@@ -11,6 +11,7 @@ import {
 	parseRemoteDevClientEvent,
 	parseRemoteDevPortCreateRequest,
 	parseRemoteDevSessionCreateRequest,
+	parseRemoteDevTranscriptPayload,
 } from "./remote-dev.js";
 
 describe("Remote Dev Session 契约", () => {
@@ -213,6 +214,46 @@ describe("RDS 续接协议", () => {
 				generationId: "g1",
 				acpSessionId: "s1",
 				extra: 1,
+			}),
+		).toThrow();
+	});
+});
+
+describe("rds:transcript 回放负载", () => {
+	it("解析 prompt 与 agent 事件两种条目", () => {
+		const payload = parseRemoteDevTranscriptPayload({
+			sessionId: "rds_1",
+			truncated: true,
+			entries: [
+				{ seq: 1, at: "2026-10-19T00:00:00.000Z", kind: "prompt", text: "你好" },
+				{
+					seq: 2,
+					at: "2026-10-19T00:00:01.000Z",
+					kind: "event",
+					event: { type: "agent.message.delta", messageId: "m1", text: "在" },
+				},
+			],
+		});
+		expect(payload.entries).toHaveLength(2);
+		expect(payload.entries[0]).toMatchObject({ kind: "prompt", text: "你好" });
+		expect(payload.truncated).toBe(true);
+	});
+
+	it("拒绝未知 kind 与未知字段", () => {
+		expect(() =>
+			parseRemoteDevTranscriptPayload({
+				sessionId: "rds_1",
+				truncated: false,
+				entries: [{ seq: 1, at: "now", kind: "system" }],
+			}),
+		).toThrow();
+		expect(() =>
+			parseRemoteDevTranscriptPayload({
+				sessionId: "rds_1",
+				truncated: false,
+				entries: [
+					{ seq: 1, at: "now", kind: "prompt", text: "x", extra: 1 },
+				],
 			}),
 		).toThrow();
 	});

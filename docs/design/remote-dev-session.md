@@ -27,7 +27,23 @@
 4. Server 或 Client 重启后，系统如实标记 `interrupted`/`disconnected`，不伪装恢复旧 agent 或旧 PTY；已结束的会话可以从会话历史里被找到，并由操作者**显式续接**（复用原 ACP sessionId，见 §7.2）。
 5. 数据库、普通日志和错误中不出现 agent 正文、终端正文、文件内容、token 或完整敏感路径。
 
+### 1.2 与远程 DSH 的分工（2026-10-20 定位调整）
+
+远程 DSH（[ADR-0059](../adr/0059-remote-dsh-webui-channel.md)、[remote-dsh](./remote-dsh.md)）已经能给出完整、可人工介入的开发界面。RDS 因此**不再承担"开发界面"角色**，收敛为无人值守的自动化管道：
+
+| | 开发（`/develop`） | 自动化（`/remote-dev`） |
+|---|---|---|
+| 形态 | 目标机上的完整 DSH WebUI | 无界面的 ACP 会话 |
+| 入口 | 需要人点 | CLI / SDK / REST 可脚本化 |
+| 留痕 | 无 | transcript、审计事件落库 |
+| 批量 | 逐台手点 | 一次多台并汇总 |
+| 前端 | 独立 WebUI | **只读运行记录** + 端口 |
+
+因此前端删除了 RDS 的对话式 UI（消息流、输入框、权限弹窗）：人工介入在 DSH 里做，这里做不出来也不该假装能做。保留的是运行记录回放、端口转发、REST/SDK/CLI 与全部审计能力。
+
 ## 2. 非目标
+
+- 不做 DSH WebUI 的替代界面：交互式开发一律去远程 DSH，RDS 不复制编辑器、终端与权限审批。
 
 - 不把 RDS 做成 A2A Task，不写 `TaskEvent`，不做 `intent/acceptanceCriteria/constraints` 和偏差判定。
 - 不做完整 IDE、语言服务器、代码补全、远程桌面或多人协同编辑。
@@ -175,9 +191,22 @@ flowchart LR
 
 `RemoteDevAuditEvent`：`id/sessionId/eventType/actorIdentityId/metadataJson/createdAt`。事件类型至少包括 `created/attached/detached/takeover/agent_started/agent_exited/permission_resolved/port_opened/port_closed/closed/interrupted`。`metadataJson` 只允许端口号、协议、agent placement id、错误码、attachment 模式等安全字段。
 
+`RemoteDevEvent`（v1.2 起，会话 transcript）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 主键 |
+| `sessionId` | 所属会话；删会话级联删除 |
+| `seq` | 会话内单调递增序号，回放顺序与去重依据 |
+| `kind` | `prompt`（操作者消息）或 `event`（agent 事件 JSON） |
+| `payload` | JSON；`event` 直接存 `AcpAdapterEvent`，与实时事件同构 |
+| `createdAt` | 落库时间，回放里作为 `at` |
+
+每会话上限 400 条，超出按 `seq` 截断最早的记录。
+
 ### 5.2 不持久化
 
-- agent 对话、thought、工具输入/输出、权限原始 payload；
+- agent 对话**正文**现在按会话 transcript 落库（见上表；归一化后的对话块，最多 400 条/会话），这是"刷新后仍能看到历史"的前提；未归一化的原始 ACP 帧、权限原始 payload 仍不落库；
 - 终端输入/输出/snapshot；
 - 文件正文、文件列表、完整路径（审计只存必要路径或哈希，默认不存）；
 - 端口 token、Cookie、Authorization、环境变量；
@@ -188,7 +217,7 @@ flowchart LR
 为了刷新/短暂断网后仍能看到最近上下文，Client 与 Server 各保留一个有界内存 ring：
 
 - 每 session 最近 `500` 条归一化 agent 事件，或 `1 MiB`，先到先限；
-- ring 不落库；Server 重启、Client 重启后丢失；
+- ring 只在内存；Server 重启后丢失实时 ring，但**已落库的 transcript**仍会在重新 attach 时回放（``rds:transcript``）；
 - 重新 attach 时先发 `rds:state`，再发 ring 中未确认的事件，最后接实时流；
 - 浏览器按 `seq` 去重/补洞；无法补洞时显示“上下文可能不完整”，不伪造历史。
 
@@ -275,6 +304,14 @@ stateDiagram-v2
 - **约束**：续接要求同 Client、同 placement、同 workspace（ACP 会话绑定 cwd）；源会话必须已终态（对仍活动的会话 resume 会被 agent 拒绝）；只用 `session/resume`，不用 `session/load`，Server 不参与上下文传输。
 - **兼容**：`rds:acp-session` 是新增事件，旧 Server 无 handler 会静默忽略；`session.create` 新增的是可选字段，旧 Client 在续接请求下会明确报错（fail closed），普通创建不受影响。详见 `docs/compatibility.md`。
 - **时序**：Client 先发上报、后发 `rds:command-result`，因此上报到达时行上的 `generationId` 常常还是空串。Server 在这种情况下按 socket 归属接受上报（与 `handleClientEvent` 的宽容判定一致），只有**已知且不匹配**的 generation 才丢弃；否则会话会因为一个纯时序竞争而永久不可续接，且没有任何报错。
+
+### 7.1.2 transcript 回放与生命周期对账（v1.2）
+
+- **谁写**：Server。`rds:event` 到达时把 `agent.event` 落库（合并连续增量、工具行就地更新、上限 400 条/会话）；`prompt()` 在**发命令之前**写 `kind=prompt`，失败则按 `seq` 回滚，保证回放顺序为用户消息→agent 回复。
+- **谁读**：`/app` 在 `rds:attach` 成功后单独下发 `rds:transcript`（新事件名，旧前端可忽略）；前端每个会话只播种一次，重连重复下发不会翻倍。
+- **权威**：transcript 是"回放用的历史"，不是实时状态；实时状态仍以 `rds:state`/`rds:agent:event` 为准。`truncated=true` 表示更早内容已按上限丢弃，前端不得伪造。
+- **生命周期对账**：Client socket 断开 → 该机器非终态会话降级 `disconnected`；Client 重新注册时带 `remoteDevSessions`（缺省=旧 Client 不判定；空数组=明确无存活会话）→ 命中且 generation 一致恢复 `active`，未命中收敛 `interrupted`（`closeReason=client-restarted`）。
+- **已知偏移**：transcript 不跨会话共享——「继续」创建的是新会话，历史 transcript 不会复制过去（原会话仍可打开回看）。
 
 ### 7.2 事件归一化
 
@@ -551,7 +588,7 @@ ADR-0058 所说的“v1”对应 Phase 1 + Phase 2；Phase 3/4 不阻塞 v1 验�
 
 本节描述代码现状，避免把设计当运行事实：
 
-- **已实现**：`RemoteDevSession/RemoteDevPort/RemoteDevAuditEvent`、REST 创建/列表/详情/关闭、端口打开/关闭/forward token、`/app` attachment、`/client` 的 RDS 命令/结果/事件、`/remote-dev/tunnel`（Client）与 `/remote-dev/forward`（CLI）二进制帧、Client ACP Host 复用、Server lexical + Client canonical/roots 校验、SDK `remoteDev` 与 CLI `vcpdeck forward`；刷新/断线后可用 30 秒 reconnect token 重新 attach，端口关闭会撤销 token 并断开 forward。创建页在没有 Client 或没有 agent placement 时不再展示空下拉，而是给出登记引导与可复制的 `vcpdeck agents create` 命令；SDK 提供 `agents.create`，CLI 提供 `agents create`。Client 启动 ACP agent 前按 `PATH`/`PATHEXT` 解析 placement 的 `command`：Windows 上 `.cmd`/`.bat` 垫片经 `cmd.exe /d /s /c` 包装后启动，`.exe`/`.com` 与解析出的裸命令名直接执行。**会话历史与续接（§7.1.1）**：`/remote-dev/sessions` 历史页 + 侧栏「开发」二级导航；Client 用 `rds:acp-session` 上报 ACP sessionId 并由 Server 落库；对已终态会话「继续」会新建 RDS 会话并在 `session.create` 带 `acpSessionId`，Client 走 `session/resume` 接回上下文。
-- **未实现/简化**：HTTP preview、DAP、端口自动发现、DSH 原生 Web 代理、多租户；Server 重启后的 attachment/端口恢复、Client 重启的完整 generation 对账、agent 事件 ring 补播、真实双机压测矩阵尚未验收；Files 为固定 workspace 只读；Terminal 子会话仍使用 Terminal 自己的 operator 语义，RDS viewer 限制未在 Server 端强制到每个 Terminal；Agent placement 目前没有前端登记表单，浏览器侧只做选择与命令引导；续接不支持改 workspace/placement，也不做跨 Client 迁移；历史页只展示元数据，不含对话回放。
+- **已实现**：`RemoteDevSession/RemoteDevPort/RemoteDevAuditEvent`、REST 创建/列表/详情/关闭、端口打开/关闭/forward token、`/app` attachment、`/client` 的 RDS 命令/结果/事件、`/remote-dev/tunnel`（Client）与 `/remote-dev/forward`（CLI）二进制帧、Client ACP Host 复用、Server lexical + Client canonical/roots 校验、SDK `remoteDev` 与 CLI `vcpdeck forward`；刷新/断线后可用 30 秒 reconnect token 重新 attach，端口关闭会撤销 token 并断开 forward。创建页在没有 Client 或没有 agent placement 时不再展示空下拉，而是给出登记引导与可复制的 `vcpdeck agents create` 命令；SDK 提供 `agents.create`，CLI 提供 `agents create`。Client 启动 ACP agent 前按 `PATH`/`PATHEXT` 解析 placement 的 `command`：Windows 上 `.cmd`/`.bat` 垫片经 `cmd.exe /d /s /c` 包装后启动，`.exe`/`.com` 与解析出的裸命令名直接执行。**会话历史与续接（§7.1.1）**：`/remote-dev/sessions` 历史页 + 侧栏「开发」二级导航；Client 用 `rds:acp-session` 上报 ACP sessionId 并由 Server 落库；对已终态会话「继续」会新建 RDS 会话并在 `session.create` 带 `acpSessionId`，Client 走 `session/resume` 接回上下文。**transcript 回放与存活对账（§7.1.2）**：`RemoteDevEvent` 按会话落库（连续增量合并、工具行就地更新、400 条上限），附着后经 `rds:transcript` 回放；Client 断开把非终态会话降级 `disconnected`，重新注册时按 `remoteDevSessions` 上报对账，未命中收敛为 `interrupted` 并可在历史页「继续」。
+- **未实现/简化**：HTTP preview、DAP、端口自动发现、DSH 原生 Web 代理、多租户；Server 重启后的 attachment/端口恢复、agent 事件 ring 补播（已由落库 transcript 取代）、跨会话 transcript 迁移、真实双机压测矩阵尚未验收；Files 为固定 workspace 只读；Terminal 子会话仍使用 Terminal 自己的 operator 语义，RDS viewer 限制未在 Server 端强制到每个 Terminal；Agent placement 目前没有前端登记表单，浏览器侧只做选择与命令引导；续接不支持改 workspace/placement，也不做跨 Client 迁移；历史页仍只展示元数据，对话回放发生在会话页（§7.1.2）。
 - **当前安全边界**：端口仍要求 operator/owner 显式打开、只允许 loopback、每 session 最多 8 个；forward token 只存内存 hash，Server 重启即失效，且 OPEN 端口必须与 token 对应端口一致；RDS 不是沙箱。
-- **正文策略**：Server 不保存 agent/终端/文件正文；审计只记生命周期/端口/权限元数据。
+- **正文策略**：终端输入/输出、文件正文、端口/隧道原始字节仍**不落库**；会话 transcript（归一化后的 agent 对话块与操作者 prompt，最多 400 条/会话、随会话级联删除）自 v1.2 起落库，用于刷新与重连后回放，见 §5.1/§7.1.2；审计仍只记生命周期/端口/权限元数据。

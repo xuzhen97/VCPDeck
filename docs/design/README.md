@@ -23,7 +23,8 @@
 
 | 领域 | 文档 | 状态与用途 |
 | --- | --- | --- |
-| 跨机开发会话 | [`remote-dev-session.md`](./remote-dev-session.md) | Current；Remote Dev Session 的状态机、ACP/终端/文件组合、session 级端口隧道、安全与验收；v1 已落地，未完成项见 §18；方向见 ADR-0058（Accepted） |
+| 自动化会话（RDS） | [`remote-dev-session.md`](./remote-dev-session.md) | Current；定位为无人值守自动化管道（对话 UI 已删除），保留状态机、transcript、审计、端口隧道，见 §1.2；方向见 ADR-0058（Accepted） |
+| 开发台（远程 DSH） | [`remote-dsh.md`](./remote-dsh.md) | Current；ADR-0059。入口为 `/develop` 与机器「开发」tab；一键代起 `dsh web` + 自动 FRP 映射 + 受管清理 |
 
 ## 新专题模板
 

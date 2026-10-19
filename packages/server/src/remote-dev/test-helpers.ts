@@ -53,6 +53,15 @@ interface PortRow {
 	lastErrorCode: string | null;
 }
 
+interface EventRow {
+	id: string;
+	sessionId: string;
+	seq: number;
+	kind: string;
+	payload: string;
+	createdAt: Date;
+}
+
 export function makeRemoteDevService(
 	overrides: {
 		clientOnline?: boolean;
@@ -60,6 +69,8 @@ export function makeRemoteDevService(
 		placementClientId?: string;
 		workspaceRoots?: string[];
 		autoAck?: boolean;
+		/** 这些 action 直接回失败，用于验证失败/回滚路径。 */
+		failActions?: string[];
 		createTimeoutMs?: number;
 		closeTimeoutMs?: number;
 	} = {},
@@ -68,6 +79,8 @@ export function makeRemoteDevService(
 	const now = () => new Date(1_700_000_000_000 + tick++ * 1_000);
 	const sessions = new Map<string, SessionRow>();
 	const ports = new Map<string, PortRow>();
+	const events = new Map<string, EventRow>();
+	let eventSeq = 0;
 	const audits: Array<Record<string, unknown>> = [];
 
 	const prisma = {
@@ -128,8 +141,21 @@ export function makeRemoteDevService(
 				row.ports = [...ports.values()].filter((port) => port.sessionId === row.id);
 				return row;
 			},
-			async findMany() {
-				return [...sessions.values()];
+			async findMany({ where }: { where?: Record<string, unknown> } = {}) {
+				let rows = [...sessions.values()];
+				if (where?.clientId) {
+					rows = rows.filter((row) => row.clientId === where.clientId);
+				}
+				const state = where?.state as
+					| { notIn?: string[] }
+					| string
+					| undefined;
+				if (typeof state === "string") {
+					rows = rows.filter((row) => row.state === state);
+				} else if (state?.notIn) {
+					rows = rows.filter((row) => !state.notIn?.includes(row.state));
+				}
+				return rows;
 			},
 			async count() {
 				return sessions.size;
@@ -138,15 +164,30 @@ export function makeRemoteDevService(
 				where,
 				data,
 			}: {
-				where: { id: string; state?: string };
+				where: {
+					id?: string;
+					clientId?: string;
+					state?: string | { notIn?: string[] };
+				};
 				data: Record<string, unknown>;
 			}) {
-				const row = sessions.get(where.id);
-				if (!row || (where.state && row.state !== where.state)) {
-					return { count: 0 };
+				let count = 0;
+				for (const row of sessions.values()) {
+					if (where.id && row.id !== where.id) continue;
+					if (where.clientId && row.clientId !== where.clientId) continue;
+					if (typeof where.state === "string" && row.state !== where.state) {
+						continue;
+					}
+					if (
+						typeof where.state === "object" &&
+						where.state?.notIn?.includes(row.state)
+					) {
+						continue;
+					}
+					Object.assign(row, data, { updatedAt: now() });
+					count += 1;
 				}
-				Object.assign(row, data, { updatedAt: now() });
-				return { count: 1 };
+				return { count };
 			},
 		},
 		remoteDevPort: {
@@ -222,6 +263,67 @@ export function makeRemoteDevService(
 				return [];
 			},
 		},
+		remoteDevEvent: {
+			async create({ data }: { data: Record<string, unknown> }) {
+				eventSeq += 1;
+				const row: EventRow = {
+					id: `ev-${eventSeq}`,
+					sessionId: data.sessionId as string,
+					seq: data.seq as number,
+					kind: data.kind as string,
+					payload: data.payload as string,
+					createdAt: now(),
+				};
+				events.set(row.id, row);
+				return row;
+			},
+			async update({
+				where,
+				data,
+			}: {
+				where: { id: string };
+				data: Record<string, unknown>;
+			}) {
+				const row = events.get(where.id);
+				if (!row) throw new Error("event not found");
+				Object.assign(row, data);
+				return row;
+			},
+			async findFirst({
+				where,
+				orderBy,
+			}: {
+				where: { sessionId: string };
+				orderBy?: { seq?: "asc" | "desc" };
+			}) {
+				const rows = [...events.values()].filter(
+					(row) => row.sessionId === where.sessionId,
+				);
+				rows.sort((a, b) =>
+					orderBy?.seq === "desc" ? b.seq - a.seq : a.seq - b.seq,
+				);
+				return rows[0] ?? null;
+			},
+			async findMany({ where }: { where: { sessionId: string } }) {
+				return [...events.values()]
+					.filter((row) => row.sessionId === where.sessionId)
+					.sort((a, b) => a.seq - b.seq);
+			},
+			async deleteMany({
+				where,
+			}: {
+				where: { sessionId: string; seq?: { lte?: number } };
+			}) {
+				let count = 0;
+				for (const [id, row] of events) {
+					if (row.sessionId !== where.sessionId) continue;
+					if (where.seq?.lte !== undefined && row.seq > where.seq.lte) continue;
+					events.delete(id);
+					count += 1;
+				}
+				return { count };
+			},
+		},
 	} as unknown as PrismaService;
 
 	const placement = {
@@ -262,6 +364,16 @@ export function makeRemoteDevService(
 		closeTimeoutMs: overrides.closeTimeoutMs ?? 1_000,
 		send: (socketId, command) => {
 			sent.push(command);
+			if (overrides.failActions?.includes(command.action)) {
+				queueMicrotask(() => {
+					void service.handleCommandResult(socketId, {
+						requestId: command.requestId,
+						ok: false,
+						error: { code: "RDS_COMMAND_FAILED", message: "boom" },
+					});
+				});
+				return;
+			}
 			if (overrides.autoAck === false) return;
 			queueMicrotask(() => {
 				void service.handleCommandResult(socketId, {
@@ -273,5 +385,5 @@ export function makeRemoteDevService(
 			});
 		},
 	});
-	return { service, prisma, agents, terminals, audit, audits, sent, sessions, ports };
+	return { service, prisma, agents, terminals, audit, audits, sent, sessions, ports, events };
 }

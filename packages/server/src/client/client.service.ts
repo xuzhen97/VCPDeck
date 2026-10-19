@@ -29,6 +29,8 @@ export const CLIENT_NOT_FOUND = "CLIENT_NOT_FOUND";
 export const INVALID_CLIENT_NAME = "INVALID_CLIENT_NAME";
 /** 注解格式非法（400） */
 export const INVALID_CLIENT_ANNOTATIONS = "INVALID_CLIENT_ANNOTATIONS";
+/** 远程 DSH 地址格式非法（400，ADR-0059） */
+export const INVALID_DSH_WEB_URL = "INVALID_DSH_WEB_URL";
 /** Client 心跳超时阈值：超过两个以上心跳周期未上报即视为离线。 */
 export const CLIENT_HEARTBEAT_TIMEOUT_MS = 30_000;
 
@@ -49,6 +51,11 @@ interface ClientRow {
   capabilities: string;
   capabilityDetails: string;
   annotations: string;
+  /** 远程 DSH WebUI 登记地址（ADR-0059）；null 表示未登记 */
+  dshWebUrl: string | null;
+  /** 受管通道状态（ADR-0059 修订） */
+  dshWebState?: string;
+  dshWebPort?: number | null;
   disks: string;
   online: boolean;
   cpuPercent: number | null;
@@ -171,6 +178,31 @@ export class ClientService {
           `Client "${clientId}" not found`,
           404,
         );
+      }
+      throw error;
+    }
+    return this.toClientInfo(updated);
+  }
+
+  /**
+   * 登记/清除远程 DSH WebUI 地址（ADR-0059）。
+   *
+   * 只存"操作者声明的入口"，不校验可达性：地址经 FRP/内网暴露，
+   * 由操作者保证私网可达（ADR-0059 决策 3）。注册与心跳不会覆盖它。
+   */
+  async setDshWebUrl(
+    clientId: string,
+    url: string | null,
+  ): Promise<ClientInfo> {
+    let updated: ClientRow;
+    try {
+      updated = await this.prisma.client.update({
+        where: { id: clientId },
+        data: { dshWebUrl: url },
+      });
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === "P2025") {
+        throw clientError(CLIENT_NOT_FOUND, `Client "${clientId}" not found`, 404);
       }
       throw error;
     }
@@ -332,6 +364,14 @@ export class ClientService {
     const annotations = this.parseStoredAnnotations(c.annotations);
     if (annotations !== null) {
       info.annotations = annotations;
+    }
+    // 只下发已登记的地址；未登记时缺省，避免前端出现空链接
+    if (c.dshWebUrl) {
+      info.dshWebUrl = c.dshWebUrl;
+    }
+    if (c.dshWebState) {
+      info.dshWebState = c.dshWebState as ClientInfo["dshWebState"];
+      info.dshWebPort = c.dshWebPort ?? null;
     }
     return info;
   }

@@ -64,6 +64,26 @@ v1 落地后暴露一个产品缺口：会话关闭后前端没有任何入口�
 
 本修订不改变 §决策 3、6、8 的边界：RDS 仍不落正文、仍不是沙箱、仍是单信任域；`acpSessionId` 是不透明标识，不是会话内容。
 
+## 修订（2026-10-19 · 二）：transcript 回放与 Client 存活对账
+
+v1.1 之后验收暴露两个缺口：刷新页面后对话内容消失、Client 重启后遗留会话仍显示「运行中」。二者都不是渲染问题，而是**权威数据缺失**，因此按最小协议增量补齐。
+
+### 决策
+
+17. **会话 transcript 落库。** Server 在收到 Client 的 `rds:event` 时，把其中的 agent 事件写入 `RemoteDevEvent(sessionId, seq, kind, payload)`；`kind=prompt` 由 `prompt()` 在**发起命令之前**写入（失败则回滚），保证回放时用户消息排在 agent 回复之前。
+18. **增量合并。** 连续 `agent.message.delta`（同 `messageId`）、连续 `agent.thought.delta` 合并成一行；`tool.updated` 就地更新对应工具行；`usage.updated`/`plan.updated` 覆盖上一行。行数因此约等于"对话块数"，而不是 token 数。
+19. **保留上限 400 条/会话。** 插入时按 `seq <= seq - 400` 一次 `deleteMany` 截断，不做逐条计数；`rds:transcript.truncated` 标明是否发生过截断。
+20. **回放走独立事件 `rds:transcript`**，由 `/app` 在 `rds:attach` 成功后单独下发，**不塞进 attach 响应**——attach 响应是严格解析的既有消息，加字段会让旧前端整条丢弃（与 v1.1 的 `rds:acp-session` 同理）。
+21. **Client 存活对账。** 新增可选注册字段 `remoteDevSessions: {sessionId, generationId}[]`：缺省 = 旧 Client 未报告（Server 不得据此判死任何会话）；空数组 = 新 Client 明确报告没有存活会话。
+22. **断开与判死分两步。** Client socket 断开时只把该机器非终态会话降级为 `disconnected`（`convergeOfflineClient`），避免网络抖动就误杀；重新注册时按上报列表对账：命中且 generation 一致 → 恢复 `active`；未命中 → `interrupted`（`closeReason=client-restarted`，写审计），从而在历史页可选「继续」。
+
+### 验证与退出条件（增量）
+
+- 刷新 `/remote-dev/:sessionId` 后历史对话仍在，且顺序为用户消息→agent 回复；
+- 流式回复 400 条以内不产生"每 token 一行"，超出后 `truncated=true` 且只保留最近 400 条；
+- Client 重启后其遗留会话在历史页显示「已中断」并可「继续」，不再伪装成「运行中」；
+- 旧 Client（不带 `remoteDevSessions`）重连不会导致任何会话被判死。
+
 ## 候选方案
 
 - **把开发会话做成 A2A Task**：不采用。Task 的 intent/acceptance/审计语义不适合自由探索；聊天和端口访问会污染 TaskEvent。

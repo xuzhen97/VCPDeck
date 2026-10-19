@@ -50,6 +50,7 @@ describe("RemoteDevBridge", () => {
 			cancel: vi.fn(),
 			permission: vi.fn(),
 			close: vi.fn(),
+			listSessions: vi.fn(() => []),
 		};
 		attachRemoteDevBridge(socket, { runtime });
 		trigger(Events.RDS_COMMAND, createCommand);
@@ -76,6 +77,7 @@ describe("RemoteDevBridge", () => {
 			cancel: vi.fn(),
 			permission: vi.fn(),
 			close: vi.fn(),
+			listSessions: vi.fn(() => []),
 		};
 		attachRemoteDevBridge(socket, { runtime });
 		trigger(Events.RDS_COMMAND, {
@@ -102,6 +104,7 @@ describe("RemoteDevBridge", () => {
 			cancel: vi.fn(),
 			permission: vi.fn(),
 			close: vi.fn().mockResolvedValue(undefined),
+			listSessions: vi.fn(() => []),
 		};
 		attachRemoteDevBridge(socket, {
 			runtime,

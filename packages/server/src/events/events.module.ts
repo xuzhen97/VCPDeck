@@ -13,6 +13,7 @@ import { ReleaseModule } from "../release/release.module.js";
 import { GitSshModule } from "../git-ssh/git-ssh.module.js";
 import { TaskModule } from "../task/task.module.js";
 import { RemoteDevModule } from "../remote-dev/remote-dev.module.js";
+import { DshWebService } from "../dsh-web/dsh-web.service.js";
 
 @Module({
 	imports: [
@@ -28,7 +29,7 @@ import { RemoteDevModule } from "../remote-dev/remote-dev.module.js";
 		TaskModule,
 		RemoteDevModule,
 	],
-	providers: [ClientGateway, AppGateway],
+	providers: [ClientGateway, AppGateway, DshWebService],
 	exports: [ClientGateway],
 	controllers: [EventsController],
 })

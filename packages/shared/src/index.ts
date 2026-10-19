@@ -12,6 +12,12 @@ export type {
 	ClientPublicAddress,
 } from "./client-annotations.js";
 
+// ── 远程 DSH WebUI 登记（ADR-0059） ──
+export { DSH_WEB_URL_MAX_LENGTH, parseClientDshWebUrl } from "./client-dsh-web.js";
+import type { DshWebState } from "./dsh-web.js";
+export type { DshWebState } from "./dsh-web.js";
+export * from "./dsh-web.js";
+
 // ── Client 一键安装协议 ──
 export {
 	ClientInstallerErrorCode,
@@ -175,6 +181,9 @@ export const Events = {
 	RDS_COMMAND_RESULT: "rds:command-result",
 	RDS_EVENT: "rds:event",
 	RDS_ACP_SESSION: "rds:acp-session",
+	RDS_TRANSCRIPT: "rds:transcript",
+	DSH_WEB_COMMAND: "dshweb:command",
+	DSH_WEB_RESULT: "dshweb:result",
 	RDS_ATTACH: "rds:attach",
 	RDS_DETACH: "rds:detach",
 	RDS_PROMPT: "rds:prompt",
@@ -427,6 +436,12 @@ export interface ClientInfo {
 	installation?: MachineInstallationStatus;
 	/** 可选：操作者声明的公网地址与备注（ADR-0055；旧 Server 缺省即未补充） */
 	annotations?: ClientAnnotations;
+	/** 可选：操作者登记的远程 DSH WebUI 地址（ADR-0059）；缺省表示未登记 */
+	dshWebUrl?: string;
+	/** 可选：受管通道状态（ADR-0059 修订）；缺省表示旧 Server 未跟踪 */
+	dshWebState?: DshWebState;
+	/** 可选：受管 dsh web 的监听端口 */
+	dshWebPort?: number | null;
 	online: boolean;
 	cpuPercent: number | null;
 	memPercent: number | null;

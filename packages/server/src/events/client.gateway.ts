@@ -30,6 +30,7 @@ import {
   parseRemoteDevClientEvent,
   parseRemoteDevCommandResult,
   parseRemoteDevAcpSessionReport,
+  parseDshWebCommandResult,
   parseTerminalStateReport,
   type JobLogLine,
   type JobProgress,
@@ -58,6 +59,7 @@ import { GitSshService } from "../git-ssh/git-ssh.service.js";
 import { JobLogService } from "../job/job-log.service.js";
 import { TaskDispatchService } from "../task/task-dispatch.service.js";
 import { RemoteDevService } from "../remote-dev/remote-dev.service.js";
+import { DshWebService } from "../dsh-web/dsh-web.service.js";
 
 const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
 
@@ -115,6 +117,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(RemoteDevService)
     private readonly remoteDev?: RemoteDevService,
+    // 远程 DSH 受管通道（ADR-0059 修订）；旧测试构造可省略
+    @Optional()
+    @Inject(DshWebService)
+    private readonly dshWeb?: DshWebService,
   ) {}
 
   onModuleInit() {
@@ -147,6 +153,12 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     this.remoteDev?.bindEmitter((socketId, command) => {
       this.server.to(socketId).emit(Events.RDS_COMMAND, command);
     });
+    this.dshWeb?.bindEmitter((socketId, command) => {
+      this.server.to(socketId).emit(Events.DSH_WEB_COMMAND, command);
+    });
+    // FRP 映射 dispatch 下发口：受管 DSH 生命周期建/删映射后必须走到这里，
+    // 否则映射只存在于数据库、frpc 侧没有代理，端口不可达。
+    this.dshWeb?.bindDispatch((payload) => this.sendDispatch(payload));
     this.updateChannel.bindEmitters({
       sendUpdateRequest: (clientId, request) => {
         this.server.to(clientId).emit(Events.UPDATE_REQUEST, request);
@@ -240,6 +252,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     await this.jobService.markDisconnected(clientId);
     await this.frpService.markInactiveByClientId(clientId);
     await this.taskDispatch?.failByClientId(clientId);
+    // RDS：agent 进程活在 Client 上，Client 掉线后会话不可能再产出事件。
+    // 这里只降级为 disconnected，是否已死由 Client 重新注册时的存活上报判定。
+    await this.remoteDev?.handleClientOffline(clientId);
+    await this.dshWeb?.handleClientOffline(clientId);
   }
 
   // ── Client events ──
@@ -276,6 +292,13 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       client.id,
       register.capabilityDetails?.gitSsh,
     );
+    // RDS 对账：只有新 Client 会带 remoteDevSessions；缺省（旧 Client）不作任何判定。
+    // 放在 ack 之后：对账失败不该阻塞 Client 注册，否则重连会被拖死。
+    await this.remoteDev
+      ?.reconcileClientSessions(register.clientId, register.remoteDevSessions)
+      .catch((cause: unknown) => {
+        console.warn(`[ws] rds reconcile failed: ${String(cause)}`);
+      });
     console.log(`[ws] registered: ${register.clientId} (${register.hostname})`);
     return { ok: true };
   }
@@ -856,6 +879,19 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       );
     } catch {
       // 非法上报丢弃，不影响连接。
+    }
+  }
+
+  @SubscribeMessage(Events.DSH_WEB_RESULT)
+  async handleDshWebResult(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<void> {
+    if (!client.data.clientId || !this.dshWeb) return;
+    try {
+      await this.dshWeb.handleResult(client.id, parseDshWebCommandResult(data));
+    } catch {
+      // 非法结果丢弃，不影响连接；Server 侧按超时收敛。
     }
   }
 
