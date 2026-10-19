@@ -230,4 +230,59 @@ describe("DshWebService 生命周期", () => {
 			dshWebPort: null,
 		});
 	});
+
+	it("外部托管：start 直接拒绝，不代起第二个实例", async () => {
+		const { service, sends, frp } = makeService({
+			client: {
+				...ONLINE_CLIENT,
+				dshWebState: "external",
+				dshWebMode: "external",
+				dshWebUrl: "https://dsh.example.com/?token=tok",
+			},
+		});
+
+		await expect(service.start("c1")).rejects.toMatchObject({
+			code: "DSH_WEB_EXTERNAL_MANAGED",
+			statusCode: 409,
+		});
+		expect(sends).toHaveLength(0);
+		expect(frp.createMapping).not.toHaveBeenCalled();
+	});
+
+	it("外部托管：stop 只解除登记，不发命令不删映射", async () => {
+		const { service, sends, frp, updates } = makeService({
+			client: {
+				...ONLINE_CLIENT,
+				dshWebState: "external",
+				dshWebMode: "external",
+				dshWebUrl: "https://dsh.example.com/?token=tok",
+				dshWebFrpMappingId: null,
+			},
+		});
+
+		const status = await service.stop("c1");
+
+		expect(sends).toHaveLength(0);
+		expect(frp.deleteMapping).not.toHaveBeenCalled();
+		expect(status).toMatchObject({ state: "stopped", url: null, mode: "managed" });
+		expect(updates.at(-1)).toMatchObject({
+			dshWebState: "stopped",
+			dshWebUrl: null,
+			dshWebMode: "managed",
+		});
+	});
+
+	it("status 回传归属模式", async () => {
+		const { service } = makeService({
+			client: {
+				...ONLINE_CLIENT,
+				dshWebState: "external",
+				dshWebMode: "external",
+				dshWebUrl: "https://dsh.example.com/?token=tok",
+			},
+		});
+		const status = await service.status("c1");
+		expect(status.mode).toBe("external");
+		expect(status.state).toBe("external");
+	});
 });

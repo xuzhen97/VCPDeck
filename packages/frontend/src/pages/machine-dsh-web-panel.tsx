@@ -34,6 +34,7 @@ export function dshWebStateBadge(state?: string): {
 	if (state === "running") return { label: "运行中", tone: "success" };
 	if (state === "starting") return { label: "启动中", tone: "warning" };
 	if (state === "failed") return { label: "失败", tone: "danger" };
+	if (state === "external") return { label: "外部托管", tone: "neutral" };
 	return { label: "已停止", tone: "neutral" };
 }
 
@@ -56,6 +57,7 @@ export function MachineDshWebPanel({ client }: { client: ClientInfo }) {
 	const [local, setLocal] = useState<{
 		state: string;
 		url: string | null;
+		mode: string;
 	} | null>(null);
 
 	// Server 是权威；父级轮询刷新后同步回填并丢掉本地乐观值。
@@ -75,7 +77,11 @@ export function MachineDshWebPanel({ client }: { client: ClientInfo }) {
 					: await sdk.clients.stopDshWeb(client.clientId);
 			setSaved(status.url ?? null);
 			setDraft(status.url ?? "");
-			setLocal({ state: status.state, url: status.url ?? null });
+			setLocal({
+				state: status.state,
+				url: status.url ?? null,
+				mode: status.mode,
+			});
 		} catch (cause) {
 			const code = (cause as { code?: unknown }).code;
 			setError(typeof code === "string" ? describeLifecycleError(code) : "操作失败");
@@ -104,7 +110,36 @@ export function MachineDshWebPanel({ client }: { client: ClientInfo }) {
 
 	const dirty = draft.trim() !== (saved ?? "");
 	const state = local?.state ?? client.dshWebState ?? "stopped";
-	const badge = dshWebStateBadge(state);
+	const mode = local?.mode ?? client.dshWebMode ?? "managed";
+	// 外部托管：实例归目标机（systemd 常驻 / 自有反代），VCPDeck 只维护入口。
+	const external = mode === "external" || state === "external";
+	const badge = external
+		? { label: "外部托管", tone: "neutral" as const }
+		: dshWebStateBadge(state);
+	// 复用机器注解里已维护的公网地址，避免再让人手抄一遍域名。
+	const publicHost =
+		client.annotations?.publicAddress?.host ??
+		client.annotations?.publicAddress?.v4[0] ??
+		null;
+	const placeholder = publicHost
+		? `https://${publicHost}/?token=…`
+		: "https://dsh.example.com/?token=…";
+
+	async function detach() {
+		setSaving(true);
+		setError(null);
+		try {
+			const status = await sdk.clients.detachDshWeb(client.clientId);
+			setSaved(status.url ?? null);
+			setDraft("");
+			setLocal({ state: status.state, url: status.url ?? null, mode: status.mode });
+		} catch (cause) {
+			const code = (cause as { code?: unknown }).code;
+			setError(typeof code === "string" ? describeLifecycleError(code) : "解除登记失败");
+		} finally {
+			setSaving(false);
+		}
+	}
 
 	return (
 		<Card>
@@ -117,7 +152,16 @@ export function MachineDshWebPanel({ client }: { client: ClientInfo }) {
 			<CardContent className="space-y-3">
 				<div className="flex flex-wrap items-center gap-2">
 					<StatusChip label={badge.label} tone={badge.tone} />
-					{state !== "running" ? (
+					{external ? (
+						<Button
+							size="sm"
+							variant="outline"
+							disabled={saving}
+							onClick={() => void detach()}
+						>
+							{saving ? "解除中…" : "解除登记"}
+						</Button>
+					) : state !== "running" ? (
 						<Button
 							size="sm"
 							disabled={busy || state === "starting"}
@@ -138,7 +182,9 @@ export function MachineDshWebPanel({ client }: { client: ClientInfo }) {
 						</Button>
 					)}
 					<p className="text-xs text-muted-foreground">
-						一键启动会在目标机代起 dsh web 并自动建 FRP 映射；停止会停进程、删映射、清地址。
+						{external
+							? "实例由目标机自己管（systemd 常驻 / 自有反代）：VCPDeck 只维护入口地址，不会起停它。"
+							: "一键启动会在目标机代起 dsh web 并自动建 FRP 映射；停止会停进程、删映射、清地址。"}
 					</p>
 				</div>
 
@@ -180,10 +226,20 @@ export function MachineDshWebPanel({ client }: { client: ClientInfo }) {
 				<div className="flex items-center gap-2">
 					<Input
 						className="min-w-0 flex-1 font-mono text-xs"
-						placeholder="https://dsh.example.com/?token=…"
+						placeholder={placeholder}
 						value={draft}
 						onChange={(event) => setDraft(event.target.value)}
 					/>
+					{publicHost && !draft ? (
+						<Button
+							size="sm"
+							variant="outline"
+							className="shrink-0 whitespace-nowrap"
+							onClick={() => setDraft(`https://${publicHost}/?token=`)}
+						>
+							用公网地址
+						</Button>
+					) : null}
 					<Button
 						size="sm"
 						className="shrink-0 whitespace-nowrap"
@@ -194,6 +250,13 @@ export function MachineDshWebPanel({ client }: { client: ClientInfo }) {
 						{saving ? "保存中…" : "保存"}
 					</Button>
 				</div>
+				{publicHost && (
+					<p className="text-xs text-muted-foreground">
+						机器注解里的公网地址：{" "}
+						<code className="rounded bg-secondary/60 px-1">{publicHost}</code>
+						（改它请到下方「公网与注解」）
+					</p>
+				)}
 				{error && <p className="text-sm text-destructive">{error}</p>}
 				<p className="text-xs text-muted-foreground">
 					地址可能含一次性 token：只经此页下发，不写日志。仅检测"是否可达"由你在浏览器打开时判断。

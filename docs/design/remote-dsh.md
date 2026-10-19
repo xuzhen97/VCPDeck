@@ -51,6 +51,22 @@ RDS 用 ACP 驱动目标机 agent，界面是自建的对话流。ACP 的定位�
 - **离线时不动映射**：`deleteMapping` 需要 Client 在线确认，离线删只会留下永远 `deleting` 的记录，因此留到重连后的停止流程一起清。
 - **前提**：Client 需声明 `dsh-web` 能力；Server 需有可用 `FrpsInstance`。缺任一都返回稳定错误码（`DSH_WEB_UNSUPPORTED` / `DSH_WEB_FRP_UNAVAILABLE`），不静默降级。
 - 手工登记地址的路径保留：不想要受管生命周期时，仍可直接填 URL。
+## 2.2 归属模式（managed / external）
+
+同一台机器上的 `dsh web` 可能不归 VCPDeck 起。两种归属必须显式区分，否则"一键启动"会在 systemd 常驻服务旁边再起一个实例，并把操作者登记的入口覆盖掉。
+
+| | `managed`（默认） | `external` |
+|---|---|---|
+| 谁起的 | VCPDeck 代起 | 目标机（systemd / docker / 手工 / 自有反代） |
+| VCPDeck 做什么 | 启动、停止、建删 FRP 映射 | 只维护入口地址 |
+| 点「一键启动」 | 正常代起 | **409 `DSH_WEB_EXTERNAL_MANAGED`**，并提示先停常驻实例 |
+| 点「停止并清理」 | 停进程 + 删映射 + 清地址 | 等价于**解除登记**，不向 Client 发任何命令 |
+| 显式解除 | — | `DELETE /api/clients/:id/dsh-web` |
+| 状态值 | stopped / starting / running / failed | `external` |
+
+- **登记即外部托管**：`PUT /dsh-web` 写地址时同时置 `dshWebMode=external`、`dshWebState=external`；清空地址则交还 `managed`。
+- **入口复用注解**：表单预填与「用公网地址」快捷填入直接读 `annotations.publicAddress`（host 优先，其次 IPv4），不另造一套外网地址字段。
+- **公网 + external**：实例长期在线、token 长期有效，VCPDeck 不承诺任何保护；反代必须自带 basic auth 或 mTLS。
 ## 3. 启动契约（不可省）
 
 ```bash
@@ -77,3 +93,5 @@ dsh --profile web \
 - 每台目标机需安装一次 DSH 插件；DSH 预览版 slot 契约变化时需要逐机适配。
 - 多机时是"每台一个 URL"，靠插件面板收敛；超过 5 台或出现第二操作者时按 ADR-0059 决策 6 切反代。
 - 插件面板只做展示与打开，不含日志/会话管理；这些仍以 VCPDeck 与 DSH 各自的界面为准。
+- 端口兜底清理（按端口杀进程）尚未校验进程命令行，理论上可能误杀新占用同端口的进程；端口区间 30000–40000 与常驻实例错开的概率极低，但仍是已知风险。
+- `external` 只维护"入口地址"，不含健康检查：常驻实例挂了 VCPDeck 不会知道，靠操作者打开时发现。

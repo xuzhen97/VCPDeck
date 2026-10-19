@@ -29,6 +29,7 @@ RDS（ADR-0058）用 ACP 驱动目标机 agent，并自建了会话 UI（对话�
 9. **受管生命周期（同日二次修订）**：操作者不再手写启动命令。`POST /api/clients/:clientId/dsh-web/start` 由 Server 分配 loopback 端口 → 命令 Client 代起 `dsh web` → 为该端口自动建 **FRP TCP 映射** → 用「映射地址 + 一次性 token」拼出 `dshWebUrl` 落库；`POST .../stop` 反向收尾：停进程、删映射、清地址。任何一步失败都不留半开状态（建映射失败即回滚进程）。
 10. **状态与可观测**：`Client.dshWebState ∈ {stopped, starting, running, failed}`、`dshWebPort`、`dshWebFrpMappingId`。Client 离线时把运行中的通道标 `failed` 并清空地址，但**保留端口与映射引用**：`dsh web` 是独立进程，Client 重启不会杀掉它，句柄失效后端口是唯一还能定位残留的线索；停止时先杀句柄、再按端口兜底（Windows `netstat -ano` + `taskkill /T /F`），并轮询确认端口释放，仍占用则报 `DSH_WEB_STOP_INCOMPLETE` 而不是假装成功。离线时也不调 `deleteMapping`（需要 Client 在线确认，否则留下永远 `deleting` 的记录），留给重连后的停止流程。FRP 映射建/删后必须把 `dispatch` 下发到 Client——只落库不生效，表现是"映射存在但端口不可达"。
 11. **前提**：一键启动要求目标 Client 声明 `dsh-web` 能力，且 Server 侧存在可用的 `FrpsInstance`；缺少时返回 `DSH_WEB_FRP_UNAVAILABLE` 并提示先去配置 frps，而不是静默降级成"起了个没人能访问的进程"。
+12. **归属分离（同日三次修订）：外部托管的实例是一等公民。** 目标机可能已有 systemd/docker 常驻的 `dsh web`，或已有 nginx/caddy + TLS + 域名。此时 VCPDeck **只能维护入口，不能起停**——代起会多一个实例、覆盖已登记入口，代停会杀掉别人正在用的服务。因此新增 `dshWebMode ∈ {managed, external}`：登记地址即落 `external`（`dshWebState=external`）；`external` 下 `POST .../start` 返回 `409 DSH_WEB_EXTERNAL_MANAGED`，`POST .../stop` 等价于解除登记，另有 `DELETE /dsh-web` 显式解除；`managed` 的启动成功会把归属写回 `managed`。入口表单复用机器注解里已维护的 `annotations.publicAddress`（host/IPv4）做预填，避免两处重复录入。外网 + `external` 时 VCPDeck 不承诺任何保护：反代必须自带 basic auth / mTLS，token 按长期凭据对待。
 ## 候选方案
 
 - **A. FRP 直连 + DSH 插件目录**（采纳）：复用已有 FRP；不引入 HTTP/WS 代理面；产出一个可长期复用的插件包。代价是每台机的 DSH 直接暴露（受决策 3 约束）与逐机安装插件。

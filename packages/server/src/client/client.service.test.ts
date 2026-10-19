@@ -720,35 +720,58 @@ describe("ClientService 操作者注解", () => {
 });
 
 describe("ClientService 远程 DSH 地址（ADR-0059）", () => {
-	it("登记后投影下发 dshWebUrl", async () => {
-		const update = vi
-			.fn()
-			.mockResolvedValue({ ...clientRow, dshWebUrl: "https://dsh.example.com/" });
-		const prisma = prismaMock({ update }) as never;
+	it("登记后投影下发 dshWebUrl，并把归属落成 external", async () => {
+		const findUnique = vi.fn().mockResolvedValue({ ...clientRow });
+		const update = vi.fn().mockResolvedValue({
+			...clientRow,
+			dshWebUrl: "https://dsh.example.com/",
+			dshWebMode: "external",
+			dshWebState: "external",
+		});
+		const prisma = prismaMock({ findUnique, update }) as never;
 		const service = new ClientService(prisma);
 
 		const result = await service.setDshWebUrl("c1", "https://dsh.example.com/");
 
+		// 登记 = 声明「实例不是我起的」：必须落 external，否则一键启动会覆盖它
 		expect(update).toHaveBeenCalledWith({
 			where: { id: "c1" },
-			data: { dshWebUrl: "https://dsh.example.com/" },
+			data: {
+				dshWebUrl: "https://dsh.example.com/",
+				dshWebMode: "external",
+				dshWebState: "external",
+			},
 		});
 		expect(result.dshWebUrl).toBe("https://dsh.example.com/");
+		expect(result.dshWebMode).toBe("external");
 	});
 
-	it("清除登记后投影不带该字段", async () => {
-		const update = vi.fn().mockResolvedValue({ ...clientRow, dshWebUrl: null });
-		const prisma = prismaMock({ update }) as never;
+	it("清除登记后投影不带该字段并交还 managed", async () => {
+		const findUnique = vi.fn().mockResolvedValue({
+			...clientRow,
+			dshWebMode: "external",
+			dshWebState: "external",
+		});
+		const update = vi.fn().mockResolvedValue({
+			...clientRow,
+			dshWebUrl: null,
+			dshWebMode: "managed",
+		});
+		const prisma = prismaMock({ findUnique, update }) as never;
 		const service = new ClientService(prisma);
 
 		const result = await service.setDshWebUrl("c1", null);
 
+		expect(update).toHaveBeenCalledWith({
+			where: { id: "c1" },
+			data: { dshWebUrl: null, dshWebMode: "managed", dshWebState: "stopped" },
+		});
 		expect(result.dshWebUrl).toBeUndefined();
 	});
 
 	it("Client 不存在时返回 404", async () => {
-		const update = vi.fn().mockRejectedValue({ code: "P2025" });
-		const prisma = prismaMock({ update }) as never;
+		const findUnique = vi.fn().mockResolvedValue(null);
+		const prisma = prismaMock({ findUnique }) as never;
 		const service = new ClientService(prisma);
 
 		await expect(service.setDshWebUrl("missing", null)).rejects.toMatchObject({

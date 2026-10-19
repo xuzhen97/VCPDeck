@@ -53,7 +53,7 @@ export function DevelopDshPage() {
 	}, [load]);
 
 	const lifecycle = useCallback(
-		async (client: ClientInfo, action: "start" | "stop") => {
+		async (client: ClientInfo, action: "start" | "stop" | "detach") => {
 			setBusyId(client.clientId);
 			setRowError((current) => {
 				const next = { ...current };
@@ -64,18 +64,22 @@ export function DevelopDshPage() {
 				const status =
 					action === "start"
 						? await sdk.clients.startDshWeb(client.clientId)
-						: await sdk.clients.stopDshWeb(client.clientId);
-				setClients((current) =>
-					current?.map((item) =>
-						item.clientId === client.clientId
-							? {
-									...item,
-									dshWebUrl: status.url ?? undefined,
-									dshWebState: status.state,
-									dshWebPort: status.port ?? undefined,
-								}
-							: item,
-					) ?? null,
+						: action === "detach"
+							? await sdk.clients.detachDshWeb(client.clientId)
+							: await sdk.clients.stopDshWeb(client.clientId);
+				setClients(
+					(current) =>
+						current?.map((item) =>
+							item.clientId === client.clientId
+								? {
+										...item,
+										dshWebUrl: status.url ?? undefined,
+										dshWebState: status.state,
+										dshWebMode: status.mode,
+										dshWebPort: status.port ?? undefined,
+									}
+								: item,
+						) ?? null,
 				);
 			} catch (cause) {
 				const code = (cause as { code?: unknown }).code;
@@ -131,7 +135,12 @@ export function DevelopDshPage() {
 			) : (
 				<div className="grid gap-3 lg:grid-cols-2">
 					{clients.map((client) => {
-						const badge = dshWebStateBadge(client.dshWebState);
+						const external =
+							client.dshWebMode === "external" ||
+							client.dshWebState === "external";
+						const badge = external
+							? { label: "外部托管", tone: "neutral" as const }
+							: dshWebStateBadge(client.dshWebState);
 						const busy = busyId === client.clientId;
 						const url = client.dshWebUrl;
 						return (
@@ -172,7 +181,27 @@ export function DevelopDshPage() {
 									)}
 
 									<div className="flex flex-wrap items-center gap-2">
-										{client.dshWebState === "running" ? (
+										{external ? (
+											<>
+												{url && (
+													<Button
+														size="sm"
+														onClick={() => window.open(url, "_blank", "noreferrer")}
+													>
+														<ExternalLink className="size-3.5" aria-hidden="true" />
+														打开
+													</Button>
+												)}
+												<Button
+													size="sm"
+													variant="outline"
+													disabled={busy}
+													onClick={() => void lifecycle(client, "detach")}
+												>
+													{busy ? "解除中…" : "解除登记"}
+												</Button>
+											</>
+										) : client.dshWebState === "running" ? (
 											<>
 												{url && (
 													<Button

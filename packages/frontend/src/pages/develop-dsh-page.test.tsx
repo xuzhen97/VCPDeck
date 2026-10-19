@@ -105,4 +105,24 @@ describe("DevelopDshPage（跨机器远程 DSH）", () => {
 		renderPage({ clients: { list: vi.fn().mockResolvedValue([]) } });
 		expect(await screen.findByText("还没有机器上线")).toBeVisible();
 	});
+
+	it("外部托管的机器只给打开与解除登记，不提供起停", async () => {
+		renderPage({
+			clients: {
+				list: vi.fn().mockResolvedValue([
+					makeClient({
+						dshWebState: "external",
+						dshWebMode: "external",
+						dshWebUrl: "https://dsh.example.com/?token=tok",
+					}),
+				]),
+			},
+		});
+
+		expect(await screen.findByText("外部托管")).toBeVisible();
+		expect(screen.queryByRole("button", { name: /一键启动/ })).toBeNull();
+		expect(screen.queryByRole("button", { name: /停止并清理/ })).toBeNull();
+		expect(screen.getByRole("button", { name: /解除登记/ })).toBeVisible();
+		expect(screen.getByRole("button", { name: /打开/ })).toBeVisible();
+	});
 });

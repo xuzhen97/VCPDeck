@@ -26,7 +26,12 @@ function makeClient(overrides: Partial<ClientInfo> = {}): ClientInfo {
 }
 
 function renderPanel(
-	sdk: { clients: { setDshWebUrl: ReturnType<typeof vi.fn> } },
+	sdk: {
+		clients: {
+			setDshWebUrl: ReturnType<typeof vi.fn>;
+			detachDshWeb?: ReturnType<typeof vi.fn>;
+		};
+	},
 	client: ClientInfo,
 ) {
 	render(
@@ -82,8 +87,6 @@ describe("MachineDshWebPanel（ADR-0059）", () => {
 			);
 		});
 	});
-});
-
 	it("一键启动后展示运行中与打开入口", async () => {
 		const user = userEvent.setup();
 		const sdk = {
@@ -94,6 +97,7 @@ describe("MachineDshWebPanel（ADR-0059）", () => {
 					state: "running",
 					port: 30123,
 					url: "https://frp.example.com:30123/?token=abc",
+					mode: "managed",
 				}),
 				stopDshWeb: vi.fn(),
 			},
@@ -110,3 +114,75 @@ describe("MachineDshWebPanel（ADR-0059）", () => {
 			"https://frp.example.com:30123/?token=abc",
 		);
 	});
+
+	it("外部托管时不提供一键启动，只给打开与解除登记", () => {
+		renderPanel(
+			{ clients: { setDshWebUrl: vi.fn(), detachDshWeb: vi.fn() } },
+			makeClient({
+				dshWebState: "external",
+				dshWebMode: "external",
+				dshWebUrl: "https://dsh.example.com/?token=secret123",
+			}),
+		);
+
+		expect(screen.getByText("外部托管")).toBeVisible();
+		expect(screen.queryByRole("button", { name: /一键启动/ })).toBeNull();
+		expect(screen.queryByRole("button", { name: /停止并清理/ })).toBeNull();
+		expect(screen.getByRole("button", { name: /解除登记/ })).toBeVisible();
+		expect(screen.getByRole("link", { name: /打开/ })).toBeVisible();
+		// 常驻实例不归 VCPDeck 管，文案必须说清楚
+		expect(screen.getByText(/不会起停它/)).toBeVisible();
+	});
+
+	it("解除登记调用 detach 而不是 stop", async () => {
+		const user = userEvent.setup();
+		const detach = vi.fn().mockResolvedValue({
+			clientId: "c1",
+			state: "stopped",
+			port: null,
+			url: null,
+			mode: "managed",
+		});
+		const stop = vi.fn();
+		render(
+			<SdkProvider
+				client={
+					{
+						clients: { setDshWebUrl: vi.fn(), detachDshWeb: detach, stopDshWeb: stop },
+					} as never
+				}
+			>
+				<MachineDshWebPanel
+					client={makeClient({
+						dshWebState: "external",
+						dshWebMode: "external",
+						dshWebUrl: "https://dsh.example.com/?token=secret123",
+					})}
+				/>
+			</SdkProvider>,
+		);
+
+		await user.click(screen.getByRole("button", { name: /解除登记/ }));
+		await waitFor(() => expect(detach).toHaveBeenCalledWith("c1"));
+		expect(stop).not.toHaveBeenCalled();
+		expect(await screen.findByRole("button", { name: /一键启动/ })).toBeVisible();
+	});
+
+	it("有公网注解时预填并提示复用，不必手抄域名", () => {
+		renderPanel(
+			{ clients: { setDshWebUrl: vi.fn() } },
+			makeClient({
+				annotations: {
+					publicAddress: { v4: ["203.0.113.7"], v6: [], host: "mylx.example.com" },
+					notes: null,
+					updatedAt: new Date(0).toISOString(),
+				},
+			}),
+		);
+
+		expect(
+			screen.getByPlaceholderText("https://mylx.example.com/?token=…"),
+		).toBeVisible();
+		expect(screen.getByRole("button", { name: "用公网地址" })).toBeVisible();
+	});
+});

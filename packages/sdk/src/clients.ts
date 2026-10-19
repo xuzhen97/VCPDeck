@@ -1,6 +1,7 @@
 import type {
 	ClientAnnotationsInput,
 	ClientInfo,
+	DshWebMode,
 	DshWebState,
 } from "@vcpdeck/shared";
 
@@ -10,6 +11,8 @@ export interface DshWebStatus {
 	state: DshWebState;
 	port: number | null;
 	url: string | null;
+	/** 归属模式：external 表示实例由目标机自己管。 */
+	mode: DshWebMode;
 }
 import type { VcpDeckClient } from "./client.js";
 
@@ -54,11 +57,19 @@ export function createClientsApi(client: Pick<VcpDeckClient, "request">) {
 				undefined,
 				signal,
 			),
-		/** 一键停止：停进程、删映射、清地址。 */
+		/** 一键停止：停进程、删映射、清地址；外部托管时等价于解除登记。 */
 		stopDshWeb: (clientId: string, signal?: AbortSignal) =>
 			client.request<DshWebStatus>(
 				"POST",
 				`/api/clients/${encodeURIComponent(clientId)}/dsh-web/stop`,
+				undefined,
+				signal,
+			),
+		/** 解除外部托管的登记：只清 VCPDeck 侧入口，不动目标机进程（ADR-0059 决策 12）。 */
+		detachDshWeb: (clientId: string, signal?: AbortSignal) =>
+			client.request<DshWebStatus>(
+				"DELETE",
+				`/api/clients/${encodeURIComponent(clientId)}/dsh-web`,
 				undefined,
 				signal,
 			),

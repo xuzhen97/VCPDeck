@@ -55,6 +55,8 @@ interface ClientRow {
   dshWebUrl: string | null;
   /** 受管通道状态（ADR-0059 修订） */
   dshWebState?: string;
+  /** 归属模式：managed / external（ADR-0059 决策 12） */
+  dshWebMode?: string | null;
   dshWebPort?: number | null;
   disks: string;
   online: boolean;
@@ -196,10 +198,30 @@ export class ClientService {
   ): Promise<ClientInfo> {
     let updated: ClientRow;
     try {
-      updated = await this.prisma.client.update({
+      // 登记地址 = 声明「这台机器的实例不是我起的」：落成 external，避免一键启动
+      // 又在 systemd 常驻服务旁边起一个实例、把这里的地址覆盖掉。
+      // 清空地址则交还给 managed，让一键启动重新可用（不打断正在运行的受管通道）。
+      const current = await this.prisma.client.findUnique({
         where: { id: clientId },
-        data: { dshWebUrl: url },
       });
+      if (!current) {
+        throw clientError(CLIENT_NOT_FOUND, `Client "${clientId}" not found`, 404);
+      }
+      const row = current as unknown as {
+        dshWebMode?: string | null;
+        dshWebState?: string | null;
+      };
+      const wasExternal =
+        row.dshWebMode === "external" || row.dshWebState === "external";
+      const data: Record<string, unknown> =
+        url === null
+          ? {
+              dshWebUrl: null,
+              dshWebMode: "managed",
+              ...(wasExternal ? { dshWebState: "stopped" } : {}),
+            }
+          : { dshWebUrl: url, dshWebMode: "external", dshWebState: "external" };
+      updated = await this.prisma.client.update({ where: { id: clientId }, data });
     } catch (error) {
       if ((error as { code?: string } | null)?.code === "P2025") {
         throw clientError(CLIENT_NOT_FOUND, `Client "${clientId}" not found`, 404);
@@ -372,6 +394,7 @@ export class ClientService {
     if (c.dshWebState) {
       info.dshWebState = c.dshWebState as ClientInfo["dshWebState"];
       info.dshWebPort = c.dshWebPort ?? null;
+      info.dshWebMode = (c.dshWebMode ?? "managed") as ClientInfo["dshWebMode"];
     }
     return info;
   }

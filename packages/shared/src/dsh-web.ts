@@ -17,8 +17,22 @@ export const DSH_WEB_STATES = [
 	"starting",
 	"running",
 	"failed",
+	/**
+	 * 外部托管：实例由目标机自己管（systemd / docker / 手工常驻 / 自有反代），
+	 * VCPDeck 只登记入口，绝不代起代停。
+	 */
+	"external",
 ] as const;
 export type DshWebState = (typeof DSH_WEB_STATES)[number];
+
+/**
+ * 远程 DSH 的归属模式。
+ *
+ * - `managed`：VCPDeck 代起 `dsh web` 并自动建 FRP 映射，可一键停止；
+ * - `external`：实例的生命周期归目标机（systemd 常驻等），VCPDeck 只维护入口地址。
+ */
+export const DSH_WEB_MODES = ["managed", "external"] as const;
+export type DshWebMode = (typeof DSH_WEB_MODES)[number];
 
 /** Server → Client 命令。 */
 export interface DshWebCommand {

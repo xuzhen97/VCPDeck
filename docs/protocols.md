@@ -48,7 +48,7 @@
 | --- | --- |
 | `/api/auth` | 登录、登出、当前身份、Credential |
 | `/api/identities` | admin 身份管理 |
-| `/api/clients` | 在线 Client、别名、操作者注解、远程 DSH 地址（`dshWebUrl`，ADR-0059）和终端子资源；`PUT /api/clients/:clientId/dsh-web` 登记/清除（`{url: string \| null}`，非法返回 400 `INVALID_DSH_WEB_URL`）；`POST /api/clients/:clientId/dsh-web/start\|stop` 受管生命周期（代起 dsh web + 自动建/删 FRP 映射），`GET` 查状态 |
+| `/api/clients` | 在线 Client、别名、操作者注解、远程 DSH 地址（`dshWebUrl`，ADR-0059）和终端子资源；`PUT /api/clients/:clientId/dsh-web` 登记/清除（`{url: string \| null}`，非法返回 400 `INVALID_DSH_WEB_URL`）；`POST /api/clients/:clientId/dsh-web/start\|stop` 受管生命周期（代起 dsh web + 自动建/删 FRP 映射），`DELETE /api/clients/:clientId/dsh-web` 解除外部托管登记（ADR-0059 决策 12），`GET` 查状态（含 `mode: managed\|external`）|
 | `/api/jobs` | Job 创建、分页查询、详情、取消和日志事件链 |
 | `/api/files` | 文件上传/导出会话及进度 |
 | `/api/storage` | 签名能力、文件流、Provider 配置和 Storage Share 管理 |

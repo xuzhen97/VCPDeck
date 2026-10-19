@@ -14,8 +14,8 @@ export type {
 
 // ── 远程 DSH WebUI 登记（ADR-0059） ──
 export { DSH_WEB_URL_MAX_LENGTH, parseClientDshWebUrl } from "./client-dsh-web.js";
-import type { DshWebState } from "./dsh-web.js";
-export type { DshWebState } from "./dsh-web.js";
+import type { DshWebMode, DshWebState } from "./dsh-web.js";
+export type { DshWebMode, DshWebState } from "./dsh-web.js";
 export * from "./dsh-web.js";
 
 // ── Client 一键安装协议 ──
@@ -440,6 +440,8 @@ export interface ClientInfo {
 	dshWebUrl?: string;
 	/** 可选：受管通道状态（ADR-0059 修订）；缺省表示旧 Server 未跟踪 */
 	dshWebState?: DshWebState;
+	/** 可选：归属模式（managed=VCPDeck 代管，external=目标机自管）；缺省按 managed 处理 */
+	dshWebMode?: DshWebMode;
 	/** 可选：受管 dsh web 的监听端口 */
 	dshWebPort?: number | null;
 	online: boolean;

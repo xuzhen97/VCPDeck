@@ -2,6 +2,8 @@ import {
   Optional,
   BadRequestException,
   Controller,
+  Delete,
+  HttpCode,
   HttpException,
   Inject,
   NotFoundException,
@@ -446,11 +448,33 @@ function normalizeAndValidateExecPayload(payload: Record<string, unknown>): Reco
 		}
 	}
 
-	/** 一键停止：停进程、删 FRP 映射、清空地址。 */
+	/** 一键停止：停进程、删 FRP 映射、清空地址。外部托管时等价于解除登记。 */
 	@Post("clients/:clientId/dsh-web/stop")
 	async stopClientDshWeb(@Param("clientId") clientId: string) {
 		try {
 			return await this.requireDshWeb().stop(clientId);
+		} catch (error) {
+			const { code, statusCode, message } = error as {
+				code?: string;
+				statusCode?: number;
+				message?: string;
+			};
+			if (!code || !statusCode) throw error;
+			throw new HttpException({ code, message }, statusCode);
+		}
+	}
+
+	/**
+	 * 解除外部托管的登记（ADR-0059 决策 12）。
+	 *
+	 * 只清 VCPDeck 侧的入口与归属，不动目标机进程：常驻的 `dsh web`
+	 * 归 systemd / docker / 操作者自己管。
+	 */
+	@Delete("clients/:clientId/dsh-web")
+	@HttpCode(200)
+	async detachClientDshWeb(@Param("clientId") clientId: string) {
+		try {
+			return await this.requireDshWeb().detach(clientId);
 		} catch (error) {
 			const { code, statusCode, message } = error as {
 				code?: string;

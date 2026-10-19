@@ -3,6 +3,7 @@ import type {
 	DispatchPayload,
 	DshWebCommand,
 	DshWebCommandResult,
+	DshWebMode,
 	DshWebState,
 } from "@vcpdeck/shared";
 import { randomUUID } from "node:crypto";
@@ -16,6 +17,7 @@ export type DshWebErrorCode =
 	| "DSH_WEB_NOT_RUNNING"
 	| "DSH_WEB_COMMAND_FAILED"
 	| "DSH_WEB_STOP_INCOMPLETE"
+	| "DSH_WEB_EXTERNAL_MANAGED"
 	| "DSH_WEB_FRP_UNAVAILABLE";
 
 export class DshWebError extends Error {
@@ -43,6 +45,8 @@ export interface DshWebStatus {
 	state: DshWebState;
 	port: number | null;
 	url: string | null;
+	/** 归属模式；`external` 表示实例由目标机自己管，VCPDeck 不起停它。 */
+	mode: DshWebMode;
 }
 
 export interface DshWebServiceDeps {
@@ -121,14 +125,20 @@ export class DshWebService {
 		}
 		const row = client as unknown as {
 			dshWebState?: string;
+			dshWebMode?: string | null;
 			dshWebPort?: number | null;
 			dshWebUrl?: string | null;
 		};
+		const state = (row.dshWebState as DshWebState | undefined) ?? "stopped";
 		return {
 			clientId,
-			state: (row.dshWebState as DshWebState | undefined) ?? "stopped",
+			state,
 			port: row.dshWebPort ?? null,
 			url: row.dshWebUrl ?? null,
+			mode:
+				row.dshWebMode === "external" || state === "external"
+					? "external"
+					: "managed",
 		};
 	}
 
@@ -144,7 +154,17 @@ export class DshWebService {
 			socketId: string | null;
 			capabilities: string;
 			dshWebState?: string;
+			dshWebMode?: string | null;
+			dshWebUrl?: string | null;
 		};
+		// 外部托管（systemd 常驻 / 自有反代）：绝不代起第二个实例，更不能覆盖别人登记的入口。
+		if (row.dshWebMode === "external" || row.dshWebState === "external") {
+			throw fail(
+				"DSH_WEB_EXTERNAL_MANAGED",
+				"这台机器的 DSH 由外部托管（常驻服务或自有反代）：VCPDeck 只维护入口地址，不会起停它。想让 VCPDeck 代管，先停掉目标机的常驻实例并解除登记。",
+				409,
+			);
+		}
 		if (!row.online || !row.socketId) {
 			throw fail("DSH_WEB_CLIENT_OFFLINE", "目标 Client 不在线", 409);
 		}
@@ -249,15 +269,22 @@ export class DshWebService {
 		const url = buildDshWebUrl(publicUrl, started.token);
 		await this.updateClient(clientId, {
 			dshWebState: "running",
+			// 代管成功即归属 managed：清掉可能残留的 external 标记。
+			dshWebMode: "managed",
 			dshWebPort: started.port ?? port,
 			dshWebUrl: url,
 			dshWebFrpMappingId: mappingId,
 		});
-		return { clientId, state: "running", port: started.port ?? port, url };
+		return {
+			clientId,
+			state: "running",
+			port: started.port ?? port,
+			url,
+			mode: "managed",
+		};
 	}
 
 	async stop(clientId: string): Promise<DshWebStatus> {
-		let stopIncomplete = false;
 		const client = await this.deps.prisma.client.findUnique({
 			where: { id: clientId },
 		});
@@ -267,41 +294,17 @@ export class DshWebService {
 		const row = client as unknown as {
 			socketId: string | null;
 			dshWebState?: string;
+			dshWebMode?: string | null;
 			dshWebPort?: number | null;
 			dshWebFrpMappingId?: string | null;
 		};
-		if (row.dshWebState !== "running" && row.dshWebState !== "starting") {
-			// 非运行态也要收尾：Client 重启后状态会变 failed，但进程和端口可能还活着，
-			// 这里靠残留的 dshWebPort 再让 Client 按端口清一次。
-			if (row.socketId && row.dshWebPort) {
-				await this.command(row.socketId, {
-					requestId: randomUUID(),
-					action: "stop",
-					clientId,
-					port: row.dshWebPort,
-				}).then(
-					(result) => {
-						if (!result.ok) stopIncomplete = true;
-					},
-					() => {
-						// 已停止态下通道不可用不算失败：没有证据表明还有进程。
-					},
-				);
-			}
-			if (row.dshWebFrpMappingId) {
-				await this.deleteMappingQuietly(row.dshWebFrpMappingId);
-			}
-			await this.updateClient(clientId, {
-				dshWebState: stopIncomplete ? "failed" : "stopped",
-				dshWebUrl: null,
-				dshWebPort: stopIncomplete ? row.dshWebPort : null,
-				dshWebFrpMappingId: null,
-			});
-			if (stopIncomplete) {
-			throw fail("DSH_WEB_STOP_INCOMPLETE", "dsh web 进程未能退出，请重试停止", 502);
+		// 外部托管的实例不归 VCPDeck 管：停止 = 解除登记，不向 Client 发任何命令。
+		if (row.dshWebMode === "external" || row.dshWebState === "external") {
+			return this.detach(clientId);
 		}
-			return { clientId, state: "stopped", port: null, url: null };
-		}
+
+		const running = row.dshWebState === "running" || row.dshWebState === "starting";
+		let stopIncomplete = false;
 		if (row.socketId && row.dshWebPort) {
 			await this.command(row.socketId, {
 				requestId: randomUUID(),
@@ -314,7 +317,8 @@ export class DshWebService {
 					if (!result.ok) stopIncomplete = true;
 				},
 				() => {
-					stopIncomplete = true;
+					// 非运行态下通道不可用不算失败：没有证据表明还有进程。
+					if (running) stopIncomplete = true;
 				},
 			);
 		}
@@ -331,7 +335,45 @@ export class DshWebService {
 		if (stopIncomplete) {
 			throw fail("DSH_WEB_STOP_INCOMPLETE", "dsh web 进程未能退出，请重试停止", 502);
 		}
-		return { clientId, state: "stopped", port: null, url: null };
+		return {
+			clientId,
+			state: "stopped",
+			port: null,
+			url: null,
+			mode: "managed",
+		};
+	}
+
+	/**
+	 * 解除外部托管的登记（ADR-0059 决策 12）。
+	 *
+	 * 只清 VCPDeck 侧的地址与归属，**绝不向目标机发命令**：那里的 `dsh web` 归
+	 * systemd / docker / 操作者自己管，VCPDeck 停它属于越权。
+	 */
+	async detach(clientId: string): Promise<DshWebStatus> {
+		const client = await this.deps.prisma.client.findUnique({
+			where: { id: clientId },
+		});
+		if (!client) {
+			throw fail("DSH_WEB_CLIENT_OFFLINE", `Client "${clientId}" 不存在`, 404);
+		}
+		const row = client as unknown as { dshWebFrpMappingId?: string | null };
+		// 历史数据可能残留映射引用：只清引用，不删映射（那属于外部实例的入口）。
+		void row;
+		await this.updateClient(clientId, {
+			dshWebState: "stopped",
+			dshWebUrl: null,
+			dshWebPort: null,
+			dshWebFrpMappingId: null,
+			dshWebMode: "managed",
+		});
+		return {
+			clientId,
+			state: "stopped",
+			port: null,
+			url: null,
+			mode: "managed",
+		};
 	}
 
 	/** Client 结果回报：按 requestId 结算挂起的命令。 */
