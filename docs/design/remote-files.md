@@ -272,3 +272,7 @@ FileRef URL 是临时凭据：
 - [`../protocols.md`](../protocols.md) — REST、Socket.IO、错误和恢复语义；
 - [`../security.md`](../security.md) — 可信操作者、敏感数据和已知风险；
 - [`../operations.md`](../operations.md) — 巡检、备份和故障处置。
+
+## 15. RDS workspace（ADR-0058）
+
+RDS 的 Files 视图固定使用会话 `workspaceRoot`，只提供只读浏览/读取，不暴露全局 roots；Server 先做 roots 词法边界检查，Client 启动 ACP Host 前再做 realpath/canonical 校验。RDS 不改变现有文件 Job 的 `rootDir` 信任边界，也不把 workspace 外路径通过 UI 放行。

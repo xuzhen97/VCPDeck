@@ -6,7 +6,7 @@
 
 VCPDeck 是面向个人工作流的独立控制面，不是 VCPToolBox 的后台管理面板。
 
-- **VCPDeck 当前负责**：可信操作者、远程机器、Job、文件、终端、FRP 和发布更新；
+- **VCPDeck 当前负责**：可信操作者、远程机器、Job、文件、终端、FRP、A2A Task 和发布更新；
 - **VCPToolBox 负责**：Agent 身份、知识库、RAG 和插件生态；
 - **长期愿景**：在现有远程执行基础上增加 TODO、工作流、聊天和 VCPToolBox 双向集成。
 
@@ -19,6 +19,8 @@ VCPDeck 是面向个人工作流的独立控制面，不是 VCPToolBox 的后台
 - 远程文件浏览、读写、导入/导出及本地/阿里云 Storage；
 - 交互式远程终端，包括 PTY、快照、重连和控制权；
 - FRPS 实例与 FRP 映射管理；
+- A2A Task 与 ACP Host：一个 agent 可把任务委托给目标机器上的另一个 agent，支持权限往返、取消和审计；
+- Remote Dev Session（ADR-0058）：从浏览器创建目标 Client 上的 agent + 终端 + workspace 文件 + 端口转发会话；CLI `vcpdeck forward` 只监听本机 loopback；
 - Cookie/Bearer 身份认证、操作审计和 React 驾驶台；
 - Release、Launcher、Server/Client 更新与失败回退基础实现；
 - CLI 多环境注册与项目默认环境选择，以及双平台 Release 上传。
@@ -35,7 +37,7 @@ VCPDeck 采用 Server 中心控制面：Frontend、SDK 和 CLI 只访问 Server�
 - TODO、工作流、聊天、规则和 VCPToolBox 双向桥接仍是规划；
 - Server 当前是单控制面节点，使用 SQLite，不提供高可用多实例；
 - Release/Launcher 已完成双平台 Server→多 Client 生产演练，但仍不提供灰度、暂停/恢复或 Launcher 自动更新；
-- Agent 创建、知识向量检索和插件生态不属于 VCPDeck。
+- Agent 身份、知识向量检索和插件生态不属于 VCPDeck；VCPDeck 只保存 agent placement 和 A2A 任务契约，实际 ACP agent 在目标 Client 上运行。
 
 ## 项目文档
 

@@ -142,8 +142,8 @@ describe("getRegisterInfo", () => {
 				runAsUser: "vcpdeck",
 			});
 		expect(info.installation).toEqual({ mode: "systemd-root-equivalent" });
-		// 不新增可执行 capability 字符串。
-		expect(info.capabilities).toEqual(["exec", "file.read", "file.write", "frp"]);
+		// ACP 是协议宿主能力；不新增可执行命令字符串。
+		expect(info.capabilities).toEqual(["exec", "file.read", "file.write", "frp", "acp", "remote-dev"]);
 		const json = JSON.stringify(info);
 		expect(json).not.toContain("C:\\");
 		expect(json).not.toContain("/home/");

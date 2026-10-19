@@ -23,6 +23,7 @@
 
 | 领域 | 文档 | 状态与用途 |
 | --- | --- | --- |
+| 跨机开发会话 | [`remote-dev-session.md`](./remote-dev-session.md) | Current；Remote Dev Session 的状态机、ACP/终端/文件组合、session 级端口隧道、安全与验收；v1 已落地，未完成项见 §18；方向见 ADR-0058（Accepted） |
 
 ## 新专题模板
 

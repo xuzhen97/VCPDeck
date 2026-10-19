@@ -168,6 +168,30 @@ export const Events = {
 	FRP_STATE_ACK: "frp:state-ack",
 	GIT_SSH_COMMAND: "git-ssh:command",
 	GIT_SSH_ACK: "git-ssh:ack",
+	TASK_COMMAND: "task:command",
+	TASK_COMMAND_RESULT: "task:command-result",
+	TASK_EVENT: "task:event",
+	RDS_COMMAND: "rds:command",
+	RDS_COMMAND_RESULT: "rds:command-result",
+	RDS_EVENT: "rds:event",
+	RDS_ACP_SESSION: "rds:acp-session",
+	RDS_ATTACH: "rds:attach",
+	RDS_DETACH: "rds:detach",
+	RDS_PROMPT: "rds:prompt",
+	RDS_CANCEL: "rds:cancel",
+	RDS_PERMISSION: "rds:permission",
+	RDS_PORT_OPEN: "rds:port.open",
+	RDS_PORT_CLOSE: "rds:port.close",
+	RDS_RESYNC: "rds:resync",
+	RDS_STATE: "rds:state",
+	RDS_AGENT_EVENT: "rds:agent:event",
+	RDS_PORT_STATE: "rds:port:state",
+	RDS_ERROR: "rds:error",
+	RDS_CLOSED: "rds:closed",
+	RDS_TUNNEL_HELLO: "rds:tunnel:hello",
+	RDS_STREAM_HELLO: "rds:stream:hello",
+	RDS_STREAM_FRAME: "rds:stream:frame",
+	RDS_STREAM_CLOSE: "rds:stream:close",
 } as const;
 
 // ── Job type ──
@@ -207,28 +231,36 @@ import {
 	MachineInstallationMode,
 	PrivilegedCapabilityMode,
 	getClientInstallationCompliance,
+	parseAcpCapabilityStatus,
+	parseRemoteDevCapabilityStatus,
 	parseMachineInstallation,
 	parseMachineRegister,
 	parsePrivilegedCapabilityStatus,
 } from "./machine-register.js";
 import type {
+	AcpCapabilityStatus,
 	ClientInstallationCompliance,
 	MachineInstallationStatus,
 	MachineRegister,
 	PrivilegedCapabilityStatus,
+	RemoteDevCapabilityStatus,
 } from "./machine-register.js";
 export {
 	ClientInstallationComplianceReason,
 	MachineInstallationMode,
 	PrivilegedCapabilityMode,
 	getClientInstallationCompliance,
+	parseAcpCapabilityStatus,
+	parseRemoteDevCapabilityStatus,
 	parseMachineInstallation,
 	parseMachineRegister,
 	parsePrivilegedCapabilityStatus,
+	type AcpCapabilityStatus,
 	type ClientInstallationCompliance,
 	type MachineInstallationStatus,
 	type MachineRegister,
 	type PrivilegedCapabilityStatus,
+	type RemoteDevCapabilityStatus,
 };
 
 /** 单盘容量与占用率（容量与使用率来自同一次 statfs） */
@@ -386,6 +418,10 @@ export interface ClientInfo {
 		 * 否则 Server 严格投影会把 Client 已上报的 gitSsh 能力静默丢弃。
 		 */
 		gitSsh?: GitSshCapability;
+		/** 可选：ACP Host 能力摘要（ADR-0057，旧 Client 缺省即未报告） */
+		acp?: AcpCapabilityStatus;
+		/** 可选：Remote Dev Session 能力摘要（ADR-0058，旧 Client 缺省即未报告） */
+		remoteDev?: RemoteDevCapabilityStatus;
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告，不推断为任何模式） */
 	installation?: MachineInstallationStatus;
@@ -1078,3 +1114,12 @@ export type {
 	FeatureVerification,
 	FeatureVerificationSource,
 } from "./feature.js";
+
+// ── A2A v1.0 对外契约与 ACP 适配器事件（ADR-0057） ──
+export * from "./a2a.js";
+export * from "./acp.js";
+export * from "./task-client.js";
+
+// ── Remote Dev Session 与数据面（ADR-0058） ──
+export * from "./remote-dev.js";
+export * from "./remote-dev-tunnel.js";

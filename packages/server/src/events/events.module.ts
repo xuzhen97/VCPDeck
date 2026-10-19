@@ -11,6 +11,8 @@ import { StorageModule } from "../storage/storage.module.js";
 import { TerminalModule } from "../terminal/terminal.module.js";
 import { ReleaseModule } from "../release/release.module.js";
 import { GitSshModule } from "../git-ssh/git-ssh.module.js";
+import { TaskModule } from "../task/task.module.js";
+import { RemoteDevModule } from "../remote-dev/remote-dev.module.js";
 
 @Module({
 	imports: [
@@ -23,6 +25,8 @@ import { GitSshModule } from "../git-ssh/git-ssh.module.js";
 		forwardRef(() => ReleaseModule),
 		TerminalModule,
 		GitSshModule,
+		TaskModule,
+		RemoteDevModule,
 	],
 	providers: [ClientGateway, AppGateway],
 	exports: [ClientGateway],

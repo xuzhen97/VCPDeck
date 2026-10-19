@@ -43,6 +43,7 @@ describe("resolveModule", () => {
 			"任务",
 			"映射",
 			"功能",
+			"开发",
 			"发版",
 			"设置",
 		]);
@@ -54,6 +55,9 @@ describe("resolveModule", () => {
 			MODULES.find((mod) => mod.id === "settings")?.sub?.map((s) => s.path),
 		).not.toContain("/settings/network");
 		expect(MODULES.map((mod) => mod.path)).not.toContain("/storage");
+		expect(
+			MODULES.find((mod) => mod.id === "remote-dev")?.sub?.map((s) => s.path),
+		).toEqual(["/remote-dev/new", "/remote-dev/sessions"]);
 	});
 });
 

@@ -1,12 +1,15 @@
 import {
 	Blocks,
 	Cable,
+	Code2,
 	Database,
+	History,
 	KeyRound,
 	LayoutDashboard,
 	ListTodo,
 	Lock,
 	MonitorCog,
+	Plus,
 	Rocket,
 	Settings,
 	UserRound,
@@ -50,6 +53,16 @@ export const MODULES: NavModule[] = [
 	{ id: "jobs", path: "/jobs", label: "任务", icon: ListTodo },
 	{ id: "frp", path: "/frp", label: "映射", icon: Cable },
 	{ id: "features", path: "/features", label: "功能", icon: Blocks },
+	{
+		id: "remote-dev",
+		path: "/remote-dev",
+		label: "开发",
+		icon: Code2,
+		sub: [
+			{ path: "/remote-dev/new", label: "新建会话", icon: Plus },
+			{ path: "/remote-dev/sessions", label: "会话历史", icon: History },
+		],
+	},
 	{ id: "releases", path: "/releases", label: "发版", icon: Rocket },
 	{
 		id: "settings",

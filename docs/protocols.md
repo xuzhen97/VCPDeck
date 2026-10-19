@@ -1,6 +1,6 @@
 # VCPDeck API 与通信协议
 
-> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-10-12｜适用版本：`0.19.2` / 当前 `main`｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
+> 状态：Current｜维护责任：Shared/Server 维护者｜最后核验：2026-10-19｜适用版本：`0.21.0` / 当前 `main`｜事实来源：`packages/shared/src/` 与 Server Controllers/Gateways
 
 本文维护协议语义和兼容规则，不复制全部 DTO。字段级事实以 `@vcpdeck/shared` 导出、SDK 和 Controller 实现为准。
 
@@ -54,6 +54,10 @@
 | `/api/storage` | 签名能力、文件流、Provider 配置和 Storage Share 管理 |
 | `/api/aliyundrive` | 阿里云盘配置、OAuth 和授权验证 |
 | `/api/frp` | FRPS 实例和映射 |
+| `/api/agents` | 逻辑 agent 到 Client 的受控 placement |
+| `/api/a2a` | A2A v1.0 JSON-RPC 入口与 Agent Card |
+| `/api/tasks` | Task 审计事件链与偏差检查（只读） |
+| `/api/remote-dev` | Remote Dev Session 生命周期、端口与 forward token |
 | `/api/releases` | 发布上传、列表和构件下载 |
 | `/api/health`、`/api/status` | 浅健康与版本/发布状态 |
 
@@ -180,6 +184,60 @@ Client 只在收到本次 REGISTER ack、且已上报兼容 `capabilityDetails.g
 
 响应 `{ jobId, events[], nextSeq }`；`events[].seq` 是全局自增序号，`nextSeq` 是下一次请求的游标（无事件时回显入参 `since`）。**返回条数小于 `limit` 即表示已到末尾**。Job 不存在返回 404。事件不复述命令、路径或 stdout/stderr 正文，正文仍在 `Job.result` 与输出 spool。契约与保留策略见 [`design/job-observability.md`](./design/job-observability.md) 与 [ADR-0054](./adr/0054-job-log-event-chain.md)。
 
+### 2.11 A2A Task REST 与 JSON-RPC 协议
+
+A2A 是面向“agent 调 agent”的任务契约，不是 Job 控制面，也不把 ACP 直接暴露给调用方（[ADR-0057](./adr/0057-a2a-hub-and-backend-agnostic-task-model.md)）。
+
+- `POST /api/a2a`：认证同普通 REST（Cookie/Bearer）；body 为 A2A v1.0 JSON-RPC 请求，`params` 先经 Shared strict parser。
+- `GET /api/a2a/agent-card`：返回 `supportedInterfaces`（`url`、`protocolBinding: "JSONRPC"`、`protocolVersion: "1.0"`）、能力与技能；`streaming`/`pushNotifications` 当前为 `false`。
+- `GET /api/tasks/:id/events?since&limit`：只读审计链，`limit` 夹取 1..200。
+- `GET /api/tasks/:id/deviation`：按路径约束和 `requiredArtifacts` 返回 `aligned`/`drifted`/`failed` 与原因。
+- `api/agents`：AgentPlacement 的 CRUD；`agentId` 是逻辑名，同一 `agentId` 同时只能有一个启用的 placement，多个启用会使解析以 `AGENT_AMBIGUOUS` 失败关闭。
+
+方法：
+
+| 方法 | 语义 |
+| --- | --- |
+| `SendMessage` | 新消息创建 Task；带 `message.taskId` 时继续已有 Task 或回答权限 |
+| `GetTask` | 读取 Task；`historyLength` 当前保留但不返回完整轮次正文 |
+| `ListTasks` | 按 `contextId`/`status` 分页；`pageToken` 是页码字符串 |
+| `CancelTask` | 先取消 Task，再尽力向 Client 发 `cancel`；终态 Task 幂等返回 |
+
+对外 Task 只使用 `status.state = TASK_STATE_*`，绝不暴露内部小写 `state`；内部基线字段位于 `metadata.vcpdeck`。ACP 权限不是标准 A2A 字段，而是声明的扩展：
+
+```json
+{
+  "metadata": {
+    "extensions": {
+      "https://vcpdeck.dev/a2a/extensions/acp-permission/v1": {
+        "requestId": "perm-1",
+        "optionId": "allow-once"
+      }
+    }
+  }
+}
+```
+
+未知扩展、未知字段和未知状态一律拒绝；错误返回 JSON-RPC `error`，业务错误码（如 `TASK_TERMINAL`、`TASK_CLIENT_OFFLINE`）放在 `error.data.code`。A2A `SendMessage` 的初始响应可能已是 `working`，调用方必须用 `GetTask` 或审计链观察后续 `input-required`/终态。
+
+当前 `input-required` 只由 ACP permission 请求触发；直接向这类 Task 追加普通文本会返回 `-32000`，必须先回答 permission。ACP 的自由文本追问没有独立的 A2A 状态：一轮 prompt 正常结束会收敛为 `completed`；需要继续时由调用方新建 Task，可用同一 `contextId` 分组。这是当前实现边界，不把 `completed` 伪造为可重开的 Task。
+
+### 2.12 Remote Dev Session REST 协议
+
+RDS 是独立人机开发会话域（[ADR-0058](./adr/0058-remote-dev-session.md)），不是 A2A Task 或 Job。
+
+| 方法/路径 | 语义 |
+| --- | --- |
+| `POST /api/remote-dev/sessions` | 创建；body `{clientId, agentPlacementId, workspaceRoot, label?, resumeFromSessionId?}`；校验 Client 在线、`remote-dev` capability、placement 归属与 workspace roots；带 `resumeFromSessionId` 时按续接规则校验（同 Client/placement/workspace、源会话已终态、有 `acpSessionId`、调用者是 owner） |
+| `GET /api/remote-dev/sessions` | 分页；`clientId`/`state` 过滤 |
+| `GET /api/remote-dev/sessions/:id` | 详情；不返回 token/正文 |
+| `DELETE /api/remote-dev/sessions/:id` | 关闭；关闭子终端与端口，等待 Client ack；不把失败报告为成功 |
+| `GET/POST /api/remote-dev/sessions/:id/ports` | 端口列表 / 打开（`1024-65535`，每会话最多 8 个） |
+| `DELETE /api/remote-dev/sessions/:id/ports/:portId` | 关闭端口 |
+| `POST /api/remote-dev/sessions/:id/ports/:portId/forward-token` | 签发短期 forward token（10 分钟，只在 Server 内存存 hash） |
+
+错误码包括 `RDS_CLIENT_OFFLINE`、`RDS_UNSUPPORTED_CLIENT`、`RDS_PLACEMENT_INVALID`、`RDS_WORKSPACE_INVALID`、`RDS_LIMIT_EXCEEDED`、`RDS_OPERATOR_REQUIRED`（含"续接非自己创建的会话"）、`RDS_RESUME_NOT_ALLOWED`、`RDS_RESUME_UNAVAILABLE`、`RDS_RESUME_MISMATCH`、`RDS_PORT_INVALID`、`RDS_COMMAND_FAILED`。`workspaceRoot` 先由 Server 做词法 roots 边界检查，Client 启动 ACP Host 前再做 realpath/canonical 校验；越界拒绝，不做宽松猜测。
+
 ## 3. `/client` Socket.IO 协议
 
 Client 使用 `auth.psk` 建立连接。注册成功后，Server 将 Client room 标识绑定到 `clientId`。
@@ -212,6 +270,13 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 | `server:shutdown` | Server → Client | Server 即将更新重启 |
 | `frp:state` | Client → Server | FRP runtime 安全快照（状态、generation、proxy 摘要）；REGISTER 确认后立即首报，之后每次状态变化上报 |
 | `frp:state-ack` | Server → Client | 严格确认（accepted + action）；Client 只接受当前 connection generation 的 ack |
+| `task:command` | Server → Client | A2A Task 的受控 ACP 命令：`start/prompt/cancel/permission/close` |
+| `task:command-result` | Client → Server | 按 `requestId` 回报命令结果；可带 `stopReason` |
+| `task:event` | Client → Server | ACP 归一化事件（message/tool/plan/permission/usage/session） |
+| `rds:command` | Server → Client | RDS 受控命令：`session.create/close`、`agent.prompt/cancel/permission`；`session.create` 可带可选 `acpSessionId`（续接） |
+| `rds:command-result` | Client → Server | 按 `requestId` 回报；create 带 `generationId`，prompt 带 `stopReason` |
+| `rds:event` | Client → Server | RDS 归一化 ACP 事件与状态（`agent.event/agent.status/session.ended`） |
+| `rds:acp-session` | Client → Server | 创建成功后上报 ACP 侧 `sessionId`（`{sessionId, generationId, acpSessionId}`）；独立事件以便旧 Server 静默忽略 |
 
 所有跨信任边界 payload 长期必须先通过 Shared parse 函数或等价严格校验，再进入领域服务。Terminal 当前已采用严格 parser；exec 和文件 Job 的双端校验仍有本文件所列实现偏移。
 
@@ -234,9 +299,21 @@ Client 在上报终态之外，另发一条只含生命周期事实的相位流�
 - 时间权威是 Server 接收时刻；`clientAt` 只进 `data`，用于与目标机本地日志对时；
 - **不提升协议版本**：旧 Client 不报相位时事件链仍完整；新 Client 对旧 Server 发送该事件会被静默忽略。
 
+### 3.5 A2A Task 派发通道
+
+Server 只为已解析的 `AgentPlacement` 下发 `task:command`，不把任意 shell 或未注册命令交给 Client。命令和事件都以 `{ taskId, attemptId }` 归属；Server 丢弃旧 socket、错误 attempt 或无法关联的迟到事件。当前只执行 `acp` adapter；`cli` 保留，派发会以 `TASK_ADAPTER_UNSUPPORTED` 失败关闭。
+
+- `start` 携带 placement 的 `command/args/cwd`；Client 启动 ACP Host 后返回 `ok`，Server 再在后台发送 `prompt`。
+- `prompt` 的 `requestId` 关联本轮；Client 返回 `{ ok, stopReason? }`，Server 按 `stopReason` 收敛 Task。
+- `permission.requested` 进入 `input-required`；`permission` 命令携带 `permissionRequestId` 与 `optionId`，Client 必须回传对应 ACP 决策。
+- `cancel` 只表示取消请求；Server 不把取消信号直接当终态，要等本轮结果或离线收敛。
+- Client 确认离线（无存活 socket）时，Server 将未完成 Task 置 `failed/TASK_CLIENT_DISCONNECTED`，并审计 `task.failed`。
+
+Client 的 `acp` capability 只表示可以承载 ACP Host；具体 agent 是否可用由 AgentPlacement 的 `enabled` 与执行结果决定。
+
 ## 4. `/app` Socket.IO 协议
 
-该 namespace 当前只承载浏览器终端。连接认证后，Server 将 Actor 绑定到 socket。
+该 namespace 当前承载浏览器终端与 Remote Dev Session 控制面。连接认证后，Server 将 Actor 绑定到 socket。
 
 浏览器请求事件：
 
@@ -267,6 +344,30 @@ Server 推送事件：
 - 单次 input 限制 64 KiB，但没有持续字节速率限制，`TERMINAL_RATE_LIMITED` 尚未使用。
 
 Client REGISTER 后上报 generationId 和内存 Session。Server 当前按“DB/报告集合是否存在”对账，没有保存或比较 generationId；DB 非终态但本次未上报的会话会被标为 interrupted。Client 本地 30 分钟 expired 当前不主动上报 Server，attach/detach 也未完整同步 SQLite active/detached 时间字段。完整事实见 [`design/remote-terminal.md`](./design/remote-terminal.md)。
+
+### 4.1 RDS attachment 与浏览器事件
+
+RDS 浏览器请求（均通过 ack）：
+
+- `rds:attach` `{sessionId, reconnectToken?}`：首个 operator，后续 viewer；返回 `{attachmentId, mode, reconnectToken}`；
+- `rds:detach`、`rds:prompt`、`rds:cancel`、`rds:permission`、`rds:port.open`、`rds:port.close`、`rds:resync`；
+- 只有 operator 可 prompt/cancel/permission/端口操作；viewer 只读。
+
+Server 推送：
+
+- `rds:state` `{session, ports, attachment?}`；
+- `rds:agent:event`（ACP 归一化事件，带 `seq`）；
+- `rds:port:state`；
+- `rds:closed`；
+- `rds:error` `{code, message}`。
+
+### 4.2 RDS 数据面 namespace
+
+- `/remote-dev/tunnel`：Client 出站；PSK + `{clientId, sessionId}` 认证，一个 RDS 一条隧道。
+- `/remote-dev/forward`：CLI 入站；`{token, sessionId, portId}` 认证，token 由 forward-token REST 签发。
+- 事件：`rds:stream:hello`、`rds:stream:frame`、`rds:stream:close`；二进制帧布局为 `version(1)|type(1)|streamId(4 BE)|length(4 BE)|payload`，payload 上限 64 KiB。
+- `OPEN` 的 payload 只含 `{remotePort}`；Client 只连接目标机 `127.0.0.1`，不接受远端 host。`DATA/CLOSE/ERROR` 按 streamId 多路复用；Server 校验 stream 属于当前 forward 连接，并要求 `OPEN.remotePort` 与该 token 对应的已打开端口一致。
+- 当前 forward token 只在 Server 内存保存 hash，重启即失效；关闭端口会撤销 token 并断开对应 forward，关闭 RDS 会关闭端口与隧道、通知 CLI 关闭残留 stream。
 
 ## 5. 远程 Agent（已退役）
 

@@ -64,10 +64,16 @@ export function getRegisterInfo(
 		if (terminalStatus?.available) {
 			caps.push("terminal.pty");
 		}
+		// ACP Host 是 Client 的协议宿主能力，不表示目标 agent 已安装。
+		caps.push("acp");
+		// RDS 依赖 ACP Host 与本地终端/端口运行时；capability 只表示宿主存在。
+		caps.push("remote-dev");
 	}
 	const capabilityDetails: MachineRegister["capabilityDetails"] = {};
 	if (!verifyOnly) {
 		if (terminalStatus !== undefined) capabilityDetails.terminal = terminalStatus;
+		capabilityDetails.acp = { available: true, protocolVersion: 1 };
+		capabilityDetails.remoteDev = { available: true, protocolVersion: 1 };
 		// FRP 能力：按 frpc 可探测性声明；协商固定为 protocol v1（不按应用版本猜测）。
 		const frpStatus: FrpCapabilityStatus = isFrpAvailable()
 			? { available: true, reconcileProtocolVersion: FRP_RECONCILE_PROTOCOL_VERSION }

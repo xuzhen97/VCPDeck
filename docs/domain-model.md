@@ -1,6 +1,6 @@
 # VCPDeck 领域与数据模型
 
-> 状态：Current｜维护责任：Server/Shared 维护者｜最后核验：2026-10-12｜适用版本：`0.19.2` / 当前 `main`｜事实来源：`packages/shared/src/`、`packages/server/prisma/schema.prisma`
+> 状态：Current｜维护责任：Server/Shared 维护者｜最后核验：2026-10-19｜适用版本：`0.21.0` / 当前 `main`｜事实来源：`packages/shared/src/`、`packages/server/prisma/schema.prisma`
 
 本文解释核心领域概念、状态和数据权威；字段级定义以 Shared 类型和 Prisma schema 为准。
 
@@ -13,6 +13,8 @@ Identity ─创建/操作→ Job ─调度到→ Client
                          ├─产生/消费→ File
                          ├─管理→ FrpMapping ─使用→ FrpsInstance
                          └─协作→ TerminalSession
+Identity ─创建/操作→ Task ─派发→ Client（ACP agent）
+Identity ─创建/操作→ RemoteDevSession ─组合→ ACP / PTY / Files / Port
 Identity ─创建/操作→ AgentSession ─触发→ AgentRun（不受 Job 调度）
                          └─记录→ AgentAuditEvent
 Release ─编排更新→ Server / Client ─由→ Launcher 守护
@@ -30,6 +32,15 @@ TODO、工作流、聊天和 VCPToolBox 桥接目前没有落地数据模型，�
 | Client | `id` / `clientId` | SQLite + 在线 Socket | 持久属性在 DB；在线 lease 由当前 socket 决定 |
 | Job | `id` / `jobId` | SQLite | 远程操作的统一调度和审计信封 |
 | JobLogEvent | `id`（即 `seq`） | SQLite | Job 生命周期与诊断事件链；只存事实与白名单字段，不存命令、路径或输出正文 |
+| AgentPlacement | `id` | SQLite | 逻辑 agent 到目标 Client 的受控启动配置；`agentId` 不是 Client 主机名 |
+| Task | `id` / `taskId` | SQLite | A2A 任务的生命周期、意图、验收标准、约束和终态；不等于 Job |
+| TaskTurn | `id` / `seq` | SQLite | 任务轮次归约：200 字符摘要 + SHA-256；不保存完整 prompt/reply |
+| TaskAttempt | `id` | SQLite | 单次执行尝试（当前 ACP）及终态；Task 可有多次尝试 |
+| TaskEvent | `id`（即 `seq`） | SQLite | 只追加任务证据链；数据上限 8 KiB，超限降级为截断标记 |
+| TaskArtifact | `id` | SQLite + 外部 URI | 任务产物引用；正文不在 Task 表 |
+| RemoteDevSession | `id` | SQLite | 独立人机开发会话；绑定一个 Client、placement、workspace，不写 TaskEvent |
+| RemoteDevPort | `id` | SQLite | 会话内显式打开的 loopback 端口及生命周期 |
+| RemoteDevAuditEvent | `id` | SQLite | RDS 生命周期/端口/权限元数据；不保存正文或完整路径 |
 | File | `id` | SQLite；正文在 Storage | 文件元数据和生命周期 |
 | StorageShare | `id` / `tokenHash` | SQLite；正文仍在 Storage | 长期公开只读分享、撤销审计和 File 保留关系；只保存 Token 哈希 |
 | StorageBackendConfig | 单行配置 | SQLite | 当前 Storage Provider 及配置 JSON |
@@ -161,7 +172,45 @@ stateDiagram-v2
 - Server 的 Job 运行日志与事件出自同一个写入点（`recordJobLog` 双写 stdout JSONL 与事件表），因此"按 jobId grep 日志"和"按 jobId 查事件链"看到的是同一条链路；
 - 已知偏移：内部 `frp.reconcile` Job 由恢复编排直接建行并结算，事件链从 `dispatched` 起，其终态以 Job 行为准。
 
-## 6. File 与 Storage
+## 6. A2A Task（ADR-0057）
+
+Task 是一次委托给逻辑 agent 的工作单元，不是 Job、TerminalSession 或 AgentSession。`taskId` 与 `jobId` 没有等价关系：Task 不进入 Job 调度器、不占 Client 的通用 Job 并发槽，也不复用 Job 的 `done/error/disconnected` 状态。
+
+### 6.1 AgentPlacement
+
+`AgentPlacement` 把逻辑 `agentId` 绑定到一台 Client 上的受控启动配置：`adapter`（`acp`/`cli`）、`command`、`args`、`cwd`、`workspaceRoots`、`skills` 和 `enabled`。它由控制面维护，不是 Client 上报的“任意命令”；Client 的 `acp` capability 只表示该机器能承载 ACP Host，不表示某个具体 agent 已安装或可执行。当前只有 `acp` 可执行；`cli` 是保留值，派发会以 `TASK_ADAPTER_UNSUPPORTED` 失败关闭。v1 由操作者通过 `POST /api/agents` 或 `vcpdeck agents create` 登记；RDS 只从登记表选择，不自动发现机器上的 agent。`command` 是启动命令，Client 会先按 `PATH`/`PATHEXT` 解析：Windows 上 `.cmd`/`.bat` 垫片（CLI agent 的常见分发形态）经 `cmd.exe /d /s /c` 包装后启动，`.exe`/`.com` 直接执行；非 Windows 平台原样执行。
+
+### 6.2 状态与轮次
+
+内部持久化状态使用小写：
+
+```text
+submitted → working → input-required → working
+working → completed | canceled | rejected | failed
+submitted → canceled | rejected | failed
+```
+
+对外 A2A wire 只使用 `status.state = TASK_STATE_*`，由 `toA2aTaskState`/`fromA2aTaskState` 转换，Task 顶层不得出现内部小写 `state`。终态是最终状态，终态后新的用户消息返回 `TASK_TERMINAL`。`CancelTask` 先取消 Task，再尽力向 Client 发 `cancel`；Client 真正离线时未完成 Task 收敛为 `failed/TASK_CLIENT_DISCONNECTED`。
+
+`TaskTurn` 只保存轮次摘要（≤200 字符）和 `contentHash`，不保存完整正文；`TaskAttempt` 记录一次 ACP/CLI 执行；`TaskArtifact` 只保存产物引用，不把文件正文塞进 Task。
+
+### 6.3 证据链与权限
+
+`TaskEvent` 是只追加的审计链，事件数据上限 8 KiB，超限时只保留截断标记；事件不复述完整 prompt/reply。典型事件包括 `task.created`、`turn.started`、`task.routed`、`permission.requested`、`permission.decided`、`turn.completed`、`task.completed`/`task.failed`。偏差检查可以基于路径约束和 `requiredArtifacts` 给出 `aligned`/`drifted`/`failed` 及原因。
+
+ACP 的权限决策不是 A2A 标准字段，而是声明的扩展 `https://vcpdeck.dev/a2a/extensions/acp-permission/v1`（`requestId` + `optionId`）；未知扩展必须拒绝，不能把任意 metadata 当权限。
+
+## 7. Remote Dev Session（ADR-0058）
+
+RDS 是一次跨机人机开发会话，不是 A2A Task、Job 或 TerminalSession。一个 RDS 绑定一个目标 Client、一个 AgentPlacement 和一个 workspace；Server 保存会话/端口/轻量审计与 attachment lease，Client 持有 ACP Host、PTY 与端口流。
+
+状态：`starting → active ⇄ detached → closing → closed`，异常为 `interrupted/failed`。首个浏览器 attachment 是 operator，其余是 viewer；只有 operator 可 prompt、回答 permission、打开端口。`RemoteDevPort` 只允许目标机 loopback、显式打开、每会话最多 8 个；关闭会话会关闭子终端和端口。
+
+RDS 复用 A2A 的 ACP Host 与既有 Terminal/Files，但不创建 Task、不写 TaskEvent；端口数据面走独立 `/remote-dev/tunnel` 与 `/remote-dev/forward`，不使用 FRP 默认路径。Server 不保存 agent/终端/文件正文；当前未实现 HTTP preview、DAP、端口自动发现与多租户。
+
+会话历史与续接：`RemoteDevSession` 行本身即历史（前端「会话历史」页只读展示元数据）。Client 创建成功后用 `rds:acp-session` 上报 ACP 侧 `sessionId`，Server 存进 `RemoteDevSession.acpSessionId`（不透明标识，不是正文）。对**已终态**且带该标识的会话「继续」= 新建一条 RDS 会话并在 `session.create` 带 `acpSessionId`，Client 走 ACP `session/resume`；要求同 Client、同 placement、同 workspace，跨 workspace/placement 或对活动会话续接分别返回 `RDS_RESUME_MISMATCH` / `RDS_RESUME_NOT_ALLOWED` / `RDS_RESUME_UNAVAILABLE`。
+
+## 8. File 与 Storage
 
 File 记录只保存 Storage 对象元数据；import/export 正文由当前 Storage Provider 保存。轻量文件 Job 是另一条数据路径：`file.writeText` 的完整 content 进入 Job payload，`file.readText` 的完整 content 进入 Job result，并随 SQLite 一起持久化和备份。
 
@@ -181,7 +230,7 @@ File 记录只保存 Storage 对象元数据；import/export 正文由当前 Sto
 
 远程文件操作与路径不变量见 [`design/remote-files.md`](./design/remote-files.md)，Provider 和 File 生命周期见 [`design/storage.md`](./design/storage.md)。
 
-## 7. FRP
+## 9. FRP
 
 - FrpsInstance 保存 FRPS 连接地址、明文 Token、Dashboard 凭据和端口范围；只能有一个逻辑默认实例，但该约束当前没有数据库唯一性或事务保证；
 - FrpMapping 归属一个 Client，并关联创建时选择的 FrpsInstance；同一实例内 proxy name 由数据库唯一约束保护；
@@ -192,7 +241,7 @@ File 记录只保存 Storage 对象元数据；import/export 正文由当前 Sto
 - FRPS Token 还会进入 Job payload 和 Client TOML，相关数据都按秘密处理；
 - 完整运行态和已知偏移见 [`design/frp.md`](./design/frp.md)。
 
-## 8. TerminalSession
+## 10. TerminalSession
 
 终端会话状态：
 
@@ -210,7 +259,7 @@ starting → detached/active → exited | interrupted | expired | closed | error
 - TerminalAuditEvent 只记录 created/attached/takeover/closed 等生命周期，不记录输入输出；
 - 当前 Client 本地 expired 不上报 Server，从未 attach 的新 Session 也可能未启动 TTL，详见 [`design/remote-terminal.md`](./design/remote-terminal.md)。
 
-## 9. Agent Session、Run 与审计
+## 11. Agent Session、Run 与审计
 
 会话与执行不再复用 Job。`AgentSession` 保存稳定 sessionId、Client、固定 Owner、执行模式覆盖与归档状态；每次 Prompt 创建一个 `AgentRun`；会话控制面操作写入 `AgentAuditEvent`。
 
@@ -258,7 +307,7 @@ stateDiagram-v2
 - Server 与 Client 的 `PI_SESSION_PROTOCOL_VERSION` 必须精确相等，当前为 `4`；
 - 完整 Worker、Extension、断线、迁移与兼容边界见 [`design/remote-pi.md`](./archive/design/remote-pi.md)。
 
-## 10. Release 与 Launcher
+## 12. Release 与 Launcher
 
 Release 状态：
 
@@ -281,7 +330,7 @@ uploaded → updating_server → updating_clients → done
 - Client 一键安装只选择 `version === Server VERSION`、`status=done` 且含目标平台 archive 的 Release；
 - 一键安装开关只控制安装入口，不撤销既有 Client 或轮换共享 PSK。
 
-## 11. 模型变更规则
+## 13. 模型变更规则
 
 1. 先更新领域不变量和 ADR（若为重大取舍）；
 2. 修改 Shared 协议和 Prisma schema；

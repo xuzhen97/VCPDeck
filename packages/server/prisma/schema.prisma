@@ -32,8 +32,10 @@ model Client {
   frpMappings        FrpMapping[]
   terminalSessions   TerminalSession[]
   agentSessions      AgentSession[]
+  agentPlacements    AgentPlacement[]
   sessionHostInstances SessionHostInstance[]
   features           Feature[]
+  remoteDevSessions  RemoteDevSession[]
 }
 
 model Job {
@@ -355,6 +357,7 @@ model TerminalSession {
   rows                Int
   createdByIdentityId String?
   createdByName       String?
+  parentRemoteDevSessionId String?
   createdAt           DateTime @default(now())
   lastAttachedAt      DateTime?
   detachedAt          DateTime?
@@ -368,6 +371,7 @@ model TerminalSession {
 
   @@index([clientId, createdAt])
   @@index([clientId, status])
+  @@index([parentRemoteDevSessionId])
 }
 
 // ── 终端最小审计（只记录生命周期事件，不记录输入输出） ──
@@ -595,4 +599,167 @@ model Feature {
   @@unique([clientId, slug])
   @@index([status])
   @@index([clientId, scope])
+}
+
+// ── A2A Task Hub（ADR-0057）：Task 独立于 Job/AgentSession ──
+// agent placement 是 Server 侧受控的 agent 配置；command/args/cwd 只存 Server，
+// 不对外投影。TaskTurn 默认只存摘要与 hash，不存完整 prompt/回复正文。
+
+model AgentPlacement {
+  id             String   @id
+  agentId        String
+  name           String
+  adapter        String   // acp | cli
+  clientId       String
+  client         Client   @relation(fields: [clientId], references: [id])
+  command        String
+  args           String   @default("[]")
+  cwd            String
+  workspaceRoots String   @default("[]")
+  skills         String   @default("[]")
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tasks          Task[]
+
+  @@index([agentId, enabled])
+  @@index([clientId])
+}
+
+model RemoteDevSession {
+  id               String   @id
+  ownerIdentityId  String?
+  clientId         String
+  client           Client   @relation(fields: [clientId], references: [id])
+  agentPlacementId String
+  workspaceRoot    String
+  label            String?
+  state            String
+  generationId     String   @default("")
+  agentStatus      String   @default("starting")
+  acpSessionId     String?
+  lastSeq          Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  lastAttachedAt   DateTime?
+  expiresAt        DateTime?
+  closedAt         DateTime?
+  closeReason      String?
+  cleanupStatus    String   @default("unknown")
+  ports            RemoteDevPort[]
+  audits           RemoteDevAuditEvent[]
+
+  @@index([clientId, state])
+  @@index([state, expiresAt])
+  @@index([ownerIdentityId, createdAt])
+}
+
+model RemoteDevPort {
+  id            String   @id
+  sessionId     String
+  session       RemoteDevSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  remotePort    Int
+  protocol      String   @default("tcp")
+  label         String?
+  status        String
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime?
+  closedAt      DateTime?
+  lastErrorCode String?
+
+  @@unique([sessionId, remotePort])
+  @@index([sessionId, status])
+}
+
+model RemoteDevAuditEvent {
+  id              Int      @id @default(autoincrement())
+  sessionId       String
+  session         RemoteDevSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  at              DateTime @default(now())
+  event           String
+  actorIdentityId String?
+  data            String?
+
+  @@index([sessionId, id])
+}
+
+model Task {
+  id                 String   @id
+  contextId          String
+  state              String
+  ownerIdentityId    String?
+  agentPlacementId   String
+  agentPlacement     AgentPlacement @relation(fields: [agentPlacementId], references: [id])
+  intent             String
+  acceptanceCriteria String   @default("[]")
+  constraints        String   @default("{}")
+  verdict            String?
+  errorCode          String?
+  errorMessage       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  completedAt        DateTime?
+  turns              TaskTurn[]
+  attempts           TaskAttempt[]
+  events             TaskEvent[]
+  artifacts          TaskArtifact[]
+
+  @@index([contextId, createdAt])
+  @@index([state, updatedAt])
+}
+
+model TaskTurn {
+  id          String   @id
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  seq         Int
+  direction   String   // inbound | outbound
+  messageId   String
+  summary     String?
+  contentHash String
+  createdAt   DateTime @default(now())
+
+  @@unique([taskId, seq])
+}
+
+model TaskAttempt {
+  id        String   @id
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  adapter   String   // acp | cli
+  status    String
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+  errorCode String?
+
+  @@index([taskId, startedAt])
+}
+
+model TaskEvent {
+  id        Int      @id @default(autoincrement())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  turnId    String?
+  attemptId String?
+  at        DateTime @default(now())
+  source    String   // a2a | acp | cli | human
+  event     String
+  fidelity  String   // structured | text | summary | hash-only
+  data      String?
+
+  @@index([taskId, id])
+}
+
+model TaskArtifact {
+  id        String   @id
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  name      String
+  mimeType  String
+  uri       String
+  sha256    String?
+  size      Int?
+  createdAt DateTime @default(now())
+
+  @@index([taskId, createdAt])
 }

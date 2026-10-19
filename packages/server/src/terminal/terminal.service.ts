@@ -257,7 +257,12 @@ export class TerminalService {
 	/** 创建会话（Server 生成 sessionId；串行化 5 会话限制）。 */
 	async createSession(
 		clientId: string,
-		request: { shellId: string; cols: number; rows: number },
+		request: {
+			shellId: string;
+			cols: number;
+			rows: number;
+			parentRemoteDevSessionId?: string;
+		},
 		actor: ActorContext,
 	): Promise<TerminalSessionInfo> {
 		return this.withClientChain(clientId, async () => {
@@ -280,6 +285,12 @@ export class TerminalService {
 					rows: request.rows,
 					createdByIdentityId: actor.identityId,
 					createdByName: actor.displayName,
+					...(request.parentRemoteDevSessionId
+						? {
+								parentRemoteDevSessionId:
+									request.parentRemoteDevSessionId,
+							}
+						: {}),
 				},
 			});
 			// 先建 runtime：Client 可能立即输出（提示符等），浏览器 attach 前不能丢块
@@ -336,6 +347,31 @@ export class TerminalService {
 		this.runtimes.delete(sessionId);
 		await this.recordAudit(sessionId, clientId, "closed", actor);
 		return toTerminalSessionInfo(updated as never);
+	}
+
+	/** 关闭归属于某个 RDS 会话的终端；单个失败不阻断其余清理，但如实返回失败数。 */
+	async closeByParent(
+		parentRemoteDevSessionId: string,
+		actor: ActorContext,
+	): Promise<{ attempted: number; closed: number; failed: number }> {
+		const rows = await this.deps.prisma.terminalSession.findMany({
+			where: {
+				parentRemoteDevSessionId,
+				status: { notIn: [...TERMINAL_SESSION_END_STATUSES] },
+			},
+			select: { id: true, clientId: true },
+		});
+		let closed = 0;
+		let failed = 0;
+		for (const row of rows) {
+			try {
+				await this.closeSession(row.clientId, row.id, actor);
+				closed += 1;
+			} catch {
+				failed += 1;
+			}
+		}
+		return { attempted: rows.length, closed, failed };
 	}
 
 	// ── 浏览器 attach/detach ──

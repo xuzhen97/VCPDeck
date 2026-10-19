@@ -10,7 +10,10 @@ import { createGitSshApi } from "./git-ssh.js";
 import { createReleasesApi } from "./releases.js";
 import { createStorageApi } from "./storage.js";
 import { createStorageSharesApi } from "./storage-shares.js";
+import { createTasksApi } from "./tasks.js";
 import { createTerminalsApi } from "./terminal.js";
+import { createAgentsApi } from "./agents.js";
+import { createRemoteDevApi } from "./remote-dev.js";
 
 /** SDK 认证模式；显式 cookie 仅用于不会自动维护 Cookie 的 Node.js 调用方。 */
 export type AuthMode =
@@ -72,6 +75,12 @@ export class VcpDeckClient {
 	readonly gitSsh;
 	readonly releases;
 	readonly terminals;
+	/** A2A Task 契约（ADR-0057）。 */
+	readonly tasks;
+	/** Agent placement 只读投影。 */
+	readonly agents;
+	/** Remote Dev Session（ADR-0058）。 */
+	readonly remoteDev;
 	readonly health = {
 		get: (signal?: AbortSignal) =>
 			this.request<{ ok: true }>("GET", "/api/health", undefined, signal),
@@ -94,6 +103,9 @@ export class VcpDeckClient {
 		this.gitSsh = createGitSshApi(this);
 		this.releases = createReleasesApi(this);
 		this.terminals = createTerminalsApi(this);
+		this.tasks = createTasksApi(this);
+		this.agents = createAgentsApi(this);
+		this.remoteDev = createRemoteDevApi(this);
 	}
 
 	/** 发起 JSON REST 请求并归一化失败响应。 */

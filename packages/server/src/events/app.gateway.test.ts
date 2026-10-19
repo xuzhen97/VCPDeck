@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AppGateway } from "./app.gateway.js";
 import type { Socket } from "socket.io";
+import { Events } from "@vcpdeck/shared";
 import type { ActorContext } from "@vcpdeck/shared";
 
 const ACTOR: ActorContext = { identityId: "id1", displayName: "admin", isAdmin: true, credentialId: null, sessionId: null, source: "web", requestId: "socket-1" };
@@ -18,7 +19,10 @@ function makeSocket(id = "socket-1") {
 	return socket;
 }
 
-function makeGateway() {
+function makeGateway(
+	remoteDev?: Record<string, unknown>,
+	remoteDevAttachments?: Record<string, unknown>,
+) {
 	const prisma = {
 		authSession: { findUnique: vi.fn() },
 		credential: { findUnique: vi.fn() },
@@ -35,7 +39,12 @@ function makeGateway() {
 		browserResync: vi.fn(),
 		bindBrowserEmitter: vi.fn(),
 	};
-	const gateway = new AppGateway(prisma as never, terminalService as never);
+	const gateway = new AppGateway(
+		prisma as never,
+		terminalService as never,
+		remoteDev as never,
+		remoteDevAttachments as never,
+	);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
 	gateway.server = { emit: vi.fn(), to } as never;
@@ -119,5 +128,88 @@ describe("AppGateway terminal handlers", () => {
 		const socket = makeSocket();
 		await gateway.handleDisconnect(socket);
 		expect(terminalService.detachBrowserSocket).toHaveBeenCalledWith("socket-1");
+	});
+});
+
+describe("AppGateway RDS handlers", () => {
+	const SESSION = {
+		sessionId: "r1",
+		clientId: "c1",
+		agentPlacementId: "p1",
+		workspaceRoot: "/repo",
+		state: "active",
+		agentStatus: "ready",
+		generationId: "gen-1",
+		createdAt: "2026-10-18T00:00:00.000Z",
+		updatedAt: "2026-10-18T00:00:00.000Z",
+		cleanupStatus: "unknown",
+	};
+
+	it("attach 加入 room 并返回 attachment", async () => {
+		const remoteDev = {
+			get: vi.fn().mockResolvedValue(SESSION),
+			ports: vi.fn().mockResolvedValue([]),
+		};
+		const attachments = {
+			attach: vi.fn().mockReturnValue({
+				attachmentId: "s1",
+				mode: "operator",
+				reconnectToken: "tok",
+			}),
+		};
+		const { gateway } = makeGateway(remoteDev, attachments);
+		const socket = makeSocket();
+		const result = await gateway.handleRdsAttach(socket, { sessionId: "r1" });
+		expect(attachments.attach).toHaveBeenCalledWith("r1", ACTOR, "socket-1", undefined);
+		expect(socket.join).toHaveBeenCalledWith("rds:r1");
+		expect(socket.emit).toHaveBeenCalledWith(
+			Events.RDS_STATE,
+			expect.objectContaining({ session: SESSION, ports: [] }),
+		);
+		expect(result).toEqual({
+			ok: true,
+			data: { attachmentId: "s1", mode: "operator", reconnectToken: "tok" },
+		});
+	});
+
+	it("viewer 的 prompt 在 gateway 层被拒绝，不调用 service", async () => {
+		const remoteDev = { prompt: vi.fn() };
+		const attachments = {
+			assertOperator: vi.fn(() => {
+				throw Object.assign(new Error("operator required"), {
+					code: "RDS_OPERATOR_REQUIRED",
+				});
+			}),
+		};
+		const { gateway } = makeGateway(remoteDev, attachments);
+		const result = await gateway.handleRdsPrompt(makeSocket(), {
+			sessionId: "r1",
+			text: "hello",
+		});
+		expect(result).toEqual({
+			ok: false,
+			error: { code: "RDS_OPERATOR_REQUIRED", message: "operator required" },
+		});
+		expect(remoteDev.prompt).not.toHaveBeenCalled();
+	});
+
+	it("session.ended 同时广播 agent 事件与 closed", () => {
+		const remoteDev = { bindBrowserEmitter: vi.fn() };
+		const { gateway, to, emit } = makeGateway(remoteDev);
+		gateway.afterInit();
+		const binder = remoteDev.bindBrowserEmitter.mock.calls[0]?.[0] as (
+			sessionId: string,
+			event: { type: string; reason: string },
+		) => void;
+		binder("r1", { type: "session.ended", reason: "closed" });
+		expect(to).toHaveBeenCalledWith("rds:r1");
+		expect(emit).toHaveBeenCalledWith(
+			Events.RDS_AGENT_EVENT,
+			expect.objectContaining({ type: "session.ended" }),
+		);
+		expect(emit).toHaveBeenCalledWith(Events.RDS_CLOSED, {
+			reason: "closed",
+			sessionId: "r1",
+		});
 	});
 });

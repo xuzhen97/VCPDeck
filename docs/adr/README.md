@@ -117,3 +117,5 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0054](./0054-job-log-event-chain.md) | Accepted | Job 诊断采用可持久化事件链（`JobLogEvent` 表，每 Job 200 条上限、30 天 TTL）；新增 `job:log` 相位事件并校验归属与限流；Job 日志统一为带 jobId 的 JSONL 并与事件同点双写；只做 Job 维度读取，不做跨 Job 检索与输出体积治理 |
 | [0055](./0055-client-operator-annotations.md) | Accepted | Client 新增 Server 持有的操作者注解（公网地址声明 + 备注），与 Client 上报事实分离，注册不得覆盖；仅作说明性元数据，不参与授权，也不构成连通性保证 |
 | [0056](./0056-feature-registry-declared-contracts.md) | Accepted | 新增 Server 持有的「功能条目」：绑定 host Client，用 `scope`（generic/machine）表达能否换机器；`status` 是意图、验证结果是证据，`active` 只能由成功验证产生；验证由调用方执行、Server 只记账，不代理执行、不后台探测、不建模网络可达性 |
+| [0057](./0057-a2a-hub-and-backend-agnostic-task-model.md) | Accepted | 以 A2A v1.0 作为跨 agent 任务契约；Task 独立于 Job 与 attempt，支持多轮 Turn；ACP 为多轮执行主路径、CLI/Job 兜底；Server 持有 placement Registry、Task/Audit 事件链与偏差检查，不默认镜像正文 |
+| [0058](./0058-remote-dev-session.md) | Accepted | Remote Dev Session 作为跨机人机会话域，独立于 A2A Task/Job/Terminal；复用 ACP Host、PTY、Files，新增 session 级认证隧道与 TCP forward，HTTP preview 仅作便利路径；Server 只存元数据/轻量审计，不存正文 |

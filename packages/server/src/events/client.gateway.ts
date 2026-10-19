@@ -25,6 +25,11 @@ import {
   parseTerminalExitReport,
   parseTerminalOutputChunk,
   parseMachineRegister,
+  parseTaskClientEvent,
+  parseTaskCommandResult,
+  parseRemoteDevClientEvent,
+  parseRemoteDevCommandResult,
+  parseRemoteDevAcpSessionReport,
   parseTerminalStateReport,
   type JobLogLine,
   type JobProgress,
@@ -51,6 +56,8 @@ import type {
 import { clientPsk } from "../client/client-psk.js";
 import { GitSshService } from "../git-ssh/git-ssh.service.js";
 import { JobLogService } from "../job/job-log.service.js";
+import { TaskDispatchService } from "../task/task-dispatch.service.js";
+import { RemoteDevService } from "../remote-dev/remote-dev.service.js";
 
 const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
 
@@ -100,6 +107,14 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(JobLogService)
     private readonly jobLog?: JobLogService,
+    // A2A Task 派发；旧测试构造可省略
+    @Optional()
+    @Inject(TaskDispatchService)
+    private readonly taskDispatch?: TaskDispatchService,
+    // Remote Dev Session 派发；旧测试构造可省略
+    @Optional()
+    @Inject(RemoteDevService)
+    private readonly remoteDev?: RemoteDevService,
   ) {}
 
   onModuleInit() {
@@ -125,6 +140,12 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     });
     this.terminalBroker.bindEmitter((socketId, request) => {
       this.server.to(socketId).emit(Events.TERMINAL_REQUEST, request);
+    });
+    this.taskDispatch?.bindEmitter((socketId, command) => {
+      this.server.to(socketId).emit(Events.TASK_COMMAND, command);
+    });
+    this.remoteDev?.bindEmitter((socketId, command) => {
+      this.server.to(socketId).emit(Events.RDS_COMMAND, command);
     });
     this.updateChannel.bindEmitters({
       sendUpdateRequest: (clientId, request) => {
@@ -218,6 +239,7 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   private async convergeOfflineClient(clientId: string): Promise<void> {
     await this.jobService.markDisconnected(clientId);
     await this.frpService.markInactiveByClientId(clientId);
+    await this.taskDispatch?.failByClientId(clientId);
   }
 
   // ── Client events ──
@@ -752,6 +774,89 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     } satisfies JobUpdate);
     this.server.emit(Events.JOB_CANCEL_FAILED, data);
     if (next) this.sendDispatch(next);
+  }
+
+  // ── A2A Task 回报 ──
+  @SubscribeMessage(Events.TASK_COMMAND_RESULT)
+  handleTaskCommandResult(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): void {
+    if (!client.data.clientId || !this.taskDispatch) return;
+    try {
+      this.taskDispatch.handleCommandResult(
+        client.id,
+        parseTaskCommandResult(data),
+      );
+    } catch {
+      // 非法/过期结果丢弃，不影响连接。
+    }
+  }
+
+  @SubscribeMessage(Events.TASK_EVENT)
+  async handleTaskEvent(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<void> {
+    if (!client.data.clientId || !this.taskDispatch) return;
+    try {
+      await this.taskDispatch.handleEvent(
+        client.id,
+        parseTaskClientEvent(data),
+      );
+    } catch {
+      // 事件投影失败不杀 Client；Task 会由超时/取消路径收敛。
+    }
+  }
+
+  // ── Remote Dev Session 回报 ──
+
+  @SubscribeMessage(Events.RDS_COMMAND_RESULT)
+  async handleRdsCommandResult(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<void> {
+    if (!client.data.clientId || !this.remoteDev) return;
+    try {
+      await this.remoteDev.handleCommandResult(
+        client.id,
+        parseRemoteDevCommandResult(data),
+      );
+    } catch {
+      // 非法/过期结果丢弃，不影响连接。
+    }
+  }
+
+  @SubscribeMessage(Events.RDS_EVENT)
+  async handleRdsEvent(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<void> {
+    if (!client.data.clientId || !this.remoteDev) return;
+    try {
+      await this.remoteDev.handleClientEvent(
+        client.id,
+        parseRemoteDevClientEvent(data),
+      );
+    } catch {
+      // 事件投影失败不杀 Client；会话由超时/关闭路径收敛。
+    }
+  }
+
+  @SubscribeMessage(Events.RDS_ACP_SESSION)
+  async handleRdsAcpSession(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ): Promise<void> {
+    if (!client.data.clientId || !this.remoteDev) return;
+    try {
+      await this.remoteDev.handleAcpSessionReport(
+        client.id,
+        parseRemoteDevAcpSessionReport(data),
+      );
+    } catch {
+      // 非法上报丢弃，不影响连接。
+    }
   }
 
   // ── Public API (called by controller) ──

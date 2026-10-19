@@ -416,13 +416,19 @@ export interface TerminalSessionCreateRequest {
 	shellId: string;
 	cols: number;
 	rows: number;
+	/** RDS 子终端归属；只用于生命周期清理，不改变终端状态机。 */
+	parentRemoteDevSessionId?: string;
 }
 
 export function parseTerminalSessionCreateRequest(
 	v: unknown,
 ): TerminalSessionCreateRequest {
 	assertRecord(v, "create");
-	assertKeys(v, new Set(["shellId", "cols", "rows"]), "create");
+	assertKeys(
+		v,
+		new Set(["shellId", "cols", "rows", "parentRemoteDevSessionId"]),
+		"create",
+	);
 	assertString(v.shellId, "shellId", 64);
 	if (
 		typeof v.cols !== "number" ||
@@ -430,6 +436,9 @@ export function parseTerminalSessionCreateRequest(
 		!isValidTerminalSize(v.cols, v.rows)
 	) {
 		throw new TerminalProtocolError("create 尺寸非法");
+	}
+	if (v.parentRemoteDevSessionId !== undefined) {
+		assertString(v.parentRemoteDevSessionId, "parentRemoteDevSessionId", 128);
 	}
 	return v as unknown as TerminalSessionCreateRequest;
 }

@@ -25,4 +25,33 @@ describe("parseCommandArgs", () => {
 		const { positionals } = parseCommandArgs(["--", "--nope"], {});
 		expect(positionals).toEqual(["--nope"]);
 	});
+
+	it("multiValue 选项可重复并收集为数组", () => {
+		const { options, multi } = parseCommandArgs(
+			[
+				"--arg=--profile",
+				"--arg=acp",
+				"--workspace-root=/repo",
+				"--json",
+			],
+			{ multiValue: ["arg", "workspace-root"], boolean: ["json"] },
+		);
+		expect(multi).toEqual({
+			arg: ["--profile", "acp"],
+			"workspace-root": ["/repo"],
+		});
+		expect(options).toEqual({ json: true });
+	});
+
+	it("multiValue 选项缺值仍报错，inline 值允许以 -- 开头", () => {
+		expect(() =>
+			parseCommandArgs(["--arg"], { multiValue: ["arg"] }),
+		).toThrow("选项缺少值");
+		expect(() =>
+			parseCommandArgs(["--arg", "--other"], { multiValue: ["arg"] }),
+		).toThrow("选项缺少值");
+		expect(
+			parseCommandArgs(["--arg=--other"], { multiValue: ["arg"] }).multi.arg,
+		).toEqual(["--other"]);
+	});
 });

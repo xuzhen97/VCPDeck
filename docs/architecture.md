@@ -1,6 +1,6 @@
 # VCPDeck 系统架构
 
-> 状态：Current｜维护责任：架构维护者｜最后核验：2026-09-25｜适用版本：当前 `main`
+> 状态：Current｜维护责任：架构维护者｜最后核验：2026-10-19｜适用版本：`0.21.0` / 当前 `main`
 >
 > 本文描述当前仓库已经落地的系统结构、运行组件、通信边界、数据归属和关键链路。产品定位与长期愿景见 [`README.md`](../README.md)，具体技术版本和选型理由见 [`tech-stack.md`](./tech-stack.md)，单项功能的协议细节见文末专题文档。
 
@@ -80,17 +80,19 @@ flowchart TB
         AppWs[Socket.IO /app]
         ClientWs[Socket.IO /client]
         Sse[SSE Endpoint]
-        Services[领域 Services<br/>Auth / Client / Job / File / FRP / Terminal / Release]
+        Services[领域 Services<br/>Auth / Client / Job / File / FRP / Terminal / Release / Task / Agent Registry / Remote Dev]
         Prisma[Prisma 数据访问]
         StorageSvc[Storage Provider 抽象]
         Db[(SQLite)]
         FileStore[(本地存储或阿里云存储)]
+        RdsWs[Socket.IO /remote-dev]
     end
 
     subgraph RemoteNode[目标机器]
         Client[Client Agent]
         Executor[命令与文件执行器]
         Terminal[PTY 与终端快照]
+        AcpAgent[ACP agent]
         Frpc[frpc]
         Os[操作系统资源]
     end
@@ -109,12 +111,16 @@ flowchart TB
     Prisma --> Db
     StorageSvc --> FileStore
 
-    ClientWs <-->|注册、心跳、Job、终端、更新| Client
+    ClientWs <-->|注册、心跳、Job、终端、Task、更新| Client
     Client --> Executor
     Client --> Terminal
+    Client --> AcpAgent
     Client --> Frpc
     Executor --> Os
     Terminal --> Os
+    AcpAgent --> Os
+    RdsWs <-->|RDS 端口流| Client
+    RdsWs <-->|CLI forward| Cli
 ```
 
 ### 4.2 组件职责
@@ -124,8 +130,8 @@ flowchart TB
 | Frontend | 浏览器 | 驾驶台交互、REST 调用、终端渲染 | 直接访问数据库或远程机器 |
 | SDK | 浏览器或 Node.js 调用方 | 类型安全的 REST API 封装和错误归一化 | Socket.IO/SSE 生命周期、服务端业务状态机 |
 | CLI | 操作员机器或自动化环境 | 管理用户级/项目级目标环境；当前负责发布包上传；构建 Skill 的单文件入口 | 承担 Server/Client 运行逻辑，或让项目配置直接定义 Server/凭据 |
-| Server | 控制面主机 | 认证、资源 API、Client 连接、Job 调度、状态持久化、实时流代理、更新编排 | 直接在远程机器执行命令或持有远程 PTY |
-| Client | 每台目标机器 | 能力探测、命令与文件操作、PTY、frpc、状态上报 | 用户身份管理和全局业务状态持久化 |
+| Server | 控制面主机 | 认证、资源 API、Client 连接、Job 调度、A2A Task 与 agent placement、RDS 会话与端口数据面、状态持久化、实时流代理、更新编排 | 直接在远程机器执行命令、持有远程 PTY 或运行 ACP agent |
+| Client | 每台目标机器 | 能力探测、命令与文件操作、PTY、ACP Host、frpc、状态上报 | 用户身份管理和全局业务状态持久化 |
 | Launcher | Server/Client 所在主机 | 守护业务进程、准备 Node.js、应用更新、探活和回退 | Job 调度与业务协议处理 |
 | SQLite | Server 主机 | 保存控制面关系数据和状态记录 | 保存终端正文、PTY 或远程进程内存 |
 | Storage Provider | Server 本地或外部存储 | 保存跨机器传输的文件内容和发布构件 | 作为 Job 队列或业务数据库 |
@@ -266,8 +272,10 @@ Server 管理会话元数据、浏览器 attachment、operator/viewer 控制权�
 ### 9.3 远程 Agent（已退役）
 
 Pi／DSH 专用集成已按 [ADR-0049](./adr/0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md) 退役：
-不再有 Agent 会话、Run、扩展交互或 SSE 事件投影。历史设计见
+不再有旧 Agent 会话、Run、扩展交互或 SSE 事件投影。历史设计见
 [`archive/design/remote-pi.md`](./archive/design/remote-pi.md)。
+
+与此不同，ADR-0057 的 A2A Task 是 Server 持有的“agent 调 agent”任务契约：Server 只下发受控 `task:command`，Client 的 ACP Host 启动具体 agent，Task 审计与 Job 调度分离。它不是旧 Pi／DSH Agent 平台的复活，也不把 ACP 暴露给浏览器。
 
 
 ### 9.4 文件传输

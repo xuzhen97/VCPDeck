@@ -76,6 +76,29 @@ export async function run(
 			await runFeaturesCommand(subcommand, rest, { log, error });
 			return 0;
 		}
+		if (command === "tasks") {
+			const { runTasksCommand } = await import("./tasks-command.js");
+			await runTasksCommand(subcommand, rest, { log, error });
+			return 0;
+		}
+		if (command === "agents") {
+			const { runAgentsCommand } = await import("./agents-command.js");
+			await runAgentsCommand(subcommand, rest, { log });
+			return 0;
+		}
+		if (command === "forward") {
+			const { runForwardCommand, forwardUsage } = await import(
+				"./forward-command.js"
+			);
+			if (subcommand === "--help" || subcommand === "-h") {
+				log(forwardUsage());
+				return 0;
+			}
+			await runForwardCommand(subcommand ? [subcommand, ...rest] : rest, {
+				log,
+			});
+			return 0;
+		}
 		if (command === "release") {
 			await runReleaseCommand(subcommand, rest, { log });
 			return 0;
@@ -124,6 +147,18 @@ export function helpText(): string {
 		"  vcpdeck features verify <slug|id> [--client=<name|id>] [--env=<name>] [--json]",
 		"  vcpdeck features update <slug|id> [--client=<name|id>] [字段...] [--status=draft|retired] [--env=<name>] [--json]",
 		"  验证由 CLI 执行（command 型走 exec Job，http 型直连）；active 只能由成功验证产生",
+		"",
+		"Tasks / Agents（A2A v1.0）:",
+		"  vcpdeck tasks send --agent=<id> --intent=<text> --message=<text> [--accept=<a,b>] [--env=<name>] [--json]",
+		"  vcpdeck tasks get <taskId> [--env=<name>] [--json]",
+		"  vcpdeck tasks list [--page-size=<n>] [--env=<name>] [--json]",
+		"  vcpdeck tasks cancel <taskId> [--env=<name>] [--json]",
+		"  vcpdeck tasks answer <taskId> --request=<id> --option=<id> [--message=<text>] [--json]",
+		"  vcpdeck tasks events <taskId> [--since=<seq>] [--limit=<n>] [--json]",
+		"  vcpdeck agents list [--env=<name>] [--json]",
+		"  vcpdeck agents create --client=<name|id> --agent=<slug> --command=<cmd> [--arg=<v>]... [--workspace-root=<dir>]...",
+		"      [--name=<显示名>] [--adapter=acp|cli] [--cwd=<dir>] [--skill=<s>]... [--disabled] [--env=<name>] [--json]",
+		"  vcpdeck forward --session=<id> --remote-port=<1024-65535> [--local-port=<0-65535>] [--env=<name>]",
 		"",
 		"Jobs:",
 		"  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",

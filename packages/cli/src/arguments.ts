@@ -1,12 +1,15 @@
 /** CLI 长选项解析结果。 */
 export interface ParsedCommandArgs {
 	positionals: string[];
+	/** 单值/布尔选项；multiValue 选项不出现在这里。 */
 	options: Record<string, string | true>;
+	/** multiValue 选项按出现顺序收集；未出现的键不存在。 */
+	multi: Record<string, string[]>;
 }
 
 /**
- * 解析 `--name=value`、`--name value` 与布尔长选项。
- * 未声明、重复或缺值选项会明确失败，避免静默拼写错误。
+ * 解析 `--name=value`、`--name value`、布尔长选项与可重复的 multiValue 选项。
+ * 未声明、重复（multiValue 除外）或缺值选项会明确失败，避免静默拼写错误。
  * 裸 `--` 为分隔符：其后所有参数原样作为位置参数，不再解析选项。
  */
 export function parseCommandArgs(
@@ -14,11 +17,20 @@ export function parseCommandArgs(
 	schema: {
 		value?: readonly string[];
 		boolean?: readonly string[];
+		/** 可重复出现的选项；与 value/boolean 同名视为声明冲突。 */
+		multiValue?: readonly string[];
 	} = {},
 ): ParsedCommandArgs {
 	const valueOptions = new Set(schema.value ?? []);
 	const booleanOptions = new Set(schema.boolean ?? []);
+	const multiOptions = new Set(schema.multiValue ?? []);
+	for (const name of multiOptions) {
+		if (valueOptions.has(name) || booleanOptions.has(name)) {
+			throw new Error(`选项声明冲突: --${name}`);
+		}
+	}
 	const options: Record<string, string | true> = {};
+	const multi: Record<string, string[]> = {};
 	const positionals: string[] = [];
 
 	for (let index = 0; index < argv.length; index++) {
@@ -32,22 +44,40 @@ export function parseCommandArgs(
 			continue;
 		}
 		const parsed = parseLongOption(arg);
-		assertKnownOption(parsed.name, valueOptions, booleanOptions);
+		assertKnownOption(parsed.name, valueOptions, booleanOptions, multiOptions);
+		const inline = parsed.inlineValue !== undefined;
+		if (multiOptions.has(parsed.name)) {
+			const value = requireOptionValue(
+				parsed.name,
+				inline ? parsed.inlineValue : argv[++index],
+				inline,
+			);
+			let list = multi[parsed.name];
+			if (!list) {
+				list = [];
+				multi[parsed.name] = list;
+			}
+			list.push(value);
+			continue;
+		}
 		if (Object.hasOwn(options, parsed.name)) {
 			throw new Error(`选项不能重复: --${parsed.name}`);
 		}
 		if (booleanOptions.has(parsed.name)) {
-			if (parsed.inlineValue !== undefined) {
+			if (inline) {
 				throw new Error(`布尔选项不接受值: --${parsed.name}`);
 			}
 			options[parsed.name] = true;
 			continue;
 		}
-		const value = parsed.inlineValue ?? argv[++index];
-		options[parsed.name] = requireOptionValue(parsed.name, value);
+		options[parsed.name] = requireOptionValue(
+			parsed.name,
+			inline ? parsed.inlineValue : argv[++index],
+			inline,
+		);
 	}
 
-	return { positionals, options };
+	return { positionals, options, multi };
 }
 
 function parseLongOption(arg: string): {
@@ -65,14 +95,28 @@ function assertKnownOption(
 	name: string,
 	valueOptions: ReadonlySet<string>,
 	booleanOptions: ReadonlySet<string>,
+	multiOptions: ReadonlySet<string>,
 ): void {
-	if (!name || (!valueOptions.has(name) && !booleanOptions.has(name))) {
+	if (
+		!name ||
+		(!valueOptions.has(name) &&
+			!booleanOptions.has(name) &&
+			!multiOptions.has(name))
+	) {
 		throw new Error(`未知选项: --${name}`);
 	}
 }
 
-function requireOptionValue(name: string, value: string | undefined): string {
-	if (value === undefined || value.startsWith("--") || value.length === 0) {
+function requireOptionValue(
+	name: string,
+	value: string | undefined,
+	inline: boolean,
+): string {
+	if (
+		value === undefined ||
+		value.length === 0 ||
+		(!inline && value.startsWith("--"))
+	) {
 		throw new Error(`选项缺少值: --${name}`);
 	}
 	return value;

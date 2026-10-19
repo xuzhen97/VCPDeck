@@ -2,6 +2,8 @@ import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
 	hasClientAnnotations,
+	parseAcpCapabilityStatus,
+	parseRemoteDevCapabilityStatus,
 	parseClientAnnotations,
 	parseFrpCapabilityStatus,
 	parseMachineInstallation,
@@ -360,6 +362,8 @@ export class ClientService {
       frp?: FrpCapabilityStatus;
       privileged?: PrivilegedCapabilityStatus;
       gitSsh?: ClientInfo["capabilityDetails"]["gitSsh"];
+      acp?: ClientInfo["capabilityDetails"]["acp"];
+      remoteDev?: ClientInfo["capabilityDetails"]["remoteDev"];
     };
     installation: MachineInstallationStatus | null;
   } {
@@ -369,6 +373,8 @@ export class ClientService {
         frp?: FrpCapabilityStatus;
         privileged?: PrivilegedCapabilityStatus;
         gitSsh?: ClientInfo["capabilityDetails"]["gitSsh"];
+        acp?: ClientInfo["capabilityDetails"]["acp"];
+        remoteDev?: ClientInfo["capabilityDetails"]["remoteDev"];
       };
       installation: MachineInstallationStatus | null;
     } = { details: {}, installation: null };
@@ -403,6 +409,22 @@ export class ClientService {
         result.details.gitSsh = parseGitSshCapability(record.gitSsh);
       } catch {
         // gitSsh 摘要损坏：省略，UI 按“未上报”处理，不推断支持状态。
+      }
+    }
+    if (record.acp !== undefined) {
+      try {
+        result.details.acp = parseAcpCapabilityStatus(record.acp);
+      } catch {
+        // acp 摘要损坏：省略，不宽松猜测。
+      }
+    }
+    if (record.remoteDev !== undefined) {
+      try {
+        result.details.remoteDev = parseRemoteDevCapabilityStatus(
+          record.remoteDev,
+        );
+      } catch {
+        // remoteDev 摘要损坏：省略，不宽松猜测。
       }
     }
     if (record.installation !== undefined) {

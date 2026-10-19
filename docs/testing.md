@@ -223,3 +223,9 @@ Release 不得只凭构建成功发布。至少确认：
 - FRP 缺同 Client 多实例约束、secret 脱敏、默认实例原子性、Client 重启恢复、frpc 退出状态和删除孤儿的长期门禁；
 - 缺稳定的安全 fuzz/速率限制测试；
 - 旧集成测试清单存在过时能力描述，新增测试以代码和本文为准。
+
+## 10. Remote Dev Session 验收矩阵
+
+- 自动门禁：`packages/shared/src/remote-dev.test.ts`（含续接协议：可选 `acpSessionId`、`resumeFromSessionId`、`rds:acp-session`）、`remote-dev-tunnel.test.ts`；`packages/server/src/remote-dev/*.test.ts`（生命周期、attachment、relay、tunnel/forward gateway、port token、续接校验与 acp-session 落库、集成回路）；`packages/client/src/remote-dev/*.test.ts`（ACP runtime、bridge、tunnel、续接透传）、`packages/client/src/acp/windows-launcher.test.ts`（Windows 启动解析）与 `acp-process.test.ts`（含 `.cmd` 垫片的 cmd.exe 包装用例，非 Windows 跳过）、`acp-host.test.ts`（含 `session/resume` 分支）；`packages/sdk/src/remote-dev.test.ts`；`packages/cli/src/forward-command.test.ts`；`packages/frontend/src/pages/remote-dev-page.test.tsx`（含 `?resumeFrom=` 续接流程）、`remote-dev-sessions-page.test.tsx`、`remote-dev-agent-panel.test.tsx`、`packages/frontend/src/app/navigation.test.ts`。
+- 手工门禁（尚未在 CI）：两台真实机器/两个 Client，A 浏览器创建 B 的 RDS，agent 多轮 + permission、PTY、Files 固定 workspace、`vcpdeck forward` 访问 B 的 dev server；关闭后端口/流/子终端无残留；Client 重启收敛 `interrupted`；旧 Client 未声明 `remote-dev` 时明确拒绝。
+- 安全断言：端口仅 loopback、token 过期拒绝、viewer 不能 prompt/port、Server 日志/DB 不出现正文或 token。

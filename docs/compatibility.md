@@ -89,6 +89,7 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 - 新增独立 API、Job 类型或事件且旧端不会收到；
 - 新增数据库表或 nullable/default 字段。
 - Client 新增可选 `annotations`（操作者声明；Server 持有、注册不覆盖）；`GET /api/clients` 为其新增可选字段，数据库新增带默认值的 `annotations` 列。旧 Server 缺省时 CLI/UI 按“未补充”处理，旧 Client 不感知；不提升协议版本。
+- RDS 会话历史与续接（v1.1）：数据库新增可空列 `RemoteDevSession.acpSessionId`（`prisma db push` 直接加列，无需 `--accept-data-loss`）；Client 新增事件 `rds:acp-session`，旧 Server 无 handler 会静默忽略（与 `job:log` 同款先例）；`session.create` 只新增可选字段 `acpSessionId`，新 Server 仅在"续接"时下发，因此**旧 Client 的普通创建不受影响**；`POST /api/remote-dev/sessions` 新增可选 `resumeFromSessionId`。**唯一的有意不兼容点**：新 Server + 旧 Client 的续接请求会被旧 Client 的严格 parser 拒绝并返回明确错误（fail closed），不会静默降级成新上下文。
 
 ### 5.2 需要迁移和双端发布
 

@@ -55,7 +55,7 @@ var require_client_annotations = __commonJS({
     var MAX_PUBLIC_ADDRESSES = 4;
     var MAX_HOST_LENGTH = 253;
     var MAX_NOTES_LENGTH = 1e3;
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function isIPv4(value2) {
@@ -148,7 +148,7 @@ var require_client_annotations = __commonJS({
     function parsePublicAddress(value2) {
       if (value2 === void 0 || value2 === null)
         return null;
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new Error("annotations.publicAddress \u5FC5\u987B\u4E3A\u5BF9\u8C61\u6216 null");
       }
       for (const key of Object.keys(value2)) {
@@ -163,7 +163,7 @@ var require_client_annotations = __commonJS({
       };
     }
     function parseClientAnnotationsInput(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       for (const key of Object.keys(value2)) {
@@ -180,7 +180,7 @@ var require_client_annotations = __commonJS({
       return input.publicAddress !== null || input.notes !== null;
     }
     function parseClientAnnotations(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       if (Object.keys(value2).length === 0)
@@ -230,13 +230,13 @@ var require_client_installer = __commonJS({
       throw new Error("platform \u5FC5\u987B\u4E3A win-x64 \u6216 linux-x64");
     }
     function parseClientInstallerConfigUpdate(value2) {
-      if (!isRecord2(value2) || Object.keys(value2).length !== 1 || typeof value2.enabled !== "boolean") {
+      if (!isRecord3(value2) || Object.keys(value2).length !== 1 || typeof value2.enabled !== "boolean") {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B boolean enabled");
       }
       return { enabled: value2.enabled };
     }
     function parseClientInstallerNameUpdate(value2) {
-      if (!isRecord2(value2) || Object.keys(value2).length !== 1 || typeof value2.name !== "string") {
+      if (!isRecord3(value2) || Object.keys(value2).length !== 1 || typeof value2.name !== "string") {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B string name");
       }
       const name = value2.name.trim();
@@ -244,7 +244,7 @@ var require_client_installer = __commonJS({
         throw new Error("name \u957F\u5EA6\u5FC5\u987B\u4E3A 1-100");
       return { name };
     }
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
   }
@@ -293,7 +293,7 @@ var require_update = __commonJS({
       RETRY_NOT_ALLOWED: "RELEASE_RETRY_NOT_ALLOWED"
     };
     function parseReleaseUploadCreateInput(value2) {
-      if (!isRecord2(value2) || !hasOnlyKeys(value2, ["version", "platform", "sha256", "size"])) {
+      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["version", "platform", "sha256", "size"])) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B version/platform/sha256/size");
       }
       if (typeof value2.version !== "string" || !/^\d+\.\d+\.\d+$/.test(value2.version)) {
@@ -316,7 +316,7 @@ var require_update = __commonJS({
       };
     }
     function parseReleaseUploadPartRefresh(value2) {
-      if (!isRecord2(value2) || !hasOnlyKeys(value2, ["partNumbers"]) || !Array.isArray(value2.partNumbers)) {
+      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["partNumbers"]) || !Array.isArray(value2.partNumbers)) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B partNumbers \u6570\u7EC4");
       }
       const partNumbers = value2.partNumbers;
@@ -326,12 +326,12 @@ var require_update = __commonJS({
       return { partNumbers };
     }
     function parseReleaseUploadComplete(value2) {
-      if (!isRecord2(value2) || !hasOnlyKeys(value2, ["uploadedBytes"]) || typeof value2.uploadedBytes !== "number" || !Number.isSafeInteger(value2.uploadedBytes) || value2.uploadedBytes < 1 || value2.uploadedBytes > 2147483647) {
+      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["uploadedBytes"]) || typeof value2.uploadedBytes !== "number" || !Number.isSafeInteger(value2.uploadedBytes) || value2.uploadedBytes < 1 || value2.uploadedBytes > 2147483647) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B\u6709\u6548\u6574\u6570 uploadedBytes");
       }
       return { uploadedBytes: value2.uploadedBytes };
     }
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function hasOnlyKeys(value2, keys) {
@@ -679,11 +679,11 @@ var require_terminal = __commonJS({
       }
     };
     exports2.TerminalProtocolError = TerminalProtocolError;
-    function isRecord2(v) {
+    function isRecord3(v) {
       return typeof v === "object" && v !== null && !Array.isArray(v);
     }
     function assertRecord(v, what) {
-      if (!isRecord2(v))
+      if (!isRecord3(v))
         throw new TerminalProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(v, allowed, what) {
@@ -844,10 +844,13 @@ var require_terminal = __commonJS({
     }
     function parseTerminalSessionCreateRequest(v) {
       assertRecord(v, "create");
-      assertKeys(v, /* @__PURE__ */ new Set(["shellId", "cols", "rows"]), "create");
+      assertKeys(v, /* @__PURE__ */ new Set(["shellId", "cols", "rows", "parentRemoteDevSessionId"]), "create");
       assertString(v.shellId, "shellId", 64);
       if (typeof v.cols !== "number" || typeof v.rows !== "number" || !isValidTerminalSize(v.cols, v.rows)) {
         throw new TerminalProtocolError("create \u5C3A\u5BF8\u975E\u6CD5");
+      }
+      if (v.parentRemoteDevSessionId !== void 0) {
+        assertString(v.parentRemoteDevSessionId, "parentRemoteDevSessionId", 128);
       }
       return v;
     }
@@ -1580,6 +1583,8 @@ var require_machine_register = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ClientInstallationComplianceReason = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = void 0;
+    exports2.parseRemoteDevCapabilityStatus = parseRemoteDevCapabilityStatus;
+    exports2.parseAcpCapabilityStatus = parseAcpCapabilityStatus;
     exports2.parseMachineInstallation = parseMachineInstallation;
     exports2.parsePrivilegedCapabilityStatus = parsePrivilegedCapabilityStatus;
     exports2.getClientInstallationCompliance = getClientInstallationCompliance;
@@ -1606,7 +1611,53 @@ var require_machine_register = __commonJS({
       UNAVAILABLE: "unavailable"
     };
     var RETIRED_DETAIL_KEYS = /* @__PURE__ */ new Set(["pi", "p2pTunnel"]);
-    function isRecord2(value2) {
+    function parseRemoteDevCapabilityStatus(value2) {
+      if (!isRecord3(value2))
+        throw new Error("remoteDev \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
+      for (const key of Object.keys(value2)) {
+        if (!allowed.has(key))
+          throw new Error(`remoteDev \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      if (typeof value2.available !== "boolean") {
+        throw new Error("remoteDev.available \u5FC5\u987B\u4E3A boolean");
+      }
+      if (value2.protocolVersion !== void 0 && (!Number.isInteger(value2.protocolVersion) || value2.protocolVersion < 1)) {
+        throw new Error("remoteDev.protocolVersion \u5FC5\u987B\u4E3A\u6B63\u6574\u6570");
+      }
+      if (value2.code !== void 0 && typeof value2.code !== "string") {
+        throw new Error("remoteDev.code \u5FC5\u987B\u4E3A string");
+      }
+      return {
+        available: value2.available,
+        ...value2.protocolVersion !== void 0 ? { protocolVersion: value2.protocolVersion } : {},
+        ...value2.code !== void 0 ? { code: value2.code } : {}
+      };
+    }
+    function parseAcpCapabilityStatus(value2) {
+      if (!isRecord3(value2))
+        throw new Error("acp \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
+      for (const key of Object.keys(value2)) {
+        if (!allowed.has(key))
+          throw new Error(`acp \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      if (typeof value2.available !== "boolean") {
+        throw new Error("acp.available \u5FC5\u987B\u4E3A boolean");
+      }
+      if (value2.protocolVersion !== void 0 && (!Number.isInteger(value2.protocolVersion) || value2.protocolVersion < 1)) {
+        throw new Error("acp.protocolVersion \u5FC5\u987B\u4E3A\u6B63\u6574\u6570");
+      }
+      if (value2.code !== void 0 && typeof value2.code !== "string") {
+        throw new Error("acp.code \u5FC5\u987B\u4E3A string");
+      }
+      return {
+        available: value2.available,
+        ...value2.protocolVersion !== void 0 ? { protocolVersion: value2.protocolVersion } : {},
+        ...value2.code !== void 0 ? { code: value2.code } : {}
+      };
+    }
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function requireString(value2, field, maxLength) {
@@ -1616,7 +1667,7 @@ var require_machine_register = __commonJS({
       return value2;
     }
     function parseMachineInstallation(value2) {
-      if (!isRecord2(value2) || Object.keys(value2).length !== 1) {
+      if (!isRecord3(value2) || Object.keys(value2).length !== 1) {
         throw new Error("installation \u5FC5\u987B\u4E3A\u4EC5\u542B mode \u7684\u5BF9\u8C61");
       }
       const valid = [
@@ -1630,7 +1681,7 @@ var require_machine_register = __commonJS({
       return { mode: value2.mode };
     }
     function parsePrivilegedCapabilityStatus(value2) {
-      if (!isRecord2(value2) || Object.keys(value2).length !== 4) {
+      if (!isRecord3(value2) || Object.keys(value2).length !== 4) {
         throw new Error("privileged \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B available/mode/nonInteractive/runAsUser");
       }
       const { available, mode, nonInteractive, runAsUser } = value2;
@@ -1686,7 +1737,7 @@ var require_machine_register = __commonJS({
       return { compliant: true, reason: null };
     }
     function parseMachineRegister(value2) {
-      if (!isRecord2(value2))
+      if (!isRecord3(value2))
         throw new Error("register \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const clientId = requireString(value2.clientId, "clientId", MAX_CLIENT_ID);
       const hostname = requireString(value2.hostname, "hostname", MAX_HOSTNAME);
@@ -1712,9 +1763,9 @@ var require_machine_register = __commonJS({
       };
       if (value2.capabilityDetails !== void 0) {
         const details = value2.capabilityDetails;
-        if (!isRecord2(details))
+        if (!isRecord3(details))
           throw new Error("capabilityDetails \u5FC5\u987B\u4E3A\u5BF9\u8C61");
-        const known = ["terminal", "frp", "privileged", "gitSsh"];
+        const known = ["terminal", "frp", "privileged", "gitSsh", "acp", "remoteDev"];
         for (const key of Object.keys(details)) {
           if (RETIRED_DETAIL_KEYS.has(key))
             continue;
@@ -1734,6 +1785,12 @@ var require_machine_register = __commonJS({
         }
         if (details.gitSsh !== void 0) {
           parsedDetails.gitSsh = (0, git_ssh_js_1.parseGitSshCapability)(details.gitSsh);
+        }
+        if (details.acp !== void 0) {
+          parsedDetails.acp = parseAcpCapabilityStatus(details.acp);
+        }
+        if (details.remoteDev !== void 0) {
+          parsedDetails.remoteDev = parseRemoteDevCapabilityStatus(details.remoteDev);
         }
         result.capabilityDetails = parsedDetails;
       }
@@ -1795,7 +1852,7 @@ var require_feature = __commonJS({
       "INVALID_FEATURE_STATUS_TRANSITION",
       "FEATURE_CLIENT_UNKNOWN"
     ];
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function rejectUnknown(value2, allowed, field) {
@@ -1855,7 +1912,7 @@ var require_feature = __commonJS({
       return url2;
     }
     function parseFeatureInvocation(value2, field = "invoke") {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
       }
       if (value2.kind === "command") {
@@ -1895,7 +1952,7 @@ var require_feature = __commonJS({
       const seen = /* @__PURE__ */ new Set();
       return value2.map((raw, index) => {
         const field = `inputs[${index}]`;
-        if (!isRecord2(raw)) {
+        if (!isRecord3(raw)) {
           throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
         }
         rejectUnknown(raw, ["name", "type", "required", "description", "example", "options"], field);
@@ -1942,7 +1999,7 @@ var require_feature = __commonJS({
       });
     }
     function parseFeatureVerificationReport(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new FeatureProtocolError("verification \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       rejectUnknown(value2, ["ok", "durationMs", "evidence", "via"], "verification");
@@ -1972,7 +2029,7 @@ var require_feature = __commonJS({
       return report;
     }
     function parseFeatureCreateInput(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new FeatureProtocolError("\u529F\u80FD\u6761\u76EE\u5FC5\u987B\u662F\u5BF9\u8C61");
       }
       rejectUnknown(value2, [
@@ -2015,7 +2072,7 @@ var require_feature = __commonJS({
       return input;
     }
     function parseFeatureUpdateInput(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new FeatureProtocolError("\u66F4\u65B0\u8BF7\u6C42\u5FC5\u987B\u662F\u5BF9\u8C61");
       }
       if (Object.keys(value2).length === 0) {
@@ -2084,6 +2141,1626 @@ var require_feature = __commonJS({
   }
 });
 
+// ../shared/dist/a2a.js
+var require_a2a = __commonJS({
+  "../shared/dist/a2a.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.AGENT_ADAPTERS = exports2.A2aProtocolError = exports2.A2A_LIMITS = exports2.ACP_PERMISSION_EXTENSION_URI = exports2.TASK_LIFECYCLE_STATES = exports2.A2A_TASK_STATES = void 0;
+    exports2.toA2aTaskState = toA2aTaskState;
+    exports2.fromA2aTaskState = fromA2aTaskState;
+    exports2.isA2aTaskState = isA2aTaskState;
+    exports2.toA2aTask = toA2aTask;
+    exports2.parseA2aJsonRpcRequest = parseA2aJsonRpcRequest;
+    exports2.parseAgentPlacementInput = parseAgentPlacementInput;
+    exports2.parseAgentPlacementUpdate = parseAgentPlacementUpdate;
+    exports2.A2A_TASK_STATES = [
+      "TASK_STATE_SUBMITTED",
+      "TASK_STATE_WORKING",
+      "TASK_STATE_INPUT_REQUIRED",
+      "TASK_STATE_AUTH_REQUIRED",
+      "TASK_STATE_COMPLETED",
+      "TASK_STATE_CANCELED",
+      "TASK_STATE_REJECTED",
+      "TASK_STATE_FAILED"
+    ];
+    exports2.TASK_LIFECYCLE_STATES = [
+      "submitted",
+      "working",
+      "input-required",
+      "auth-required",
+      "completed",
+      "canceled",
+      "rejected",
+      "failed"
+    ];
+    var TO_A2A_STATE = {
+      submitted: "TASK_STATE_SUBMITTED",
+      working: "TASK_STATE_WORKING",
+      "input-required": "TASK_STATE_INPUT_REQUIRED",
+      "auth-required": "TASK_STATE_AUTH_REQUIRED",
+      completed: "TASK_STATE_COMPLETED",
+      canceled: "TASK_STATE_CANCELED",
+      rejected: "TASK_STATE_REJECTED",
+      failed: "TASK_STATE_FAILED"
+    };
+    var FROM_A2A_STATE = {
+      TASK_STATE_SUBMITTED: "submitted",
+      TASK_STATE_WORKING: "working",
+      TASK_STATE_INPUT_REQUIRED: "input-required",
+      TASK_STATE_AUTH_REQUIRED: "auth-required",
+      TASK_STATE_COMPLETED: "completed",
+      TASK_STATE_CANCELED: "canceled",
+      TASK_STATE_REJECTED: "rejected",
+      TASK_STATE_FAILED: "failed"
+    };
+    function toA2aTaskState(state) {
+      return TO_A2A_STATE[state];
+    }
+    function fromA2aTaskState(state) {
+      return FROM_A2A_STATE[state];
+    }
+    function isA2aTaskState(value2) {
+      return typeof value2 === "string" && exports2.A2A_TASK_STATES.includes(value2);
+    }
+    exports2.ACP_PERMISSION_EXTENSION_URI = "https://vcpdeck.dev/a2a/extensions/acp-permission/v1";
+    exports2.A2A_LIMITS = {
+      maxMessageBytes: 64 * 1024,
+      maxTextParts: 32,
+      maxMessageIdBytes: 128,
+      maxTaskIdBytes: 128,
+      maxContextIdBytes: 128,
+      maxAgentIdBytes: 128,
+      maxIntentBytes: 4096,
+      maxCriteria: 32,
+      maxCriterionBytes: 1024,
+      maxConstraintItems: 64,
+      maxConstraintBytes: 1024,
+      maxPermissionIdBytes: 128,
+      maxHistoryLength: 1e3,
+      maxPageSize: 100,
+      maxPageTokenBytes: 512
+    };
+    var A2aProtocolError = class extends Error {
+      rpcCode;
+      code = "A2A_PROTOCOL_INVALID";
+      constructor(message, rpcCode = -32600) {
+        super(message);
+        this.rpcCode = rpcCode;
+        this.name = "A2aProtocolError";
+      }
+    };
+    exports2.A2aProtocolError = A2aProtocolError;
+    function toA2aTask(info) {
+      return {
+        id: info.id,
+        contextId: info.contextId,
+        status: {
+          state: toA2aTaskState(info.state),
+          timestamp: info.updatedAt
+        },
+        artifacts: info.artifacts,
+        metadata: {
+          vcpdeck: {
+            agentId: info.agentId,
+            intent: info.intent,
+            acceptanceCriteria: info.acceptanceCriteria,
+            constraints: info.constraints,
+            createdAt: info.createdAt,
+            updatedAt: info.updatedAt,
+            verdict: info.verdict ?? null
+          }
+        }
+      };
+    }
+    function isRecord3(value2) {
+      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+    }
+    function assertRecord(value2, what) {
+      if (!isRecord3(value2))
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+    }
+    function assertKeys(value2, allowed, what) {
+      const set = new Set(allowed);
+      for (const key of Object.keys(value2)) {
+        if (!set.has(key)) {
+          throw new A2aProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function utf8ByteLength(value2) {
+      return new TextEncoder().encode(value2).byteLength;
+    }
+    function assertString(value2, what, maxBytes) {
+      if (typeof value2 !== "string" || value2.length === 0) {
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      }
+      if (utf8ByteLength(value2) > maxBytes) {
+        throw new A2aProtocolError(`${what} \u8D85\u8FC7 ${maxBytes} \u5B57\u8282\u4E0A\u9650`);
+      }
+    }
+    function assertOptionalString(value2, what, maxBytes) {
+      if (value2 !== void 0)
+        assertString(value2, what, maxBytes);
+    }
+    function assertBoolean(value2, what) {
+      if (typeof value2 !== "boolean") {
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F boolean`);
+      }
+    }
+    function assertInteger(value2, what, min, max) {
+      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < min || value2 > max) {
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F ${min}-${max} \u7684\u6574\u6570`);
+      }
+    }
+    function parseStringArray(value2, what, maxItems, maxItemBytes) {
+      if (!Array.isArray(value2) || value2.length > maxItems) {
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F\u4E0D\u8D85\u8FC7 ${maxItems} \u9879\u7684\u6570\u7EC4`);
+      }
+      return value2.map((item, index) => {
+        assertString(item, `${what}[${index}]`, maxItemBytes);
+        return item;
+      });
+    }
+    function parseConstraints(value2) {
+      assertRecord(value2, "constraints");
+      assertKeys(value2, ["allowedPaths", "allowedCommands", "requiredArtifacts"], "constraints");
+      const result = {};
+      if (value2.allowedPaths !== void 0) {
+        result.allowedPaths = parseStringArray(value2.allowedPaths, "constraints.allowedPaths", exports2.A2A_LIMITS.maxConstraintItems, exports2.A2A_LIMITS.maxConstraintBytes);
+      }
+      if (value2.allowedCommands !== void 0) {
+        result.allowedCommands = parseStringArray(value2.allowedCommands, "constraints.allowedCommands", exports2.A2A_LIMITS.maxConstraintItems, exports2.A2A_LIMITS.maxConstraintBytes);
+      }
+      if (value2.requiredArtifacts !== void 0) {
+        result.requiredArtifacts = parseStringArray(value2.requiredArtifacts, "constraints.requiredArtifacts", exports2.A2A_LIMITS.maxConstraintItems, exports2.A2A_LIMITS.maxConstraintBytes);
+      }
+      return result;
+    }
+    function parsePermissionExtension(value2) {
+      assertRecord(value2, "extensions.permission");
+      assertKeys(value2, ["requestId", "optionId"], "extensions.permission");
+      assertString(value2.requestId, "extensions.permission.requestId", exports2.A2A_LIMITS.maxPermissionIdBytes);
+      assertString(value2.optionId, "extensions.permission.optionId", exports2.A2A_LIMITS.maxPermissionIdBytes);
+      return { requestId: value2.requestId, optionId: value2.optionId };
+    }
+    function parseExtensions(value2) {
+      assertRecord(value2, "metadata.extensions");
+      assertKeys(value2, [exports2.ACP_PERMISSION_EXTENSION_URI], "metadata.extensions");
+      const result = {};
+      if (value2[exports2.ACP_PERMISSION_EXTENSION_URI] !== void 0) {
+        result[exports2.ACP_PERMISSION_EXTENSION_URI] = parsePermissionExtension(value2[exports2.ACP_PERMISSION_EXTENSION_URI]);
+      }
+      return result;
+    }
+    function parseMetadata(value2) {
+      assertRecord(value2, "metadata");
+      assertKeys(value2, [
+        "agentId",
+        "intent",
+        "acceptanceCriteria",
+        "constraints",
+        "extensions"
+      ], "metadata");
+      const result = {};
+      if (value2.agentId !== void 0) {
+        assertString(value2.agentId, "metadata.agentId", exports2.A2A_LIMITS.maxAgentIdBytes);
+        result.agentId = value2.agentId;
+      }
+      if (value2.intent !== void 0) {
+        assertString(value2.intent, "metadata.intent", exports2.A2A_LIMITS.maxIntentBytes);
+        result.intent = value2.intent;
+      }
+      if (value2.acceptanceCriteria !== void 0) {
+        result.acceptanceCriteria = parseStringArray(value2.acceptanceCriteria, "metadata.acceptanceCriteria", exports2.A2A_LIMITS.maxCriteria, exports2.A2A_LIMITS.maxCriterionBytes);
+      }
+      if (value2.constraints !== void 0) {
+        result.constraints = parseConstraints(value2.constraints);
+      }
+      if (value2.extensions !== void 0) {
+        result.extensions = parseExtensions(value2.extensions);
+      }
+      return result;
+    }
+    function parseMessage(value2) {
+      assertRecord(value2, "message");
+      assertKeys(value2, ["messageId", "role", "parts", "contextId", "taskId"], "message");
+      assertString(value2.messageId, "message.messageId", exports2.A2A_LIMITS.maxMessageIdBytes);
+      if (value2.role !== "user" && value2.role !== "agent") {
+        throw new A2aProtocolError("message.role \u5FC5\u987B\u662F user \u6216 agent");
+      }
+      if (!Array.isArray(value2.parts) || value2.parts.length === 0 || value2.parts.length > exports2.A2A_LIMITS.maxTextParts) {
+        throw new A2aProtocolError(`message.parts \u5FC5\u987B\u662F 1-${exports2.A2A_LIMITS.maxTextParts} \u9879\u6570\u7EC4`);
+      }
+      let totalBytes = 0;
+      const parts2 = value2.parts.map((part, index) => {
+        assertRecord(part, `message.parts[${index}]`);
+        assertKeys(part, ["text"], `message.parts[${index}]`);
+        assertString(part.text, `message.parts[${index}].text`, exports2.A2A_LIMITS.maxMessageBytes);
+        totalBytes += utf8ByteLength(part.text);
+        return { text: part.text };
+      });
+      if (totalBytes > exports2.A2A_LIMITS.maxMessageBytes) {
+        throw new A2aProtocolError(`message.parts \u603B\u957F\u5EA6\u8D85\u8FC7 ${exports2.A2A_LIMITS.maxMessageBytes} \u5B57\u8282\u4E0A\u9650`);
+      }
+      assertOptionalString(value2.contextId, "message.contextId", exports2.A2A_LIMITS.maxContextIdBytes);
+      assertOptionalString(value2.taskId, "message.taskId", exports2.A2A_LIMITS.maxTaskIdBytes);
+      const contextId = value2.contextId;
+      const taskId = value2.taskId;
+      return {
+        messageId: value2.messageId,
+        role: value2.role,
+        parts: parts2,
+        ...contextId !== void 0 ? { contextId } : {},
+        ...taskId !== void 0 ? { taskId } : {}
+      };
+    }
+    function parseConfiguration(value2) {
+      assertRecord(value2, "configuration");
+      assertKeys(value2, ["returnImmediately", "historyLength"], "configuration");
+      const result = {};
+      if (value2.returnImmediately !== void 0) {
+        assertBoolean(value2.returnImmediately, "configuration.returnImmediately");
+        result.returnImmediately = value2.returnImmediately;
+      }
+      if (value2.historyLength !== void 0) {
+        assertInteger(value2.historyLength, "configuration.historyLength", 0, exports2.A2A_LIMITS.maxHistoryLength);
+        result.historyLength = value2.historyLength;
+      }
+      return result;
+    }
+    function parseSendMessageParams(value2) {
+      assertRecord(value2, "params");
+      assertKeys(value2, ["message", "configuration", "metadata"], "params");
+      const result = {
+        message: parseMessage(value2.message)
+      };
+      if (value2.configuration !== void 0) {
+        result.configuration = parseConfiguration(value2.configuration);
+      }
+      if (value2.metadata !== void 0) {
+        result.metadata = parseMetadata(value2.metadata);
+      }
+      return result;
+    }
+    function parseGetTaskParams(value2) {
+      assertRecord(value2, "params");
+      assertKeys(value2, ["id", "historyLength"], "params");
+      assertString(value2.id, "params.id", exports2.A2A_LIMITS.maxTaskIdBytes);
+      const result = { id: value2.id };
+      if (value2.historyLength !== void 0) {
+        assertInteger(value2.historyLength, "params.historyLength", 0, exports2.A2A_LIMITS.maxHistoryLength);
+        result.historyLength = value2.historyLength;
+      }
+      return result;
+    }
+    function parseListTasksParams(value2) {
+      assertRecord(value2, "params");
+      assertKeys(value2, [
+        "contextId",
+        "status",
+        "pageSize",
+        "pageToken",
+        "historyLength",
+        "includeArtifacts"
+      ], "params");
+      const result = {};
+      if (value2.contextId !== void 0) {
+        assertString(value2.contextId, "params.contextId", exports2.A2A_LIMITS.maxContextIdBytes);
+        result.contextId = value2.contextId;
+      }
+      if (value2.status !== void 0) {
+        if (!isA2aTaskState(value2.status)) {
+          throw new A2aProtocolError("params.status \u975E\u6CD5");
+        }
+        result.status = value2.status;
+      }
+      if (value2.pageSize !== void 0) {
+        assertInteger(value2.pageSize, "params.pageSize", 1, exports2.A2A_LIMITS.maxPageSize);
+        result.pageSize = value2.pageSize;
+      }
+      if (value2.pageToken !== void 0) {
+        assertString(value2.pageToken, "params.pageToken", exports2.A2A_LIMITS.maxPageTokenBytes);
+        result.pageToken = value2.pageToken;
+      }
+      if (value2.historyLength !== void 0) {
+        assertInteger(value2.historyLength, "params.historyLength", 0, exports2.A2A_LIMITS.maxHistoryLength);
+        result.historyLength = value2.historyLength;
+      }
+      if (value2.includeArtifacts !== void 0) {
+        assertBoolean(value2.includeArtifacts, "params.includeArtifacts");
+        result.includeArtifacts = value2.includeArtifacts;
+      }
+      return result;
+    }
+    function parseCancelTaskParams(value2) {
+      assertRecord(value2, "params");
+      assertKeys(value2, ["id"], "params");
+      assertString(value2.id, "params.id", exports2.A2A_LIMITS.maxTaskIdBytes);
+      return { id: value2.id };
+    }
+    function parseA2aJsonRpcRequest(value2) {
+      assertRecord(value2, "request");
+      assertKeys(value2, ["jsonrpc", "id", "method", "params"], "request");
+      if (value2.jsonrpc !== "2.0") {
+        throw new A2aProtocolError("jsonrpc \u5FC5\u987B\u662F 2.0");
+      }
+      if (typeof value2.id !== "string" && typeof value2.id !== "number") {
+        throw new A2aProtocolError("id \u5FC5\u987B\u662F string \u6216 number");
+      }
+      if (typeof value2.id === "string" && value2.id.length === 0) {
+        throw new A2aProtocolError("id \u4E0D\u5F97\u4E3A\u7A7A\u5B57\u7B26\u4E32");
+      }
+      if (typeof value2.id === "number" && !Number.isFinite(value2.id)) {
+        throw new A2aProtocolError("id \u5FC5\u987B\u662F\u6709\u9650\u6570\u5B57");
+      }
+      switch (value2.method) {
+        case "SendMessage":
+          return {
+            jsonrpc: "2.0",
+            id: value2.id,
+            method: "SendMessage",
+            params: parseSendMessageParams(value2.params)
+          };
+        case "GetTask":
+          return {
+            jsonrpc: "2.0",
+            id: value2.id,
+            method: "GetTask",
+            params: parseGetTaskParams(value2.params)
+          };
+        case "ListTasks":
+          return {
+            jsonrpc: "2.0",
+            id: value2.id,
+            method: "ListTasks",
+            params: parseListTasksParams(value2.params)
+          };
+        case "CancelTask":
+          return {
+            jsonrpc: "2.0",
+            id: value2.id,
+            method: "CancelTask",
+            params: parseCancelTaskParams(value2.params)
+          };
+        default:
+          throw new A2aProtocolError(`\u672A\u77E5 method ${String(value2.method)}`, -32601);
+      }
+    }
+    exports2.AGENT_ADAPTERS = ["acp", "cli"];
+    var AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+    function parseAgentArgs(value2) {
+      return parseStringArray(value2, "args", 64, 1024);
+    }
+    function parseAgentWorkspaceRoots(value2) {
+      return parseStringArray(value2, "workspaceRoots", 32, 2048);
+    }
+    function parseAgentSkills(value2) {
+      return parseStringArray(value2, "skills", 32, 128);
+    }
+    function parseAgentAdapter(value2) {
+      if (value2 !== "acp" && value2 !== "cli") {
+        throw new A2aProtocolError("adapter \u5FC5\u987B\u662F acp \u6216 cli");
+      }
+      return value2;
+    }
+    function parseAgentPlacementInput(value2) {
+      assertRecord(value2, "agent placement");
+      assertKeys(value2, [
+        "agentId",
+        "name",
+        "adapter",
+        "clientId",
+        "command",
+        "args",
+        "cwd",
+        "workspaceRoots",
+        "skills",
+        "enabled"
+      ], "agent placement");
+      assertString(value2.agentId, "agentId", 64);
+      if (!AGENT_ID_PATTERN.test(value2.agentId)) {
+        throw new A2aProtocolError("agentId \u5FC5\u987B\u662F\u5C0F\u5199 slug");
+      }
+      assertString(value2.name, "name", 128);
+      const adapter = parseAgentAdapter(value2.adapter);
+      assertString(value2.clientId, "clientId", 128);
+      assertString(value2.command, "command", 1024);
+      const args = parseAgentArgs(value2.args);
+      assertString(value2.cwd, "cwd", 2048);
+      const workspaceRoots = parseAgentWorkspaceRoots(value2.workspaceRoots);
+      const result = {
+        agentId: value2.agentId,
+        name: value2.name,
+        adapter,
+        clientId: value2.clientId,
+        command: value2.command,
+        args,
+        cwd: value2.cwd,
+        workspaceRoots
+      };
+      if (value2.skills !== void 0) {
+        result.skills = parseAgentSkills(value2.skills);
+      }
+      if (value2.enabled !== void 0) {
+        assertBoolean(value2.enabled, "enabled");
+        result.enabled = value2.enabled;
+      }
+      return result;
+    }
+    function parseAgentPlacementUpdate(value2) {
+      assertRecord(value2, "agent placement update");
+      assertKeys(value2, [
+        "name",
+        "adapter",
+        "command",
+        "args",
+        "cwd",
+        "workspaceRoots",
+        "skills",
+        "enabled"
+      ], "agent placement update");
+      if (Object.keys(value2).length === 0) {
+        throw new A2aProtocolError("placement update \u4E0D\u5F97\u4E3A\u7A7A");
+      }
+      const result = {};
+      if (value2.name !== void 0) {
+        assertString(value2.name, "name", 128);
+        result.name = value2.name;
+      }
+      if (value2.adapter !== void 0) {
+        result.adapter = parseAgentAdapter(value2.adapter);
+      }
+      if (value2.command !== void 0) {
+        assertString(value2.command, "command", 1024);
+        result.command = value2.command;
+      }
+      if (value2.args !== void 0) {
+        result.args = parseAgentArgs(value2.args);
+      }
+      if (value2.cwd !== void 0) {
+        assertString(value2.cwd, "cwd", 2048);
+        result.cwd = value2.cwd;
+      }
+      if (value2.workspaceRoots !== void 0) {
+        result.workspaceRoots = parseAgentWorkspaceRoots(value2.workspaceRoots);
+      }
+      if (value2.skills !== void 0) {
+        result.skills = parseAgentSkills(value2.skills);
+      }
+      if (value2.enabled !== void 0) {
+        assertBoolean(value2.enabled, "enabled");
+        result.enabled = value2.enabled;
+      }
+      return result;
+    }
+  }
+});
+
+// ../shared/dist/acp.js
+var require_acp = __commonJS({
+  "../shared/dist/acp.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.AcpProtocolError = exports2.ACP_ADAPTER_EVENT_TYPES = void 0;
+    exports2.parseAcpSessionUpdate = parseAcpSessionUpdate;
+    exports2.parseAcpAdapterEvent = parseAcpAdapterEvent;
+    exports2.parseAcpPermissionRequest = parseAcpPermissionRequest;
+    exports2.parseAcpPromptResult = parseAcpPromptResult;
+    exports2.ACP_ADAPTER_EVENT_TYPES = [
+      "agent.message.delta",
+      "agent.thought.delta",
+      "tool.started",
+      "tool.updated",
+      "plan.updated",
+      "usage.updated",
+      "permission.requested",
+      "permission.resolved",
+      "session.ended"
+    ];
+    var AcpProtocolError = class extends Error {
+      code = "ACP_PROTOCOL_INVALID";
+      constructor(message) {
+        super(message);
+        this.name = "AcpProtocolError";
+      }
+    };
+    exports2.AcpProtocolError = AcpProtocolError;
+    function isRecord3(value2) {
+      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+    }
+    function assertRecord(value2, what) {
+      if (!isRecord3(value2))
+        throw new AcpProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+    }
+    function assertKeys(value2, allowed, what) {
+      const set = new Set(allowed);
+      for (const key of Object.keys(value2)) {
+        if (!set.has(key)) {
+          throw new AcpProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function assertString(value2, what, allowEmpty = false) {
+      if (typeof value2 !== "string" || !allowEmpty && value2.length === 0) {
+        throw new AcpProtocolError(`${what} \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+      }
+    }
+    function optionalString(value2, what) {
+      if (value2 === void 0)
+        return void 0;
+      assertString(value2, what);
+      return value2;
+    }
+    function textContent(value2, what) {
+      assertRecord(value2, what);
+      assertKeys(value2, ["type", "text"], what);
+      if (value2.type !== "text") {
+        throw new AcpProtocolError(`${what}.type \u5FC5\u987B\u4E3A text`);
+      }
+      assertString(value2.text, `${what}.text`, true);
+      return value2.text;
+    }
+    function parseLocations(value2) {
+      if (!Array.isArray(value2)) {
+        throw new AcpProtocolError("locations \u5FC5\u987B\u662F\u6570\u7EC4");
+      }
+      return value2.map((item, index) => {
+        assertRecord(item, `locations[${index}]`);
+        assertKeys(item, ["path", "line"], `locations[${index}]`);
+        assertString(item.path, `locations[${index}].path`);
+        if (item.line !== void 0 && (typeof item.line !== "number" || !Number.isInteger(item.line) || item.line < 0)) {
+          throw new AcpProtocolError(`locations[${index}].line \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570`);
+        }
+        return {
+          path: item.path,
+          ...item.line !== void 0 ? { line: item.line } : {}
+        };
+      });
+    }
+    function parseToolCall(value2) {
+      assertString(value2.toolCallId, "toolCallId");
+      assertString(value2.title, "title");
+      const event = {
+        type: "tool.started",
+        toolCallId: value2.toolCallId,
+        title: value2.title
+      };
+      const kind = optionalString(value2.kind, "kind");
+      const status = optionalString(value2.status, "status");
+      if (kind !== void 0)
+        event.kind = kind;
+      if (status !== void 0)
+        event.status = status;
+      if (value2.locations !== void 0) {
+        event.locations = parseLocations(value2.locations);
+      }
+      return event;
+    }
+    function parseToolUpdate(value2) {
+      assertString(value2.toolCallId, "toolCallId");
+      const event = {
+        type: "tool.updated",
+        toolCallId: value2.toolCallId
+      };
+      const status = optionalString(value2.status, "status");
+      const title = optionalString(value2.title, "title");
+      if (status !== void 0)
+        event.status = status;
+      if (title !== void 0)
+        event.title = title;
+      if (value2.content !== void 0) {
+        if (!Array.isArray(value2.content)) {
+          throw new AcpProtocolError("content \u5FC5\u987B\u662F\u6570\u7EC4");
+        }
+        const texts = [];
+        for (const [index, block] of value2.content.entries()) {
+          assertRecord(block, `content[${index}]`);
+          if (block.type === "content") {
+            assertRecord(block.content, `content[${index}].content`);
+            texts.push(textContent(block.content, `content[${index}].content`));
+          }
+        }
+        if (texts.length > 0)
+          event.content = texts.join("");
+      }
+      return event;
+    }
+    function parsePlan(value2) {
+      if (!Array.isArray(value2.entries)) {
+        throw new AcpProtocolError("plan.entries \u5FC5\u987B\u662F\u6570\u7EC4");
+      }
+      const entries = value2.entries.map((entry, index) => {
+        assertRecord(entry, `plan.entries[${index}]`);
+        assertKeys(entry, ["content", "priority", "status"], `plan.entries[${index}]`);
+        assertString(entry.content, `plan.entries[${index}].content`);
+        const result = { content: entry.content };
+        const priority = optionalString(entry.priority, `plan.entries[${index}].priority`);
+        const status = optionalString(entry.status, `plan.entries[${index}].status`);
+        if (priority !== void 0)
+          result.priority = priority;
+        if (status !== void 0)
+          result.status = status;
+        return result;
+      });
+      return { type: "plan.updated", entries };
+    }
+    function parseUsage(value2) {
+      if (typeof value2.used !== "number" || !Number.isInteger(value2.used) || value2.used < 0 || typeof value2.size !== "number" || !Number.isInteger(value2.size) || value2.size < 0) {
+        throw new AcpProtocolError("usage.used/size \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
+      }
+      const event = {
+        type: "usage.updated",
+        used: value2.used,
+        size: value2.size
+      };
+      if (value2.cost !== void 0) {
+        assertRecord(value2.cost, "usage.cost");
+        assertKeys(value2.cost, ["amount", "currency"], "usage.cost");
+        if (typeof value2.cost.amount !== "number" || !Number.isFinite(value2.cost.amount)) {
+          throw new AcpProtocolError("usage.cost.amount \u5FC5\u987B\u662F\u6570\u5B57");
+        }
+        assertString(value2.cost.currency, "usage.cost.currency");
+        event.cost = {
+          amount: value2.cost.amount,
+          currency: value2.cost.currency
+        };
+      }
+      return event;
+    }
+    function parseAcpSessionUpdate(value2) {
+      assertRecord(value2, "session/update");
+      if (typeof value2.sessionUpdate !== "string") {
+        throw new AcpProtocolError("sessionUpdate \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
+      switch (value2.sessionUpdate) {
+        case "agent_message_chunk": {
+          assertString(value2.messageId, "messageId");
+          return {
+            type: "agent.message.delta",
+            messageId: value2.messageId,
+            text: textContent(value2.content, "content")
+          };
+        }
+        case "agent_thought_chunk":
+          return {
+            type: "agent.thought.delta",
+            text: textContent(value2.content, "content")
+          };
+        case "tool_call":
+          return parseToolCall(value2);
+        case "tool_call_update":
+          return parseToolUpdate(value2);
+        case "plan":
+          return parsePlan(value2);
+        case "usage_update":
+          return parseUsage(value2);
+        default:
+          return null;
+      }
+    }
+    function parseAcpAdapterEvent(value2) {
+      assertRecord(value2, "acp event");
+      assertString(value2.type, "acp event.type");
+      switch (value2.type) {
+        case "agent.message.delta":
+          assertKeys(value2, ["type", "messageId", "text"], "agent.message.delta");
+          assertString(value2.messageId, "messageId");
+          assertString(value2.text, "text", true);
+          return { type: "agent.message.delta", messageId: value2.messageId, text: value2.text };
+        case "agent.thought.delta":
+          assertKeys(value2, ["type", "text"], "agent.thought.delta");
+          assertString(value2.text, "text", true);
+          return { type: "agent.thought.delta", text: value2.text };
+        case "tool.started": {
+          assertKeys(value2, ["type", "toolCallId", "title", "kind", "status", "locations"], "tool.started");
+          assertString(value2.toolCallId, "toolCallId");
+          assertString(value2.title, "title");
+          const event = {
+            type: "tool.started",
+            toolCallId: value2.toolCallId,
+            title: value2.title
+          };
+          const kind = optionalString(value2.kind, "kind");
+          const status = optionalString(value2.status, "status");
+          if (kind !== void 0)
+            event.kind = kind;
+          if (status !== void 0)
+            event.status = status;
+          if (value2.locations !== void 0) {
+            event.locations = parseLocations(value2.locations);
+          }
+          return event;
+        }
+        case "tool.updated": {
+          assertKeys(value2, ["type", "toolCallId", "status", "title", "content"], "tool.updated");
+          assertString(value2.toolCallId, "toolCallId");
+          const event = {
+            type: "tool.updated",
+            toolCallId: value2.toolCallId
+          };
+          const status = optionalString(value2.status, "status");
+          const title = optionalString(value2.title, "title");
+          if (status !== void 0)
+            event.status = status;
+          if (title !== void 0)
+            event.title = title;
+          if (value2.content !== void 0) {
+            assertString(value2.content, "content", true);
+            event.content = value2.content;
+          }
+          return event;
+        }
+        case "plan.updated": {
+          assertKeys(value2, ["type", "entries"], "plan.updated");
+          if (!Array.isArray(value2.entries)) {
+            throw new AcpProtocolError("plan.entries \u5FC5\u987B\u662F\u6570\u7EC4");
+          }
+          const entries = value2.entries.map((entry, index) => {
+            assertRecord(entry, `plan.entries[${index}]`);
+            assertKeys(entry, ["content", "priority", "status"], `plan.entries[${index}]`);
+            assertString(entry.content, `plan.entries[${index}].content`);
+            const item = { content: entry.content };
+            const priority = optionalString(entry.priority, `plan.entries[${index}].priority`);
+            const status = optionalString(entry.status, `plan.entries[${index}].status`);
+            if (priority !== void 0)
+              item.priority = priority;
+            if (status !== void 0)
+              item.status = status;
+            return item;
+          });
+          return { type: "plan.updated", entries };
+        }
+        case "usage.updated": {
+          assertKeys(value2, ["type", "used", "size", "cost"], "usage.updated");
+          if (typeof value2.used !== "number" || !Number.isInteger(value2.used) || value2.used < 0 || typeof value2.size !== "number" || !Number.isInteger(value2.size) || value2.size < 0) {
+            throw new AcpProtocolError("usage.used/size \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
+          }
+          const event = {
+            type: "usage.updated",
+            used: value2.used,
+            size: value2.size
+          };
+          if (value2.cost !== void 0) {
+            assertRecord(value2.cost, "usage.cost");
+            assertKeys(value2.cost, ["amount", "currency"], "usage.cost");
+            if (typeof value2.cost.amount !== "number" || !Number.isFinite(value2.cost.amount)) {
+              throw new AcpProtocolError("usage.cost.amount \u5FC5\u987B\u662F\u6570\u5B57");
+            }
+            assertString(value2.cost.currency, "usage.cost.currency");
+            event.cost = { amount: value2.cost.amount, currency: value2.cost.currency };
+          }
+          return event;
+        }
+        case "permission.requested": {
+          assertKeys(value2, ["type", "requestId", "toolCallId", "title", "options"], "permission.requested");
+          assertString(value2.requestId, "requestId");
+          assertString(value2.toolCallId, "toolCallId");
+          const title = optionalString(value2.title, "title");
+          if (!Array.isArray(value2.options) || value2.options.length === 0) {
+            throw new AcpProtocolError("permission.options \u5FC5\u987B\u662F\u975E\u7A7A\u6570\u7EC4");
+          }
+          const options = value2.options.map((option, index) => {
+            assertRecord(option, `options[${index}]`);
+            assertKeys(option, ["optionId", "name", "kind"], `options[${index}]`);
+            assertString(option.optionId, `options[${index}].optionId`);
+            assertString(option.name, `options[${index}].name`);
+            assertString(option.kind, `options[${index}].kind`);
+            return {
+              optionId: option.optionId,
+              name: option.name,
+              kind: option.kind
+            };
+          });
+          return {
+            type: "permission.requested",
+            requestId: value2.requestId,
+            toolCallId: value2.toolCallId,
+            ...title !== void 0 ? { title } : {},
+            options
+          };
+        }
+        case "permission.resolved": {
+          assertKeys(value2, ["type", "requestId", "optionId", "outcome"], "permission.resolved");
+          assertString(value2.requestId, "requestId");
+          if (value2.outcome === "selected") {
+            assertString(value2.optionId, "optionId");
+            return {
+              type: "permission.resolved",
+              requestId: value2.requestId,
+              optionId: value2.optionId,
+              outcome: "selected"
+            };
+          }
+          if (value2.outcome === "cancelled") {
+            if (value2.optionId !== void 0) {
+              throw new AcpProtocolError("cancelled \u4E0D\u80FD\u5E26 optionId");
+            }
+            return {
+              type: "permission.resolved",
+              requestId: value2.requestId,
+              outcome: "cancelled"
+            };
+          }
+          throw new AcpProtocolError("permission.resolved.outcome \u975E\u6CD5");
+        }
+        case "session.ended": {
+          assertKeys(value2, ["type", "reason", "code"], "session.ended");
+          if (value2.reason !== "exited" && value2.reason !== "closed" && value2.reason !== "error") {
+            throw new AcpProtocolError("session.ended.reason \u975E\u6CD5");
+          }
+          if (value2.code !== void 0 && (typeof value2.code !== "number" || !Number.isInteger(value2.code) || value2.code < 0)) {
+            throw new AcpProtocolError("session.ended.code \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
+          }
+          return {
+            type: "session.ended",
+            reason: value2.reason,
+            ...value2.code !== void 0 ? { code: value2.code } : {}
+          };
+        }
+        default:
+          throw new AcpProtocolError(`\u672A\u77E5 ACP event ${value2.type}`);
+      }
+    }
+    function parseAcpPermissionRequest(value2, requestId) {
+      assertRecord(value2, "session/request_permission params");
+      assertKeys(value2, ["sessionId", "toolCall", "options"], "params");
+      assertString(value2.sessionId, "sessionId");
+      assertRecord(value2.toolCall, "toolCall");
+      assertString(value2.toolCall.toolCallId, "toolCall.toolCallId");
+      const title = optionalString(value2.toolCall.title, "toolCall.title");
+      if (!Array.isArray(value2.options) || value2.options.length === 0) {
+        throw new AcpProtocolError("options \u5FC5\u987B\u662F\u975E\u7A7A\u6570\u7EC4");
+      }
+      const options = value2.options.map((option, index) => {
+        assertRecord(option, `options[${index}]`);
+        assertKeys(option, ["optionId", "name", "kind"], `options[${index}]`);
+        assertString(option.optionId, `options[${index}].optionId`);
+        assertString(option.name, `options[${index}].name`);
+        assertString(option.kind, `options[${index}].kind`);
+        return {
+          optionId: option.optionId,
+          name: option.name,
+          kind: option.kind
+        };
+      });
+      return {
+        requestId,
+        sessionId: value2.sessionId,
+        toolCallId: value2.toolCall.toolCallId,
+        ...title !== void 0 ? { title } : {},
+        options
+      };
+    }
+    function parseAcpPromptResult(value2) {
+      assertRecord(value2, "session/prompt result");
+      assertString(value2.stopReason, "stopReason");
+      return { stopReason: value2.stopReason };
+    }
+  }
+});
+
+// ../shared/dist/task-client.js
+var require_task_client = __commonJS({
+  "../shared/dist/task-client.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.TaskClientProtocolError = exports2.TASK_CLIENT_ACTIONS = void 0;
+    exports2.parseTaskClientCommand = parseTaskClientCommand;
+    exports2.parseTaskClientEvent = parseTaskClientEvent;
+    exports2.parseTaskCommandResult = parseTaskCommandResult;
+    exports2.TASK_CLIENT_ACTIONS = [
+      "start",
+      "prompt",
+      "cancel",
+      "permission",
+      "close"
+    ];
+    var TaskClientProtocolError = class extends Error {
+      code = "TASK_CLIENT_PROTOCOL_INVALID";
+      constructor(message) {
+        super(message);
+        this.name = "TaskClientProtocolError";
+      }
+    };
+    exports2.TaskClientProtocolError = TaskClientProtocolError;
+    function isRecord3(value2) {
+      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+    }
+    function assertRecord(value2, what) {
+      if (!isRecord3(value2))
+        throw new TaskClientProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+    }
+    function assertKeys(value2, allowed, what) {
+      const set = new Set(allowed);
+      for (const key of Object.keys(value2)) {
+        if (!set.has(key)) {
+          throw new TaskClientProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function assertString(value2, what, maxBytes = 4096) {
+      if (typeof value2 !== "string" || value2.length === 0) {
+        throw new TaskClientProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      }
+      if (new TextEncoder().encode(value2).byteLength > maxBytes) {
+        throw new TaskClientProtocolError(`${what} \u8D85\u8FC7 ${maxBytes} \u5B57\u8282\u4E0A\u9650`);
+      }
+    }
+    function assertSeq(value2) {
+      if (!Number.isInteger(value2) || value2 < 1) {
+        throw new TaskClientProtocolError("seq \u5FC5\u987B\u662F\u6B63\u6574\u6570");
+      }
+    }
+    function assertBase(value2) {
+      assertString(value2.requestId, "requestId", 128);
+      assertString(value2.taskId, "taskId", 128);
+      assertString(value2.attemptId, "attemptId", 128);
+      return {
+        requestId: value2.requestId,
+        taskId: value2.taskId,
+        attemptId: value2.attemptId
+      };
+    }
+    function parseTaskClientCommand(value2) {
+      assertRecord(value2, "task command");
+      if (typeof value2.action !== "string") {
+        throw new TaskClientProtocolError("action \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
+      const action = value2.action;
+      switch (action) {
+        case "start": {
+          assertKeys(value2, [
+            "requestId",
+            "action",
+            "taskId",
+            "attemptId",
+            "command",
+            "args",
+            "cwd",
+            "prompt"
+          ], "start");
+          const base = assertBase(value2);
+          assertString(value2.command, "command", 1024);
+          if (!Array.isArray(value2.args)) {
+            throw new TaskClientProtocolError("args \u5FC5\u987B\u662F\u6570\u7EC4");
+          }
+          const args = value2.args.map((arg, index) => {
+            assertString(arg, `args[${index}]`, 1024);
+            return arg;
+          });
+          assertString(value2.cwd, "cwd", 2048);
+          if (value2.prompt !== void 0) {
+            assertString(value2.prompt, "prompt", 256 * 1024);
+          }
+          return {
+            ...base,
+            action: "start",
+            command: value2.command,
+            args,
+            cwd: value2.cwd,
+            ...value2.prompt !== void 0 ? { prompt: value2.prompt } : {}
+          };
+        }
+        case "prompt": {
+          assertKeys(value2, ["requestId", "action", "taskId", "attemptId", "text"], "prompt");
+          const base = assertBase(value2);
+          assertString(value2.text, "text", 256 * 1024);
+          return { ...base, action: "prompt", text: value2.text };
+        }
+        case "cancel": {
+          assertKeys(value2, ["requestId", "action", "taskId", "attemptId"], "cancel");
+          return { ...assertBase(value2), action: "cancel" };
+        }
+        case "permission": {
+          assertKeys(value2, [
+            "requestId",
+            "action",
+            "taskId",
+            "attemptId",
+            "permissionRequestId",
+            "outcome"
+          ], "permission");
+          const base = assertBase(value2);
+          assertString(value2.permissionRequestId, "permissionRequestId", 128);
+          assertRecord(value2.outcome, "outcome");
+          assertKeys(value2.outcome, ["outcome", "optionId"], "outcome");
+          if (value2.outcome.outcome === "selected") {
+            assertString(value2.outcome.optionId, "outcome.optionId", 128);
+            return {
+              ...base,
+              action: "permission",
+              permissionRequestId: value2.permissionRequestId,
+              outcome: {
+                outcome: "selected",
+                optionId: value2.outcome.optionId
+              }
+            };
+          }
+          if (value2.outcome.outcome === "cancelled") {
+            return {
+              ...base,
+              action: "permission",
+              permissionRequestId: value2.permissionRequestId,
+              outcome: { outcome: "cancelled" }
+            };
+          }
+          throw new TaskClientProtocolError("outcome.outcome \u975E\u6CD5");
+        }
+        case "close": {
+          assertKeys(value2, ["requestId", "action", "taskId", "attemptId"], "close");
+          return { ...assertBase(value2), action: "close" };
+        }
+        default:
+          throw new TaskClientProtocolError(`\u672A\u77E5 action ${action}`);
+      }
+    }
+    function parseTaskClientEvent(value2) {
+      assertRecord(value2, "task event");
+      assertKeys(value2, ["taskId", "attemptId", "seq", "event"], "task event");
+      assertString(value2.taskId, "taskId", 128);
+      assertString(value2.attemptId, "attemptId", 128);
+      assertSeq(value2.seq);
+      assertRecord(value2.event, "event");
+      assertString(value2.event.type, "event.type", 64);
+      return value2;
+    }
+    function parseTaskCommandResult(value2) {
+      assertRecord(value2, "task command result");
+      assertKeys(value2, ["requestId", "ok", "sessionId", "stopReason", "error"], "task command result");
+      assertString(value2.requestId, "requestId", 128);
+      if (typeof value2.ok !== "boolean") {
+        throw new TaskClientProtocolError("ok \u5FC5\u987B\u662F boolean");
+      }
+      if (value2.sessionId !== void 0) {
+        assertString(value2.sessionId, "sessionId", 128);
+      }
+      if (value2.stopReason !== void 0) {
+        assertString(value2.stopReason, "stopReason", 64);
+      }
+      if (value2.error !== void 0) {
+        assertRecord(value2.error, "error");
+        assertKeys(value2.error, ["code", "message"], "error");
+        assertString(value2.error.code, "error.code", 128);
+        assertString(value2.error.message, "error.message", 512);
+      }
+      return value2;
+    }
+  }
+});
+
+// ../shared/dist/remote-dev.js
+var require_remote_dev = __commonJS({
+  "../shared/dist/remote-dev.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.RemoteDevProtocolError = exports2.RDS_LIMITS = exports2.REMOTE_DEV_PORT_PROTOCOLS = exports2.REMOTE_DEV_PORT_STATUSES = exports2.REMOTE_DEV_ATTACHMENT_MODES = exports2.REMOTE_DEV_AGENT_STATES = exports2.REMOTE_DEV_STATES = void 0;
+    exports2.parseRemoteDevSessionCreateRequest = parseRemoteDevSessionCreateRequest;
+    exports2.parseRemoteDevPortCreateRequest = parseRemoteDevPortCreateRequest;
+    exports2.parseRemoteDevBrowserAttach = parseRemoteDevBrowserAttach;
+    exports2.parseRemoteDevBrowserPrompt = parseRemoteDevBrowserPrompt;
+    exports2.parseRemoteDevBrowserCancel = parseRemoteDevBrowserCancel;
+    exports2.parseRemoteDevBrowserDetach = parseRemoteDevBrowserDetach;
+    exports2.parseRemoteDevBrowserPermission = parseRemoteDevBrowserPermission;
+    exports2.parseRemoteDevBrowserResync = parseRemoteDevBrowserResync;
+    exports2.parseRemoteDevBrowserPortOpen = parseRemoteDevBrowserPortOpen;
+    exports2.parseRemoteDevBrowserPortClose = parseRemoteDevBrowserPortClose;
+    exports2.parseRemoteDevClientCommand = parseRemoteDevClientCommand;
+    exports2.parseRemoteDevCommandResult = parseRemoteDevCommandResult;
+    exports2.parseRemoteDevClientEvent = parseRemoteDevClientEvent;
+    var acp_js_1 = require_acp();
+    exports2.REMOTE_DEV_STATES = [
+      "starting",
+      "active",
+      "detached",
+      "disconnected",
+      "interrupted",
+      "closing",
+      "closed",
+      "failed"
+    ];
+    exports2.REMOTE_DEV_AGENT_STATES = [
+      "starting",
+      "ready",
+      "busy",
+      "idle",
+      "exited",
+      "failed"
+    ];
+    exports2.REMOTE_DEV_ATTACHMENT_MODES = ["operator", "viewer"];
+    exports2.REMOTE_DEV_PORT_STATUSES = [
+      "opening",
+      "open",
+      "failed",
+      "closing",
+      "closed"
+    ];
+    exports2.REMOTE_DEV_PORT_PROTOCOLS = ["tcp"];
+    exports2.RDS_LIMITS = {
+      maxSessionIdBytes: 128,
+      maxLabelBytes: 80,
+      maxWorkspaceBytes: 2048,
+      maxPromptBytes: 256 * 1024,
+      maxPortsPerSession: 8,
+      minPort: 1024,
+      maxPort: 65535,
+      maxFrameBytes: 64 * 1024,
+      maxReconnectTokenBytes: 512
+    };
+    var RemoteDevProtocolError = class extends Error {
+      code = "RDS_PROTOCOL_INVALID";
+      constructor(message) {
+        super(message);
+        this.name = "RemoteDevProtocolError";
+      }
+    };
+    exports2.RemoteDevProtocolError = RemoteDevProtocolError;
+    function isRecord3(value2) {
+      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+    }
+    var textEncoder = new TextEncoder();
+    function byteLength2(value2) {
+      return textEncoder.encode(value2).length;
+    }
+    function assertRecord(value2, what) {
+      if (!isRecord3(value2))
+        throw new RemoteDevProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+    }
+    function assertKeys(value2, allowed, what) {
+      const set = new Set(allowed);
+      for (const key of Object.keys(value2)) {
+        if (!set.has(key)) {
+          throw new RemoteDevProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function assertString(value2, what, maxBytes, allowEmpty = false) {
+      if (typeof value2 !== "string") {
+        throw new RemoteDevProtocolError(`${what} \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+      }
+      if (!allowEmpty && value2.length === 0) {
+        throw new RemoteDevProtocolError(`${what} \u4E0D\u80FD\u4E3A\u7A7A`);
+      }
+      if (byteLength2(value2) > maxBytes) {
+        throw new RemoteDevProtocolError(`${what} \u8D85\u8FC7 ${maxBytes} \u5B57\u8282`);
+      }
+    }
+    function optionalString(value2, what, maxBytes) {
+      if (value2 === void 0)
+        return void 0;
+      assertString(value2, what, maxBytes);
+      return value2;
+    }
+    function assertPort(value2, what) {
+      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < exports2.RDS_LIMITS.minPort || value2 > exports2.RDS_LIMITS.maxPort) {
+        throw new RemoteDevProtocolError(`${what} \u5FC5\u987B\u662F ${exports2.RDS_LIMITS.minPort}-${exports2.RDS_LIMITS.maxPort} \u7684\u6574\u6570`);
+      }
+    }
+    function parseRemoteDevSessionCreateRequest(value2) {
+      assertRecord(value2, "remote-dev create");
+      assertKeys(value2, ["clientId", "agentPlacementId", "workspaceRoot", "label"], "remote-dev create");
+      assertString(value2.clientId, "clientId", 128);
+      assertString(value2.agentPlacementId, "agentPlacementId", 128);
+      assertString(value2.workspaceRoot, "workspaceRoot", exports2.RDS_LIMITS.maxWorkspaceBytes);
+      const label = optionalString(value2.label, "label", exports2.RDS_LIMITS.maxLabelBytes);
+      return {
+        clientId: value2.clientId,
+        agentPlacementId: value2.agentPlacementId,
+        workspaceRoot: value2.workspaceRoot,
+        ...label ? { label } : {}
+      };
+    }
+    function parseRemoteDevPortCreateRequest(value2) {
+      assertRecord(value2, "remote-dev port create");
+      assertKeys(value2, ["remotePort", "label"], "remote-dev port create");
+      assertPort(value2.remotePort, "remotePort");
+      const label = optionalString(value2.label, "label", exports2.RDS_LIMITS.maxLabelBytes);
+      return {
+        remotePort: value2.remotePort,
+        ...label ? { label } : {}
+      };
+    }
+    function parseRemoteDevBrowserAttach(value2) {
+      assertRecord(value2, "rds:attach");
+      assertKeys(value2, ["sessionId", "reconnectToken"], "rds:attach");
+      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      const reconnectToken = optionalString(value2.reconnectToken, "reconnectToken", exports2.RDS_LIMITS.maxReconnectTokenBytes);
+      return {
+        sessionId: value2.sessionId,
+        ...reconnectToken ? { reconnectToken } : {}
+      };
+    }
+    function parseRemoteDevBrowserPrompt(value2) {
+      assertRecord(value2, "rds:prompt");
+      assertKeys(value2, ["sessionId", "text"], "rds:prompt");
+      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      assertString(value2.text, "text", exports2.RDS_LIMITS.maxPromptBytes);
+      return { sessionId: value2.sessionId, text: value2.text };
+    }
+    function parseRemoteDevBrowserCancel(value2) {
+      assertRecord(value2, "rds:cancel");
+      assertKeys(value2, ["sessionId"], "rds:cancel");
+      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      return { sessionId: value2.sessionId };
+    }
+    function parseRemoteDevBrowserDetach(value2) {
+      assertRecord(value2, "rds:detach");
+      assertKeys(value2, ["sessionId"], "rds:detach");
+      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      return { sessionId: value2.sessionId };
+    }
+    function parseRemoteDevBrowserPermission(value2) {
+      assertRecord(value2, "rds:permission");
+      assertKeys(value2, ["sessionId", "requestId", "optionId"], "rds:permission");
+      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      assertString(value2.requestId, "requestId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      const optionId = optionalString(value2.optionId, "optionId", 128);
+      return {
+        sessionId: value2.sessionId,
+        requestId: value2.requestId,
+        ...optionId ? { optionId } : {}
+      };
+    }
+    function parseRemoteDevBrowserResync(value2) {
+      assertRecord(value2, "rds:resync");
+      assertKeys(value2, ["sessionId", "sinceSeq"], "rds:resync");
+      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      if (value2.sinceSeq !== void 0) {
+        if (typeof value2.sinceSeq !== "number" || !Number.isInteger(value2.sinceSeq) || value2.sinceSeq < 0) {
+          throw new RemoteDevProtocolError("sinceSeq \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
+        }
+      }
+      return {
+        sessionId: value2.sessionId,
+        ...value2.sinceSeq !== void 0 ? { sinceSeq: value2.sinceSeq } : {}
+      };
+    }
+    function parseRemoteDevBrowserPortOpen(value2) {
+      assertRecord(value2, "rds:port.open");
+      assertKeys(value2, ["sessionId", "remotePort", "label"], "rds:port.open");
+      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      assertPort(value2.remotePort, "remotePort");
+      const label = optionalString(value2.label, "label", exports2.RDS_LIMITS.maxLabelBytes);
+      return {
+        sessionId: value2.sessionId,
+        remotePort: value2.remotePort,
+        ...label ? { label } : {}
+      };
+    }
+    function parseRemoteDevBrowserPortClose(value2) {
+      assertRecord(value2, "rds:port.close");
+      assertKeys(value2, ["sessionId", "portId"], "rds:port.close");
+      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      assertString(value2.portId, "portId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      return { sessionId: value2.sessionId, portId: value2.portId };
+    }
+    function parseRemoteDevClientCommand(value2) {
+      assertRecord(value2, "rds:command");
+      assertString(value2.requestId, "requestId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      if (typeof value2.action !== "string") {
+        throw new RemoteDevProtocolError("rds:command.action \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
+      if (value2.action === "session.create") {
+        assertKeys(value2, [
+          "action",
+          "requestId",
+          "sessionId",
+          "agentPlacementId",
+          "workspaceRoot",
+          "workspaceRoots",
+          "command",
+          "args",
+          "cwd"
+        ], "rds:command.session.create");
+        assertString(value2.agentPlacementId, "agentPlacementId", 128);
+        assertString(value2.workspaceRoot, "workspaceRoot", exports2.RDS_LIMITS.maxWorkspaceBytes);
+        assertString(value2.command, "command", 1024);
+        assertString(value2.cwd, "cwd", exports2.RDS_LIMITS.maxWorkspaceBytes);
+        const args = parseStringArray(value2.args, "args", 64, 1024);
+        const workspaceRoots = parseStringArray(value2.workspaceRoots, "workspaceRoots", 32, exports2.RDS_LIMITS.maxWorkspaceBytes);
+        if (workspaceRoots.length === 0) {
+          throw new RemoteDevProtocolError("workspaceRoots \u4E0D\u80FD\u4E3A\u7A7A");
+        }
+        return {
+          action: "session.create",
+          requestId: value2.requestId,
+          sessionId: value2.sessionId,
+          agentPlacementId: value2.agentPlacementId,
+          workspaceRoot: value2.workspaceRoot,
+          workspaceRoots,
+          command: value2.command,
+          args,
+          cwd: value2.cwd
+        };
+      }
+      if (value2.action === "session.close") {
+        assertKeys(value2, ["action", "requestId", "sessionId", "reason"], "rds:command.session.close");
+        const reason = optionalString(value2.reason, "reason", 128);
+        return {
+          action: "session.close",
+          requestId: value2.requestId,
+          sessionId: value2.sessionId,
+          ...reason ? { reason } : {}
+        };
+      }
+      if (value2.action === "agent.prompt") {
+        assertKeys(value2, ["action", "requestId", "sessionId", "text"], "rds:command.agent.prompt");
+        assertString(value2.text, "text", exports2.RDS_LIMITS.maxPromptBytes);
+        return {
+          action: "agent.prompt",
+          requestId: value2.requestId,
+          sessionId: value2.sessionId,
+          text: value2.text
+        };
+      }
+      if (value2.action === "agent.cancel") {
+        assertKeys(value2, ["action", "requestId", "sessionId"], "rds:command.agent.cancel");
+        return {
+          action: "agent.cancel",
+          requestId: value2.requestId,
+          sessionId: value2.sessionId
+        };
+      }
+      if (value2.action === "agent.permission") {
+        assertKeys(value2, [
+          "action",
+          "requestId",
+          "sessionId",
+          "permissionRequestId",
+          "outcome"
+        ], "rds:command.agent.permission");
+        assertString(value2.permissionRequestId, "permissionRequestId", exports2.RDS_LIMITS.maxSessionIdBytes);
+        assertRecord(value2.outcome, "outcome");
+        if (value2.outcome.outcome === "selected") {
+          assertKeys(value2.outcome, ["outcome", "optionId"], "outcome");
+          assertString(value2.outcome.optionId, "optionId", 128);
+          return {
+            action: "agent.permission",
+            requestId: value2.requestId,
+            sessionId: value2.sessionId,
+            permissionRequestId: value2.permissionRequestId,
+            outcome: {
+              outcome: "selected",
+              optionId: value2.outcome.optionId
+            }
+          };
+        }
+        if (value2.outcome.outcome === "cancelled") {
+          assertKeys(value2.outcome, ["outcome"], "outcome");
+          return {
+            action: "agent.permission",
+            requestId: value2.requestId,
+            sessionId: value2.sessionId,
+            permissionRequestId: value2.permissionRequestId,
+            outcome: { outcome: "cancelled" }
+          };
+        }
+        throw new RemoteDevProtocolError("permission outcome \u975E\u6CD5");
+      }
+      throw new RemoteDevProtocolError(`\u672A\u77E5 RDS action ${value2.action}`);
+    }
+    function parseRemoteDevCommandResult(value2) {
+      assertRecord(value2, "rds:command-result");
+      assertKeys(value2, ["requestId", "ok", "sessionId", "generationId", "stopReason", "error"], "rds:command-result");
+      assertString(value2.requestId, "requestId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      if (typeof value2.ok !== "boolean") {
+        throw new RemoteDevProtocolError("ok \u5FC5\u987B\u662F boolean");
+      }
+      const sessionId = optionalString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      const generationId = optionalString(value2.generationId, "generationId", exports2.RDS_LIMITS.maxSessionIdBytes);
+      const stopReason = optionalString(value2.stopReason, "stopReason", 128);
+      let error;
+      if (value2.error !== void 0) {
+        assertRecord(value2.error, "error");
+        assertKeys(value2.error, ["code", "message"], "error");
+        assertString(value2.error.code, "error.code", 128);
+        assertString(value2.error.message, "error.message", 512);
+        error = { code: value2.error.code, message: value2.error.message };
+      }
+      return {
+        requestId: value2.requestId,
+        ok: value2.ok,
+        ...sessionId ? { sessionId } : {},
+        ...generationId ? { generationId } : {},
+        ...stopReason ? { stopReason } : {},
+        ...error ? { error } : {}
+      };
+    }
+    function parseRemoteDevClientEvent(value2) {
+      assertRecord(value2, "rds:event");
+      if (typeof value2.type !== "string") {
+        throw new RemoteDevProtocolError("rds:event.type \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
+      if (value2.type === "agent.event") {
+        assertKeys(value2, ["type", "sessionId", "generationId", "seq", "event"], "rds:event.agent.event");
+        assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+        assertString(value2.generationId, "generationId", 128);
+        if (typeof value2.seq !== "number" || !Number.isInteger(value2.seq) || value2.seq < 0) {
+          throw new RemoteDevProtocolError("seq \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
+        }
+        assertRecord(value2.event, "event");
+        let event;
+        try {
+          event = (0, acp_js_1.parseAcpAdapterEvent)(value2.event);
+        } catch (cause) {
+          throw new RemoteDevProtocolError(cause instanceof Error ? cause.message : "ACP event \u975E\u6CD5");
+        }
+        return {
+          type: "agent.event",
+          sessionId: value2.sessionId,
+          generationId: value2.generationId,
+          seq: value2.seq,
+          event
+        };
+      }
+      if (value2.type === "agent.status") {
+        assertKeys(value2, ["type", "sessionId", "generationId", "status"], "rds:event.agent.status");
+        assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+        assertString(value2.generationId, "generationId", 128);
+        if (typeof value2.status !== "string" || !exports2.REMOTE_DEV_AGENT_STATES.includes(value2.status)) {
+          throw new RemoteDevProtocolError("\u672A\u77E5 agent status");
+        }
+        return {
+          type: "agent.status",
+          sessionId: value2.sessionId,
+          generationId: value2.generationId,
+          status: value2.status
+        };
+      }
+      if (value2.type === "session.ended") {
+        assertKeys(value2, ["type", "sessionId", "generationId", "reason", "code"], "rds:event.session.ended");
+        assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
+        assertString(value2.generationId, "generationId", 128);
+        if (value2.reason !== "closed" && value2.reason !== "exited" && value2.reason !== "error") {
+          throw new RemoteDevProtocolError("\u672A\u77E5 session ended reason");
+        }
+        const code = optionalString(value2.code, "code", 128);
+        return {
+          type: "session.ended",
+          sessionId: value2.sessionId,
+          generationId: value2.generationId,
+          reason: value2.reason,
+          ...code ? { code } : {}
+        };
+      }
+      throw new RemoteDevProtocolError(`\u672A\u77E5 rds:event.type ${value2.type}`);
+    }
+    function parseStringArray(value2, what, maxItems, maxBytes) {
+      if (!Array.isArray(value2)) {
+        throw new RemoteDevProtocolError(`${what} \u5FC5\u987B\u662F\u6570\u7EC4`);
+      }
+      if (value2.length > maxItems) {
+        throw new RemoteDevProtocolError(`${what} \u8D85\u8FC7 ${maxItems} \u9879`);
+      }
+      return value2.map((item, index) => {
+        assertString(item, `${what}[${index}]`, maxBytes);
+        return item;
+      });
+    }
+  }
+});
+
+// ../shared/dist/remote-dev-tunnel.js
+var require_remote_dev_tunnel = __commonJS({
+  "../shared/dist/remote-dev-tunnel.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.RdsFrameDecoder = exports2.RDS_FRAME_TYPES = exports2.RDS_FRAME_VERSION = void 0;
+    exports2.encodeRdsFrame = encodeRdsFrame2;
+    exports2.encodeRdsOpenPayload = encodeRdsOpenPayload2;
+    exports2.decodeRdsOpenPayload = decodeRdsOpenPayload;
+    var remote_dev_js_1 = require_remote_dev();
+    exports2.RDS_FRAME_VERSION = 1;
+    exports2.RDS_FRAME_TYPES = [
+      "OPEN",
+      "DATA",
+      "CLOSE",
+      "ERROR",
+      "HEARTBEAT"
+    ];
+    var FRAME_TYPE_CODES = {
+      OPEN: 1,
+      DATA: 2,
+      CLOSE: 3,
+      ERROR: 4,
+      HEARTBEAT: 5
+    };
+    var FRAME_CODE_TYPES = new Map(Object.entries(FRAME_TYPE_CODES).map(([type, code]) => [
+      code,
+      type
+    ]));
+    var HEADER_BYTES = 10;
+    var textEncoder = new TextEncoder();
+    var textDecoder = new TextDecoder();
+    function assertFrameType(value2) {
+      if (!exports2.RDS_FRAME_TYPES.includes(value2)) {
+        throw new remote_dev_js_1.RemoteDevProtocolError(`\u672A\u77E5 RDS \u5E27\u7C7B\u578B ${value2}`);
+      }
+      return value2;
+    }
+    function encodeRdsFrame2(frame) {
+      const type = assertFrameType(frame.type);
+      if (typeof frame.streamId !== "number" || !Number.isInteger(frame.streamId) || frame.streamId < 0 || frame.streamId > 4294967295) {
+        throw new remote_dev_js_1.RemoteDevProtocolError("streamId \u5FC5\u987B\u662F uint32");
+      }
+      const payload = frame.payload ?? new Uint8Array(0);
+      if (payload.byteLength > remote_dev_js_1.RDS_LIMITS.maxFrameBytes) {
+        throw new remote_dev_js_1.RemoteDevProtocolError(`RDS payload \u8D85\u8FC7 ${remote_dev_js_1.RDS_LIMITS.maxFrameBytes} \u5B57\u8282`);
+      }
+      const result = new Uint8Array(HEADER_BYTES + payload.byteLength);
+      const view = new DataView(result.buffer);
+      view.setUint8(0, exports2.RDS_FRAME_VERSION);
+      view.setUint8(1, FRAME_TYPE_CODES[type]);
+      view.setUint32(2, frame.streamId, false);
+      view.setUint32(6, payload.byteLength, false);
+      result.set(payload, HEADER_BYTES);
+      return result;
+    }
+    var RdsFrameDecoder2 = class {
+      buffer = new Uint8Array(0);
+      push(chunk) {
+        if (chunk.byteLength === 0)
+          return [];
+        const merged = new Uint8Array(this.buffer.byteLength + chunk.byteLength);
+        merged.set(this.buffer, 0);
+        merged.set(chunk, this.buffer.byteLength);
+        this.buffer = merged;
+        const frames = [];
+        while (this.buffer.byteLength >= HEADER_BYTES) {
+          const view = new DataView(this.buffer.buffer, this.buffer.byteOffset, this.buffer.byteLength);
+          if (view.getUint8(0) !== exports2.RDS_FRAME_VERSION) {
+            throw new remote_dev_js_1.RemoteDevProtocolError("RDS \u5E27\u7248\u672C\u4E0D\u5339\u914D");
+          }
+          const type = FRAME_CODE_TYPES.get(view.getUint8(1));
+          if (!type)
+            throw new remote_dev_js_1.RemoteDevProtocolError("\u672A\u77E5 RDS \u5E27\u7C7B\u578B");
+          const streamId = view.getUint32(2, false);
+          const length = view.getUint32(6, false);
+          if (length > remote_dev_js_1.RDS_LIMITS.maxFrameBytes) {
+            throw new remote_dev_js_1.RemoteDevProtocolError(`RDS payload \u8D85\u8FC7 ${remote_dev_js_1.RDS_LIMITS.maxFrameBytes} \u5B57\u8282`);
+          }
+          if (this.buffer.byteLength < HEADER_BYTES + length)
+            break;
+          const payload = this.buffer.slice(HEADER_BYTES, HEADER_BYTES + length);
+          frames.push({ type, streamId, payload });
+          this.buffer = this.buffer.slice(HEADER_BYTES + length);
+        }
+        return frames;
+      }
+    };
+    exports2.RdsFrameDecoder = RdsFrameDecoder2;
+    function encodeRdsOpenPayload2(payload) {
+      assertOpenPort(payload.remotePort);
+      return textEncoder.encode(JSON.stringify({ remotePort: payload.remotePort }));
+    }
+    function decodeRdsOpenPayload(payload) {
+      let parsed;
+      try {
+        parsed = JSON.parse(textDecoder.decode(payload));
+      } catch {
+        throw new remote_dev_js_1.RemoteDevProtocolError("RDS OPEN payload \u4E0D\u662F JSON");
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw new remote_dev_js_1.RemoteDevProtocolError("RDS OPEN payload \u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      const record = parsed;
+      for (const key of Object.keys(record)) {
+        if (key !== "remotePort") {
+          throw new remote_dev_js_1.RemoteDevProtocolError(`RDS OPEN \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      assertOpenPort(record.remotePort);
+      return { remotePort: record.remotePort };
+    }
+    function assertOpenPort(value2) {
+      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < remote_dev_js_1.RDS_LIMITS.minPort || value2 > remote_dev_js_1.RDS_LIMITS.maxPort) {
+        throw new remote_dev_js_1.RemoteDevProtocolError(`remotePort \u5FC5\u987B\u662F ${remote_dev_js_1.RDS_LIMITS.minPort}-${remote_dev_js_1.RDS_LIMITS.maxPort} \u7684\u6574\u6570`);
+      }
+    }
+  }
+});
+
 // ../shared/dist/index.js
 var require_dist = __commonJS({
   "../shared/dist/index.js"(exports2) {
@@ -2105,8 +3782,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = void 0;
+    exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -2256,7 +3933,30 @@ var require_dist = __commonJS({
       FRP_STATE: "frp:state",
       FRP_STATE_ACK: "frp:state-ack",
       GIT_SSH_COMMAND: "git-ssh:command",
-      GIT_SSH_ACK: "git-ssh:ack"
+      GIT_SSH_ACK: "git-ssh:ack",
+      TASK_COMMAND: "task:command",
+      TASK_COMMAND_RESULT: "task:command-result",
+      TASK_EVENT: "task:event",
+      RDS_COMMAND: "rds:command",
+      RDS_COMMAND_RESULT: "rds:command-result",
+      RDS_EVENT: "rds:event",
+      RDS_ATTACH: "rds:attach",
+      RDS_DETACH: "rds:detach",
+      RDS_PROMPT: "rds:prompt",
+      RDS_CANCEL: "rds:cancel",
+      RDS_PERMISSION: "rds:permission",
+      RDS_PORT_OPEN: "rds:port.open",
+      RDS_PORT_CLOSE: "rds:port.close",
+      RDS_RESYNC: "rds:resync",
+      RDS_STATE: "rds:state",
+      RDS_AGENT_EVENT: "rds:agent:event",
+      RDS_PORT_STATE: "rds:port:state",
+      RDS_ERROR: "rds:error",
+      RDS_CLOSED: "rds:closed",
+      RDS_TUNNEL_HELLO: "rds:tunnel:hello",
+      RDS_STREAM_HELLO: "rds:stream:hello",
+      RDS_STREAM_FRAME: "rds:stream:frame",
+      RDS_STREAM_CLOSE: "rds:stream:close"
     };
     var JobType;
     (function(JobType2) {
@@ -2299,6 +3999,12 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "getClientInstallationCompliance", { enumerable: true, get: function() {
       return machine_register_js_1.getClientInstallationCompliance;
+    } });
+    Object.defineProperty(exports2, "parseAcpCapabilityStatus", { enumerable: true, get: function() {
+      return machine_register_js_1.parseAcpCapabilityStatus;
+    } });
+    Object.defineProperty(exports2, "parseRemoteDevCapabilityStatus", { enumerable: true, get: function() {
+      return machine_register_js_1.parseRemoteDevCapabilityStatus;
     } });
     Object.defineProperty(exports2, "parseMachineInstallation", { enumerable: true, get: function() {
       return machine_register_js_1.parseMachineInstallation;
@@ -2508,6 +4214,11 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parseFeatureVerificationReport", { enumerable: true, get: function() {
       return feature_js_1.parseFeatureVerificationReport;
     } });
+    __exportStar(require_a2a(), exports2);
+    __exportStar(require_acp(), exports2);
+    __exportStar(require_task_client(), exports2);
+    __exportStar(require_remote_dev(), exports2);
+    __exportStar(require_remote_dev_tunnel(), exports2);
   }
 });
 
@@ -2959,6 +4670,41 @@ var init_storage_shares = __esm({
   }
 });
 
+// ../sdk/dist/tasks.js
+function createTasksApi(client, nextId = () => crypto.randomUUID()) {
+  async function rpc(method, params, signal) {
+    const response = await client.request("POST", "/api/a2a", { jsonrpc: "2.0", id: nextId(), method, params }, signal);
+    if ("error" in response) {
+      const data = response.error.data;
+      throw new VcpDeckApiError(response.error.message, response.error.code, typeof data?.code === "string" ? data.code : void 0, response.error.data);
+    }
+    return response.result;
+  }
+  return {
+    sendMessage: (params, signal) => rpc("SendMessage", params, signal),
+    get: (id, historyLength, signal) => rpc("GetTask", { id, historyLength }, signal),
+    list: (params = {}, signal) => rpc("ListTasks", params, signal),
+    cancel: (id, signal) => rpc("CancelTask", { id }, signal),
+    agentCard: (signal) => client.request("GET", "/api/a2a/agent-card", void 0, signal),
+    events: (id, options = {}, signal) => {
+      const search = new URLSearchParams();
+      if (options.since !== void 0)
+        search.set("since", String(options.since));
+      if (options.limit !== void 0)
+        search.set("limit", String(options.limit));
+      const query = search.toString();
+      return client.request("GET", `/api/tasks/${encodeURIComponent(id)}/events${query ? `?${query}` : ""}`, void 0, signal);
+    },
+    deviation: (id, signal) => client.request("GET", `/api/tasks/${encodeURIComponent(id)}/deviation`, void 0, signal)
+  };
+}
+var init_tasks = __esm({
+  "../sdk/dist/tasks.js"() {
+    "use strict";
+    init_client();
+  }
+});
+
 // ../sdk/dist/terminal.js
 function createTerminalsApi(client) {
   const base = (clientId) => `/api/clients/${encodeURIComponent(clientId)}/terminals`;
@@ -3000,6 +4746,62 @@ var init_terminal = __esm({
   }
 });
 
+// ../sdk/dist/agents.js
+function createAgentsApi(client) {
+  return {
+    list: (options = {}, signal) => {
+      const search = new URLSearchParams();
+      if (options.page !== void 0)
+        search.set("page", String(options.page));
+      if (options.pageSize !== void 0)
+        search.set("pageSize", String(options.pageSize));
+      const query = search.toString();
+      return client.request("GET", `/api/agents${query ? `?${query}` : ""}`, void 0, signal);
+    },
+    /** 登记一条受控 placement；Server 侧仍会做完整字段校验。 */
+    create: (input, signal) => client.request("POST", "/api/agents", input, signal)
+  };
+}
+var init_agents = __esm({
+  "../sdk/dist/agents.js"() {
+    "use strict";
+  }
+});
+
+// ../sdk/dist/remote-dev.js
+function createRemoteDevApi(client) {
+  return {
+    create: (input, signal) => client.request("POST", "/api/remote-dev/sessions", input, signal),
+    list: (options = {}, signal) => {
+      const search = new URLSearchParams();
+      if (options.clientId)
+        search.set("clientId", options.clientId);
+      if (options.state)
+        search.set("state", options.state);
+      if (options.page !== void 0)
+        search.set("page", String(options.page));
+      if (options.pageSize !== void 0)
+        search.set("pageSize", String(options.pageSize));
+      const query = search.toString();
+      return client.request("GET", `/api/remote-dev/sessions${query ? `?${query}` : ""}`, void 0, signal);
+    },
+    get: (id, signal) => client.request("GET", `/api/remote-dev/sessions/${encodeURIComponent(id)}`, void 0, signal),
+    close: (id, signal) => client.request("DELETE", `/api/remote-dev/sessions/${encodeURIComponent(id)}`, void 0, signal),
+    issueForwardToken: (sessionId, portId, signal) => client.request("POST", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports/${encodeURIComponent(portId)}/forward-token`, void 0, signal),
+    ports: {
+      list: (sessionId, signal) => client.request("GET", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports`, void 0, signal),
+      open: (sessionId, input, signal) => client.request("POST", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports`, input, signal),
+      close: (sessionId, portId, signal) => client.request("DELETE", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports/${encodeURIComponent(portId)}`, void 0, signal),
+      issueForwardToken: (sessionId, portId, signal) => client.request("POST", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports/${encodeURIComponent(portId)}/forward-token`, void 0, signal)
+    }
+  };
+}
+var init_remote_dev = __esm({
+  "../sdk/dist/remote-dev.js"() {
+    "use strict";
+  }
+});
+
 // ../sdk/dist/client.js
 function parseJson(text) {
   try {
@@ -3027,7 +4829,10 @@ var init_client = __esm({
     init_releases();
     init_storage();
     init_storage_shares();
+    init_tasks();
     init_terminal();
+    init_agents();
+    init_remote_dev();
     VcpDeckApiError = class extends Error {
       status;
       code;
@@ -3060,6 +4865,12 @@ var init_client = __esm({
       gitSsh;
       releases;
       terminals;
+      /** A2A Task 契约（ADR-0057）。 */
+      tasks;
+      /** Agent placement 只读投影。 */
+      agents;
+      /** Remote Dev Session（ADR-0058）。 */
+      remoteDev;
       health = {
         get: (signal) => this.request("GET", "/api/health", void 0, signal)
       };
@@ -3081,6 +4892,9 @@ var init_client = __esm({
         this.gitSsh = createGitSshApi(this);
         this.releases = createReleasesApi(this);
         this.terminals = createTerminalsApi(this);
+        this.tasks = createTasksApi(this);
+        this.agents = createAgentsApi(this);
+        this.remoteDev = createRemoteDevApi(this);
       }
       /** 发起 JSON REST 请求并归一化失败响应。 */
       async request(method, path, body, signal) {
@@ -3145,6 +4959,9 @@ var init_dist = __esm({
     init_releases();
     init_storage();
     init_storage_shares();
+    init_tasks();
+    init_agents();
+    init_remote_dev();
     init_terminal();
   }
 });
@@ -3419,7 +5236,14 @@ var init_config = __esm({
 function parseCommandArgs(argv, schema = {}) {
   const valueOptions = new Set(schema.value ?? []);
   const booleanOptions = new Set(schema.boolean ?? []);
+  const multiOptions = new Set(schema.multiValue ?? []);
+  for (const name of multiOptions) {
+    if (valueOptions.has(name) || booleanOptions.has(name)) {
+      throw new Error(`\u9009\u9879\u58F0\u660E\u51B2\u7A81: --${name}`);
+    }
+  }
   const options = {};
+  const multi = {};
   const positionals = [];
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
@@ -3432,34 +5256,44 @@ function parseCommandArgs(argv, schema = {}) {
       continue;
     }
     const parsed = parseLongOption(arg);
-    assertKnownOption(parsed.name, valueOptions, booleanOptions);
+    assertKnownOption(parsed.name, valueOptions, booleanOptions, multiOptions);
+    const inline = parsed.inlineValue !== void 0;
+    if (multiOptions.has(parsed.name)) {
+      const value2 = requireOptionValue(parsed.name, inline ? parsed.inlineValue : argv[++index], inline);
+      let list = multi[parsed.name];
+      if (!list) {
+        list = [];
+        multi[parsed.name] = list;
+      }
+      list.push(value2);
+      continue;
+    }
     if (Object.hasOwn(options, parsed.name)) {
       throw new Error(`\u9009\u9879\u4E0D\u80FD\u91CD\u590D: --${parsed.name}`);
     }
     if (booleanOptions.has(parsed.name)) {
-      if (parsed.inlineValue !== void 0) {
+      if (inline) {
         throw new Error(`\u5E03\u5C14\u9009\u9879\u4E0D\u63A5\u53D7\u503C: --${parsed.name}`);
       }
       options[parsed.name] = true;
       continue;
     }
-    const value2 = parsed.inlineValue ?? argv[++index];
-    options[parsed.name] = requireOptionValue(parsed.name, value2);
+    options[parsed.name] = requireOptionValue(parsed.name, inline ? parsed.inlineValue : argv[++index], inline);
   }
-  return { positionals, options };
+  return { positionals, options, multi };
 }
 function parseLongOption(arg) {
   const raw = arg.slice(2);
   const separator = raw.indexOf("=");
   return separator >= 0 ? { name: raw.slice(0, separator), inlineValue: raw.slice(separator + 1) } : { name: raw };
 }
-function assertKnownOption(name, valueOptions, booleanOptions) {
-  if (!name || !valueOptions.has(name) && !booleanOptions.has(name)) {
+function assertKnownOption(name, valueOptions, booleanOptions, multiOptions) {
+  if (!name || !valueOptions.has(name) && !booleanOptions.has(name) && !multiOptions.has(name)) {
     throw new Error(`\u672A\u77E5\u9009\u9879: --${name}`);
   }
 }
-function requireOptionValue(name, value2) {
-  if (value2 === void 0 || value2.startsWith("--") || value2.length === 0) {
+function requireOptionValue(name, value2, inline) {
+  if (value2 === void 0 || value2.length === 0 || !inline && value2.startsWith("--")) {
     throw new Error(`\u9009\u9879\u7F3A\u5C11\u503C: --${name}`);
   }
   return value2;
@@ -5113,7 +6947,7 @@ var require_ms = __commonJS({
       options = options || {};
       var type = typeof val;
       if (type === "string" && val.length > 0) {
-        return parse4(val);
+        return parse5(val);
       } else if (type === "number" && isFinite(val)) {
         return options.long ? fmtLong(val) : fmtShort(val);
       }
@@ -5121,7 +6955,7 @@ var require_ms = __commonJS({
         "val is not a non-empty string or a valid number. val=" + JSON.stringify(val)
       );
     };
-    function parse4(str) {
+    function parse5(str) {
       str = String(str);
       if (str.length > 100) {
         return;
@@ -8520,7 +10354,7 @@ var require_extension = __commonJS({
       if (dest[name] === void 0) dest[name] = [elem];
       else dest[name].push(elem);
     }
-    function parse4(header) {
+    function parse5(header) {
       const offers = /* @__PURE__ */ Object.create(null);
       let params = /* @__PURE__ */ Object.create(null);
       let mustUnescape = false;
@@ -8660,7 +10494,7 @@ var require_extension = __commonJS({
         }).join(", ");
       }).join(", ");
     }
-    module2.exports = { format, parse: parse4 };
+    module2.exports = { format, parse: parse5 };
   }
 });
 
@@ -8694,7 +10528,7 @@ var require_websocket = __commonJS({
     var {
       EventTarget: { addEventListener: addEventListener2, removeEventListener: removeEventListener2 }
     } = require_event_target();
-    var { format, parse: parse4 } = require_extension();
+    var { format, parse: parse5 } = require_extension();
     var { toBuffer: toBuffer2 } = require_buffer_util();
     var kAborted = Symbol("kAborted");
     var protocolVersions = [8, 13];
@@ -9371,7 +11205,7 @@ var require_websocket = __commonJS({
           }
           let extensions;
           try {
-            extensions = parse4(secWebSocketExtensions);
+            extensions = parse5(secWebSocketExtensions);
           } catch (err) {
             const message = "Invalid Sec-WebSocket-Extensions header";
             abortHandshake(websocket, socket, message);
@@ -9663,7 +11497,7 @@ var require_subprotocol = __commonJS({
   "../../node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/subprotocol.js"(exports2, module2) {
     "use strict";
     var { tokenChars } = require_validation();
-    function parse4(header) {
+    function parse5(header) {
       const protocols = /* @__PURE__ */ new Set();
       let start = -1;
       let end = -1;
@@ -9699,7 +11533,7 @@ var require_subprotocol = __commonJS({
       protocols.add(protocol4);
       return protocols;
     }
-    module2.exports = { parse: parse4 };
+    module2.exports = { parse: parse5 };
   }
 });
 
@@ -13665,6 +15499,526 @@ var init_features_command = __esm({
   }
 });
 
+// dist/tasks-command.js
+var tasks_command_exports = {};
+__export(tasks_command_exports, {
+  runTasksCommand: () => runTasksCommand
+});
+async function runTasksCommand(subcommand, argv, context = {}) {
+  const log = context.log ?? console.log;
+  if (subcommand === void 0 || subcommand === "--help" || subcommand === "-h") {
+    log(tasksUsage());
+    return;
+  }
+  const client = context.sdk ?? await createAuthenticatedClient(await resolveEnvironment({
+    environment: envOverrideOf(argv),
+    paths: context.paths,
+    processEnv: context.processEnv
+  }));
+  if (subcommand === "send") {
+    await runSend(argv, client, log);
+    return;
+  }
+  if (subcommand === "get") {
+    await runGet(argv, client, log);
+    return;
+  }
+  if (subcommand === "list") {
+    await runList3(argv, client, log);
+    return;
+  }
+  if (subcommand === "cancel") {
+    await runCancel(argv, client, log);
+    return;
+  }
+  if (subcommand === "answer") {
+    await runAnswer(argv, client, log);
+    return;
+  }
+  if (subcommand === "events") {
+    await runEvents(argv, client, log);
+    return;
+  }
+  throw new Error(tasksUsage());
+}
+function tasksUsage() {
+  return [
+    "Tasks \u547D\u4EE4\uFF08A2A v1.0\uFF09:",
+    "  vcpdeck tasks send --agent=<id> --intent=<text> --message=<text> [--accept=<a,b>] [--env=<name>] [--json]",
+    "  vcpdeck tasks get <taskId> [--env=<name>] [--json]",
+    "  vcpdeck tasks list [--page-size=<n>] [--env=<name>] [--json]",
+    "  vcpdeck tasks cancel <taskId> [--env=<name>] [--json]",
+    "  vcpdeck tasks answer <taskId> --request=<id> --option=<id> [--message=<text>] [--json]",
+    "  vcpdeck tasks events <taskId> [--since=<seq>] [--limit=<n>] [--json]",
+    "  agents: vcpdeck agents list|create [--env=<name>] [--json]"
+  ].join("\n");
+}
+function parse4(argv, positionalsNeeded) {
+  const parsed = parseCommandArgs(argv, {
+    value: [...VALUE_OPTIONS],
+    boolean: ["json"]
+  });
+  if (parsed.positionals.length < positionalsNeeded) {
+    throw new Error(tasksUsage());
+  }
+  return parsed;
+}
+async function runSend(argv, client, log) {
+  const { options } = parse4(argv, 0);
+  const agent = stringOption(options, "agent");
+  const intent = stringOption(options, "intent");
+  const text = stringOption(options, "message");
+  if (!agent || !intent || !text)
+    throw new Error(tasksUsage());
+  const task = await client.tasks.sendMessage({
+    message: { messageId: `cli-${Date.now()}`, role: "user", parts: [{ text }] },
+    metadata: {
+      agentId: agent,
+      intent,
+      ...stringOption(options, "accept") ? {
+        acceptanceCriteria: splitList(stringOption(options, "accept"))
+      } : {}
+    }
+  });
+  printTask(task, options, log);
+}
+async function runGet(argv, client, log) {
+  const { positionals, options } = parse4(argv, 1);
+  const task = await client.tasks.get(positionals[0]);
+  printTask(task, options, log);
+}
+async function runList3(argv, client, log) {
+  const { options } = parse4(argv, 0);
+  const pageSize = Number(stringOption(options, "page-size") ?? 20);
+  const result = await client.tasks.list({ pageSize });
+  if (options.json) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  const rows = result.tasks.map((task) => ({
+    id: task.id,
+    state: task.status.state,
+    updated: task.metadata?.vcpdeck?.updatedAt ?? ""
+  }));
+  log(formatTable3(rows, ["id", "state", "updated"]));
+}
+async function runCancel(argv, client, log) {
+  const { positionals, options } = parse4(argv, 1);
+  const task = await client.tasks.cancel(positionals[0]);
+  printTask(task, options, log);
+}
+async function runAnswer(argv, client, log) {
+  const { positionals, options } = parse4(argv, 1);
+  const taskId = positionals[0];
+  const requestId = stringOption(options, "request");
+  const optionId = stringOption(options, "option");
+  if (!requestId || !optionId)
+    throw new Error(tasksUsage());
+  const task = await client.tasks.sendMessage({
+    message: {
+      messageId: `cli-permission-${Date.now()}`,
+      role: "user",
+      taskId,
+      parts: [{ text: stringOption(options, "message") ?? "permission decision" }]
+    },
+    metadata: {
+      extensions: {
+        "https://vcpdeck.dev/a2a/extensions/acp-permission/v1": {
+          requestId,
+          optionId
+        }
+      }
+    }
+  });
+  printTask(task, options, log);
+}
+async function runEvents(argv, client, log) {
+  const { positionals, options } = parse4(argv, 1);
+  const sinceRaw = stringOption(options, "since");
+  const limitRaw = stringOption(options, "limit");
+  const result = await client.tasks.events(positionals[0], {
+    ...sinceRaw ? { since: Number(sinceRaw) } : {},
+    ...limitRaw ? { limit: Number(limitRaw) } : {}
+  });
+  if (options.json) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  const rows = result.data.map((event) => ({
+    seq: String(event.id),
+    event: event.event,
+    fidelity: event.fidelity,
+    at: event.at
+  }));
+  log(formatTable3(rows, ["seq", "event", "fidelity", "at"]));
+}
+function printTask(task, options, log) {
+  if (options.json) {
+    log(JSON.stringify(task, null, 2));
+    return;
+  }
+  log(`${task.id}	${task.status.state}`);
+}
+function splitList(value2) {
+  return value2.split(",").map((item) => item.trim()).filter(Boolean);
+}
+var VALUE_OPTIONS;
+var init_tasks_command = __esm({
+  "dist/tasks-command.js"() {
+    "use strict";
+    init_arguments();
+    init_authenticated_client();
+    init_environment();
+    init_features_command();
+    init_table();
+    VALUE_OPTIONS = [
+      "agent",
+      "intent",
+      "accept",
+      "message",
+      "task",
+      "request",
+      "option",
+      "since",
+      "limit",
+      "page-size",
+      "env",
+      "environment"
+    ];
+  }
+});
+
+// dist/agents-command.js
+var agents_command_exports = {};
+__export(agents_command_exports, {
+  agentsUsage: () => agentsUsage,
+  runAgentsCommand: () => runAgentsCommand
+});
+function agentsUsage() {
+  return [
+    "Agents \u547D\u4EE4:",
+    "  vcpdeck agents list [--env=<name>] [--json]",
+    "  vcpdeck agents create --client=<name|id> --agent=<slug> --command=<cmd> [--arg=<v>]... [--workspace-root=<dir>]...",
+    "      [--name=<\u663E\u793A\u540D>] [--adapter=acp|cli] [--cwd=<dir>] [--skill=<s>]... [--disabled] [--env=<name>] [--json]",
+    "  \u767B\u8BB0\u7684\u662F Server \u4FA7\u53D7\u63A7 placement\uFF1B\u76EE\u6807\u673A\u5668\u4E0A\u5FC5\u987B\u5148\u5B89\u88C5\u5BF9\u5E94 agent \u547D\u4EE4\u3002"
+  ].join("\n");
+}
+async function resolveClient(context, argv) {
+  return context.sdk ?? await createAuthenticatedClient(await resolveEnvironment({
+    environment: envOverrideOf(argv),
+    paths: context.paths,
+    processEnv: context.processEnv
+  }));
+}
+async function runAgentsCommand(subcommand, argv, context = {}) {
+  const log = context.log ?? console.log;
+  if (subcommand === "list") {
+    await runList4(argv, context, log);
+    return;
+  }
+  if (subcommand === "create") {
+    await runCreate(argv, context, log);
+    return;
+  }
+  throw new Error(agentsUsage());
+}
+async function runList4(argv, context, log) {
+  const { options } = parseCommandArgs(argv, {
+    value: ["env", "environment"],
+    boolean: ["json"]
+  });
+  const client = await resolveClient(context, argv);
+  const result = await client.agents.list();
+  if (options.json) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  const rows = result.data.map((agent) => ({
+    agent: agent.agentId,
+    name: agent.name,
+    adapter: agent.adapter,
+    client: agent.clientId,
+    enabled: String(agent.enabled)
+  }));
+  log(formatTable3(rows, ["agent", "name", "adapter", "client", "enabled"]));
+}
+async function runCreate(argv, context, log) {
+  const { options, multi } = parseCommandArgs(argv, {
+    value: [
+      "client",
+      "agent",
+      "name",
+      "command",
+      "adapter",
+      "cwd",
+      "env",
+      "environment"
+    ],
+    boolean: ["json", "disabled"],
+    multiValue: ["arg", "workspace-root", "skill"]
+  });
+  const clientFilter = stringOption(options, "client");
+  const agentId = stringOption(options, "agent");
+  const command = stringOption(options, "command");
+  if (!clientFilter || !agentId || !command) {
+    throw new Error(agentsUsage());
+  }
+  const adapterRaw = stringOption(options, "adapter") ?? "acp";
+  if (adapterRaw !== "acp" && adapterRaw !== "cli") {
+    throw new Error(`adapter \u5FC5\u987B\u662F acp \u6216 cli
+
+${agentsUsage()}`);
+  }
+  const workspaceRoots = multi["workspace-root"] ?? [];
+  const cwd = stringOption(options, "cwd") ?? workspaceRoots[0];
+  if (!cwd) {
+    throw new Error(`\u9700\u8981 --cwd \u6216\u81F3\u5C11\u4E00\u4E2A --workspace-root
+
+${agentsUsage()}`);
+  }
+  const input = {
+    agentId,
+    name: stringOption(options, "name") ?? agentId,
+    adapter: adapterRaw,
+    clientId: await resolveClientIdFor(context, argv, clientFilter),
+    command,
+    args: multi.arg ?? [],
+    cwd,
+    workspaceRoots,
+    enabled: options.disabled !== true
+  };
+  const skills = multi.skill;
+  if (skills && skills.length > 0)
+    input.skills = skills;
+  const client = await resolveClient(context, argv);
+  const created = await client.agents.create(input);
+  if (options.json) {
+    log(JSON.stringify(created, null, 2));
+    return;
+  }
+  log(`\u5DF2\u767B\u8BB0 agent placement ${created.id}\uFF1A${created.agentId} \u2192 ${created.clientId}${created.enabled ? "" : "\uFF08\u5DF2\u505C\u7528\uFF09"}`);
+}
+async function resolveClientIdFor(context, argv, filter) {
+  if (context.resolveClientIdFn)
+    return context.resolveClientIdFn(filter);
+  const client = await resolveClient(context, argv);
+  return resolveClientId(filter, context.paths, context.processEnv, client);
+}
+var init_agents_command = __esm({
+  "dist/agents-command.js"() {
+    "use strict";
+    init_arguments();
+    init_authenticated_client();
+    init_client_resolver();
+    init_environment();
+    init_features_command();
+    init_table();
+  }
+});
+
+// dist/forward-command.js
+var forward_command_exports = {};
+__export(forward_command_exports, {
+  createForwarder: () => createForwarder,
+  forwardUsage: () => forwardUsage,
+  runForwardCommand: () => runForwardCommand
+});
+function createForwarder(options) {
+  const socket = (options.connectSocket ?? defaultSocket)(`${options.serverBase.replace(/\/$/, "")}/remote-dev/forward`, {
+    token: options.token,
+    sessionId: options.sessionId,
+    portId: options.portId
+  });
+  const streams = /* @__PURE__ */ new Map();
+  let nextStreamId = 1;
+  let server = null;
+  let closed = false;
+  const shutdown = () => {
+    if (closed)
+      return;
+    closed = true;
+    for (const stream of streams.values())
+      stream.socket.destroy();
+    streams.clear();
+    server?.close();
+  };
+  const send = (frame) => {
+    socket.emit(import_shared8.Events.RDS_STREAM_FRAME, {
+      sessionId: options.sessionId,
+      data: (0, import_shared8.encodeRdsFrame)(frame)
+    });
+  };
+  socket.on(import_shared8.Events.RDS_STREAM_FRAME, (payload) => {
+    if (!isRecord2(payload))
+      return;
+    const data = payload.data;
+    if (!(data instanceof Uint8Array || data instanceof ArrayBuffer))
+      return;
+    let frames;
+    try {
+      frames = new import_shared8.RdsFrameDecoder().push(new Uint8Array(data));
+    } catch {
+      return;
+    }
+    for (const frame of frames) {
+      const stream = streams.get(frame.streamId);
+      if (!stream)
+        continue;
+      if (frame.type === "DATA") {
+        stream.socket.write(frame.payload ?? new Uint8Array(0));
+      }
+      if (frame.type === "CLOSE" || frame.type === "ERROR") {
+        stream.socket.end();
+        streams.delete(frame.streamId);
+      }
+    }
+  });
+  socket.on("disconnect", () => {
+    shutdown();
+  });
+  return {
+    listen() {
+      server = (0, import_node_net.createServer)((local) => {
+        const streamId = nextStreamId++;
+        const stream = { socket: local };
+        streams.set(streamId, stream);
+        socket.emit(import_shared8.Events.RDS_STREAM_HELLO, {
+          sessionId: options.sessionId,
+          streamId
+        });
+        send({
+          type: "OPEN",
+          streamId,
+          payload: (0, import_shared8.encodeRdsOpenPayload)({ remotePort: options.remotePort })
+        });
+        local.on("data", (chunk) => {
+          send({
+            type: "DATA",
+            streamId,
+            payload: new Uint8Array(chunk)
+          });
+        });
+        local.on("close", () => {
+          if (!streams.has(streamId))
+            return;
+          streams.delete(streamId);
+          send({ type: "CLOSE", streamId });
+        });
+        local.on("error", () => {
+          if (!streams.has(streamId))
+            return;
+          streams.delete(streamId);
+          send({ type: "ERROR", streamId });
+        });
+      });
+      return new Promise((resolve2, reject) => {
+        server?.once("error", reject);
+        server?.listen(options.localPort ?? options.remotePort, "127.0.0.1", () => {
+          const address = server?.address();
+          if (!address || typeof address === "string") {
+            reject(new Error("forward listen failed"));
+            return;
+          }
+          resolve2({ address: address.address, port: address.port });
+        });
+      });
+    },
+    async close() {
+      closed = true;
+      for (const stream of streams.values())
+        stream.socket.destroy();
+      streams.clear();
+      await new Promise((resolve2) => {
+        if (!server || !server.listening)
+          return resolve2();
+        server.close(() => resolve2());
+      });
+      socket.disconnect();
+    }
+  };
+}
+function defaultSocket(url2, auth) {
+  return lookup(url2, {
+    auth,
+    transports: ["websocket"],
+    reconnection: false
+  });
+}
+function isRecord2(value2) {
+  return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+}
+function forwardUsage() {
+  return [
+    "Forward \u547D\u4EE4:",
+    "  vcpdeck forward --session=<id> --remote-port=<1024-65535> [--local-port=<0-65535>] [--env=<name>]",
+    "  \u53EA\u76D1\u542C 127.0.0.1\uFF1BCtrl+C \u5173\u95ED\u76D1\u542C\u4E0E\u6240\u6709\u6D41\u3002"
+  ].join("\n");
+}
+async function runForwardCommand(argv, context = {}) {
+  const log = context.log ?? console.log;
+  const { options } = parseCommandArgs(argv, {
+    value: ["session", "remote-port", "local-port", "env", "environment"],
+    boolean: []
+  });
+  const sessionId = stringOption(options, "session");
+  const remotePort = Number(stringOption(options, "remote-port"));
+  if (!sessionId || !Number.isInteger(remotePort) || remotePort < 1024 || remotePort > 65535) {
+    throw new Error(forwardUsage());
+  }
+  const localPortRaw = stringOption(options, "local-port");
+  const localPort = localPortRaw === void 0 ? remotePort : Number(localPortRaw);
+  if (!Number.isInteger(localPort) || localPort < 0 || localPort > 65535) {
+    throw new Error(forwardUsage());
+  }
+  let client = context.sdk;
+  let serverBase = context.serverBase;
+  if (!client) {
+    const environment = await resolveEnvironment({
+      environment: envOverrideOf(argv),
+      paths: context.paths,
+      processEnv: context.processEnv
+    });
+    client = await createAuthenticatedClient(environment);
+    serverBase = environment.server;
+  }
+  if (!serverBase)
+    throw new Error("\u7F3A\u5C11 Server \u5730\u5740");
+  const ports = await client.remoteDev.ports.list(sessionId);
+  let port = ports.find((item) => item.remotePort === remotePort && item.status === "open");
+  if (!port) {
+    port = await client.remoteDev.ports.open(sessionId, { remotePort });
+  }
+  const token = await client.remoteDev.ports.issueForwardToken(sessionId, port.portId);
+  const forwarder = createForwarder({
+    serverBase,
+    token: token.token,
+    sessionId,
+    portId: port.portId,
+    remotePort,
+    ...localPort !== remotePort ? { localPort } : {}
+  });
+  const address = await forwarder.listen();
+  log(`forwarding 127.0.0.1:${address.port} -> ${sessionId} 127.0.0.1:${remotePort}`);
+  process.once("SIGINT", () => {
+    void forwarder.close().then(() => {
+      process.exitCode = 0;
+    });
+  });
+}
+var import_node_net, import_shared8;
+var init_forward_command = __esm({
+  "dist/forward-command.js"() {
+    "use strict";
+    import_node_net = require("node:net");
+    init_esm_debug3();
+    import_shared8 = __toESM(require_dist(), 1);
+    init_arguments();
+    init_authenticated_client();
+    init_environment();
+    init_features_command();
+  }
+});
+
 // dist/index.js
 var index_exports = {};
 __export(index_exports, {
@@ -13672,7 +16026,7 @@ __export(index_exports, {
   run: () => run
 });
 module.exports = __toCommonJS(index_exports);
-var import_shared8 = __toESM(require_dist(), 1);
+var import_shared9 = __toESM(require_dist(), 1);
 
 // dist/env-command.js
 init_authenticated_client();
@@ -15296,7 +17650,7 @@ async function run(argv, context = {}) {
   const [command, subcommand, ...rest] = argv;
   try {
     if (command === "version" || command === "--version" || command === "-v") {
-      log(import_shared8.VERSION);
+      log(import_shared9.VERSION);
       return 0;
     }
     if (command === "env") {
@@ -15337,6 +17691,27 @@ async function run(argv, context = {}) {
     if (command === "features") {
       const { runFeaturesCommand: runFeaturesCommand2 } = await Promise.resolve().then(() => (init_features_command(), features_command_exports));
       await runFeaturesCommand2(subcommand, rest, { log, error });
+      return 0;
+    }
+    if (command === "tasks") {
+      const { runTasksCommand: runTasksCommand2 } = await Promise.resolve().then(() => (init_tasks_command(), tasks_command_exports));
+      await runTasksCommand2(subcommand, rest, { log, error });
+      return 0;
+    }
+    if (command === "agents") {
+      const { runAgentsCommand: runAgentsCommand2 } = await Promise.resolve().then(() => (init_agents_command(), agents_command_exports));
+      await runAgentsCommand2(subcommand, rest, { log });
+      return 0;
+    }
+    if (command === "forward") {
+      const { runForwardCommand: runForwardCommand2, forwardUsage: forwardUsage2 } = await Promise.resolve().then(() => (init_forward_command(), forward_command_exports));
+      if (subcommand === "--help" || subcommand === "-h") {
+        log(forwardUsage2());
+        return 0;
+      }
+      await runForwardCommand2(subcommand ? [subcommand, ...rest] : rest, {
+        log
+      });
       return 0;
     }
     if (command === "release") {
@@ -15382,6 +17757,18 @@ function helpText() {
     "  vcpdeck features verify <slug|id> [--client=<name|id>] [--env=<name>] [--json]",
     "  vcpdeck features update <slug|id> [--client=<name|id>] [\u5B57\u6BB5...] [--status=draft|retired] [--env=<name>] [--json]",
     "  \u9A8C\u8BC1\u7531 CLI \u6267\u884C\uFF08command \u578B\u8D70 exec Job\uFF0Chttp \u578B\u76F4\u8FDE\uFF09\uFF1Bactive \u53EA\u80FD\u7531\u6210\u529F\u9A8C\u8BC1\u4EA7\u751F",
+    "",
+    "Tasks / Agents\uFF08A2A v1.0\uFF09:",
+    "  vcpdeck tasks send --agent=<id> --intent=<text> --message=<text> [--accept=<a,b>] [--env=<name>] [--json]",
+    "  vcpdeck tasks get <taskId> [--env=<name>] [--json]",
+    "  vcpdeck tasks list [--page-size=<n>] [--env=<name>] [--json]",
+    "  vcpdeck tasks cancel <taskId> [--env=<name>] [--json]",
+    "  vcpdeck tasks answer <taskId> --request=<id> --option=<id> [--message=<text>] [--json]",
+    "  vcpdeck tasks events <taskId> [--since=<seq>] [--limit=<n>] [--json]",
+    "  vcpdeck agents list [--env=<name>] [--json]",
+    "  vcpdeck agents create --client=<name|id> --agent=<slug> --command=<cmd> [--arg=<v>]... [--workspace-root=<dir>]...",
+    "      [--name=<\u663E\u793A\u540D>] [--adapter=acp|cli] [--cwd=<dir>] [--skill=<s>]... [--disabled] [--env=<name>] [--json]",
+    "  vcpdeck forward --session=<id> --remote-port=<1024-65535> [--local-port=<0-65535>] [--env=<name>]",
     "",
     "Jobs:",
     "  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",

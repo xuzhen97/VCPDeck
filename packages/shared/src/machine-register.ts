@@ -68,6 +68,79 @@ export interface PrivilegedCapabilityStatus {
  */
 const RETIRED_DETAIL_KEYS = new Set(["pi", "p2pTunnel"]);
 
+/** ACP Host capability 摘要（ADR-0057）：只表示 Client 能启动 ACP Host，不表示 agent 已安装。 */
+export interface AcpCapabilityStatus {
+	available: boolean;
+	protocolVersion?: number;
+	code?: string;
+}
+
+/** Remote Dev Session 能力摘要（ADR-0058）；只表示 Client 具备 RDS 运行时。 */
+export interface RemoteDevCapabilityStatus {
+	available: boolean;
+	protocolVersion?: number;
+	code?: string;
+}
+
+/** 严格解析 Remote Dev capability 摘要。 */
+export function parseRemoteDevCapabilityStatus(
+	value: unknown,
+): RemoteDevCapabilityStatus {
+	if (!isRecord(value)) throw new Error("remoteDev 必须为对象");
+	const allowed = new Set(["available", "protocolVersion", "code"]);
+	for (const key of Object.keys(value)) {
+		if (!allowed.has(key)) throw new Error(`remoteDev 含未知字段 ${key}`);
+	}
+	if (typeof value.available !== "boolean") {
+		throw new Error("remoteDev.available 必须为 boolean");
+	}
+	if (
+		value.protocolVersion !== undefined &&
+		(!Number.isInteger(value.protocolVersion) ||
+			(value.protocolVersion as number) < 1)
+	) {
+		throw new Error("remoteDev.protocolVersion 必须为正整数");
+	}
+	if (value.code !== undefined && typeof value.code !== "string") {
+		throw new Error("remoteDev.code 必须为 string");
+	}
+	return {
+		available: value.available,
+		...(value.protocolVersion !== undefined
+			? { protocolVersion: value.protocolVersion as number }
+			: {}),
+		...(value.code !== undefined ? { code: value.code as string } : {}),
+	};
+}
+
+/** 严格解析 ACP capability 摘要；旧 Client 缺省即未报告。 */
+export function parseAcpCapabilityStatus(value: unknown): AcpCapabilityStatus {
+	if (!isRecord(value)) throw new Error("acp 必须为对象");
+	const allowed = new Set(["available", "protocolVersion", "code"]);
+	for (const key of Object.keys(value)) {
+		if (!allowed.has(key)) throw new Error(`acp 含未知字段 ${key}`);
+	}
+	if (typeof value.available !== "boolean") {
+		throw new Error("acp.available 必须为 boolean");
+	}
+	if (
+		value.protocolVersion !== undefined &&
+		(!Number.isInteger(value.protocolVersion) || (value.protocolVersion as number) < 1)
+	) {
+		throw new Error("acp.protocolVersion 必须为正整数");
+	}
+	if (value.code !== undefined && typeof value.code !== "string") {
+		throw new Error("acp.code 必须为 string");
+	}
+	return {
+		available: value.available,
+		...(value.protocolVersion !== undefined
+			? { protocolVersion: value.protocolVersion as number }
+			: {}),
+		...(value.code !== undefined ? { code: value.code as string } : {}),
+	};
+}
+
 /** 机器注册消息（Client → Server，/client Socket.IO）。 */
 export interface MachineRegister {
 	clientId: string;
@@ -85,6 +158,10 @@ export interface MachineRegister {
 		privileged?: PrivilegedCapabilityStatus;
 		/** 可选：Git SSH 受管密钥能力摘要（ADR-0037 新 Client）；旧 Client 缺省即未报告 */
 		gitSsh?: GitSshCapability;
+		/** 可选：ACP Host 能力摘要（ADR-0057）；旧 Client 缺省即未报告 */
+		acp?: AcpCapabilityStatus;
+		/** 可选：RDS 能力摘要（ADR-0058）；旧 Client 缺省即未报告 */
+		remoteDev?: RemoteDevCapabilityStatus;
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告） */
 	installation?: MachineInstallationStatus;
@@ -272,7 +349,7 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 	if (value.capabilityDetails !== undefined) {
 		const details = value.capabilityDetails;
 		if (!isRecord(details)) throw new Error("capabilityDetails 必须为对象");
-		const known = ["terminal", "frp", "privileged", "gitSsh"] as const;
+		const known = ["terminal", "frp", "privileged", "gitSsh", "acp", "remoteDev"] as const;
 		for (const key of Object.keys(details)) {
 			// ADR-0049 退役的键：旧 Client（如 0.18.2）仍会带 pi 摘要，
 			// 接受并丢弃，否则整个集群会因“未知字段”被拒注册。
@@ -294,6 +371,12 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 		}
 		if (details.gitSsh !== undefined) {
 			parsedDetails.gitSsh = parseGitSshCapability(details.gitSsh);
+		}
+		if (details.acp !== undefined) {
+			parsedDetails.acp = parseAcpCapabilityStatus(details.acp);
+		}
+		if (details.remoteDev !== undefined) {
+			parsedDetails.remoteDev = parseRemoteDevCapabilityStatus(details.remoteDev);
 		}
 		result.capabilityDetails = parsedDetails;
 	}

@@ -43,6 +43,10 @@ import {
 	shutdownFrpRuntime,
 } from "./frpc-daemon.js";
 import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge.js";
+import { createAcpHost } from "./acp/acp-host.js";
+import { attachAcpTaskBridge } from "./acp/acp-bridge.js";
+import { attachRemoteDevBridge } from "./remote-dev/remote-dev-bridge.js";
+import { connectRemoteDevTunnel } from "./remote-dev/remote-dev-tunnel.js";
 import { ClientLauncher } from "./launcher-control.js";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -358,6 +362,22 @@ export function connect(): Socket {
 		clientId: CLIENT_ID,
 		manager: terminalManager,
 	});
+	if (!verifyOnly) {
+		attachAcpTaskBridge(socket, {
+			clientId: CLIENT_ID,
+			createHost: createAcpHost,
+		});
+		attachRemoteDevBridge(socket, {
+			createHost: createAcpHost,
+			tunnelFactory: (sessionId) =>
+				connectRemoteDevTunnel({
+					serverBase: SERVER_BASE,
+					psk: PSK,
+					clientId: CLIENT_ID,
+					sessionId,
+				}),
+		});
+	}
 
 	// 连接后：探测终端能力并发现 Shell（幂等，不阻塞注册超过 3 秒）
 	let terminalReady: Promise<void> | null = null;

@@ -10,6 +10,10 @@ import { ReleaseModule } from "./release/release.module.js";
 import { ClientInstallerModule } from "./client-installer/client-installer.module.js";
 import { GitSshModule } from "./git-ssh/git-ssh.module.js";
 import { FeatureModule } from "./feature/feature.module.js";
+import { AgentRegistryModule } from "./agent-registry/agent-registry.module.js";
+import { TaskModule } from "./task/task.module.js";
+import { A2aModule } from "./a2a/a2a.module.js";
+import { RemoteDevModule } from "./remote-dev/remote-dev.module.js";
 
 @Module({
 	imports: [
@@ -24,6 +28,10 @@ import { FeatureModule } from "./feature/feature.module.js";
 		ClientInstallerModule,
 		GitSshModule,
 		FeatureModule,
+		AgentRegistryModule,
+		TaskModule,
+		A2aModule,
+		RemoteDevModule,
 	],
 })
 export class AppModule {}
