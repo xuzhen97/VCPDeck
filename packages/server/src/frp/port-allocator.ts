@@ -1,6 +1,14 @@
 /** @file 端口分配器 — DB 检查 + 可选 frps Dashboard 对账 */
 
+import type { FrpErrorCode } from "@vcpdeck/shared";
 import type { PrismaService } from "../prisma/prisma.service.js";
+
+/** 端口分配失败：code 让 controller 映射成可读的 4xx，而不是笼统 500。 */
+function allocateError(code: FrpErrorCode, message: string): Error {
+	const error = new Error(message);
+	(error as { code?: string }).code = code;
+	return error;
+}
 
 /** Dashboard 配置（由调用者传入，不再从环境变量读取） */
 export interface DashboardConfig {
@@ -42,12 +50,13 @@ export class PortAllocator {
 			if (typeof options?.preferredPort === "number") {
 				const p = options.preferredPort;
 				if (p < portRangeStart || p > portRangeEnd) {
-					throw new Error(
-						`端口 ${p} 超出配置范围 ${portRangeStart}-${portRangeEnd}`,
+					throw allocateError(
+						"FRP_PORT_OUT_OF_RANGE",
+						`端口 ${p} 超出实例配置范围 ${portRangeStart}-${portRangeEnd}`,
 					);
 				}
 				if (usedPorts.has(p)) {
-					throw new Error(`端口 ${p} 已被占用`);
+					throw allocateError("FRP_PORT_CONFLICT", `端口 ${p} 已被占用`);
 				}
 				return p;
 			}
@@ -56,7 +65,8 @@ export class PortAllocator {
 				if (!usedPorts.has(port)) return port;
 			}
 
-			throw new Error(
+			throw allocateError(
+				"FRP_PORT_CONFLICT",
 				`端口范围 ${portRangeStart}-${portRangeEnd} 内无可用端口`,
 			);
 		});

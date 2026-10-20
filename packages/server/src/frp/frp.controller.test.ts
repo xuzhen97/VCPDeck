@@ -143,4 +143,37 @@ describe("FrpController write boundary", () => {
 			response: { code: "FRP_PROXY_CONFIRM_TIMEOUT" },
 		});
 	});
+
+	it("端口越界返回 400 并透出真实原因，不再退化成笼统 500", async () => {
+		const { controller, frpService } = fixture();
+		frpService.createMapping.mockRejectedValue(
+			Object.assign(new Error("端口 35998 超出实例配置范围 17001-17100"), {
+				code: "FRP_PORT_OUT_OF_RANGE",
+			}),
+		);
+		await expect(
+			controller.create({ clientId: "c1", proxyType: "tcp", localPort: 1919 }),
+		).rejects.toMatchObject({
+			status: 400,
+			response: {
+				code: "FRP_PORT_OUT_OF_RANGE",
+				message: "端口 35998 超出实例配置范围 17001-17100",
+			},
+		});
+	});
+
+	it("FRPS 实例不存在返回 400 而不是 500", async () => {
+		const { controller, frpService } = fixture();
+		frpService.createMapping.mockRejectedValue(
+			Object.assign(new Error("未找到目标 FRP 实例"), {
+				code: "FRP_INSTANCE_NOT_FOUND",
+			}),
+		);
+		await expect(
+			controller.create({ clientId: "c1", proxyType: "tcp", localPort: 1919 }),
+		).rejects.toMatchObject({
+			status: 400,
+			response: { code: "FRP_INSTANCE_NOT_FOUND" },
+		});
+	});
 });

@@ -123,6 +123,10 @@ Server 启动时，若 FrpsInstance 表为空，会从以下变量创建一个�
 3. 认证成功后并行请求 `/api/proxy/tcp|http|https`；
 4. 返回 TCP、Dashboard、auth、version、proxy 摘要和 usedPorts。
 
+proxy 摘要分三类计数：`online`（FRPS 已建立隧道）、`offline`（历史残留：frpc 已断开，FRPS 仍保留其统计条目，`conf` 为空、端口已释放）、`total`（两者之和）。只有 `online` 的 `remotePort` 进入 `usedPorts`。frps 只在自身重启时清空这些统计条目，因此长时间运行的实例上 `offline` 会累加——**看到 offline 不等于有幽灵映射**，判断实际隧道一律看 `online` 与数据库记录。
+
+端口分配与实例约束失败现在返回稳定 4xx 与可读原因，不再退化成笼统 `500 FRP_OPERATION_FAILED`：`FRP_PORT_OUT_OF_RANGE`（指定端口超出实例 `portRange`）、`FRP_PORT_CONFLICT`（已被占用或范围耗尽）、`FRP_INSTANCE_NOT_FOUND`（实例或默认实例不存在）、`FRP_INSTANCE_CONFLICT`（同一 Client 只能用一个 FRPS 实例）。
+
 无 Dashboard 时 `ok` 等于 TCP 可达，但 `authValid=false`、`proxies=null`。有 Dashboard 时 `ok` 当前只等于 Dashboard authValid，不同时要求 tcpReachable。因此 probe 是诊断摘要，不是完整端到端映射健康保证。
 
 外部错误文本当前可能进入 ProbeResult.error。Dashboard 网络/TLS/解析失败被安全地收敛为不可达，但错误码和消息还没有稳定 allowlist。
@@ -211,7 +215,7 @@ Server 数据模型允许每个 FrpMapping 关联不同 FrpsInstance，但 Clien
 
 1. 创建 running `frp.delete` Job，把 mapping 置为 deleting 并返回 operationJobId；
 2. 派发 Client delete；
-3. Client 从内存 registry 删除并重启/停止 frpc，失败时恢复 registry 和旧配置；
+3. Client 从内存 registry 删除并重启/停止 frpc，失败时恢复 registry 和旧配置；删除最后一条映射时同时把 `frpc-combined.toml` 写成空配置——否则该 proxy 块会留在文件里，下次手工跑 frpc 或人工排查时会被误认成幽灵映射（每次 `startFrpc` 都会按当前 registry 重写配置，所以它不会真的复活）；
 4. Client JOB_DONE 后，Server 轮询 Dashboard；
 5. proxy 消失后才删除 FrpMapping，Job done；
 6. 超时、Dashboard 故障或 Client 失败时保留 error mapping 和安全错误摘要，可再次 DELETE 重试。

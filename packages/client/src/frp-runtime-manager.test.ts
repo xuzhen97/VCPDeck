@@ -184,4 +184,18 @@ describe("FrpRuntimeManager", () => {
 		);
 		await expect(stale).rejects.toThrow(/STALE|stale|generation/i);
 	}, 10_000);
+
+	it("删除最后一条映射时把 frpc 配置写空，避免幽灵 proxy 块残留", async () => {
+		const manager = createManager();
+		const first = manager.reconcile(makePayload([mappingOne]));
+		children.at(-1)?.emit("spawn");
+		await first;
+		writeConfigMock.mockClear();
+		await manager.delete({ mappingId: "fm_1", name: "tcp-1919" });
+		expect(writeConfigMock).toHaveBeenCalledTimes(1);
+		const content = writeConfigMock.mock.calls.at(-1)?.[0] as string;
+		expect(content).not.toContain("tcp-1919");
+		expect(content).toContain("serverAddr");
+		expect(manager.getStateReport("c1").status).toBe("stopped");
+	});
 });

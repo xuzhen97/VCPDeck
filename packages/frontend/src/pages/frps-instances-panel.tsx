@@ -637,7 +637,11 @@ function ProbeDetails({ result }: { result: ProbeResult }) {
 			{result.serverInfo && <p>FRP {result.serverInfo.version}</p>}
 			{result.proxies && (
 				<>
-					<p>Proxy 共 {result.proxies.total} 个</p>
+					<p>
+						在线 Proxy {result.proxies.online} 个
+						{result.proxies.offline > 0 &&
+							` · 历史残留 ${result.proxies.offline} 条（frpc 已断开，FRPS 仅保留统计，端口已释放）`}
+					</p>
 					<p>
 						TCP {result.proxies.byType.tcp} · HTTP {result.proxies.byType.http}{" "}
 						· HTTPS {result.proxies.byType.https}

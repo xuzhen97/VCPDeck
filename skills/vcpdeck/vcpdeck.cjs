@@ -3675,7 +3675,11 @@ var require_dist = __commonJS({
       "FRP_RECONCILE_TIMEOUT",
       "FRP_CLIENT_NOT_FOUND",
       "FRP_CLIENT_OFFLINE",
-      "FRP_CLIENT_NO_FRP_CAPABILITY"
+      "FRP_CLIENT_NO_FRP_CAPABILITY",
+      "FRP_PORT_OUT_OF_RANGE",
+      "FRP_PORT_CONFLICT",
+      "FRP_INSTANCE_NOT_FOUND",
+      "FRP_INSTANCE_CONFLICT"
     ];
     var FrpProtocolError = class extends Error {
       constructor(message) {

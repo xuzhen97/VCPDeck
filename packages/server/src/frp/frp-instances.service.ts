@@ -12,6 +12,13 @@ import type {
 	ProbeResult,
 } from "@vcpdeck/shared";
 
+/** FRPS 实例查找失败：带 code 让 controller 返回可读 4xx，而不是笼统 500。 */
+function instanceError(message: string): Error {
+	const error = new Error(message);
+	(error as { code?: string }).code = "FRP_INSTANCE_NOT_FOUND";
+	return error;
+}
+
 /** FRPS Dashboard 写操作确认失败。 */
 export class FrpsDashboardError extends Error {
 	constructor(
@@ -97,7 +104,7 @@ export class FrpsInstancesService {
 		const existing = await this.prisma.frpsInstance.findUnique({
 			where: { id },
 		});
-		if (!existing) throw new Error(`FrpsInstance "${id}" 不存在`);
+		if (!existing) throw instanceError(`FrpsInstance "${id}" 不存在`);
 
 		if (dto.isDefault === true) {
 			await this.prisma.frpsInstance.updateMany({
@@ -154,7 +161,7 @@ export class FrpsInstancesService {
 		const row = await this.prisma.frpsInstance.findFirst({
 			where: { isDefault: true },
 		});
-		if (!row) throw new Error("没有默认 FRP 实例，请先配置");
+		if (!row) throw instanceError("没有默认 FRP 实例，请先配置");
 		return this.toApi(row);
 	}
 
@@ -211,7 +218,7 @@ export class FrpsInstancesService {
 	/** 健康检查 */
 	async probe(id: string): Promise<ProbeResult> {
 		const instance = await this.getById(id);
-		if (!instance) throw new Error(`FrpsInstance "${id}" 不存在`);
+		if (!instance) throw instanceError(`FrpsInstance "${id}" 不存在`);
 
 		// 1. TCP 连接检查
 		const tcpResult = await this.probeTcp(
@@ -382,7 +389,10 @@ export class FrpsInstancesService {
 				}),
 			);
 			const list = results.flat();
+			const onlineList = list.filter((proxy) => proxy.status === "online");
 			return {
+				online: onlineList.length,
+				offline: list.length - onlineList.length,
 				total: list.length,
 				byType: {
 					tcp: list.filter((proxy) => proxy.proxyType === "tcp").length,

@@ -107,8 +107,11 @@ export class FrpService {
 		const instance = dto.frpsInstanceId
 			? await this.instancesService.getById(dto.frpsInstanceId)
 			: await this.instancesService.getDefault();
-		if (!instance) throw new Error("未找到目标 FRP 实例");
-
+		if (!instance)
+			throw new FrpOperationError(
+				"FRP_INSTANCE_NOT_FOUND",
+				"未找到目标 FRP 实例",
+			);
 		const clientMapping = await this.prisma.frpMapping.findFirst({
 			where: { clientId: dto.clientId },
 			select: { frpsInstanceId: true },
@@ -117,7 +120,10 @@ export class FrpService {
 			clientMapping?.frpsInstanceId &&
 			clientMapping.frpsInstanceId !== instance.id
 		) {
-			throw new Error("同一 Client 当前只能使用一个 FRPS 实例");
+			throw new FrpOperationError(
+				"FRP_INSTANCE_CONFLICT",
+				"同一 Client 当前只能使用一个 FRPS 实例",
+			);
 		}
 
 		const dashboard = await this.instancesService.listDashboardProxies(instance);
@@ -309,7 +315,11 @@ export class FrpService {
 			);
 		}
 		const instance = await this.instancesService.getById(mapping.frpsInstanceId);
-		if (!instance) throw new Error("映射关联的 FRPS 实例不存在");
+		if (!instance)
+			throw new FrpOperationError(
+				"FRP_INSTANCE_NOT_FOUND",
+				"映射关联的 FRPS 实例不存在",
+			);
 		const shouldExist = type === "frp.create";
 		let confirmed = false;
 		let dashboardError:

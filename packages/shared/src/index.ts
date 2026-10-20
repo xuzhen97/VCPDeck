@@ -724,6 +724,10 @@ export const FRP_ERROR_CODES = [
 	"FRP_CLIENT_NOT_FOUND",
 	"FRP_CLIENT_OFFLINE",
 	"FRP_CLIENT_NO_FRP_CAPABILITY",
+	"FRP_PORT_OUT_OF_RANGE",
+	"FRP_PORT_CONFLICT",
+	"FRP_INSTANCE_NOT_FOUND",
+	"FRP_INSTANCE_CONFLICT",
 ] as const;
 export type FrpErrorCode = (typeof FRP_ERROR_CODES)[number];
 
@@ -1052,6 +1056,11 @@ export interface ProbeResult {
 	serverInfo?: { version: string };
 	error?: string;
 	proxies: {
+		/** 在线隧道数（FRPS 已建立） */
+		online: number;
+		/** 历史残留数：frpc 已断开，FRPS 仍保留其统计条目（conf 为空、端口已释放） */
+		offline: number;
+		/** online + offline，等于 list 长度 */
 		total: number;
 		byType: { tcp: number; http: number; https: number };
 		/** status: online = FRPS 已建立隧道；offline = 残留条目（frpc 已断开，尚未从列表移除） */

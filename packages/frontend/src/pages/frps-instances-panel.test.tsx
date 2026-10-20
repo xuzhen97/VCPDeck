@@ -210,6 +210,8 @@ describe("FrpsInstancesPanel", () => {
 				authValid: true,
 				serverInfo: { version: "0.61.0" },
 				proxies: {
+					online: 3,
+					offline: 2,
 					total: 5,
 					byType: { tcp: 3, http: 1, https: 1 },
 					list: [],
@@ -220,7 +222,7 @@ describe("FrpsInstancesPanel", () => {
 				"TCP 可达 · 12 ms",
 				"Dashboard 可达 · 认证有效",
 				"FRP 0.61.0",
-				"Proxy 共 5 个",
+				"在线 Proxy 3 个 · 历史残留 2 条（frpc 已断开，FRPS 仅保留统计，端口已释放）",
 				"TCP 3 · HTTP 1 · HTTPS 1",
 				"已占用端口：20001, 20002",
 			],

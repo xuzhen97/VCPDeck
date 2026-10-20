@@ -405,6 +405,9 @@ export function createFrpRuntimeManager(deps: FrpRuntimeManagerDeps): FrpRuntime
 					}
 					currentChild = null;
 				}
+				// 落盘清空配置：否则最后一条映射的 proxy 块会留在 frpc-combined.toml 里，
+				// 手工跑 frpc 或排查时会被当成"幽灵映射"（frps 侧同时还有统计残留）。
+				if (frpsInfo) deps.writeConfigAtomically(buildConfigContent(frpsInfo, []));
 				status = "stopped";
 			} else if (frpsInfo) {
 				await startFrpc(frpsInfo, proxies);
