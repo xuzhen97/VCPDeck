@@ -49,4 +49,6 @@ RDS 的对话式 UI 已在同一天的菜单重组中删除（人工介入开发
 
 ## 验证
 
-2026-10-20 在单机真机环境确认「FRP 可替代 forward」这一判断成立：`POST /api/frp/mappings`（`localPort=3001`、`remotePort=17055`）→ 经 frps `127.0.0.1:17055/api/health` 拿到 Client 上服务的响应 → `DELETE` 该映射后端口立即不可达。这正是旧 forward 承诺的用途，且多出映射管理与 `probe` 探测。
+**A2A 通道端到端可用（决策 2 的前提）**：2026-10-20 派出一条真实委托 `task_bb6c7e89df37430e`（`agentId=dsh`，意图「汇总本机配置」），约 55 秒后 `COMPLETED`。`GetTask` 返回 3 条 history（user 指令 + agent 过程说明 + 最终结果）、1 个 `agent-reply` artifact（650 B）；`/api/tasks/:id/events` 记录 50 条事件，其中成对的 `tool_call` / `tool_call_update` 证明 agent 真的执行了命令。操作者随后在同一台机器独立读取 8 项配置逐项复核，与 agent 汇报完全一致。这条证据的意义是：A2A 不只是「能发能收」，而是能承载带工具执行、多轮消息与产物的真实委托——也就是 RDS 曾经想做的事。
+
+**FRP 可替代 forward（决策 3 的前提）**：同一环境确认 `POST /api/frp/mappings`（`localPort=3001`、`remotePort=17055`）→ 经 frps `127.0.0.1:17055/api/health` 拿到 Client 上服务的响应 → `DELETE` 该映射后端口立即不可达。这正是旧 forward 承诺的用途，且多出映射管理与 `probe` 探测。

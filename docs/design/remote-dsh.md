@@ -107,6 +107,18 @@ dsh --profile web \
 
 此前 A2A 任务只存在库里和 CLI，页面看不到痕迹。现新增侧栏「Agent 任务」（`/agent-tasks`）：`ListTasks` 分页列表（状态、目标 agent、意图、产物数、更新时间）+ 详情抽屉（`GetTask` 的 history 双向回放、artifact 元数据、`/api/tasks/:id/events` 事件时间线）。只读视图，派活仍走 `vcpdeck tasks` / JSON-RPC。与「任务」页的 Typed Job 是两套模型，页面上明确分开——`Job` 是可控作业，`Task` 是 agent 委托。
 
+### 4.1.2 端到端实证（2026-10-20）
+
+一次带真实工具调用的委托，作为该通道可用的验收证据（不再只是「回一个字」的连通性探测）：
+
+- 任务：`task_bb6c7e89df37430e`，`agentId=dsh`，意图「汇总本机配置」，耗时约 55 秒（提交时为 `WORKING`，55 秒后 `COMPLETED`）。
+- 回放：3 条 history —— user 指令 + agent 的**过程说明**（「WMI/CIM 访问被拒绝，改走注册表与 .NET API」）+ agent 的最终结果。**一条 turn 允许多条 agent 消息**，界面按序展示，不是重复。
+- 产物：`agent-reply`，`text/plain`，650 B。
+- 事件：`#51 task.created → #100`（50 条），其中成对的 `tool_call` / `tool_call_update` 证明它确实执行了命令，不是凭记忆编造。
+- 复核：操作者在同一台机器上独立读取 8 项（主机名、系统版本、CPU 型号与核数、内存总量、两个卷的容量与剩余、GPU 型号与显存、Node 版本），与 agent 汇报**逐项一致**。
+- 顺带观察：ACP 会话里 `Get-CimInstance` 被拒绝（同一操作者在普通 shell 里可以），说明 agent 侧是受限工具上下文；它会自行降级到注册表 / .NET / `nvidia-smi`，这类「先说碰壁、再换路径」的汇报是可信信号。
+
+
 ## 5. 已知偏移
 
 - 每台目标机需安装一次 DSH 插件；DSH 预览版 slot 契约变化时需要逐机适配。
