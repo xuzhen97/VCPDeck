@@ -124,17 +124,24 @@ describe("runFeaturesCommand", () => {
 	});
 
 	it("退役条目在 --include-retired 下带“已退役”前缀", async () => {
-		const retired: FeatureInfo = {
-			...feature,
-			id: "ft_retired",
-			slug: "old-feature",
-			name: "旧条目",
-			status: "retired",
-		};
-		const { ctx, log } = context([retired]);
-		await runFeaturesCommand("list", ["--include-retired"], ctx);
-		const output = log.mock.calls.map((call) => String(call[0])).join("\n");
-		expect(output).toContain("已退役（今天通过）");
+		// 断言依赖「今天」这一相对时间：把时钟固定到 fixture 的验证时间，
+		// 否则跨天之后 lastVerifiedAt 变成「N 天前通过」，测试必然失败。
+		vi.useFakeTimers({ now: new Date("2026-10-18T12:00:00.000Z") });
+		try {
+			const retired: FeatureInfo = {
+				...feature,
+				id: "ft_retired",
+				slug: "old-feature",
+				name: "旧条目",
+				status: "retired",
+			};
+			const { ctx, log } = context([retired]);
+			await runFeaturesCommand("list", ["--include-retired"], ctx);
+			const output = log.mock.calls.map((call) => String(call[0])).join("\n");
+			expect(output).toContain("已退役（今天通过）");
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("--env 在创建客户端前解析并透传", async () => {
