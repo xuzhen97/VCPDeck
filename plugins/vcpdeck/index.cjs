@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.21.0";
+    exports2.VERSION = "0.22.0";
   }
 });
 
@@ -194,6 +194,136 @@ var require_client_annotations = __commonJS({
         notes,
         updatedAt: new Date(value.updatedAt).toISOString()
       };
+    }
+  }
+});
+
+// ../shared/dist/client-dsh-web.js
+var require_client_dsh_web = __commonJS({
+  "../shared/dist/client-dsh-web.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.DSH_WEB_URL_MAX_LENGTH = void 0;
+    exports2.parseClientDshWebUrl = parseClientDshWebUrl;
+    exports2.DSH_WEB_URL_MAX_LENGTH = 2048;
+    function parseClientDshWebUrl(value) {
+      if (value === null)
+        return null;
+      if (typeof value !== "string") {
+        throw new Error("dshWebUrl \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32\u6216 null");
+      }
+      const trimmed = value.trim();
+      if (trimmed.length === 0)
+        return null;
+      if (trimmed.length > exports2.DSH_WEB_URL_MAX_LENGTH) {
+        throw new Error(`dshWebUrl \u4E0D\u80FD\u8D85\u8FC7 ${exports2.DSH_WEB_URL_MAX_LENGTH} \u5B57\u7B26`);
+      }
+      let parsed;
+      try {
+        parsed = new URL(trimmed);
+      } catch {
+        throw new Error("dshWebUrl \u4E0D\u662F\u5408\u6CD5 URL");
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("dshWebUrl \u53EA\u5141\u8BB8 http/https");
+      }
+      if (parsed.username !== "" || parsed.password !== "") {
+        throw new Error("dshWebUrl \u4E0D\u80FD\u5305\u542B\u7528\u6237\u540D\u6216\u53E3\u4EE4");
+      }
+      return parsed.toString();
+    }
+  }
+});
+
+// ../shared/dist/dsh-web.js
+var require_dsh_web = __commonJS({
+  "../shared/dist/dsh-web.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.DSH_WEB_MODES = exports2.DSH_WEB_STATES = exports2.DSH_WEB_CAPABILITY = void 0;
+    exports2.parseDshWebCommand = parseDshWebCommand;
+    exports2.parseDshWebCommandResult = parseDshWebCommandResult;
+    exports2.DSH_WEB_CAPABILITY = "dsh-web";
+    exports2.DSH_WEB_STATES = [
+      "stopped",
+      "starting",
+      "running",
+      "failed",
+      /**
+       * 外部托管：实例由目标机自己管（systemd / docker / 手工常驻 / 自有反代），
+       * VCPDeck 只登记入口，绝不代起代停。
+       */
+      "external"
+    ];
+    exports2.DSH_WEB_MODES = ["managed", "external"];
+    function isRecord2(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function requireString(value, field, maxLength) {
+      if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 1-${maxLength} \u7684\u5B57\u7B26\u4E32`);
+      }
+      return value;
+    }
+    function requirePort(value, field) {
+      if (typeof value !== "number" || !Number.isInteger(value) || value < 1024 || value > 65535) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A 1024-65535 \u7684\u6574\u6570`);
+      }
+      return value;
+    }
+    function parseDshWebCommand(value) {
+      if (!isRecord2(value))
+        throw new Error("dshweb \u547D\u4EE4\u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      const allowed = /* @__PURE__ */ new Set(["requestId", "action", "clientId", "port"]);
+      for (const key of Object.keys(value)) {
+        if (!allowed.has(key))
+          throw new Error(`dshweb \u547D\u4EE4\u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      const requestId = requireString(value.requestId, "requestId", 128);
+      const clientId = requireString(value.clientId, "clientId", 128);
+      if (value.action !== "start" && value.action !== "stop") {
+        throw new Error("dshweb \u547D\u4EE4 action \u5FC5\u987B\u662F start \u6216 stop");
+      }
+      return {
+        requestId,
+        action: value.action,
+        clientId,
+        port: requirePort(value.port, "port")
+      };
+    }
+    function parseDshWebCommandResult(value) {
+      if (!isRecord2(value))
+        throw new Error("dshweb \u7ED3\u679C\u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      const allowed = /* @__PURE__ */ new Set([
+        "requestId",
+        "ok",
+        "port",
+        "token",
+        "error"
+      ]);
+      for (const key of Object.keys(value)) {
+        if (!allowed.has(key))
+          throw new Error(`dshweb \u7ED3\u679C\u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      const requestId = requireString(value.requestId, "requestId", 128);
+      if (typeof value.ok !== "boolean")
+        throw new Error("dshweb \u7ED3\u679C ok \u5FC5\u987B\u4E3A\u5E03\u5C14\u503C");
+      const result = { requestId, ok: value.ok };
+      if (value.port !== void 0) {
+        result.port = requirePort(value.port, "port");
+      }
+      if (value.token !== void 0) {
+        result.token = requireString(value.token, "token", 512);
+      }
+      if (value.error !== void 0) {
+        if (!isRecord2(value.error))
+          throw new Error("error \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+        result.error = {
+          code: requireString(value.error.code, "error.code", 128),
+          message: requireString(value.error.message, "error.message", 2e3)
+        };
+      }
+      return result;
     }
   }
 });
@@ -836,10 +966,13 @@ var require_terminal = __commonJS({
     }
     function parseTerminalSessionCreateRequest(v) {
       assertRecord(v, "create");
-      assertKeys(v, /* @__PURE__ */ new Set(["shellId", "cols", "rows"]), "create");
+      assertKeys(v, /* @__PURE__ */ new Set(["shellId", "cols", "rows", "parentRemoteDevSessionId"]), "create");
       assertString(v.shellId, "shellId", 64);
       if (typeof v.cols !== "number" || typeof v.rows !== "number" || !isValidTerminalSize(v.cols, v.rows)) {
         throw new TerminalProtocolError("create \u5C3A\u5BF8\u975E\u6CD5");
+      }
+      if (v.parentRemoteDevSessionId !== void 0) {
+        assertString(v.parentRemoteDevSessionId, "parentRemoteDevSessionId", 128);
       }
       return v;
     }
@@ -1572,6 +1705,8 @@ var require_machine_register = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ClientInstallationComplianceReason = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = void 0;
+    exports2.parseRemoteDevCapabilityStatus = parseRemoteDevCapabilityStatus;
+    exports2.parseAcpCapabilityStatus = parseAcpCapabilityStatus;
     exports2.parseMachineInstallation = parseMachineInstallation;
     exports2.parsePrivilegedCapabilityStatus = parsePrivilegedCapabilityStatus;
     exports2.getClientInstallationCompliance = getClientInstallationCompliance;
@@ -1598,6 +1733,52 @@ var require_machine_register = __commonJS({
       UNAVAILABLE: "unavailable"
     };
     var RETIRED_DETAIL_KEYS = /* @__PURE__ */ new Set(["pi", "p2pTunnel"]);
+    function parseRemoteDevCapabilityStatus(value) {
+      if (!isRecord2(value))
+        throw new Error("remoteDev \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
+      for (const key of Object.keys(value)) {
+        if (!allowed.has(key))
+          throw new Error(`remoteDev \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      if (typeof value.available !== "boolean") {
+        throw new Error("remoteDev.available \u5FC5\u987B\u4E3A boolean");
+      }
+      if (value.protocolVersion !== void 0 && (!Number.isInteger(value.protocolVersion) || value.protocolVersion < 1)) {
+        throw new Error("remoteDev.protocolVersion \u5FC5\u987B\u4E3A\u6B63\u6574\u6570");
+      }
+      if (value.code !== void 0 && typeof value.code !== "string") {
+        throw new Error("remoteDev.code \u5FC5\u987B\u4E3A string");
+      }
+      return {
+        available: value.available,
+        ...value.protocolVersion !== void 0 ? { protocolVersion: value.protocolVersion } : {},
+        ...value.code !== void 0 ? { code: value.code } : {}
+      };
+    }
+    function parseAcpCapabilityStatus(value) {
+      if (!isRecord2(value))
+        throw new Error("acp \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
+      for (const key of Object.keys(value)) {
+        if (!allowed.has(key))
+          throw new Error(`acp \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      if (typeof value.available !== "boolean") {
+        throw new Error("acp.available \u5FC5\u987B\u4E3A boolean");
+      }
+      if (value.protocolVersion !== void 0 && (!Number.isInteger(value.protocolVersion) || value.protocolVersion < 1)) {
+        throw new Error("acp.protocolVersion \u5FC5\u987B\u4E3A\u6B63\u6574\u6570");
+      }
+      if (value.code !== void 0 && typeof value.code !== "string") {
+        throw new Error("acp.code \u5FC5\u987B\u4E3A string");
+      }
+      return {
+        available: value.available,
+        ...value.protocolVersion !== void 0 ? { protocolVersion: value.protocolVersion } : {},
+        ...value.code !== void 0 ? { code: value.code } : {}
+      };
+    }
     function isRecord2(value) {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     }
@@ -1706,7 +1887,7 @@ var require_machine_register = __commonJS({
         const details = value.capabilityDetails;
         if (!isRecord2(details))
           throw new Error("capabilityDetails \u5FC5\u987B\u4E3A\u5BF9\u8C61");
-        const known = ["terminal", "frp", "privileged", "gitSsh"];
+        const known = ["terminal", "frp", "privileged", "gitSsh", "acp", "remoteDev"];
         for (const key of Object.keys(details)) {
           if (RETIRED_DETAIL_KEYS.has(key))
             continue;
@@ -1727,12 +1908,44 @@ var require_machine_register = __commonJS({
         if (details.gitSsh !== void 0) {
           parsedDetails.gitSsh = (0, git_ssh_js_1.parseGitSshCapability)(details.gitSsh);
         }
+        if (details.acp !== void 0) {
+          parsedDetails.acp = parseAcpCapabilityStatus(details.acp);
+        }
+        if (details.remoteDev !== void 0) {
+          parsedDetails.remoteDev = parseRemoteDevCapabilityStatus(details.remoteDev);
+        }
         result.capabilityDetails = parsedDetails;
       }
       if (value.installation !== void 0) {
         result.installation = parseMachineInstallation(value.installation);
       }
+      if (value.remoteDevSessions !== void 0) {
+        result.remoteDevSessions = parseRemoteDevSessionReports(value.remoteDevSessions);
+      }
       return result;
+    }
+    var MAX_REMOTE_DEV_SESSION_REPORTS = 64;
+    function parseRemoteDevSessionReports(value) {
+      if (!Array.isArray(value)) {
+        throw new Error("remoteDevSessions \u5FC5\u987B\u4E3A\u6570\u7EC4");
+      }
+      if (value.length > MAX_REMOTE_DEV_SESSION_REPORTS) {
+        throw new Error(`remoteDevSessions \u8D85\u8FC7 ${MAX_REMOTE_DEV_SESSION_REPORTS} \u9879`);
+      }
+      return value.map((item, index) => {
+        if (!isRecord2(item)) {
+          throw new Error(`remoteDevSessions[${index}] \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+        }
+        for (const key of Object.keys(item)) {
+          if (key !== "sessionId" && key !== "generationId") {
+            throw new Error(`remoteDevSessions[${index}] \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+          }
+        }
+        return {
+          sessionId: requireString(item.sessionId, `remoteDevSessions[${index}].sessionId`, 128),
+          generationId: requireString(item.generationId, `remoteDevSessions[${index}].generationId`, 128)
+        };
+      });
     }
   }
 });
@@ -2076,6 +2289,1095 @@ var require_feature = __commonJS({
   }
 });
 
+// ../shared/dist/a2a.js
+var require_a2a = __commonJS({
+  "../shared/dist/a2a.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.AGENT_ADAPTERS = exports2.A2aProtocolError = exports2.A2A_LIMITS = exports2.ACP_PERMISSION_EXTENSION_URI = exports2.TASK_LIFECYCLE_STATES = exports2.A2A_TASK_STATES = void 0;
+    exports2.toA2aTaskState = toA2aTaskState;
+    exports2.fromA2aTaskState = fromA2aTaskState;
+    exports2.isA2aTaskState = isA2aTaskState;
+    exports2.toA2aTask = toA2aTask;
+    exports2.parseA2aJsonRpcRequest = parseA2aJsonRpcRequest;
+    exports2.parseAgentPlacementInput = parseAgentPlacementInput;
+    exports2.parseAgentPlacementUpdate = parseAgentPlacementUpdate;
+    exports2.A2A_TASK_STATES = [
+      "TASK_STATE_SUBMITTED",
+      "TASK_STATE_WORKING",
+      "TASK_STATE_INPUT_REQUIRED",
+      "TASK_STATE_AUTH_REQUIRED",
+      "TASK_STATE_COMPLETED",
+      "TASK_STATE_CANCELED",
+      "TASK_STATE_REJECTED",
+      "TASK_STATE_FAILED"
+    ];
+    exports2.TASK_LIFECYCLE_STATES = [
+      "submitted",
+      "working",
+      "input-required",
+      "auth-required",
+      "completed",
+      "canceled",
+      "rejected",
+      "failed"
+    ];
+    var TO_A2A_STATE = {
+      submitted: "TASK_STATE_SUBMITTED",
+      working: "TASK_STATE_WORKING",
+      "input-required": "TASK_STATE_INPUT_REQUIRED",
+      "auth-required": "TASK_STATE_AUTH_REQUIRED",
+      completed: "TASK_STATE_COMPLETED",
+      canceled: "TASK_STATE_CANCELED",
+      rejected: "TASK_STATE_REJECTED",
+      failed: "TASK_STATE_FAILED"
+    };
+    var FROM_A2A_STATE = {
+      TASK_STATE_SUBMITTED: "submitted",
+      TASK_STATE_WORKING: "working",
+      TASK_STATE_INPUT_REQUIRED: "input-required",
+      TASK_STATE_AUTH_REQUIRED: "auth-required",
+      TASK_STATE_COMPLETED: "completed",
+      TASK_STATE_CANCELED: "canceled",
+      TASK_STATE_REJECTED: "rejected",
+      TASK_STATE_FAILED: "failed"
+    };
+    function toA2aTaskState(state) {
+      return TO_A2A_STATE[state];
+    }
+    function fromA2aTaskState(state) {
+      return FROM_A2A_STATE[state];
+    }
+    function isA2aTaskState(value) {
+      return typeof value === "string" && exports2.A2A_TASK_STATES.includes(value);
+    }
+    exports2.ACP_PERMISSION_EXTENSION_URI = "https://vcpdeck.dev/a2a/extensions/acp-permission/v1";
+    exports2.A2A_LIMITS = {
+      maxMessageBytes: 64 * 1024,
+      maxTextParts: 32,
+      maxMessageIdBytes: 128,
+      maxTaskIdBytes: 128,
+      maxContextIdBytes: 128,
+      maxAgentIdBytes: 128,
+      maxIntentBytes: 4096,
+      maxCriteria: 32,
+      maxCriterionBytes: 1024,
+      maxConstraintItems: 64,
+      maxConstraintBytes: 1024,
+      maxPermissionIdBytes: 128,
+      maxHistoryLength: 1e3,
+      maxPageSize: 100,
+      maxPageTokenBytes: 512
+    };
+    var A2aProtocolError = class extends Error {
+      rpcCode;
+      code = "A2A_PROTOCOL_INVALID";
+      constructor(message, rpcCode = -32600) {
+        super(message);
+        this.rpcCode = rpcCode;
+        this.name = "A2aProtocolError";
+      }
+    };
+    exports2.A2aProtocolError = A2aProtocolError;
+    function toA2aTask(info, history) {
+      return {
+        id: info.id,
+        contextId: info.contextId,
+        status: {
+          state: toA2aTaskState(info.state),
+          timestamp: info.updatedAt
+        },
+        artifacts: info.artifacts,
+        ...history && history.length > 0 ? { history } : {},
+        metadata: {
+          vcpdeck: {
+            agentId: info.agentId,
+            intent: info.intent,
+            acceptanceCriteria: info.acceptanceCriteria,
+            constraints: info.constraints,
+            createdAt: info.createdAt,
+            updatedAt: info.updatedAt,
+            verdict: info.verdict ?? null
+          }
+        }
+      };
+    }
+    function isRecord2(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function assertRecord(value, what) {
+      if (!isRecord2(value))
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+    }
+    function assertKeys(value, allowed, what) {
+      const set = new Set(allowed);
+      for (const key of Object.keys(value)) {
+        if (!set.has(key)) {
+          throw new A2aProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function utf8ByteLength(value) {
+      return new TextEncoder().encode(value).byteLength;
+    }
+    function assertString(value, what, maxBytes) {
+      if (typeof value !== "string" || value.length === 0) {
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      }
+      if (utf8ByteLength(value) > maxBytes) {
+        throw new A2aProtocolError(`${what} \u8D85\u8FC7 ${maxBytes} \u5B57\u8282\u4E0A\u9650`);
+      }
+    }
+    function assertOptionalString(value, what, maxBytes) {
+      if (value !== void 0)
+        assertString(value, what, maxBytes);
+    }
+    function assertBoolean(value, what) {
+      if (typeof value !== "boolean") {
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F boolean`);
+      }
+    }
+    function assertInteger(value, what, min, max) {
+      if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F ${min}-${max} \u7684\u6574\u6570`);
+      }
+    }
+    function parseStringArray(value, what, maxItems, maxItemBytes) {
+      if (!Array.isArray(value) || value.length > maxItems) {
+        throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F\u4E0D\u8D85\u8FC7 ${maxItems} \u9879\u7684\u6570\u7EC4`);
+      }
+      return value.map((item, index) => {
+        assertString(item, `${what}[${index}]`, maxItemBytes);
+        return item;
+      });
+    }
+    function parseConstraints(value) {
+      assertRecord(value, "constraints");
+      assertKeys(value, ["allowedPaths", "allowedCommands", "requiredArtifacts"], "constraints");
+      const result = {};
+      if (value.allowedPaths !== void 0) {
+        result.allowedPaths = parseStringArray(value.allowedPaths, "constraints.allowedPaths", exports2.A2A_LIMITS.maxConstraintItems, exports2.A2A_LIMITS.maxConstraintBytes);
+      }
+      if (value.allowedCommands !== void 0) {
+        result.allowedCommands = parseStringArray(value.allowedCommands, "constraints.allowedCommands", exports2.A2A_LIMITS.maxConstraintItems, exports2.A2A_LIMITS.maxConstraintBytes);
+      }
+      if (value.requiredArtifacts !== void 0) {
+        result.requiredArtifacts = parseStringArray(value.requiredArtifacts, "constraints.requiredArtifacts", exports2.A2A_LIMITS.maxConstraintItems, exports2.A2A_LIMITS.maxConstraintBytes);
+      }
+      return result;
+    }
+    function parsePermissionExtension(value) {
+      assertRecord(value, "extensions.permission");
+      assertKeys(value, ["requestId", "optionId"], "extensions.permission");
+      assertString(value.requestId, "extensions.permission.requestId", exports2.A2A_LIMITS.maxPermissionIdBytes);
+      assertString(value.optionId, "extensions.permission.optionId", exports2.A2A_LIMITS.maxPermissionIdBytes);
+      return { requestId: value.requestId, optionId: value.optionId };
+    }
+    function parseExtensions(value) {
+      assertRecord(value, "metadata.extensions");
+      assertKeys(value, [exports2.ACP_PERMISSION_EXTENSION_URI], "metadata.extensions");
+      const result = {};
+      if (value[exports2.ACP_PERMISSION_EXTENSION_URI] !== void 0) {
+        result[exports2.ACP_PERMISSION_EXTENSION_URI] = parsePermissionExtension(value[exports2.ACP_PERMISSION_EXTENSION_URI]);
+      }
+      return result;
+    }
+    function parseMetadata(value) {
+      assertRecord(value, "metadata");
+      assertKeys(value, [
+        "agentId",
+        "intent",
+        "acceptanceCriteria",
+        "constraints",
+        "extensions"
+      ], "metadata");
+      const result = {};
+      if (value.agentId !== void 0) {
+        assertString(value.agentId, "metadata.agentId", exports2.A2A_LIMITS.maxAgentIdBytes);
+        result.agentId = value.agentId;
+      }
+      if (value.intent !== void 0) {
+        assertString(value.intent, "metadata.intent", exports2.A2A_LIMITS.maxIntentBytes);
+        result.intent = value.intent;
+      }
+      if (value.acceptanceCriteria !== void 0) {
+        result.acceptanceCriteria = parseStringArray(value.acceptanceCriteria, "metadata.acceptanceCriteria", exports2.A2A_LIMITS.maxCriteria, exports2.A2A_LIMITS.maxCriterionBytes);
+      }
+      if (value.constraints !== void 0) {
+        result.constraints = parseConstraints(value.constraints);
+      }
+      if (value.extensions !== void 0) {
+        result.extensions = parseExtensions(value.extensions);
+      }
+      return result;
+    }
+    function parseMessage(value) {
+      assertRecord(value, "message");
+      assertKeys(value, ["messageId", "role", "parts", "contextId", "taskId"], "message");
+      assertString(value.messageId, "message.messageId", exports2.A2A_LIMITS.maxMessageIdBytes);
+      if (value.role !== "user" && value.role !== "agent") {
+        throw new A2aProtocolError("message.role \u5FC5\u987B\u662F user \u6216 agent");
+      }
+      if (!Array.isArray(value.parts) || value.parts.length === 0 || value.parts.length > exports2.A2A_LIMITS.maxTextParts) {
+        throw new A2aProtocolError(`message.parts \u5FC5\u987B\u662F 1-${exports2.A2A_LIMITS.maxTextParts} \u9879\u6570\u7EC4`);
+      }
+      let totalBytes = 0;
+      const parts = value.parts.map((part, index) => {
+        assertRecord(part, `message.parts[${index}]`);
+        assertKeys(part, ["text"], `message.parts[${index}]`);
+        assertString(part.text, `message.parts[${index}].text`, exports2.A2A_LIMITS.maxMessageBytes);
+        totalBytes += utf8ByteLength(part.text);
+        return { text: part.text };
+      });
+      if (totalBytes > exports2.A2A_LIMITS.maxMessageBytes) {
+        throw new A2aProtocolError(`message.parts \u603B\u957F\u5EA6\u8D85\u8FC7 ${exports2.A2A_LIMITS.maxMessageBytes} \u5B57\u8282\u4E0A\u9650`);
+      }
+      assertOptionalString(value.contextId, "message.contextId", exports2.A2A_LIMITS.maxContextIdBytes);
+      assertOptionalString(value.taskId, "message.taskId", exports2.A2A_LIMITS.maxTaskIdBytes);
+      const contextId = value.contextId;
+      const taskId = value.taskId;
+      return {
+        messageId: value.messageId,
+        role: value.role,
+        parts,
+        ...contextId !== void 0 ? { contextId } : {},
+        ...taskId !== void 0 ? { taskId } : {}
+      };
+    }
+    function parseConfiguration(value) {
+      assertRecord(value, "configuration");
+      assertKeys(value, ["returnImmediately", "historyLength"], "configuration");
+      const result = {};
+      if (value.returnImmediately !== void 0) {
+        assertBoolean(value.returnImmediately, "configuration.returnImmediately");
+        result.returnImmediately = value.returnImmediately;
+      }
+      if (value.historyLength !== void 0) {
+        assertInteger(value.historyLength, "configuration.historyLength", 0, exports2.A2A_LIMITS.maxHistoryLength);
+        result.historyLength = value.historyLength;
+      }
+      return result;
+    }
+    function parseSendMessageParams(value) {
+      assertRecord(value, "params");
+      assertKeys(value, ["message", "configuration", "metadata"], "params");
+      const result = {
+        message: parseMessage(value.message)
+      };
+      if (value.configuration !== void 0) {
+        result.configuration = parseConfiguration(value.configuration);
+      }
+      if (value.metadata !== void 0) {
+        result.metadata = parseMetadata(value.metadata);
+      }
+      return result;
+    }
+    function parseGetTaskParams(value) {
+      assertRecord(value, "params");
+      assertKeys(value, ["id", "historyLength"], "params");
+      assertString(value.id, "params.id", exports2.A2A_LIMITS.maxTaskIdBytes);
+      const result = { id: value.id };
+      if (value.historyLength !== void 0) {
+        assertInteger(value.historyLength, "params.historyLength", 0, exports2.A2A_LIMITS.maxHistoryLength);
+        result.historyLength = value.historyLength;
+      }
+      return result;
+    }
+    function parseListTasksParams(value) {
+      assertRecord(value, "params");
+      assertKeys(value, [
+        "contextId",
+        "status",
+        "pageSize",
+        "pageToken",
+        "historyLength",
+        "includeArtifacts"
+      ], "params");
+      const result = {};
+      if (value.contextId !== void 0) {
+        assertString(value.contextId, "params.contextId", exports2.A2A_LIMITS.maxContextIdBytes);
+        result.contextId = value.contextId;
+      }
+      if (value.status !== void 0) {
+        if (!isA2aTaskState(value.status)) {
+          throw new A2aProtocolError("params.status \u975E\u6CD5");
+        }
+        result.status = value.status;
+      }
+      if (value.pageSize !== void 0) {
+        assertInteger(value.pageSize, "params.pageSize", 1, exports2.A2A_LIMITS.maxPageSize);
+        result.pageSize = value.pageSize;
+      }
+      if (value.pageToken !== void 0) {
+        assertString(value.pageToken, "params.pageToken", exports2.A2A_LIMITS.maxPageTokenBytes);
+        result.pageToken = value.pageToken;
+      }
+      if (value.historyLength !== void 0) {
+        assertInteger(value.historyLength, "params.historyLength", 0, exports2.A2A_LIMITS.maxHistoryLength);
+        result.historyLength = value.historyLength;
+      }
+      if (value.includeArtifacts !== void 0) {
+        assertBoolean(value.includeArtifacts, "params.includeArtifacts");
+        result.includeArtifacts = value.includeArtifacts;
+      }
+      return result;
+    }
+    function parseCancelTaskParams(value) {
+      assertRecord(value, "params");
+      assertKeys(value, ["id"], "params");
+      assertString(value.id, "params.id", exports2.A2A_LIMITS.maxTaskIdBytes);
+      return { id: value.id };
+    }
+    function parseA2aJsonRpcRequest(value) {
+      assertRecord(value, "request");
+      assertKeys(value, ["jsonrpc", "id", "method", "params"], "request");
+      if (value.jsonrpc !== "2.0") {
+        throw new A2aProtocolError("jsonrpc \u5FC5\u987B\u662F 2.0");
+      }
+      if (typeof value.id !== "string" && typeof value.id !== "number") {
+        throw new A2aProtocolError("id \u5FC5\u987B\u662F string \u6216 number");
+      }
+      if (typeof value.id === "string" && value.id.length === 0) {
+        throw new A2aProtocolError("id \u4E0D\u5F97\u4E3A\u7A7A\u5B57\u7B26\u4E32");
+      }
+      if (typeof value.id === "number" && !Number.isFinite(value.id)) {
+        throw new A2aProtocolError("id \u5FC5\u987B\u662F\u6709\u9650\u6570\u5B57");
+      }
+      switch (value.method) {
+        case "SendMessage":
+          return {
+            jsonrpc: "2.0",
+            id: value.id,
+            method: "SendMessage",
+            params: parseSendMessageParams(value.params)
+          };
+        case "GetTask":
+          return {
+            jsonrpc: "2.0",
+            id: value.id,
+            method: "GetTask",
+            params: parseGetTaskParams(value.params)
+          };
+        case "ListTasks":
+          return {
+            jsonrpc: "2.0",
+            id: value.id,
+            method: "ListTasks",
+            params: parseListTasksParams(value.params)
+          };
+        case "CancelTask":
+          return {
+            jsonrpc: "2.0",
+            id: value.id,
+            method: "CancelTask",
+            params: parseCancelTaskParams(value.params)
+          };
+        default:
+          throw new A2aProtocolError(`\u672A\u77E5 method ${String(value.method)}`, -32601);
+      }
+    }
+    exports2.AGENT_ADAPTERS = ["acp", "cli"];
+    var AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+    function parseAgentArgs(value) {
+      return parseStringArray(value, "args", 64, 1024);
+    }
+    function parseAgentWorkspaceRoots(value) {
+      return parseStringArray(value, "workspaceRoots", 32, 2048);
+    }
+    function parseAgentSkills(value) {
+      return parseStringArray(value, "skills", 32, 128);
+    }
+    function parseAgentAdapter(value) {
+      if (value !== "acp" && value !== "cli") {
+        throw new A2aProtocolError("adapter \u5FC5\u987B\u662F acp \u6216 cli");
+      }
+      return value;
+    }
+    function parseAgentPlacementInput(value) {
+      assertRecord(value, "agent placement");
+      assertKeys(value, [
+        "agentId",
+        "name",
+        "adapter",
+        "clientId",
+        "command",
+        "args",
+        "cwd",
+        "workspaceRoots",
+        "skills",
+        "enabled"
+      ], "agent placement");
+      assertString(value.agentId, "agentId", 64);
+      if (!AGENT_ID_PATTERN.test(value.agentId)) {
+        throw new A2aProtocolError("agentId \u5FC5\u987B\u662F\u5C0F\u5199 slug");
+      }
+      assertString(value.name, "name", 128);
+      const adapter = parseAgentAdapter(value.adapter);
+      assertString(value.clientId, "clientId", 128);
+      assertString(value.command, "command", 1024);
+      const args = parseAgentArgs(value.args);
+      assertString(value.cwd, "cwd", 2048);
+      const workspaceRoots = parseAgentWorkspaceRoots(value.workspaceRoots);
+      const result = {
+        agentId: value.agentId,
+        name: value.name,
+        adapter,
+        clientId: value.clientId,
+        command: value.command,
+        args,
+        cwd: value.cwd,
+        workspaceRoots
+      };
+      if (value.skills !== void 0) {
+        result.skills = parseAgentSkills(value.skills);
+      }
+      if (value.enabled !== void 0) {
+        assertBoolean(value.enabled, "enabled");
+        result.enabled = value.enabled;
+      }
+      return result;
+    }
+    function parseAgentPlacementUpdate(value) {
+      assertRecord(value, "agent placement update");
+      assertKeys(value, [
+        "name",
+        "adapter",
+        "command",
+        "args",
+        "cwd",
+        "workspaceRoots",
+        "skills",
+        "enabled"
+      ], "agent placement update");
+      if (Object.keys(value).length === 0) {
+        throw new A2aProtocolError("placement update \u4E0D\u5F97\u4E3A\u7A7A");
+      }
+      const result = {};
+      if (value.name !== void 0) {
+        assertString(value.name, "name", 128);
+        result.name = value.name;
+      }
+      if (value.adapter !== void 0) {
+        result.adapter = parseAgentAdapter(value.adapter);
+      }
+      if (value.command !== void 0) {
+        assertString(value.command, "command", 1024);
+        result.command = value.command;
+      }
+      if (value.args !== void 0) {
+        result.args = parseAgentArgs(value.args);
+      }
+      if (value.cwd !== void 0) {
+        assertString(value.cwd, "cwd", 2048);
+        result.cwd = value.cwd;
+      }
+      if (value.workspaceRoots !== void 0) {
+        result.workspaceRoots = parseAgentWorkspaceRoots(value.workspaceRoots);
+      }
+      if (value.skills !== void 0) {
+        result.skills = parseAgentSkills(value.skills);
+      }
+      if (value.enabled !== void 0) {
+        assertBoolean(value.enabled, "enabled");
+        result.enabled = value.enabled;
+      }
+      return result;
+    }
+  }
+});
+
+// ../shared/dist/acp.js
+var require_acp = __commonJS({
+  "../shared/dist/acp.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.AcpProtocolError = exports2.ACP_ADAPTER_EVENT_TYPES = void 0;
+    exports2.parseAcpSessionUpdate = parseAcpSessionUpdate;
+    exports2.parseAcpAdapterEvent = parseAcpAdapterEvent;
+    exports2.parseAcpPermissionRequest = parseAcpPermissionRequest;
+    exports2.parseAcpPromptResult = parseAcpPromptResult;
+    exports2.ACP_ADAPTER_EVENT_TYPES = [
+      "agent.message.delta",
+      "agent.thought.delta",
+      "tool.started",
+      "tool.updated",
+      "plan.updated",
+      "usage.updated",
+      "permission.requested",
+      "permission.resolved",
+      "session.ended"
+    ];
+    var AcpProtocolError = class extends Error {
+      code = "ACP_PROTOCOL_INVALID";
+      constructor(message) {
+        super(message);
+        this.name = "AcpProtocolError";
+      }
+    };
+    exports2.AcpProtocolError = AcpProtocolError;
+    function isRecord2(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function assertRecord(value, what) {
+      if (!isRecord2(value))
+        throw new AcpProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+    }
+    function assertKeys(value, allowed, what) {
+      const set = new Set(allowed);
+      for (const key of Object.keys(value)) {
+        if (!set.has(key)) {
+          throw new AcpProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function assertString(value, what, allowEmpty = false) {
+      if (typeof value !== "string" || !allowEmpty && value.length === 0) {
+        throw new AcpProtocolError(`${what} \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+      }
+    }
+    function optionalString(value, what) {
+      if (value === void 0)
+        return void 0;
+      assertString(value, what);
+      return value;
+    }
+    function textContent(value, what) {
+      assertRecord(value, what);
+      assertKeys(value, ["type", "text"], what);
+      if (value.type !== "text") {
+        throw new AcpProtocolError(`${what}.type \u5FC5\u987B\u4E3A text`);
+      }
+      assertString(value.text, `${what}.text`, true);
+      return value.text;
+    }
+    function parseLocations(value) {
+      if (!Array.isArray(value)) {
+        throw new AcpProtocolError("locations \u5FC5\u987B\u662F\u6570\u7EC4");
+      }
+      return value.map((item, index) => {
+        assertRecord(item, `locations[${index}]`);
+        assertKeys(item, ["path", "line"], `locations[${index}]`);
+        assertString(item.path, `locations[${index}].path`);
+        if (item.line !== void 0 && (typeof item.line !== "number" || !Number.isInteger(item.line) || item.line < 0)) {
+          throw new AcpProtocolError(`locations[${index}].line \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570`);
+        }
+        return {
+          path: item.path,
+          ...item.line !== void 0 ? { line: item.line } : {}
+        };
+      });
+    }
+    function parseToolCall(value) {
+      assertString(value.toolCallId, "toolCallId");
+      assertString(value.title, "title");
+      const event = {
+        type: "tool.started",
+        toolCallId: value.toolCallId,
+        title: value.title
+      };
+      const kind = optionalString(value.kind, "kind");
+      const status = optionalString(value.status, "status");
+      if (kind !== void 0)
+        event.kind = kind;
+      if (status !== void 0)
+        event.status = status;
+      if (value.locations !== void 0) {
+        event.locations = parseLocations(value.locations);
+      }
+      return event;
+    }
+    function parseToolUpdate(value) {
+      assertString(value.toolCallId, "toolCallId");
+      const event = {
+        type: "tool.updated",
+        toolCallId: value.toolCallId
+      };
+      const status = optionalString(value.status, "status");
+      const title = optionalString(value.title, "title");
+      if (status !== void 0)
+        event.status = status;
+      if (title !== void 0)
+        event.title = title;
+      if (value.content !== void 0) {
+        if (!Array.isArray(value.content)) {
+          throw new AcpProtocolError("content \u5FC5\u987B\u662F\u6570\u7EC4");
+        }
+        const texts = [];
+        for (const [index, block] of value.content.entries()) {
+          assertRecord(block, `content[${index}]`);
+          if (block.type === "content") {
+            assertRecord(block.content, `content[${index}].content`);
+            texts.push(textContent(block.content, `content[${index}].content`));
+          }
+        }
+        if (texts.length > 0)
+          event.content = texts.join("");
+      }
+      return event;
+    }
+    function parsePlan(value) {
+      if (!Array.isArray(value.entries)) {
+        throw new AcpProtocolError("plan.entries \u5FC5\u987B\u662F\u6570\u7EC4");
+      }
+      const entries = value.entries.map((entry, index) => {
+        assertRecord(entry, `plan.entries[${index}]`);
+        assertKeys(entry, ["content", "priority", "status"], `plan.entries[${index}]`);
+        assertString(entry.content, `plan.entries[${index}].content`);
+        const result = { content: entry.content };
+        const priority = optionalString(entry.priority, `plan.entries[${index}].priority`);
+        const status = optionalString(entry.status, `plan.entries[${index}].status`);
+        if (priority !== void 0)
+          result.priority = priority;
+        if (status !== void 0)
+          result.status = status;
+        return result;
+      });
+      return { type: "plan.updated", entries };
+    }
+    function parseUsage(value) {
+      if (typeof value.used !== "number" || !Number.isInteger(value.used) || value.used < 0 || typeof value.size !== "number" || !Number.isInteger(value.size) || value.size < 0) {
+        throw new AcpProtocolError("usage.used/size \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
+      }
+      const event = {
+        type: "usage.updated",
+        used: value.used,
+        size: value.size
+      };
+      if (value.cost !== void 0) {
+        assertRecord(value.cost, "usage.cost");
+        assertKeys(value.cost, ["amount", "currency"], "usage.cost");
+        if (typeof value.cost.amount !== "number" || !Number.isFinite(value.cost.amount)) {
+          throw new AcpProtocolError("usage.cost.amount \u5FC5\u987B\u662F\u6570\u5B57");
+        }
+        assertString(value.cost.currency, "usage.cost.currency");
+        event.cost = {
+          amount: value.cost.amount,
+          currency: value.cost.currency
+        };
+      }
+      return event;
+    }
+    function parseAcpSessionUpdate(value) {
+      assertRecord(value, "session/update");
+      if (typeof value.sessionUpdate !== "string") {
+        throw new AcpProtocolError("sessionUpdate \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
+      switch (value.sessionUpdate) {
+        case "agent_message_chunk": {
+          assertString(value.messageId, "messageId");
+          return {
+            type: "agent.message.delta",
+            messageId: value.messageId,
+            text: textContent(value.content, "content")
+          };
+        }
+        case "agent_thought_chunk":
+          return {
+            type: "agent.thought.delta",
+            text: textContent(value.content, "content")
+          };
+        case "tool_call":
+          return parseToolCall(value);
+        case "tool_call_update":
+          return parseToolUpdate(value);
+        case "plan":
+          return parsePlan(value);
+        case "usage_update":
+          return parseUsage(value);
+        default:
+          return null;
+      }
+    }
+    function parseAcpAdapterEvent(value) {
+      assertRecord(value, "acp event");
+      assertString(value.type, "acp event.type");
+      switch (value.type) {
+        case "agent.message.delta":
+          assertKeys(value, ["type", "messageId", "text"], "agent.message.delta");
+          assertString(value.messageId, "messageId");
+          assertString(value.text, "text", true);
+          return { type: "agent.message.delta", messageId: value.messageId, text: value.text };
+        case "agent.thought.delta":
+          assertKeys(value, ["type", "text"], "agent.thought.delta");
+          assertString(value.text, "text", true);
+          return { type: "agent.thought.delta", text: value.text };
+        case "tool.started": {
+          assertKeys(value, ["type", "toolCallId", "title", "kind", "status", "locations"], "tool.started");
+          assertString(value.toolCallId, "toolCallId");
+          assertString(value.title, "title");
+          const event = {
+            type: "tool.started",
+            toolCallId: value.toolCallId,
+            title: value.title
+          };
+          const kind = optionalString(value.kind, "kind");
+          const status = optionalString(value.status, "status");
+          if (kind !== void 0)
+            event.kind = kind;
+          if (status !== void 0)
+            event.status = status;
+          if (value.locations !== void 0) {
+            event.locations = parseLocations(value.locations);
+          }
+          return event;
+        }
+        case "tool.updated": {
+          assertKeys(value, ["type", "toolCallId", "status", "title", "content"], "tool.updated");
+          assertString(value.toolCallId, "toolCallId");
+          const event = {
+            type: "tool.updated",
+            toolCallId: value.toolCallId
+          };
+          const status = optionalString(value.status, "status");
+          const title = optionalString(value.title, "title");
+          if (status !== void 0)
+            event.status = status;
+          if (title !== void 0)
+            event.title = title;
+          if (value.content !== void 0) {
+            assertString(value.content, "content", true);
+            event.content = value.content;
+          }
+          return event;
+        }
+        case "plan.updated": {
+          assertKeys(value, ["type", "entries"], "plan.updated");
+          if (!Array.isArray(value.entries)) {
+            throw new AcpProtocolError("plan.entries \u5FC5\u987B\u662F\u6570\u7EC4");
+          }
+          const entries = value.entries.map((entry, index) => {
+            assertRecord(entry, `plan.entries[${index}]`);
+            assertKeys(entry, ["content", "priority", "status"], `plan.entries[${index}]`);
+            assertString(entry.content, `plan.entries[${index}].content`);
+            const item = { content: entry.content };
+            const priority = optionalString(entry.priority, `plan.entries[${index}].priority`);
+            const status = optionalString(entry.status, `plan.entries[${index}].status`);
+            if (priority !== void 0)
+              item.priority = priority;
+            if (status !== void 0)
+              item.status = status;
+            return item;
+          });
+          return { type: "plan.updated", entries };
+        }
+        case "usage.updated": {
+          assertKeys(value, ["type", "used", "size", "cost"], "usage.updated");
+          if (typeof value.used !== "number" || !Number.isInteger(value.used) || value.used < 0 || typeof value.size !== "number" || !Number.isInteger(value.size) || value.size < 0) {
+            throw new AcpProtocolError("usage.used/size \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
+          }
+          const event = {
+            type: "usage.updated",
+            used: value.used,
+            size: value.size
+          };
+          if (value.cost !== void 0) {
+            assertRecord(value.cost, "usage.cost");
+            assertKeys(value.cost, ["amount", "currency"], "usage.cost");
+            if (typeof value.cost.amount !== "number" || !Number.isFinite(value.cost.amount)) {
+              throw new AcpProtocolError("usage.cost.amount \u5FC5\u987B\u662F\u6570\u5B57");
+            }
+            assertString(value.cost.currency, "usage.cost.currency");
+            event.cost = { amount: value.cost.amount, currency: value.cost.currency };
+          }
+          return event;
+        }
+        case "permission.requested": {
+          assertKeys(value, ["type", "requestId", "toolCallId", "title", "options"], "permission.requested");
+          assertString(value.requestId, "requestId");
+          assertString(value.toolCallId, "toolCallId");
+          const title = optionalString(value.title, "title");
+          if (!Array.isArray(value.options) || value.options.length === 0) {
+            throw new AcpProtocolError("permission.options \u5FC5\u987B\u662F\u975E\u7A7A\u6570\u7EC4");
+          }
+          const options = value.options.map((option, index) => {
+            assertRecord(option, `options[${index}]`);
+            assertKeys(option, ["optionId", "name", "kind"], `options[${index}]`);
+            assertString(option.optionId, `options[${index}].optionId`);
+            assertString(option.name, `options[${index}].name`);
+            assertString(option.kind, `options[${index}].kind`);
+            return {
+              optionId: option.optionId,
+              name: option.name,
+              kind: option.kind
+            };
+          });
+          return {
+            type: "permission.requested",
+            requestId: value.requestId,
+            toolCallId: value.toolCallId,
+            ...title !== void 0 ? { title } : {},
+            options
+          };
+        }
+        case "permission.resolved": {
+          assertKeys(value, ["type", "requestId", "optionId", "outcome"], "permission.resolved");
+          assertString(value.requestId, "requestId");
+          if (value.outcome === "selected") {
+            assertString(value.optionId, "optionId");
+            return {
+              type: "permission.resolved",
+              requestId: value.requestId,
+              optionId: value.optionId,
+              outcome: "selected"
+            };
+          }
+          if (value.outcome === "cancelled") {
+            if (value.optionId !== void 0) {
+              throw new AcpProtocolError("cancelled \u4E0D\u80FD\u5E26 optionId");
+            }
+            return {
+              type: "permission.resolved",
+              requestId: value.requestId,
+              outcome: "cancelled"
+            };
+          }
+          throw new AcpProtocolError("permission.resolved.outcome \u975E\u6CD5");
+        }
+        case "session.ended": {
+          assertKeys(value, ["type", "reason", "code"], "session.ended");
+          if (value.reason !== "exited" && value.reason !== "closed" && value.reason !== "error") {
+            throw new AcpProtocolError("session.ended.reason \u975E\u6CD5");
+          }
+          if (value.code !== void 0 && (typeof value.code !== "number" || !Number.isInteger(value.code) || value.code < 0)) {
+            throw new AcpProtocolError("session.ended.code \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
+          }
+          return {
+            type: "session.ended",
+            reason: value.reason,
+            ...value.code !== void 0 ? { code: value.code } : {}
+          };
+        }
+        default:
+          throw new AcpProtocolError(`\u672A\u77E5 ACP event ${value.type}`);
+      }
+    }
+    function parseAcpPermissionRequest(value, requestId) {
+      assertRecord(value, "session/request_permission params");
+      assertKeys(value, ["sessionId", "toolCall", "options"], "params");
+      assertString(value.sessionId, "sessionId");
+      assertRecord(value.toolCall, "toolCall");
+      assertString(value.toolCall.toolCallId, "toolCall.toolCallId");
+      const title = optionalString(value.toolCall.title, "toolCall.title");
+      if (!Array.isArray(value.options) || value.options.length === 0) {
+        throw new AcpProtocolError("options \u5FC5\u987B\u662F\u975E\u7A7A\u6570\u7EC4");
+      }
+      const options = value.options.map((option, index) => {
+        assertRecord(option, `options[${index}]`);
+        assertKeys(option, ["optionId", "name", "kind"], `options[${index}]`);
+        assertString(option.optionId, `options[${index}].optionId`);
+        assertString(option.name, `options[${index}].name`);
+        assertString(option.kind, `options[${index}].kind`);
+        return {
+          optionId: option.optionId,
+          name: option.name,
+          kind: option.kind
+        };
+      });
+      return {
+        requestId,
+        sessionId: value.sessionId,
+        toolCallId: value.toolCall.toolCallId,
+        ...title !== void 0 ? { title } : {},
+        options
+      };
+    }
+    function parseAcpPromptResult(value) {
+      assertRecord(value, "session/prompt result");
+      assertString(value.stopReason, "stopReason");
+      return { stopReason: value.stopReason };
+    }
+  }
+});
+
+// ../shared/dist/task-client.js
+var require_task_client = __commonJS({
+  "../shared/dist/task-client.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.TaskClientProtocolError = exports2.TASK_CLIENT_ACTIONS = void 0;
+    exports2.parseTaskClientCommand = parseTaskClientCommand;
+    exports2.parseTaskClientEvent = parseTaskClientEvent;
+    exports2.parseTaskCommandResult = parseTaskCommandResult;
+    exports2.TASK_CLIENT_ACTIONS = [
+      "start",
+      "prompt",
+      "cancel",
+      "permission",
+      "close"
+    ];
+    var TaskClientProtocolError = class extends Error {
+      code = "TASK_CLIENT_PROTOCOL_INVALID";
+      constructor(message) {
+        super(message);
+        this.name = "TaskClientProtocolError";
+      }
+    };
+    exports2.TaskClientProtocolError = TaskClientProtocolError;
+    function isRecord2(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function assertRecord(value, what) {
+      if (!isRecord2(value))
+        throw new TaskClientProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
+    }
+    function assertKeys(value, allowed, what) {
+      const set = new Set(allowed);
+      for (const key of Object.keys(value)) {
+        if (!set.has(key)) {
+          throw new TaskClientProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+    }
+    function assertString(value, what, maxBytes = 4096) {
+      if (typeof value !== "string" || value.length === 0) {
+        throw new TaskClientProtocolError(`${what} \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      }
+      if (new TextEncoder().encode(value).byteLength > maxBytes) {
+        throw new TaskClientProtocolError(`${what} \u8D85\u8FC7 ${maxBytes} \u5B57\u8282\u4E0A\u9650`);
+      }
+    }
+    function assertSeq(value) {
+      if (!Number.isInteger(value) || value < 1) {
+        throw new TaskClientProtocolError("seq \u5FC5\u987B\u662F\u6B63\u6574\u6570");
+      }
+    }
+    function assertBase(value) {
+      assertString(value.requestId, "requestId", 128);
+      assertString(value.taskId, "taskId", 128);
+      assertString(value.attemptId, "attemptId", 128);
+      return {
+        requestId: value.requestId,
+        taskId: value.taskId,
+        attemptId: value.attemptId
+      };
+    }
+    function parseTaskClientCommand(value) {
+      assertRecord(value, "task command");
+      if (typeof value.action !== "string") {
+        throw new TaskClientProtocolError("action \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
+      const action = value.action;
+      switch (action) {
+        case "start": {
+          assertKeys(value, [
+            "requestId",
+            "action",
+            "taskId",
+            "attemptId",
+            "command",
+            "args",
+            "cwd",
+            "prompt"
+          ], "start");
+          const base = assertBase(value);
+          assertString(value.command, "command", 1024);
+          if (!Array.isArray(value.args)) {
+            throw new TaskClientProtocolError("args \u5FC5\u987B\u662F\u6570\u7EC4");
+          }
+          const args = value.args.map((arg, index) => {
+            assertString(arg, `args[${index}]`, 1024);
+            return arg;
+          });
+          assertString(value.cwd, "cwd", 2048);
+          if (value.prompt !== void 0) {
+            assertString(value.prompt, "prompt", 256 * 1024);
+          }
+          return {
+            ...base,
+            action: "start",
+            command: value.command,
+            args,
+            cwd: value.cwd,
+            ...value.prompt !== void 0 ? { prompt: value.prompt } : {}
+          };
+        }
+        case "prompt": {
+          assertKeys(value, ["requestId", "action", "taskId", "attemptId", "text"], "prompt");
+          const base = assertBase(value);
+          assertString(value.text, "text", 256 * 1024);
+          return { ...base, action: "prompt", text: value.text };
+        }
+        case "cancel": {
+          assertKeys(value, ["requestId", "action", "taskId", "attemptId"], "cancel");
+          return { ...assertBase(value), action: "cancel" };
+        }
+        case "permission": {
+          assertKeys(value, [
+            "requestId",
+            "action",
+            "taskId",
+            "attemptId",
+            "permissionRequestId",
+            "outcome"
+          ], "permission");
+          const base = assertBase(value);
+          assertString(value.permissionRequestId, "permissionRequestId", 128);
+          assertRecord(value.outcome, "outcome");
+          assertKeys(value.outcome, ["outcome", "optionId"], "outcome");
+          if (value.outcome.outcome === "selected") {
+            assertString(value.outcome.optionId, "outcome.optionId", 128);
+            return {
+              ...base,
+              action: "permission",
+              permissionRequestId: value.permissionRequestId,
+              outcome: {
+                outcome: "selected",
+                optionId: value.outcome.optionId
+              }
+            };
+          }
+          if (value.outcome.outcome === "cancelled") {
+            return {
+              ...base,
+              action: "permission",
+              permissionRequestId: value.permissionRequestId,
+              outcome: { outcome: "cancelled" }
+            };
+          }
+          throw new TaskClientProtocolError("outcome.outcome \u975E\u6CD5");
+        }
+        case "close": {
+          assertKeys(value, ["requestId", "action", "taskId", "attemptId"], "close");
+          return { ...assertBase(value), action: "close" };
+        }
+        default:
+          throw new TaskClientProtocolError(`\u672A\u77E5 action ${action}`);
+      }
+    }
+    function parseTaskClientEvent(value) {
+      assertRecord(value, "task event");
+      assertKeys(value, ["taskId", "attemptId", "seq", "event"], "task event");
+      assertString(value.taskId, "taskId", 128);
+      assertString(value.attemptId, "attemptId", 128);
+      assertSeq(value.seq);
+      assertRecord(value.event, "event");
+      assertString(value.event.type, "event.type", 64);
+      return value;
+    }
+    function parseTaskCommandResult(value) {
+      assertRecord(value, "task command result");
+      assertKeys(value, ["requestId", "ok", "sessionId", "stopReason", "error"], "task command result");
+      assertString(value.requestId, "requestId", 128);
+      if (typeof value.ok !== "boolean") {
+        throw new TaskClientProtocolError("ok \u5FC5\u987B\u662F boolean");
+      }
+      if (value.sessionId !== void 0) {
+        assertString(value.sessionId, "sessionId", 128);
+      }
+      if (value.stopReason !== void 0) {
+        assertString(value.stopReason, "stopReason", 64);
+      }
+      if (value.error !== void 0) {
+        assertRecord(value.error, "error");
+        assertKeys(value.error, ["code", "message"], "error");
+        assertString(value.error.code, "error.code", 128);
+        assertString(value.error.message, "error.message", 512);
+      }
+      return value;
+    }
+  }
+});
+
 // ../shared/dist/index.js
 var require_dist = __commonJS({
   "../shared/dist/index.js"(exports2) {
@@ -2097,8 +3399,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = void 0;
+    exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientDshWebUrl = exports2.DSH_WEB_URL_MAX_LENGTH = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -2115,6 +3417,14 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parseClientAnnotationsInput", { enumerable: true, get: function() {
       return client_annotations_js_1.parseClientAnnotationsInput;
     } });
+    var client_dsh_web_js_1 = require_client_dsh_web();
+    Object.defineProperty(exports2, "DSH_WEB_URL_MAX_LENGTH", { enumerable: true, get: function() {
+      return client_dsh_web_js_1.DSH_WEB_URL_MAX_LENGTH;
+    } });
+    Object.defineProperty(exports2, "parseClientDshWebUrl", { enumerable: true, get: function() {
+      return client_dsh_web_js_1.parseClientDshWebUrl;
+    } });
+    __exportStar(require_dsh_web(), exports2);
     var client_installer_js_1 = require_client_installer();
     Object.defineProperty(exports2, "ClientInstallerErrorCode", { enumerable: true, get: function() {
       return client_installer_js_1.ClientInstallerErrorCode;
@@ -2248,7 +3558,12 @@ var require_dist = __commonJS({
       FRP_STATE: "frp:state",
       FRP_STATE_ACK: "frp:state-ack",
       GIT_SSH_COMMAND: "git-ssh:command",
-      GIT_SSH_ACK: "git-ssh:ack"
+      GIT_SSH_ACK: "git-ssh:ack",
+      TASK_COMMAND: "task:command",
+      TASK_COMMAND_RESULT: "task:command-result",
+      TASK_EVENT: "task:event",
+      DSH_WEB_COMMAND: "dshweb:command",
+      DSH_WEB_RESULT: "dshweb:result"
     };
     var JobType;
     (function(JobType2) {
@@ -2291,6 +3606,12 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "getClientInstallationCompliance", { enumerable: true, get: function() {
       return machine_register_js_1.getClientInstallationCompliance;
+    } });
+    Object.defineProperty(exports2, "parseAcpCapabilityStatus", { enumerable: true, get: function() {
+      return machine_register_js_1.parseAcpCapabilityStatus;
+    } });
+    Object.defineProperty(exports2, "parseRemoteDevCapabilityStatus", { enumerable: true, get: function() {
+      return machine_register_js_1.parseRemoteDevCapabilityStatus;
     } });
     Object.defineProperty(exports2, "parseMachineInstallation", { enumerable: true, get: function() {
       return machine_register_js_1.parseMachineInstallation;
@@ -2346,7 +3667,11 @@ var require_dist = __commonJS({
       "FRP_RECONCILE_TIMEOUT",
       "FRP_CLIENT_NOT_FOUND",
       "FRP_CLIENT_OFFLINE",
-      "FRP_CLIENT_NO_FRP_CAPABILITY"
+      "FRP_CLIENT_NO_FRP_CAPABILITY",
+      "FRP_PORT_OUT_OF_RANGE",
+      "FRP_PORT_CONFLICT",
+      "FRP_INSTANCE_NOT_FOUND",
+      "FRP_INSTANCE_CONFLICT"
     ];
     var FrpProtocolError = class extends Error {
       constructor(message) {
@@ -2500,6 +3825,9 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parseFeatureVerificationReport", { enumerable: true, get: function() {
       return feature_js_1.parseFeatureVerificationReport;
     } });
+    __exportStar(require_a2a(), exports2);
+    __exportStar(require_acp(), exports2);
+    __exportStar(require_task_client(), exports2);
   }
 });
 
@@ -2559,7 +3887,15 @@ function createClientsApi(client) {
     /** 修改客户端别名（全局唯一；重名返回 409）。 */
     rename: (clientId, name, signal) => client.request("PATCH", `/api/clients/${encodeURIComponent(clientId)}/name`, { name }, signal),
     /** 全量替换操作者注解（ADR-0055）；空输入清除。 */
-    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal)
+    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal),
+    /** 登记/清除远程 DSH WebUI 地址（ADR-0059）；`null` 清除。 */
+    setDshWebUrl: (clientId, url, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/dsh-web`, { url }, signal),
+    /** 一键启动：代起 dsh web 并自动建 FRP 映射（ADR-0059 修订）。 */
+    startDshWeb: (clientId, signal) => client.request("POST", `/api/clients/${encodeURIComponent(clientId)}/dsh-web/start`, void 0, signal),
+    /** 一键停止：停进程、删映射、清地址；外部托管时等价于解除登记。 */
+    stopDshWeb: (clientId, signal) => client.request("POST", `/api/clients/${encodeURIComponent(clientId)}/dsh-web/stop`, void 0, signal),
+    /** 解除外部托管的登记：只清 VCPDeck 侧入口，不动目标机进程（ADR-0059 决策 12）。 */
+    detachDshWeb: (clientId, signal) => client.request("DELETE", `/api/clients/${encodeURIComponent(clientId)}/dsh-web`, void 0, signal)
   };
 }
 
@@ -2889,6 +4225,35 @@ function createStorageSharesApi(client) {
   };
 }
 
+// ../sdk/dist/tasks.js
+function createTasksApi(client, nextId = () => crypto.randomUUID()) {
+  async function rpc(method, params, signal) {
+    const response = await client.request("POST", "/api/a2a", { jsonrpc: "2.0", id: nextId(), method, params }, signal);
+    if ("error" in response) {
+      const data = response.error.data;
+      throw new VcpDeckApiError(response.error.message, response.error.code, typeof data?.code === "string" ? data.code : void 0, response.error.data);
+    }
+    return response.result;
+  }
+  return {
+    sendMessage: (params, signal) => rpc("SendMessage", params, signal),
+    get: (id, historyLength, signal) => rpc("GetTask", { id, historyLength }, signal),
+    list: (params = {}, signal) => rpc("ListTasks", params, signal),
+    cancel: (id, signal) => rpc("CancelTask", { id }, signal),
+    agentCard: (signal) => client.request("GET", "/api/a2a/agent-card", void 0, signal),
+    events: (id, options = {}, signal) => {
+      const search = new URLSearchParams();
+      if (options.since !== void 0)
+        search.set("since", String(options.since));
+      if (options.limit !== void 0)
+        search.set("limit", String(options.limit));
+      const query = search.toString();
+      return client.request("GET", `/api/tasks/${encodeURIComponent(id)}/events${query ? `?${query}` : ""}`, void 0, signal);
+    },
+    deviation: (id, signal) => client.request("GET", `/api/tasks/${encodeURIComponent(id)}/deviation`, void 0, signal)
+  };
+}
+
 // ../sdk/dist/terminal.js
 function createTerminalsApi(client) {
   const base = (clientId) => `/api/clients/${encodeURIComponent(clientId)}/terminals`;
@@ -2925,6 +4290,23 @@ function createTerminalsApi(client) {
   };
 }
 
+// ../sdk/dist/agents.js
+function createAgentsApi(client) {
+  return {
+    list: (options = {}, signal) => {
+      const search = new URLSearchParams();
+      if (options.page !== void 0)
+        search.set("page", String(options.page));
+      if (options.pageSize !== void 0)
+        search.set("pageSize", String(options.pageSize));
+      const query = search.toString();
+      return client.request("GET", `/api/agents${query ? `?${query}` : ""}`, void 0, signal);
+    },
+    /** 登记一条受控 placement；Server 侧仍会做完整字段校验。 */
+    create: (input, signal) => client.request("POST", "/api/agents", input, signal)
+  };
+}
+
 // ../sdk/dist/client.js
 var VcpDeckApiError = class extends Error {
   status;
@@ -2958,6 +4340,11 @@ var VcpDeckClient = class {
   gitSsh;
   releases;
   terminals;
+  /** A2A Task 契约（ADR-0057）。 */
+  tasks;
+  /** Agent placement 只读投影。 */
+  agents;
+  /** Remote Dev Session（ADR-0058）。 */
   health = {
     get: (signal) => this.request("GET", "/api/health", void 0, signal)
   };
@@ -2979,6 +4366,8 @@ var VcpDeckClient = class {
     this.gitSsh = createGitSshApi(this);
     this.releases = createReleasesApi(this);
     this.terminals = createTerminalsApi(this);
+    this.tasks = createTasksApi(this);
+    this.agents = createAgentsApi(this);
   }
   /** 发起 JSON REST 请求并归一化失败响应。 */
   async request(method, path2, body, signal) {

@@ -1,6 +1,6 @@
 # VCPDeck 兼容性与升级策略
 
-> 状态：Current｜维护责任：发布维护者｜最后核验：2026-10-12｜适用版本：`0.19.2` / 当前 `main`
+> 状态：Current｜维护责任：发布维护者｜最后核验：2026-10-20｜适用版本：`0.22.0` / 当前 `main`
 
 ## 1. 当前结论
 
@@ -103,6 +103,7 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 
 ### 5.3 破坏性变化
 
+- **`0.22.0` 起：Remote Dev Session（RDS）整体退役**（ADR-0060）。删除 `RemoteDevSession` / `RemoteDevPort` / `RemoteDevAuditEvent` / `RemoteDevEvent` 四张表、`rds:*` 事件与 `/api/remote-dev/*` 端点、SDK `remoteDev`、CLI `forward` 子命令与前端三个页面。升级会**丢表**，`prisma db push` 必须显式带 `--accept-data-loss`，回滚只能从备份恢复；依赖 `vcpdeck forward` 的脚本改用 `vcpdeck frp`。兼容处理：`register.remoteDevSessions` 与 `capabilityDetails.remoteDev` 仍被解析但不再上报/消费，旧 Client 照常注册；旧 Client 发来的 `rds:*` 事件因未注册而被 Socket.IO 忽略，不会断连。
 - 删除或重命名事件/字段/错误码；
 - 更改 Job type 对应 payload；
 - 更改终态含义；
@@ -143,6 +144,7 @@ FRP 恢复对账通过 capability `frp.reconcileProtocolVersion=1` 协商：新 
 - 开发/启动脚本使用 `prisma db push`（不带 `--accept-data-loss`）：纯增量变更直接生效，会丢数据的变更直接失败而不静默放行；该方式仍只适合开发，不是生产迁移保证；
 - Launcher 回退应用版本不自动回退数据库 schema；涉及不可向后兼容迁移时，必须采用 expand/migrate/contract 多阶段方案；
 - 回滚前确认旧 Server 能读取已升级 schema，否则应从备份恢复整个数据集。
+- **`0.22.0` 是首次有意的删表升级**（ADR-0060 退役 RDS）：升级命令必须带 `--accept-data-loss`，四张 RDS 表的存量数据不可保留；旧版本 Server 回退后无法读到这些表，跨该版本回退只能整库恢复。
 
 ## 7. Launcher 兼容缺口
 

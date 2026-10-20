@@ -1,6 +1,6 @@
 # VCPDeck 文档中心
 
-> 维护责任：项目维护者｜最后核验：2026-10-18｜适用版本：`0.21.0` / 当前 `main`
+> 维护责任：项目维护者｜最后核验：2026-10-20｜适用版本：`0.22.0` / 当前 `main`
 
 本页是长期文档的统一入口。代码和 `@vcpdeck/shared` 是协议事实来源；文档负责解释边界、语义和操作方式。
 
@@ -27,6 +27,7 @@
 | [`testing.md`](./testing.md) | 测试层次、命令、环境和发布门禁 |
 | [脚本用途与运行边界](../scripts/README.md) | scripts 分类、逐文件入口/依赖/副作用、真实本地 frps 与离线/手工分组 |
 | [`verification/2026-09-03-linux-a2-and-release-integration.md`](./verification/2026-09-03-linux-a2-and-release-integration.md) | 0.6.18 Linux A2、虚拟机/真机集成验收与 Release 结果 |
+| [`verification/2026-10-20-0.22.0-a2a-and-agent-tasks.md`](./verification/2026-10-20-0.22.0-a2a-and-agent-tasks.md) | 0.22.0 A2A 端到端派活与取消、Agent 任务页、FRP 承载端口暴露 |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | 开发流程、变更要求和提交规范 |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | 用户可感知的版本变更 |
 
