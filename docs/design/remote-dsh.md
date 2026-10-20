@@ -88,6 +88,18 @@ dsh --profile web \
 - Server **不探测** `dshWebUrl` 的可达性（探测会形成 SSRF 面），可达性由操作者打开时判断。
 - RDS 与远程 DSH 不对同一会话双写。
 
+## 4.1 A2A 结果回传（2026-10-20）
+
+`SendMessage` 能派活的前提是"结果回得来"。此前 `TaskTurn` 只存 `summary`（200 字）+ `contentHash`，agent 输出正文被丢弃，`GetTask` 永远返回空 `artifacts`/`history`——通道只进不出。
+
+现在：
+
+- `TaskTurn.content` 存正文：**outbound（agent 输出）存全文**，按 `TaskService.AGENT_TURN_MAX_CHARS`（64KB）截断；**inbound（操作者 prompt）刻意只存摘要 + hash**，不因回传需求扩大敏感面。
+- `settle()` 时 flush：同一 `messageId` 的流式增量在内存累积，任务收尾一次性落库（中途崩溃不写半截）；最长的一段同时写成 `TaskArtifact`（`name=agent-reply`、`mimeType=text/plain`、`uri=task://<taskId>/reply/<messageId>`、带 sha256 与 size）。
+- `GetTask` 组装 `history`（inbound=user、outbound=agent），按 `historyLength` 取最近 N 条；`ListTasks` 不带 history（正文可能很大，按需取）。
+- 多轮语义遵循 A2A：**进行中的 Task** 才能带 `taskId` 追加（已完成返回 `-32000 TASK_TERMINAL`）；新的一轮用同一 `contextId` 开新 Task，`ListTasks?contextId=` 归组。
+
+实测：`dsh` placement 单轮任务 3 秒完成，`GetTask` 返回 `history: [{role:"agent", parts:[{text:"第一轮完成"}]}]` 与 `agent-reply` artifact；同 `contextId` 两轮归组为 2 个 Task。
 ## 5. 已知偏移
 
 - 每台目标机需安装一次 DSH 插件；DSH 预览版 slot 契约变化时需要逐机适配。

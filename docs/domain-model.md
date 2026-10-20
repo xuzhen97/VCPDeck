@@ -115,6 +115,7 @@ Capability 是能力声明，不是用户权限：
 - Server **不验证可达性**，也不主动探测（探测会形成 SSRF 面，且目标往往只在操作者本机网络可达）；登记不参与授权。
 - 该地址可能携带一次性 token，因此只经 API 按需下发，**不得写入日志、审计正文或文档**。
 - 写入口为 `PUT /api/clients/:clientId/dsh-web`（`{ url: string | null }`）；格式非法返回 400 `INVALID_DSH_WEB_URL`。
+- `TaskTurn.content` 存该轮正文：仅 **outbound（agent 输出）** 有值（上限 64KB 截断），inbound（操作者 prompt）只存 `summary` + `contentHash`。正文是 A2A `GetTask.history` 的事实来源；`TaskArtifact`（`name=agent-reply`）承接最终回复引用。
 - `dshWebMode ∈ {managed, external}` 表示实例归谁管：登记地址即落 `external`（状态 `external`），VCPDeck 只维护入口、拒绝代起代停；`DELETE` 解除登记并交还 `managed`。该字段与 `dshWebState/dshWebPort/dshWebFrpMappingId` 一起构成归属事实，注册与心跳不得覆盖。
 
 ## 5. Job

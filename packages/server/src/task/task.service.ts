@@ -52,6 +52,7 @@ export interface TaskTurnInfo {
 	direction: "inbound" | "outbound";
 	messageId: string;
 	summary: string | null;
+	content: string | null;
 	contentHash: string;
 	createdAt: string;
 }
@@ -250,6 +251,8 @@ export class TaskService {
 			direction: "inbound",
 			messageId: message.messageId,
 			summary,
+			// 输入侧刻意只存摘要 + hash（安全决策，见 task.service.test）：
+			// 需要完整正文的是 agent 的输出（outbound），不是操作者的 prompt。
 			contentHash: sha256(text),
 			createdAt: this.now,
 		};
@@ -261,9 +264,75 @@ export class TaskService {
 			direction: "inbound",
 			messageId: turn.messageId,
 			summary: turn.summary,
+			content: turn.content ?? null,
 			contentHash: turn.contentHash,
 			createdAt: turn.createdAt.toISOString(),
 		};
+	}
+
+	/** agent 输出正文的上限（与 RDS transcript 同一量级的截断策略）。 */
+	static readonly AGENT_TURN_MAX_CHARS = 64 * 1024;
+
+	/**
+	 * 追加 agent 回复轮（正文入库，供 A2A 结果回传）。
+	 *
+	 * 与 appendUserTurn 对称：inbound 存用户输入，outbound 存 agent 输出。
+	 */
+	async appendAgentTurn(
+		taskIdValue: string,
+		messageId: string,
+		text: string,
+	): Promise<TaskTurnInfo> {
+		const content = text.slice(0, TaskService.AGENT_TURN_MAX_CHARS);
+		const summary = content.slice(0, 200);
+		const last = await this.prisma.taskTurn.findFirst({
+			where: { taskId: taskIdValue },
+			orderBy: { seq: "desc" },
+		});
+		const seq = (last?.seq ?? 0) + 1;
+		const turn = await this.prisma.taskTurn.create({
+			data: {
+				id: turnId(),
+				taskId: taskIdValue,
+				seq,
+				direction: "outbound",
+				messageId,
+				summary,
+				content,
+				contentHash: sha256(content),
+				createdAt: this.now,
+			},
+		});
+		return {
+			id: turn.id,
+			taskId: turn.taskId,
+			seq: turn.seq,
+			direction: "outbound",
+			messageId: turn.messageId,
+			summary: turn.summary,
+			content: turn.content ?? null,
+			contentHash: turn.contentHash,
+			createdAt: turn.createdAt.toISOString(),
+		};
+	}
+
+	/** 按 seq 升序列出全部轮次（A2A history 组装用）。 */
+	async listTurns(taskIdValue: string): Promise<TaskTurnInfo[]> {
+		const turns = await this.prisma.taskTurn.findMany({
+			where: { taskId: taskIdValue },
+			orderBy: { seq: "asc" },
+		});
+		return turns.map((turn) => ({
+			id: turn.id,
+			taskId: turn.taskId,
+			seq: turn.seq,
+			direction: turn.direction as "inbound" | "outbound",
+			messageId: turn.messageId,
+			summary: turn.summary,
+			content: turn.content ?? null,
+			contentHash: turn.contentHash,
+			createdAt: turn.createdAt.toISOString(),
+		}));
 	}
 
 	/** 读取 Task（内部投影）。 */

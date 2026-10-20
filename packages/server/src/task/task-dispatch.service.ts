@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
 	type AcpPermissionOutcome,
 	type TaskClientCommand,
@@ -50,6 +50,8 @@ interface Runtime {
 			timer: ReturnType<typeof setTimeout>;
 		}
 	>;
+	/** agent 流式输出按 messageId 累积；settle 时落库供 A2A 回传。 */
+	agentMessages: Map<string, string>;
 }
 
 function dispatchError(code: TaskDispatchErrorCode, message: string): Error {
@@ -180,6 +182,7 @@ export class TaskDispatchService {
 			clientId: placement.clientId,
 			socketId: client.socketId,
 			pending: new Map(),
+			agentMessages: new Map(),
 		};
 		this.runtimes.set(taskId, runtime);
 		await deps.tasks.transition(taskId, "working");
@@ -413,6 +416,7 @@ export class TaskDispatchService {
 				pending.reject(dispatchError("TASK_COMMAND_FAILED", "Task failed"));
 			}
 			runtime.pending.clear();
+			this.runtimes.delete(taskId);
 			return;
 		}
 		if (runtime) {
@@ -428,6 +432,12 @@ export class TaskDispatchService {
 				)
 				.catch(() => undefined);
 		}
+		// agent 输出正文在此落库：outbound 轮次（history）+ 最终回复 artifact。
+		// 失败也尽力写——调用方至少能拿到部分输出，而不是只有 chars 统计。
+		if (runtime && runtime.agentMessages.size > 0) {
+			await this.flushAgentMessages(taskId, runtime);
+		}
+		if (runtime) this.runtimes.delete(taskId);
 		if (stopReason === "cancelled") {
 			await deps.tasks.transition(taskId, "canceled");
 			await this.record(taskId, "task.canceled", "summary", {
@@ -444,6 +454,44 @@ export class TaskDispatchService {
 		}
 	}
 
+	/**
+	 * 把累积的 agent 输出落成 outbound 轮次与 artifact。
+	 *
+	 * artifact 是 A2A 的标准结果位（`A2aTask.artifacts` 已映射）：调用方拿
+	 * `text/plain` 的最终回复；多段输出时取最长的一段作为最终回复。
+	 */
+	private async flushAgentMessages(
+		taskId: string,
+		runtime: Runtime,
+	): Promise<void> {
+		const deps = this.requireDeps();
+		const entries = [...runtime.agentMessages.entries()];
+		runtime.agentMessages.clear();
+		let longest = { id: "", text: "" };
+		for (const [messageId, text] of entries) {
+			if (text.length === 0) continue;
+			await deps.tasks
+				.appendAgentTurn(taskId, messageId, text)
+				.catch(() => undefined);
+			if (text.length > longest.text.length) longest = { id: messageId, text };
+		}
+		if (longest.id.length === 0) return;
+		const content = longest.text.slice(0, TaskService.AGENT_TURN_MAX_CHARS);
+		await deps.prisma.taskArtifact
+			.create({
+				data: {
+					id: `art_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+					taskId,
+					name: "agent-reply",
+					mimeType: "text/plain",
+					uri: `task://${taskId}/reply/${longest.id}`,
+					sha256: createHash("sha256").update(content).digest("hex"),
+					size: content.length,
+				},
+			})
+			.catch(() => undefined);
+	}
+
 	private async record(
 		taskId: string,
 		event: string,
@@ -457,8 +505,14 @@ export class TaskDispatchService {
 
 	private async recordAcpEvent(event: TaskClientEvent): Promise<void> {
 		const value = event.event;
+		const runtime = this.runtimes.get(event.taskId);
 		switch (value.type) {
 			case "agent.message.delta":
+				// 正文按 messageId 累积在内存，settle 时落库：中途崩溃不写半截。
+				if (runtime) {
+					const prev = runtime.agentMessages.get(value.messageId) ?? "";
+					runtime.agentMessages.set(value.messageId, prev + value.text);
+				}
 				await this.record(event.taskId, "message", "summary", {
 					messageId: value.messageId,
 					chars: value.text.length,

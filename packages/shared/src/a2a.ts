@@ -189,6 +189,8 @@ export interface A2aTask {
 	contextId: string;
 	status: A2aTaskStatus;
 	artifacts: A2aArtifactRef[];
+	/** 多轮对话回放（inbound=user，outbound=agent）；旧 Task 无数据时缺省。 */
+	history?: A2aMessage[];
 	metadata?: A2aTaskMetadata;
 }
 
@@ -209,7 +211,7 @@ export interface TaskInfo {
 	error?: { code: string; message: string };
 }
 
-export function toA2aTask(info: TaskInfo): A2aTask {
+export function toA2aTask(info: TaskInfo, history?: A2aMessage[]): A2aTask {
 	return {
 		id: info.id,
 		contextId: info.contextId,
@@ -218,6 +220,7 @@ export function toA2aTask(info: TaskInfo): A2aTask {
 			timestamp: info.updatedAt,
 		},
 		artifacts: info.artifacts,
+		...(history && history.length > 0 ? { history } : {}),
 		metadata: {
 			vcpdeck: {
 				agentId: info.agentId,

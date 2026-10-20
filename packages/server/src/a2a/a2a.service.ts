@@ -2,11 +2,13 @@ import { Inject, Injectable, Optional } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import {
 	ACP_PERMISSION_EXTENSION_URI,
+	A2A_LIMITS,
 	A2aProtocolError,
 	type A2aAgentCard,
 	type A2aJsonRpcRequest,
 	type A2aJsonRpcResponse,
 	type A2aListTasksResult,
+	type A2aMessage,
 	type ActorContext,
 	type A2aPermissionExtension,
 	fromA2aTaskState,
@@ -107,6 +109,10 @@ export class A2aService {
 								request.params.id,
 								request.params.historyLength,
 							),
+							await this.taskHistory(
+								request.params.id,
+								request.params.historyLength,
+							),
 						),
 					);
 				case "ListTasks": {
@@ -124,7 +130,10 @@ export class A2aService {
 					if (!wasTerminal) {
 						await this.dispatch?.cancel(request.params.id);
 					}
-					return ok(request.id, toA2aTask(canceled));
+					return ok(
+					request.id,
+					toA2aTask(canceled, await this.taskHistory(request.params.id)),
+				);
 				}
 			}
 		} catch (error) {
@@ -134,6 +143,37 @@ export class A2aService {
 
 	async agentCard(baseUrl: string): Promise<A2aAgentCard> {
 		return this.agents.agentCard(baseUrl);
+	}
+
+	/**
+	 * 把 TaskTurn 组装成 A2A history（inbound=user，outbound=agent）。
+	 *
+	 * agent 输出正文是 settle 时才落库的（见 TaskDispatchService），所以历史里
+	 * 的 outbound 轮只在任务收尾后可见。读不到 turns 时返回 undefined：
+	 * 旧 Task / 旧 TaskService 没有这份投影，不能因此报错。
+	 */
+	private async taskHistory(
+		taskId: string,
+		historyLength?: number,
+	): Promise<A2aMessage[] | undefined> {
+		try {
+			const turns = await this.tasks.listTurns(taskId);
+			const messages: A2aMessage[] = turns
+				.filter((turn) => turn.content !== null && turn.content.length > 0)
+				.map((turn) => ({
+					messageId: turn.messageId,
+					role: turn.direction === "inbound" ? ("user" as const) : ("agent" as const),
+					parts: [{ text: turn.content ?? "" }],
+					...(turn.taskId ? {} : {}),
+				}));
+			const limit =
+				historyLength && historyLength > 0
+					? Math.min(historyLength, A2A_LIMITS.maxHistoryLength)
+					: A2A_LIMITS.maxHistoryLength;
+			return messages.slice(Math.max(0, messages.length - limit));
+		} catch {
+			return undefined;
+		}
 	}
 
 	private async sendMessage(
@@ -256,7 +296,8 @@ export class A2aService {
 			pageSize,
 		);
 		return {
-			tasks: result.data.map(toA2aTask),
+			// 列表不带 history：正文可能很大，按需用 GetTask 取。
+			tasks: result.data.map((info) => toA2aTask(info)),
 			nextPageToken:
 				result.page < result.totalPages ? String(result.page + 1) : "",
 			pageSize: result.pageSize,

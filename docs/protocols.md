@@ -198,8 +198,8 @@ A2A 是面向“agent 调 agent”的任务契约，不是 Job 控制面，也�
 
 | 方法 | 语义 |
 | --- | --- |
-| `SendMessage` | 新消息创建 Task；带 `message.taskId` 时继续已有 Task 或回答权限 |
-| `GetTask` | 读取 Task；`historyLength` 当前保留但不返回完整轮次正文 |
+| `SendMessage` | 新消息创建 Task；带 `message.taskId` 时继续**进行中**的 Task 或回答权限（终态返回 `-32000 TASK_TERMINAL`，新一轮用同 `contextId` 开新 Task） |
+| `GetTask` | 读取 Task；返回 `history`（inbound=user、outbound=agent，含 agent 回复正文），`historyLength` 取最近 N 条 |
 | `ListTasks` | 按 `contextId`/`status` 分页；`pageToken` 是页码字符串 |
 | `CancelTask` | 先取消 Task，再尽力向 Client 发 `cancel`；终态 Task 幂等返回 |
 

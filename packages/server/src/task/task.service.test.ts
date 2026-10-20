@@ -72,6 +72,9 @@ function makeHarness() {
 				const list = turns.get(where.taskId) ?? [];
 				return list.at(-1) ?? null;
 			}),
+			findMany: vi.fn(async ({ where }: { where: { taskId: string } }) => {
+				return [...(turns.get(where.taskId) ?? [])];
+			}),
 			create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
 				const list = turns.get(String(data.taskId)) ?? [];
 				list.push(data);
@@ -168,5 +171,27 @@ describe("TaskService", () => {
 		const cancelled = await service.cancelTask(task.id, ACTOR);
 		expect(cancelled.state).toBe("canceled");
 		expect((await service.cancelTask(task.id, ACTOR)).state).toBe("canceled");
+	});
+
+	it("appendAgentTurn 存正文（A2A 回传），listTurns 按序返回", async () => {
+		const { service } = makeHarness();
+		const task = await createTask(service);
+		await service.appendUserTurn(task.id, msg("m1", "去修复"), ACTOR);
+		const reply = await service.appendAgentTurn(task.id, "am-1", "修复完成，共改动 3 个文件。");
+		expect(reply.direction).toBe("outbound");
+		expect(reply.content).toBe("修复完成，共改动 3 个文件。");
+		const turns = await service.listTurns(task.id);
+		expect(turns.map((t) => t.direction)).toEqual(["inbound", "outbound"]);
+		// 输入侧只有摘要与 hash；输出侧才有完整正文
+		expect(turns[0]?.content).toBeNull();
+		expect(turns[1]?.content).toBe("修复完成，共改动 3 个文件。");
+	});
+
+	it("appendAgentTurn 超长正文按上限截断", async () => {
+		const { service } = makeHarness();
+		const task = await createTask(service);
+		const huge = "y".repeat(TaskService.AGENT_TURN_MAX_CHARS + 1000);
+		const reply = await service.appendAgentTurn(task.id, "am-1", huge);
+		expect(reply.content?.length).toBe(TaskService.AGENT_TURN_MAX_CHARS);
 	});
 });

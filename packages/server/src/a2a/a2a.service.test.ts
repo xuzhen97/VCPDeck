@@ -34,6 +34,8 @@ function makeService() {
 		createTask: vi.fn(async () => taskInfo()),
 		appendUserTurn: vi.fn(async () => ({})),
 		getTask: vi.fn(async () => taskInfo()),
+		appendAgentTurn: vi.fn(async () => ({})),
+		listTurns: vi.fn(async () => [] as Array<Record<string, unknown>>),
 		listTasks: vi.fn(async () => ({
 			data: [taskInfo()],
 			total: 1,
@@ -114,5 +116,62 @@ describe("A2aService", () => {
 			1,
 			10,
 		);
+	});
+
+	it("GetTask 把 outbound 轮次组装成 history（agent 回复可读回）", async () => {
+		const { service, tasks } = makeService();
+		tasks.listTurns.mockResolvedValue([
+			{
+				seq: 1,
+				direction: "inbound",
+				messageId: "m1",
+				content: null, // 输入侧刻意不存正文
+			},
+			{
+				seq: 2,
+				direction: "outbound",
+				messageId: "am-1",
+				content: "A2A结果回传验证成功。",
+			},
+		]);
+
+		const response = await service.rpc(
+			{ jsonrpc: "2.0", id: 4, method: "GetTask", params: { id: "t1" } },
+			ACTOR,
+		);
+
+		if ("result" in response) {
+			const history = (response.result as { history?: unknown[] }).history;
+			expect(history).toHaveLength(1);
+			expect(history?.[0]).toMatchObject({
+				messageId: "am-1",
+				role: "agent",
+				parts: [{ text: "A2A结果回传验证成功。" }],
+			});
+		}
+	});
+
+	it("historyLength 保留最近 N 条", async () => {
+		const { service, tasks } = makeService();
+		tasks.listTurns.mockResolvedValue([
+			{ seq: 1, direction: "outbound", messageId: "a1", content: "一" },
+			{ seq: 2, direction: "outbound", messageId: "a2", content: "二" },
+			{ seq: 3, direction: "outbound", messageId: "a3", content: "三" },
+		]);
+
+		const response = await service.rpc(
+			{
+				jsonrpc: "2.0",
+				id: 5,
+				method: "GetTask",
+				params: { id: "t1", historyLength: 2 },
+			},
+			ACTOR,
+		);
+		if ("result" in response) {
+			const history = (response.result as { history?: Array<{ messageId: string }> })
+				.history;
+			expect(history?.map((item) => item.messageId)).toEqual(["a2", "a3"]);
+		}
 	});
 });
