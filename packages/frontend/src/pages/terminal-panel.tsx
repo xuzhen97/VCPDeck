@@ -154,13 +154,11 @@ function SessionTab({
 /** 机器终端面板：多会话子标签、Shell 选择、单写多读与最小审计入口。 */
 export function TerminalPanel({
 	clientId,
-	parentRemoteDevSessionId,
 	socketFactory = createAppSocket,
 	viewAdapterFactory,
 	viewResizeObserverFactory,
 }: {
 	clientId: string;
-	parentRemoteDevSessionId?: string;
 	socketFactory?: () => ReturnType<typeof createAppSocket>;
 	viewAdapterFactory?: () => XtermAdapter;
 	viewResizeObserverFactory?: () => ResizeObserverLike;
@@ -232,9 +230,6 @@ export function TerminalPanel({
 					shellId,
 					cols: sizeRef.current.cols,
 					rows: sizeRef.current.rows,
-					...(parentRemoteDevSessionId
-						? { parentRemoteDevSessionId }
-						: {}),
 				});
 				setActiveId(created.sessionId);
 				await reload();
@@ -243,7 +238,7 @@ export function TerminalPanel({
 				setError(typeof code === "string" ? code : "终端创建失败");
 			}
 		},
-		[sdk, clientId, parentRemoteDevSessionId, reload],
+		[sdk, clientId, reload],
 	);
 
 	const confirmClose = useCallback(async () => {

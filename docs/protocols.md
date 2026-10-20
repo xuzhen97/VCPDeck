@@ -57,7 +57,6 @@
 | `/api/agents` | 逻辑 agent 到 Client 的受控 placement |
 | `/api/a2a` | A2A v1.0 JSON-RPC 入口与 Agent Card |
 | `/api/tasks` | Task 审计事件链与偏差检查（只读） |
-| `/api/remote-dev` | Remote Dev Session 生命周期、端口与 forward token |
 | `/api/releases` | 发布上传、列表和构件下载 |
 | `/api/health`、`/api/status` | 浅健康与版本/发布状态 |
 
@@ -222,22 +221,6 @@ A2A 是面向“agent 调 agent”的任务契约，不是 Job 控制面，也�
 
 当前 `input-required` 只由 ACP permission 请求触发；直接向这类 Task 追加普通文本会返回 `-32000`，必须先回答 permission。ACP 的自由文本追问没有独立的 A2A 状态：一轮 prompt 正常结束会收敛为 `completed`；需要继续时由调用方新建 Task，可用同一 `contextId` 分组。这是当前实现边界，不把 `completed` 伪造为可重开的 Task。
 
-### 2.12 Remote Dev Session REST 协议
-
-RDS 是独立人机开发会话域（[ADR-0058](./adr/0058-remote-dev-session.md)），不是 A2A Task 或 Job。
-
-| 方法/路径 | 语义 |
-| --- | --- |
-| `POST /api/remote-dev/sessions` | 创建；body `{clientId, agentPlacementId, workspaceRoot, label?, resumeFromSessionId?}`；校验 Client 在线、`remote-dev` capability、placement 归属与 workspace roots；带 `resumeFromSessionId` 时按续接规则校验（同 Client/placement/workspace、源会话已终态、有 `acpSessionId`、调用者是 owner） |
-| `GET /api/remote-dev/sessions` | 分页；`clientId`/`state` 过滤 |
-| `GET /api/remote-dev/sessions/:id` | 详情；不返回 token/正文 |
-| `DELETE /api/remote-dev/sessions/:id` | 关闭；关闭子终端与端口，等待 Client ack；不把失败报告为成功 |
-| `GET/POST /api/remote-dev/sessions/:id/ports` | 端口列表 / 打开（`1024-65535`，每会话最多 8 个） |
-| `DELETE /api/remote-dev/sessions/:id/ports/:portId` | 关闭端口 |
-| `POST /api/remote-dev/sessions/:id/ports/:portId/forward-token` | 签发短期 forward token（10 分钟，只在 Server 内存存 hash） |
-
-错误码包括 `RDS_CLIENT_OFFLINE`、`RDS_UNSUPPORTED_CLIENT`、`RDS_PLACEMENT_INVALID`、`RDS_WORKSPACE_INVALID`、`RDS_LIMIT_EXCEEDED`、`RDS_OPERATOR_REQUIRED`（含"续接非自己创建的会话"）、`RDS_RESUME_NOT_ALLOWED`、`RDS_RESUME_UNAVAILABLE`、`RDS_RESUME_MISMATCH`、`RDS_PORT_INVALID`、`RDS_COMMAND_FAILED`。`workspaceRoot` 先由 Server 做词法 roots 边界检查，Client 启动 ACP Host 前再做 realpath/canonical 校验；越界拒绝，不做宽松猜测。
-
 ## 3. `/client` Socket.IO 协议
 
 Client 使用 `auth.psk` 建立连接。注册成功后，Server 将 Client room 标识绑定到 `clientId`。
@@ -255,7 +238,7 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 
 | 事件 | 方向 | 语义 |
 | --- | --- | --- |
-| `register` | Client → Server | 注册静态信息、版本和 capability；可选 `remoteDevSessions: {sessionId, generationId}[]`（缺省=旧 Client 未报告，空数组=明确无存活 RDS 会话） |
+| `register` | Client → Server | 注册静态信息、版本和 capability |
 | `heartbeat` | Client → Server | 动态指标和运行 Job |
 | `status:report` | Client → Server | 通用 Job 重连对账 |
 | `job:dispatch` | Server → Client | 下发判别联合 Job |
@@ -273,11 +256,6 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 | `task:command` | Server → Client | A2A Task 的受控 ACP 命令：`start/prompt/cancel/permission/close` |
 | `task:command-result` | Client → Server | 按 `requestId` 回报命令结果；可带 `stopReason` |
 | `task:event` | Client → Server | ACP 归一化事件（message/tool/plan/permission/usage/session） |
-| `rds:command` | Server → Client | RDS 受控命令：`session.create/close`、`agent.prompt/cancel/permission`；`session.create` 可带可选 `acpSessionId`（续接） |
-| `rds:command-result` | Client → Server | 按 `requestId` 回报；create 带 `generationId`，prompt 带 `stopReason` |
-| `rds:event` | Client → Server | RDS 归一化 ACP 事件与状态（`agent.event/agent.status/session.ended`） |
-| `rds:acp-session` | Client → Server | 创建成功后上报 ACP 侧 `sessionId`（`{sessionId, generationId, acpSessionId}`）；独立事件以便旧 Server 静默忽略 |
-| `rds:transcript` | Server → Browser | 附着成功后回放会话 transcript：`{sessionId, entries, truncated}`；`entries[]` 为 `{seq, at, kind:"prompt", text}` 或 `{seq, at, kind:"event", event}` |
 | `dshweb:command` | Server → Client | 远程 DSH 受管生命周期：`{requestId, action:"start"\|"stop", clientId, port}`；Server 分配 loopback 端口，Client 只按它启动 |
 | `dshweb:result` | Client → Server | 回执：`{requestId, ok, port?, token?, error?}`；token 只在此通道传递，不写日志 |
 
@@ -347,33 +325,6 @@ Server 推送事件：
 - 单次 input 限制 64 KiB，但没有持续字节速率限制，`TERMINAL_RATE_LIMITED` 尚未使用。
 
 Client REGISTER 后上报 generationId 和内存 Session。Server 当前按“DB/报告集合是否存在”对账，没有保存或比较 generationId；DB 非终态但本次未上报的会话会被标为 interrupted。Client 本地 30 分钟 expired 当前不主动上报 Server，attach/detach 也未完整同步 SQLite active/detached 时间字段。完整事实见 [`design/remote-terminal.md`](./design/remote-terminal.md)。
-
-### 4.1 RDS attachment 与浏览器事件
-
-RDS 浏览器请求（均通过 ack）：
-
-- `rds:attach` `{sessionId, reconnectToken?}`：首个 operator，后续 viewer；返回 `{attachmentId, mode, reconnectToken}`；
-- `rds:detach`、`rds:prompt`、`rds:cancel`、`rds:permission`、`rds:port.open`、`rds:port.close`、`rds:resync`；
-- 只有 operator 可 prompt/cancel/permission/端口操作；viewer 只读。
-
-Server 推送：
-
-- `rds:state` `{session, ports, attachment?}`；
-- `rds:agent:event`（ACP 归一化事件，带 `seq`）；
-- `rds:transcript` `{sessionId, entries, truncated}`：`rds:attach` 成功后在 `rds:state` 之后单独下发，回放该会话最近的对话（最多 400 条）；旧前端忽略未订阅事件，不影响附着；
-- `rds:port:state`；
-- `rds:closed`；
-- `rds:error` `{code, message}`。
-
-transcript 由 Server 侧落库（RemoteDevEvent）：gent.event 到达时合并写入，prompt 在命令发出前写入、失败回滚。	runcated=true 表示更早记录已按上限丢弃。
-
-### 4.2 RDS 数据面 namespace
-
-- `/remote-dev/tunnel`：Client 出站；PSK + `{clientId, sessionId}` 认证，一个 RDS 一条隧道。
-- `/remote-dev/forward`：CLI 入站；`{token, sessionId, portId}` 认证，token 由 forward-token REST 签发。
-- 事件：`rds:stream:hello`、`rds:stream:frame`、`rds:stream:close`；二进制帧布局为 `version(1)|type(1)|streamId(4 BE)|length(4 BE)|payload`，payload 上限 64 KiB。
-- `OPEN` 的 payload 只含 `{remotePort}`；Client 只连接目标机 `127.0.0.1`，不接受远端 host。`DATA/CLOSE/ERROR` 按 streamId 多路复用；Server 校验 stream 属于当前 forward 连接，并要求 `OPEN.remotePort` 与该 token 对应的已打开端口一致。
-- 当前 forward token 只在 Server 内存保存 hash，重启即失效；关闭端口会撤销 token 并断开对应 forward，关闭 RDS 会关闭端口与隧道、通知 CLI 关闭残留 stream。
 
 ## 5. 远程 Agent（已退役）
 

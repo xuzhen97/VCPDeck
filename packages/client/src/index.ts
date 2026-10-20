@@ -45,10 +45,7 @@ import {
 import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge.js";
 import { createAcpHost } from "./acp/acp-host.js";
 import { attachAcpTaskBridge } from "./acp/acp-bridge.js";
-import { attachRemoteDevBridge } from "./remote-dev/remote-dev-bridge.js";
-import { createRemoteDevRuntime } from "./remote-dev/remote-dev-runtime.js";
 import { createDshWebHost } from "./dsh-web/dsh-web-host.js";
-import { connectRemoteDevTunnel } from "./remote-dev/remote-dev-tunnel.js";
 import { ClientLauncher } from "./launcher-control.js";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -364,29 +361,10 @@ export function connect(): Socket {
 		clientId: CLIENT_ID,
 		manager: terminalManager,
 	});
-	// RDS runtime 由 index 持有：注册时要把仍在运行的会话上报给 Server 做对账，
-	// 否则 Client 重启后遗留的会话会一直显示"运行中"。
-	const remoteDevRuntime = verifyOnly
-		? null
-		: createRemoteDevRuntime({
-				createHost: createAcpHost,
-				emit: (event) => socket.emit(Events.RDS_EVENT, event),
-			});
 	if (!verifyOnly) {
 		attachAcpTaskBridge(socket, {
 			clientId: CLIENT_ID,
 			createHost: createAcpHost,
-		});
-		attachRemoteDevBridge(socket, {
-			...(remoteDevRuntime ? { runtime: remoteDevRuntime } : {}),
-			createHost: createAcpHost,
-			tunnelFactory: (sessionId) =>
-				connectRemoteDevTunnel({
-					serverBase: SERVER_BASE,
-					psk: PSK,
-					clientId: CLIENT_ID,
-					sessionId,
-				}),
 		});
 	}
 
@@ -512,8 +490,6 @@ export function connect(): Socket {
 				runtimeSecurity,
 				process.env,
 				gitSshStatus,
-				// verifyOnly 不接管工作状态，也不该让 Server 以为"没有存活会话"
-				verifyOnly ? undefined : (remoteDevRuntime?.listSessions() ?? []),
 			),
 		getStatusReport: () => ({
 			clientId: CLIENT_ID,

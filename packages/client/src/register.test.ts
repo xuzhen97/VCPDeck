@@ -149,7 +149,6 @@ describe("getRegisterInfo", () => {
 			"file.write",
 			"frp",
 			"acp",
-			"remote-dev",
 			"dsh-web",
 		]);
 		const json = JSON.stringify(info);

@@ -14,7 +14,6 @@ Identity ─创建/操作→ Job ─调度到→ Client
                          ├─管理→ FrpMapping ─使用→ FrpsInstance
                          └─协作→ TerminalSession
 Identity ─创建/操作→ Task ─派发→ Client（ACP agent）
-Identity ─创建/操作→ RemoteDevSession ─组合→ ACP / PTY / Files / Port
 Identity ─创建/操作→ AgentSession ─触发→ AgentRun（不受 Job 调度）
                          └─记录→ AgentAuditEvent
 Release ─编排更新→ Server / Client ─由→ Launcher 守护
@@ -38,9 +37,6 @@ TODO、工作流、聊天和 VCPToolBox 桥接目前没有落地数据模型，�
 | TaskAttempt | `id` | SQLite | 单次执行尝试（当前 ACP）及终态；Task 可有多次尝试 |
 | TaskEvent | `id`（即 `seq`） | SQLite | 只追加任务证据链；数据上限 8 KiB，超限降级为截断标记 |
 | TaskArtifact | `id` | SQLite + 外部 URI | 任务产物引用；正文不在 Task 表 |
-| RemoteDevSession | `id` | SQLite | 独立人机开发会话；绑定一个 Client、placement、workspace，不写 TaskEvent |
-| RemoteDevPort | `id` | SQLite | 会话内显式打开的 loopback 端口及生命周期 |
-| RemoteDevAuditEvent | `id` | SQLite | RDS 生命周期/端口/权限元数据；不保存正文或完整路径 |
 | File | `id` | SQLite；正文在 Storage | 文件元数据和生命周期 |
 | StorageShare | `id` / `tokenHash` | SQLite；正文仍在 Storage | 长期公开只读分享、撤销审计和 File 保留关系；只保存 Token 哈希 |
 | StorageBackendConfig | 单行配置 | SQLite | 当前 Storage Provider 及配置 JSON |
@@ -188,7 +184,7 @@ Task 是一次委托给逻辑 agent 的工作单元，不是 Job、TerminalSessi
 
 ### 6.1 AgentPlacement
 
-`AgentPlacement` 把逻辑 `agentId` 绑定到一台 Client 上的受控启动配置：`adapter`（`acp`/`cli`）、`command`、`args`、`cwd`、`workspaceRoots`、`skills` 和 `enabled`。它由控制面维护，不是 Client 上报的“任意命令”；Client 的 `acp` capability 只表示该机器能承载 ACP Host，不表示某个具体 agent 已安装或可执行。当前只有 `acp` 可执行；`cli` 是保留值，派发会以 `TASK_ADAPTER_UNSUPPORTED` 失败关闭。v1 由操作者通过 `POST /api/agents` 或 `vcpdeck agents create` 登记；RDS 只从登记表选择，不自动发现机器上的 agent。`command` 是启动命令，Client 会先按 `PATH`/`PATHEXT` 解析：Windows 上 `.cmd`/`.bat` 垫片（CLI agent 的常见分发形态）经 `cmd.exe /d /s /c` 包装后启动，`.exe`/`.com` 直接执行；非 Windows 平台原样执行。
+`AgentPlacement` 把逻辑 `agentId` 绑定到一台 Client 上的受控启动配置：`adapter`（`acp`/`cli`）、`command`、`args`、`cwd`、`workspaceRoots`、`skills` 和 `enabled`。它由控制面维护，不是 Client 上报的“任意命令”；Client 的 `acp` capability 只表示该机器能承载 ACP Host，不表示某个具体 agent 已安装或可执行。当前只有 `acp` 可执行；`cli` 是保留值，派发会以 `TASK_ADAPTER_UNSUPPORTED` 失败关闭。由操作者通过 `POST /api/agents` 或 `vcpdeck agents create` 登记；A2A Task 只从登记表选择，不自动发现机器上的 agent。`command` 是启动命令，Client 会先按 `PATH`/`PATHEXT` 解析：Windows 上 `.cmd`/`.bat` 垫片（CLI agent 的常见分发形态）经 `cmd.exe /d /s /c` 包装后启动，`.exe`/`.com` 直接执行；非 Windows 平台原样执行。
 
 ### 6.2 状态与轮次
 
@@ -210,15 +206,6 @@ submitted → canceled | rejected | failed
 
 ACP 的权限决策不是 A2A 标准字段，而是声明的扩展 `https://vcpdeck.dev/a2a/extensions/acp-permission/v1`（`requestId` + `optionId`）；未知扩展必须拒绝，不能把任意 metadata 当权限。
 
-## 7. Remote Dev Session（ADR-0058）
-
-RDS 是一次跨机人机开发会话，不是 A2A Task、Job 或 TerminalSession。一个 RDS 绑定一个目标 Client、一个 AgentPlacement 和一个 workspace；Server 保存会话/端口/轻量审计与 attachment lease，Client 持有 ACP Host、PTY 与端口流。
-
-状态：`starting → active ⇄ detached → closing → closed`，异常为 `interrupted/failed`。首个浏览器 attachment 是 operator，其余是 viewer；只有 operator 可 prompt、回答 permission、打开端口。`RemoteDevPort` 只允许目标机 loopback、显式打开、每会话最多 8 个；关闭会话会关闭子终端和端口。
-
-RDS 复用 A2A 的 ACP Host 与既有 Terminal/Files，但不创建 Task、不写 TaskEvent；端口数据面走独立 `/remote-dev/tunnel` 与 `/remote-dev/forward`，不使用 FRP 默认路径。Server 不保存 agent/终端/文件正文；当前未实现 HTTP preview、DAP、端口自动发现与多租户。
-
-会话历史与续接：`RemoteDevSession` 行本身即历史（前端「会话历史」页只读展示元数据）。Client 创建成功后用 `rds:acp-session` 上报 ACP 侧 `sessionId`，Server 存进 `RemoteDevSession.acpSessionId`（不透明标识，不是正文）。对**已终态**且带该标识的会话「继续」= 新建一条 RDS 会话并在 `session.create` 带 `acpSessionId`，Client 走 ACP `session/resume`；要求同 Client、同 placement、同 workspace，跨 workspace/placement 或对活动会话续接分别返回 `RDS_RESUME_MISMATCH` / `RDS_RESUME_NOT_ALLOWED` / `RDS_RESUME_UNAVAILABLE`。
 
 ## 8. File 与 Storage
 

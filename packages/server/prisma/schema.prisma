@@ -45,7 +45,6 @@ model Client {
   agentPlacements    AgentPlacement[]
   sessionHostInstances SessionHostInstance[]
   features           Feature[]
-  remoteDevSessions  RemoteDevSession[]
 }
 
 model Job {
@@ -367,7 +366,6 @@ model TerminalSession {
   rows                Int
   createdByIdentityId String?
   createdByName       String?
-  parentRemoteDevSessionId String?
   createdAt           DateTime @default(now())
   lastAttachedAt      DateTime?
   detachedAt          DateTime?
@@ -381,7 +379,6 @@ model TerminalSession {
 
   @@index([clientId, createdAt])
   @@index([clientId, status])
-  @@index([parentRemoteDevSessionId])
 }
 
 // ── 终端最小审计（只记录生命周期事件，不记录输入输出） ──
@@ -636,79 +633,7 @@ model AgentPlacement {
   @@index([clientId])
 }
 
-model RemoteDevSession {
-  id               String   @id
-  ownerIdentityId  String?
-  clientId         String
-  client           Client   @relation(fields: [clientId], references: [id])
-  agentPlacementId String
-  workspaceRoot    String
-  label            String?
-  state            String
-  generationId     String   @default("")
-  agentStatus      String   @default("starting")
-  acpSessionId     String?
-  lastSeq          Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  lastAttachedAt   DateTime?
-  expiresAt        DateTime?
-  closedAt         DateTime?
-  closeReason      String?
-  cleanupStatus    String   @default("unknown")
-  ports            RemoteDevPort[]
-  audits           RemoteDevAuditEvent[]
-  events           RemoteDevEvent[]
-
-  @@index([clientId, state])
-  @@index([state, expiresAt])
-  @@index([ownerIdentityId, createdAt])
-}
-
 /// 会话 transcript：按操作落库，供附着后回放（ADR-0058 修订 2026-10-19）。
-model RemoteDevEvent {
-  id        String   @id @default(cuid())
-  sessionId String
-  session   RemoteDevSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  /// 会话内单调递增序号，回放与去重都依赖它。
-  seq       Int
-  /// prompt（操作者消息）或 event（agent 事件，payload 为 AcpAdapterEvent JSON）。
-  kind      String
-  payload   String
-  createdAt DateTime @default(now())
-
-  @@unique([sessionId, seq])
-  @@index([sessionId, seq])
-}
-
-model RemoteDevPort {
-  id            String   @id
-  sessionId     String
-  session       RemoteDevSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  remotePort    Int
-  protocol      String   @default("tcp")
-  label         String?
-  status        String
-  createdAt     DateTime @default(now())
-  expiresAt     DateTime?
-  closedAt      DateTime?
-  lastErrorCode String?
-
-  @@unique([sessionId, remotePort])
-  @@index([sessionId, status])
-}
-
-model RemoteDevAuditEvent {
-  id              Int      @id @default(autoincrement())
-  sessionId       String
-  session         RemoteDevSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  at              DateTime @default(now())
-  event           String
-  actorIdentityId String?
-  data            String?
-
-  @@index([sessionId, id])
-}
 
 model Task {
   id                 String   @id

@@ -80,12 +80,11 @@ flowchart TB
         AppWs[Socket.IO /app]
         ClientWs[Socket.IO /client]
         Sse[SSE Endpoint]
-        Services[领域 Services<br/>Auth / Client / Job / File / FRP / Terminal / Release / Task / Agent Registry / Remote Dev]
+        Services[领域 Services<br/>Auth / Client / Job / File / FRP / Terminal / Release / Task / Agent Registry]
         Prisma[Prisma 数据访问]
         StorageSvc[Storage Provider 抽象]
         Db[(SQLite)]
         FileStore[(本地存储或阿里云存储)]
-        RdsWs[Socket.IO /remote-dev]
     end
 
     subgraph RemoteNode[目标机器]
@@ -119,8 +118,6 @@ flowchart TB
     Executor --> Os
     Terminal --> Os
     AcpAgent --> Os
-    RdsWs <-->|RDS 端口流| Client
-    RdsWs <-->|CLI forward| Cli
 ```
 
 ### 4.2 组件职责
@@ -130,7 +127,7 @@ flowchart TB
 | Frontend | 浏览器 | 驾驶台交互、REST 调用、终端渲染 | 直接访问数据库或远程机器 |
 | SDK | 浏览器或 Node.js 调用方 | 类型安全的 REST API 封装和错误归一化 | Socket.IO/SSE 生命周期、服务端业务状态机 |
 | CLI | 操作员机器或自动化环境 | 管理用户级/项目级目标环境；当前负责发布包上传；构建 Skill 的单文件入口 | 承担 Server/Client 运行逻辑，或让项目配置直接定义 Server/凭据 |
-| Server | 控制面主机 | 认证、资源 API、Client 连接、Job 调度、A2A Task 与 agent placement、RDS 会话与端口数据面、状态持久化、实时流代理、更新编排 | 直接在远程机器执行命令、持有远程 PTY 或运行 ACP agent |
+| Server | 控制面主机 | 认证、资源 API、Client 连接、Job 调度、A2A Task 与 agent placement、状态持久化、实时流代理、更新编排 | 直接在远程机器执行命令、持有远程 PTY 或运行 ACP agent |
 | Client | 每台目标机器 | 能力探测、命令与文件操作、PTY、ACP Host、frpc、状态上报 | 用户身份管理和全局业务状态持久化 |
 | Launcher | Server/Client 所在主机 | 守护业务进程、准备 Node.js、应用更新、探活和回退 | Job 调度与业务协议处理 |
 | SQLite | Server 主机 | 保存控制面关系数据和状态记录 | 保存终端正文、PTY 或远程进程内存 |

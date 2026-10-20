@@ -16,8 +16,6 @@ import { LoginPage } from "@/pages/login-page";
 import { MachinesPage } from "@/pages/machines-page";
 import { MachineWorkspace } from "@/pages/machine-workspace";
 import { ReleasesPage } from "@/pages/releases-page";
-import { RemoteDevPage } from "@/pages/remote-dev-page";
-import { RemoteDevSessionsPage } from "@/pages/remote-dev-sessions-page";
 import { SettingsPage } from "@/pages/settings-page";
 
 /** 应用认证路由。 */
@@ -48,10 +46,6 @@ export function AppRoutes() {
 				<Route path="/frp" element={<FrpPage />} />
 				<Route path="/features" element={<FeaturesPage />} />
 				<Route path="/develop" element={<DevelopDshPage />} />
-				<Route path="/remote-dev" element={<Navigate to="/remote-dev/new" replace />} />
-				<Route path="/remote-dev/new" element={<RemoteDevPage />} />
-				<Route path="/remote-dev/sessions" element={<RemoteDevSessionsPage />} />
-				<Route path="/remote-dev/:sessionId" element={<RemoteDevPage />} />
 				<Route path="/releases" element={<ReleasesPage />} />
 				{/* 兼容旧入口：存储已并入设置模块 */}
 				<Route

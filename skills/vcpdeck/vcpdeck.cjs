@@ -55,7 +55,7 @@ var require_client_annotations = __commonJS({
     var MAX_PUBLIC_ADDRESSES = 4;
     var MAX_HOST_LENGTH = 253;
     var MAX_NOTES_LENGTH = 1e3;
-    function isRecord3(value2) {
+    function isRecord2(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function isIPv4(value2) {
@@ -148,7 +148,7 @@ var require_client_annotations = __commonJS({
     function parsePublicAddress(value2) {
       if (value2 === void 0 || value2 === null)
         return null;
-      if (!isRecord3(value2)) {
+      if (!isRecord2(value2)) {
         throw new Error("annotations.publicAddress \u5FC5\u987B\u4E3A\u5BF9\u8C61\u6216 null");
       }
       for (const key of Object.keys(value2)) {
@@ -163,7 +163,7 @@ var require_client_annotations = __commonJS({
       };
     }
     function parseClientAnnotationsInput(value2) {
-      if (!isRecord3(value2)) {
+      if (!isRecord2(value2)) {
         throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       for (const key of Object.keys(value2)) {
@@ -180,7 +180,7 @@ var require_client_annotations = __commonJS({
       return input.publicAddress !== null || input.notes !== null;
     }
     function parseClientAnnotations(value2) {
-      if (!isRecord3(value2)) {
+      if (!isRecord2(value2)) {
         throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       if (Object.keys(value2).length === 0)
@@ -202,6 +202,136 @@ var require_client_annotations = __commonJS({
         notes,
         updatedAt: new Date(value2.updatedAt).toISOString()
       };
+    }
+  }
+});
+
+// ../shared/dist/client-dsh-web.js
+var require_client_dsh_web = __commonJS({
+  "../shared/dist/client-dsh-web.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.DSH_WEB_URL_MAX_LENGTH = void 0;
+    exports2.parseClientDshWebUrl = parseClientDshWebUrl;
+    exports2.DSH_WEB_URL_MAX_LENGTH = 2048;
+    function parseClientDshWebUrl(value2) {
+      if (value2 === null)
+        return null;
+      if (typeof value2 !== "string") {
+        throw new Error("dshWebUrl \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32\u6216 null");
+      }
+      const trimmed = value2.trim();
+      if (trimmed.length === 0)
+        return null;
+      if (trimmed.length > exports2.DSH_WEB_URL_MAX_LENGTH) {
+        throw new Error(`dshWebUrl \u4E0D\u80FD\u8D85\u8FC7 ${exports2.DSH_WEB_URL_MAX_LENGTH} \u5B57\u7B26`);
+      }
+      let parsed;
+      try {
+        parsed = new URL(trimmed);
+      } catch {
+        throw new Error("dshWebUrl \u4E0D\u662F\u5408\u6CD5 URL");
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("dshWebUrl \u53EA\u5141\u8BB8 http/https");
+      }
+      if (parsed.username !== "" || parsed.password !== "") {
+        throw new Error("dshWebUrl \u4E0D\u80FD\u5305\u542B\u7528\u6237\u540D\u6216\u53E3\u4EE4");
+      }
+      return parsed.toString();
+    }
+  }
+});
+
+// ../shared/dist/dsh-web.js
+var require_dsh_web = __commonJS({
+  "../shared/dist/dsh-web.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.DSH_WEB_MODES = exports2.DSH_WEB_STATES = exports2.DSH_WEB_CAPABILITY = void 0;
+    exports2.parseDshWebCommand = parseDshWebCommand;
+    exports2.parseDshWebCommandResult = parseDshWebCommandResult;
+    exports2.DSH_WEB_CAPABILITY = "dsh-web";
+    exports2.DSH_WEB_STATES = [
+      "stopped",
+      "starting",
+      "running",
+      "failed",
+      /**
+       * 外部托管：实例由目标机自己管（systemd / docker / 手工常驻 / 自有反代），
+       * VCPDeck 只登记入口，绝不代起代停。
+       */
+      "external"
+    ];
+    exports2.DSH_WEB_MODES = ["managed", "external"];
+    function isRecord2(value2) {
+      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+    }
+    function requireString(value2, field, maxLength) {
+      if (typeof value2 !== "string" || value2.length === 0 || value2.length > maxLength) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 1-${maxLength} \u7684\u5B57\u7B26\u4E32`);
+      }
+      return value2;
+    }
+    function requirePort(value2, field) {
+      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < 1024 || value2 > 65535) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A 1024-65535 \u7684\u6574\u6570`);
+      }
+      return value2;
+    }
+    function parseDshWebCommand(value2) {
+      if (!isRecord2(value2))
+        throw new Error("dshweb \u547D\u4EE4\u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      const allowed = /* @__PURE__ */ new Set(["requestId", "action", "clientId", "port"]);
+      for (const key of Object.keys(value2)) {
+        if (!allowed.has(key))
+          throw new Error(`dshweb \u547D\u4EE4\u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      const requestId = requireString(value2.requestId, "requestId", 128);
+      const clientId = requireString(value2.clientId, "clientId", 128);
+      if (value2.action !== "start" && value2.action !== "stop") {
+        throw new Error("dshweb \u547D\u4EE4 action \u5FC5\u987B\u662F start \u6216 stop");
+      }
+      return {
+        requestId,
+        action: value2.action,
+        clientId,
+        port: requirePort(value2.port, "port")
+      };
+    }
+    function parseDshWebCommandResult(value2) {
+      if (!isRecord2(value2))
+        throw new Error("dshweb \u7ED3\u679C\u5FC5\u987B\u4E3A\u5BF9\u8C61");
+      const allowed = /* @__PURE__ */ new Set([
+        "requestId",
+        "ok",
+        "port",
+        "token",
+        "error"
+      ]);
+      for (const key of Object.keys(value2)) {
+        if (!allowed.has(key))
+          throw new Error(`dshweb \u7ED3\u679C\u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+      }
+      const requestId = requireString(value2.requestId, "requestId", 128);
+      if (typeof value2.ok !== "boolean")
+        throw new Error("dshweb \u7ED3\u679C ok \u5FC5\u987B\u4E3A\u5E03\u5C14\u503C");
+      const result = { requestId, ok: value2.ok };
+      if (value2.port !== void 0) {
+        result.port = requirePort(value2.port, "port");
+      }
+      if (value2.token !== void 0) {
+        result.token = requireString(value2.token, "token", 512);
+      }
+      if (value2.error !== void 0) {
+        if (!isRecord2(value2.error))
+          throw new Error("error \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+        result.error = {
+          code: requireString(value2.error.code, "error.code", 128),
+          message: requireString(value2.error.message, "error.message", 2e3)
+        };
+      }
+      return result;
     }
   }
 });
@@ -230,13 +360,13 @@ var require_client_installer = __commonJS({
       throw new Error("platform \u5FC5\u987B\u4E3A win-x64 \u6216 linux-x64");
     }
     function parseClientInstallerConfigUpdate(value2) {
-      if (!isRecord3(value2) || Object.keys(value2).length !== 1 || typeof value2.enabled !== "boolean") {
+      if (!isRecord2(value2) || Object.keys(value2).length !== 1 || typeof value2.enabled !== "boolean") {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B boolean enabled");
       }
       return { enabled: value2.enabled };
     }
     function parseClientInstallerNameUpdate(value2) {
-      if (!isRecord3(value2) || Object.keys(value2).length !== 1 || typeof value2.name !== "string") {
+      if (!isRecord2(value2) || Object.keys(value2).length !== 1 || typeof value2.name !== "string") {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B string name");
       }
       const name = value2.name.trim();
@@ -244,7 +374,7 @@ var require_client_installer = __commonJS({
         throw new Error("name \u957F\u5EA6\u5FC5\u987B\u4E3A 1-100");
       return { name };
     }
-    function isRecord3(value2) {
+    function isRecord2(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
   }
@@ -293,7 +423,7 @@ var require_update = __commonJS({
       RETRY_NOT_ALLOWED: "RELEASE_RETRY_NOT_ALLOWED"
     };
     function parseReleaseUploadCreateInput(value2) {
-      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["version", "platform", "sha256", "size"])) {
+      if (!isRecord2(value2) || !hasOnlyKeys(value2, ["version", "platform", "sha256", "size"])) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B version/platform/sha256/size");
       }
       if (typeof value2.version !== "string" || !/^\d+\.\d+\.\d+$/.test(value2.version)) {
@@ -316,7 +446,7 @@ var require_update = __commonJS({
       };
     }
     function parseReleaseUploadPartRefresh(value2) {
-      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["partNumbers"]) || !Array.isArray(value2.partNumbers)) {
+      if (!isRecord2(value2) || !hasOnlyKeys(value2, ["partNumbers"]) || !Array.isArray(value2.partNumbers)) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B partNumbers \u6570\u7EC4");
       }
       const partNumbers = value2.partNumbers;
@@ -326,12 +456,12 @@ var require_update = __commonJS({
       return { partNumbers };
     }
     function parseReleaseUploadComplete(value2) {
-      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["uploadedBytes"]) || typeof value2.uploadedBytes !== "number" || !Number.isSafeInteger(value2.uploadedBytes) || value2.uploadedBytes < 1 || value2.uploadedBytes > 2147483647) {
+      if (!isRecord2(value2) || !hasOnlyKeys(value2, ["uploadedBytes"]) || typeof value2.uploadedBytes !== "number" || !Number.isSafeInteger(value2.uploadedBytes) || value2.uploadedBytes < 1 || value2.uploadedBytes > 2147483647) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B\u6709\u6548\u6574\u6570 uploadedBytes");
       }
       return { uploadedBytes: value2.uploadedBytes };
     }
-    function isRecord3(value2) {
+    function isRecord2(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function hasOnlyKeys(value2, keys) {
@@ -679,11 +809,11 @@ var require_terminal = __commonJS({
       }
     };
     exports2.TerminalProtocolError = TerminalProtocolError;
-    function isRecord3(v) {
+    function isRecord2(v) {
       return typeof v === "object" && v !== null && !Array.isArray(v);
     }
     function assertRecord(v, what) {
-      if (!isRecord3(v))
+      if (!isRecord2(v))
         throw new TerminalProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(v, allowed, what) {
@@ -1612,7 +1742,7 @@ var require_machine_register = __commonJS({
     };
     var RETIRED_DETAIL_KEYS = /* @__PURE__ */ new Set(["pi", "p2pTunnel"]);
     function parseRemoteDevCapabilityStatus(value2) {
-      if (!isRecord3(value2))
+      if (!isRecord2(value2))
         throw new Error("remoteDev \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
       for (const key of Object.keys(value2)) {
@@ -1635,7 +1765,7 @@ var require_machine_register = __commonJS({
       };
     }
     function parseAcpCapabilityStatus(value2) {
-      if (!isRecord3(value2))
+      if (!isRecord2(value2))
         throw new Error("acp \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
       for (const key of Object.keys(value2)) {
@@ -1657,7 +1787,7 @@ var require_machine_register = __commonJS({
         ...value2.code !== void 0 ? { code: value2.code } : {}
       };
     }
-    function isRecord3(value2) {
+    function isRecord2(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function requireString(value2, field, maxLength) {
@@ -1667,7 +1797,7 @@ var require_machine_register = __commonJS({
       return value2;
     }
     function parseMachineInstallation(value2) {
-      if (!isRecord3(value2) || Object.keys(value2).length !== 1) {
+      if (!isRecord2(value2) || Object.keys(value2).length !== 1) {
         throw new Error("installation \u5FC5\u987B\u4E3A\u4EC5\u542B mode \u7684\u5BF9\u8C61");
       }
       const valid = [
@@ -1681,7 +1811,7 @@ var require_machine_register = __commonJS({
       return { mode: value2.mode };
     }
     function parsePrivilegedCapabilityStatus(value2) {
-      if (!isRecord3(value2) || Object.keys(value2).length !== 4) {
+      if (!isRecord2(value2) || Object.keys(value2).length !== 4) {
         throw new Error("privileged \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B available/mode/nonInteractive/runAsUser");
       }
       const { available, mode, nonInteractive, runAsUser } = value2;
@@ -1737,7 +1867,7 @@ var require_machine_register = __commonJS({
       return { compliant: true, reason: null };
     }
     function parseMachineRegister(value2) {
-      if (!isRecord3(value2))
+      if (!isRecord2(value2))
         throw new Error("register \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const clientId = requireString(value2.clientId, "clientId", MAX_CLIENT_ID);
       const hostname = requireString(value2.hostname, "hostname", MAX_HOSTNAME);
@@ -1763,7 +1893,7 @@ var require_machine_register = __commonJS({
       };
       if (value2.capabilityDetails !== void 0) {
         const details = value2.capabilityDetails;
-        if (!isRecord3(details))
+        if (!isRecord2(details))
           throw new Error("capabilityDetails \u5FC5\u987B\u4E3A\u5BF9\u8C61");
         const known = ["terminal", "frp", "privileged", "gitSsh", "acp", "remoteDev"];
         for (const key of Object.keys(details)) {
@@ -1797,7 +1927,33 @@ var require_machine_register = __commonJS({
       if (value2.installation !== void 0) {
         result.installation = parseMachineInstallation(value2.installation);
       }
+      if (value2.remoteDevSessions !== void 0) {
+        result.remoteDevSessions = parseRemoteDevSessionReports(value2.remoteDevSessions);
+      }
       return result;
+    }
+    var MAX_REMOTE_DEV_SESSION_REPORTS = 64;
+    function parseRemoteDevSessionReports(value2) {
+      if (!Array.isArray(value2)) {
+        throw new Error("remoteDevSessions \u5FC5\u987B\u4E3A\u6570\u7EC4");
+      }
+      if (value2.length > MAX_REMOTE_DEV_SESSION_REPORTS) {
+        throw new Error(`remoteDevSessions \u8D85\u8FC7 ${MAX_REMOTE_DEV_SESSION_REPORTS} \u9879`);
+      }
+      return value2.map((item, index) => {
+        if (!isRecord2(item)) {
+          throw new Error(`remoteDevSessions[${index}] \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+        }
+        for (const key of Object.keys(item)) {
+          if (key !== "sessionId" && key !== "generationId") {
+            throw new Error(`remoteDevSessions[${index}] \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+          }
+        }
+        return {
+          sessionId: requireString(item.sessionId, `remoteDevSessions[${index}].sessionId`, 128),
+          generationId: requireString(item.generationId, `remoteDevSessions[${index}].generationId`, 128)
+        };
+      });
     }
   }
 });
@@ -1852,7 +2008,7 @@ var require_feature = __commonJS({
       "INVALID_FEATURE_STATUS_TRANSITION",
       "FEATURE_CLIENT_UNKNOWN"
     ];
-    function isRecord3(value2) {
+    function isRecord2(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function rejectUnknown(value2, allowed, field) {
@@ -1912,7 +2068,7 @@ var require_feature = __commonJS({
       return url2;
     }
     function parseFeatureInvocation(value2, field = "invoke") {
-      if (!isRecord3(value2)) {
+      if (!isRecord2(value2)) {
         throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
       }
       if (value2.kind === "command") {
@@ -1952,7 +2108,7 @@ var require_feature = __commonJS({
       const seen = /* @__PURE__ */ new Set();
       return value2.map((raw, index) => {
         const field = `inputs[${index}]`;
-        if (!isRecord3(raw)) {
+        if (!isRecord2(raw)) {
           throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
         }
         rejectUnknown(raw, ["name", "type", "required", "description", "example", "options"], field);
@@ -1999,7 +2155,7 @@ var require_feature = __commonJS({
       });
     }
     function parseFeatureVerificationReport(value2) {
-      if (!isRecord3(value2)) {
+      if (!isRecord2(value2)) {
         throw new FeatureProtocolError("verification \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       rejectUnknown(value2, ["ok", "durationMs", "evidence", "via"], "verification");
@@ -2029,7 +2185,7 @@ var require_feature = __commonJS({
       return report;
     }
     function parseFeatureCreateInput(value2) {
-      if (!isRecord3(value2)) {
+      if (!isRecord2(value2)) {
         throw new FeatureProtocolError("\u529F\u80FD\u6761\u76EE\u5FC5\u987B\u662F\u5BF9\u8C61");
       }
       rejectUnknown(value2, [
@@ -2072,7 +2228,7 @@ var require_feature = __commonJS({
       return input;
     }
     function parseFeatureUpdateInput(value2) {
-      if (!isRecord3(value2)) {
+      if (!isRecord2(value2)) {
         throw new FeatureProtocolError("\u66F4\u65B0\u8BF7\u6C42\u5FC5\u987B\u662F\u5BF9\u8C61");
       }
       if (Object.keys(value2).length === 0) {
@@ -2231,7 +2387,7 @@ var require_a2a = __commonJS({
       }
     };
     exports2.A2aProtocolError = A2aProtocolError;
-    function toA2aTask(info) {
+    function toA2aTask(info, history) {
       return {
         id: info.id,
         contextId: info.contextId,
@@ -2240,6 +2396,7 @@ var require_a2a = __commonJS({
           timestamp: info.updatedAt
         },
         artifacts: info.artifacts,
+        ...history && history.length > 0 ? { history } : {},
         metadata: {
           vcpdeck: {
             agentId: info.agentId,
@@ -2253,11 +2410,11 @@ var require_a2a = __commonJS({
         }
       };
     }
-    function isRecord3(value2) {
+    function isRecord2(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function assertRecord(value2, what) {
-      if (!isRecord3(value2))
+      if (!isRecord2(value2))
         throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(value2, allowed, what) {
@@ -2666,11 +2823,11 @@ var require_acp = __commonJS({
       }
     };
     exports2.AcpProtocolError = AcpProtocolError;
-    function isRecord3(value2) {
+    function isRecord2(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function assertRecord(value2, what) {
-      if (!isRecord3(value2))
+      if (!isRecord2(value2))
         throw new AcpProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(value2, allowed, what) {
@@ -3064,11 +3221,11 @@ var require_task_client = __commonJS({
       }
     };
     exports2.TaskClientProtocolError = TaskClientProtocolError;
-    function isRecord3(value2) {
+    function isRecord2(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function assertRecord(value2, what) {
-      if (!isRecord3(value2))
+      if (!isRecord2(value2))
         throw new TaskClientProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(value2, allowed, what) {
@@ -3229,538 +3386,6 @@ var require_task_client = __commonJS({
   }
 });
 
-// ../shared/dist/remote-dev.js
-var require_remote_dev = __commonJS({
-  "../shared/dist/remote-dev.js"(exports2) {
-    "use strict";
-    Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.RemoteDevProtocolError = exports2.RDS_LIMITS = exports2.REMOTE_DEV_PORT_PROTOCOLS = exports2.REMOTE_DEV_PORT_STATUSES = exports2.REMOTE_DEV_ATTACHMENT_MODES = exports2.REMOTE_DEV_AGENT_STATES = exports2.REMOTE_DEV_STATES = void 0;
-    exports2.parseRemoteDevSessionCreateRequest = parseRemoteDevSessionCreateRequest;
-    exports2.parseRemoteDevPortCreateRequest = parseRemoteDevPortCreateRequest;
-    exports2.parseRemoteDevBrowserAttach = parseRemoteDevBrowserAttach;
-    exports2.parseRemoteDevBrowserPrompt = parseRemoteDevBrowserPrompt;
-    exports2.parseRemoteDevBrowserCancel = parseRemoteDevBrowserCancel;
-    exports2.parseRemoteDevBrowserDetach = parseRemoteDevBrowserDetach;
-    exports2.parseRemoteDevBrowserPermission = parseRemoteDevBrowserPermission;
-    exports2.parseRemoteDevBrowserResync = parseRemoteDevBrowserResync;
-    exports2.parseRemoteDevBrowserPortOpen = parseRemoteDevBrowserPortOpen;
-    exports2.parseRemoteDevBrowserPortClose = parseRemoteDevBrowserPortClose;
-    exports2.parseRemoteDevClientCommand = parseRemoteDevClientCommand;
-    exports2.parseRemoteDevCommandResult = parseRemoteDevCommandResult;
-    exports2.parseRemoteDevClientEvent = parseRemoteDevClientEvent;
-    var acp_js_1 = require_acp();
-    exports2.REMOTE_DEV_STATES = [
-      "starting",
-      "active",
-      "detached",
-      "disconnected",
-      "interrupted",
-      "closing",
-      "closed",
-      "failed"
-    ];
-    exports2.REMOTE_DEV_AGENT_STATES = [
-      "starting",
-      "ready",
-      "busy",
-      "idle",
-      "exited",
-      "failed"
-    ];
-    exports2.REMOTE_DEV_ATTACHMENT_MODES = ["operator", "viewer"];
-    exports2.REMOTE_DEV_PORT_STATUSES = [
-      "opening",
-      "open",
-      "failed",
-      "closing",
-      "closed"
-    ];
-    exports2.REMOTE_DEV_PORT_PROTOCOLS = ["tcp"];
-    exports2.RDS_LIMITS = {
-      maxSessionIdBytes: 128,
-      maxLabelBytes: 80,
-      maxWorkspaceBytes: 2048,
-      maxPromptBytes: 256 * 1024,
-      maxPortsPerSession: 8,
-      minPort: 1024,
-      maxPort: 65535,
-      maxFrameBytes: 64 * 1024,
-      maxReconnectTokenBytes: 512
-    };
-    var RemoteDevProtocolError = class extends Error {
-      code = "RDS_PROTOCOL_INVALID";
-      constructor(message) {
-        super(message);
-        this.name = "RemoteDevProtocolError";
-      }
-    };
-    exports2.RemoteDevProtocolError = RemoteDevProtocolError;
-    function isRecord3(value2) {
-      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
-    }
-    var textEncoder = new TextEncoder();
-    function byteLength2(value2) {
-      return textEncoder.encode(value2).length;
-    }
-    function assertRecord(value2, what) {
-      if (!isRecord3(value2))
-        throw new RemoteDevProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
-    }
-    function assertKeys(value2, allowed, what) {
-      const set = new Set(allowed);
-      for (const key of Object.keys(value2)) {
-        if (!set.has(key)) {
-          throw new RemoteDevProtocolError(`${what} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
-        }
-      }
-    }
-    function assertString(value2, what, maxBytes, allowEmpty = false) {
-      if (typeof value2 !== "string") {
-        throw new RemoteDevProtocolError(`${what} \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
-      }
-      if (!allowEmpty && value2.length === 0) {
-        throw new RemoteDevProtocolError(`${what} \u4E0D\u80FD\u4E3A\u7A7A`);
-      }
-      if (byteLength2(value2) > maxBytes) {
-        throw new RemoteDevProtocolError(`${what} \u8D85\u8FC7 ${maxBytes} \u5B57\u8282`);
-      }
-    }
-    function optionalString(value2, what, maxBytes) {
-      if (value2 === void 0)
-        return void 0;
-      assertString(value2, what, maxBytes);
-      return value2;
-    }
-    function assertPort(value2, what) {
-      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < exports2.RDS_LIMITS.minPort || value2 > exports2.RDS_LIMITS.maxPort) {
-        throw new RemoteDevProtocolError(`${what} \u5FC5\u987B\u662F ${exports2.RDS_LIMITS.minPort}-${exports2.RDS_LIMITS.maxPort} \u7684\u6574\u6570`);
-      }
-    }
-    function parseRemoteDevSessionCreateRequest(value2) {
-      assertRecord(value2, "remote-dev create");
-      assertKeys(value2, ["clientId", "agentPlacementId", "workspaceRoot", "label"], "remote-dev create");
-      assertString(value2.clientId, "clientId", 128);
-      assertString(value2.agentPlacementId, "agentPlacementId", 128);
-      assertString(value2.workspaceRoot, "workspaceRoot", exports2.RDS_LIMITS.maxWorkspaceBytes);
-      const label = optionalString(value2.label, "label", exports2.RDS_LIMITS.maxLabelBytes);
-      return {
-        clientId: value2.clientId,
-        agentPlacementId: value2.agentPlacementId,
-        workspaceRoot: value2.workspaceRoot,
-        ...label ? { label } : {}
-      };
-    }
-    function parseRemoteDevPortCreateRequest(value2) {
-      assertRecord(value2, "remote-dev port create");
-      assertKeys(value2, ["remotePort", "label"], "remote-dev port create");
-      assertPort(value2.remotePort, "remotePort");
-      const label = optionalString(value2.label, "label", exports2.RDS_LIMITS.maxLabelBytes);
-      return {
-        remotePort: value2.remotePort,
-        ...label ? { label } : {}
-      };
-    }
-    function parseRemoteDevBrowserAttach(value2) {
-      assertRecord(value2, "rds:attach");
-      assertKeys(value2, ["sessionId", "reconnectToken"], "rds:attach");
-      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      const reconnectToken = optionalString(value2.reconnectToken, "reconnectToken", exports2.RDS_LIMITS.maxReconnectTokenBytes);
-      return {
-        sessionId: value2.sessionId,
-        ...reconnectToken ? { reconnectToken } : {}
-      };
-    }
-    function parseRemoteDevBrowserPrompt(value2) {
-      assertRecord(value2, "rds:prompt");
-      assertKeys(value2, ["sessionId", "text"], "rds:prompt");
-      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      assertString(value2.text, "text", exports2.RDS_LIMITS.maxPromptBytes);
-      return { sessionId: value2.sessionId, text: value2.text };
-    }
-    function parseRemoteDevBrowserCancel(value2) {
-      assertRecord(value2, "rds:cancel");
-      assertKeys(value2, ["sessionId"], "rds:cancel");
-      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      return { sessionId: value2.sessionId };
-    }
-    function parseRemoteDevBrowserDetach(value2) {
-      assertRecord(value2, "rds:detach");
-      assertKeys(value2, ["sessionId"], "rds:detach");
-      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      return { sessionId: value2.sessionId };
-    }
-    function parseRemoteDevBrowserPermission(value2) {
-      assertRecord(value2, "rds:permission");
-      assertKeys(value2, ["sessionId", "requestId", "optionId"], "rds:permission");
-      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      assertString(value2.requestId, "requestId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      const optionId = optionalString(value2.optionId, "optionId", 128);
-      return {
-        sessionId: value2.sessionId,
-        requestId: value2.requestId,
-        ...optionId ? { optionId } : {}
-      };
-    }
-    function parseRemoteDevBrowserResync(value2) {
-      assertRecord(value2, "rds:resync");
-      assertKeys(value2, ["sessionId", "sinceSeq"], "rds:resync");
-      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      if (value2.sinceSeq !== void 0) {
-        if (typeof value2.sinceSeq !== "number" || !Number.isInteger(value2.sinceSeq) || value2.sinceSeq < 0) {
-          throw new RemoteDevProtocolError("sinceSeq \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
-        }
-      }
-      return {
-        sessionId: value2.sessionId,
-        ...value2.sinceSeq !== void 0 ? { sinceSeq: value2.sinceSeq } : {}
-      };
-    }
-    function parseRemoteDevBrowserPortOpen(value2) {
-      assertRecord(value2, "rds:port.open");
-      assertKeys(value2, ["sessionId", "remotePort", "label"], "rds:port.open");
-      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      assertPort(value2.remotePort, "remotePort");
-      const label = optionalString(value2.label, "label", exports2.RDS_LIMITS.maxLabelBytes);
-      return {
-        sessionId: value2.sessionId,
-        remotePort: value2.remotePort,
-        ...label ? { label } : {}
-      };
-    }
-    function parseRemoteDevBrowserPortClose(value2) {
-      assertRecord(value2, "rds:port.close");
-      assertKeys(value2, ["sessionId", "portId"], "rds:port.close");
-      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      assertString(value2.portId, "portId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      return { sessionId: value2.sessionId, portId: value2.portId };
-    }
-    function parseRemoteDevClientCommand(value2) {
-      assertRecord(value2, "rds:command");
-      assertString(value2.requestId, "requestId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      if (typeof value2.action !== "string") {
-        throw new RemoteDevProtocolError("rds:command.action \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
-      }
-      if (value2.action === "session.create") {
-        assertKeys(value2, [
-          "action",
-          "requestId",
-          "sessionId",
-          "agentPlacementId",
-          "workspaceRoot",
-          "workspaceRoots",
-          "command",
-          "args",
-          "cwd"
-        ], "rds:command.session.create");
-        assertString(value2.agentPlacementId, "agentPlacementId", 128);
-        assertString(value2.workspaceRoot, "workspaceRoot", exports2.RDS_LIMITS.maxWorkspaceBytes);
-        assertString(value2.command, "command", 1024);
-        assertString(value2.cwd, "cwd", exports2.RDS_LIMITS.maxWorkspaceBytes);
-        const args = parseStringArray(value2.args, "args", 64, 1024);
-        const workspaceRoots = parseStringArray(value2.workspaceRoots, "workspaceRoots", 32, exports2.RDS_LIMITS.maxWorkspaceBytes);
-        if (workspaceRoots.length === 0) {
-          throw new RemoteDevProtocolError("workspaceRoots \u4E0D\u80FD\u4E3A\u7A7A");
-        }
-        return {
-          action: "session.create",
-          requestId: value2.requestId,
-          sessionId: value2.sessionId,
-          agentPlacementId: value2.agentPlacementId,
-          workspaceRoot: value2.workspaceRoot,
-          workspaceRoots,
-          command: value2.command,
-          args,
-          cwd: value2.cwd
-        };
-      }
-      if (value2.action === "session.close") {
-        assertKeys(value2, ["action", "requestId", "sessionId", "reason"], "rds:command.session.close");
-        const reason = optionalString(value2.reason, "reason", 128);
-        return {
-          action: "session.close",
-          requestId: value2.requestId,
-          sessionId: value2.sessionId,
-          ...reason ? { reason } : {}
-        };
-      }
-      if (value2.action === "agent.prompt") {
-        assertKeys(value2, ["action", "requestId", "sessionId", "text"], "rds:command.agent.prompt");
-        assertString(value2.text, "text", exports2.RDS_LIMITS.maxPromptBytes);
-        return {
-          action: "agent.prompt",
-          requestId: value2.requestId,
-          sessionId: value2.sessionId,
-          text: value2.text
-        };
-      }
-      if (value2.action === "agent.cancel") {
-        assertKeys(value2, ["action", "requestId", "sessionId"], "rds:command.agent.cancel");
-        return {
-          action: "agent.cancel",
-          requestId: value2.requestId,
-          sessionId: value2.sessionId
-        };
-      }
-      if (value2.action === "agent.permission") {
-        assertKeys(value2, [
-          "action",
-          "requestId",
-          "sessionId",
-          "permissionRequestId",
-          "outcome"
-        ], "rds:command.agent.permission");
-        assertString(value2.permissionRequestId, "permissionRequestId", exports2.RDS_LIMITS.maxSessionIdBytes);
-        assertRecord(value2.outcome, "outcome");
-        if (value2.outcome.outcome === "selected") {
-          assertKeys(value2.outcome, ["outcome", "optionId"], "outcome");
-          assertString(value2.outcome.optionId, "optionId", 128);
-          return {
-            action: "agent.permission",
-            requestId: value2.requestId,
-            sessionId: value2.sessionId,
-            permissionRequestId: value2.permissionRequestId,
-            outcome: {
-              outcome: "selected",
-              optionId: value2.outcome.optionId
-            }
-          };
-        }
-        if (value2.outcome.outcome === "cancelled") {
-          assertKeys(value2.outcome, ["outcome"], "outcome");
-          return {
-            action: "agent.permission",
-            requestId: value2.requestId,
-            sessionId: value2.sessionId,
-            permissionRequestId: value2.permissionRequestId,
-            outcome: { outcome: "cancelled" }
-          };
-        }
-        throw new RemoteDevProtocolError("permission outcome \u975E\u6CD5");
-      }
-      throw new RemoteDevProtocolError(`\u672A\u77E5 RDS action ${value2.action}`);
-    }
-    function parseRemoteDevCommandResult(value2) {
-      assertRecord(value2, "rds:command-result");
-      assertKeys(value2, ["requestId", "ok", "sessionId", "generationId", "stopReason", "error"], "rds:command-result");
-      assertString(value2.requestId, "requestId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      if (typeof value2.ok !== "boolean") {
-        throw new RemoteDevProtocolError("ok \u5FC5\u987B\u662F boolean");
-      }
-      const sessionId = optionalString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      const generationId = optionalString(value2.generationId, "generationId", exports2.RDS_LIMITS.maxSessionIdBytes);
-      const stopReason = optionalString(value2.stopReason, "stopReason", 128);
-      let error;
-      if (value2.error !== void 0) {
-        assertRecord(value2.error, "error");
-        assertKeys(value2.error, ["code", "message"], "error");
-        assertString(value2.error.code, "error.code", 128);
-        assertString(value2.error.message, "error.message", 512);
-        error = { code: value2.error.code, message: value2.error.message };
-      }
-      return {
-        requestId: value2.requestId,
-        ok: value2.ok,
-        ...sessionId ? { sessionId } : {},
-        ...generationId ? { generationId } : {},
-        ...stopReason ? { stopReason } : {},
-        ...error ? { error } : {}
-      };
-    }
-    function parseRemoteDevClientEvent(value2) {
-      assertRecord(value2, "rds:event");
-      if (typeof value2.type !== "string") {
-        throw new RemoteDevProtocolError("rds:event.type \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
-      }
-      if (value2.type === "agent.event") {
-        assertKeys(value2, ["type", "sessionId", "generationId", "seq", "event"], "rds:event.agent.event");
-        assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-        assertString(value2.generationId, "generationId", 128);
-        if (typeof value2.seq !== "number" || !Number.isInteger(value2.seq) || value2.seq < 0) {
-          throw new RemoteDevProtocolError("seq \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570");
-        }
-        assertRecord(value2.event, "event");
-        let event;
-        try {
-          event = (0, acp_js_1.parseAcpAdapterEvent)(value2.event);
-        } catch (cause) {
-          throw new RemoteDevProtocolError(cause instanceof Error ? cause.message : "ACP event \u975E\u6CD5");
-        }
-        return {
-          type: "agent.event",
-          sessionId: value2.sessionId,
-          generationId: value2.generationId,
-          seq: value2.seq,
-          event
-        };
-      }
-      if (value2.type === "agent.status") {
-        assertKeys(value2, ["type", "sessionId", "generationId", "status"], "rds:event.agent.status");
-        assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-        assertString(value2.generationId, "generationId", 128);
-        if (typeof value2.status !== "string" || !exports2.REMOTE_DEV_AGENT_STATES.includes(value2.status)) {
-          throw new RemoteDevProtocolError("\u672A\u77E5 agent status");
-        }
-        return {
-          type: "agent.status",
-          sessionId: value2.sessionId,
-          generationId: value2.generationId,
-          status: value2.status
-        };
-      }
-      if (value2.type === "session.ended") {
-        assertKeys(value2, ["type", "sessionId", "generationId", "reason", "code"], "rds:event.session.ended");
-        assertString(value2.sessionId, "sessionId", exports2.RDS_LIMITS.maxSessionIdBytes);
-        assertString(value2.generationId, "generationId", 128);
-        if (value2.reason !== "closed" && value2.reason !== "exited" && value2.reason !== "error") {
-          throw new RemoteDevProtocolError("\u672A\u77E5 session ended reason");
-        }
-        const code = optionalString(value2.code, "code", 128);
-        return {
-          type: "session.ended",
-          sessionId: value2.sessionId,
-          generationId: value2.generationId,
-          reason: value2.reason,
-          ...code ? { code } : {}
-        };
-      }
-      throw new RemoteDevProtocolError(`\u672A\u77E5 rds:event.type ${value2.type}`);
-    }
-    function parseStringArray(value2, what, maxItems, maxBytes) {
-      if (!Array.isArray(value2)) {
-        throw new RemoteDevProtocolError(`${what} \u5FC5\u987B\u662F\u6570\u7EC4`);
-      }
-      if (value2.length > maxItems) {
-        throw new RemoteDevProtocolError(`${what} \u8D85\u8FC7 ${maxItems} \u9879`);
-      }
-      return value2.map((item, index) => {
-        assertString(item, `${what}[${index}]`, maxBytes);
-        return item;
-      });
-    }
-  }
-});
-
-// ../shared/dist/remote-dev-tunnel.js
-var require_remote_dev_tunnel = __commonJS({
-  "../shared/dist/remote-dev-tunnel.js"(exports2) {
-    "use strict";
-    Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.RdsFrameDecoder = exports2.RDS_FRAME_TYPES = exports2.RDS_FRAME_VERSION = void 0;
-    exports2.encodeRdsFrame = encodeRdsFrame2;
-    exports2.encodeRdsOpenPayload = encodeRdsOpenPayload2;
-    exports2.decodeRdsOpenPayload = decodeRdsOpenPayload;
-    var remote_dev_js_1 = require_remote_dev();
-    exports2.RDS_FRAME_VERSION = 1;
-    exports2.RDS_FRAME_TYPES = [
-      "OPEN",
-      "DATA",
-      "CLOSE",
-      "ERROR",
-      "HEARTBEAT"
-    ];
-    var FRAME_TYPE_CODES = {
-      OPEN: 1,
-      DATA: 2,
-      CLOSE: 3,
-      ERROR: 4,
-      HEARTBEAT: 5
-    };
-    var FRAME_CODE_TYPES = new Map(Object.entries(FRAME_TYPE_CODES).map(([type, code]) => [
-      code,
-      type
-    ]));
-    var HEADER_BYTES = 10;
-    var textEncoder = new TextEncoder();
-    var textDecoder = new TextDecoder();
-    function assertFrameType(value2) {
-      if (!exports2.RDS_FRAME_TYPES.includes(value2)) {
-        throw new remote_dev_js_1.RemoteDevProtocolError(`\u672A\u77E5 RDS \u5E27\u7C7B\u578B ${value2}`);
-      }
-      return value2;
-    }
-    function encodeRdsFrame2(frame) {
-      const type = assertFrameType(frame.type);
-      if (typeof frame.streamId !== "number" || !Number.isInteger(frame.streamId) || frame.streamId < 0 || frame.streamId > 4294967295) {
-        throw new remote_dev_js_1.RemoteDevProtocolError("streamId \u5FC5\u987B\u662F uint32");
-      }
-      const payload = frame.payload ?? new Uint8Array(0);
-      if (payload.byteLength > remote_dev_js_1.RDS_LIMITS.maxFrameBytes) {
-        throw new remote_dev_js_1.RemoteDevProtocolError(`RDS payload \u8D85\u8FC7 ${remote_dev_js_1.RDS_LIMITS.maxFrameBytes} \u5B57\u8282`);
-      }
-      const result = new Uint8Array(HEADER_BYTES + payload.byteLength);
-      const view = new DataView(result.buffer);
-      view.setUint8(0, exports2.RDS_FRAME_VERSION);
-      view.setUint8(1, FRAME_TYPE_CODES[type]);
-      view.setUint32(2, frame.streamId, false);
-      view.setUint32(6, payload.byteLength, false);
-      result.set(payload, HEADER_BYTES);
-      return result;
-    }
-    var RdsFrameDecoder2 = class {
-      buffer = new Uint8Array(0);
-      push(chunk) {
-        if (chunk.byteLength === 0)
-          return [];
-        const merged = new Uint8Array(this.buffer.byteLength + chunk.byteLength);
-        merged.set(this.buffer, 0);
-        merged.set(chunk, this.buffer.byteLength);
-        this.buffer = merged;
-        const frames = [];
-        while (this.buffer.byteLength >= HEADER_BYTES) {
-          const view = new DataView(this.buffer.buffer, this.buffer.byteOffset, this.buffer.byteLength);
-          if (view.getUint8(0) !== exports2.RDS_FRAME_VERSION) {
-            throw new remote_dev_js_1.RemoteDevProtocolError("RDS \u5E27\u7248\u672C\u4E0D\u5339\u914D");
-          }
-          const type = FRAME_CODE_TYPES.get(view.getUint8(1));
-          if (!type)
-            throw new remote_dev_js_1.RemoteDevProtocolError("\u672A\u77E5 RDS \u5E27\u7C7B\u578B");
-          const streamId = view.getUint32(2, false);
-          const length = view.getUint32(6, false);
-          if (length > remote_dev_js_1.RDS_LIMITS.maxFrameBytes) {
-            throw new remote_dev_js_1.RemoteDevProtocolError(`RDS payload \u8D85\u8FC7 ${remote_dev_js_1.RDS_LIMITS.maxFrameBytes} \u5B57\u8282`);
-          }
-          if (this.buffer.byteLength < HEADER_BYTES + length)
-            break;
-          const payload = this.buffer.slice(HEADER_BYTES, HEADER_BYTES + length);
-          frames.push({ type, streamId, payload });
-          this.buffer = this.buffer.slice(HEADER_BYTES + length);
-        }
-        return frames;
-      }
-    };
-    exports2.RdsFrameDecoder = RdsFrameDecoder2;
-    function encodeRdsOpenPayload2(payload) {
-      assertOpenPort(payload.remotePort);
-      return textEncoder.encode(JSON.stringify({ remotePort: payload.remotePort }));
-    }
-    function decodeRdsOpenPayload(payload) {
-      let parsed;
-      try {
-        parsed = JSON.parse(textDecoder.decode(payload));
-      } catch {
-        throw new remote_dev_js_1.RemoteDevProtocolError("RDS OPEN payload \u4E0D\u662F JSON");
-      }
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        throw new remote_dev_js_1.RemoteDevProtocolError("RDS OPEN payload \u5FC5\u987B\u662F\u5BF9\u8C61");
-      }
-      const record = parsed;
-      for (const key of Object.keys(record)) {
-        if (key !== "remotePort") {
-          throw new remote_dev_js_1.RemoteDevProtocolError(`RDS OPEN \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
-        }
-      }
-      assertOpenPort(record.remotePort);
-      return { remotePort: record.remotePort };
-    }
-    function assertOpenPort(value2) {
-      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < remote_dev_js_1.RDS_LIMITS.minPort || value2 > remote_dev_js_1.RDS_LIMITS.maxPort) {
-        throw new remote_dev_js_1.RemoteDevProtocolError(`remotePort \u5FC5\u987B\u662F ${remote_dev_js_1.RDS_LIMITS.minPort}-${remote_dev_js_1.RDS_LIMITS.maxPort} \u7684\u6574\u6570`);
-      }
-    }
-  }
-});
-
 // ../shared/dist/index.js
 var require_dist = __commonJS({
   "../shared/dist/index.js"(exports2) {
@@ -3782,8 +3407,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = void 0;
+    exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientDshWebUrl = exports2.DSH_WEB_URL_MAX_LENGTH = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -3800,6 +3425,14 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parseClientAnnotationsInput", { enumerable: true, get: function() {
       return client_annotations_js_1.parseClientAnnotationsInput;
     } });
+    var client_dsh_web_js_1 = require_client_dsh_web();
+    Object.defineProperty(exports2, "DSH_WEB_URL_MAX_LENGTH", { enumerable: true, get: function() {
+      return client_dsh_web_js_1.DSH_WEB_URL_MAX_LENGTH;
+    } });
+    Object.defineProperty(exports2, "parseClientDshWebUrl", { enumerable: true, get: function() {
+      return client_dsh_web_js_1.parseClientDshWebUrl;
+    } });
+    __exportStar(require_dsh_web(), exports2);
     var client_installer_js_1 = require_client_installer();
     Object.defineProperty(exports2, "ClientInstallerErrorCode", { enumerable: true, get: function() {
       return client_installer_js_1.ClientInstallerErrorCode;
@@ -3937,26 +3570,8 @@ var require_dist = __commonJS({
       TASK_COMMAND: "task:command",
       TASK_COMMAND_RESULT: "task:command-result",
       TASK_EVENT: "task:event",
-      RDS_COMMAND: "rds:command",
-      RDS_COMMAND_RESULT: "rds:command-result",
-      RDS_EVENT: "rds:event",
-      RDS_ATTACH: "rds:attach",
-      RDS_DETACH: "rds:detach",
-      RDS_PROMPT: "rds:prompt",
-      RDS_CANCEL: "rds:cancel",
-      RDS_PERMISSION: "rds:permission",
-      RDS_PORT_OPEN: "rds:port.open",
-      RDS_PORT_CLOSE: "rds:port.close",
-      RDS_RESYNC: "rds:resync",
-      RDS_STATE: "rds:state",
-      RDS_AGENT_EVENT: "rds:agent:event",
-      RDS_PORT_STATE: "rds:port:state",
-      RDS_ERROR: "rds:error",
-      RDS_CLOSED: "rds:closed",
-      RDS_TUNNEL_HELLO: "rds:tunnel:hello",
-      RDS_STREAM_HELLO: "rds:stream:hello",
-      RDS_STREAM_FRAME: "rds:stream:frame",
-      RDS_STREAM_CLOSE: "rds:stream:close"
+      DSH_WEB_COMMAND: "dshweb:command",
+      DSH_WEB_RESULT: "dshweb:result"
     };
     var JobType;
     (function(JobType2) {
@@ -4217,8 +3832,6 @@ var require_dist = __commonJS({
     __exportStar(require_a2a(), exports2);
     __exportStar(require_acp(), exports2);
     __exportStar(require_task_client(), exports2);
-    __exportStar(require_remote_dev(), exports2);
-    __exportStar(require_remote_dev_tunnel(), exports2);
   }
 });
 
@@ -4288,7 +3901,15 @@ function createClientsApi(client) {
     /** 修改客户端别名（全局唯一；重名返回 409）。 */
     rename: (clientId, name, signal) => client.request("PATCH", `/api/clients/${encodeURIComponent(clientId)}/name`, { name }, signal),
     /** 全量替换操作者注解（ADR-0055）；空输入清除。 */
-    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal)
+    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal),
+    /** 登记/清除远程 DSH WebUI 地址（ADR-0059）；`null` 清除。 */
+    setDshWebUrl: (clientId, url2, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/dsh-web`, { url: url2 }, signal),
+    /** 一键启动：代起 dsh web 并自动建 FRP 映射（ADR-0059 修订）。 */
+    startDshWeb: (clientId, signal) => client.request("POST", `/api/clients/${encodeURIComponent(clientId)}/dsh-web/start`, void 0, signal),
+    /** 一键停止：停进程、删映射、清地址；外部托管时等价于解除登记。 */
+    stopDshWeb: (clientId, signal) => client.request("POST", `/api/clients/${encodeURIComponent(clientId)}/dsh-web/stop`, void 0, signal),
+    /** 解除外部托管的登记：只清 VCPDeck 侧入口，不动目标机进程（ADR-0059 决策 12）。 */
+    detachDshWeb: (clientId, signal) => client.request("DELETE", `/api/clients/${encodeURIComponent(clientId)}/dsh-web`, void 0, signal)
   };
 }
 var init_clients = __esm({
@@ -4768,40 +4389,6 @@ var init_agents = __esm({
   }
 });
 
-// ../sdk/dist/remote-dev.js
-function createRemoteDevApi(client) {
-  return {
-    create: (input, signal) => client.request("POST", "/api/remote-dev/sessions", input, signal),
-    list: (options = {}, signal) => {
-      const search = new URLSearchParams();
-      if (options.clientId)
-        search.set("clientId", options.clientId);
-      if (options.state)
-        search.set("state", options.state);
-      if (options.page !== void 0)
-        search.set("page", String(options.page));
-      if (options.pageSize !== void 0)
-        search.set("pageSize", String(options.pageSize));
-      const query = search.toString();
-      return client.request("GET", `/api/remote-dev/sessions${query ? `?${query}` : ""}`, void 0, signal);
-    },
-    get: (id, signal) => client.request("GET", `/api/remote-dev/sessions/${encodeURIComponent(id)}`, void 0, signal),
-    close: (id, signal) => client.request("DELETE", `/api/remote-dev/sessions/${encodeURIComponent(id)}`, void 0, signal),
-    issueForwardToken: (sessionId, portId, signal) => client.request("POST", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports/${encodeURIComponent(portId)}/forward-token`, void 0, signal),
-    ports: {
-      list: (sessionId, signal) => client.request("GET", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports`, void 0, signal),
-      open: (sessionId, input, signal) => client.request("POST", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports`, input, signal),
-      close: (sessionId, portId, signal) => client.request("DELETE", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports/${encodeURIComponent(portId)}`, void 0, signal),
-      issueForwardToken: (sessionId, portId, signal) => client.request("POST", `/api/remote-dev/sessions/${encodeURIComponent(sessionId)}/ports/${encodeURIComponent(portId)}/forward-token`, void 0, signal)
-    }
-  };
-}
-var init_remote_dev = __esm({
-  "../sdk/dist/remote-dev.js"() {
-    "use strict";
-  }
-});
-
 // ../sdk/dist/client.js
 function parseJson(text) {
   try {
@@ -4832,7 +4419,6 @@ var init_client = __esm({
     init_tasks();
     init_terminal();
     init_agents();
-    init_remote_dev();
     VcpDeckApiError = class extends Error {
       status;
       code;
@@ -4870,7 +4456,6 @@ var init_client = __esm({
       /** Agent placement 只读投影。 */
       agents;
       /** Remote Dev Session（ADR-0058）。 */
-      remoteDev;
       health = {
         get: (signal) => this.request("GET", "/api/health", void 0, signal)
       };
@@ -4894,7 +4479,6 @@ var init_client = __esm({
         this.terminals = createTerminalsApi(this);
         this.tasks = createTasksApi(this);
         this.agents = createAgentsApi(this);
-        this.remoteDev = createRemoteDevApi(this);
       }
       /** 发起 JSON REST 请求并归一化失败响应。 */
       async request(method, path, body, signal) {
@@ -4961,7 +4545,6 @@ var init_dist = __esm({
     init_storage_shares();
     init_tasks();
     init_agents();
-    init_remote_dev();
     init_terminal();
   }
 });
@@ -15816,209 +15399,6 @@ var init_agents_command = __esm({
   }
 });
 
-// dist/forward-command.js
-var forward_command_exports = {};
-__export(forward_command_exports, {
-  createForwarder: () => createForwarder,
-  forwardUsage: () => forwardUsage,
-  runForwardCommand: () => runForwardCommand
-});
-function createForwarder(options) {
-  const socket = (options.connectSocket ?? defaultSocket)(`${options.serverBase.replace(/\/$/, "")}/remote-dev/forward`, {
-    token: options.token,
-    sessionId: options.sessionId,
-    portId: options.portId
-  });
-  const streams = /* @__PURE__ */ new Map();
-  let nextStreamId = 1;
-  let server = null;
-  let closed = false;
-  const shutdown = () => {
-    if (closed)
-      return;
-    closed = true;
-    for (const stream of streams.values())
-      stream.socket.destroy();
-    streams.clear();
-    server?.close();
-  };
-  const send = (frame) => {
-    socket.emit(import_shared8.Events.RDS_STREAM_FRAME, {
-      sessionId: options.sessionId,
-      data: (0, import_shared8.encodeRdsFrame)(frame)
-    });
-  };
-  socket.on(import_shared8.Events.RDS_STREAM_FRAME, (payload) => {
-    if (!isRecord2(payload))
-      return;
-    const data = payload.data;
-    if (!(data instanceof Uint8Array || data instanceof ArrayBuffer))
-      return;
-    let frames;
-    try {
-      frames = new import_shared8.RdsFrameDecoder().push(new Uint8Array(data));
-    } catch {
-      return;
-    }
-    for (const frame of frames) {
-      const stream = streams.get(frame.streamId);
-      if (!stream)
-        continue;
-      if (frame.type === "DATA") {
-        stream.socket.write(frame.payload ?? new Uint8Array(0));
-      }
-      if (frame.type === "CLOSE" || frame.type === "ERROR") {
-        stream.socket.end();
-        streams.delete(frame.streamId);
-      }
-    }
-  });
-  socket.on("disconnect", () => {
-    shutdown();
-  });
-  return {
-    listen() {
-      server = (0, import_node_net.createServer)((local) => {
-        const streamId = nextStreamId++;
-        const stream = { socket: local };
-        streams.set(streamId, stream);
-        socket.emit(import_shared8.Events.RDS_STREAM_HELLO, {
-          sessionId: options.sessionId,
-          streamId
-        });
-        send({
-          type: "OPEN",
-          streamId,
-          payload: (0, import_shared8.encodeRdsOpenPayload)({ remotePort: options.remotePort })
-        });
-        local.on("data", (chunk) => {
-          send({
-            type: "DATA",
-            streamId,
-            payload: new Uint8Array(chunk)
-          });
-        });
-        local.on("close", () => {
-          if (!streams.has(streamId))
-            return;
-          streams.delete(streamId);
-          send({ type: "CLOSE", streamId });
-        });
-        local.on("error", () => {
-          if (!streams.has(streamId))
-            return;
-          streams.delete(streamId);
-          send({ type: "ERROR", streamId });
-        });
-      });
-      return new Promise((resolve2, reject) => {
-        server?.once("error", reject);
-        server?.listen(options.localPort ?? options.remotePort, "127.0.0.1", () => {
-          const address = server?.address();
-          if (!address || typeof address === "string") {
-            reject(new Error("forward listen failed"));
-            return;
-          }
-          resolve2({ address: address.address, port: address.port });
-        });
-      });
-    },
-    async close() {
-      closed = true;
-      for (const stream of streams.values())
-        stream.socket.destroy();
-      streams.clear();
-      await new Promise((resolve2) => {
-        if (!server || !server.listening)
-          return resolve2();
-        server.close(() => resolve2());
-      });
-      socket.disconnect();
-    }
-  };
-}
-function defaultSocket(url2, auth) {
-  return lookup(url2, {
-    auth,
-    transports: ["websocket"],
-    reconnection: false
-  });
-}
-function isRecord2(value2) {
-  return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
-}
-function forwardUsage() {
-  return [
-    "Forward \u547D\u4EE4:",
-    "  vcpdeck forward --session=<id> --remote-port=<1024-65535> [--local-port=<0-65535>] [--env=<name>]",
-    "  \u53EA\u76D1\u542C 127.0.0.1\uFF1BCtrl+C \u5173\u95ED\u76D1\u542C\u4E0E\u6240\u6709\u6D41\u3002"
-  ].join("\n");
-}
-async function runForwardCommand(argv, context = {}) {
-  const log = context.log ?? console.log;
-  const { options } = parseCommandArgs(argv, {
-    value: ["session", "remote-port", "local-port", "env", "environment"],
-    boolean: []
-  });
-  const sessionId = stringOption(options, "session");
-  const remotePort = Number(stringOption(options, "remote-port"));
-  if (!sessionId || !Number.isInteger(remotePort) || remotePort < 1024 || remotePort > 65535) {
-    throw new Error(forwardUsage());
-  }
-  const localPortRaw = stringOption(options, "local-port");
-  const localPort = localPortRaw === void 0 ? remotePort : Number(localPortRaw);
-  if (!Number.isInteger(localPort) || localPort < 0 || localPort > 65535) {
-    throw new Error(forwardUsage());
-  }
-  let client = context.sdk;
-  let serverBase = context.serverBase;
-  if (!client) {
-    const environment = await resolveEnvironment({
-      environment: envOverrideOf(argv),
-      paths: context.paths,
-      processEnv: context.processEnv
-    });
-    client = await createAuthenticatedClient(environment);
-    serverBase = environment.server;
-  }
-  if (!serverBase)
-    throw new Error("\u7F3A\u5C11 Server \u5730\u5740");
-  const ports = await client.remoteDev.ports.list(sessionId);
-  let port = ports.find((item) => item.remotePort === remotePort && item.status === "open");
-  if (!port) {
-    port = await client.remoteDev.ports.open(sessionId, { remotePort });
-  }
-  const token = await client.remoteDev.ports.issueForwardToken(sessionId, port.portId);
-  const forwarder = createForwarder({
-    serverBase,
-    token: token.token,
-    sessionId,
-    portId: port.portId,
-    remotePort,
-    ...localPort !== remotePort ? { localPort } : {}
-  });
-  const address = await forwarder.listen();
-  log(`forwarding 127.0.0.1:${address.port} -> ${sessionId} 127.0.0.1:${remotePort}`);
-  process.once("SIGINT", () => {
-    void forwarder.close().then(() => {
-      process.exitCode = 0;
-    });
-  });
-}
-var import_node_net, import_shared8;
-var init_forward_command = __esm({
-  "dist/forward-command.js"() {
-    "use strict";
-    import_node_net = require("node:net");
-    init_esm_debug3();
-    import_shared8 = __toESM(require_dist(), 1);
-    init_arguments();
-    init_authenticated_client();
-    init_environment();
-    init_features_command();
-  }
-});
-
 // dist/index.js
 var index_exports = {};
 __export(index_exports, {
@@ -16026,7 +15406,7 @@ __export(index_exports, {
   run: () => run
 });
 module.exports = __toCommonJS(index_exports);
-var import_shared9 = __toESM(require_dist(), 1);
+var import_shared8 = __toESM(require_dist(), 1);
 
 // dist/env-command.js
 init_authenticated_client();
@@ -17650,7 +17030,7 @@ async function run(argv, context = {}) {
   const [command, subcommand, ...rest] = argv;
   try {
     if (command === "version" || command === "--version" || command === "-v") {
-      log(import_shared9.VERSION);
+      log(import_shared8.VERSION);
       return 0;
     }
     if (command === "env") {
@@ -17701,17 +17081,6 @@ async function run(argv, context = {}) {
     if (command === "agents") {
       const { runAgentsCommand: runAgentsCommand2 } = await Promise.resolve().then(() => (init_agents_command(), agents_command_exports));
       await runAgentsCommand2(subcommand, rest, { log });
-      return 0;
-    }
-    if (command === "forward") {
-      const { runForwardCommand: runForwardCommand2, forwardUsage: forwardUsage2 } = await Promise.resolve().then(() => (init_forward_command(), forward_command_exports));
-      if (subcommand === "--help" || subcommand === "-h") {
-        log(forwardUsage2());
-        return 0;
-      }
-      await runForwardCommand2(subcommand ? [subcommand, ...rest] : rest, {
-        log
-      });
       return 0;
     }
     if (command === "release") {
@@ -17768,7 +17137,6 @@ function helpText() {
     "  vcpdeck agents list [--env=<name>] [--json]",
     "  vcpdeck agents create --client=<name|id> --agent=<slug> --command=<cmd> [--arg=<v>]... [--workspace-root=<dir>]...",
     "      [--name=<\u663E\u793A\u540D>] [--adapter=acp|cli] [--cwd=<dir>] [--skill=<s>]... [--disabled] [--env=<name>] [--json]",
-    "  vcpdeck forward --session=<id> --remote-port=<1024-65535> [--local-port=<0-65535>] [--env=<name>]",
     "",
     "Jobs:",
     "  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",

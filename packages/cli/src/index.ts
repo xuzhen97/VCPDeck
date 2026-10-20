@@ -86,19 +86,6 @@ export async function run(
 			await runAgentsCommand(subcommand, rest, { log });
 			return 0;
 		}
-		if (command === "forward") {
-			const { runForwardCommand, forwardUsage } = await import(
-				"./forward-command.js"
-			);
-			if (subcommand === "--help" || subcommand === "-h") {
-				log(forwardUsage());
-				return 0;
-			}
-			await runForwardCommand(subcommand ? [subcommand, ...rest] : rest, {
-				log,
-			});
-			return 0;
-		}
 		if (command === "release") {
 			await runReleaseCommand(subcommand, rest, { log });
 			return 0;
@@ -158,7 +145,6 @@ export function helpText(): string {
 		"  vcpdeck agents list [--env=<name>] [--json]",
 		"  vcpdeck agents create --client=<name|id> --agent=<slug> --command=<cmd> [--arg=<v>]... [--workspace-root=<dir>]...",
 		"      [--name=<显示名>] [--adapter=acp|cli] [--cwd=<dir>] [--skill=<s>]... [--disabled] [--env=<name>] [--json]",
-		"  vcpdeck forward --session=<id> --remote-port=<1024-65535> [--local-port=<0-65535>] [--env=<name>]",
 		"",
 		"Jobs:",
 		"  vcpdeck jobs list [--client=<name|id>] [--status=<status>] [--page=<n>] [--env=<name>] [--json]",

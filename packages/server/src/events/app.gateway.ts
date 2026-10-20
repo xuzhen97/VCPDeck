@@ -1,4 +1,4 @@
-import { Inject, Optional } from "@nestjs/common";
+import { Inject } from "@nestjs/common";
 import {
 	ConnectedSocket,
 	MessageBody,
@@ -9,29 +9,16 @@ import {
 import type { Server, Socket } from "socket.io";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { TerminalService } from "../terminal/terminal.service.js";
-import { RemoteDevService } from "../remote-dev/remote-dev.service.js";
-import { RemoteDevAttachmentService } from "../remote-dev/remote-dev-attachment.service.js";
-import { RemoteDevPortService } from "../remote-dev/remote-dev-port.service.js";
-import { RemoteDevForwardGateway } from "../remote-dev/remote-dev-forward.gateway.js";
 import { createHash } from "node:crypto";
 import { Events } from "@vcpdeck/shared";
 import type {
 	ActorContext,
-	RemoteDevClientEvent,
 	TerminalAck,
 	TerminalBrowserAttached,
 	TerminalErrorCode,
 } from "@vcpdeck/shared";
 import {
 	TERMINAL_ERROR_CODES,
-	parseRemoteDevBrowserAttach,
-	parseRemoteDevBrowserCancel,
-	parseRemoteDevBrowserDetach,
-	parseRemoteDevBrowserPermission,
-	parseRemoteDevBrowserPortClose,
-	parseRemoteDevBrowserPortOpen,
-	parseRemoteDevBrowserPrompt,
-	parseRemoteDevBrowserResync,
 	parseTerminalBrowserAckOutput,
 	parseTerminalBrowserAttach,
 	parseTerminalBrowserDetach,
@@ -74,39 +61,14 @@ function actorOf(client: Socket): ActorContext {
 export class AppGateway {
   @WebSocketServer()
   server!: Server;
-
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TerminalService) private readonly terminalService: TerminalService,
-    @Optional()
-    @Inject(RemoteDevService)
-    private readonly remoteDev?: RemoteDevService,
-    @Optional()
-    @Inject(RemoteDevAttachmentService)
-    private readonly remoteDevAttachments?: RemoteDevAttachmentService,
-    @Optional()
-    @Inject(RemoteDevPortService)
-    private readonly remoteDevPorts?: RemoteDevPortService,
-    @Optional()
-    @Inject(RemoteDevForwardGateway)
-    private readonly remoteDevForwarder?: RemoteDevForwardGateway,
   ) {}
 
   afterInit() {
     this.terminalService.bindBrowserEmitter((socketId, event, payload) => {
       this.server.to(socketId).emit(event, payload);
-    });
-    this.remoteDev?.bindBrowserEmitter((sessionId, event) => {
-      this.server
-        .to(this.rdsRoom(sessionId))
-        .emit(Events.RDS_AGENT_EVENT, event);
-      if (event.type === "session.ended") {
-        this.remoteDevAttachments?.clear(sessionId);
-        this.server.to(this.rdsRoom(sessionId)).emit(Events.RDS_CLOSED, {
-          sessionId,
-          reason: event.reason,
-        });
-      }
     });
   }
 
@@ -127,7 +89,6 @@ export class AppGateway {
   }
 
   async handleDisconnect(client: Socket) {
-    this.remoteDevAttachments?.detach(client.id);
     await this.terminalService.detachBrowserSocket(client.id);
   }
 
@@ -294,205 +255,5 @@ export class AppGateway {
     }
   }
 
-  // ── Remote Dev Session（/app） ──
-
-  @SubscribeMessage(Events.RDS_ATTACH)
-  async handleRdsAttach(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ) {
-    try {
-      const parsed = parseRemoteDevBrowserAttach(data);
-      if (!this.remoteDev || !this.remoteDevAttachments) {
-        throw new Error("RDS is not available");
-      }
-      const session = await this.remoteDev.get(parsed.sessionId);
-      const attachment = this.remoteDevAttachments.attach(
-        parsed.sessionId,
-        actorOf(client),
-        client.id,
-        parsed.reconnectToken,
-      );
-      await client.join(this.rdsRoom(parsed.sessionId));
-      client.emit(Events.RDS_STATE, {
-        session,
-        ports: await this.remoteDev.ports(parsed.sessionId),
-        attachment,
-      });
-      // 回放历史对话：单独一个事件而不是塞进 attach 响应，避免旧前端解析失败。
-      // 回放失败不影响附着本身。
-      await this.remoteDev
-        .transcript(parsed.sessionId)
-        .then((transcript) => {
-          client.emit(Events.RDS_TRANSCRIPT, transcript);
-        })
-        .catch(() => undefined);
-      return { ok: true, data: attachment };
-    } catch (error) {
-      return this.rdsError(error);
-    }
-  }
-
-  @SubscribeMessage(Events.RDS_DETACH)
-  async handleRdsDetach(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ) {
-    try {
-      const parsed = parseRemoteDevBrowserDetach(data);
-      this.remoteDevAttachments?.detach(client.id);
-      await client.leave(this.rdsRoom(parsed.sessionId));
-      return { ok: true };
-    } catch (error) {
-      return this.rdsError(error);
-    }
-  }
-
-  @SubscribeMessage(Events.RDS_PROMPT)
-  async handleRdsPrompt(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ) {
-    try {
-      if (!this.remoteDev || !this.remoteDevAttachments) {
-        throw new Error("RDS is not available");
-      }
-      const parsed = parseRemoteDevBrowserPrompt(data);
-      this.remoteDevAttachments.assertOperator(parsed.sessionId, client.id);
-      await this.remoteDev.prompt(parsed.sessionId, parsed.text, actorOf(client));
-      return { ok: true };
-    } catch (error) {
-      return this.rdsError(error);
-    }
-  }
-
-  @SubscribeMessage(Events.RDS_CANCEL)
-  async handleRdsCancel(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ) {
-    try {
-      if (!this.remoteDev || !this.remoteDevAttachments) {
-        throw new Error("RDS is not available");
-      }
-      const parsed = parseRemoteDevBrowserCancel(data);
-      this.remoteDevAttachments.assertOperator(parsed.sessionId, client.id);
-      await this.remoteDev.cancel(parsed.sessionId, actorOf(client));
-      return { ok: true };
-    } catch (error) {
-      return this.rdsError(error);
-    }
-  }
-
-  @SubscribeMessage(Events.RDS_PERMISSION)
-  async handleRdsPermission(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ) {
-    try {
-      if (!this.remoteDev || !this.remoteDevAttachments) {
-        throw new Error("RDS is not available");
-      }
-      const parsed = parseRemoteDevBrowserPermission(data);
-      this.remoteDevAttachments.assertOperator(parsed.sessionId, client.id);
-      await this.remoteDev.permission(
-        parsed.sessionId,
-        parsed.requestId,
-        parsed.optionId,
-        actorOf(client),
-      );
-      return { ok: true };
-    } catch (error) {
-      return this.rdsError(error);
-    }
-  }
-
-  @SubscribeMessage(Events.RDS_PORT_OPEN)
-  async handleRdsPortOpen(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ) {
-    try {
-      if (!this.remoteDev || !this.remoteDevAttachments) {
-        throw new Error("RDS is not available");
-      }
-      const parsed = parseRemoteDevBrowserPortOpen(data);
-      this.remoteDevAttachments.assertOperator(parsed.sessionId, client.id);
-      const port = await this.remoteDev.openPort(
-        parsed.sessionId,
-        {
-          remotePort: parsed.remotePort,
-          ...(parsed.label ? { label: parsed.label } : {}),
-        },
-        actorOf(client),
-      );
-      this.server.to(this.rdsRoom(parsed.sessionId)).emit(Events.RDS_PORT_STATE, port);
-      return { ok: true, data: port };
-    } catch (error) {
-      return this.rdsError(error);
-    }
-  }
-
-  @SubscribeMessage(Events.RDS_PORT_CLOSE)
-  async handleRdsPortClose(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ) {
-    try {
-      if (!this.remoteDev || !this.remoteDevAttachments) {
-        throw new Error("RDS is not available");
-      }
-      const parsed = parseRemoteDevBrowserPortClose(data);
-      this.remoteDevAttachments.assertOperator(parsed.sessionId, client.id);
-      const port = await this.remoteDev.closePort(
-        parsed.sessionId,
-        parsed.portId,
-        actorOf(client),
-      );
-      this.remoteDevPorts?.revokePort(parsed.portId);
-      this.remoteDevForwarder?.disconnectPort(parsed.portId);
-      this.server.to(this.rdsRoom(parsed.sessionId)).emit(Events.RDS_PORT_STATE, port);
-      return { ok: true, data: port };
-    } catch (error) {
-      return this.rdsError(error);
-    }
-  }
-
-  @SubscribeMessage(Events.RDS_RESYNC)
-  async handleRdsResync(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ) {
-    try {
-      if (!this.remoteDev) throw new Error("RDS is not available");
-      const parsed = parseRemoteDevBrowserResync(data);
-      client.emit(Events.RDS_STATE, {
-        session: await this.remoteDev.get(parsed.sessionId),
-        ports: await this.remoteDev.ports(parsed.sessionId),
-      });
-      return { ok: true };
-    } catch (error) {
-      return this.rdsError(error);
-    }
-  }
-
-  private rdsRoom(sessionId: string): string {
-    return `rds:${sessionId}`;
-  }
-
-  private rdsError(cause: unknown): {
-    ok: false;
-    error: { code: string; message: string };
-  } {
-    const code = (cause as { code?: unknown }).code;
-    const message = (cause as { message?: unknown }).message;
-    return {
-      ok: false,
-      error: {
-        code: typeof code === "string" ? code : "RDS_PROTOCOL_INVALID",
-        message: typeof message === "string" ? message.slice(0, 500) : "RDS error",
-      },
-    };
-  }
 
 }

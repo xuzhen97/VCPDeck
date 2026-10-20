@@ -44,12 +44,10 @@ describe("resolveModule", () => {
 			"映射",
 			"功能",
 			"开发",
-			"自动化",
 			"发版",
 			"设置",
 		]);
 		expect(MODULES.map((mod) => mod.id)).not.toContain("agent");
-		// 「开发」= 远程 DSH（人机协作），`/remote-dev` = 自动化（无人值守）
 		expect(MODULES.find((mod) => mod.id === "develop")?.path).toBe("/develop");
 		expect(
 			MODULES.find((mod) => mod.id === "develop")?.sub,
@@ -61,9 +59,6 @@ describe("resolveModule", () => {
 			MODULES.find((mod) => mod.id === "settings")?.sub?.map((s) => s.path),
 		).not.toContain("/settings/network");
 		expect(MODULES.map((mod) => mod.path)).not.toContain("/storage");
-		expect(
-			MODULES.find((mod) => mod.id === "remote-dev")?.sub?.map((s) => s.path),
-		).toEqual(["/remote-dev/new", "/remote-dev/sessions"]);
 	});
 });
 

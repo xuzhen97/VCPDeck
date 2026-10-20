@@ -1,6 +1,6 @@
 # ADR-0058：Remote Dev Session 作为跨机人机开发会话与独立数据面
 
-- 状态：Accepted
+- 状态：Superseded by [ADR-0060](./0060-retire-rds-consolidate-a2a.md)
 - 日期：2026-10-18
 - 决策者：项目维护者
 - 关联：[ADR-0001](./0001-control-plane-and-outbound-clients.md)、[ADR-0007](./0007-client-owned-interactive-runtime.md)、[ADR-0009](./0009-trusted-operator-security-domain.md)、[ADR-0049](./0049-retire-pi-dsh-integrations-and-focus-on-core-capabilities.md)、[ADR-0053](./0053-retire-p2p-tunnel-and-browser-remote-desktop.md)、[ADR-0054](./0054-job-log-event-chain.md)、[ADR-0057](./0057-a2a-hub-and-backend-agnostic-task-model.md)、[`docs/design/remote-dev-session.md`](../design/remote-dev-session.md)

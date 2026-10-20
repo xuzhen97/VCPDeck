@@ -13,5 +13,4 @@ export * from "./storage.js";
 export * from "./storage-shares.js";
 export * from "./tasks.js";
 export * from "./agents.js";
-export * from "./remote-dev.js";
 export * from "./terminal.js";

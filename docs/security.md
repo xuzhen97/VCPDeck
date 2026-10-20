@@ -212,17 +212,6 @@ PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 
 
 隔离 → 保全证据 → 撤销 Session/Token → 轮换 PSK/FRP/Storage 凭据 → 核对 Job/TerminalAudit/Release/代理日志 → 从可信构件和备份恢复 → 验证所有 Client → 形成事后报告和修复 ADR。
 
-## 15. Remote Dev Session 补充（ADR-0058）
-
-- RDS 继承单信任域；ACP agent 与 PTY 继承 Client OS 账户权限，**不是沙箱**。
-- 端口只允许目标机 `127.0.0.1`、`1024-65535`、operator 显式打开、每会话最多 8 个；不得成为访问任意 localhost 的通用 SSRF 跳板。
-- forward token 10 分钟、只存内存 hash，Server 重启即失效；只有会话 owner 可为已打开端口签发，且隧道只允许该端口对应的 `OPEN`，不能借 token 连接其他 localhost 端口；端口/会话关闭会撤销 token 并断开已建立的 forward。
-- 隧道使用独立 namespace，不复用 `/client` 业务事件；CLI 与 Client 的 stream 按 session + streamId 定向转发，跨 namespace 投递使用根 Server。
-- Server 不保存 agent/终端/文件正文；审计只记生命周期、端口、权限决定等元数据，不记完整路径或 token。
-- 浏览器 attachment 首个 operator、其余 viewer；viewer 不能 prompt/cancel/permission/端口操作。重连 token 只存浏览器 `sessionStorage` 与 Server 内存 hash，保护窗口 30 秒。
-- v1 的 Terminal tab 复用现有 Terminal attachment/operator 语义；RDS viewer 限制目前由前端与 RDS 命令层执行，尚未在 Server 端把每个 Terminal 子会话强制绑定到 RDS operator。
-- 会话续接（v1.1）不引入新的信任边界：`RemoteDevSession.acpSessionId` 是 ACP 侧的不透明标识，不是对话正文；续接仍要求 operator/owner、同 Client、同 placement、同 workspace 且源会话已终态，Server 只在 `session.create` 里转发该标识，不参与上下文传输。历史页只展示元数据，不做对话回放。
-- Windows 上启动 `.cmd`/`.bat` agent 垫片会经 `cmd.exe /d /s /c` 包装：命令与每个参数各自加引号，使 `&`、`|`、`<`、`>`、`^` 在引号内成为字面量，避免参数被解释成额外命令；`"` 按 cmd 惯例双写转义。注意 `%VAR%` 仍会被 cmd 展开（命令行无法转义），因此 `command`/`args` 只能来自操作者登记的 placement，不得作为最终用户输入通道；若未来出现低权限可写 placement 的场景，必须重新评估该包装。
 
 ## 16. 远程 DSH WebUI（ADR-0059）
 
@@ -231,4 +220,3 @@ PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 
 - 启动契约必须包含 --trusted-host <对外 authority>，否则其 /api 会被 browser-trust 门禁拒绝；反代/隧道层必须固定 Host、不透传客户端 Host，并设置 X-Forwarded-For / X-Forwarded-Proto。用 Host 判断"来自本机"已被证明会导致认证绕过。
 - VCPDeck 只登记 dshWebUrl，**不探测**其可达性（避免 SSRF 面），也不以其授权；该地址可能含一次性 token，不得写入日志、审计正文或文档。
 - DSH 插件的 Host 半持有 VCPDeck API token，只用于服务端代发 GET /api/clients；返回浏览器的字段走白名单（clientId/name/hostname/online/lastHeartbeatAt/dshWebUrl），token 不进浏览器。
-- RDS 与远程 DSH 不对同一会话双写；同一 Client 上开启远程 DSH 时，RDS 的驱动路径应视为不可用或只读。

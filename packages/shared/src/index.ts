@@ -177,30 +177,8 @@ export const Events = {
 	TASK_COMMAND: "task:command",
 	TASK_COMMAND_RESULT: "task:command-result",
 	TASK_EVENT: "task:event",
-	RDS_COMMAND: "rds:command",
-	RDS_COMMAND_RESULT: "rds:command-result",
-	RDS_EVENT: "rds:event",
-	RDS_ACP_SESSION: "rds:acp-session",
-	RDS_TRANSCRIPT: "rds:transcript",
 	DSH_WEB_COMMAND: "dshweb:command",
 	DSH_WEB_RESULT: "dshweb:result",
-	RDS_ATTACH: "rds:attach",
-	RDS_DETACH: "rds:detach",
-	RDS_PROMPT: "rds:prompt",
-	RDS_CANCEL: "rds:cancel",
-	RDS_PERMISSION: "rds:permission",
-	RDS_PORT_OPEN: "rds:port.open",
-	RDS_PORT_CLOSE: "rds:port.close",
-	RDS_RESYNC: "rds:resync",
-	RDS_STATE: "rds:state",
-	RDS_AGENT_EVENT: "rds:agent:event",
-	RDS_PORT_STATE: "rds:port:state",
-	RDS_ERROR: "rds:error",
-	RDS_CLOSED: "rds:closed",
-	RDS_TUNNEL_HELLO: "rds:tunnel:hello",
-	RDS_STREAM_HELLO: "rds:stream:hello",
-	RDS_STREAM_FRAME: "rds:stream:frame",
-	RDS_STREAM_CLOSE: "rds:stream:close",
 } as const;
 
 // ── Job type ──
@@ -1137,6 +1115,3 @@ export * from "./a2a.js";
 export * from "./acp.js";
 export * from "./task-client.js";
 
-// ── Remote Dev Session 与数据面（ADR-0058） ──
-export * from "./remote-dev.js";
-export * from "./remote-dev-tunnel.js";
