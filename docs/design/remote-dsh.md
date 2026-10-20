@@ -101,6 +101,12 @@ dsh --profile web \
 - 多轮语义遵循 A2A：**进行中的 Task** 才能带 `taskId` 追加（已完成返回 `-32000 TASK_TERMINAL`）；新的一轮用同一 `contextId` 开新 Task，`ListTasks?contextId=` 归组。
 
 实测：`dsh` placement 单轮任务 3 秒完成，`GetTask` 返回 `history: [{role:"agent", parts:[{text:"第一轮完成"}]}]` 与 `agent-reply` artifact；同 `contextId` 两轮归组为 2 个 Task。
+
+
+### 4.1.1 界面入口（2026-10-20）
+
+此前 A2A 任务只存在库里和 CLI，页面看不到痕迹。现新增侧栏「Agent 任务」（`/agent-tasks`）：`ListTasks` 分页列表（状态、目标 agent、意图、产物数、更新时间）+ 详情抽屉（`GetTask` 的 history 双向回放、artifact 元数据、`/api/tasks/:id/events` 事件时间线）。只读视图，派活仍走 `vcpdeck tasks` / JSON-RPC。与「任务」页的 Typed Job 是两套模型，页面上明确分开——`Job` 是可控作业，`Task` 是 agent 委托。
+
 ## 5. 已知偏移
 
 - 每台目标机需安装一次 DSH 插件；DSH 预览版 slot 契约变化时需要逐机适配。

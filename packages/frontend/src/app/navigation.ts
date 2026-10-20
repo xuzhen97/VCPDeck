@@ -1,5 +1,6 @@
 import {
 	Blocks,
+	Bot,
 	Cable,
 	Code2,
 	Database,
@@ -49,6 +50,8 @@ export const MODULES: NavModule[] = [
 	{ id: "dashboard", path: "/dashboard", label: "概览", icon: LayoutDashboard },
 	{ id: "machines", path: "/machines", label: "机器", icon: MonitorCog },
 	{ id: "jobs", path: "/jobs", label: "任务", icon: ListTodo },
+	// 「Agent 任务」= A2A Task（agent 之间的委托）；与上一项 Typed Job 是两套模型。
+	{ id: "agent-tasks", path: "/agent-tasks", label: "Agent 任务", icon: Bot },
 	{ id: "frp", path: "/frp", label: "映射", icon: Cable },
 	{ id: "features", path: "/features", label: "功能", icon: Blocks },
 	// 「开发」= 人机协作：跨机器远程 DSH，一屏启动并直接进入完整 WebUI。

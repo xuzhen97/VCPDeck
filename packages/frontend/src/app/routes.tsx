@@ -11,6 +11,7 @@ import { DevelopDshPage } from "@/pages/develop-dsh-page";
 import { FrpPage } from "@/pages/frp-page";
 import { FeaturesPage } from "@/pages/machine-features-panel";
 import { JobDetailPage } from "@/pages/job-detail-page";
+import { AgentTasksPage } from "@/pages/agent-tasks-page";
 import { JobsPage } from "@/pages/jobs-page";
 import { LoginPage } from "@/pages/login-page";
 import { MachinesPage } from "@/pages/machines-page";
@@ -43,6 +44,7 @@ export function AppRoutes() {
 				/>
 				<Route path="/jobs" element={<JobsPage />} />
 				<Route path="/jobs/:jobId" element={<JobDetailPage />} />
+				<Route path="/agent-tasks" element={<AgentTasksPage />} />
 				<Route path="/frp" element={<FrpPage />} />
 				<Route path="/features" element={<FeaturesPage />} />
 				<Route path="/develop" element={<DevelopDshPage />} />

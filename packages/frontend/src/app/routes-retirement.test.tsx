@@ -38,7 +38,8 @@ describe("AppRoutes 退役入口", () => {
 	it("旧对话深链接走兜底，不再渲染 Agent", async () => {
 		renderAt("/agent/chat");
 		expect(await screen.findByText("dashboard-view")).toBeVisible();
-		expect(screen.queryByText(/agent/i)).not.toBeInTheDocument();
+		// 侧栏现在有「Agent 任务」模块，不能用 /agent/i 粗匹配；只断言退役的对话页没渲染。
+		expect(screen.queryByText("Agent")).not.toBeInTheDocument();
 	});
 
 	it("旧 /pi 深链接走兜底", async () => {

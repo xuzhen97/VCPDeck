@@ -41,6 +41,7 @@ describe("resolveModule", () => {
 			"概览",
 			"机器",
 			"任务",
+			"Agent 任务",
 			"映射",
 			"功能",
 			"开发",
