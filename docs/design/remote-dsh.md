@@ -47,7 +47,7 @@ RDS 用 ACP 驱动目标机 agent，界面是自建的对话流。ACP 的定位�
 
 - **失败回滚**：建映射失败就立刻停掉刚起的进程，并把状态标 `failed`，避免留下"没人能访问的 dsh web"。
 - **Client 重启不等于进程退出**：Client 掉线时只标 `failed` 并清空地址，**保留 `dshWebPort` 与 `dshWebFrpMappingId`**——`dsh web` 是独立进程，句柄随 Client 进程消失，端口是唯一还能定位它的线索。
-- **停止以端口为准**：Client 先杀句柄，再按端口兜底（Windows `netstat -ano` + `taskkill /T /F`；POSIX `lsof`），并轮询确认端口释放；仍占用则报 `DSH_WEB_STOP_INCOMPLETE`，不假装成功。
+- **停止以端口为准**：Client 先杀句柄，再按端口兜底——Windows 用 `netstat -ano` + `taskkill /T /F`；Linux 读 `/proc/net/tcp{,6}` 拿监听 inode、扫 `/proc/*/fd` 反查 PID（**不依赖 lsof**，精简发行版也能用），仅在 `/proc` 不可读时才退回 `lsof`；Linux 侧还会按 `/proc/<pid>/cmdline` 校验确实含 `--profile` + `web` 才杀，避免端口被复用时误伤。随后轮询确认端口释放；仍占用则报 `DSH_WEB_STOP_INCOMPLETE`，不假装成功。
 - **离线时不动映射**：`deleteMapping` 需要 Client 在线确认，离线删只会留下永远 `deleting` 的记录，因此留到重连后的停止流程一起清。
 - **前提**：Client 需声明 `dsh-web` 能力；Server 需有可用 `FrpsInstance`。缺任一都返回稳定错误码（`DSH_WEB_UNSUPPORTED` / `DSH_WEB_FRP_UNAVAILABLE`），不静默降级。
 - 手工登记地址的路径保留：不想要受管生命周期时，仍可直接填 URL。
@@ -93,5 +93,6 @@ dsh --profile web \
 - 每台目标机需安装一次 DSH 插件；DSH 预览版 slot 契约变化时需要逐机适配。
 - 多机时是"每台一个 URL"，靠插件面板收敛；超过 5 台或出现第二操作者时按 ADR-0059 决策 6 切反代。
 - 插件面板只做展示与打开，不含日志/会话管理；这些仍以 VCPDeck 与 DSH 各自的界面为准。
-- 端口兜底清理（按端口杀进程）尚未校验进程命令行，理论上可能误杀新占用同端口的进程；端口区间 30000–40000 与常驻实例错开的概率极低，但仍是已知风险。
+- Windows 侧的端口兜底清理尚未校验进程命令行（Linux 已校验）：理论上可能误杀新占用同端口的进程，端口区间 30000–40000 与常驻实例错开的概率极低，但仍是已知风险。
+- Linux 的 `/proc` 反查与命令行校验只有单元测试覆盖，**尚未在真实 Linux 目标机上验证**（含权限受限容器、`hidepid` 挂载等情况）。
 - `external` 只维护"入口地址"，不含健康检查：常驻实例挂了 VCPDeck 不会知道，靠操作者打开时发现。

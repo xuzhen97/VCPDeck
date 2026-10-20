@@ -4,9 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	createDshWebHost,
 	extractToken,
+	findListeningPidsViaProc,
+	isDshWebProcess,
 	isPortListening,
 	parseListeningPids,
 	parseLsofPids,
+	parseProcNetTcpListeners,
 } from "./dsh-web-host.js";
 
 /** 造一个能吐出 token 的假子进程。 */
@@ -56,6 +59,88 @@ describe("受管 dsh web 主机", () => {
 	it("解析 lsof 输出", () => {
 		expect(parseLsofPids("123\r\n456\r\n")).toEqual([123, 456]);
 		expect(parseLsofPids("")).toEqual([]);
+	});
+
+	it("从 /proc/net/tcp 里按端口找监听 inode", () => {
+		// 真实格式：local_address 是 HEXIP:HEXPORT，st=0A 表示 LISTEN
+		const tcp = [
+			"  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+			"   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 11111 1",
+			"   1: 0100007F:8AAA 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 22222 1",
+			"   2: 0100007F:1F90 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 33333 1",
+		].join("\n");
+		// 0x1F90 = 8080，0x8AAA = 35498
+		expect(parseProcNetTcpListeners(tcp, 8080)).toEqual([11111]);
+		expect(parseProcNetTcpListeners(tcp, 35498)).toEqual([22222]);
+		// 只有 ESTABLISHED（st=01）不算监听
+		expect(parseProcNetTcpListeners(tcp, 50000)).toEqual([]);
+	});
+
+	it("扫 /proc/*/fd 把 inode 映射回 PID", async () => {
+		const files: Record<string, string> = {
+			"/proc/net/tcp":
+				"   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 777 1",
+			"/proc/net/tcp6": "",
+		};
+		const fds: Record<string, string[]> = {
+			"/proc": ["1", "42", "self"],
+			"/proc/1/fd": ["0", "1"],
+			"/proc/42/fd": ["0", "7"],
+		};
+		const links: Record<string, string> = {
+			"/proc/1/fd/1": "pipe:[1]",
+			"/proc/42/fd/7": "socket:[777]",
+		};
+		const pids = await findListeningPidsViaProc(8080, {
+			readFile: async (path) => {
+				if (path in files) return files[path] as string;
+				throw new Error("ENOENT");
+			},
+			readdir: async (path) => {
+				if (path in fds) return fds[path] as string[];
+				throw new Error("EACCES");
+			},
+			readlink: async (path) => {
+				if (path in links) return links[path] as string;
+				throw new Error("ENOENT");
+			},
+		});
+		expect(pids).toEqual([42]);
+	});
+
+	it("读不到 /proc 时返回空而不是抛错", async () => {
+		const pids = await findListeningPidsViaProc(8080, {
+			readFile: async () => {
+				throw new Error("ENOENT");
+			},
+			readdir: async () => {
+				throw new Error("ENOENT");
+			},
+			readlink: async () => {
+				throw new Error("ENOENT");
+			},
+		});
+		expect(pids).toEqual([]);
+	});
+
+	it("按命令行判断是不是 dsh web", async () => {
+		const withCmdline = (cmdline: string) => ({
+			readFile: async () => cmdline,
+		});
+		expect(
+			await isDshWebProcess(42, withCmdline("dsh\u0000--profile\u0000web\u0000--port\u000038212\u0000")),
+		).toBe(true);
+		expect(
+			await isDshWebProcess(42, withCmdline("nginx\u0000-g\u0000daemon off;\u0000")),
+		).toBe(false);
+		// 读不到命令行 → 未知，调用方按"可能是"处理
+		expect(
+			await isDshWebProcess(42, {
+				readFile: async () => {
+					throw new Error("EACCES");
+				},
+			}),
+		).toBeNull();
 	});
 
 	it("start 拿到 token 后进入运行态；stop 按端口兜底清理", async () => {

@@ -94,6 +94,145 @@ export function parseLsofPids(output: string): number[] {
 		.filter((pid) => Number.isInteger(pid) && pid > 0);
 }
 
+/**
+ * 从 `/proc/net/tcp`（或 `tcp6`）里解析出监听指定端口的 socket inode。
+ *
+ * 行形如：
+ * `   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 ... 12345 1 ...`
+ * - 第二列 `local_address` 是 `HEXIP:HEXPORT`（IPv4 小端序）；
+ * - 第四列 `st` 为 `0A` 表示 LISTEN；
+ * - inode 位于第 10 列。
+ *
+ * 之所以不走 `lsof`：它是可选包，多数精简 Linux 发行版默认不装，
+ * 而 `/proc` 是内核自带的，零依赖。
+ */
+export function parseProcNetTcpListeners(
+	content: string,
+	port: number,
+): number[] {
+	const inodes = new Set<number>();
+	for (const line of content.split(/\r?\n/)) {
+		const cols = line.trim().split(/\s+/);
+		if (cols.length < 10) continue;
+		// 表头或非法行
+		if (!/^\d+:$/.test(cols[0] ?? "")) continue;
+		if ((cols[3] ?? "").toUpperCase() !== "0A") continue;
+		const local = cols[1] ?? "";
+		const portHex = local.slice(local.lastIndexOf(":") + 1);
+		if (Number.parseInt(portHex, 16) !== port) continue;
+		const inode = Number(cols[9]);
+		if (Number.isInteger(inode) && inode > 0) inodes.add(inode);
+	}
+	return [...inodes];
+}
+
+/** `/proc` 读取依赖注入点；测试用来喂假文件系统。 */
+export interface ProcFsDeps {
+	readFile?: (path: string) => Promise<string>;
+	readdir?: (path: string) => Promise<string[]>;
+	readlink?: (path: string) => Promise<string>;
+}
+
+async function defaultReadFile(path: string): Promise<string> {
+	const { readFile } = await import("node:fs/promises");
+	return readFile(path, "utf8");
+}
+
+async function defaultReaddir(path: string): Promise<string[]> {
+	const { readdir } = await import("node:fs/promises");
+	return readdir(path);
+}
+
+async function defaultReadlink(path: string): Promise<string> {
+	const { readlink } = await import("node:fs/promises");
+	return readlink(path);
+}
+
+/**
+ * 在 Linux 上找出监听指定端口的进程（纯 `/proc`，不依赖 lsof）。
+ *
+ * 步骤：`/proc/net/tcp{,6}` 拿到 socket inode → 扫 `/proc/<pid>/fd/*`
+ * 的符号链接（形如 `socket:[12345]`）匹配 inode → 得到 PID。
+ * 无权限读取的进程会被跳过（尽力而为）。
+ */
+export async function findListeningPidsViaProc(
+	port: number,
+	deps: ProcFsDeps = {},
+): Promise<number[]> {
+	const readFile = deps.readFile ?? defaultReadFile;
+	const readdir = deps.readdir ?? defaultReaddir;
+	const readlink = deps.readlink ?? defaultReadlink;
+
+	const contents = await Promise.all(
+		["/proc/net/tcp", "/proc/net/tcp6"].map((path) =>
+			readFile(path).catch(() => ""),
+		),
+	);
+	const inodes = new Set<number>();
+	for (const content of contents) {
+		for (const inode of parseProcNetTcpListeners(content, port)) {
+			inodes.add(inode);
+		}
+	}
+	if (inodes.size === 0) return [];
+
+	let entries: string[];
+	try {
+		entries = await readdir("/proc");
+	} catch {
+		return [];
+	}
+
+	const pids = new Set<number>();
+	for (const entry of entries) {
+		if (!/^\d+$/.test(entry)) continue;
+		const pid = Number(entry);
+		if (pid <= 0) continue;
+		let fds: string[];
+		try {
+			fds = await readdir(`/proc/${entry}/fd`);
+		} catch {
+			continue; // 权限不足或进程已退出
+		}
+		for (const fd of fds) {
+			let target: string;
+			try {
+				target = await readlink(`/proc/${entry}/fd/${fd}`);
+			} catch {
+				continue;
+			}
+			const match = /^socket:\[(\d+)\]$/.exec(target);
+			if (!match) continue;
+			if (inodes.has(Number(match[1]))) {
+				pids.add(pid);
+				break;
+			}
+		}
+	}
+	return [...pids];
+}
+
+/**
+ * 判断某 PID 是不是我们起的 `dsh web`。
+ *
+ * 返回 `null` 表示读不到命令行（权限等），调用方应按"可能是"处理——
+ * 宁可多清一次，也不要留下无法回收的进程。
+ */
+export async function isDshWebProcess(
+	pid: number,
+	deps: ProcFsDeps = {},
+): Promise<boolean | null> {
+	const readFile = deps.readFile ?? defaultReadFile;
+	try {
+		const raw = await readFile(`/proc/${pid}/cmdline`);
+		const cmdline = raw.replace(/\0/g, " ").trim();
+		if (cmdline.length === 0) return null;
+		return cmdline.includes("--profile") && /\bweb\b/.test(cmdline);
+	} catch {
+		return null;
+	}
+}
+
 async function runCapture(command: string, args: string[]): Promise<string> {
 	const { stdout } = await execFileAsync(command, args, {
 		windowsHide: true,
@@ -118,7 +257,8 @@ function runQuiet(command: string, args: string[]): Promise<void> {
  * 杀掉监听指定端口的进程（尽力而为）。
  *
  * Windows 用 `netstat -ano` 找 PID 再 `taskkill /T /F` 连子进程一起收；
- * 其他平台用 `lsof`。任何一步失败都静默返回——清理是尽力而为，不能阻塞停止流程。
+ * Linux 走 `/proc`（零依赖），读不到再退到 `lsof`；两者都失败就静默放弃——
+ * 清理是尽力而为，不能阻塞停止流程。
  */
 export async function killListeningProcess(port: number): Promise<void> {
 	if (process.platform === "win32") {
@@ -130,8 +270,20 @@ export async function killListeningProcess(port: number): Promise<void> {
 		}
 		return;
 	}
-	const out = await runCapture("lsof", ["-ti", `tcp:${port}`]).catch(() => "");
-	for (const pid of parseLsofPids(out)) {
+
+	let pids = await findListeningPidsViaProc(port).catch(() => [] as number[]);
+	if (pids.length === 0) {
+		// 容器里可能没有 /proc/net，退回 lsof（装了才有）。
+		const out = await runCapture("lsof", ["-ti", `tcp:${port}`]).catch(
+			() => "",
+		);
+		pids = parseLsofPids(out);
+	}
+	for (const pid of pids) {
+		// 只杀确实是 dsh web 的进程：端口可能已被别的程序复用。
+		// 读不到命令行时按"可能是"处理，避免留下无法回收的进程。
+		const ours = await isDshWebProcess(pid).catch(() => null);
+		if (ours === false) continue;
 		await runQuiet("kill", ["-9", String(pid)]);
 	}
 }
