@@ -20,7 +20,7 @@ VCPDeck 是面向个人工作流的独立控制面，不是 VCPToolBox 的后台
 - 交互式远程终端，包括 PTY、快照、重连和控制权；
 - FRPS 实例与 FRP 映射管理；
 - A2A Task 与 ACP Host：一个 agent 可把任务委托给目标机器上的另一个 agent，支持权限往返、取消和审计；
-- Remote Dev Session（ADR-0058）：从浏览器创建目标 Client 上的 agent + 终端 + workspace 文件 + 端口转发会话；CLI `vcpdeck forward` 只监听本机 loopback；
+- Remote DSH WebUI（ADR-0059）：在目标 Client 上启动/接管 `dsh web`，一键打开远程开发台；端口暴露统一走 FRP（ADR-0060）；
 - Cookie/Bearer 身份认证、操作审计和 React 驾驶台；
 - Release、Launcher、Server/Client 更新与失败回退基础实现；
 - CLI 多环境注册与项目默认环境选择，以及双平台 Release 上传。

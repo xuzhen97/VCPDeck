@@ -339,7 +339,3 @@ Terminal 变更至少覆盖：
 - [`../security.md`](../security.md) — 可信操作者和终端正文边界；
 - [`../operations.md`](../operations.md) — 故障处置；
 - [`../testing.md`](../testing.md) — 测试和发布门禁。
-
-## 17. RDS 子终端（ADR-0058）
-
-RDS 的 Terminal 仍是 `TerminalSession`，只新增可选 `parentRemoteDevSessionId` 关联；不改变 Terminal 状态机、审计或 PTY 所有权。RDS 关闭时 Server 调用 `closeByParent` 逐个关闭子终端并继续原有审计。子终端的 owner 仍是发起操作的身份，RDS 不把终端正文写入 `RemoteDevAuditEvent`。

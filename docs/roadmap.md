@@ -14,7 +14,7 @@
 - CLI 全域命令对齐控制面能力（jobs/files/frp/storage/terminal/features/tasks/agents），支持 TUI 终端直连，并有真实 Server+Client 的 CLI 能力端到端测试；
 - 功能目录（ADR-0056）：机器上的可复用设施及其调用契约，CLI `features` + 机器「功能」Tab 与全局功能页，验证由调用方执行；
 - A2A Task 与 ACP 后端无关任务模型（ADR-0057）：`SendMessage/GetTask/ListTasks/CancelTask`、AgentPlacement、权限扩展与任务审计；CLI `tasks`/`agents`（含 `agents create`）；
-- Remote Dev Session v1（ADR-0058）：目标 Client 的 ACP agent + Terminal + workspace Files + loopback TCP forward；`vcpdeck forward` 与「开发」页；HTTP preview/DAP/端口发现未做；
+- ~~Remote Dev Session v1（ADR-0058）~~：已于 [ADR-0060](./adr/0060-retire-rds-consolidate-a2a.md) 退役，能力拆分到 A2A Task（agent 任务）与远程 DSH（人工开发）；端口调试走 FRP 映射；
 - React 驾驶台和框架无关 SDK。
 
 ## 2. 近期优先级：可靠性与安全基线
@@ -52,7 +52,7 @@
 ## 4. 产品方向候选
 
 - TODO 驱动的任务管理、标签和结果审核；
-- 跨机 Remote Dev Session 的后续：v1 已落地 ACP/Terminal/Files/TCP forward；HTTP preview、DAP、端口自动发现、DSH 原生 Web 代理与真实双机验收仍在后续。设计见 [`design/remote-dev-session.md`](./design/remote-dev-session.md)，方向见 [ADR-0058](./adr/0058-remote-dev-session.md)（Accepted）；
+- 跨机 agent 委托的真实双机验收：A2A 通道已在单机 Client 上端到端验证，A→B 跨机与真实 Linux 目标仍未验证。方向见 [ADR-0057](./adr/0057-a2a-hub-and-backend-agnostic-task-model.md)；
 - 基于功能目录的可复用工作流、规则和自动触发（目录本身已落地，见 §1；编排、自动执行与产物回传仍未实现）；
 - VCPToolBox 双向桥接与 Agent 对话；
 - 主动监控巡检和异常任务生成；

@@ -119,5 +119,5 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0056](./0056-feature-registry-declared-contracts.md) | Accepted | 新增 Server 持有的「功能条目」：绑定 host Client，用 `scope`（generic/machine）表达能否换机器；`status` 是意图、验证结果是证据，`active` 只能由成功验证产生；验证由调用方执行、Server 只记账，不代理执行、不后台探测、不建模网络可达性 |
 | [0057](./0057-a2a-hub-and-backend-agnostic-task-model.md) | Accepted | 以 A2A v1.0 作为跨 agent 任务契约；Task 独立于 Job 与 attempt，支持多轮 Turn；ACP 为多轮执行主路径、CLI/Job 兜底；Server 持有 placement Registry、Task/Audit 事件链与偏差检查，不默认镜像正文 |
 | [0058](./0058-remote-dev-session.md) | Superseded by 0060 | Remote Dev Session 作为跨机人机会话域，独立于 A2A Task/Job/Terminal；复用 ACP Host、PTY、Files，新增 session 级认证隧道与 TCP forward，HTTP preview 仅作便利路径；Server 只存元数据/轻量审计，不存正文 |
-| [0059](./0059-remote-dsh-webui-channel.md) | Accepted | 远程 DSH WebUI 作为跨机开发台：以 FRP 暴露目标机 `dsh web`（`--public-url` + `--trusted-host` 为硬约束、仅私网可达）并经 DSH 插件做机器目录与入口，`dshWebUrl` 登记表提供链接；VCPDeck 反代 `/dsh/<clientId>/` 降为 v2 升级路径；RDS 收敛为自动化控制台 |
-| [0060](./0060-retire-rds-consolidate-a2a.md) | Accepted | 退役 Remote Dev Session：删四张表与全套代码，agent 任务统一到 A2A Task（CLI/SDK/JSON-RPC 三入口）；会话级临时隧道一并移除、待按 client 级重建；旧 Client 的 RDS 上报字段保留解析 |
+| [0059](./0059-remote-dsh-webui-channel.md) | Accepted | 远程 DSH WebUI 作为跨机开发台：以 FRP 暴露目标机 `dsh web`（`--public-url` + `--trusted-host` 为硬约束、仅私网可达）并经 DSH 插件做机器目录与入口，`dshWebUrl` 登记表提供链接；VCPDeck 反代 `/dsh/<clientId>/` 降为 v2 升级路径；RDS 已于 0060 退役，agent 任务改由 A2A 承担 |
+| [0060](./0060-retire-rds-consolidate-a2a.md) | Accepted | 退役 Remote Dev Session：删四张表与全套代码，agent 任务统一到 A2A Task（CLI/SDK/JSON-RPC 三入口）；会话级临时隧道一并移除且不再重建，端口暴露统一走 FRP；旧 Client 的 RDS 上报字段保留解析 |

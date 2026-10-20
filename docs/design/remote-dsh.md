@@ -1,21 +1,21 @@
 # 远程 DSH WebUI（远程开发台）
 
-> Current。对应 [ADR-0059](../adr/0059-remote-dsh-webui-channel.md)。与 [remote-dev-session.md](./remote-dev-session.md)（RDS）并存，职责不同。
+> Current。对应 [ADR-0059](../adr/0059-remote-dsh-webui-channel.md)、[ADR-0060](../adr/0060-retire-rds-consolidate-a2a.md)。RDS 已于 0060 退役，agent 任务走 A2A。
 
 ## 1. 要解决的问题
 
-RDS 用 ACP 驱动目标机 agent，界面是自建的对话流。ACP 的定位是自动化协议（`@deepseek-ai/dsh-acp` 自述 "automation-only"），而 DSH 的界面能力分布在四十多个 `dsh-client-ui-*` 包与 Slots 体系里——用 ACP 复刻 WebUI 是结构性落后。
+此前用 ACP 驱动目标机 agent（即已退役的 RDS），界面是自建的对话流。ACP 的定位是自动化协议（`@deepseek-ai/dsh-acp` 自述 "automation-only"），而 DSH 的界面能力分布在四十多个 `dsh-client-ui-*` 包与 Slots 体系里——用 ACP 复刻 WebUI 是结构性落后。
 
-同时实测确认：RDS 的 ACP 会话与 `dsh web` 会话虽然同处 `$DSH_HOME/sessions`，但内置 WebUI **不列出** ACP 创建的会话，因此"嵌 WebUI 看同一条会话"不可达。
+同时实测确认：ACP 创建的会话与 `dsh web` 会话虽然同处 `$DSH_HOME/sessions`，但内置 WebUI **不列出** ACP 创建的会话，因此"嵌 WebUI 看同一条会话"不可达。
 
 于是把两件事分开：
 
 | 场景 | 用什么 |
 | --- | --- |
-| 批量、脚本、远程冒烟、需要审计与程序化取消 | **RDS（ACP）** |
+| 批量、脚本、远程冒烟、需要审计与程序化取消 | **A2A Task**（`vcpdeck tasks` / SDK / JSON-RPC） |
 | 人坐下来写代码，要看 diff / 产物 / 计划 / 审批 | **远程 DSH（本页）** |
 
-入口有两处，指向同一份状态：跨机器落地页 `/develop`（一屏列出所有机器，直接启动/打开/停止）与机器详情页的「开发」tab。RDS 的对话式 UI 已随之删除，只保留只读运行记录。
+入口有两处，指向同一份状态：跨机器落地页 `/develop`（一屏列出所有机器，直接启动/打开/停止）与机器详情页的「开发」tab。
 
 ## 2. 形态
 
@@ -86,7 +86,7 @@ dsh --profile web \
 - `dsh web` 等价于**一台开发机的完整 shell 能力**，鉴权只有 URL token ⇒ **只允许私网访问**；确需公网时在 FRP 前置 basic auth 或 mTLS。
 - token 不写入 VCPDeck 日志、审计正文与文档；前端默认打码展示，只在点击「打开」时使用。
 - Server **不探测** `dshWebUrl` 的可达性（探测会形成 SSRF 面），可达性由操作者打开时判断。
-- RDS 与远程 DSH 不对同一会话双写。
+- 人工开发与 agent 任务不共享会话：前者是 `dsh web` 自己的会话，后者是 A2A Task 驱动的 ACP 会话，两者不互相覆盖。
 
 ## 4.1 A2A 结果回传（2026-10-20）
 
