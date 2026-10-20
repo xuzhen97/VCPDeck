@@ -158,14 +158,18 @@ export class A2aService {
 	): Promise<A2aMessage[] | undefined> {
 		try {
 			const turns = await this.tasks.listTurns(taskId);
-			const messages: A2aMessage[] = turns
-				.filter((turn) => turn.content !== null && turn.content.length > 0)
-				.map((turn) => ({
+			const messages: A2aMessage[] = [];
+			for (const turn of turns) {
+				// outbound 有全文；inbound 只存摘要（安全决策），用 summary 回填
+				// 让多轮上下文不缺 user 回合——不给 200 字而已，不给整段 prompt。
+				const text = turn.content ?? turn.summary ?? "";
+				if (text.length === 0) continue;
+				messages.push({
 					messageId: turn.messageId,
-					role: turn.direction === "inbound" ? ("user" as const) : ("agent" as const),
-					parts: [{ text: turn.content ?? "" }],
-					...(turn.taskId ? {} : {}),
-				}));
+					role: turn.direction === "inbound" ? "user" : "agent",
+					parts: [{ text }],
+				});
+			}
 			const limit =
 				historyLength && historyLength > 0
 					? Math.min(historyLength, A2A_LIMITS.maxHistoryLength)

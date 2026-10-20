@@ -260,6 +260,17 @@ export class AgentRegistryService {
 		});
 		const skills = new Map<string, A2aAgentSkill>();
 		for (const row of rows as AgentPlacementRow[]) {
+			// 目录条目：SendMessage 必须带 metadata.agentId，调用方得先知道有哪些可用。
+			// 只暴露 agentId 与 adapter，不暴露 clientId / command / cwd。
+			const entry = `agent:${row.agentId}`;
+			if (!skills.has(entry)) {
+				skills.set(entry, {
+					id: entry,
+					name: row.agentId,
+					description: `在目标机上运行 ${row.agentId}（adapter=${row.adapter}）；派活时 metadata.agentId 填 "${row.agentId}"`,
+					tags: ["remote-agent", row.adapter],
+				});
+			}
 			const declared = parseJsonStringArray(row.skills);
 			for (const skill of declared) {
 				if (!skills.has(skill)) {

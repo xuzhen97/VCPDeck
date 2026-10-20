@@ -126,6 +126,7 @@ describe("A2aService", () => {
 				direction: "inbound",
 				messageId: "m1",
 				content: null, // 输入侧刻意不存正文
+				summary: "去修复失败测试", // 用摘要回填，保证多轮上下文不断
 			},
 			{
 				seq: 2,
@@ -142,8 +143,14 @@ describe("A2aService", () => {
 
 		if ("result" in response) {
 			const history = (response.result as { history?: unknown[] }).history;
-			expect(history).toHaveLength(1);
+			expect(history).toHaveLength(2);
+			// user 回合用 summary 回填（不暴露整段 prompt）
 			expect(history?.[0]).toMatchObject({
+				messageId: "m1",
+				role: "user",
+				parts: [{ text: "去修复失败测试" }],
+			});
+			expect(history?.[1]).toMatchObject({
 				messageId: "am-1",
 				role: "agent",
 				parts: [{ text: "A2A结果回传验证成功。" }],

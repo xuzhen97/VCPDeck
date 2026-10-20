@@ -71,6 +71,18 @@ describe("AgentRegistryService", () => {
 		expect(JSON.stringify(card)).not.toContain("/home/operator/repo");
 	});
 
+	it("Agent Card 列出口 agentId（调用方据此填 metadata.agentId）", async () => {
+		const { service } = makeService();
+		const card = await service.agentCard("https://deck.example");
+		const entry = card.skills.find((skill) => skill.id === "agent:reviewer");
+		expect(entry).toMatchObject({ name: "reviewer" });
+		expect(entry?.description).toContain('metadata.agentId 填 "reviewer"');
+		// 目录条目不能把敏感字段带出去
+		expect(JSON.stringify(card)).not.toContain("client-secret");
+		expect(JSON.stringify(card)).not.toContain("/usr/local/bin/dsh");
+		expect(JSON.stringify(card)).not.toContain("/home/operator/repo");
+	});
+
 	it("未知 Client 拒绝创建", async () => {
 		const { service, prisma } = makeService();
 		vi.mocked(prisma.client.findUnique).mockResolvedValueOnce(null);

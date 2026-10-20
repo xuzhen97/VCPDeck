@@ -189,7 +189,7 @@ Client 只在收到本次 REGISTER ack、且已上报兼容 `capabilityDetails.g
 A2A 是面向“agent 调 agent”的任务契约，不是 Job 控制面，也不把 ACP 直接暴露给调用方（[ADR-0057](./adr/0057-a2a-hub-and-backend-agnostic-task-model.md)）。
 
 - `POST /api/a2a`：认证同普通 REST（Cookie/Bearer）；body 为 A2A v1.0 JSON-RPC 请求，`params` 先经 Shared strict parser。
-- `GET /api/a2a/agent-card`：返回 `supportedInterfaces`（`url`、`protocolBinding: "JSONRPC"`、`protocolVersion: "1.0"`）、能力与技能；`streaming`/`pushNotifications` 当前为 `false`。
+- `GET /api/a2a/agent-card`：返回 `supportedInterfaces`（`url`、`protocolBinding: "JSONRPC"`、`protocolVersion: "1.0"`）、能力与技能；`streaming`/`pushNotifications` 当前为 `false`。`skills` 中每个启用 placement 都有一条 `id=agent:<agentId>` 的目录条目（描述里给出派活要填的 `metadata.agentId`），只暴露 `agentId` 与 `adapter`。
 - `GET /api/tasks/:id/events?since&limit`：只读审计链，`limit` 夹取 1..200。
 - `GET /api/tasks/:id/deviation`：按路径约束和 `requiredArtifacts` 返回 `aligned`/`drifted`/`failed` 与原因。
 - `api/agents`：AgentPlacement 的 CRUD；`agentId` 是逻辑名，同一 `agentId` 同时只能有一个启用的 placement，多个启用会使解析以 `AGENT_AMBIGUOUS` 失败关闭。
