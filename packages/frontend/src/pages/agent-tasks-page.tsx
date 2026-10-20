@@ -5,6 +5,7 @@ import {
 } from "@vcpdeck/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSdk } from "@/api/context";
+import { apiErrorMessage } from "@/api/error-message";
 import { useResource } from "@/api/hooks/use-resource";
 import { ErrorState, LoadingState } from "@/components/async-state";
 import { PageHeading } from "@/components/page-heading";
@@ -25,6 +26,14 @@ const STATE_LABELS: Record<A2aTaskState, { label: string; tone: "success" | "war
 	TASK_STATE_REJECTED: { label: "已拒绝", tone: "danger" },
 	TASK_STATE_FAILED: { label: "失败", tone: "danger" },
 };
+
+/** 终态：不可再取消（A2A CancelTask 对终态返回 TASK_TERMINAL）。 */
+const TERMINAL_A2A_STATES: readonly A2aTaskState[] = [
+	"TASK_STATE_COMPLETED",
+	"TASK_STATE_CANCELED",
+	"TASK_STATE_REJECTED",
+	"TASK_STATE_FAILED",
+];
 
 const PAGE_SIZE = 20;
 const DETAIL_HISTORY_LENGTH = 50;
@@ -199,15 +208,32 @@ export function AgentTasksPage() {
 				title="Agent 任务详情"
 				size="wide"
 			>
-				{detailId && <AgentTaskDetail taskId={detailId} />}
+				{detailId && (
+					<AgentTaskDetail
+						taskId={detailId}
+						onChanged={resource.reload}
+						onClose={() => setDetailId(null)}
+					/>
+				)}
 			</Drawer>
 		</div>
 	);
 }
 
-/** 单条 Agent 任务详情：对话回放、产物、元数据与事件时间线。 */
-function AgentTaskDetail({ taskId }: { taskId: string }) {
+/** 单条 Agent 任务详情：对话回放、产物、元数据、事件时间线，以及运行中任务的取消。 */
+function AgentTaskDetail({
+	taskId,
+	onChanged,
+	onClose,
+}: {
+	taskId: string;
+	onChanged: () => void;
+	onClose: () => void;
+}) {
 	const sdk = useSdk();
+	const [confirming, setConfirming] = useState(false);
+	const [cancelling, setCancelling] = useState(false);
+	const [cancelError, setCancelError] = useState<string>();
 	const load = useCallback(
 		(signal: AbortSignal) => sdk.tasks.get(taskId, DETAIL_HISTORY_LENGTH, signal),
 		[sdk, taskId],
@@ -224,12 +250,71 @@ function AgentTaskDetail({ taskId }: { taskId: string }) {
 	const task = resource.data;
 	const meta = task.metadata?.vcpdeck;
 	const status = stateLabel(task.status.state);
+	const cancellable = !TERMINAL_A2A_STATES.includes(task.status.state);
+	async function cancelTask() {
+		setCancelling(true);
+		setCancelError(undefined);
+		try {
+			await sdk.tasks.cancel(task.id);
+			setConfirming(false);
+			onChanged();
+			resource.reload();
+			events.reload();
+		} catch (reason) {
+			setCancelError(apiErrorMessage(reason, "取消失败，请稍后重试"));
+		} finally {
+			setCancelling(false);
+		}
+	}
 	return (
 		<div className="space-y-5">
 			<div className="flex flex-wrap items-center gap-2 text-sm">
 				<StatusChip label={status.label} tone={status.tone} />
 				<span className="font-mono text-xs text-muted-foreground">{task.id}</span>
+				<span className="ml-auto flex items-center gap-2">
+					{cancellable &&
+						(confirming ? (
+							<>
+								<Button
+									size="sm"
+									variant="outline"
+									disabled={cancelling}
+									onClick={() => setConfirming(false)}
+								>
+									放弃
+								</Button>
+								<Button
+									size="sm"
+									disabled={cancelling}
+									onClick={() => void cancelTask()}
+								>
+									{cancelling ? "取消中…" : "确认取消"}
+								</Button>
+							</>
+						) : (
+							<Button
+								size="sm"
+								variant="outline"
+								onClick={() => {
+									setCancelError(undefined);
+									setConfirming(true);
+								}}
+							>
+								取消任务
+							</Button>
+						))}
+				</span>
 			</div>
+			{confirming && (
+				<p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-400">
+					取消会终止目标机器上的 agent 回合，已产生的回放与产物保留。确认取消该任务？
+				</p>
+			)}
+			{cancelError && (
+				<p className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+					{cancelError}
+				</p>
+			)}
 			<dl className="grid gap-3 text-sm sm:grid-cols-2">
 				<div>
 					<dt className="text-xs text-muted-foreground">目标 agent</dt>

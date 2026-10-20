@@ -40,8 +40,9 @@ const task = (overrides: Partial<A2aTask> = {}): A2aTask => ({
 function renderPage(
 	overrides: {
 		list?: () => Promise<unknown>;
-		get?: () => Promise<unknown>;
+		get?: (id: string) => Promise<unknown>;
 		events?: () => Promise<unknown>;
+		cancel?: (id: string) => Promise<unknown>;
 	} = {},
 ) {
 	const list = vi.fn(
@@ -84,9 +85,10 @@ function renderPage(
 				nextSeq: 8,
 			})),
 	);
+	const cancel = vi.fn(overrides.cancel ?? (async (id: string) => task({ id })));
 	const client = {
 		auth: { me: async () => identity },
-		tasks: { list, get, events },
+		tasks: { list, get, events, cancel },
 	} as unknown as VcpDeckClient;
 	render(
 		<MemoryRouter>
@@ -97,7 +99,7 @@ function renderPage(
 			</SdkProvider>
 		</MemoryRouter>,
 	);
-	return { list, get, events };
+	return { list, get, events, cancel };
 }
 
 describe("AgentTasksPage", () => {
@@ -143,5 +145,63 @@ describe("AgentTasksPage", () => {
 		await waitFor(() => expect(events).toHaveBeenCalled());
 		expect(await screen.findByText("turn.outbound")).toBeInTheDocument();
 		expect(get).toHaveBeenCalledWith("task_abc", 50, expect.anything());
+	});
+
+	it("运行中的任务可取消：二次确认后才调用 CancelTask 并刷新", async () => {
+		const user = userEvent.setup();
+		const running = task({ status: { state: "TASK_STATE_WORKING" }, artifacts: [] });
+		const { cancel } = renderPage({
+			list: async () => ({
+				tasks: [running],
+				nextPageToken: "",
+				pageSize: 20,
+				totalSize: 1,
+			}),
+			get: async (id: string) => ({ ...running, id }),
+		});
+		await screen.findByText("task_abc");
+		await user.click(screen.getByRole("button", { name: "详情" }));
+		const drawer = await screen.findByRole("dialog", { name: "Agent 任务详情" });
+		await user.click(within(drawer).getByRole("button", { name: "取消任务" }));
+		// 第一次点击只进入确认态，不直接终止 agent
+		expect(cancel).not.toHaveBeenCalled();
+		expect(within(drawer).getByText(/确认取消该任务/)).toBeInTheDocument();
+		await user.click(within(drawer).getByRole("button", { name: "确认取消" }));
+		await waitFor(() => expect(cancel).toHaveBeenCalledWith("task_abc"));
+	});
+
+	it("终态任务不显示取消按钮（CancelTask 对终态只会报错）", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		await screen.findByText("task_abc");
+		await user.click(screen.getByRole("button", { name: "详情" }));
+		const drawer = await screen.findByRole("dialog", { name: "Agent 任务详情" });
+		await waitFor(() => expect(within(drawer).getByText("已完成")).toBeInTheDocument());
+		expect(
+			within(drawer).queryByRole("button", { name: "取消任务" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("取消失败时回显安全文案，不静默吞掉", async () => {
+		const user = userEvent.setup();
+		const running = task({ status: { state: "TASK_STATE_WORKING" }, artifacts: [] });
+		renderPage({
+			list: async () => ({
+				tasks: [running],
+				nextPageToken: "",
+				pageSize: 20,
+				totalSize: 1,
+			}),
+			get: async (id: string) => ({ ...running, id }),
+			cancel: async () => {
+				throw Object.assign(new Error("任务已结束"), { code: "TASK_TERMINAL" });
+			},
+		});
+		await screen.findByText("task_abc");
+		await user.click(screen.getByRole("button", { name: "详情" }));
+		const drawer = await screen.findByRole("dialog", { name: "Agent 任务详情" });
+		await user.click(within(drawer).getByRole("button", { name: "取消任务" }));
+		await user.click(within(drawer).getByRole("button", { name: "确认取消" }));
+		expect(await within(drawer).findByText("任务已结束")).toBeInTheDocument();
 	});
 });

@@ -105,7 +105,7 @@ dsh --profile web \
 
 ### 4.1.1 界面入口（2026-10-20）
 
-此前 A2A 任务只存在库里和 CLI，页面看不到痕迹。现新增侧栏「Agent 任务」（`/agent-tasks`）：`ListTasks` 分页列表（状态、目标 agent、意图、产物数、更新时间）+ 详情抽屉（`GetTask` 的 history 双向回放、artifact 元数据、`/api/tasks/:id/events` 事件时间线）。只读视图，派活仍走 `vcpdeck tasks` / JSON-RPC。与「任务」页的 Typed Job 是两套模型，页面上明确分开——`Job` 是可控作业，`Task` 是 agent 委托。
+此前 A2A 任务只存在库里和 CLI，页面看不到痕迹。现新增侧栏「Agent 任务」（`/agent-tasks`）：`ListTasks` 分页列表（状态、目标 agent、意图、产物数、更新时间）+ 详情抽屉（`GetTask` 的 history 双向回放、artifact 元数据、`/api/tasks/:id/events` 事件时间线）。派活仍走 `vcpdeck tasks` / JSON-RPC；**取消**可在详情抽屉完成（二次确认后才发 `CancelTask`，终态任务不显示按钮，因为对终态取消只会得到 `TASK_TERMINAL`）。与「任务」页的 Typed Job 是两套模型，页面上明确分开——`Job` 是可控作业，`Task` 是 agent 委托。
 
 ### 4.1.2 端到端实证（2026-10-20）
 
@@ -117,6 +117,8 @@ dsh --profile web \
 - 事件：`#51 task.created → #100`（50 条），其中成对的 `tool_call` / `tool_call_update` 证明它确实执行了命令，不是凭记忆编造。
 - 复核：操作者在同一台机器上独立读取 8 项（主机名、系统版本、CPU 型号与核数、内存总量、两个卷的容量与剩余、GPU 型号与显存、Node 版本），与 agent 汇报**逐项一致**。
 - 顺带观察：ACP 会话里 `Get-CimInstance` 被拒绝（同一操作者在普通 shell 里可以），说明 agent 侧是受限工具上下文；它会自行降级到注册表 / .NET / `nvidia-smi`，这类「先说碰壁、再换路径」的汇报是可信信号。
+
+**取消实证**：同一环境下派发一条长任务（	ask_e37369d1a9cb4a92，要求每 10 秒输出一次共 12 次），在页面详情里点「取消任务 → 确认取消」，状态从 WORKING 变为 CANCELED，事件链尾记为 #132 task.canceled，抽屉随即收起取消按钮。通过 UI 取消与 cpdeck tasks cancel 走同一条 CancelTask。
 
 
 ## 5. 已知偏移
