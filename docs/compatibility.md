@@ -146,6 +146,8 @@ FRP 恢复对账通过 capability `frp.reconcileProtocolVersion=1` 协商：新 
 - 回滚前确认旧 Server 能读取已升级 schema，否则应从备份恢复整个数据集。
 - **`0.22.0` 是首次有意的删表升级**（ADR-0060 退役 RDS）：升级命令必须带 `--accept-data-loss`，四张 RDS 表的存量数据不可保留；旧版本 Server 回退后无法读到这些表，跨该版本回退只能整库恢复。
 
+删表版本的线上升级流程（0.22.0 实测）：构件 preStart 固定为不带 --accept-data-loss 的 db push，因此**必须先手工迁移再上传**，否则切换版本前失败并回滚。步骤是：备份 server.db → 用目标版本的 schema（packages/server/prisma/schema.prisma，把 generator output 改到临时目录以免覆盖运行中应用的 client）执行 db push --accept-data-loss --schema=<tmp> --url=<DATABASE_URL> → 用 sqlite_master 确认目标表已删、业务表仍在 → 再 cpdeck release upload --wait。Prisma 7 的 db push 已无 --skip-generate；远程执行要用绝对 node 路径。
+
 ## 7. Launcher 兼容缺口
 
 manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身版本比较和拒绝逻辑，打包脚本写入 `0.0.0`。Launcher 随发布 zip 提供，首次安装后位于 `<app-dir>/dist/main.js`；已有 Launcher 默认保留，不随业务版本自动覆盖。新安装的 Launcher 会在稳定启动后维护 `apps/retention.json` 并清理不受保护的本地旧版本；旧 Launcher 没有该能力。在最低版本校验缺口修复前：
