@@ -36,3 +36,6 @@ packages/*/dist/
 # dev 生成的 Pi Resource Bundle 与 Client 运行时数据（含 install-secret，不入库）
 packages/client/pi-resources/
 packages/client/data/
+
+# 架构图工具的本地工作区（仅本地生成，不入库）
+.archify/
