@@ -40,7 +40,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.22.0";
+    exports2.VERSION = "0.22.1";
   }
 });
 
@@ -1344,6 +1344,7 @@ var require_job_log = __commonJS({
       "cancel_failed",
       "client_offline",
       "reconciled",
+      "frp_confirm",
       "orphaned",
       "settled"
     ];
@@ -3664,6 +3665,7 @@ var require_dist = __commonJS({
       "FRP_PROXY_NAME_CONFLICT",
       "FRP_PROXY_CONFIRM_TIMEOUT",
       "FRP_PROXY_REMOVE_TIMEOUT",
+      "FRP_OPERATION_TIMEOUT",
       "FRP_ROLLBACK_FAILED",
       "FRPC_NOT_FOUND",
       "FRPC_START_FAILED",
