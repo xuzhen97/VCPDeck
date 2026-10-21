@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [0.22.2] - 2026-10-21
+
+### Fixed
+
+- **明文 HTTP 部署下「Agent 任务」页不再整页失败**：`/agent-tasks` 用 A2A `ListTasks` 拉数据，而 SDK 生成 JSON-RPC `id` 时直接调 `crypto.randomUUID()`。该 API 只在安全上下文（HTTPS / localhost）存在，`http://<IP>:3001` 这类线上明文部署里它是 `undefined`，请求还没发出就抛 `TypeError`，页面只显示「无法加载 Agent 任务」。SDK 现在退回 `crypto.getRandomValues` 按 v4 规则拼装 UUID（与前端既有 `utils.randomUUID` 同策略），列表、详情、事件时间线与取消四条链路一并恢复。本地已用 `http://<LAN IP>:3099`（非安全上下文）复现并验证修复。
+
 ## [0.22.1] - 2026-10-21
 
 ### Fixed

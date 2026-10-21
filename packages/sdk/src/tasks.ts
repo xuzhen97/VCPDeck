@@ -7,6 +7,7 @@ import type {
 } from "@vcpdeck/shared";
 import type { VcpDeckClient } from "./client.js";
 import { VcpDeckApiError } from "./client.js";
+import { randomUUID } from "./uuid.js";
 
 export interface TaskAuditEvent {
 	id: number;
@@ -21,7 +22,7 @@ export interface TaskAuditEvent {
 /** A2A 任务 SDK；只是 JSON-RPC 薄映射，不隐藏 Task 状态。 */
 export function createTasksApi(
 	client: Pick<VcpDeckClient, "request">,
-	nextId: () => string = () => crypto.randomUUID(),
+	nextId: () => string = randomUUID,
 ) {
 	async function rpc<T>(
 		method: string,

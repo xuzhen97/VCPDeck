@@ -108,6 +108,8 @@ dsh --profile web \
 
 此前 A2A 任务只存在库里和 CLI，页面看不到痕迹。现新增侧栏「Agent 任务」（`/agent-tasks`）：`ListTasks` 分页列表（状态、目标 agent、意图、产物数、更新时间）+ 详情抽屉（`GetTask` 的 history 双向回放、artifact 元数据、`/api/tasks/:id/events` 事件时间线）。派活仍走 `vcpdeck tasks` / JSON-RPC；**取消**可在详情抽屉完成（二次确认后才发 `CancelTask`，终态任务不显示按钮，因为对终态取消只会得到 `TASK_TERMINAL`）。与「任务」页的 Typed Job 是两套模型，页面上明确分开——`Job` 是可控作业，`Task` 是 agent 委托。
 
+该页在**明文 HTTP 部署**（`http://<IP>:3001`，非安全上下文）下同样可用：A2A JSON-RPC 的 request id 由 SDK 生成，`crypto.randomUUID` 在那里是 `undefined`，SDK 会退回 `crypto.getRandomValues` 按 v4 规则拼装，不因运行在 HTTPS 还是 HTTP 而整页失败（0.22.2 修复）。
+
 ### 4.1.2 端到端实证（2026-10-20）
 
 一次带真实工具调用的委托，作为该通道可用的验收证据（不再只是「回一个字」的连通性探测）：
