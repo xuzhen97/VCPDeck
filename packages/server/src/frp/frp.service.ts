@@ -35,6 +35,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { FrpsInstancesService } from "./frp-instances.service.js";
 import { FrpReconciliationService } from "./frp-reconciliation.service.js";
 import { PortAllocator } from "./port-allocator.js";
+import { JobLogService } from "../job/job-log.service.js";
 
 /** FRP 映射操作稳定失败。 */
 class FrpOperationError extends Error {
@@ -70,6 +71,9 @@ export class FrpService {
 		/** 恢复周期互斥守卫；未注入时（旧测试直接两参构造）跳过检查。 */
 		@Optional() @Inject(FrpReconciliationService)
 		private readonly reconciliation?: FrpReconciliationService,
+		/** Job 事件链；未注入时（旧测试）跳过写日志。 */
+		@Optional() @Inject(JobLogService)
+		private readonly jobLog?: JobLogService,
 	) {
 		this.allocator = new PortAllocator(prisma);
 	}
@@ -340,6 +344,30 @@ export class FrpService {
 				message: failure.message ?? "FRPS Dashboard 不可达",
 			};
 		}
+
+		// 二次确认结果写进 Job 事件链：确认超时/失败时，这里能直接看出卡在
+		// Dashboard 侧而不是 Client 没回 JOB_DONE。
+		const confirmCode: FrpErrorCode | undefined = confirmed
+			? undefined
+			: (dashboardError?.code ??
+				(shouldExist ? "FRP_PROXY_CONFIRM_TIMEOUT" : "FRP_PROXY_REMOVE_TIMEOUT"));
+		const confirmMessage = confirmed
+			? "FRPS Dashboard 已确认 proxy 状态"
+			: (dashboardError?.message ?? "FRPS 未在时限内确认 proxy 状态");
+		await this.jobLog?.record({
+			jobId,
+			event: "frp_confirm",
+			source: "server",
+			level: confirmed ? "info" : "warn",
+			...(confirmCode ? { code: confirmCode } : {}),
+			message: confirmMessage.slice(0, 200),
+			data: {
+				confirmed,
+				shouldExist,
+				proxyType: mapping.proxyType,
+				timeoutSeconds: mapping.operationTimeoutSeconds,
+			},
+		});
 
 		if (confirmed && shouldExist) {
 			await this.prisma.frpMapping.update({

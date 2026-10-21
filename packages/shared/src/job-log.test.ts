@@ -18,6 +18,7 @@ describe("Job 日志契约（ADR-0054）", () => {
 			"cancel_failed",
 			"client_offline",
 			"reconciled",
+			"frp_confirm",
 			"orphaned",
 			"settled",
 		]);

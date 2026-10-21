@@ -19,6 +19,7 @@ import {
 } from "@vcpdeck/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { FrpsInstancesService } from "./frp-instances.service.js";
+import { JobLogService } from "../job/job-log.service.js";
 
 /** 参与自动恢复的映射状态（provisioning/deleting/error 永远排除）。 */
 const RECOVERABLE_STATUSES: readonly string[] = ["active", "inactive", "reconciling"];
@@ -105,6 +106,28 @@ function mappingKey(name: string, localPort: number, remotePort: number | null):
 	return `${name}@${localPort}:${remotePort ?? "-"}`;
 }
 
+/** 尽力读取兜底收尾需要的 payload 字段；坏数据按空处理（不因此放弃收尾）。 */
+function parseJobPayload(raw: string | null): {
+	mappingId?: string;
+	rollbackOfJobId?: string;
+} {
+	if (!raw) return {};
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return {};
+	}
+	if (typeof parsed !== "object" || parsed === null) return {};
+	const record = parsed as Record<string, unknown>;
+	const out: { mappingId?: string; rollbackOfJobId?: string } = {};
+	if (typeof record.mappingId === "string") out.mappingId = record.mappingId;
+	if (typeof record.rollbackOfJobId === "string") {
+		out.rollbackOfJobId = record.rollbackOfJobId;
+	}
+	return out;
+}
+
 @Injectable()
 export class FrpReconciliationService implements OnModuleDestroy {
 	private readonly contexts = new Map<string, ReconcileContext>();
@@ -124,6 +147,9 @@ export class FrpReconciliationService implements OnModuleDestroy {
 		@Inject(FrpsInstancesService)
 		private readonly instances: FrpsInstancesService,
 		@Optional() deps: ReconcileScheduleDeps = {},
+		/** Job 事件链；未注入时（旧测试直接三参构造）跳过写日志。 */
+		@Optional() @Inject(JobLogService)
+		private readonly jobLog?: JobLogService,
 	) {
 		this.delays = deps.delays ?? [0, 5_000, 30_000];
 		this.schedule =
@@ -167,13 +193,14 @@ export class FrpReconciliationService implements OnModuleDestroy {
 	}
 
 	/**
-	 * 在途 reconcile Job 超时兜底：结算所有 running 超过 timeout 字段的
-	 * frp.reconcile Job。
+	 * 在途 FRP Job 超时兜底：
+	 * - `frp.reconcile`：见原本说明（handleLocalResult 守卫静默 return 等漏结算）；
+	 * - `frp.create` / `frp.delete`：Client 没回 JOB_DONE、或回滚链断在半路时，
+	 *   这两类 Job 会永远停在 running（生产 2026-10-20 实例：
+	 *   `b225f930…` / `7577b478…`）。它们会让 `ServerDrain` 一直等不到收敛，
+	 *   下一次发布直接失败，所以必须由 Server 主动终结。
 	 *
-	 * 这是最后一层防御：handleLocalResult 的守卫静默 return、周期被清、
-	 * 停机窗口漏结算——任何路径漏掉的孤儿都会在这里被强制终局，Job 不再
-	 * 永久 running（生产事故 539da971）。幂等：已终局行不会被命中；与
-	 * 周期/重试槽位的交互见 sweep 中对 contexts 的处理说明。
+	 * 幂等：已终局行不会被命中。
 	 */
 	private async sweepTimedOutJobs(): Promise<void> {
 		// 重排下一轮：扫描自身失败不应终止兜底循环。
@@ -183,7 +210,15 @@ export class FrpReconciliationService implements OnModuleDestroy {
 		try {
 			const nowMs = this.now();
 			const jobs = await this.prisma.job.findMany({
-				where: { type: "frp.reconcile", status: "running" },
+				where: {
+					OR: [
+						{ type: "frp.reconcile", status: "running" },
+						{
+							type: { in: ["frp.create", "frp.delete"] },
+							status: { in: ["running", "cancelling"] },
+						},
+					],
+				},
 			});
 			for (const job of jobs) {
 				// timeout 字段单位是秒；缺 0/null 的历史行不兜底（保守：只处理
@@ -192,6 +227,11 @@ export class FrpReconciliationService implements OnModuleDestroy {
 				if (budgetSeconds <= 0) continue;
 				const startedMs = job.startedAt ? job.startedAt.getTime() : 0;
 				if (startedMs <= 0 || nowMs - startedMs < budgetSeconds * 1_000) continue;
+
+				if (job.type === "frp.create" || job.type === "frp.delete") {
+					await this.reapMutationJob(job, budgetSeconds, nowMs);
+					continue;
+				}
 
 				// 若该 Job 仍属于某个活周期，先取消周期（清槽位），让后续上报
 				// 走正常的新周期/新代次路由，而不是与已终局的 Job 互相纠缠。
@@ -209,6 +249,82 @@ export class FrpReconciliationService implements OnModuleDestroy {
 				`超时扫描失败: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
+	}
+
+	/**
+	 * 终结一条超时的映射写操作 Job。
+	 *
+	 * 三件事必须一起做，否则状态会互相打架：Job 收敛为 error、映射让出
+	 * `operationJobId`（否则后续恢复/删除会一直认为有人在操作它）、回滚链的
+	 * 父 Job 一并终结（否则父任务继续等一个永远不会到的结果）。
+	 */
+	private async reapMutationJob(
+		job: {
+			id: string;
+			clientId: string;
+			type: string;
+			payload: string | null;
+		},
+		budgetSeconds: number,
+		nowMs: number,
+	): Promise<void> {
+		const message = `FRP 映射操作超过 ${budgetSeconds} 秒未收到 Client 完成回调，已由 Server 兜底终结`;
+		const payload = parseJobPayload(job.payload);
+		try {
+			await this.prisma.job.update({
+				where: { id: job.id },
+				data: {
+					status: "error",
+					errorCode: "FRP_OPERATION_TIMEOUT",
+					errorMessage: message,
+					finishedAt: new Date(nowMs),
+				},
+			});
+		} catch {
+			// Job 行缺失/已终局：忽略（幂等结算）。
+		}
+		if (payload.mappingId) {
+			await this.prisma.frpMapping
+				.updateMany({
+					where: { operationJobId: job.id },
+					data: {
+						operationJobId: null,
+						status: "error",
+						errorCode: "FRP_OPERATION_TIMEOUT",
+						errorMessage: message,
+					},
+				})
+				.catch(() => undefined);
+		}
+		if (payload.rollbackOfJobId) {
+			// 回滚链的父 Job 仍在等这条结果，一起终结。
+			await this.prisma.job
+				.updateMany({
+					where: {
+						id: payload.rollbackOfJobId,
+						status: { in: ["running", "cancelling"] },
+					},
+					data: {
+						status: "error",
+						errorCode: "FRP_OPERATION_TIMEOUT",
+						errorMessage: message,
+						finishedAt: new Date(nowMs),
+					},
+				})
+				.catch(() => undefined);
+		}
+		await this.jobLog?.record({
+			jobId: job.id,
+			event: "orphaned",
+			source: "server",
+			level: "error",
+			code: "FRP_OPERATION_TIMEOUT",
+			message,
+			data: { type: job.type, timeoutSeconds: budgetSeconds },
+		});
+		this.log(
+			`FRP Job 超时兑底结算 (job=${job.id}, type=${job.type}, client=${job.clientId})`,
+		);
 	}
 
 	/** 该 Client 是否处于恢复周期（create/delete 据此稳定返回 409）。 */

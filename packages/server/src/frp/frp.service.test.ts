@@ -291,6 +291,78 @@ describe("FrpService createMapping", () => {
 		});
 	});
 
+	it("二次确认成功时写 frp_confirm 事件（info）", async () => {
+		prisma.job.findUnique.mockResolvedValue({
+			id: "create-job",
+			clientId: "client-1",
+			type: "frp.create",
+			payload: JSON.stringify({ mappingId: "fm_1", name: "tcp-1919" }),
+		});
+		prisma.frpMapping.findUnique.mockResolvedValue({
+			id: "fm_1",
+			frpsInstanceId: "frps_1",
+			name: "tcp-1919",
+			proxyType: "tcp",
+			operationTimeoutSeconds: 30,
+		});
+		instances.listDashboardProxies.mockResolvedValue({
+			total: 1,
+			byType: { tcp: 1, http: 0, https: 0 },
+			list: [{ name: "tcp-1919", proxyType: "tcp", status: "online", remotePort: 20000 }],
+			usedPorts: [20000],
+		});
+		const jobLog = { record: vi.fn().mockResolvedValue(undefined) };
+		const logging = new FrpService(prisma, instances as any, undefined, jobLog as any);
+
+		await logging.settleClientOperation("create-job", "frp.create");
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "create-job",
+				event: "frp_confirm",
+				source: "server",
+				level: "info",
+				data: expect.objectContaining({ confirmed: true, shouldExist: true }),
+			}),
+		);
+	});
+
+	it("二次确认失败时写 frp_confirm 事件（warn + 真实错误码）", async () => {
+		prisma.job.findUnique.mockResolvedValue({
+			id: "create-job",
+			clientId: "client-1",
+			type: "frp.create",
+			payload: JSON.stringify({ mappingId: "fm_1", name: "tcp-1919" }),
+		});
+		prisma.frpMapping.findUnique.mockResolvedValue({
+			id: "fm_1",
+			clientId: "client-1",
+			frpsInstanceId: "frps_1",
+			name: "tcp-1919",
+			proxyType: "tcp",
+			operationTimeoutSeconds: 0,
+		});
+		instances.listDashboardProxies.mockRejectedValue(
+			Object.assign(new Error("FRPS Dashboard 不可达"), {
+				code: "FRPS_DASHBOARD_UNREACHABLE",
+			}),
+		);
+		const jobLog = { record: vi.fn().mockResolvedValue(undefined) };
+		const logging = new FrpService(prisma, instances as any, undefined, jobLog as any);
+
+		await logging.settleClientOperation("create-job", "frp.create");
+
+		expect(jobLog.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				jobId: "create-job",
+				event: "frp_confirm",
+				level: "warn",
+				code: "FRPS_DASHBOARD_UNREACHABLE",
+				data: expect.objectContaining({ confirmed: false }),
+			}),
+		);
+	});
+
 	it("删除离线 Client 时不创建 Job、不改变 mapping", async () => {
 		prisma.frpMapping.findUnique.mockResolvedValue({
 			id: "fm_1",

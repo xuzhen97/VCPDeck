@@ -15,6 +15,7 @@ export const JOB_LOG_SERVER_EVENTS = [
 	"cancel_failed",
 	"client_offline",
 	"reconciled",
+	"frp_confirm",
 	"orphaned",
 	"settled",
 ] as const;

@@ -793,6 +793,136 @@ describe("FrpReconciliationService 生命周期与守卫", () => {
 		});
 	});
 
+	describe("映射写操作 Job（frp.create/frp.delete）超时收割", () => {
+		/** 生产回归：2026-10-20 两条 frp Job 停在 running 9 小时，会让 drain 等不到收敛。 */
+		function setupMutationSweep(opts?: { clock?: { now: number } }) {
+			const clock = opts?.clock ?? { now: 1_000_000 };
+			const jobLog = { record: vi.fn().mockResolvedValue(undefined) };
+			const prisma = {
+				job: {
+					findMany: vi.fn().mockResolvedValue([]),
+					update: vi.fn().mockResolvedValue({}),
+					updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+				},
+				frpMapping: {
+					updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+				},
+			};
+			const instances = {
+				getById: vi.fn().mockResolvedValue(instance),
+				listDashboardProxies: vi.fn().mockResolvedValue(dashboardWith()),
+			};
+			const timers: TimerEntry[] = [];
+			const service = new FrpReconciliationService(
+				prisma as never,
+				instances as never,
+				{
+					schedule: (delay, run) => {
+						timers.push({ delay, run: () => Promise.resolve(run()) });
+						return { cancel: () => {} } as unknown as NodeJS.Timeout;
+					},
+					log: vi.fn(),
+					sweepIntervalMs: 60_000,
+					now: () => clock.now,
+				},
+				jobLog as never,
+			);
+			return { service, prisma, jobLog, timers };
+		}
+
+		const mutationJob = (over: Record<string, unknown> = {}) => ({
+			id: "j_create",
+			type: "frp.create",
+			status: "running",
+			clientId: "c1",
+			timeout: 30,
+			startedAt: new Date(1_000_000 - 60_000),
+			payload: JSON.stringify({ mappingId: "fm_1", name: "tcp-1919" }),
+			...over,
+		});
+
+		it("超预算的 frp.create 被终结为 FRP_OPERATION_TIMEOUT 并让出映射占用", async () => {
+			const { prisma, jobLog, timers } = setupMutationSweep();
+			prisma.job.findMany.mockResolvedValue([mutationJob()]);
+
+			await timers.find((t) => t.delay === 60_000)!.run();
+
+			expect(prisma.job.update).toHaveBeenCalledWith({
+				where: { id: "j_create" },
+				data: expect.objectContaining({
+					status: "error",
+					errorCode: "FRP_OPERATION_TIMEOUT",
+				}),
+			});
+			expect(prisma.frpMapping.updateMany).toHaveBeenCalledWith({
+				where: { operationJobId: "j_create" },
+				data: expect.objectContaining({
+					operationJobId: null,
+					status: "error",
+					errorCode: "FRP_OPERATION_TIMEOUT",
+				}),
+			});
+			expect(jobLog.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					jobId: "j_create",
+					event: "orphaned",
+					level: "error",
+					code: "FRP_OPERATION_TIMEOUT",
+				}),
+			);
+		});
+
+		it("回滚链上的 frp.delete 会连带终结仍在跑的父 create Job", async () => {
+			const { prisma, timers } = setupMutationSweep();
+			prisma.job.findMany.mockResolvedValue([
+				mutationJob({
+					id: "j_rollback",
+					type: "frp.delete",
+					payload: JSON.stringify({
+						mappingId: "fm_1",
+						name: "tcp-1919",
+						rollbackOfJobId: "j_create",
+					}),
+				}),
+			]);
+
+			await timers.find((t) => t.delay === 60_000)!.run();
+
+			expect(prisma.job.updateMany).toHaveBeenCalledWith({
+				where: { id: "j_create", status: { in: ["running", "cancelling"] } },
+				data: expect.objectContaining({ errorCode: "FRP_OPERATION_TIMEOUT" }),
+			});
+		});
+
+		it("未超预算或无预算预算的映射 Job 不收割", async () => {
+			const { prisma, timers } = setupMutationSweep();
+			prisma.job.findMany.mockResolvedValue([
+				mutationJob({ id: "j_fresh", startedAt: new Date(1_000_000 - 5_000) }),
+				mutationJob({ id: "j_legacy", timeout: null }),
+			]);
+
+			await timers.find((t) => t.delay === 60_000)!.run();
+
+			expect(prisma.job.update).not.toHaveBeenCalled();
+			expect(prisma.frpMapping.updateMany).not.toHaveBeenCalled();
+		});
+
+		it("payload 无法解析时仍终结 Job（不因坏数据放弃收尾）", async () => {
+			const { prisma, timers } = setupMutationSweep();
+			prisma.job.findMany.mockResolvedValue([
+				mutationJob({ id: "j_broken", payload: "{not json" }),
+			]);
+
+			await timers.find((t) => t.delay === 60_000)!.run();
+
+			expect(prisma.job.update).toHaveBeenCalledWith({
+				where: { id: "j_broken" },
+				data: expect.objectContaining({ errorCode: "FRP_OPERATION_TIMEOUT" }),
+			});
+			expect(prisma.frpMapping.updateMany).not.toHaveBeenCalled();
+		});
+	});
+
 	it("onModuleDestroy 清空周期与 timer", async () => {
 		const { service, prisma, jobs } = setup();
 		prisma.frpMapping.findMany.mockResolvedValue([mappingRow({ id: "fm_1" })]);

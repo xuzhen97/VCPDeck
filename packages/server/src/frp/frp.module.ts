@@ -6,9 +6,10 @@ import { FrpsInstancesService } from "./frp-instances.service.js";
 import { FrpsInstancesController } from "./frp-instances.controller.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
 import { EventsModule } from "../events/events.module.js";
+import { JobModule } from "../job/job.module.js";
 
 @Module({
-	imports: [PrismaModule, forwardRef(() => EventsModule)],
+	imports: [PrismaModule, forwardRef(() => EventsModule), JobModule],
 	providers: [FrpService, FrpsInstancesService, FrpReconciliationService],
 	controllers: [FrpController, FrpsInstancesController],
 	exports: [FrpService, FrpReconciliationService],

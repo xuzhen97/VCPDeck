@@ -54,7 +54,8 @@ Job 此前只有终态行、`Job.result` 和一份无序 raw spool（`data/job-o
 | server | `cancel_failed` | `ClientGateway.handleJobCancelFailed` |
 | server | `client_offline` | `JobService.markDisconnected`（逐 Job） |
 | server | `reconciled` | `JobService.reconcileOnReconnect` |
-| server | `orphaned` | `JobService.failOrphaned` |
+| server | `frp_confirm` | `FrpService.settleClientOperation`（Dashboard 二次确认结果：`confirmed`/`shouldExist`/`timeoutSeconds`；未确认时带 `FRP_PROXY_CONFIRM_TIMEOUT` 或 `FRPS_DASHBOARD_*`） |
+| server | `orphaned` | `JobService.failOrphaned`；FRP 映射作业超时收割时也写一条（`FRP_OPERATION_TIMEOUT`） |
 | server | `settled` | `JobService.markDone`（状态、耗时、exitCode、输出字节、spool 字节） |
 | client | `received` / `spawned` / `exited` / `local_settled` / `cancel_received` / `kill_failed` / `drain_timeout` | `packages/client/src/executor.ts` |
 
@@ -69,6 +70,7 @@ Job 此前只有终态行、`Job.result` 和一份无序 raw spool（`data/job-o
 - **首块去重依赖进程内存**：Server 重启后可能重复记一条 `output_first`（内容相同，可接受）。
 - **灰度期**：旧 Client 不上报相位，链只有 Server 事件；不能把"没有 `spawned`"直接判成"进程没起来"。
 - **`frp.reconcile`**：由恢复编排直接建行并结算，事件链从 `dispatched` 起，终态以 Job 行为准。
+- **`frp.create` / `frp.delete` 停在 running**（10-20 事故：`b225f930…` / `7577b478…` 挂了 9 小时）：Client 回 JOB_DONE 后 Server 还要等 Dashboard 二次确认；确认失败会生成回滚 delete Job，回滚链任何一环断掉，父 Job 就永远在等。现在两层兜底：`frp_confirm` 事件写明确认结局；`FrpReconciliationService.sweepTimedOutJobs` 在超过 `timeout` 后把 Job 判为 `FRP_OPERATION_TIMEOUT`、让出映射的 `operationJobId`，并连带终结回滚链的父 Job。这类残留会拖住 `ServerDrain`，让下一次发布等满 10 分钟后失败。
 
 ## 6. 安全、隐私与运维
 

@@ -2,6 +2,11 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [Unreleased]
+
+### Fixed
+
+- **FRP 映射作业不再永久停在 `running`**：2026-10-20 线上留下两条 `frp.create` / `frp.delete` Job（`b225f930…`、`7577b478…`）挂了 9 小时——Client 回了 `JOB_DONE`，但 Server 等 FRPS Dashboard 二次确认超时后生成的回滚链没有收尾，父 Job 一直在等。现在两层兜底：新增 `frp_confirm` 服务端事件记录二次确认结局（`confirmed`/`shouldExist`/超时秒数与真实错误码），排障时能直接区分「Client 没回」与「Dashboard 没确认」；`FrpReconciliationService` 的超时扫描扩展到这两类 Job，超过各自 `timeout` 后判为 `FRP_OPERATION_TIMEOUT`、让出映射的 `operationJobId`，并连带终结回滚链的父 Job。这类残留会让 `ServerDrain` 等满 10 分钟后放弃，下一次发布因此失败。
 ## [0.22.0] - 2026-10-20
 
 ### Breaking Changes
