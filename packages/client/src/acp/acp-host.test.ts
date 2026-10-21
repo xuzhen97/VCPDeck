@@ -98,6 +98,30 @@ describe("createAcpHost", () => {
 		}
 	});
 
+	it("close 会发 session/close 并结束子进程（避免 agent 常驻）", async () => {
+		let exited = false;
+		const host = createAcpHost({
+			command: process.execPath,
+			args: [fixture],
+			cwd: process.cwd(),
+			onEvent: () => undefined,
+			onExit: () => {
+				exited = true;
+			},
+		});
+		await host.start();
+		await host.close();
+		// 关闭后 host 不可再用
+		await expect(host.prompt("after-close")).rejects.toMatchObject({
+			code: "ACP_NOT_STARTED",
+		});
+		// 子进程应被 kill：等待退出事件落地
+		for (let i = 0; i < 40 && !exited; i++) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		expect(exited).toBe(true);
+	});
+
 	it("resume 失败时抛出 ACP_RESUME_FAILED", async () => {
 		const host = createAcpHost({
 			command: process.execPath,

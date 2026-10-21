@@ -158,4 +158,60 @@ describe("TaskDispatchService", () => {
 		});
 		expect(String(h.artifacts[0]!.uri)).toContain("/reply/m1");
 	});
+
+	it("任务完成时向 Client 发 close，避免 ACP 进程常驻", async () => {
+		const h = harness();
+		const started = h.service.start("t1", "hello");
+		await tick();
+		const startCmd = h.sent[0]!.command;
+		h.service.handleCommandResult("s1", {
+			requestId: startCmd.requestId,
+			ok: true,
+			sessionId: "s1",
+		});
+		await started;
+		await tick();
+		const promptCmd = h.sent.find((s) => s.command.action === "prompt")!.command;
+		h.service.handleCommandResult("s1", {
+			requestId: promptCmd.requestId,
+			ok: true,
+			stopReason: "end_turn",
+		});
+		await tick();
+		await tick();
+		expect(
+			h.sent.some((entry) => entry.command.action === "close"),
+		).toBe(true);
+	});
+
+	it("取消后 turn 未收敛时，15 秒兜底发 close", async () => {
+		vi.useFakeTimers();
+		try {
+			const h = harness();
+			const started = h.service.start("t1", "hello");
+			await vi.advanceTimersByTimeAsync(0);
+			const startCmd = h.sent[0]!.command;
+			h.service.handleCommandResult("s1", {
+				requestId: startCmd.requestId,
+				ok: true,
+				sessionId: "s1",
+			});
+			await started;
+			await vi.advanceTimersByTimeAsync(0);
+			// 不结算 prompt：模拟 session/cancel 没有让 turn 收敛
+			void h.service.cancel("t1");
+			await vi.advanceTimersByTimeAsync(0);
+			const cancelCmd = h.sent.find((s) => s.command.action === "cancel")!.command;
+			h.service.handleCommandResult("s1", {
+				requestId: cancelCmd.requestId,
+				ok: true,
+			});
+			await vi.advanceTimersByTimeAsync(15_100);
+			expect(
+				h.sent.some((entry) => entry.command.action === "close"),
+			).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });

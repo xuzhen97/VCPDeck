@@ -99,6 +99,7 @@ dsh --profile web \
 - `GetTask` 组装 `history`（inbound=user、outbound=agent），按 `historyLength` 取最近 N 条；`ListTasks` 不带 history（正文可能很大，按需取）。**user 回合用 `summary` 回填**（前 200 字）：多轮上下文不缺人那一半，又不暴露整段 prompt。
 - `agent-card.skills` 为每个启用的 placement 生成目录条目（`id=agent:<agentId>`），描述里写明「派活时 `metadata.agentId` 填什么」——调用方据此发现可用 agent，不再需要猜或翻库；条目只含 `agentId` 与 `adapter`，不含 `clientId` / `command` / `cwd`。
 - 多轮语义遵循 A2A：**进行中的 Task** 才能带 `taskId` 追加（已完成返回 `-32000 TASK_TERMINAL`）；新的一轮用同一 `contextId` 开新 Task，`ListTasks?contextId=` 归组。
+- **终态必须释放 Client**：`settle()` 在完成/取消/失败时向 Client 发 `close`（Client 执行 `session/close` + 杀进程）。不发就会一个任务泄漏一个 agent 进程，取消掉的长任务里正在跑的工具命令还会继续执行——2026-10-21 跨机实测发现，修复见 verification `2026-10-20-0.22.0` §9。
 
 实测：`dsh` placement 单轮任务 3 秒完成，`GetTask` 返回 `history: [{role:"agent", parts:[{text:"第一轮完成"}]}]` 与 `agent-reply` artifact；同 `contextId` 两轮归组为 2 个 Task。
 

@@ -265,6 +265,28 @@ export class TaskDispatchService {
 		if (!runtime) return;
 		const command = this.command(runtime, "cancel");
 		await this.request(runtime, command, 15_000).catch(() => undefined);
+		// 兜底：`session/cancel` 不保证停止已启动的工具命令。给 turn 一个收敛窗口，
+		// 超时仍存在 runtime 就进程级关闭，避免取消后命令继续在目标机上跑。
+		const timer = setTimeout(() => {
+			const still = this.runtimes.get(taskId);
+			if (still) this.releaseRuntime(still);
+		}, 15_000);
+		timer.unref?.();
+	}
+
+	/**
+	 * 终态释放 Client 侧 ACP 运行态。
+	 *
+	 * 不发 `close` 的话，Client 的 runtime 与 agent 进程会一直常驻到 socket 断开
+	 * 为止：一个任务泄漏一个进程，取消掉的长任务里正在跑的工具命令还会继续执行
+	 * （2026-10-21 跨机实测）。这里 fire-and-forget，失败只忽略——Client 已离线时
+	 * 不该拖住任务终态落库。
+	 */
+	private releaseRuntime(runtime: Runtime): void {
+		// fire-and-forget：close 的结果不影响任务终态，不能阻塞 settle。
+		void this.request(runtime, this.command(runtime, "close"), 10_000).catch(
+			() => undefined,
+		);
 	}
 
 	/** 回答 ACP permission；由 TaskService 把状态从 input-required 推回 working。 */
@@ -416,6 +438,7 @@ export class TaskDispatchService {
 				pending.reject(dispatchError("TASK_COMMAND_FAILED", "Task failed"));
 			}
 			runtime.pending.clear();
+			this.releaseRuntime(runtime);
 			this.runtimes.delete(taskId);
 			return;
 		}
@@ -437,7 +460,10 @@ export class TaskDispatchService {
 		if (runtime && runtime.agentMessages.size > 0) {
 			await this.flushAgentMessages(taskId, runtime);
 		}
-		if (runtime) this.runtimes.delete(taskId);
+		if (runtime) {
+			this.releaseRuntime(runtime);
+			this.runtimes.delete(taskId);
+		}
 		if (stopReason === "cancelled") {
 			await deps.tasks.transition(taskId, "canceled");
 			await this.record(taskId, "task.canceled", "summary", {
