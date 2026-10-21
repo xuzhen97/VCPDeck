@@ -123,6 +123,7 @@ dsh --profile web \
 
 ## 5. 已知偏移
 
+- **跨机派活的前提**：目标机必须在自己的 DSH 凭据库（`~/.dsh/.credentials.yaml` 的 `refs`）里有所需 provider 的密钥。placement 与 ACP 握手成功并不代表能跑：缺密钥时错误在 turn 阶段才出现（`ACP_RPC_ERROR`，明细只在 `Task.errorMessage`）。
 - 每台目标机需安装一次 DSH 插件；DSH 预览版 slot 契约变化时需要逐机适配。
 - 多机时是"每台一个 URL"，靠插件面板收敛；超过 5 台或出现第二操作者时按 ADR-0059 决策 6 切反代。
 - 插件面板只做展示与打开，不含日志/会话管理；这些仍以 VCPDeck 与 DSH 各自的界面为准。
