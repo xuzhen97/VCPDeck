@@ -29,6 +29,7 @@
 | [`verification/2026-09-03-linux-a2-and-release-integration.md`](./verification/2026-09-03-linux-a2-and-release-integration.md) | 0.6.18 Linux A2、虚拟机/真机集成验收与 Release 结果 |
 | [`verification/2026-10-20-0.22.0-a2a-and-agent-tasks.md`](./verification/2026-10-20-0.22.0-a2a-and-agent-tasks.md) | 0.22.0 A2A 端到端派活与取消、Agent 任务页、FRP 承载端口暴露 |
 | [`verification/2026-10-21-0.22.1-frp-job-reaper.md`](./verification/2026-10-21-0.22.1-frp-job-reaper.md) | 0.22.1 FRP 映射作业超时收割与 `frp_confirm` 事件 |
+| [`verification/2026-10-22-0.22.2-insecure-context-agent-tasks.md`](./verification/2026-10-22-0.22.2-insecure-context-agent-tasks.md) | 0.22.2 明文 HTTP（非安全上下文）下 Agent 任务页恢复 |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | 开发流程、变更要求和提交规范 |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | 用户可感知的版本变更 |
 
