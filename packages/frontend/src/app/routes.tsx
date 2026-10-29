@@ -7,7 +7,6 @@ import { ConsoleShell } from "@/app/console-shell";
 import { useAuth } from "@/auth-context";
 import { LoadingState } from "@/components/async-state";
 import { DashboardPage } from "@/pages/dashboard-page";
-import { DevelopDshPage } from "@/pages/develop-dsh-page";
 import { FrpPage } from "@/pages/frp-page";
 import { FeaturesPage } from "@/pages/machine-features-panel";
 import { JobDetailPage } from "@/pages/job-detail-page";
@@ -47,7 +46,6 @@ export function AppRoutes() {
 				<Route path="/agent-tasks" element={<AgentTasksPage />} />
 				<Route path="/frp" element={<FrpPage />} />
 				<Route path="/features" element={<FeaturesPage />} />
-				<Route path="/develop" element={<DevelopDshPage />} />
 				<Route path="/releases" element={<ReleasesPage />} />
 				{/* 兼容旧入口：存储已并入设置模块 */}
 				<Route

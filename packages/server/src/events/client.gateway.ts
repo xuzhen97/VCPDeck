@@ -27,7 +27,6 @@ import {
   parseMachineRegister,
   parseTaskClientEvent,
   parseTaskCommandResult,
-  parseDshWebCommandResult,
   parseTerminalStateReport,
   type JobLogLine,
   type JobProgress,
@@ -55,7 +54,6 @@ import { clientPsk } from "../client/client-psk.js";
 import { GitSshService } from "../git-ssh/git-ssh.service.js";
 import { JobLogService } from "../job/job-log.service.js";
 import { TaskDispatchService } from "../task/task-dispatch.service.js";
-import { DshWebService } from "../dsh-web/dsh-web.service.js";
 
 const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
 
@@ -109,10 +107,6 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(TaskDispatchService)
     private readonly taskDispatch?: TaskDispatchService,
-    // 远程 DSH 受管通道（ADR-0059 修订）；旧测试构造可省略
-    @Optional()
-    @Inject(DshWebService)
-    private readonly dshWeb?: DshWebService,
   ) {}
 
   onModuleInit() {
@@ -142,12 +136,6 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     this.taskDispatch?.bindEmitter((socketId, command) => {
       this.server.to(socketId).emit(Events.TASK_COMMAND, command);
     });
-    this.dshWeb?.bindEmitter((socketId, command) => {
-      this.server.to(socketId).emit(Events.DSH_WEB_COMMAND, command);
-    });
-    // FRP 映射 dispatch 下发口：受管 DSH 生命周期建/删映射后必须走到这里，
-    // 否则映射只存在于数据库、frpc 侧没有代理，端口不可达。
-    this.dshWeb?.bindDispatch((payload) => this.sendDispatch(payload));
     this.updateChannel.bindEmitters({
       sendUpdateRequest: (clientId, request) => {
         this.server.to(clientId).emit(Events.UPDATE_REQUEST, request);
@@ -241,7 +229,6 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     await this.jobService.markDisconnected(clientId);
     await this.frpService.markInactiveByClientId(clientId);
     await this.taskDispatch?.failByClientId(clientId);
-    await this.dshWeb?.handleClientOffline(clientId);
   }
 
   // ── Client events ──
@@ -808,19 +795,6 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       );
     } catch {
       // 事件投影失败不杀 Client；Task 会由超时/取消路径收敛。
-    }
-  }
-
-  @SubscribeMessage(Events.DSH_WEB_RESULT)
-  async handleDshWebResult(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: unknown,
-  ): Promise<void> {
-    if (!client.data.clientId || !this.dshWeb) return;
-    try {
-      await this.dshWeb.handleResult(client.id, parseDshWebCommandResult(data));
-    } catch {
-      // 非法结果丢弃，不影响连接；Server 侧按超时收敛。
     }
   }
 

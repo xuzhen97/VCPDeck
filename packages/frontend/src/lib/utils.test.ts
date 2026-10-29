@@ -35,7 +35,6 @@ describe("MACHINE_TABS", () => {
 			"frp",
 			"jobs",
 			"terminal",
-			"develop",
 			"features",
 		]);
 	});

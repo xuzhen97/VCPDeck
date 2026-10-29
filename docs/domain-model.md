@@ -104,16 +104,6 @@ Capability 是能力声明，不是用户权限：
 - `updatedAt` 由 Server 写入；注解是说明性事实，未验证可达性，不参与授权，也不构成连通性保证；
 - 写入口为 `PUT /api/clients/:clientId/annotations`（全量替换，空对象清除）。
 
-### 4.5 远程 DSH 地址（ADR-0059）
-
-- `dshWebUrl` 是**操作者登记**的目标机 DSH WebUI 入口（经 FRP 或内网暴露），与 Client 上报事实分离；注册、心跳、重连与改名都不会覆盖。
-- 只接受 `http/https`、不含用户名口令、长度不超过 2048；空串与 `null` 都表示清除登记。
-- Server **不验证可达性**，也不主动探测（探测会形成 SSRF 面，且目标往往只在操作者本机网络可达）；登记不参与授权。
-- 该地址可能携带一次性 token，因此只经 API 按需下发，**不得写入日志、审计正文或文档**。
-- 写入口为 `PUT /api/clients/:clientId/dsh-web`（`{ url: string | null }`）；格式非法返回 400 `INVALID_DSH_WEB_URL`。
-- `TaskTurn.content` 存该轮正文：仅 **outbound（agent 输出）** 有值（上限 64KB 截断），inbound（操作者 prompt）只存 `summary` + `contentHash`。正文是 A2A `GetTask.history` 的事实来源；`TaskArtifact`（`name=agent-reply`）承接最终回复引用。
-- `dshWebMode ∈ {managed, external}` 表示实例归谁管：登记地址即落 `external`（状态 `external`），VCPDeck 只维护入口、拒绝代起代停；`DELETE` 解除登记并交还 `managed`。该字段与 `dshWebState/dshWebPort/dshWebFrpMappingId` 一起构成归属事实，注册与心跳不得覆盖。
-
 ## 5. Job
 
 Job 是一次具有目标 Client、类型、输入、生命周期、结果和操作者审计的远程操作。
@@ -199,6 +189,8 @@ submitted → canceled | rejected | failed
 对外 A2A wire 只使用 `status.state = TASK_STATE_*`，由 `toA2aTaskState`/`fromA2aTaskState` 转换，Task 顶层不得出现内部小写 `state`。终态是最终状态，终态后新的用户消息返回 `TASK_TERMINAL`。`CancelTask` 先取消 Task，再尽力向 Client 发 `cancel`；Client 真正离线时未完成 Task 收敛为 `failed/TASK_CLIENT_DISCONNECTED`。
 
 `TaskTurn` 只保存轮次摘要（≤200 字符）和 `contentHash`，不保存完整正文；`TaskAttempt` 记录一次 ACP/CLI 执行；`TaskArtifact` 只保存产物引用，不把文件正文塞进 Task。
+
+`TaskTurn.content` 存该轮正文：仅 **outbound（agent 输出）** 有值（上限 64KB 截断），inbound（操作者 prompt）只存 `summary` + `contentHash`。正文是 A2A `GetTask.history` 的事实来源；`TaskArtifact`（`name=agent-reply`）承接最终回复引用。
 
 ### 6.3 证据链与权限
 

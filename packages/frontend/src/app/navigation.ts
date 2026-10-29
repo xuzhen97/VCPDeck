@@ -2,7 +2,6 @@ import {
 	Blocks,
 	Bot,
 	Cable,
-	Code2,
 	Database,
 	KeyRound,
 	LayoutDashboard,
@@ -54,8 +53,6 @@ export const MODULES: NavModule[] = [
 	{ id: "agent-tasks", path: "/agent-tasks", label: "Agent 任务", icon: Bot },
 	{ id: "frp", path: "/frp", label: "映射", icon: Cable },
 	{ id: "features", path: "/features", label: "功能", icon: Blocks },
-	// 「开发」= 人机协作：跨机器远程 DSH，一屏启动并直接进入完整 WebUI。
-	{ id: "develop", path: "/develop", label: "开发", icon: Code2 },
 	{ id: "releases", path: "/releases", label: "发版", icon: Rocket },
 	{
 		id: "settings",

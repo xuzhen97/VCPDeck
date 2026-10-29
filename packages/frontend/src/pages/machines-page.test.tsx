@@ -111,10 +111,6 @@ describe("MachinesPage", () => {
 		// 卡片只放高频入口：映射 / 任务记录 / 功能 走全局页，不再重复铺一排链接
 		expect(screen.queryByRole("link", { name: "映射" })).toBeNull();
 		expect(screen.queryByRole("link", { name: "任务记录" })).toBeNull();
-		expect(screen.getByRole("link", { name: "开发" })).toHaveAttribute(
-			"href",
-			"/machines/client-1/develop",
-		);
 			expect(screen.queryByRole("link", { name: "Agent 对话" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("link", { name: "Pi" })).not.toBeInTheDocument();
 		expect(screen.getByRole("link", { name: "终端" })).toHaveAttribute(

@@ -1,6 +1,6 @@
 # ADR-0059：远程 DSH WebUI 通道（远程开发台）
 
-- 状态：Accepted（2026-10-19；同日修订：主路径由"VCPDeck 反代"改为"FRP 直连 + DSH 插件目录"）
+- 状态：Superseded by [ADR-0061](./0061-retire-remote-dsh-webui.md)（2026-10-29 退役该通道；以下内容为历史记录）
 - 决策者：维护者
 - 关联：[ADR-0058](./0058-remote-dev-session.md)（RDS）、[ADR-0037](./0037-git-ssh-managed-keys.md)（受控下发思路）
 

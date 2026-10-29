@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本采用[语义化版本](https://semver.org/lang/zh-CN/)。日期 `YYYY-MM-DD`。
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **退役远程 DSH WebUI 通道**（[ADR-0061](docs/adr/0061-retire-remote-dsh-webui.md)）：侧栏「开发」模块、全局 `/develop` 页与机器「开发」tab 一并删除；`Client` 的 `dshWebUrl`/`dshWebState`/`dshWebMode`/`dshWebPort`/`dshWebFrpMappingId` 五列随迁移 `20261029000000_client_drop_dsh_web` 丢弃（升级需 `prisma db push --accept-data-loss`）；`/api/clients/:clientId/dsh-web` 系列端点、Shared 的 `dsh-web` 契约与 `dshweb:command`/`dshweb:result` 事件、SDK 的 `setDshWebUrl`/`startDshWeb`/`stopDshWeb`/`detachDshWeb`、Client 的 `dsh-web` capability 与 `dsh-web-host`、以及 `plugins/dsh-vcpdeck`（`@vcpdeck/dsh-panel`）全部移除。不提供替代品：跨机人工开发直接连目标机使用 DSH，暴露端口用已有 FRP 映射。ACP 侧的 `agentId=dsh` 与 A2A Task 不受影响。
+
 ## [0.22.2] - 2026-10-21
 
 ### Fixed

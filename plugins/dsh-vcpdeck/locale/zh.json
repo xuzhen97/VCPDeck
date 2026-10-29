@@ -1,6 +1,0 @@
-{
-	"meta": {
-		"title": "VCPDeck",
-		"description": "列出 VCPDeck 机器，并一键打开目标机的远程 DSH WebUI。"
-	}
-}

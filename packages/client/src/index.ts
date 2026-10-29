@@ -1,5 +1,5 @@
 import { io, type Socket } from "socket.io-client";
-import { Events, parseDshWebCommand } from "@vcpdeck/shared";
+import { Events } from "@vcpdeck/shared";
 import type {
 	GitSshCapability,
 	MachineRegister,
@@ -45,7 +45,6 @@ import {
 import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge.js";
 import { createAcpHost } from "./acp/acp-host.js";
 import { attachAcpTaskBridge } from "./acp/acp-bridge.js";
-import { createDshWebHost } from "./dsh-web/dsh-web-host.js";
 import { ClientLauncher } from "./launcher-control.js";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -367,65 +366,6 @@ export function connect(): Socket {
 			createHost: createAcpHost,
 		});
 	}
-
-	// 远程 DSH：Server 代操作者起停本机 `dsh web`（ADR-0059 修订）。
-	// 只在本机 loopback 监听，对外由 Server 侧 FRP 映射；token 只回传给 Server。
-	const dshWebHost = verifyOnly ? null : createDshWebHost();
-	socket.on(Events.DSH_WEB_COMMAND, (raw: unknown) => {
-		void (async () => {
-			let command: ReturnType<typeof parseDshWebCommand>;
-			try {
-				command = parseDshWebCommand(raw);
-			} catch {
-				// 非法命令不进入状态机，也不回包（Server 侧有超时兜底）。
-				return;
-			}
-			if (!dshWebHost) {
-				socket.emit(Events.DSH_WEB_RESULT, {
-					requestId: command.requestId,
-					ok: false,
-					error: {
-						code: "DSH_WEB_UNAVAILABLE",
-						message: "迁移验证模式不托管 dsh web",
-					},
-				});
-				return;
-			}
-			try {
-				if (command.action === "start") {
-					const started = await dshWebHost.start({ port: command.port });
-					socket.emit(Events.DSH_WEB_RESULT, {
-						requestId: command.requestId,
-						ok: true,
-						port: started.port,
-						token: started.token,
-					});
-					return;
-				}
-				await dshWebHost.stop(command.port);
-				socket.emit(Events.DSH_WEB_RESULT, {
-					requestId: command.requestId,
-					ok: true,
-				});
-			} catch (cause) {
-				const code =
-					(cause as { code?: unknown }).code ?? "DSH_WEB_COMMAND_FAILED";
-				const message =
-					(cause as { message?: unknown }).message ?? "dsh web 命令失败";
-				socket.emit(Events.DSH_WEB_RESULT, {
-					requestId: command.requestId,
-					ok: false,
-					error: {
-						code: typeof code === "string" ? code : "DSH_WEB_COMMAND_FAILED",
-						message:
-							typeof message === "string"
-								? message.slice(0, 500)
-								: "dsh web 命令失败",
-					},
-				});
-			}
-		})();
-	});
 
 	// 连接后：探测终端能力并发现 Shell（幂等，不阻塞注册超过 3 秒）
 	let terminalReady: Promise<void> | null = null;

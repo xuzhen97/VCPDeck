@@ -1,4 +1,0 @@
-- insert:
-    - id: vcpdeck-panel
-      name: '@vcpdeck/dsh-panel'
-      config: {}

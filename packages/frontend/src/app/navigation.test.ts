@@ -44,15 +44,10 @@ describe("resolveModule", () => {
 			"Agent 任务",
 			"映射",
 			"功能",
-			"开发",
 			"发版",
 			"设置",
 		]);
 		expect(MODULES.map((mod) => mod.id)).not.toContain("agent");
-		expect(MODULES.find((mod) => mod.id === "develop")?.path).toBe("/develop");
-		expect(
-			MODULES.find((mod) => mod.id === "develop")?.sub,
-		).toBeUndefined();
 		expect(
 			MODULES.find((mod) => mod.id === "settings")?.sub?.map((s) => s.label),
 		).toEqual(["个人资料", "Token", "Git 密钥", "存储", "身份管理"]);

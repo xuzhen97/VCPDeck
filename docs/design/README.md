@@ -21,9 +21,7 @@
 
 ## 候选提案（不可作为当前运行事实）
 
-| 领域 | 文档 | 状态与用途 |
-| --- | --- | --- |
-| 开发台（远程 DSH） | [`remote-dsh.md`](./remote-dsh.md) | Current；ADR-0059。入口为 `/develop` 与机器「开发」tab；一键代起 `dsh web` + 自动 FRP 映射 + 受管清理 |
+当前没有待评估的专题提案。远程 DSH WebUI 通道（原 `remote-dsh.md`）已按 [ADR-0061](../adr/0061-retire-remote-dsh-webui.md) 退役，文档一并删除。
 
 ## 新专题模板
 

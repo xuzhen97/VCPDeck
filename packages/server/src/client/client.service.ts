@@ -29,8 +29,6 @@ export const CLIENT_NOT_FOUND = "CLIENT_NOT_FOUND";
 export const INVALID_CLIENT_NAME = "INVALID_CLIENT_NAME";
 /** 注解格式非法（400） */
 export const INVALID_CLIENT_ANNOTATIONS = "INVALID_CLIENT_ANNOTATIONS";
-/** 远程 DSH 地址格式非法（400，ADR-0059） */
-export const INVALID_DSH_WEB_URL = "INVALID_DSH_WEB_URL";
 /** Client 心跳超时阈值：超过两个以上心跳周期未上报即视为离线。 */
 export const CLIENT_HEARTBEAT_TIMEOUT_MS = 30_000;
 
@@ -51,13 +49,6 @@ interface ClientRow {
   capabilities: string;
   capabilityDetails: string;
   annotations: string;
-  /** 远程 DSH WebUI 登记地址（ADR-0059）；null 表示未登记 */
-  dshWebUrl: string | null;
-  /** 受管通道状态（ADR-0059 修订） */
-  dshWebState?: string;
-  /** 归属模式：managed / external（ADR-0059 决策 12） */
-  dshWebMode?: string | null;
-  dshWebPort?: number | null;
   disks: string;
   online: boolean;
   cpuPercent: number | null;
@@ -180,51 +171,6 @@ export class ClientService {
           `Client "${clientId}" not found`,
           404,
         );
-      }
-      throw error;
-    }
-    return this.toClientInfo(updated);
-  }
-
-  /**
-   * 登记/清除远程 DSH WebUI 地址（ADR-0059）。
-   *
-   * 只存"操作者声明的入口"，不校验可达性：地址经 FRP/内网暴露，
-   * 由操作者保证私网可达（ADR-0059 决策 3）。注册与心跳不会覆盖它。
-   */
-  async setDshWebUrl(
-    clientId: string,
-    url: string | null,
-  ): Promise<ClientInfo> {
-    let updated: ClientRow;
-    try {
-      // 登记地址 = 声明「这台机器的实例不是我起的」：落成 external，避免一键启动
-      // 又在 systemd 常驻服务旁边起一个实例、把这里的地址覆盖掉。
-      // 清空地址则交还给 managed，让一键启动重新可用（不打断正在运行的受管通道）。
-      const current = await this.prisma.client.findUnique({
-        where: { id: clientId },
-      });
-      if (!current) {
-        throw clientError(CLIENT_NOT_FOUND, `Client "${clientId}" not found`, 404);
-      }
-      const row = current as unknown as {
-        dshWebMode?: string | null;
-        dshWebState?: string | null;
-      };
-      const wasExternal =
-        row.dshWebMode === "external" || row.dshWebState === "external";
-      const data: Record<string, unknown> =
-        url === null
-          ? {
-              dshWebUrl: null,
-              dshWebMode: "managed",
-              ...(wasExternal ? { dshWebState: "stopped" } : {}),
-            }
-          : { dshWebUrl: url, dshWebMode: "external", dshWebState: "external" };
-      updated = await this.prisma.client.update({ where: { id: clientId }, data });
-    } catch (error) {
-      if ((error as { code?: string } | null)?.code === "P2025") {
-        throw clientError(CLIENT_NOT_FOUND, `Client "${clientId}" not found`, 404);
       }
       throw error;
     }
@@ -386,15 +332,6 @@ export class ClientService {
     const annotations = this.parseStoredAnnotations(c.annotations);
     if (annotations !== null) {
       info.annotations = annotations;
-    }
-    // 只下发已登记的地址；未登记时缺省，避免前端出现空链接
-    if (c.dshWebUrl) {
-      info.dshWebUrl = c.dshWebUrl;
-    }
-    if (c.dshWebState) {
-      info.dshWebState = c.dshWebState as ClientInfo["dshWebState"];
-      info.dshWebPort = c.dshWebPort ?? null;
-      info.dshWebMode = (c.dshWebMode ?? "managed") as ClientInfo["dshWebMode"];
     }
     return info;
   }

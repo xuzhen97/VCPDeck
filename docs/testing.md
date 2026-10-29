@@ -223,9 +223,10 @@ Release 不得只凭构建成功发布。至少确认：
 - FRP 缺同 Client 多实例约束、secret 脱敏、默认实例原子性、Client 重启恢复、frpc 退出状态和删除孤儿的长期门禁；
 - 缺稳定的安全 fuzz/速率限制测试；
 - 旧集成测试清单存在过时能力描述，新增测试以代码和本文为准。
-## 10. 远程 DSH 与 A2A 验收矩阵
 
-- 自动门禁：`packages/shared/src/client-dsh-web.test.ts`（DSH 地址规范化、null/空串清除、拒绝非 http(s) 与内嵌凭据）、`packages/shared/src/dsh-web.test.ts`（受管命令/结果解析）、`packages/server/src/dsh-web/dsh-web.service.test.ts`（地址拼装、启动/停止、离线与能力缺失拒绝、建映射失败回滚、外部托管拒绝代起与解除登记）、`packages/server/src/client/client.service.test.ts`（登记即 external / 清除交还 managed）、`packages/server/src/task/task.service.test.ts`（appendAgentTurn 正文落库与 64KB 截断、listTurns 顺序、输入侧不存正文）、`packages/server/src/task/task-dispatch.service.test.ts`（流式增量累积后 settle flush、reply artifact）、`packages/server/src/a2a/a2a.service.test.ts`（GetTask 组装 history、user 回合 summary 回填、historyLength 取最近 N 条）、`packages/server/src/agent-registry/agent-registry.service.test.ts`（Agent Card 列出口 agentId 且不带敏感字段）、`packages/client/src/dsh-web/dsh-web-host.test.ts`（token 提取、netstat/lsof/`/proc` 端口解析与反查、命令行校验、端口延迟释放不误报、清理失败要报错）、`packages/frontend/src/pages/machine-dsh-web-panel.test.tsx`（打码、打开、保存、一键启动、外部托管、公网地址预填）、`packages/frontend/src/pages/develop-dsh-page.test.tsx`（跨机器启动/错误映射/空状态/外部托管）、`packages/frontend/src/app/navigation.test.ts`。
-- 手工门禁（尚未在 CI）：两台真实机器，A 机 `vcpdeck tasks send --agent=<id> --intent=... --message=...` 到 B 机并 `tasks get` 取回 `history`；远程 DSH 一键启动 → 打开完整 WebUI → 停止并清理后无残留进程与映射。
-- 安全断言：DSH 地址只经 API 按需下发、不写日志；`agent-reply` 正文入库按 64KB 截断、操作者 prompt 只存摘要 + hash；`external` 托管下 VCPDeck 不向 Client 发送任何起停命令。
+## 10. A2A 验收矩阵
+
+- 自动门禁：`packages/server/src/task/task.service.test.ts`（appendAgentTurn 正文落库与 64KB 截断、listTurns 顺序、输入侧不存正文）、`packages/server/src/task/task-dispatch.service.test.ts`（流式增量累积后 settle flush、reply artifact）、`packages/server/src/a2a/a2a.service.test.ts`（GetTask 组装 history、user 回合 summary 回填、historyLength 取最近 N 条）、`packages/server/src/agent-registry/agent-registry.service.test.ts`（Agent Card 列出口 agentId 且不带敏感字段）、`packages/frontend/src/app/navigation.test.ts`。
+- 手工门禁（尚未在 CI）：两台真实机器，A 机 `vcpdeck tasks send --agent=<id> --intent=... --message=...` 到 B 机并 `tasks get` 取回 `history`。
+- 安全断言：`agent-reply` 正文入库按 64KB 截断、操作者 prompt 只存摘要 + hash。
 

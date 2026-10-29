@@ -149,7 +149,6 @@ describe("getRegisterInfo", () => {
 			"file.write",
 			"frp",
 			"acp",
-			"dsh-web",
 		]);
 		const json = JSON.stringify(info);
 		expect(json).not.toContain("C:\\");

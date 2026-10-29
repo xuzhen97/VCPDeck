@@ -212,11 +212,3 @@ PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 
 
 隔离 → 保全证据 → 撤销 Session/Token → 轮换 PSK/FRP/Storage 凭据 → 核对 Job/TerminalAudit/Release/代理日志 → 从可信构件和备份恢复 → 验证所有 Client → 形成事后报告和修复 ADR。
 
-
-## 16. 远程 DSH WebUI（ADR-0059）
-
-- dsh web 暴露的是一台开发机的完整 shell 能力（读写文件、执行命令、调用工具），**不是沙箱**；鉴权仅为其 URL token。
-- **只允许私网访问**：内网、Tailscale 或已加密的 FRP 隧道；确需公网时必须在 FRP 前置 basic auth 或 mTLS。
-- 启动契约必须包含 --trusted-host <对外 authority>，否则其 /api 会被 browser-trust 门禁拒绝；反代/隧道层必须固定 Host、不透传客户端 Host，并设置 X-Forwarded-For / X-Forwarded-Proto。用 Host 判断"来自本机"已被证明会导致认证绕过。
-- VCPDeck 只登记 dshWebUrl，**不探测**其可达性（避免 SSRF 面），也不以其授权；该地址可能含一次性 token，不得写入日志、审计正文或文档。
-- DSH 插件的 Host 半持有 VCPDeck API token，只用于服务端代发 GET /api/clients；返回浏览器的字段走白名单（clientId/name/hostname/online/lastHeartbeatAt/dshWebUrl），token 不进浏览器。

@@ -14,7 +14,8 @@
 - CLI 全域命令对齐控制面能力（jobs/files/frp/storage/terminal/features/tasks/agents），支持 TUI 终端直连，并有真实 Server+Client 的 CLI 能力端到端测试；
 - 功能目录（ADR-0056）：机器上的可复用设施及其调用契约，CLI `features` + 机器「功能」Tab 与全局功能页，验证由调用方执行；
 - A2A Task 与 ACP 后端无关任务模型（ADR-0057）：`SendMessage/GetTask/ListTasks/CancelTask`、AgentPlacement、权限扩展与任务审计；CLI `tasks`/`agents`（含 `agents create`）；
-- ~~Remote Dev Session v1（ADR-0058）~~：已于 [ADR-0060](./adr/0060-retire-rds-consolidate-a2a.md) 退役，能力拆分到 A2A Task（agent 任务）与远程 DSH（人工开发）；端口调试走 FRP 映射；
+- ~~Remote Dev Session v1（ADR-0058）~~：已于 [ADR-0060](./adr/0060-retire-rds-consolidate-a2a.md) 退役，agent 任务收敛到 A2A Task；端口调试走 FRP 映射；
+- ~~远程 DSH WebUI 通道（ADR-0059）~~：已于 [ADR-0061](./adr/0061-retire-remote-dsh-webui.md) 退役，跨机开发改由操作者自行在目标机使用 DSH；
 - React 驾驶台和框架无关 SDK。
 
 ## 2. 近期优先级：可靠性与安全基线

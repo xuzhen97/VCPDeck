@@ -67,8 +67,6 @@ export function getRegisterInfo(
 		// ACP Host 是 Client 的协议宿主能力，不表示目标 agent 已安装。
 		caps.push("acp");
 		// RDS 依赖 ACP Host 与本地终端/端口运行时；capability 只表示宿主存在。
-		// 远程 DSH：本机可被代启 dsh web（ADR-0059 修订）。
-		caps.push("dsh-web");
 	}
 	const capabilityDetails: MachineRegister["capabilityDetails"] = {};
 	if (!verifyOnly) {

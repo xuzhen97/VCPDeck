@@ -12,7 +12,6 @@ import { TerminalModule } from "../terminal/terminal.module.js";
 import { ReleaseModule } from "../release/release.module.js";
 import { GitSshModule } from "../git-ssh/git-ssh.module.js";
 import { TaskModule } from "../task/task.module.js";
-import { DshWebService } from "../dsh-web/dsh-web.service.js";
 
 @Module({
 	imports: [
@@ -27,7 +26,7 @@ import { DshWebService } from "../dsh-web/dsh-web.service.js";
 		GitSshModule,
 		TaskModule,
 	],
-	providers: [ClientGateway, AppGateway, DshWebService],
+	providers: [ClientGateway, AppGateway],
 	exports: [ClientGateway],
 	controllers: [EventsController],
 })
