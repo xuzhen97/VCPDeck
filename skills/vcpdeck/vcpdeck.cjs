@@ -40,7 +40,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.22.2";
+    exports2.VERSION = "0.22.3";
   }
 });
 
@@ -202,136 +202,6 @@ var require_client_annotations = __commonJS({
         notes,
         updatedAt: new Date(value2.updatedAt).toISOString()
       };
-    }
-  }
-});
-
-// ../shared/dist/client-dsh-web.js
-var require_client_dsh_web = __commonJS({
-  "../shared/dist/client-dsh-web.js"(exports2) {
-    "use strict";
-    Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.DSH_WEB_URL_MAX_LENGTH = void 0;
-    exports2.parseClientDshWebUrl = parseClientDshWebUrl;
-    exports2.DSH_WEB_URL_MAX_LENGTH = 2048;
-    function parseClientDshWebUrl(value2) {
-      if (value2 === null)
-        return null;
-      if (typeof value2 !== "string") {
-        throw new Error("dshWebUrl \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32\u6216 null");
-      }
-      const trimmed = value2.trim();
-      if (trimmed.length === 0)
-        return null;
-      if (trimmed.length > exports2.DSH_WEB_URL_MAX_LENGTH) {
-        throw new Error(`dshWebUrl \u4E0D\u80FD\u8D85\u8FC7 ${exports2.DSH_WEB_URL_MAX_LENGTH} \u5B57\u7B26`);
-      }
-      let parsed;
-      try {
-        parsed = new URL(trimmed);
-      } catch {
-        throw new Error("dshWebUrl \u4E0D\u662F\u5408\u6CD5 URL");
-      }
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw new Error("dshWebUrl \u53EA\u5141\u8BB8 http/https");
-      }
-      if (parsed.username !== "" || parsed.password !== "") {
-        throw new Error("dshWebUrl \u4E0D\u80FD\u5305\u542B\u7528\u6237\u540D\u6216\u53E3\u4EE4");
-      }
-      return parsed.toString();
-    }
-  }
-});
-
-// ../shared/dist/dsh-web.js
-var require_dsh_web = __commonJS({
-  "../shared/dist/dsh-web.js"(exports2) {
-    "use strict";
-    Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.DSH_WEB_MODES = exports2.DSH_WEB_STATES = exports2.DSH_WEB_CAPABILITY = void 0;
-    exports2.parseDshWebCommand = parseDshWebCommand;
-    exports2.parseDshWebCommandResult = parseDshWebCommandResult;
-    exports2.DSH_WEB_CAPABILITY = "dsh-web";
-    exports2.DSH_WEB_STATES = [
-      "stopped",
-      "starting",
-      "running",
-      "failed",
-      /**
-       * 外部托管：实例由目标机自己管（systemd / docker / 手工常驻 / 自有反代），
-       * VCPDeck 只登记入口，绝不代起代停。
-       */
-      "external"
-    ];
-    exports2.DSH_WEB_MODES = ["managed", "external"];
-    function isRecord2(value2) {
-      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
-    }
-    function requireString(value2, field, maxLength) {
-      if (typeof value2 !== "string" || value2.length === 0 || value2.length > maxLength) {
-        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 1-${maxLength} \u7684\u5B57\u7B26\u4E32`);
-      }
-      return value2;
-    }
-    function requirePort(value2, field) {
-      if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < 1024 || value2 > 65535) {
-        throw new Error(`${field} \u5FC5\u987B\u4E3A 1024-65535 \u7684\u6574\u6570`);
-      }
-      return value2;
-    }
-    function parseDshWebCommand(value2) {
-      if (!isRecord2(value2))
-        throw new Error("dshweb \u547D\u4EE4\u5FC5\u987B\u4E3A\u5BF9\u8C61");
-      const allowed = /* @__PURE__ */ new Set(["requestId", "action", "clientId", "port"]);
-      for (const key of Object.keys(value2)) {
-        if (!allowed.has(key))
-          throw new Error(`dshweb \u547D\u4EE4\u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
-      }
-      const requestId = requireString(value2.requestId, "requestId", 128);
-      const clientId = requireString(value2.clientId, "clientId", 128);
-      if (value2.action !== "start" && value2.action !== "stop") {
-        throw new Error("dshweb \u547D\u4EE4 action \u5FC5\u987B\u662F start \u6216 stop");
-      }
-      return {
-        requestId,
-        action: value2.action,
-        clientId,
-        port: requirePort(value2.port, "port")
-      };
-    }
-    function parseDshWebCommandResult(value2) {
-      if (!isRecord2(value2))
-        throw new Error("dshweb \u7ED3\u679C\u5FC5\u987B\u4E3A\u5BF9\u8C61");
-      const allowed = /* @__PURE__ */ new Set([
-        "requestId",
-        "ok",
-        "port",
-        "token",
-        "error"
-      ]);
-      for (const key of Object.keys(value2)) {
-        if (!allowed.has(key))
-          throw new Error(`dshweb \u7ED3\u679C\u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
-      }
-      const requestId = requireString(value2.requestId, "requestId", 128);
-      if (typeof value2.ok !== "boolean")
-        throw new Error("dshweb \u7ED3\u679C ok \u5FC5\u987B\u4E3A\u5E03\u5C14\u503C");
-      const result = { requestId, ok: value2.ok };
-      if (value2.port !== void 0) {
-        result.port = requirePort(value2.port, "port");
-      }
-      if (value2.token !== void 0) {
-        result.token = requireString(value2.token, "token", 512);
-      }
-      if (value2.error !== void 0) {
-        if (!isRecord2(value2.error))
-          throw new Error("error \u5FC5\u987B\u4E3A\u5BF9\u8C61");
-        result.error = {
-          code: requireString(value2.error.code, "error.code", 128),
-          message: requireString(value2.error.message, "error.message", 2e3)
-        };
-      }
-      return result;
     }
   }
 });
@@ -3408,8 +3278,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientDshWebUrl = exports2.DSH_WEB_URL_MAX_LENGTH = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = void 0;
+    exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -3426,14 +3296,6 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parseClientAnnotationsInput", { enumerable: true, get: function() {
       return client_annotations_js_1.parseClientAnnotationsInput;
     } });
-    var client_dsh_web_js_1 = require_client_dsh_web();
-    Object.defineProperty(exports2, "DSH_WEB_URL_MAX_LENGTH", { enumerable: true, get: function() {
-      return client_dsh_web_js_1.DSH_WEB_URL_MAX_LENGTH;
-    } });
-    Object.defineProperty(exports2, "parseClientDshWebUrl", { enumerable: true, get: function() {
-      return client_dsh_web_js_1.parseClientDshWebUrl;
-    } });
-    __exportStar(require_dsh_web(), exports2);
     var client_installer_js_1 = require_client_installer();
     Object.defineProperty(exports2, "ClientInstallerErrorCode", { enumerable: true, get: function() {
       return client_installer_js_1.ClientInstallerErrorCode;
@@ -3570,9 +3432,7 @@ var require_dist = __commonJS({
       GIT_SSH_ACK: "git-ssh:ack",
       TASK_COMMAND: "task:command",
       TASK_COMMAND_RESULT: "task:command-result",
-      TASK_EVENT: "task:event",
-      DSH_WEB_COMMAND: "dshweb:command",
-      DSH_WEB_RESULT: "dshweb:result"
+      TASK_EVENT: "task:event"
     };
     var JobType;
     (function(JobType2) {
@@ -3907,15 +3767,7 @@ function createClientsApi(client) {
     /** 修改客户端别名（全局唯一；重名返回 409）。 */
     rename: (clientId, name, signal) => client.request("PATCH", `/api/clients/${encodeURIComponent(clientId)}/name`, { name }, signal),
     /** 全量替换操作者注解（ADR-0055）；空输入清除。 */
-    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal),
-    /** 登记/清除远程 DSH WebUI 地址（ADR-0059）；`null` 清除。 */
-    setDshWebUrl: (clientId, url2, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/dsh-web`, { url: url2 }, signal),
-    /** 一键启动：代起 dsh web 并自动建 FRP 映射（ADR-0059 修订）。 */
-    startDshWeb: (clientId, signal) => client.request("POST", `/api/clients/${encodeURIComponent(clientId)}/dsh-web/start`, void 0, signal),
-    /** 一键停止：停进程、删映射、清地址；外部托管时等价于解除登记。 */
-    stopDshWeb: (clientId, signal) => client.request("POST", `/api/clients/${encodeURIComponent(clientId)}/dsh-web/stop`, void 0, signal),
-    /** 解除外部托管的登记：只清 VCPDeck 侧入口，不动目标机进程（ADR-0059 决策 12）。 */
-    detachDshWeb: (clientId, signal) => client.request("DELETE", `/api/clients/${encodeURIComponent(clientId)}/dsh-web`, void 0, signal)
+    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal)
   };
 }
 var init_clients = __esm({
@@ -5315,14 +5167,15 @@ async function runExecJob(argv, context) {
   if (options.json !== true)
     log(formatJobDetail(job, output));
 }
-async function waitForTerminalJob(client, jobId, timeoutSeconds, log, pollIntervalMs) {
-  const deadline = Date.now() + timeoutSeconds * 1e3;
+async function waitForTerminalJob(client, jobId, timeoutSeconds, log, pollIntervalMs, onJob) {
+  const deadline = timeoutSeconds > 0 ? Date.now() + timeoutSeconds * 1e3 : Number.POSITIVE_INFINITY;
   let lastStatus;
   while (Date.now() < deadline) {
     try {
       const job = await client.jobs.get(jobId);
       if (TERMINAL_STATUSES2.has(job.status))
         return job;
+      onJob?.(job);
       if (job.status !== lastStatus) {
         log(`[vcpdeck] Job ${jobId} \u72B6\u6001: ${job.status}`);
         lastStatus = job.status;
@@ -15680,7 +15533,7 @@ init_jobs_command();
 var DEFAULT_WAIT_TIMEOUT_SECONDS2 = 120;
 var POLL_INTERVAL_MS2 = 1e3;
 async function runFilesCommand(subcommand, argv, context = {}) {
-  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "roots" || subcommand === "list" || subcommand === "stat" || subcommand === "read" || subcommand === "write" || subcommand === "mkdir" || subcommand === "delete" || subcommand === "move" || subcommand === "download" || subcommand === "upload" || subcommand === void 0) && hasHelp2(argv);
+  const helpRequested = subcommand === "--help" || subcommand === "-h" || (subcommand === "roots" || subcommand === "list" || subcommand === "stat" || subcommand === "read" || subcommand === "write" || subcommand === "mkdir" || subcommand === "delete" || subcommand === "move" || subcommand === "download" || subcommand === "upload" || subcommand === "share" || subcommand === void 0) && hasHelp2(argv);
   if (helpRequested) {
     (context.log ?? console.log)(filesUsage());
     return;
@@ -15725,6 +15578,10 @@ async function runFilesCommand(subcommand, argv, context = {}) {
     await runUpload(argv, context);
     return;
   }
+  if (subcommand === "share") {
+    await runShare(argv, context);
+    return;
+  }
   throw new Error(filesUsage());
 }
 function hasHelp2(argv) {
@@ -15744,15 +15601,18 @@ function filesUsage() {
     "  vcpdeck files mkdir <client> <path> [--root=<dir>] [--env=<name>] [--json]  # \u9012\u5F52\u521B\u5EFA",
     "  vcpdeck files delete <client> <path> [--root=<dir>] [--recursive] [--env=<name>] [--json]  # \u4E0D\u53EF\u6062\u590D",
     "  vcpdeck files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
-    "  \u4F20\u8F93\uFF08\u8C03\u7528\u65B9\u987B\u5148\u53D6\u5F97\u7528\u6237\u786E\u8BA4\uFF1B\u5B57\u8282\u6D41\u8D70 Storage Provider \u76F4\u4F20\uFF0C\u4E0D\u7ECF Server \u4E2D\u8F6C\uFF09:",
-    "  vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]",
-    "  vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]"
+    "  \u4F20\u8F93\u4E0E\u5206\u4EAB\uFF08\u8C03\u7528\u65B9\u987B\u5148\u53D6\u5F97\u7528\u6237\u786E\u8BA4\uFF1B\u5B57\u8282\u6D41\u8D70 Storage Provider \u76F4\u4F20\uFF0C\u4E0D\u7ECF Server \u4E2D\u8F6C\uFF09:",
+    "  vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]",
+    "  vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--timeout=<seconds>] [--env=<name>] [--json]",
+    "  vcpdeck files share <client> <path> [--root=<dir>] [--base-url=<url>] [--timeout=<seconds>] [--env=<name>] [--json]  # \u5BFC\u51FA\u5230 Storage \u5E76\u751F\u6210\u516C\u5F00\u4E0B\u8F7D\u94FE\u63A5",
+    "  vcpdeck files share --file-id=<fileId> [--base-url=<url>] [--env=<name>] [--json]  # \u4E3A\u5DF2\u5BFC\u51FA\u7684\u6587\u4EF6\u8865\u5EFA\u94FE\u63A5",
+    "  # download/upload/share \u7684 --timeout \u53EA\u9650\u5236\u672C\u5730\u7B49\u5F85\u65F6\u957F\uFF0C\u9ED8\u8BA4 0 \u8868\u793A\u4E0D\u9650\u65F6\uFF08\u5927\u6587\u4EF6\u7528\uFF09\uFF1Bshare \u4F1A\u521B\u5EFA\u957F\u671F\u6709\u6548\u3001\u65E0\u9700\u8BA4\u8BC1\u7684\u516C\u5F00\u94FE\u63A5"
   ].join("\n");
 }
-async function runFileJob(client, clientId, type, payload, context) {
+async function runFileJob(client, clientId, type, payload, context, timeoutSeconds = DEFAULT_WAIT_TIMEOUT_SECONDS2, onJob) {
   const created = await client.jobs.create({ clientId, type, payload });
-  const job = await waitForTerminalJob(client, created.jobId, DEFAULT_WAIT_TIMEOUT_SECONDS2, () => {
-  }, context.pollIntervalMs ?? POLL_INTERVAL_MS2);
+  const job = await waitForTerminalJob(client, created.jobId, timeoutSeconds, () => {
+  }, context.pollIntervalMs ?? POLL_INTERVAL_MS2, onJob);
   if (job.status !== import_shared3.JobStatus.DONE)
     throw formatFileJobFailure(job);
   return job.result;
@@ -15987,13 +15847,14 @@ async function runMove(argv, context) {
 }
 async function runDownload(argv, context) {
   const { positionals, options } = parseCommandArgs(argv, {
-    value: ["env", "environment", "root"],
+    value: ["env", "environment", "root", "timeout"],
     boolean: ["json"]
   });
   const [clientFilter, remotePath, localPath] = positionals;
   if (!clientFilter || !remotePath || !localPath) {
     throw new Error(filesUsage());
   }
+  const timeoutSeconds = parseTransferTimeout(stringOption(options, "timeout"));
   const environment = await resolveEnvironment({
     environment: exclusiveAlias3(options, "env", "environment"),
     paths: context.paths,
@@ -16007,7 +15868,7 @@ async function runDownload(argv, context) {
     log(formatEnvironmentSummary(environment));
     log(`[vcpdeck] \u5BFC\u51FA ${clientFilter}:${joinDisplayPath(rootDir, remotePath)} \u2192 ${localPath}\uFF08Storage \u76F4\u4F20\u94FE\u8DEF\uFF09`);
   }
-  const transfer = await runFileJob(client, clientId, "file.export", { rootDir, path: remotePath }, context);
+  const transfer = await runFileJob(client, clientId, "file.export", { rootDir, path: remotePath }, context, timeoutSeconds, options.json === true ? void 0 : createTransferProgressReporter(log, "\u5BFC\u51FA"));
   const token = await client.storage.createDownloadToken({ key: transfer.key });
   const actualSha256 = await fetchToFile(resolveServerUrl(environment.server, token.url), localPath, context);
   if (actualSha256 !== transfer.sha256) {
@@ -16036,15 +15897,123 @@ async function fetchToFile(url2, localPath, context) {
   }, (0, import_node_fs2.createWriteStream)(localPath));
   return hash.digest("hex");
 }
+var TRANSFER_PROGRESS_INTERVAL_MS = 15e3;
+async function runShare(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment", "root", "base-url", "timeout", "file-id"],
+    boolean: ["json"]
+  });
+  const explicitFileId = stringOption(options, "file-id");
+  const [clientFilter = "", remotePath = ""] = positionals;
+  if (explicitFileId && positionals.length > 0) {
+    throw new Error("--file-id \u4E0E <client> <path> \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528");
+  }
+  if (!explicitFileId && (!clientFilter || !remotePath)) {
+    throw new Error(filesUsage());
+  }
+  const environment = await resolveEnvironment({
+    environment: exclusiveAlias3(options, "env", "environment"),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  const client = await createAuthenticatedClient(environment);
+  const log = context.log ?? console.log;
+  const json = options.json === true;
+  const timeoutSeconds = parseTransferTimeout(stringOption(options, "timeout"));
+  const baseUrl = stringOption(options, "base-url") ?? environment.server;
+  assertShareBaseUrl(baseUrl);
+  let fileId = explicitFileId;
+  let transfer = null;
+  let jobId = null;
+  if (!fileId) {
+    const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+    const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
+    if (!json) {
+      log(formatEnvironmentSummary(environment));
+      log(`[vcpdeck] \u5BFC\u51FA ${clientFilter}:${joinDisplayPath(rootDir, remotePath)} \u2192 Storage\uFF08\u6D41\u5F0F\u4F20\u8F93\uFF0C\u4E0D\u5199\u672C\u5730\u78C1\u76D8\uFF09`);
+    }
+    const created = await client.jobs.create({
+      clientId,
+      type: "file.export",
+      payload: { rootDir, path: remotePath }
+    });
+    jobId = created.jobId;
+    if (!json) {
+      log(`[vcpdeck] \u5BFC\u51FA Job: ${jobId}\uFF08\u5927\u6587\u4EF6\u8017\u65F6\u8F83\u957F\uFF1B\u4E2D\u65AD\u4E0D\u5F71\u54CD\u5DF2\u4E0A\u4F20\u90E8\u5206\uFF0C\u5B8C\u6210\u540E\u53EF\u7528 --file-id \u8865\u5EFA\u94FE\u63A5\uFF09`);
+    }
+    const job = await waitForTerminalJob(client, jobId, timeoutSeconds, json ? () => {
+    } : log, context.pollIntervalMs ?? POLL_INTERVAL_MS2, json ? void 0 : createTransferProgressReporter(log, "\u5BFC\u51FA"));
+    if (job.status !== import_shared3.JobStatus.DONE)
+      throw formatFileJobFailure(job);
+    const result = job.result ?? {};
+    if (typeof result.fileId !== "string" || !result.fileId) {
+      throw new Error(`\u5BFC\u51FA Job ${jobId} \u672A\u8FD4\u56DE fileId\uFF0C\u65E0\u6CD5\u521B\u5EFA\u5206\u4EAB\u94FE\u63A5`);
+    }
+    transfer = result;
+    fileId = transfer.fileId;
+  }
+  const share = await client.storageShares.create({ fileId });
+  const url2 = resolveServerUrl(baseUrl, share.sharePath);
+  if (json) {
+    log(JSON.stringify({ ...transfer ?? { fileId }, jobId, shareId: share.id, url: url2 }, null, 2));
+    return;
+  }
+  if (transfer) {
+    log(`[vcpdeck] \u5DF2\u5BFC\u51FA ${transfer.size} bytes\uFF08sha256=${transfer.sha256.slice(0, 12)}\u2026\uFF09`);
+  }
+  log(`[vcpdeck] \u516C\u5F00\u4E0B\u8F7D\u94FE\u63A5\uFF08${share.filename}\uFF0C\u65E0\u9700\u8BA4\u8BC1\u3001\u957F\u671F\u6709\u6548\uFF09:`);
+  log(url2);
+  log(`[vcpdeck] \u5206\u4EAB ID: ${share.id}\uFF1B\u64A4\u9500: DELETE /api/storage/shares/${share.id}`);
+  const host = new URL(url2).hostname;
+  if (["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"].includes(host)) {
+    log("[vcpdeck] \u6CE8\u610F\uFF1A\u94FE\u63A5\u6307\u5411\u672C\u673A\u5730\u5740\uFF0C\u5176\u5B83\u673A\u5668\u65E0\u6CD5\u8BBF\u95EE\uFF1B\u7528 --base-url=<\u5176\u5B83\u673A\u5668\u53EF\u8FBE\u7684\u5730\u5740> \u91CD\u5EFA\u94FE\u63A5");
+  }
+}
+function createTransferProgressReporter(log, label) {
+  let lastPercent = -1;
+  let lastReportAt = 0;
+  return (job) => {
+    const progress = job.progress;
+    if (!progress || progress.total <= 0)
+      return;
+    const percent = Math.min(100, Math.floor(progress.loaded / progress.total * 100));
+    const now = Date.now();
+    if (percent === lastPercent && now - lastReportAt < TRANSFER_PROGRESS_INTERVAL_MS) {
+      return;
+    }
+    lastPercent = percent;
+    lastReportAt = now;
+    log(`[vcpdeck] ${label}\u8FDB\u5EA6 ${percent}%\uFF08${progress.loaded}/${progress.total} bytes\uFF09`);
+  };
+}
+function parseTransferTimeout(raw) {
+  if (raw === void 0)
+    return 0;
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds < 0) {
+    throw new Error("--timeout \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 0 \u7684\u6574\u6570\u79D2\uFF080 \u8868\u793A\u4E0D\u9650\u65F6\uFF09");
+  }
+  return seconds;
+}
+function assertShareBaseUrl(baseUrl) {
+  try {
+    const { protocol: protocol4 } = new URL(baseUrl);
+    if (protocol4 === "http:" || protocol4 === "https:")
+      return;
+  } catch {
+  }
+  throw new Error(`\u5206\u4EAB\u94FE\u63A5\u57FA\u5730\u5740\u5FC5\u987B\u662F\u7EDD\u5BF9 http(s) \u5730\u5740\uFF08\u5F53\u524D: ${baseUrl}\uFF09`);
+}
 async function runUpload(argv, context) {
   const { positionals, options } = parseCommandArgs(argv, {
-    value: ["env", "environment", "root"],
+    value: ["env", "environment", "root", "timeout"],
     boolean: ["json", "overwrite"]
   });
   const [clientFilter, localPath, remotePath] = positionals;
   if (!clientFilter || !localPath || !remotePath) {
     throw new Error(filesUsage());
   }
+  const timeoutSeconds = parseTransferTimeout(stringOption(options, "timeout"));
   const fileStat = await (0, import_promises2.stat)(localPath).catch(() => null);
   if (!fileStat?.isFile()) {
     throw new Error(`\u672C\u5730\u6587\u4EF6\u4E0D\u5B58\u5728\u6216\u4E0D\u662F\u666E\u901A\u6587\u4EF6: ${localPath}`);
@@ -16081,8 +16050,8 @@ async function runUpload(argv, context) {
     uploadedBytes: size
   });
   progressLog(`[vcpdeck] \u5BFC\u5165 Job: ${created.jobId}\uFF08${created.status}\uFF09\uFF0C\u7B49\u5F85\u76EE\u6807\u673A\u62C9\u53D6\u2026`);
-  const job = await waitForTerminalJob(client, created.jobId, DEFAULT_WAIT_TIMEOUT_SECONDS2, () => {
-  }, context.pollIntervalMs ?? POLL_INTERVAL_MS2);
+  const job = await waitForTerminalJob(client, created.jobId, timeoutSeconds, () => {
+  }, context.pollIntervalMs ?? POLL_INTERVAL_MS2, options.json === true ? void 0 : createTransferProgressReporter(log, "\u5BFC\u5165"));
   if (job.status !== import_shared3.JobStatus.DONE)
     throw formatFileJobFailure(job);
   const imported = job.result;

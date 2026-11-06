@@ -8,6 +8,15 @@
 
 - **退役远程 DSH WebUI 通道**（[ADR-0061](docs/adr/0061-retire-remote-dsh-webui.md)）：侧栏「开发」模块、全局 `/develop` 页与机器「开发」tab 一并删除；`Client` 的 `dshWebUrl`/`dshWebState`/`dshWebMode`/`dshWebPort`/`dshWebFrpMappingId` 五列随迁移 `20261029000000_client_drop_dsh_web` 丢弃（升级需 `prisma db push --accept-data-loss`）；`/api/clients/:clientId/dsh-web` 系列端点、Shared 的 `dsh-web` 契约与 `dshweb:command`/`dshweb:result` 事件、SDK 的 `setDshWebUrl`/`startDshWeb`/`stopDshWeb`/`detachDshWeb`、Client 的 `dsh-web` capability 与 `dsh-web-host`、以及 `plugins/dsh-vcpdeck`（`@vcpdeck/dsh-panel`）全部移除。不提供替代品：跨机人工开发直接连目标机使用 DSH，暴露端口用已有 FRP 映射。ACP 侧的 `agentId=dsh` 与 A2A Task 不受影响。
 
+### Added
+
+- **开发前端端口可显式指定**（`VCPDECK_FRONTEND_PORT`，默认仍 `5173`）：此前前端端口只能靠 Vite 默认值 `5173`，被别的程序占用时 Vite 会静默换到 `5174`，页面地址与文档默认值、以及 Server 的默认可信 Origin 一起漂移。现在设了该变量就严格占用（撞车直接启动失败，不静默换号），且 Server 侧 `VCPDECK_FRONTEND_ORIGIN` / `VCPDECK_CORS_ORIGIN` 的默认值同步按该端口推导；两个 Origin 变量显式设置时仍以显式值为准。未设置时行为不变（仍自动换相邻端口，开发请求走 Vite 代理、与 Server 同源，不受影响）。
+- **CLI 新增 `vcpdeck files share`：把某台 Client 上的文件变成一条公开下载链接**。此前"把 A 机上的文件交给 B 机"只能 `files download` 到本机再 `files upload`，或手工调 `POST /api/storage/shares`。现在一条命令完成导出 + 建分享：`files share <client> <path>` 创建 `file.export` Job，终态后经 `POST /api/storage/shares` 建公开分享，输出无需认证、除撤销外不到期的链接（按 `--base-url` 拼接，缺省取环境 `server`；解析出回环地址时会显式提示该链接不可外部访问）。大文件友好：`--timeout` 缺省 `0` 表示不限时（原 120 秒默认值会误杀数十 GB 级导出），导出期间每 15 秒或百分比变化打印进度；中断（Ctrl-C）不影响远端，之后可用 `files share --file-id=<fileId>` 为已导出的文件补建链接而不重传。字节全程流式、不落本地磁盘；Alibaba 后端由下载方直连 Provider，Local 后端占用 Server 磁盘且下载流量经 Server。链接等于对外暴露文件内容，`docs/design/cli.md` 与 `skills/vcpdeck/SKILL.md` 已把该命令归入需先取得用户确认的一类。
+
+### Fixed
+
+- **`files download` / `files upload` 不再对数十 GB 传输误报超时**：等待 Job 终态的上限此前硬编码 `120` 秒（`DEFAULT_WAIT_TIMEOUT_SECONDS`），30 GB 级导出/导入必然超过该值，CLI 会当场报失败——而 Job 其实还在 Server 侧继续跑完，文件最终是好的。现在两个命令都支持 `--timeout=<seconds>`，缺省 `0` 表示不限时，且只限制本地等待时长；等待期间每 15 秒或进度百分比变化打印一行进度（`导出进度` / `导入进度`）。只读文件命令的 120 秒等待上限保持不变。顺带修掉一处参数校验顺序问题：非法 `--timeout` 现在在创建 Job/传输字节之前就报错，不会留下一个没人等着的远端任务。
+
 ## [0.22.2] - 2026-10-21
 
 ### Fixed

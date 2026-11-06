@@ -37,6 +37,7 @@ pnpm --filter @vcpdeck/cli build
 | 文件浏览（只读） | `files roots/list/stat/read` | 已实现 | 授权根探测、目录列表、元信息与文本读取（默认上限 256KB）；`--json` 供 Agent 解析 |
 | 文件写入（写操作） | `files write/mkdir/delete/move` | 已实现 | 覆盖写/递归建目录/删除（不可恢复）/移动重命名；**必须先取得用户明确确认**（确认门见功能章节） |
 | 文件传输（写操作） | `files download/upload` | 已实现 | 经 Storage Provider 直传链路（Server 只签名不承载字节）；download 校验 sha256；**必须先取得用户明确确认** |
+| 文件公开分享（写操作） | `files share` | 已实现 | 导出到 Storage 后创建长期有效、无需认证的下载链接（可撤销）；等于对外暴露文件内容，**必须先取得用户明确确认** |
 | FRP 查询（只读） | `frp instances/mappings` | 已实现 | 服务实例与映射状态；凭据字段（token/密码）绝不进入输出 |
 | FRP 映射写操作 | `frp mapping create/delete` | 已实现 | Client frpc 动作与 FRPS Dashboard 双重确认；**必须先取得用户明确确认** |
 | Storage 查询（只读） | `storage status` | 已实现 | 当前激活的存储后端类型 |
@@ -303,8 +304,10 @@ node "<vcpdeck-cli>" files write <client> <path> [--root=<dir>] [--input=<file>]
 node "<vcpdeck-cli>" files mkdir <client> <path> [--root=<dir>] [--env=<name>] [--json]  # 递归创建
 node "<vcpdeck-cli>" files delete <client> <path> [--root=<dir>] [--recursive] [--env=<name>] [--json]  # 不可恢复
 node "<vcpdeck-cli>" files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]
-node "<vcpdeck-cli>" files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]
-node "<vcpdeck-cli>" files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]
+node "<vcpdeck-cli>" files download <client> <remotePath> <localPath> [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--timeout=<seconds>] [--env=<name>] [--json]
+node "<vcpdeck-cli>" files share <client> <path> [--root=<dir>] [--base-url=<url>] [--timeout=<seconds>] [--env=<name>] [--json]  # 导出并生成公开下载链接
+node "<vcpdeck-cli>" files share --file-id=<fileId> [--base-url=<url>] [--env=<name>] [--json]  # 为已导出文件补建链接
 ```
 
 以 CLI `--help` 为命令事实来源。
@@ -343,6 +346,18 @@ node "<vcpdeck-cli>" files upload <client> <localPath> <remotePath> [--root=<dir
 **直传约束**：字节流不经过 Server——阿里云后端为 Provider 预签名 URL 直传；Local 后端经 Server 中转是无外部存储时的固有行为。签名 URL 不输出、不落盘、不进日志。
 
 确认门要求：展示源/目标路径、文件大小、是否覆盖（download 覆盖本地同名文件；upload 默认拒绝覆盖远端已存在文件，`--overwrite` 解锁），取得明确确认后执行。传输非幂等：网络结果不明时先用只读命令核对两侧状态，不盲目重传。大文件传输耗时较长，CLI 有进度输出，不要在未完成时重复触发。
+
+**超时语义**：`--timeout` 缺省 `0` 表示不限时，只限制本地等待时长——Job 在 Server 侧照常跑完，本地超时退出不等于远端失败，此时用 `jobs get <jobId>` 或只读命令核对，不要立刻重传。数十 GB 级传输保持缺省即可，不要自行设一个很小的上限。
+
+### 文件公开分享（share，确认门 + 公开链接）
+
+`share` 复用同一条导出链路但**不写本地磁盘**：创建 `file.export` Job 把目标机文件传到 Storage，终态后经 `POST /api/storage/shares` 建公开分享，输出链接与分享 ID。链接无需认证、除撤销外不到期，等于把文件内容暴露给任何拿到链接的人——确认时必须说明文件名、大小和这一点。
+
+`--base-url` 决定链接的可达域（必须是绝对 http(s) 地址）：缺省取当前环境 `server`；若解析出回环地址（localhost/127.0.0.1 等），CLI 会提示链接仅本机可访问，此时应向用户索取其它机器可达的地址（FRP/反代域名）并用 `--base-url` 重建。
+
+大文件：`--timeout` 缺省 `0`（不限时），导出期间每 15 秒或百分比变化打印进度。中断（Ctrl-C）不会撤销远端已传部分，Job 仍继续，完成后用 `files share --file-id=<fileId>` 补建链接（fileId 取自 `jobs get <jobId>` 的 result）。字节全程流式、不占本地磁盘；Alibaba 后端下载方直连 Provider，Local 后端占用 Server 磁盘且下载流量经 Server。
+
+撤销走 REST `DELETE /api/storage/shares/<shareId>`（SDK 为 `storageShares.revoke`）；仍有 active 分享的文件删不掉（`FILE_HAS_ACTIVE_SHARES`）。
 
 ## 功能：FRP 映射与 Storage 状态
 

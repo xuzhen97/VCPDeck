@@ -53,6 +53,7 @@ export async function runFilesCommand(
 			subcommand === "move" ||
 			subcommand === "download" ||
 			subcommand === "upload" ||
+			subcommand === "share" ||
 			subcommand === undefined) &&
 			hasHelp(argv));
 	if (helpRequested) {
@@ -99,6 +100,10 @@ export async function runFilesCommand(
 		await runUpload(argv, context);
 		return;
 	}
+	if (subcommand === "share") {
+		await runShare(argv, context);
+		return;
+	}
 	throw new Error(filesUsage());
 }
 
@@ -120,27 +125,36 @@ function filesUsage(): string {
 		"  vcpdeck files mkdir <client> <path> [--root=<dir>] [--env=<name>] [--json]  # 递归创建",
 		"  vcpdeck files delete <client> <path> [--root=<dir>] [--recursive] [--env=<name>] [--json]  # 不可恢复",
 		"  vcpdeck files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
-		"  传输（调用方须先取得用户确认；字节流走 Storage Provider 直传，不经 Server 中转）:",
-		"  vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]",
-		"  vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]",
+		"  传输与分享（调用方须先取得用户确认；字节流走 Storage Provider 直传，不经 Server 中转）:",
+		"  vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]",
+		"  vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--timeout=<seconds>] [--env=<name>] [--json]",
+		"  vcpdeck files share <client> <path> [--root=<dir>] [--base-url=<url>] [--timeout=<seconds>] [--env=<name>] [--json]  # 导出到 Storage 并生成公开下载链接",
+		"  vcpdeck files share --file-id=<fileId> [--base-url=<url>] [--env=<name>] [--json]  # 为已导出的文件补建链接",
+		"  # download/upload/share 的 --timeout 只限制本地等待时长，默认 0 表示不限时（大文件用）；share 会创建长期有效、无需认证的公开链接",
 	].join("\n");
 }
 
-/** 创建只读文件 Job 并等待终态；非 done 终态转为带稳定错误码的异常。 */
+/**
+ * 创建文件 Job 并等待终态；非 done 终态转为带稳定错误码的异常。
+ * `timeoutSeconds` 只限制本地等待时长，传 0 表示不限时（大文件）；`onJob` 用于观察进度。
+ */
 async function runFileJob<T>(
 	client: VcpDeckClient,
 	clientId: string,
 	type: string,
 	payload: Record<string, unknown>,
 	context: FilesCommandContext,
+	timeoutSeconds = DEFAULT_WAIT_TIMEOUT_SECONDS,
+	onJob?: (job: JobInfo) => void,
 ): Promise<T> {
 	const created = await client.jobs.create({ clientId, type, payload });
 	const job = await waitForTerminalJob(
 		client,
 		created.jobId,
-		DEFAULT_WAIT_TIMEOUT_SECONDS,
+		timeoutSeconds,
 		() => {},
 		context.pollIntervalMs ?? POLL_INTERVAL_MS,
+		onJob,
 	);
 	if (job.status !== JobStatus.DONE) throw formatFileJobFailure(job);
 	return job.result as T;
@@ -643,13 +657,15 @@ async function runDownload(
 	context: FilesCommandContext,
 ): Promise<void> {
 	const { positionals, options } = parseCommandArgs(argv, {
-		value: ["env", "environment", "root"],
+		value: ["env", "environment", "root", "timeout"],
 		boolean: ["json"],
 	});
 	const [clientFilter, remotePath, localPath] = positionals;
 	if (!clientFilter || !remotePath || !localPath) {
 		throw new Error(filesUsage());
 	}
+	// 先校验参数再建 Job：避免非法 --timeout 在远端留下一个没人等的导出任务
+	const timeoutSeconds = parseTransferTimeout(stringOption(options, "timeout"));
 	const environment = await resolveEnvironment({
 		environment: exclusiveAlias(options, "env", "environment"),
 		paths: context.paths,
@@ -680,6 +696,10 @@ async function runDownload(
 		"file.export",
 		{ rootDir, path: remotePath },
 		context,
+		timeoutSeconds,
+		options.json === true
+			? undefined
+			: createTransferProgressReporter(log, "导出"),
 	);
 	// Server 只签发短期下载令牌：阿里云为 Provider 直链，Local 为签名中转（相对地址需拼 Server）
 	const token = await client.storage.createDownloadToken({ key: transfer.key });
@@ -728,19 +748,189 @@ async function fetchToFile(
 	return hash.digest("hex");
 }
 
+/** 传输进度打印的最小间隔；百分比变化时仍会立即打印。 */
+const TRANSFER_PROGRESS_INTERVAL_MS = 15_000;
+
+/**
+ * 导出目标机文件到 Storage 并创建公开下载链接（只读远端，不写本地磁盘）。
+ * 创建的是长期有效、无需认证的公开链接，调用方须先取得用户确认。
+ */
+async function runShare(
+	argv: string[],
+	context: FilesCommandContext,
+): Promise<void> {
+	const { positionals, options } = parseCommandArgs(argv, {
+		value: ["env", "environment", "root", "base-url", "timeout", "file-id"],
+		boolean: ["json"],
+	});
+	const explicitFileId = stringOption(options, "file-id");
+	// 缺省空串：位置参数是否齐全由下方用法校验统一判定，避免下游反复判空
+	const [clientFilter = "", remotePath = ""] = positionals;
+	if (explicitFileId && positionals.length > 0) {
+		throw new Error("--file-id 与 <client> <path> 不能同时使用");
+	}
+	if (!explicitFileId && (!clientFilter || !remotePath)) {
+		throw new Error(filesUsage());
+	}
+	const environment = await resolveEnvironment({
+		environment: exclusiveAlias(options, "env", "environment"),
+		paths: context.paths,
+		processEnv: context.processEnv,
+	});
+	const client = await createAuthenticatedClient(environment);
+	const log = context.log ?? console.log;
+	const json = options.json === true;
+	const timeoutSeconds = parseTransferTimeout(stringOption(options, "timeout"));
+	const baseUrl = stringOption(options, "base-url") ?? environment.server;
+	assertShareBaseUrl(baseUrl);
+
+	let fileId = explicitFileId;
+	let transfer: TransferResultShape | null = null;
+	let jobId: string | null = null;
+	if (!fileId) {
+		const clientId = await resolveClientId(
+			clientFilter,
+			context.paths,
+			context.processEnv,
+		);
+		const rootDir = await resolveRootDir(
+			client,
+			clientId,
+			stringOption(options, "root"),
+			context,
+		);
+		if (!json) {
+			log(formatEnvironmentSummary(environment));
+			log(
+				`[vcpdeck] 导出 ${clientFilter}:${joinDisplayPath(rootDir, remotePath)} → Storage（流式传输，不写本地磁盘）`,
+			);
+		}
+		const created = await client.jobs.create({
+			clientId,
+			type: "file.export",
+			payload: { rootDir, path: remotePath },
+		});
+		jobId = created.jobId;
+		if (!json) {
+			log(
+				`[vcpdeck] 导出 Job: ${jobId}（大文件耗时较长；中断不影响已上传部分，完成后可用 --file-id 补建链接）`,
+			);
+		}
+		const job = await waitForTerminalJob(
+			client,
+			jobId,
+			timeoutSeconds,
+			json ? () => {} : log,
+			context.pollIntervalMs ?? POLL_INTERVAL_MS,
+			json ? undefined : createTransferProgressReporter(log, "导出"),
+		);
+		if (job.status !== JobStatus.DONE) throw formatFileJobFailure(job);
+		const result = job.result ?? {};
+		if (typeof result.fileId !== "string" || !result.fileId) {
+			throw new Error(`导出 Job ${jobId} 未返回 fileId，无法创建分享链接`);
+		}
+		transfer = result as unknown as TransferResultShape;
+		fileId = transfer.fileId;
+	}
+
+	const share = await client.storageShares.create({ fileId });
+	const url = resolveServerUrl(baseUrl, share.sharePath);
+	if (json) {
+		log(
+			JSON.stringify(
+				{ ...(transfer ?? { fileId }), jobId, shareId: share.id, url },
+				null,
+				2,
+			),
+		);
+		return;
+	}
+	if (transfer) {
+		log(
+			`[vcpdeck] 已导出 ${transfer.size} bytes（sha256=${transfer.sha256.slice(0, 12)}…）`,
+		);
+	}
+	log(`[vcpdeck] 公开下载链接（${share.filename}，无需认证、长期有效）:`);
+	log(url);
+	log(
+		`[vcpdeck] 分享 ID: ${share.id}；撤销: DELETE /api/storage/shares/${share.id}`,
+	);
+	const host = new URL(url).hostname;
+	if (["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"].includes(host)) {
+		log(
+			"[vcpdeck] 注意：链接指向本机地址，其它机器无法访问；用 --base-url=<其它机器可达的地址> 重建链接",
+		);
+	}
+}
+
+/** 传输等待期间按 15 秒或百分比变化打印进度；无 progress 时保持静默。 */
+function createTransferProgressReporter(
+	log: (message: string) => void,
+	label: string,
+): (job: JobInfo) => void {
+	let lastPercent = -1;
+	let lastReportAt = 0;
+	return (job) => {
+		const progress = job.progress;
+		if (!progress || progress.total <= 0) return;
+		const percent = Math.min(
+			100,
+			Math.floor((progress.loaded / progress.total) * 100),
+		);
+		const now = Date.now();
+		if (
+			percent === lastPercent &&
+			now - lastReportAt < TRANSFER_PROGRESS_INTERVAL_MS
+		) {
+			return;
+		}
+		lastPercent = percent;
+		lastReportAt = now;
+		log(
+			`[vcpdeck] ${label}进度 ${percent}%（${progress.loaded}/${progress.total} bytes）`,
+		);
+	};
+}
+
+/**
+ * 解析传输类命令的 `--timeout`：缺省 0（不限时），只限制本地等待时长；
+ * 0 与正整数合法，负数与非整数拒绝。
+ */
+function parseTransferTimeout(raw: string | undefined): number {
+	if (raw === undefined) return 0;
+	const seconds = Number(raw);
+	if (!Number.isInteger(seconds) || seconds < 0) {
+		throw new Error("--timeout 必须是不小于 0 的整数秒（0 表示不限时）");
+	}
+	return seconds;
+}
+
+/** 分享链接基地址必须是绝对 http(s) 地址，否则拼出的链接对外不可用。 */
+function assertShareBaseUrl(baseUrl: string): void {
+	try {
+		const { protocol } = new URL(baseUrl);
+		if (protocol === "http:" || protocol === "https:") return;
+	} catch {
+		// 非绝对地址：落到下方统一报错
+	}
+	throw new Error(`分享链接基地址必须是绝对 http(s) 地址（当前: ${baseUrl}）`);
+}
+
 /** 上传本地文件到目标机（写操作）：先直传 Storage 再由 Client 拉取导入。 */
 async function runUpload(
 	argv: string[],
 	context: FilesCommandContext,
 ): Promise<void> {
 	const { positionals, options } = parseCommandArgs(argv, {
-		value: ["env", "environment", "root"],
+		value: ["env", "environment", "root", "timeout"],
 		boolean: ["json", "overwrite"],
 	});
 	const [clientFilter, localPath, remotePath] = positionals;
 	if (!clientFilter || !localPath || !remotePath) {
 		throw new Error(filesUsage());
 	}
+	// 先校验参数再传字节：避免非法 --timeout 传完几十 GB 才报错
+	const timeoutSeconds = parseTransferTimeout(stringOption(options, "timeout"));
 	const fileStat = await stat(localPath).catch(() => null);
 	if (!fileStat?.isFile()) {
 		throw new Error(`本地文件不存在或不是普通文件: ${localPath}`);
@@ -801,9 +991,12 @@ async function runUpload(
 	const job = await waitForTerminalJob(
 		client,
 		created.jobId,
-		DEFAULT_WAIT_TIMEOUT_SECONDS,
+		timeoutSeconds,
 		() => {},
 		context.pollIntervalMs ?? POLL_INTERVAL_MS,
+		options.json === true
+			? undefined
+			: createTransferProgressReporter(log, "导入"),
 	);
 	if (job.status !== JobStatus.DONE) throw formatFileJobFailure(job);
 	const imported = job.result as { path?: string; size: number; sha256: string };

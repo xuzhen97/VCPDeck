@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.22.2";
+    exports2.VERSION = "0.22.3";
   }
 });
 
@@ -194,136 +194,6 @@ var require_client_annotations = __commonJS({
         notes,
         updatedAt: new Date(value.updatedAt).toISOString()
       };
-    }
-  }
-});
-
-// ../shared/dist/client-dsh-web.js
-var require_client_dsh_web = __commonJS({
-  "../shared/dist/client-dsh-web.js"(exports2) {
-    "use strict";
-    Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.DSH_WEB_URL_MAX_LENGTH = void 0;
-    exports2.parseClientDshWebUrl = parseClientDshWebUrl;
-    exports2.DSH_WEB_URL_MAX_LENGTH = 2048;
-    function parseClientDshWebUrl(value) {
-      if (value === null)
-        return null;
-      if (typeof value !== "string") {
-        throw new Error("dshWebUrl \u5FC5\u987B\u4E3A\u5B57\u7B26\u4E32\u6216 null");
-      }
-      const trimmed = value.trim();
-      if (trimmed.length === 0)
-        return null;
-      if (trimmed.length > exports2.DSH_WEB_URL_MAX_LENGTH) {
-        throw new Error(`dshWebUrl \u4E0D\u80FD\u8D85\u8FC7 ${exports2.DSH_WEB_URL_MAX_LENGTH} \u5B57\u7B26`);
-      }
-      let parsed;
-      try {
-        parsed = new URL(trimmed);
-      } catch {
-        throw new Error("dshWebUrl \u4E0D\u662F\u5408\u6CD5 URL");
-      }
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw new Error("dshWebUrl \u53EA\u5141\u8BB8 http/https");
-      }
-      if (parsed.username !== "" || parsed.password !== "") {
-        throw new Error("dshWebUrl \u4E0D\u80FD\u5305\u542B\u7528\u6237\u540D\u6216\u53E3\u4EE4");
-      }
-      return parsed.toString();
-    }
-  }
-});
-
-// ../shared/dist/dsh-web.js
-var require_dsh_web = __commonJS({
-  "../shared/dist/dsh-web.js"(exports2) {
-    "use strict";
-    Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.DSH_WEB_MODES = exports2.DSH_WEB_STATES = exports2.DSH_WEB_CAPABILITY = void 0;
-    exports2.parseDshWebCommand = parseDshWebCommand;
-    exports2.parseDshWebCommandResult = parseDshWebCommandResult;
-    exports2.DSH_WEB_CAPABILITY = "dsh-web";
-    exports2.DSH_WEB_STATES = [
-      "stopped",
-      "starting",
-      "running",
-      "failed",
-      /**
-       * 外部托管：实例由目标机自己管（systemd / docker / 手工常驻 / 自有反代），
-       * VCPDeck 只登记入口，绝不代起代停。
-       */
-      "external"
-    ];
-    exports2.DSH_WEB_MODES = ["managed", "external"];
-    function isRecord2(value) {
-      return typeof value === "object" && value !== null && !Array.isArray(value);
-    }
-    function requireString(value, field, maxLength) {
-      if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
-        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 1-${maxLength} \u7684\u5B57\u7B26\u4E32`);
-      }
-      return value;
-    }
-    function requirePort(value, field) {
-      if (typeof value !== "number" || !Number.isInteger(value) || value < 1024 || value > 65535) {
-        throw new Error(`${field} \u5FC5\u987B\u4E3A 1024-65535 \u7684\u6574\u6570`);
-      }
-      return value;
-    }
-    function parseDshWebCommand(value) {
-      if (!isRecord2(value))
-        throw new Error("dshweb \u547D\u4EE4\u5FC5\u987B\u4E3A\u5BF9\u8C61");
-      const allowed = /* @__PURE__ */ new Set(["requestId", "action", "clientId", "port"]);
-      for (const key of Object.keys(value)) {
-        if (!allowed.has(key))
-          throw new Error(`dshweb \u547D\u4EE4\u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
-      }
-      const requestId = requireString(value.requestId, "requestId", 128);
-      const clientId = requireString(value.clientId, "clientId", 128);
-      if (value.action !== "start" && value.action !== "stop") {
-        throw new Error("dshweb \u547D\u4EE4 action \u5FC5\u987B\u662F start \u6216 stop");
-      }
-      return {
-        requestId,
-        action: value.action,
-        clientId,
-        port: requirePort(value.port, "port")
-      };
-    }
-    function parseDshWebCommandResult(value) {
-      if (!isRecord2(value))
-        throw new Error("dshweb \u7ED3\u679C\u5FC5\u987B\u4E3A\u5BF9\u8C61");
-      const allowed = /* @__PURE__ */ new Set([
-        "requestId",
-        "ok",
-        "port",
-        "token",
-        "error"
-      ]);
-      for (const key of Object.keys(value)) {
-        if (!allowed.has(key))
-          throw new Error(`dshweb \u7ED3\u679C\u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
-      }
-      const requestId = requireString(value.requestId, "requestId", 128);
-      if (typeof value.ok !== "boolean")
-        throw new Error("dshweb \u7ED3\u679C ok \u5FC5\u987B\u4E3A\u5E03\u5C14\u503C");
-      const result = { requestId, ok: value.ok };
-      if (value.port !== void 0) {
-        result.port = requirePort(value.port, "port");
-      }
-      if (value.token !== void 0) {
-        result.token = requireString(value.token, "token", 512);
-      }
-      if (value.error !== void 0) {
-        if (!isRecord2(value.error))
-          throw new Error("error \u5FC5\u987B\u4E3A\u5BF9\u8C61");
-        result.error = {
-          code: requireString(value.error.code, "error.code", 128),
-          message: requireString(value.error.message, "error.message", 2e3)
-        };
-      }
-      return result;
     }
   }
 });
@@ -3400,8 +3270,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientDshWebUrl = exports2.DSH_WEB_URL_MAX_LENGTH = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = void 0;
+    exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -3418,14 +3288,6 @@ var require_dist = __commonJS({
     Object.defineProperty(exports2, "parseClientAnnotationsInput", { enumerable: true, get: function() {
       return client_annotations_js_1.parseClientAnnotationsInput;
     } });
-    var client_dsh_web_js_1 = require_client_dsh_web();
-    Object.defineProperty(exports2, "DSH_WEB_URL_MAX_LENGTH", { enumerable: true, get: function() {
-      return client_dsh_web_js_1.DSH_WEB_URL_MAX_LENGTH;
-    } });
-    Object.defineProperty(exports2, "parseClientDshWebUrl", { enumerable: true, get: function() {
-      return client_dsh_web_js_1.parseClientDshWebUrl;
-    } });
-    __exportStar(require_dsh_web(), exports2);
     var client_installer_js_1 = require_client_installer();
     Object.defineProperty(exports2, "ClientInstallerErrorCode", { enumerable: true, get: function() {
       return client_installer_js_1.ClientInstallerErrorCode;
@@ -3562,9 +3424,7 @@ var require_dist = __commonJS({
       GIT_SSH_ACK: "git-ssh:ack",
       TASK_COMMAND: "task:command",
       TASK_COMMAND_RESULT: "task:command-result",
-      TASK_EVENT: "task:event",
-      DSH_WEB_COMMAND: "dshweb:command",
-      DSH_WEB_RESULT: "dshweb:result"
+      TASK_EVENT: "task:event"
     };
     var JobType;
     (function(JobType2) {
@@ -3889,15 +3749,7 @@ function createClientsApi(client) {
     /** 修改客户端别名（全局唯一；重名返回 409）。 */
     rename: (clientId, name, signal) => client.request("PATCH", `/api/clients/${encodeURIComponent(clientId)}/name`, { name }, signal),
     /** 全量替换操作者注解（ADR-0055）；空输入清除。 */
-    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal),
-    /** 登记/清除远程 DSH WebUI 地址（ADR-0059）；`null` 清除。 */
-    setDshWebUrl: (clientId, url, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/dsh-web`, { url }, signal),
-    /** 一键启动：代起 dsh web 并自动建 FRP 映射（ADR-0059 修订）。 */
-    startDshWeb: (clientId, signal) => client.request("POST", `/api/clients/${encodeURIComponent(clientId)}/dsh-web/start`, void 0, signal),
-    /** 一键停止：停进程、删映射、清地址；外部托管时等价于解除登记。 */
-    stopDshWeb: (clientId, signal) => client.request("POST", `/api/clients/${encodeURIComponent(clientId)}/dsh-web/stop`, void 0, signal),
-    /** 解除外部托管的登记：只清 VCPDeck 侧入口，不动目标机进程（ADR-0059 决策 12）。 */
-    detachDshWeb: (clientId, signal) => client.request("DELETE", `/api/clients/${encodeURIComponent(clientId)}/dsh-web`, void 0, signal)
+    updateAnnotations: (clientId, annotations, signal) => client.request("PUT", `/api/clients/${encodeURIComponent(clientId)}/annotations`, { annotations }, signal)
   };
 }
 

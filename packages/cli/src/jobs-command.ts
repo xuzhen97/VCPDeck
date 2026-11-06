@@ -310,20 +310,28 @@ async function runExecJob(
 	if (options.json !== true) log(formatJobDetail(job, output));
 }
 
-/** 轮询 Job 直到终态或超时；仅重试安全 GET，容忍 Server 重启短暂不可达。 */
+/**
+ * 轮询 Job 直到终态或超时；仅重试安全 GET，容忍 Server 重启短暂不可达。
+ * `timeoutSeconds <= 0` 表示不限时（大文件传输用）；`onJob` 每次成功轮询后回调，供调用方渲染进度。
+ */
 export async function waitForTerminalJob(
 	client: VcpDeckClient,
 	jobId: string,
 	timeoutSeconds: number,
 	log: (message: string) => void,
 	pollIntervalMs: number,
+	onJob?: (job: JobInfo) => void,
 ): Promise<JobInfo> {
-	const deadline = Date.now() + timeoutSeconds * 1_000;
+	const deadline =
+		timeoutSeconds > 0
+			? Date.now() + timeoutSeconds * 1_000
+			: Number.POSITIVE_INFINITY;
 	let lastStatus: string | undefined;
 	while (Date.now() < deadline) {
 		try {
 			const job = await client.jobs.get(jobId);
 			if (TERMINAL_STATUSES.has(job.status)) return job;
+			onJob?.(job);
 			if (job.status !== lastStatus) {
 				log(`[vcpdeck] Job ${jobId} 状态: ${job.status}`);
 				lastStatus = job.status;

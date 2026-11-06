@@ -15,6 +15,7 @@ CLI 是操作员与 Skill 使用的命令入口，复用 `@vcpdeck/sdk` 访问 S
 - `files roots/list/stat/read` 文件只读浏览（授权根探测、目录列表、元信息、文本读取）；
 - `files write/mkdir/delete/move` 文件写操作（覆盖写、递归建目录、删除、移动，确认门由调用方负责）；
 - `files download/upload` 文件传输（Storage Provider 直传链路，Server 只签名；download 校验 sha256）；
+- `files share` 导出目标机文件到 Storage 并生成公开下载链接（长期有效、无需认证；数十 GB 级导出默认不限时）；
 - `frp instances/mappings` FRP 状态查询与 `frp mapping create/delete` 完整映射写操作；
 - `storage status` 存储后端状态只读查询；
 - `terminal shells/list/close` Terminal 生命周期管理；
@@ -202,15 +203,19 @@ vcpdeck files write <client> <path> [--root=<dir>] [--input=<file>] [--env=<name
 vcpdeck files mkdir <client> <path> [--root=<dir>] [--env=<name>] [--json]  # 递归创建
 vcpdeck files delete <client> <path> [--root=<dir>] [--recursive] [--env=<name>] [--json]  # 不可恢复
 vcpdeck files move <client> <source> <destination> [--root=<dir>] [--overwrite] [--env=<name>] [--json]
-vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--env=<name>] [--json]
-vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--env=<name>] [--json]
+vcpdeck files download <client> <remotePath> <localPath> [--root=<dir>] [--timeout=<seconds>] [--env=<name>] [--json]
+vcpdeck files upload <client> <localPath> <remotePath> [--root=<dir>] [--overwrite] [--timeout=<seconds>] [--env=<name>] [--json]
+vcpdeck files share <client> <path> [--root=<dir>] [--base-url=<url>] [--timeout=<seconds>] [--env=<name>] [--json]
+vcpdeck files share --file-id=<fileId> [--base-url=<url>] [--env=<name>] [--json]  # 为已导出的文件补建链接
 ```
 
 文件操作通过创建 `file.*` Job 并等待终态实现。`rootDir` 是授权根：显式 `--root` 优先；缺省时经 `file.roots` 探测——唯一根直接使用，多根 fail closed 要求显式指定。`list` 目录优先按名称排序并附汇总；`read` 默认上限 256KB（`--max-bytes` 可调）；失败非零退出并带稳定错误码（`PATH_NOT_FOUND`/`PATH_CONFLICT` 等）。文件内容属敏感正文，仅在显式查询时返回。
 
 写操作语义（由 Client 权威定义）：`write` 原子覆盖写（tmp+rename），内容来自 `--input` 或 stdin，不进命令行参数；`mkdir` 递归创建；`delete` 非递归遇非空目录报 `PATH_CONFLICT`，`--recursive` 解锁；`move` 目标存在默认拒绝，`--overwrite` 解锁。所有写操作执行前输出目标摘要（机器、授权根、路径、影响）；确认门由调用方负责，删除不可恢复且 `--recursive` 删除整个目录树必须单独强调。写操作非幂等，网络结果不明时先用只读命令核对权威状态。
 
-已知非能力：无（本节能力已对齐 Server 文件域；Terminal 等其他域见对应章节）。传输链路：`download` 导出后经 Server 签发的短期下载令牌从 Storage 拉取并校验 sha256；`upload` 经 upload-sessions 协商后分片直传 Provider（403 仅刷新该分片 URL），完成后由 Client 从存储拉取导入。字节流不经过 Server——阿里云为 Provider 预签名 URL 直传，Local 后端经 Server 中转是无外部存储时的固有行为；签名 URL 不输出、不落盘、不进日志。传输非幂等，网络结果不明时先用只读命令核对两侧状态。
+已知非能力：无（本节能力已对齐 Server 文件域；Terminal 等其他域见对应章节）。传输链路：`download` 导出后经 Server 签发的短期下载令牌从 Storage 拉取并校验 sha256；`upload` 经 upload-sessions 协商后分片直传 Provider（403 仅刷新该分片 URL），完成后由 Client 从存储拉取导入。字节流不经过 Server——阿里云为 Provider 预签名 URL 直传，Local 后端经 Server 中转是无外部存储时的固有行为；签名 URL 不输出、不落盘、不进日志。传输非幂等，网络结果不明时先用只读命令核对两侧状态。`download`/`upload` 的 `--timeout` 缺省 `0` 表示不限时，只限制本地等待时长：Job 在 Server 侧照常跑完，本地超时退出不等于远端失败。等待期间每 15 秒或进度百分比变化打印一行进度。
+
+`share` 复用同一条导出链路但不写本地磁盘：终态后经 `POST /api/storage/shares` 创建公开分享，输出按 `--base-url`（缺省取环境 `server`，须是绝对 http(s) 地址）拼出的链接与分享 ID。链接无需认证、除撤销外不到期，等于把文件内容暴露给任何拿到链接的人，属安全敏感操作，调用前必须取得用户确认。`--timeout` 与 `download`/`upload` 同语义（缺省 `0` 不限时），用于数十 GB 级导出；`--file-id` 可为已导出文件补建链接，是导出中断后的恢复路径。链接基地址是回环地址时命令会提示其不可外部访问。Local 后端下文件占用 Server 磁盘、下载流量也经 Server；Alibaba 后端由下载方直连 Provider。
 
 ## 9. 远程 Agent（已退役）
 
@@ -315,7 +320,8 @@ pnpm \
 - `jobs run/cancel` 覆盖 `--` 分隔符解析、payload 形状（command 模式/cwd/timeout）、创建摘要、`--wait` 成功与失败（失败自动带出现场）、取消状态展示和 `--json` 输出；
 - `files roots/list/stat/read` 覆盖四子命令、授权根探测与多根 fail closed、稳定错误码转译、排序汇总和 `--json` 输出；
 - `files write/mkdir/delete/move` 覆盖 payload 形状（content 来自 --input/递归/覆盖语义）、成功摘要、失败错误码转译和用法校验；
-- `files download/upload` 覆盖导出+签名 URL 拉取+sha256 校验、sha 不一致删除半成品、分片直传与导入终态等待。
+- `files download/upload` 覆盖导出+签名 URL 拉取+sha256 校验、sha 不一致删除半成品、分片直传与导入终态等待；
+- `files share` 覆盖导出后建分享、`--base-url` 覆盖链接基地址、`--file-id` 补建链接（不创建 Job）、`--json` 单一对象输出和 `--timeout`/混用参数/非绝对基地址拒绝。
 - `pi models/sessions/new/run/abort` 覆盖 cwdRef 推导、多根 fail closed、运行循环（prompt→轮询→回复提取）、既有会话 open 复用、扩展输入报错和中止；
 - `frp/storage` 覆盖实例/映射表格与过滤、凭据字段脱敏、TCP/HTTP/HTTPS create、完整 Job 等待、delete、timeout、JSON 和后端状态输出；
 - `terminal shells/list/close` 覆盖 shell 探测、会话列表 `--status` 本地过滤和关闭流程（先取详情再删除）；

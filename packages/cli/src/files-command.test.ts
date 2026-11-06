@@ -663,5 +663,321 @@ describe("files command", () => {
 			expect(receivedParts.get(2)?.toString()).toBe("ef");
 			expect(lines.join("\\n")).toContain("已上传");
 		});
+
+		it("download 等待导出时打印进度，--timeout=0 表示不限时", async () => {
+			const content = "0123456789";
+			const sha256 = createHash("sha256").update(content).digest("hex");
+			let polls = 0;
+			const server = createServer((request, response) => {
+				const url = request.url ?? "";
+				response.setHeader("content-type", "application/json");
+				if (url === "/api/clients") {
+					response.end(
+						JSON.stringify([
+							{ clientId: "c1", name: "workstation", online: true },
+						]),
+					);
+					return;
+				}
+				if (url === "/api/jobs" && request.method === "POST") {
+					request.resume();
+					response.end(
+						JSON.stringify({
+							jobId: "exp-2",
+							status: "running",
+							type: "file.export",
+						}),
+					);
+					return;
+				}
+				if (url === "/api/jobs/exp-2") {
+					polls += 1;
+					if (polls < 3) {
+						response.end(
+							JSON.stringify({
+								jobId: "exp-2",
+								status: "running",
+								progress: { loaded: 5, total: 10 },
+							}),
+						);
+						return;
+					}
+					response.end(
+						JSON.stringify({
+							jobId: "exp-2",
+							status: "done",
+							result: {
+								fileId: "f2",
+								key: "exports/f2",
+								size: content.length,
+								sha256,
+							},
+						}),
+					);
+					return;
+				}
+				if (url === "/api/storage/download-token" && request.method === "POST") {
+					request.resume();
+					const port = (server.address() as { port: number }).port;
+					response.end(
+						JSON.stringify({
+							url: `http://127.0.0.1:${port}/storage-object`,
+							expiresAt: Date.now() + 60_000,
+						}),
+					);
+					return;
+				}
+				if (url === "/storage-object") {
+					response.setHeader("content-type", "application/octet-stream");
+					response.end(content);
+					return;
+				}
+				response.end(JSON.stringify({}));
+			});
+			servers.push(server);
+			await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+			const port = (server.address() as { port: number }).port;
+			const { paths, processEnv } = await fixture(port);
+			const localPath = join(
+				await mkdtemp(join(tmpdir(), "vcpdeck-files-dl2-")),
+				"out.bin",
+			);
+			const lines: string[] = [];
+			await runFilesCommand(
+				"download",
+				[
+					"workstation",
+					"logs/app.log",
+					localPath,
+					"--root=D:\\",
+					"--timeout=0",
+				],
+				{ paths, processEnv, pollIntervalMs: 1, log: (m) => lines.push(m) },
+			);
+			expect(polls).toBe(3);
+			expect(lines.join("\\n")).toContain("导出进度 50%（5/10 bytes）");
+			expect(await readFile(localPath, "utf8")).toBe(content);
+		});
+
+		it("upload --timeout 非整数时在传输前报错", async () => {
+			const requests: string[] = [];
+			const server = createServer((request, response) => {
+				requests.push(request.url ?? "");
+				response.end(JSON.stringify({}));
+			});
+			servers.push(server);
+			await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+			const port = (server.address() as { port: number }).port;
+			const { paths, processEnv } = await fixture(port);
+			const localPath = join(
+				await mkdtemp(join(tmpdir(), "vcpdeck-files-tmo-")),
+				"in.txt",
+			);
+			await writeFile(localPath, "abc", "utf8");
+			await expect(
+				runFilesCommand("upload", ["workstation", localPath, "x.txt", "--timeout=abc"], {
+					paths,
+					processEnv,
+					pollIntervalMs: 1,
+					log: () => {},
+				}),
+			).rejects.toThrow("--timeout 必须是不小于 0 的整数秒");
+			expect(requests).toEqual([]);
+		});
+	});
+});
+
+describe("files share", () => {
+	const sha256 = "b".repeat(64);
+
+	/** 模拟 Server：file.export 立即 done，POST /api/storage/shares 返回固定分享。 */
+	async function listenWithShare(size = 16): Promise<{
+		port: number;
+		jobs: Record<string, unknown>[];
+		shares: Record<string, unknown>[];
+	}> {
+		const jobs: Record<string, unknown>[] = [];
+		const shares: Record<string, unknown>[] = [];
+		const server = createServer((request, response) => {
+			const url = request.url ?? "";
+			response.setHeader("content-type", "application/json");
+			if (url === "/api/clients") {
+				response.end(
+					JSON.stringify([
+						{ clientId: "client-1", name: "workstation", online: true },
+					]),
+				);
+				return;
+			}
+			if (url === "/api/jobs" && request.method === "POST") {
+				const chunks: Buffer[] = [];
+				request.on("data", (chunk: Buffer) => chunks.push(chunk));
+				request.on("end", () => {
+					jobs.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+					response.end(
+						JSON.stringify({
+							jobId: "exp-1",
+							status: "running",
+							type: "file.export",
+						}),
+					);
+				});
+				return;
+			}
+			if (url === "/api/jobs/exp-1") {
+				response.end(
+					JSON.stringify({
+						jobId: "exp-1",
+						status: "done",
+						result: { fileId: "f1", key: "exports/f1", size, sha256 },
+					}),
+				);
+				return;
+			}
+			if (url === "/api/storage/shares" && request.method === "POST") {
+				const chunks: Buffer[] = [];
+				request.on("data", (chunk: Buffer) => chunks.push(chunk));
+				request.on("end", () => {
+					shares.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+					response.end(
+						JSON.stringify({
+							id: "share-1",
+							fileId: "f1",
+							filename: "big.log",
+							mimeType: null,
+							storageKind: "local",
+							status: "active",
+							previewable: false,
+							createdAt: new Date().toISOString(),
+							revokedAt: null,
+							sharePath: "/api/public/storage-shares/tok-1",
+						}),
+					);
+				});
+				return;
+			}
+			response.end(JSON.stringify({}));
+		});
+		servers.push(server);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const port = (server.address() as { port: number }).port;
+		return { port, jobs, shares };
+	}
+
+	it("导出远程文件并打印公开下载链接", async () => {
+		const { port, jobs, shares } = await listenWithShare();
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runFilesCommand(
+			"share",
+			["workstation", "logs/big.log", "--root=D:/"],
+			{ paths, processEnv, pollIntervalMs: 1, log: (m) => lines.push(m) },
+		);
+		expect(jobs).toHaveLength(1);
+		expect(jobs[0]?.type).toBe("file.export");
+		expect(jobs[0]?.payload).toMatchObject({
+			rootDir: "D:/",
+			path: "logs/big.log",
+		});
+		expect(shares).toEqual([{ fileId: "f1" }]);
+		const output = lines.join("\n");
+		expect(output).toContain(
+			`http://127.0.0.1:${port}/api/public/storage-shares/tok-1`,
+		);
+		expect(output).toContain("分享 ID: share-1");
+		// 默认基地址是本机时明确提示链接不可外部访问
+		expect(output).toContain("其它机器无法访问");
+	});
+
+	it("--base-url 覆盖链接基地址且不再提示本机地址", async () => {
+		const { port } = await listenWithShare();
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runFilesCommand(
+			"share",
+			[
+				"workstation",
+				"logs/big.log",
+				"--root=D:/",
+				"--base-url=https://deck.example",
+			],
+			{ paths, processEnv, pollIntervalMs: 1, log: (m) => lines.push(m) },
+		);
+		const output = lines.join("\n");
+		expect(output).toContain(
+			"https://deck.example/api/public/storage-shares/tok-1",
+		);
+		expect(output).not.toContain("其它机器无法访问");
+	});
+
+	it("--file-id 直接补建链接，不创建导出 Job", async () => {
+		const { port, jobs, shares } = await listenWithShare();
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runFilesCommand("share", ["--file-id=f9"], {
+			paths,
+			processEnv,
+			pollIntervalMs: 1,
+			log: (m) => lines.push(m),
+		});
+		expect(jobs).toHaveLength(0);
+		expect(shares).toEqual([{ fileId: "f9" }]);
+		expect(lines.join("\n")).toContain("分享 ID: share-1");
+	});
+
+	it("--json 输出 fileId/shareId/url 且不含进度行", async () => {
+		const { port } = await listenWithShare();
+		const { paths, processEnv } = await fixture(port);
+		const lines: string[] = [];
+		await runFilesCommand(
+			"share",
+			["workstation", "logs/big.log", "--root=D:/", "--json"],
+			{ paths, processEnv, pollIntervalMs: 1, log: (m) => lines.push(m) },
+		);
+		expect(lines).toHaveLength(1);
+		expect(JSON.parse(lines[0] as string)).toMatchObject({
+			fileId: "f1",
+			size: 16,
+			sha256,
+			jobId: "exp-1",
+			shareId: "share-1",
+			url: `http://127.0.0.1:${port}/api/public/storage-shares/tok-1`,
+		});
+	});
+
+	it("--timeout 非整数与 --file-id 混用位置参数明确失败", async () => {
+		const { port } = await listenWithShare();
+		const { paths, processEnv } = await fixture(port);
+		await expect(
+			runFilesCommand("share", ["workstation", "a.log", "--root=D:/", "--timeout=abc"], {
+				paths,
+				processEnv,
+				pollIntervalMs: 1,
+				log: () => {},
+			}),
+		).rejects.toThrow("--timeout 必须是不小于 0 的整数秒");
+		await expect(
+			runFilesCommand("share", ["workstation", "a.log", "--file-id=f1"], {
+				paths,
+				processEnv,
+				pollIntervalMs: 1,
+				log: () => {},
+			}),
+		).rejects.toThrow("不能同时使用");
+		await expect(runFilesCommand("share", [])).rejects.toThrow("Files 命令");
+	});
+
+	it("基地址不是绝对 http(s) 地址时明确失败且不创建分享", async () => {
+		const { port, shares } = await listenWithShare();
+		const { paths, processEnv } = await fixture(port);
+		await expect(
+			runFilesCommand("share", ["--file-id=f9", "--base-url=deck.example"], {
+				paths,
+				processEnv,
+				pollIntervalMs: 1,
+				log: () => {},
+			}),
+		).rejects.toThrow("分享链接基地址必须是绝对 http(s) 地址");
+		expect(shares).toHaveLength(0);
 	});
 });
