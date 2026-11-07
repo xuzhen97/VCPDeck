@@ -9,6 +9,7 @@ import type {
 import { CLIENT_ID, getRegisterInfo } from "./register.js";
 import { getHeartbeat } from "./heartbeat.js";
 import { killJob, getRunningJobIds, getStatusReport } from "./executor.js";
+import { getActiveTransferJobIds } from "./transfer-handler.js";
 import { dispatch } from "./dispatcher.js";
 import {
 	detectInstallationInfo,
@@ -455,7 +456,12 @@ export function connect(): Socket {
 
 	setInterval(() => {
 		if (socket.connected) {
-			socket.emit(Events.HEARTBEAT, getHeartbeat(getRunningJobIds()));
+			// 传输 Job 不在 executor 的 activeJobs 里，单独合并上报：
+			// 服务端用心跳里的租约对账 running Job，漏报会把长传输判成孤儿。
+			socket.emit(
+				Events.HEARTBEAT,
+				getHeartbeat([...getRunningJobIds(), ...getActiveTransferJobIds()]),
+			);
 		}
 	}, 5_000);
 

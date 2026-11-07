@@ -23,6 +23,37 @@ import type { UploadTarget } from "@vcpdeck/shared";
 /** 已脱离 Job 的 Agent 类型:通用 Job 入口一律排除。 */
 const AGENT_JOB_TYPES = ["agent.session", "agent.run"];
 
+/** 心跳租约宽限（ms）：心跳 5 秒一次，30 秒足以覆盖抖动与新派发的上报延迟。 */
+const HEARTBEAT_LEASE_MS = 30_000;
+
+/**
+ * 首个在心跳里登记传输 Job 的 Client 版本。
+ * 更老的 Client 只上报 exec（传输不在 executor 的 activeJobs 里），
+ * 若也纳入对账，会把正在跑的长传输误判成孤儿 Job。
+ */
+const TRANSFER_LEASE_MIN_CLIENT_VERSION = "0.22.4";
+
+/** 传输类 Job：仅当 Client 会登记租约时才纳入心跳对账。 */
+const TRANSFER_JOB_TYPES = ["file.export", "file.import"];
+
+/** 逐段比较 `major.minor.patch`（忽略预发布后缀），用于能力门槛判断。 */
+function isVersionAtLeast(version: string, minimum: string): boolean {
+	if (!version) return false;
+	const parse = (value: string) =>
+		value
+			.split("-")[0]!
+			.split(".")
+			.map((part) => Number.parseInt(part, 10) || 0);
+	const current = parse(version);
+	const required = parse(minimum);
+	for (let index = 0; index < 3; index++) {
+		const left = current[index] ?? 0;
+		const right = required[index] ?? 0;
+		if (left !== right) return left > right;
+	}
+	return true;
+}
+
 const FILE_READ_TYPES = ["file.list", "file.stat", "file.readText", "file.export", "file.roots"];
 const FILE_WRITE_TYPES = [
 	"file.writeText",
@@ -572,6 +603,55 @@ export class JobService {
       data: { fromStatus: job.status },
     });
     return this.scheduler.onFinished(job.clientId);
+  }
+
+  /**
+   * 用心跳租约对账：Client 在线且心跳新鲜，但它的 `runningJobs` 已不再包含某条
+   * `running` Job 时，判定该 Job 已在 Client 侧丢失（Client 换代、进程重启、
+   * 内存映射丢失），按 `JOB_ORPHANED` 收尾并返回可继续派发的载荷。
+   *
+   * 心跳每 5 秒上报一次，`HEARTBEAT_LEASE_MS` 同时用于两条判据：
+   * 1. 心跳本身超过该时长未更新 → 不做判断（离线收敛负责）；
+   * 2. Job 刚派发时心跳还没带上它 → 留一个宽限期再判，避免误杀新 Job。
+   *
+   * 不做这一步时，僵尸 `running` Job 会永久占住并发槽，并让发布 drain 等到
+   * 10 分钟超时、把版本号作废（2026-11-06 生产事故）。
+   */
+  async reconcileOrphanedJobs(now = Date.now()): Promise<DispatchPayload[]> {
+    const clients = await this.prisma.client.findMany({
+      where: { online: true },
+      select: { id: true, runningJobs: true, lastHeartbeatAt: true, clientVersion: true },
+    });
+    const dispatches: DispatchPayload[] = [];
+    for (const client of clients) {
+      const heartbeatAt = client.lastHeartbeatAt?.getTime() ?? 0;
+      if (now - heartbeatAt > HEARTBEAT_LEASE_MS) continue;
+      const reported = new Set<string>(safeJsonParse<string[]>(client.runningJobs, []));
+      // 老版本 Client 不上报传输租约：对它们只看非传输 Job，否则会误杀长传输
+      const leasesTransfers = isVersionAtLeast(
+        client.version,
+        TRANSFER_LEASE_MIN_CLIENT_VERSION,
+      );
+      const jobs = await this.prisma.job.findMany({
+        where: {
+          clientId: client.id,
+          status: "running",
+          ...(leasesTransfers ? {} : { type: { notIn: TRANSFER_JOB_TYPES } }),
+        },
+        select: { id: true, startedAt: true, createdAt: true },
+      });
+      for (const job of jobs) {
+        if (reported.has(job.id)) continue;
+        const since = (job.startedAt ?? job.createdAt).getTime();
+        if (now - since < HEARTBEAT_LEASE_MS) continue;
+        const next = await this.failOrphaned(
+          job.id,
+          "Client 心跳未上报该 Job，判定为已在客户端丢失",
+        );
+        if (next) dispatches.push(next);
+      }
+    }
+    return dispatches;
   }
 
   async markDisconnected(clientId: string) {

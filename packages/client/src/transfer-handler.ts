@@ -176,6 +176,14 @@ function emitError(
 	} satisfies JobDone);
 }
 
+/** 正在执行的传输 Job；心跳据此上报租约，避免服务端把长传输误判为丢失。 */
+const activeTransfers = new Set<string>();
+
+/** 正在执行的传输 Job id 快照（供心跳与状态上报合并）。 */
+export function getActiveTransferJobIds(): string[] {
+	return [...activeTransfers];
+}
+
 export async function handleTransfer(
 	job: {
 		jobId: string;
@@ -187,6 +195,9 @@ export async function handleTransfer(
 ) {
 	const { jobId, type, payload } = job;
 
+	// 传输不在 executor 的 activeJobs 里：不登记的话服务端心跳租约对账
+	// 会把正在跑的几十 GB 导出/导入当成孤儿 Job 直接判死。
+	activeTransfers.add(jobId);
 	try {
 		if (type === "file.export") {
 			const path = payload.path as string;
@@ -233,6 +244,8 @@ export async function handleTransfer(
 			code,
 			code === FileErrorCode.PATH_NOT_FOUND ? "Path not found" : err.message,
 		);
+	} finally {
+		activeTransfers.delete(jobId);
 	}
 }
 

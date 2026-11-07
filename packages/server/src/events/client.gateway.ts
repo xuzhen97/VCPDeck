@@ -56,6 +56,8 @@ import { JobLogService } from "../job/job-log.service.js";
 import { TaskDispatchService } from "../task/task-dispatch.service.js";
 
 const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
+/** 心跳租约对账的节流间隔：每次都要读全量在线 Client 与其 running Job，不必 5 秒一次。 */
+const ORPHAN_RECONCILE_INTERVAL_MS = 60_000;
 
 // CORS 由引擎级的 FrontendOriginIoAdapter 统一判定(ADR-0013):socket.io 的 CORS 只在
 // Server/Engine 层生效,命名空间级 cors 配置不参与握手,写在这里会被误导为「/client 受
@@ -65,6 +67,8 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   @WebSocketServer()
   server!: Server;
   private staleClientTimer: ReturnType<typeof setInterval> | null = null;
+  /** 上次心跳租约对账时间（节流用）。 */
+  private lastOrphanReconcileAt = 0;
   /** clientId → 已 REGISTER 的存活 socket（同一 Client 重复连接时逐个记账）。 */
   private readonly trackedSockets = new Map<string, Set<string>>();
   /**
@@ -208,6 +212,27 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
       // 心跳超时已由 expireStaleClients 原子置为离线，可安全收敛。
       await this.convergeOfflineClient(client.clientId);
       console.log(`[ws] heartbeat timeout: ${client.clientId}`);
+    }
+    await this.reconcileOrphanedJobs();
+  }
+
+  /**
+   * 心跳租约对账：Client 在线、心跳新鲜，但已不再持有某条 running Job 时收尾，
+   * 顺带把因此让出的并发槽补上派发。节流执行，避免每次 5 秒扫描都查全量。
+   */
+  private async reconcileOrphanedJobs(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastOrphanReconcileAt < ORPHAN_RECONCILE_INTERVAL_MS) return;
+    this.lastOrphanReconcileAt = now;
+    try {
+      const dispatches = await this.jobService.reconcileOrphanedJobs(now);
+      for (const dispatch of dispatches) this.sendDispatch(dispatch);
+    } catch (error) {
+      // 对账失败不致命：下个周期重试，且 drain 仍有超时兜底。
+      console.error(
+        "[job] orphan reconcile failed:",
+        (error as { message?: string })?.message,
+      );
     }
   }
 

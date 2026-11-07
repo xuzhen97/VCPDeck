@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- **僵尸 Job 不再卡死服务端自更新（Release 卡在 `updating_server`）**：`ServerDrain` 原来把 `waiting_input` 的 Job 和 `disconnected` 的 `AgentRun` 也算进收敛集合。前者是「上传会话等调用方补字节」的业务等待，从未派发、不占 Client，一条被弃置的上传会话就能无限期拖住发布；后者表示 Client 已离线，不会自行收敛。现在收敛集合只等 `running` Job 与 `pending`/`running`/`waiting_input` 的 `AgentRun`（2026-11-06 生产事故：0.22.3 服务端更新被 2026-10-25 的 exec 与 2026-11-02 的 `file.import` 两条僵尸卡住，10 分钟超时后会 `markFailed` 并作废版本号）。同时补上僵尸 Job 的根治手段：Client 每 5 秒心跳里的 `runningJobs` 现在是租约，Server 定期把「心跳新鲜、但租约里已不存在的 `running` Job」按 `JOB_ORPHANED` 收尾并让出并发槽；传输 Job 只对 ≥ 0.22.4 的 Client 生效，避免把正在跑的长传输误判为孤儿。drain 超时错误也带上现场（最多 5 条 `id(type@clientId, 已运行 N 分钟)`），不必再人工翻库定位。
 - **`files download` / `files upload` 不再对数十 GB 传输误报超时**：等待 Job 终态的上限此前硬编码 `120` 秒（`DEFAULT_WAIT_TIMEOUT_SECONDS`），30 GB 级导出/导入必然超过该值，CLI 会当场报失败——而 Job 其实还在 Server 侧继续跑完，文件最终是好的。现在两个命令都支持 `--timeout=<seconds>`，缺省 `0` 表示不限时，且只限制本地等待时长；等待期间每 15 秒或进度百分比变化打印一行进度（`导出进度` / `导入进度`）。只读文件命令的 120 秒等待上限保持不变。顺带修掉一处参数校验顺序问题：非法 `--timeout` 现在在创建 Job/传输字节之前就报错，不会留下一个没人等着的远端任务。
 
 ## [0.22.2] - 2026-10-21

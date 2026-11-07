@@ -253,6 +253,13 @@ Client 收到有效更新请求后先设置本地 drain，再调用 prepare，�
 
 **Server** drain 则同时等待普通 Job 与 `AgentRun`：ADR-0041 之后 Agent 执行不再写 Job，只查 Job 会让发布在活跃 Agent 回合上直接切换。
 
+Server drain 的收敛集合是**有限集合**，不是「所有非终态行」：
+
+- Job 只算 `running`。`waiting_input` 是「上传会话等调用方补齐字节」的业务等待，从未派发、不占 Client，也没有 Job 侧回调推进它；把它算进来会让一条被弃置的上传会话无限期拖住发布（2026-11-02 创建的一条 `file.import` 就是这样卡死了 2026-11-06 的 0.22.3 服务端更新）。
+- `AgentRun` 只算 `pending` / `running` / `waiting_input`。`disconnected` 表示 Client 已离线，它不会自行收敛，由离线对账收尾，留在集合里就是永久阻塞。
+- `running` Job 的正确性由**心跳租约对账**兜底：Client 每 5 秒上报的 `runningJobs` 就是租约，Server 在周期扫描里对「心跳新鲜、但租约里没有的 `running` Job」按 `JOB_ORPHANED` 收尾并让出并发槽。传输 Job（`file.export` / `file.import`）只有在 Client 版本 ≥ 0.22.4（开始在心跳里登记传输）后才纳入对账，否则会把正在跑的长传输误判为孤儿。
+- drain 超时的错误带现场：最多 5 条 `running` Job 的 `id(type@clientId, 已运行 N 分钟)`，排障不必先翻库。
+
 Client 更新会停止整个 Client 进程：
 
 - 未完成的普通子进程可能被终止；
@@ -390,7 +397,7 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 | 解压失败 | 目标版本可能留下不完整目录 | 删除不完整版本目录后重新 prepare |
 | 目标版本目录已存在 | 仅当 manifest 可解析、版本号匹配且当前 artifact 的业务入口存在时，`prepare` 才跳过下载和校验；不完整目录会先清理再准备 | 仅含 Launcher payload 的目录会重新下载、校验和解压；完整目录继续幂等跳过 |
 | preStart 失败 | 不进入 current 切换，旧进程通常仍运行 | 修复迁移/权限；核对是否已有部分 DB 副作用 |
-| Server drain 超时 | Release 标为 failed；drain 抛错路径自动解除闸门、编排器失败路径显式 `release()`，Job 派发随即恢复 | 无需重启；检查活跃 Job 与 Agent Run 为何未收敛（drain 同时等待两者，见 [ADR-0041](../adr/0041-agent-session-run-and-audit-separation.md)）后可重新发布 |
+| Server drain 超时 | Release 标为 failed；drain 抛错路径自动解除闸门、编排器失败路径显式 `release()`，Job 派发随即恢复 | 无需重启；错误信息已列出阻塞的 `running` Job（`id(type@clientId, 已运行 N 分钟)`），确认后 `jobs cancel` 再重发；drain 同时等待 `AgentRun`，见 [ADR-0041](../adr/0041-agent-session-run-and-audit-separation.md) |
 | 新 Server 探活失败 | Launcher 尝试回退 previous current | 确认旧 Server 与当前 DB 兼容 |
 | Client drain 超时 | 继续 apply，未完成运行态可能被终止 | 重连后对账 Job/Terminal，不伪造成功 |
 | Client 重连版本不符 | Client 标记 failed | 检查 Launcher 日志和 previous 回退原因 |

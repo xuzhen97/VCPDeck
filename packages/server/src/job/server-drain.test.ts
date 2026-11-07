@@ -5,6 +5,7 @@ function mockPrisma() {
 	return {
 		job: {
 			count: vi.fn(async () => 0),
+			findMany: vi.fn(async () => [] as unknown[]),
 		},
 		agentRun: {
 			count: vi.fn(async () => 0),
@@ -38,10 +39,48 @@ describe("ServerDrain", () => {
 		await vi.advanceTimersByTimeAsync(3000);
 		await expect(phase).resolves.toBeUndefined();
 
-		// running + waiting_input 都算运行中
+		// 只等 running：waiting_input 是等调用方补字节的业务等待，从未派发
 		expect(prisma.job.count).toHaveBeenCalledWith({
-			where: { status: { in: ["running", "waiting_input"] } },
+			where: { status: "running" },
 		});
+	});
+
+	it("超时时带上现场：Job id、类型、Client 与已运行时长", async () => {
+		prisma.job.count.mockResolvedValue(1);
+		prisma.job.findMany.mockResolvedValue([
+			{
+				id: "job-zombie",
+				type: "exec",
+				clientId: "client-1",
+				startedAt: new Date(Date.now() - 90 * 60_000),
+				createdAt: new Date(Date.now() - 91 * 60_000),
+			},
+		]);
+
+		const phase = drain.drain(5000);
+		const assertion = expect(phase).rejects.toThrow(
+			/job-zombie\(exec@client-1, 已运行 90 分钟\)/,
+		);
+		await vi.advanceTimersByTimeAsync(6000);
+		await assertion;
+	});
+
+	it("现场超过 5 条时只列前 5 条并标注「等」", async () => {
+		prisma.job.count.mockResolvedValue(9);
+		prisma.job.findMany.mockResolvedValue(
+			Array.from({ length: 5 }, (_, index) => ({
+				id: `job-${index}`,
+				type: "exec",
+				clientId: "client-1",
+				startedAt: new Date(Date.now() - 60_000),
+				createdAt: new Date(Date.now() - 60_000),
+			})),
+		);
+
+		const phase = drain.drain(5000);
+		const assertion = expect(phase).rejects.toThrow(/job-4\(exec@client-1.*\) 等$/);
+		await vi.advanceTimersByTimeAsync(6000);
+		await assertion;
 	});
 
 	it("超时仍未收敛时抛错(含剩余数量)", async () => {
@@ -112,8 +151,9 @@ describe("ServerDrain 与 Agent Run(ADR-0041)", () => {
 		const phase = drain.drain(60_000);
 		await vi.advanceTimersByTimeAsync(3000);
 		await expect(phase).resolves.toBeUndefined();
+		// disconnected 的 Agent Run 不会自行收敛，由对账收尾，不该阻塞发布
 		expect(prisma.agentRun.count).toHaveBeenCalledWith({
-			where: { status: { in: ["pending", "running", "waiting_input", "disconnected"] } },
+			where: { status: { in: ["pending", "running", "waiting_input"] } },
 		});
 	});
 

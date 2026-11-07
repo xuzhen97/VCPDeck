@@ -987,3 +987,83 @@ describe("JobService 事件链采集点（ADR-0054）", () => {
 		expect(JSON.stringify(created)).not.toContain("echo hi");
 	});
 });
+
+describe("JobService.reconcileOrphanedJobs()（心跳租约对账）", () => {
+	function makeOrphanDeps() {
+		const prisma = {
+			client: { findMany: vi.fn() },
+			job: {
+				findMany: vi.fn(),
+				findUnique: vi.fn(),
+				update: vi.fn(async () => ({})),
+			},
+		} as any;
+		const scheduler = { onFinished: vi.fn(async () => null) } as any;
+		const service = new JobService(
+			prisma,
+			scheduler,
+			mockFileService(),
+			{ getBackendConfig: vi.fn() } as never,
+		);
+		return { prisma, scheduler, service };
+	}
+
+	const now = Date.now();
+
+	it("心跳未上报的 running Job 判为孤儿并让出并发槽", async () => {
+		const { prisma, scheduler, service } = makeOrphanDeps();
+		prisma.client.findMany.mockResolvedValue([
+			{
+				id: "c1",
+				runningJobs: JSON.stringify(["job-alive"]),
+				clientVersion: "0.22.4",
+				lastHeartbeatAt: new Date(now - 5_000),
+			},
+		]);
+		prisma.job.findMany.mockResolvedValue([
+			{ id: "job-alive", startedAt: new Date(now - 120_000), createdAt: new Date(now - 121_000) },
+			{ id: "job-lost", startedAt: new Date(now - 600_000), createdAt: new Date(now - 601_000) },
+		]);
+		prisma.job.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
+			where.id === "job-lost"
+				? { id: "job-lost", clientId: "c1", status: "running" }
+				: null,
+		);
+
+		const dispatches = await service.reconcileOrphanedJobs(now);
+
+		expect(prisma.job.update).toHaveBeenCalledTimes(1);
+		expect(prisma.job.update.mock.calls[0][0]).toMatchObject({
+			where: { id: "job-lost" },
+			data: { status: "error", errorCode: "JOB_ORPHANED" },
+		});
+		expect(scheduler.onFinished).toHaveBeenCalledWith("c1");
+		expect(dispatches).toEqual([]);
+	});
+
+	it("刚派发、心跳还没来得及上报的 Job 有宽限期，不误杀", async () => {
+		const { prisma, service } = makeOrphanDeps();
+		prisma.client.findMany.mockResolvedValue([
+			{ id: "c1", runningJobs: "[]", lastHeartbeatAt: new Date(now - 5_000), clientVersion: "0.22.4" },
+		]);
+		prisma.job.findMany.mockResolvedValue([
+			{ id: "job-new", startedAt: new Date(now - 10_000), createdAt: new Date(now - 10_000) },
+		]);
+
+		await service.reconcileOrphanedJobs(now);
+
+		expect(prisma.job.update).not.toHaveBeenCalled();
+	});
+
+	it("心跳本身过期时不做判断（离线收敛负责）", async () => {
+		const { prisma, service } = makeOrphanDeps();
+		prisma.client.findMany.mockResolvedValue([
+			{ id: "c1", runningJobs: "[]", lastHeartbeatAt: new Date(now - 120_000), clientVersion: "0.22.4" },
+		]);
+
+		await service.reconcileOrphanedJobs(now);
+
+		expect(prisma.job.findMany).not.toHaveBeenCalled();
+		expect(prisma.job.update).not.toHaveBeenCalled();
+	});
+});

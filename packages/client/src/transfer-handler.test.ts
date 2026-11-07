@@ -26,7 +26,7 @@ vi.mock("node:fs", () => ({
 	createWriteStream: vi.fn(() => new PassThrough()),
 }));
 
-import { handleTransfer } from "./transfer-handler.js";
+import { getActiveTransferJobIds, handleTransfer } from "./transfer-handler.js";
 
 function mockSocket() {
 	const emit = vi.fn();
@@ -147,6 +147,16 @@ describe("handleTransfer file.export", () => {
 			key: "aliyun-fileid-123",
 			size: 5,
 		});
+	});
+
+	it("传输期间登记 Job id，结束后清理（供心跳租约对账）", async () => {
+		const socket = mockSocket();
+		const running = handleTransfer(exportJob(), socket);
+		// 登记发生在第一个 await 之前：5 秒心跳能立刻看到这条租约
+		expect(getActiveTransferJobIds()).toEqual(["job-1"]);
+
+		await running;
+		expect(getActiveTransferJobIds()).toEqual([]);
 	});
 
 	it("Server 未返回 key 时回退到 uploadRef.key（本地存储后端）", async () => {
