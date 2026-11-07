@@ -13,12 +13,35 @@ describe("trusted-origins", () => {
 	afterEach(() => {
 		delete process.env.VCPDECK_FRONTEND_ORIGIN;
 		delete process.env.VCPDECK_CORS_ORIGIN;
+		delete process.env.VCPDECK_FRONTEND_PORT;
 	});
 
 	it("默认值为文档记载的开发 Origin（docs/deployment.md）", () => {
 		expect(DEFAULT_DEV_ORIGIN).toBe("http://localhost:5173");
 		expect(resolveFrontendOrigin()).toBe(DEFAULT_DEV_ORIGIN);
 		expect(resolveCorsOrigin()).toBe(DEFAULT_DEV_ORIGIN);
+	});
+
+	it("开发端口改由 VCPDECK_FRONTEND_PORT 推导默认 Origin", () => {
+		process.env.VCPDECK_FRONTEND_PORT = "5180";
+		expect(resolveFrontendOrigin()).toBe("http://localhost:5180");
+		expect(resolveCorsOrigin()).toBe("http://localhost:5180");
+		// 常量本身仍是文档默认值，只有回退结果跟着端口走
+		expect(DEFAULT_DEV_ORIGIN).toBe("http://localhost:5173");
+	});
+
+	it("VCPDECK_FRONTEND_PORT 非法时回退默认 Origin，不影响启动", () => {
+		for (const bad of ["0", "65536", "abc", "51.5"]) {
+			process.env.VCPDECK_FRONTEND_PORT = bad;
+			expect(resolveFrontendOrigin()).toBe(DEFAULT_DEV_ORIGIN);
+		}
+	});
+
+	it("显式 Origin 配置优先于按端口推导", () => {
+		process.env.VCPDECK_FRONTEND_PORT = "5180";
+		process.env.VCPDECK_FRONTEND_ORIGIN = "https://deck.example";
+		expect(resolveFrontendOrigin()).toBe("https://deck.example");
+		expect(resolveCorsOrigin()).toBe("http://localhost:5180");
 	});
 
 	it("显式配置优先于默认值", () => {

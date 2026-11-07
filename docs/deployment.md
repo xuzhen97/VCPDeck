@@ -15,7 +15,7 @@
 - 可选 FRPS 实例；
 - 可选阿里云存储后端。
 
-Frontend 构建产物随 server 构件分发并由 Server 同源托管（`server/public/`，[ADR-0013](./adr/0013-frontend-bundled-with-server.md)）：控制面主机无需单独静态托管；开发者模式仍由 Vite :5173 提供。
+Frontend 构建产物随 server 构件分发并由 Server 同源托管（`server/public/`，[ADR-0013](./adr/0013-frontend-bundled-with-server.md)）：控制面主机无需单独静态托管；开发者模式仍由 Vite :5173 提供（5173 被占用时 Vite 自动改用相邻端口，终端会打印实际地址；需要固定端口就设 `VCPDECK_FRONTEND_PORT`，显式指定后撞车直接启动失败，不再自动换号）。
 
 Client 主动连接 Server，因此目标机器无需向 Server 开放入站控制端口。
 
@@ -68,6 +68,7 @@ pnpm release --version=x.y.z
 | `VCPDECK_ADMIN_USERNAME` | `admin` | 首个管理员用户名 |
 | `VCPDECK_ADMIN_PASSWORD` | 首次启动必填 | 仅无 admin 时用于 bootstrap；不得保留示例密码 |
 | `VCPDECK_FRONTEND_ORIGIN` | `http://localhost:5173` | CORS 和 `/app` Origin |
+| `VCPDECK_FRONTEND_PORT` | `5173` | 开发模式前端 Vite 端口，仅开发使用。设置后 Vite 严格占用该端口（撞车直接启动失败，不再静默换号），并同步推导上面 `VCPDECK_FRONTEND_ORIGIN` 与下面 `VCPDECK_CORS_ORIGIN` 的默认值；两个 Origin 变量显式设置时仍以显式值为准 |
 | `VCPDECK_SESSION_TTL_SECONDS` | `604800` | 浏览器会话 TTL |
 | `VCPDECK_COOKIE_SECURE` | 未设时为 `true` | HTTP 开发环境需显式 `false`；生产必须 HTTPS + true |
 | `DATABASE_URL` | `file:./prisma/dev.db` | SQLite URL；相对路径依赖 Server 工作目录 |

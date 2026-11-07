@@ -15,14 +15,32 @@
 /** 未显式配置时的开发 Origin；与 docs/deployment.md 记载的默认值一致。 */
 export const DEFAULT_DEV_ORIGIN = "http://localhost:5173";
 
+/**
+ * 按 `VCPDECK_FRONTEND_PORT` 推导开发 Origin。
+ *
+ * 开发者把前端固定到别的端口（如 5180）时，浏览器直连 Server 的场景下
+ * Origin 会与默认值不符；让默认值跟着同一个变量走，避免两处配置漂移。
+ * 非法值不抛错：此处是策略回退点，端口合法性由前端 vite.config 与
+ * Server 启动参数负责拦截，这里退回默认端口即可。
+ */
+function defaultDevOrigin(): string {
+	const raw = process.env.VCPDECK_FRONTEND_PORT?.trim();
+	if (!raw) return DEFAULT_DEV_ORIGIN;
+	const port = Number(raw);
+	if (!Number.isInteger(port) || port < 1 || port > 65535) {
+		return DEFAULT_DEV_ORIGIN;
+	}
+	return `http://localhost:${port}`;
+}
+
 /** REST CORS 与 `/app` 网关使用的显式跨源配置。 */
 export function resolveFrontendOrigin(): string {
-	return process.env.VCPDECK_FRONTEND_ORIGIN || DEFAULT_DEV_ORIGIN;
+	return process.env.VCPDECK_FRONTEND_ORIGIN || defaultDevOrigin();
 }
 
 /** `/client` 网关使用的显式跨源配置（与 `VCPDECK_FRONTEND_ORIGIN` 互相独立）。 */
 export function resolveCorsOrigin(): string {
-	return process.env.VCPDECK_CORS_ORIGIN || DEFAULT_DEV_ORIGIN;
+	return process.env.VCPDECK_CORS_ORIGIN || defaultDevOrigin();
 }
 
 /** 兼容 cors 包 origin 回调与 Node IncomingMessage 的最小请求形状。 */
