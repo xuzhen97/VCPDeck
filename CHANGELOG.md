@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-08
+
 ### Added
 
 - **Linux 一键安装支持 Alibaba Cloud Linux 3（`alinux` 3.x）**：此前 `install-client-bootstrap.sh` 的平台门禁只认 `rocky:9*` / `almalinux:9*`，在阿里云 ECS 上直接报「不支持的 Linux: alinux 3」。Alibaba Cloud Linux 3 基于 Anolis OS 8，属 RHEL 8/CentOS 8 生态（glibc 2.32、dnf），满足 Node.js 24 的 glibc ≥ 2.28 要求，依赖包名（`libatomic`、`xz`、`unzip`）与 RHEL 9 一致，因此现按 dnf 族纳入支持；`alinux 2`（CentOS 7 生态，glibc 2.17）继续拒绝。仍不从 `ID_LIKE` 自动放宽（见 ADR-0018），单测新增 `alinux` / `alinux2` fixture 覆盖纳入与拒绝两条路径。随本版本发布后，`/releases` 页下发的固定安装命令即包含该支持（此前下发的是 Server 内旧脚本副本）。
