@@ -629,7 +629,7 @@ export class JobService {
       const reported = new Set<string>(safeJsonParse<string[]>(client.runningJobs, []));
       // 老版本 Client 不上报传输租约：对它们只看非传输 Job，否则会误杀长传输
       const leasesTransfers = isVersionAtLeast(
-        client.version,
+        client.clientVersion,
         TRANSFER_LEASE_MIN_CLIENT_VERSION,
       );
       const jobs = await this.prisma.job.findMany({
