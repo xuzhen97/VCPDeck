@@ -128,8 +128,11 @@ detect_linux_family() {
   ubuntu:22.04 | ubuntu:22.10 | ubuntu:23.* | ubuntu:24.* | ubuntu:25.* | ubuntu:26.*) printf '%s\n' apt ;;
   debian:12 | debian:13 | debian:14) printf '%s\n' apt ;;
   rocky:9* | almalinux:9*) printf '%s\n' dnf ;;
+  # Alibaba Cloud Linux 3 基于 Anolis OS 8，属 RHEL 8/CentOS 8 生态（glibc 2.32、dnf），依赖包名与 RHEL 9 一致。
+  # Alibaba Cloud Linux 2 属 CentOS 7 生态（glibc 2.17），不满足 Node.js 24 的 glibc 要求，继续拒绝。
+  alinux:3*) printf '%s\n' dnf ;;
   *)
-    fail "不支持的 Linux: ${ID:-unknown} ${VERSION_ID:-unknown}（需要 Ubuntu 22.04+、Debian 12+、Rocky/Alma 9+ 或 Bazzite x64）"
+    fail "不支持的 Linux: ${ID:-unknown} ${VERSION_ID:-unknown}（需要 Ubuntu 22.04+、Debian 12+、Rocky/Alma 9+、Alibaba Cloud Linux 3 或 Bazzite x64）"
     return 1
     ;;
   esac
@@ -189,7 +192,7 @@ collect_missing_dependencies() {
   fi
 
   # Node.js 官方 Linux x64 构件依赖 libatomic.so.1；Ubuntu/Debian 与
-  # Rocky/Alma/Bazzite 的包名不同。只在 ldconfig 明确探测不到时补包。
+  # Rocky/Alma/Alibaba Cloud Linux/Bazzite 的包名不同。只在 ldconfig 明确探测不到时补包。
   if ! runtime_library_available; then
     MISSING_COMMANDS+=(libatomic)
     case "${INSTALLER_LINUX_FAMILY:-}" in

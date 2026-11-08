@@ -5,6 +5,7 @@
 - 决策者：项目维护者
 - 关联：[`ADR-0003`](./0003-separate-launcher-for-updates.md)、[`ADR-0009`](./0009-trusted-operator-security-domain.md)、[`ADR-0015`](./0015-launcher-distributed-with-release.md)、[`ADR-0018`](./0018-public-client-installer-and-pm2-supervision.md)、[`docs/design/release-and-update.md`](../design/release-and-update.md)、[`docs/deployment.md`](../deployment.md)
 - 取代范围：取代 ADR-0018 中 Linux Client 使用用户私有 Node/PM2、PM2 systemd startup 和自启失败可降级的决策；ADR-0018 的公开安装入口、共享 PSK、Windows 安装模型及其余决策继续有效
+- 修订：2026-11-08 —— 决策 1 的支持范围纳入 Alibaba Cloud Linux 3（`ID=alinux` 3.x，RHEL 8 生态、glibc 2.32）；systemd 系统级部署与 root 等价专用账户模型不变。
 
 ## 背景
 
@@ -14,7 +15,7 @@ VCPDeck 当前面向少量可信操作者，远程 Job、Terminal、Pi 和文件
 
 ## 决策
 
-1. Linux 新安装只支持当前已确认的 Ubuntu 22.04+、Debian 12+、Rocky Linux 9+、AlmaLinux 9+ 与 Bazzite x64/glibc/systemd 范围。ARM64、musl、WSL、容器、无 systemd 和其他未经验证的平台继续 fail closed。
+1. Linux 新安装只支持当前已确认的 Ubuntu 22.04+、Debian 12+、Rocky Linux 9+、AlmaLinux 9+、Alibaba Cloud Linux 3 与 Bazzite x64/glibc/systemd 范围。ARM64、musl、WSL、容器、无 systemd 和其他未经验证的平台继续 fail closed。
 2. Linux 安装必须由 root 执行，或由能够完成 sudo 认证的普通用户执行。缺少 root/sudo 时安装失败，不提供 PM2、user service、linger、cron、桌面自启动或登录后启动等降级方式。
 3. Linux 使用固定系统布局：应用与私有 Node 位于 `/opt/vcpdeck/client`，持久身份和运行状态位于 `/var/lib/vcpdeck-client`，敏感配置位于 `/etc/vcpdeck/client.env`。系统 Node/npm 不是运行前置条件。
 4. 安装器创建或严格核对专用 `vcpdeck` 账户。该账户使用独立 HOME `/var/lib/vcpdeck-client/home` 和 `/bin/bash`，密码锁定，安装器不配置密码、authorized keys 或其他直接登录凭据。未知同名账户或属性冲突必须拒绝，不自动接管。
@@ -80,7 +81,7 @@ VCPDeck 当前面向少量可信操作者，远程 Job、Terminal、Pi 和文件
 
 ## 验证与退出条件
 
-- Ubuntu、Debian、Rocky Linux、AlmaLinux、Bazzite 五个发行版分别验证无系统 Node/npm 的 root 与 sudo 安装入口；
+- Ubuntu、Debian、Rocky Linux、AlmaLinux、Alibaba Cloud Linux 3、Bazzite 六个发行版分别验证无系统 Node/npm 的 root 与 sudo 安装入口；
 - 每个平台完成机器重启、无人登录、相同 Client ID 自动上线、版本一致和 capability 上报；
 - Bazzite 必须在 SELinux enforcing 下验证 `/opt` 持久性和 systemd 执行，不得关闭 SELinux或使用临时 `chcon` 冒充完成；
 - 验证专用账户锁定、sudoers 权限与 `visudo` 校验，并以该账户执行 `sudo -n id -u` 得到 `0`；

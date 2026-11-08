@@ -36,6 +36,17 @@ cat >"$FIXTURES/alma" <<'EOF'
 ID=almalinux
 VERSION_ID=9.5
 EOF
+cat >"$FIXTURES/alinux" <<'EOF'
+ID=alinux
+VERSION_ID=3
+ID_LIKE="centos rhel fedora"
+EOF
+# Alibaba Cloud Linux 2 属 CentOS 7 生态（glibc 2.17），不满足 Node.js 24 要求。
+cat >"$FIXTURES/alinux2" <<'EOF'
+ID=alinux
+VERSION_ID=2
+ID_LIKE="centos rhel fedora"
+EOF
 
 assert_eq() {
   local expected="$1" actual="$2"
@@ -74,9 +85,9 @@ if run_bash 'source "$1"; parse_bootstrap_args --server-origin=not-an-origin' >/
   exit 1
 fi
 
-family_script='source "$1"; detect_linux_family "$2/bazzite"; detect_linux_family "$2/ubuntu"; detect_linux_family "$2/debian"; detect_linux_family "$2/rocky"; detect_linux_family "$2/alma"'
+family_script='source "$1"; detect_linux_family "$2/bazzite"; detect_linux_family "$2/ubuntu"; detect_linux_family "$2/debian"; detect_linux_family "$2/rocky"; detect_linux_family "$2/alma"; detect_linux_family "$2/alinux"'
 family_output="$(run_bash "$family_script")"
-assert_eq $'bazzite\napt\napt\ndnf\ndnf' "$family_output"
+assert_eq $'bazzite\napt\napt\ndnf\ndnf\ndnf' "$family_output"
 
 if run_bash 'source "$1"; detect_linux_family "$2/fedora"' >/dev/null 2>&1; then
   echo "fedora must be rejected" >&2
@@ -84,6 +95,10 @@ if run_bash 'source "$1"; detect_linux_family "$2/fedora"' >/dev/null 2>&1; then
 fi
 if run_bash 'source "$1"; detect_linux_family "$2/kinoite"' >/dev/null 2>&1; then
   echo "kinoite must be rejected" >&2
+  exit 1
+fi
+if run_bash 'source "$1"; detect_linux_family "$2/alinux2"' >/dev/null 2>&1; then
+  echo "Alibaba Cloud Linux 2 must be rejected" >&2
   exit 1
 fi
 

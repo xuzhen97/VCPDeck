@@ -217,7 +217,7 @@ Release 不得只凭构建成功发布。至少确认：
 - 尚未建立持续、可重复的 Windows/Linux 真实 PTY 验收矩阵；
 - 远程文件 rootDir 认证、symlink/junction、不存在目标父链、import SHA-256、跨平台覆盖、running cancel、失败后下一 Job 派发和断线终局补报尚无满足长期安全要求的全链路验证；
 - 全链路 Release（Server + 多 Client + 故障回退）未自动化；
-- Client 一键安装已在 Ubuntu 22.04 与 Bazzite x64 完成 A2 安装、SELinux、冷重启和无人登录自动启动验收；Debian 12、Rocky Linux 9、AlmaLinux 9、Windows 真实安装以及同 Server 的 M1 正向迁移仍需发布候选环境验收；
+- Client 一键安装已在 Ubuntu 22.04 与 Bazzite x64 完成 A2 安装、SELinux、冷重启和无人登录自动启动验收；Debian 12、Rocky Linux 9、AlmaLinux 9、Alibaba Cloud Linux 3、Windows 真实安装以及同 Server 的 M1 正向迁移仍需发布候选环境验收；
 - 缺数据库升级/回滚兼容测试；
 - 认证缺 strict parser、登录限速、Cookie Origin/CSRF、Credential 生命周期、既有 Socket 撤销和最后 admin 防锁死测试；
 - FRP 缺同 Client 多实例约束、secret 脱敏、默认实例原子性、Client 重启恢复、frpc 退出状态和删除孤儿的长期门禁；

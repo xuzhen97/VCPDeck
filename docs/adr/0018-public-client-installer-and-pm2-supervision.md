@@ -3,6 +3,7 @@
 - 状态：Accepted
 - 日期：2026-08-20
 - 决策者：项目维护者
+- 修订：2026-11-08 —— 决策 6 的支持矩阵纳入 Alibaba Cloud Linux 3（`ID=alinux` 3.x，Anolis OS 8/RHEL 8 生态，glibc 2.32，dnf 族）；不改变“不从 `ID_LIKE` 自动纳入”的约束。
 - 关联：[`ADR-0003`](./0003-separate-launcher-for-updates.md)、[`ADR-0009`](./0009-trusted-operator-security-domain.md)、[`ADR-0012`](./0012-bundled-release-artifacts.md)、[`ADR-0015`](./0015-launcher-distributed-with-release.md)、[`release-and-update.md`](../design/release-and-update.md)
 
 ## 背景
@@ -20,7 +21,7 @@
 3. 只有版本与运行中 Server 完全一致、状态为 `done` 且包含目标平台 archive 的 Release 才可首次安装。历史版本、活动 Release 和缺包平台均明确拒绝。
 4. 安装脚本与 preflight 可以公开获取且不含秘密。启用安装入口后，公开 bootstrap 可返回当前共享 `VCPDECK_PSK`、目标 Release 下载地址和 SHA-256；响应禁止缓存和普通日志记录。关闭入口只阻止后续安装请求，不轮换 PSK，也不撤销已安装 Client。
 5. 继续使用现有共享 `VCPDECK_PSK` 完成 Client `/client` Socket.IO 握手，不在本阶段引入每机证书、独立 PSK、撤销列表或 mTLS。
-6. 一键安装支持 Windows 10/11 x64、Windows Server 2019+ x64，以及使用 systemd 和 glibc 的 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 与 Bazzite x64。Bazzite 之外的 Fedora Atomic 发行版未经逐项验收，不因 `ID_LIKE=fedora` 自动纳入支持。ARM64、musl/Alpine、CentOS 7、WSL、容器和无 systemd Linux 明确拒绝。
+6. 一键安装支持 Windows 10/11 x64、Windows Server 2019+ x64，以及使用 systemd 和 glibc 的 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+、Alibaba Cloud Linux 3 与 Bazzite x64。Alibaba Cloud Linux 3 基于 Anolis OS 8（RHEL 8/CentOS 8 生态、glibc 2.32），依赖包名与 RHEL 9 一致，因此按 dnf 族纳入；其 2.x 属 CentOS 7 生态（glibc 2.17），与 CentOS 7 一同拒绝。Bazzite 之外的 Fedora Atomic 发行版未经逐项验收，不因 `ID_LIKE=fedora` 自动纳入支持。ARM64、musl/Alpine、CentOS 7、WSL、容器和无 systemd Linux 明确拒绝。
 7. Client、Launcher 和 PM2 以执行安装命令的当前用户运行；sudo/UAC 仅用于安装缺失的系统依赖和注册自启。Client 因此继承该用户的文件、Shell 与 Pi 配置权限。Bazzite 缺少固定基础命令时，安装器只对实际缺失项使用 `rpm-ostree` 分层系统 RPM：优先实时应用纯新增软件包；实时应用不可用时创建下次启动使用的 deployment、提示操作者重启并安全退出，不自动重启。Node.js 与 PM2 仍安装到用户私有目录，不进入 Bazzite 基础镜像。
 8. 第一版强制使用 PM2，且 PM2 只托管稳定 Launcher。业务 Client 仍由 Launcher 启动、更新、探活和回退，禁止 PM2 直接托管版本目录中的 Client 入口。
 9. 复用当前用户已有 PM2 时保留其他应用，只新增或修复固定名称的 VCPDeck Launcher，并用 `pm2 save` 保存完整进程列表。无 PM2 时安装到 VCPDeck 用户私有工具目录。

@@ -183,7 +183,7 @@ pm2 save
 
 推荐登录驾驶台 `/releases`，确认当前 Server 同版本 Release 已完成，启用“Client 一键安装”，再复制对应平台固定命令。Linux 新安装使用 A2 systemd 系统级部署；Windows 安装器准备用户私有 Node.js、Client、Launcher、PM2 和登录自启，并等待 Server 验收。Linux 存量 PM2 安装必须显式使用 `--migrate` 迁移；显示名称和安装目录等 Windows 选项可直接回车使用默认值。
 
-一键安装当前只支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd。Linux A2 安装要求 root 或可用 sudo；入口默认关闭，启用后任何可访问 Server 的机器都能取得共享 PSK。
+一键安装当前只支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+、Alibaba Cloud Linux 3 和 Bazzite x64 + glibc + systemd。Linux A2 安装要求 root 或可用 sudo；入口默认关闭，启用后任何可访问 Server 的机器都能取得共享 PSK。
 
 需要手工安装或排障时仍可使用第 3.1 节 `install.cjs`（Client 默认使用 `~/.vcpdeck/launcher-client`，Launcher 自动安装到 `<app-dir>/dist/main.js`）：
 

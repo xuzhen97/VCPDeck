@@ -484,7 +484,7 @@ function InstallerCard({
 				))}
 				<p className="text-xs text-muted-foreground">
 					支持 Windows 10/11、Server 2019+ x64，以及 Ubuntu 22.04+、Debian
-					12+、Rocky/Alma 9+ x64 glibc/systemd；不支持 ARM64、Alpine、WSL 和容器。
+					12+、Rocky/Alma 9+、Alibaba Cloud Linux 3 x64 glibc/systemd；不支持 ARM64、Alpine、WSL 和容器。
 				</p>
 			</CardContent>
 		</Card>

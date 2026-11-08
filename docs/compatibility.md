@@ -36,7 +36,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 
 “支持”表示进入发布验收矩阵，不表示所有历史版本永久兼容。
 
-Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+ 和 Bazzite x64 + glibc + systemd 组合。ARM64、Alpine/musl、CentOS 7、WSL、容器和无 systemd Linux 会在下载大构件前明确拒绝；Node.js 自身支持某架构不代表 FRP、PTY 和 Release 原生依赖已支持。
+Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+、Alibaba Cloud Linux 3 和 Bazzite x64 + glibc + systemd 组合。Alibaba Cloud Linux 3（`ID=alinux` 3.x）基于 Anolis OS 8，属 RHEL 8/CentOS 8 生态（glibc 2.32、dnf），依赖包名与 RHEL 9 一致，因此按 dnf 族纳入；其 2.x 属 CentOS 7 生态（glibc 2.17），与 CentOS 7 一同拒绝。ARM64、Alpine/musl、CentOS 7、WSL、容器和无 systemd Linux 会在下载大构件前明确拒绝；Node.js 自身支持某架构不代表 FRP、PTY 和 Release 原生依赖已支持。
 
 **Windows SYSTEM 安装额外前提**：安装命令必须在**已提升的管理员 PowerShell** 中执行（同时要求 Administrators 成员与 high-integrity 令牌）；bootstrap 使用 `WindowsPrincipal.IsInRole(Administrator)` 区分 UAC 过滤令牌，低层安装器再通过 `whoami /groups` 独立复核完整性，未提升立即失败且不申请 UAC。固定安装到 `C:\ProgramData\VCPDeck\Client`，由 `NT AUTHORITY\SYSTEM` 下的 `\VCPDeck\Client` 开机任务守护，不依赖用户登录、不使用 PM2。
 
