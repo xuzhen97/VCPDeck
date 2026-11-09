@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.23.2] - 2026-11-09
+
 ### Fixed
 
 - **大文件直传分片改为串行**：`transfer-handler` 原来用 3 个 worker 并发 PUT 阿里云盘分片。Provider 要求单文件分片串行上传，第 3 片（`partNumber=3`）会被 HTTP 400 拒绝，表现为大文件导出/分享进度停在 64 MiB（第 1 个 64 MiB 分片完成）后失败。现在按 `partNumber` 顺序逐片上传，并显式发送 `Content-Length` 避免 chunked；仅 403 刷新分片 URL，400 等其它 4xx 立即失败并保留 OSS `Code`/`Message`/`RequestId`，不再用同一 URL 空转重试。
