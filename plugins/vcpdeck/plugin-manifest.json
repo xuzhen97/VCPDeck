@@ -3,7 +3,7 @@
   "name": "VCPDeckBridge",
   "displayName": "VCPDeck 个人 AI 驾驶台连接桥",
   "version": "0.23.0",
-  "description": "连接 VCPDeck 控制面：远程机器管理、Shell 命令执行与日志诊断、远程文件读写与元数据、公开 Storage 分享、FRP 端口映射与版本管理。",
+  "description": "连接 VCPDeck 控制面：远程机器管理、Shell 命令执行与日志诊断、远程文件读写与元数据、公开 Storage 分享的创建/查询/撤销、FRP 端口映射与版本管理。",
   "author": "Ryan",
   "pluginType": "synchronous",
   "entryPoint": {
@@ -139,13 +139,28 @@
         "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」GetStorageStatus「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
+        "command": "ShareFile",
+        "description": "功能: 将 Client 文件导出到 Storage 并创建长期公开下载链接，或复用已导出的 fileId/jobId 补建链接（副作用，需要 VCPToolBox 审批）。可用 baseUrl 覆盖插件配置；导出超过约 240 秒会返回 jobId，稍后用 jobId 补建链接。\n`command` 固定为 `ShareFile`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ShareFile「末」,\nclientId:「始」client-uuid「末」,\npath:「始」reports/result.zip「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "ListShares",
+        "description": "功能: 查询公开分享记录，可按 fileId、status（active/revoked/invalid）过滤。只读。\n`command` 固定为 `ListShares`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ListShares「末」,\nstatus:「始」active「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "RevokeShare",
+        "description": "功能: 撤销公开分享，撤销后链接立即失效（副作用）。\n`command` 固定为 `RevokeShare`，不得填写 Shell 命令、路径或自然语言。",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」RevokeShare「末」,\nshareId:「始」share-uuid「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
         "command": "ListReleases",
         "description": "功能: 列出已发布的 Release 版本列表。\n`command` 固定为 `ListReleases`，不得填写 Shell 命令、路径或自然语言。",
         "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」ListReleases「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
         "command": "DownloadFile",
-        "description": "功能: 导出 Client 上的文件并创建长期公开下载链接（副作用，需要 VCPToolBox 审批）。图片会额外在对话中直接预览。\n`command` 固定为 `DownloadFile`，不得填写 Shell 命令、路径或自然语言。",
+        "description": "功能: 兼容别名，等价于 ShareFile：导出 Client 上的文件并创建长期公开下载链接（副作用，需要 VCPToolBox 审批）。新调用优先使用 ShareFile；统一返回 Markdown 链接，不再注入图片预览。\n`command` 固定为 `DownloadFile`，不得填写 Shell 命令、路径或自然语言。",
         "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」VCPDeckBridge「末」,\ncommand:「始」DownloadFile「末」,\nclientId:「始」client-uuid「末」,\nrootDir:「始」D:\\\\「末」,\npath:「始」reports/result.png「末」\n<<<[END_TOOL_REQUEST]>>>"
       }
     ]

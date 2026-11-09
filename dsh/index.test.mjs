@@ -289,6 +289,7 @@ test("共用技能保持宿主中立且保留 frontmatter 兼容性", async () =
 	);
 	assert.match(raw, /^---\r?\nname: vcpdeck\r?\n/u);
 	assert.match(raw, /^compatibility: /mu);
+	assert.match(raw, /description: .*share files via public download links/u);
 	assert.doesNotMatch(raw, /^disable-model-invocation:/mu);
 	assert.doesNotMatch(raw, /from Pi:/u);
 	assert.doesNotMatch(raw, /保持 Pi 当前项目/u);

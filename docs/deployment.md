@@ -77,7 +77,7 @@ pnpm release --version=x.y.z
 | `VCPDECK_GIT_SSH_KEY_FILE` | 未设 = Server 自行创建并管理根密钥 | Git SSH 共享私钥的加密根密钥（文件内容为 base64 的 32 字节）。**缺省无需配置**：首次在「设置 → Git 密钥」点击生成时，Server 自动在版本目录外的数据根创建受限文件 `<VCPDECK_APP_DIR | Server 工作目录>/data/git-ssh/root.key`（POSIX 目录 `0700`/文件 `0600`；Windows 关闭继承并授权运行账户、SYSTEM 与 Administrators），重启与自更新后复用，并发首次创建只产生一把密钥。仍可显式指定路径兼容旧部署（如 `/etc/vcpdeck/git-ssh.key`，`0640 root:serverUser`），显式路径**优先且只读**，不可读时直接 fail closed，**不自动回退也不另建**。必须与其它受管密钥**分开**；密钥缺失/损坏/与既有密文不匹配时生成与分发 fail closed（`GIT_SSH_KEY_UNAVAILABLE`），**绝不静默换钥**，否则既有私钥将永久无法解密。该文件必须与 SQLite 配对备份。Client 侧不保存根密钥，只在 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh` 保存受管私钥副本 |
 | `VCPDECK_CORS_ORIGIN` | `http://localhost:5173` | 引擎级可信 Origin 白名单之一（与 `VCPDECK_FRONTEND_ORIGIN` 并列）；socket.io CORS 只在引擎层生效，`/app` 与 `/client` 共用同一判定 |
 | `VCPDECK_PORT` | `3001` | Server 监听端口（1–65535 整数）；改端口时必须同步配置 Client `VCPDECK_SERVER` 与 Server Launcher `VCPDECK_PROBE_URL` |
-| `PUBLIC_SHARE_BASE_URL` | 空（回退 `SERVER_URL`） | VCPDeckBridge 公开分享链接基地址；只接受 HTTP(S)，反向代理部署时应配置为外部公开地址 |
+| `PUBLIC_SHARE_BASE_URL` | 空（回退 `SERVER_URL`） | VCPDeckBridge 公开分享链接基地址；只接受 HTTP(S)，`ShareFile` 可用单次 `baseUrl` 覆盖，反向代理部署时应配置为外部公开地址 |
 
 **已知配置不一致：** 根目录和 `packages/server/.env.example` 目前写的是 `VCPDECK_CLIENT_PSK`，但 Server 与 Client 实际代码都读取 `VCPDECK_PSK`；`VCPDECK_CLIENT_PSK_FILE` 当前也未实现。部署必须设置 `VCPDECK_PSK`，不要依赖示例中的旧变量。
 
@@ -345,7 +345,7 @@ location / {
 2. 确认 `VCPDECK_RELEASES_DIR` 为版本目录外**绝对路径**（`install.cjs` 引导默认如此）；Local Storage 相对 `baseDir` 已锚定到 `VCPDECK_APP_DIR`，若曾在旧版本目录内写过 storage 文件，先按 [ADR-0014](./adr/0014-storage-basedir-anchor.md) 搬迁；
 3. 确认目标 Linux 机器已安装 `unzip`（自动更新解压依赖）；
 4. 确认版本号从未用过：同一版本重复上传会被拒绝（`RELEASE_DUPLICATE_VERSION`），且失败后不能“重试同一版本”，只能发布新版本号；
-5. 若启用 VCPDeckBridge 公开分享，配置插件 `PUBLIC_SHARE_BASE_URL` 为反向代理对外 HTTP(S) 地址；未配置时仅回退插件的 `SERVER_URL`，不能依赖转发头自动猜测；
+5. 若启用 VCPDeckBridge 公开分享，配置插件 `PUBLIC_SHARE_BASE_URL` 为反向代理对外 HTTP(S) 地址；未配置时仅回退插件的 `SERVER_URL`，不能依赖转发头自动猜测；`ShareFile`/`DownloadFile` 对大文件采用约 240 秒软等待，超时返回导出 Job ID，稍后以 `ShareFile jobId=...` 补建链接即可，不要重复导出；
 6. 反向代理必须对 `/api/public/storage-shares/<token>` 的访问日志脱敏，并允许公开端点的无认证请求；
 7. 若发布依赖新 Launcher（`launcherMinVersion` 当前不强制），先按 §9.8 串行升级全部 Client Launcher，再单独升级 Server Launcher；每台完成 SHA-256、守护进程、控制端口和业务版本核验后才能继续；本次版本保留能力不通过业务 Release 自动远程升级旧 Launcher；
 8. 若本版本的 Prisma schema 含**破坏性变更**（删表／删列），先在 Server 主机按 §6.2 执行一次 `npx prisma db push --accept-data-loss`；否则 Launcher preStart 会直接失败，新版本起不来。

@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.23.0";
+    exports2.VERSION = "0.22.3";
   }
 });
 
@@ -4786,37 +4786,165 @@ async function handleListReleases(client, params) {
   };
 }
 
-// dist/handlers/download.js
-function publicUrl(base, sharePath) {
+// dist/handlers/share.js
+var EXPORT_WAIT_MS = 24e4;
+var SHARE_STATUSES = ["active", "revoked", "invalid"];
+function textParam(value) {
+  return typeof value === "string" ? value : "";
+}
+function optionalText(value) {
+  const text = textParam(value).trim();
+  return text || void 0;
+}
+function numberParam(value) {
+  if (value === void 0 || value === null || value === "")
+    return void 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : void 0;
+}
+function normalizeBaseUrl(candidate) {
+  const trimmed = candidate.trim();
+  if (!trimmed) {
+    throw new Error("PUBLIC_SHARE_BASE_URL is required (or pass baseUrl for this call)");
+  }
   let parsed;
   try {
-    parsed = new URL(base);
+    parsed = new URL(trimmed);
   } catch {
-    throw new Error("PUBLIC_SHARE_BASE_URL must be a valid HTTP(S) URL");
+    throw new Error("baseUrl (or PUBLIC_SHARE_BASE_URL) must be a valid HTTP(S) URL");
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("PUBLIC_SHARE_BASE_URL must be a valid HTTP(S) URL");
+    throw new Error("baseUrl (or PUBLIC_SHARE_BASE_URL) must be a valid HTTP(S) URL");
   }
-  return new URL(sharePath, `${parsed.toString().replace(/\/$/, "")}/`).toString();
+  return trimmed.replace(/\/+$/, "");
 }
-async function handleDownloadFile(client, params, baseUrl) {
-  const clientFilter = String(params.clientId || params.clientName || params.client || "");
-  const filePath = String(params.path || "");
-  if (!clientFilter || !filePath) {
-    throw new Error("Missing required parameters: clientId (or client), path");
+function publicUrl(base, sharePath) {
+  return new URL(sharePath, `${base}/`).toString();
+}
+function exportPendingError(jobId, waitedMs) {
+  const waited = waitedMs === void 0 ? "\u5C1A\u672A\u5B8C\u6210" : `\u5728 ${Math.round(waitedMs / 1e3)} \u79D2\u5185\u672A\u5B8C\u6210`;
+  return new Error(`\u5BFC\u51FA Job ${jobId} ${waited}\uFF0C\u8FDC\u7AEF\u5BFC\u51FA\u4ECD\u5728\u7EE7\u7EED\u3002\u8BF7\u52FF\u91CD\u590D\u5BFC\u51FA\uFF1B\u7A0D\u540E\u8C03\u7528 ShareFile \u5E76\u4F20\u5165 jobId="${jobId}" \u8865\u5EFA\u5206\u4EAB\u94FE\u63A5\u3002`);
+}
+function fileIdFromExportJob(job) {
+  if (job.type !== "file.export") {
+    throw new Error(`Job ${job.jobId} \u7684\u7C7B\u578B\u662F ${job.type}\uFF0C\u4E0D\u662F file.export\uFF0C\u65E0\u6CD5\u7528\u4E8E\u521B\u5EFA\u5206\u4EAB\u94FE\u63A5\u3002`);
   }
-  const clientId = await resolveClientId(client, clientFilter);
-  const rootDir = await resolveRootDir(client, clientId, params.rootDir ? String(params.rootDir) : void 0);
-  const exported = await client.files.export(clientId, { rootDir, path: filePath });
-  const share = await client.storageShares.create({ fileId: exported.fileId });
+  if (job.status !== "done") {
+    if (job.status === "error" || job.status === "cancelled") {
+      const detail = job.errorMessage || job.errorCode || "\u672A\u77E5\u539F\u56E0";
+      throw new Error(`\u5BFC\u51FA Job ${job.jobId} \u672A\u6210\u529F\uFF08\u72B6\u6001: ${job.status}\uFF09\uFF1A${detail}`);
+    }
+    throw exportPendingError(job.jobId);
+  }
+  const fileId = job.result?.fileId;
+  if (typeof fileId !== "string" || fileId.length === 0) {
+    throw new Error(`\u5BFC\u51FA Job ${job.jobId} \u672A\u8FD4\u56DE fileId\uFF0C\u65E0\u6CD5\u521B\u5EFA\u5206\u4EAB\u94FE\u63A5\u3002`);
+  }
+  return fileId;
+}
+async function waitForExport(client, jobId, waitMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), waitMs);
+  try {
+    return await client.jobs.wait(jobId, { signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted)
+      throw exportPendingError(jobId, waitMs);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function handleShareFile(client, params, defaultBaseUrl) {
+  const baseUrl = normalizeBaseUrl(optionalText(params.baseUrl) ?? defaultBaseUrl);
+  const explicitFileId = optionalText(params.fileId);
+  const explicitJobId = optionalText(params.jobId);
+  const clientFilter = optionalText(params.clientId) ?? optionalText(params.clientName) ?? optionalText(params.client);
+  const filePath = textParam(params.path);
+  if (explicitFileId && explicitJobId) {
+    throw new Error("fileId and jobId cannot be used together");
+  }
+  if (explicitFileId && (clientFilter || filePath)) {
+    throw new Error("fileId cannot be combined with clientId/client or path");
+  }
+  if (explicitJobId && (clientFilter || filePath)) {
+    throw new Error("jobId cannot be combined with clientId/client or path");
+  }
+  if (!explicitFileId && !explicitJobId && (!clientFilter || !filePath)) {
+    throw new Error("Missing required parameters: fileId, jobId, or clientId (or client) + path");
+  }
+  let fileId = explicitFileId;
+  let jobId = explicitJobId;
+  if (!fileId && jobId) {
+    fileId = fileIdFromExportJob(await client.jobs.get(jobId));
+  } else if (!fileId) {
+    if (!clientFilter || !filePath) {
+      throw new Error("Missing required parameters: fileId, jobId, or clientId (or client) + path");
+    }
+    const clientId = await resolveClientId(client, clientFilter);
+    const rootDir = await resolveRootDir(client, clientId, optionalText(params.rootDir));
+    const created = await client.jobs.create({
+      clientId,
+      type: "file.export",
+      payload: { rootDir, path: filePath }
+    });
+    jobId = created.jobId;
+    const job = await waitForExport(client, created.jobId, EXPORT_WAIT_MS);
+    fileId = fileIdFromExportJob(job);
+  }
+  if (!fileId) {
+    throw new Error("Unable to resolve fileId for share");
+  }
+  const share = await client.storageShares.create({ fileId });
   const url = publicUrl(baseUrl, share.sharePath);
   const content = [
-    { type: "text", text: `[\u4E0B\u8F7D ${share.filename}](<${url}>)` }
+    {
+      type: "text",
+      text: `[\u4E0B\u8F7D ${share.filename}](<${url}>)
+\u5206\u4EAB ID: ${share.id}`
+    }
   ];
+  const jobHint = jobId ? `\uFF0C\u5BFC\u51FA Job: ${jobId}` : "";
   return {
     status: "success",
     content,
-    messageForAI: `\u6587\u4EF6 ${share.filename} \u5DF2\u5BFC\u51FA\u5E76\u521B\u5EFA\u516C\u5F00\u4E0B\u8F7D\u94FE\u63A5\u3002`
+    messageForAI: `\u6587\u4EF6 ${share.filename} \u5DF2\u521B\u5EFA\u516C\u5F00\u4E0B\u8F7D\u94FE\u63A5\uFF08\u5206\u4EAB ID: ${share.id}\uFF0CfileId: ${fileId}${jobHint}\uFF09\u3002\u94FE\u63A5\u65E0\u9700\u8BA4\u8BC1\u3001\u9664\u64A4\u9500\u5916\u957F\u671F\u6709\u6548\uFF1B\u64A4\u9500\u8BF7\u8C03\u7528 RevokeShare\u3002`
+  };
+}
+async function handleDownloadFile(client, params, baseUrl) {
+  return handleShareFile(client, params, baseUrl);
+}
+async function handleListShares(client, params) {
+  const rawStatus = optionalText(params.status);
+  let status;
+  if (rawStatus) {
+    if (!SHARE_STATUSES.includes(rawStatus)) {
+      throw new Error(`Invalid status "${rawStatus}"; expected one of: ${SHARE_STATUSES.join(", ")}`);
+    }
+    status = rawStatus;
+  }
+  const shares = await client.storageShares.list({
+    fileId: optionalText(params.fileId),
+    status,
+    page: numberParam(params.page),
+    pageSize: numberParam(params.pageSize)
+  });
+  return {
+    status: "success",
+    content: [{ type: "text", text: JSON.stringify(shares, null, 2) }],
+    messageForAI: `\u67E5\u8BE2\u5230 ${shares.total} \u6761\u516C\u5F00\u5206\u4EAB\u8BB0\u5F55\uFF08\u7B2C ${shares.page}/${shares.totalPages} \u9875\uFF09\u3002`
+  };
+}
+async function handleRevokeShare(client, params) {
+  const shareId = optionalText(params.shareId) ?? optionalText(params.id);
+  if (!shareId) {
+    throw new Error("Missing required parameter: shareId");
+  }
+  const share = await client.storageShares.revoke(shareId);
+  return {
+    status: "success",
+    content: [{ type: "text", text: JSON.stringify(share, null, 2) }],
+    messageForAI: `\u5DF2\u64A4\u9500\u5206\u4EAB ${shareId}\uFF08\u72B6\u6001: ${share.status}\uFF09\u3002\u8BE5\u94FE\u63A5\u5DF2\u4E0D\u53EF\u7528\u3002`
   };
 }
 
@@ -4865,12 +4993,16 @@ async function dispatchCommand(client, req, publicShareBaseUrl) {
       return handleDeleteFrpMapping(client, params);
     case "GetStorageStatus":
       return handleGetStorageStatus(client);
+    case "ShareFile":
+      return handleShareFile(client, params, publicShareBaseUrl ?? "");
+    case "ListShares":
+      return handleListShares(client, params);
+    case "RevokeShare":
+      return handleRevokeShare(client, params);
     case "ListReleases":
       return handleListReleases(client, params);
     case "DownloadFile":
-      if (!publicShareBaseUrl)
-        throw new Error("PUBLIC_SHARE_BASE_URL is required for DownloadFile");
-      return handleDownloadFile(client, params, publicShareBaseUrl);
+      return handleDownloadFile(client, params, publicShareBaseUrl ?? "");
     default:
       throw new Error(`Unknown command identifier: "${command}"`);
   }

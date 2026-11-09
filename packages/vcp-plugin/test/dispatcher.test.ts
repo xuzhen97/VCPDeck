@@ -24,18 +24,31 @@ describe("VCPDeckBridge Dispatcher", () => {
 		},
 		jobs: {
 			create: vi.fn().mockResolvedValue({ jobId: "job-1", status: "pending" }),
+			wait: vi.fn().mockResolvedValue({
+				jobId: "job-1",
+				clientId: "c1",
+				type: "file.export",
+				status: "done",
+				result: { fileId: "file-1", key: "secret-key", size: 3, sha256: "hash" },
+			}),
+			get: vi.fn(),
 			list: vi.fn().mockResolvedValue({ total: 1, page: 1, totalPages: 1, data: [] }),
 			output: vi.fn().mockResolvedValue({ jobId: "job-1", output: "hello stdout" }),
 		},
 		files: {
 			roots: vi.fn().mockResolvedValue(["/"]),
 			readText: vi.fn().mockResolvedValue("file content"),
-			export: vi.fn().mockResolvedValue({ fileId: "file-1", key: "secret-key", size: 3, sha256: "hash" }),
 		},
 		storageShares: {
 			create: vi.fn().mockResolvedValue({ filename: "photo.png", previewable: true, sharePath: "/api/public/storage-shares/token" }),
+			list: vi.fn().mockResolvedValue({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 }),
+			revoke: vi.fn().mockResolvedValue({ id: "share-1", status: "revoked" }),
 		},
 	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
 
 	it("should route ListClients correctly", async () => {
 		const res = await dispatchCommand(mockClient, {
@@ -84,15 +97,69 @@ describe("VCPDeckBridge Dispatcher", () => {
 			path: "/tmp/photo.png",
 		}, "https://deck.example");
 		expect(res.status).toBe("success");
-		expect(mockClient.files.export).toHaveBeenCalledWith("c1", { rootDir: "/", path: "/tmp/photo.png" });
+		expect(mockClient.jobs.create).toHaveBeenCalledWith({
+			clientId: "c1",
+			type: "file.export",
+			payload: { rootDir: "/", path: "/tmp/photo.png" },
+		});
 		expect(mockClient.storageShares.create).toHaveBeenCalledWith({ fileId: "file-1" });
 		expect(res.content).toHaveLength(1);
 		expect(res.content?.[0]?.text).toContain("https://deck.example/api/public/storage-shares/token");
 	});
 
-	it("should reject DownloadFile without an HTTP(S) public share base", async () => {
-		await expect(dispatchCommand(mockClient, { command: "DownloadFile", client: "node-1", path: "a.txt" }, "ftp://deck.example"))
-			.rejects.toThrow("PUBLIC_SHARE_BASE_URL");
+	it("resumes a share from an existing fileId and honors a per-call baseUrl", async () => {
+		const res = await dispatchCommand(mockClient, {
+			command: "ShareFile",
+			fileId: "file-1",
+			baseUrl: "https://cdn.example/",
+		});
+		expect(res.status).toBe("success");
+		expect(mockClient.jobs.create).not.toHaveBeenCalled();
+		expect(mockClient.storageShares.create).toHaveBeenCalledWith({ fileId: "file-1" });
+		expect(res.content?.[0]?.text).toContain("https://cdn.example/api/public/storage-shares/token");
+	});
+
+	it("resumes a share from a completed export Job", async () => {
+		mockClient.jobs.get.mockResolvedValueOnce({
+			jobId: "job-9",
+			type: "file.export",
+			status: "done",
+			result: { fileId: "file-9" },
+		});
+		const res = await dispatchCommand(mockClient, {
+			command: "ShareFile",
+			jobId: "job-9",
+		}, "https://deck.example");
+		expect(res.status).toBe("success");
+		expect(mockClient.storageShares.create).toHaveBeenCalledWith({ fileId: "file-9" });
+	});
+
+	it("returns a resumable jobId when the export is still running", async () => {
+		mockClient.jobs.get.mockResolvedValueOnce({
+			jobId: "job-9",
+			type: "file.export",
+			status: "running",
+			result: null,
+		});
+		await expect(
+			dispatchCommand(mockClient, { command: "ShareFile", jobId: "job-9" }, "https://deck.example"),
+		).rejects.toThrow('jobId="job-9"');
+	});
+
+	it("rejects an invalid share base before creating any Job or share", async () => {
+		await expect(
+			dispatchCommand(mockClient, { command: "ShareFile", client: "node-1", path: "a.txt" }, "ftp://deck.example"),
+		).rejects.toThrow("PUBLIC_SHARE_BASE_URL");
+		expect(mockClient.jobs.create).not.toHaveBeenCalled();
+		expect(mockClient.storageShares.create).not.toHaveBeenCalled();
+	});
+
+	it("requires a share base URL before creating any Job or share", async () => {
+		await expect(
+			dispatchCommand(mockClient, { command: "ShareFile", client: "node-1", path: "a.txt" }, ""),
+		).rejects.toThrow("PUBLIC_SHARE_BASE_URL is required");
+		expect(mockClient.jobs.create).not.toHaveBeenCalled();
+		expect(mockClient.storageShares.create).not.toHaveBeenCalled();
 	});
 
 	it("should throw on unknown command", async () => {
@@ -147,6 +214,13 @@ describe("VCPDeckBridge Dispatcher Matrix", () => {
 			},
 			jobs: {
 				create: vi.fn().mockResolvedValue({ jobId: "job-1", status: "pending" }),
+				wait: vi.fn().mockResolvedValue({
+					jobId: "job-1",
+					clientId: "c1",
+					type: "file.export",
+					status: "done",
+					result: { fileId: "file-1", key: "key", size: 1, sha256: "hash" },
+				}),
 				list: vi.fn().mockResolvedValue({ total: 1, page: 1, totalPages: 1, data: [] }),
 				get: vi.fn().mockResolvedValue({ jobId: "job-1", status: "done" }),
 				output: vi.fn().mockResolvedValue({ jobId: "job-1", output: "stdout" }),
@@ -154,7 +228,6 @@ describe("VCPDeckBridge Dispatcher Matrix", () => {
 			},
 			files: {
 				roots: vi.fn().mockResolvedValue(["/"]),
-				export: vi.fn().mockResolvedValue({ fileId: "file-1", key: "key", size: 1, sha256: "hash" }),
 				list: vi.fn().mockResolvedValue({ files: [] }),
 				stat: vi.fn().mockResolvedValue({ path: "/tmp/a", size: 100 }),
 				readText: vi.fn().mockResolvedValue("file content"),
@@ -176,7 +249,9 @@ describe("VCPDeckBridge Dispatcher Matrix", () => {
 				getBackendConfig: vi.fn().mockResolvedValue({ type: "local" }),
 			},
 			storageShares: {
-				create: vi.fn().mockResolvedValue({ filename: "file.txt", previewable: false, sharePath: "/api/public/storage-shares/token" }),
+				create: vi.fn().mockResolvedValue({ id: "share-1", filename: "file.txt", previewable: false, sharePath: "/api/public/storage-shares/token" }),
+				list: vi.fn().mockResolvedValue({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 }),
+				revoke: vi.fn().mockResolvedValue({ id: "share-1", status: "revoked" }),
 			},
 			releases: {
 				list: vi.fn().mockResolvedValue({ total: 1, page: 1, totalPages: 1, data: [] }),
@@ -205,8 +280,11 @@ describe("VCPDeckBridge Dispatcher Matrix", () => {
 		{ command: "CreateFrpMapping", args: { client: "node-1", localPort: "8080", remotePort: "18080", type: "tcp" }, spy: () => mockClient.frp.create },
 		{ command: "DeleteFrpMapping", args: { mappingId: "mapping-1" }, spy: () => mockClient.frp.delete },
 		{ command: "GetStorageStatus", args: {}, spy: () => mockClient.storage.getBackendConfig },
+		{ command: "ShareFile", args: { fileId: "file-1" }, spy: () => mockClient.storageShares.create },
+		{ command: "ListShares", args: { status: "active" }, spy: () => mockClient.storageShares.list },
+		{ command: "RevokeShare", args: { shareId: "share-1" }, spy: () => mockClient.storageShares.revoke },
 		{ command: "ListReleases", args: { page: "1", pageSize: "10" }, spy: () => mockClient.releases.list },
-		{ command: "DownloadFile", args: { client: "node-1", path: "/tmp/file.txt" }, spy: () => mockClient.files.export },
+		{ command: "DownloadFile", args: { client: "node-1", path: "/tmp/file.txt" }, spy: () => mockClient.jobs.create },
 	];
 
 	it("VCP_COMMANDS matches matrix command set", () => {

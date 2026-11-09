@@ -1,6 +1,6 @@
 ---
 name: vcpdeck
-description: Operate VCPDeck (remote machines, Jobs, files, Terminal, FRP, Storage, Release) through its CLI. Use when the user asks to use VCPDeck from an agent host such as Pi or DeepSeek Harness: list Client machines and online status, query/diagnose/cancel Jobs, run remote commands, browse/read/write/transfer files, inspect FRP/Storage, manage Terminal sessions, or publish/update VCPDeck. Destructive operations require explicit user confirmation.
+description: Operate VCPDeck (remote machines, Jobs, files, Terminal, FRP, Storage, Release) through its CLI. Use when the user asks to use VCPDeck from an agent host such as Pi or DeepSeek Harness: list Client machines and online status, query/diagnose/cancel Jobs, run remote commands, browse/read/write/transfer files, share files via public download links, inspect FRP/Storage, manage Terminal sessions, or publish/update VCPDeck. Destructive operations require explicit user confirmation.
 compatibility: Requires Node.js 24+, the bundled vcpdeck.cjs CLI beside this file, and network access to the VCPDeck Server. Individual capabilities may have additional requirements; Release packaging also requires the VCPDeck repository and pnpm 10.26+.
 ---
 

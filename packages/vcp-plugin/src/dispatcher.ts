@@ -27,9 +27,14 @@ import {
 } from "./handlers/frp.js";
 import { handleGetStorageStatus } from "./handlers/storage.js";
 import { handleListReleases } from "./handlers/releases.js";
-import { handleDownloadFile } from "./handlers/download.js";
+import {
+	handleDownloadFile,
+	handleListShares,
+	handleRevokeShare,
+	handleShareFile,
+} from "./handlers/share.js";
 
-/** 22 个动作标识符的唯一清单（导出，供 manifest 测试引用） */
+/** 25 个动作标识符的唯一清单（导出，供 manifest 测试引用） */
 export const VCP_COMMANDS = [
 	"ListClients",
 	"ListJobs",
@@ -51,6 +56,9 @@ export const VCP_COMMANDS = [
 	"CreateFrpMapping",
 	"DeleteFrpMapping",
 	"GetStorageStatus",
+	"ShareFile",
+	"ListShares",
+	"RevokeShare",
 	"ListReleases",
 	"DownloadFile",
 ] as const;
@@ -112,12 +120,18 @@ export async function dispatchCommand(
 		case "GetStorageStatus":
 			return handleGetStorageStatus(client);
 
+		case "ShareFile":
+			return handleShareFile(client, params, publicShareBaseUrl ?? "");
+		case "ListShares":
+			return handleListShares(client, params);
+		case "RevokeShare":
+			return handleRevokeShare(client, params);
+
 		case "ListReleases":
 			return handleListReleases(client, params);
 
 		case "DownloadFile":
-			if (!publicShareBaseUrl) throw new Error("PUBLIC_SHARE_BASE_URL is required for DownloadFile");
-			return handleDownloadFile(client, params, publicShareBaseUrl);
+			return handleDownloadFile(client, params, publicShareBaseUrl ?? "");
 
 		default:
 			throw new Error(`Unknown command identifier: "${command}"`);

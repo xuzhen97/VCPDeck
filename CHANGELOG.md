@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **VCPDeckBridge 补齐公开分享命令面**：新增 `ShareFile`、`ListShares`、`RevokeShare`。`ShareFile` 支持 `fileId` 直接复用已导出文件、`jobId` 续作已完成的 `file.export` Job，以及单次 `baseUrl` 覆盖 `PUBLIC_SHARE_BASE_URL`；`DownloadFile` 保留为兼容别名。大文件导出改为约 240 秒软等待：超时返回导出 Job ID 并提示用 `ShareFile jobId=...` 补建链接，不再让整次工具调用撞上 300 秒 stdio 上限后既无结果也无从续作。
+- **DSH 技能目录显式命中公开分享**：`skills/vcpdeck/SKILL.md` 的 frontmatter `description` 增加 “share files via public download links”，使用 DSH 时不必先加载正文就能把「分享文件」路由到该技能。
+
+### Fixed
+
+- **VCPDeckBridge 清单与配置示例纠正**：移除 `DownloadFile` 描述中已不存在的「图片会额外在对话中直接预览」（该注入早已移除），并把 `config.env.example` 的 `REQUEST_TIMEOUT_MS` 默认值注释由 30000 改为与代码/清单一致的 300000。
+- **非法分享基地址不再留下孤儿分享**：`ShareFile` / `DownloadFile` 现在先校验 `baseUrl` / `PUBLIC_SHARE_BASE_URL`，再创建导出 Job 或分享记录；此前非法地址会在分享已创建后才抛错。
+
 ## [0.23.0] - 2026-11-08
 
 ### Added
