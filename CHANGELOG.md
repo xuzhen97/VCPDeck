@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-11-09
+
 ### Added
 
 - **VCPDeckBridge 补齐公开分享命令面**：新增 `ShareFile`、`ListShares`、`RevokeShare`。`ShareFile` 支持 `fileId` 直接复用已导出文件、`jobId` 续作已完成的 `file.export` Job，以及单次 `baseUrl` 覆盖 `PUBLIC_SHARE_BASE_URL`；`DownloadFile` 保留为兼容别名。大文件导出改为约 240 秒软等待：超时返回导出 Job ID 并提示用 `ShareFile jobId=...` 补建链接，不再让整次工具调用撞上 300 秒 stdio 上限后既无结果也无从续作。
