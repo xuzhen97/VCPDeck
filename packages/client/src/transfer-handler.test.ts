@@ -326,7 +326,9 @@ describe("handleTransfer file.export", () => {
 			method: "PUT",
 			duplex: "half",
 		});
-		expect(fetcher.mock.calls[1]?.[1]?.headers).toBeUndefined();
+		expect(fetcher.mock.calls[1]?.[1]?.headers).toEqual({
+			"content-length": "5",
+		});
 		expect(fetcher.mock.calls[2]?.[0]).toBe(
 			"http://localhost:3001/api/files/client-export-sessions/job-1/complete",
 		);
@@ -396,14 +398,163 @@ describe("handleTransfer file.export", () => {
 				"x-vcpdeck-psk": "vcpdeck-dev-psk",
 			}),
 		});
-		expect(fetcher.mock.calls[1]?.[1]?.headers).toBeUndefined();
-		expect(fetcher.mock.calls[3]?.[1]?.headers).toBeUndefined();
+		expect(fetcher.mock.calls[1]?.[1]?.headers).toEqual({
+			"content-length": "5",
+		});
+		expect(fetcher.mock.calls[3]?.[1]?.headers).toEqual({
+			"content-length": "5",
+		});
 		expect(doneCalls(socket)[0]?.[1].result).toMatchObject({
 			key: "aliyun-file",
 			size: 5,
 			sha256:
 				"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
 		});
+	});
+	it("大文件分片串行 PUT，避免并发被 OSS 以 400 拒绝", async () => {
+		const partSize = 5;
+		const size = 15;
+		let inFlight = 0;
+		let maxInFlight = 0;
+		const uploadedParts: number[] = [];
+		const fetcher = vi.fn(
+			async (
+				input: unknown,
+				init?: { body?: unknown; headers?: Record<string, string> },
+			) => {
+				const url = String(input);
+				if (url.endsWith("/client-export-sessions")) {
+					return {
+						ok: true,
+						json: async () => ({
+							fileId: "aliyun-file",
+							uploadId: "up-1",
+							partSize,
+							parts: [
+								{ partNumber: 1, url: "https://oss.example/1" },
+								{ partNumber: 2, url: "https://oss.example/2" },
+								{ partNumber: 3, url: "https://oss.example/3" },
+							],
+						}),
+					};
+				}
+				if (url.endsWith("/complete")) {
+					return { ok: true, json: async () => ({ key: "aliyun-file" }) };
+				}
+				inFlight += 1;
+				maxInFlight = Math.max(maxInFlight, inFlight);
+				if (inFlight > 1) {
+					inFlight -= 1;
+					return {
+						ok: false,
+						status: 400,
+						text: async () =>
+							"<Error><Code>ConcurrentUpload</Code><Message>parallel part upload is not supported</Message><RequestId>req-concurrent</RequestId></Error>",
+					};
+				}
+				expect(init?.headers).toEqual({ "content-length": "5" });
+				const body = init?.body as ReadableStream<Uint8Array>;
+				const reader = body.getReader();
+				while (true) {
+					const { done } = await reader.read();
+					if (done) break;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 5));
+				inFlight -= 1;
+				uploadedParts.push(Number(new URL(url).pathname.slice(1)));
+				return { ok: true };
+			},
+		);
+		vi.stubGlobal("fetch", fetcher);
+		mockFsPromises.stat.mockResolvedValue({ size });
+		vi.mocked(createReadStream).mockImplementation(
+			((_path: unknown, options?: { start?: number; end?: number }) => {
+				if (options?.start === undefined) {
+					return Readable.from([Buffer.from("hello")]);
+				}
+				return Readable.from([
+					Buffer.alloc((options.end ?? 0) - options.start + 1, options.start),
+				]);
+			}) as never,
+		);
+		const socket = mockSocket();
+		const job = exportJob();
+
+		await handleTransfer(
+			{
+				...job,
+				payload: {
+					...job.payload,
+					uploadRef: { ...job.payload.uploadRef, url: "", direct: true },
+				},
+			},
+			socket,
+		);
+
+		expect(maxInFlight).toBe(1);
+		expect(uploadedParts).toEqual([1, 2, 3]);
+		expect(progressCalls(socket).at(-1)?.[1].loaded).toBe(size);
+		expect(doneCalls(socket)[0]?.[1].result).toMatchObject({
+			fileId: "f1",
+			key: "aliyun-file",
+			size,
+		});
+	});
+
+	it("分片 400 时保留 OSS Code/Message/RequestId，且不重试", async () => {
+		let calls = 0;
+		const fetcher = vi.fn(
+			async (_input: unknown, init?: { body?: unknown }) => {
+				calls += 1;
+				if (calls === 1) {
+					return {
+						ok: true,
+						json: async () => ({
+							fileId: "aliyun-file",
+							uploadId: "up-1",
+							partSize: 5,
+							parts: [{ partNumber: 1, url: "https://oss.example/1" }],
+						}),
+					};
+				}
+				const body = init?.body as ReadableStream<Uint8Array> | undefined;
+				if (body) {
+					const reader = body.getReader();
+					while (true) {
+						const { done } = await reader.read();
+						if (done) break;
+					}
+				}
+				return {
+					ok: false,
+					status: 400,
+					text: async () =>
+						"<Error><Code>InvalidArgument</Code><Message>Part size mismatch</Message><RequestId>req-400</RequestId></Error>",
+				};
+			},
+		);
+		vi.stubGlobal("fetch", fetcher);
+		const socket = mockSocket();
+		const job = exportJob();
+
+		await handleTransfer(
+			{
+				...job,
+				payload: {
+					...job.payload,
+					uploadRef: { ...job.payload.uploadRef, url: "", direct: true },
+				},
+			},
+			socket,
+		);
+
+		expect(fetcher).toHaveBeenCalledTimes(2);
+		const error = errorCalls(socket)[0]?.[1].error;
+		expect(error.code).toBe("IO_ERROR");
+		expect(error.message).toContain("HTTP 400");
+		expect(error.message).toContain("InvalidArgument");
+		expect(error.message).toContain("Part size mismatch");
+		expect(error.message).toContain("RequestId=req-400");
 	});
 });
 

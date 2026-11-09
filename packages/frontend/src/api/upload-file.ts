@@ -12,7 +12,7 @@ interface DirectUploadOptions extends UploadFileOptions {
 
 const DIRECT_RETRIES = 2;
 
-/** 分片直传：按 parts 并发 PUT 到 OSS 预签名 URL，汇总进度 */
+/** 分片直传：按 partNumber 顺序逐个 PUT 到 OSS 预签名 URL，汇总进度。 */
 export function uploadDirect(
 	parts: Array<{ partNumber: number; url: string }>,
 	size: number,

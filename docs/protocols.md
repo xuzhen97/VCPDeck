@@ -398,7 +398,7 @@ Local `signSecret` 在缺失时由 Server 生成并持久化到 `StorageBackendC
 Browser 上传后导入远程机器：
 
 1. `POST /api/files/upload-sessions` 创建 `waiting_input` Job、pending File 和分片会话；
-2. Browser 并发 PUT 分片，并可上报进度；
+2. Browser 按 `partNumber` 顺序逐片 PUT，并可上报进度；单个文件的分片必须串行上传，避免 Provider 以 HTTP 400 拒绝并发分片；
 3. 分片 URL 以 403 失效时，通过 `part-urls` 续期指定分片；
 4. Browser 调用 complete 并提交 `uploadedBytes`；
 5. Server 校验声明大小、调用 Provider 合并分片、将 File 置 completed；

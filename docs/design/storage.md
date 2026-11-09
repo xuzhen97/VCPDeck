@@ -184,7 +184,7 @@ sequenceDiagram
 1. Server 创建 `file.export` Job 和 pending File；
 2. Client stat 远程文件得到真实大小；
 3. Client 调用 `POST /api/files/client-export-sessions`（携带 `x-vcpdeck-psk`），Server 在 Alibaba 创建分片任务；
-4. Client 最多三个 worker 并发上传分片并上报 Job 进度；分片 URL 返回 403 时通过 `POST /api/files/client-export-sessions/:jobId/part-urls` 续期后重试；
+4. Client 按 `partNumber` 顺序逐片上传分片并上报 Job 进度；单个文件的分片必须串行上传，避免 Provider 以 HTTP 400 拒绝并发分片。分片 URL 返回 403 时通过 `POST /api/files/client-export-sessions/:jobId/part-urls` 续期后重试；
 5. Client 调用 `POST /api/files/client-export-sessions/:jobId/complete`，Server 校验字节数、合并对象并将 File 标记 completed；
 6. Client 上报 Job 结果；Browser 后续通过稳定下载入口取得临时外部 URL。
 

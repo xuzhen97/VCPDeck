@@ -36,10 +36,38 @@ function absUrl(path: string): string {
 }
 
 // ── 直传（阿里云 OSS 分片） ──
-const PART_CONCURRENCY = 3;
 const PART_RETRIES = 2;
 
-/** 按 parts 并发 PUT 分片；403 时调 refreshUrl 续期后重试 */
+/** 读取 OSS 错误体中的 Code/Message/RequestId；失败时返回空串，避免掩盖原始错误。 */
+async function readUploadErrorDetail(res: Response): Promise<string> {
+	try {
+		const text = await res.text();
+		const pick = (tag: string) => {
+			const startTag = `<${tag}>`;
+			const endTag = `</${tag}>`;
+			const start = text.indexOf(startTag);
+			const end = text.indexOf(endTag);
+			const value =
+				start >= 0 && end > start
+					? text.slice(start + startTag.length, end)
+					: "";
+			return value.replace(/[ \t\r\n]+/g, " ").trim().slice(0, 200);
+		};
+		const code = pick("Code");
+		const message = pick("Message");
+		const requestId = pick("RequestId");
+		const detail = [code, message, requestId ? `RequestId=${requestId}` : ""]
+			.filter(Boolean)
+			.join(" ");
+		if (detail) return ` (${detail})`;
+		const compact = text.replace(/[ \t\r\n]+/g, " ").trim().slice(0, 300);
+		return compact ? ` (${compact})` : "";
+	} catch {
+		return "";
+	}
+}
+
+/** 顺序 PUT 分片：阿里云盘要求分片串行上传，并发会在后续分片返回 HTTP 400。 */
 async function uploadParts(
 	parts: Array<{ partNumber: number; url: string }>,
 	size: number,
@@ -53,38 +81,39 @@ async function uploadParts(
 ): Promise<void> {
 	const partSize = opts.partSize;
 	let loaded = 0;
-	const queue = [...parts];
-	async function worker() {
-		while (queue.length > 0) {
-			const part = queue.shift();
-			if (part === undefined) return;
-			const start = (part.partNumber - 1) * partSize;
-			const end = Math.min(size, start + partSize);
-			let url = part.url;
-			for (let attempt = 0; ; attempt++) {
-				const res = await fetch(url, {
-					method: "PUT",
-					body: await opts.readPart(part.partNumber, start, end),
-					signal: opts.signal,
-					duplex: "half",
-				} as unknown as RequestInit);
-				if (res.ok) break;
-				if (res.status === 403 && attempt < PART_RETRIES) {
-					url = await opts.refreshUrl(part.partNumber);
-					continue;
-				}
-				if (attempt < PART_RETRIES) continue;
-				throw new Error(`分片 ${part.partNumber} 上传失败: HTTP ${res.status}`);
-			}
-			loaded += end - start;
-			opts.onProgress?.(loaded);
+	const ordered = [...parts].sort((a, b) => a.partNumber - b.partNumber);
+	for (const part of ordered) {
+		const start = (part.partNumber - 1) * partSize;
+		const end = Math.min(size, start + partSize);
+		const length = end - start;
+		if (length <= 0) {
+			throw new Error(`分片 ${part.partNumber} 超出文件范围`);
 		}
+		let url = part.url;
+		for (let attempt = 0; ; attempt++) {
+			const res = await fetch(url, {
+				method: "PUT",
+				body: await opts.readPart(part.partNumber, start, end),
+				headers: { "content-length": String(length) },
+				signal: opts.signal,
+				duplex: "half",
+			} as unknown as RequestInit);
+			if (res.ok) break;
+			if (res.status === 403 && attempt < PART_RETRIES) {
+				url = await opts.refreshUrl(part.partNumber);
+				continue;
+			}
+			if ((res.status === 429 || res.status >= 500) && attempt < PART_RETRIES) {
+				continue;
+			}
+			const detail = await readUploadErrorDetail(res);
+			throw new Error(
+				`分片 ${part.partNumber} 上传失败: HTTP ${res.status}${detail}`,
+			);
+		}
+		loaded += length;
+		opts.onProgress?.(loaded);
 	}
-	await Promise.all(
-		Array.from({ length: Math.min(PART_CONCURRENCY, parts.length) }, () =>
-			worker(),
-		),
-	);
 }
 
 /** 协商导出直传会话（Server 建阿里云分片任务） */
@@ -142,7 +171,7 @@ async function completeExportUpload(
 	return body.key ?? "";
 }
 
-/** 顺序读整个文件计算 SHA-256（分片并发直传无法在传输中保持哈希顺序）。 */
+/** 顺序读整个文件计算 SHA-256（分片直传完成后统一计算，避免分片流打乱哈希顺序）。 */
 function computeFileSha256(path: string): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const hash = createHash("sha256");

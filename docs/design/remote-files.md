@@ -130,7 +130,7 @@ Capability 是 Client 能力声明，不是用户权限。Server 创建 Job 时�
 
 1. Server 初始下发 `direct=true` 的占位 uploadRef；
 2. Client stat 后通过 `POST /api/files/client-export-sessions`（携带 `x-vcpdeck-psk`）创建 export 分片会话；
-3. Client 最多三个 worker 直接 PUT 分片并上报进度；分片 URL 返回 403 时通过 `POST /api/files/client-export-sessions/:jobId/part-urls` 续期指定分片后重试；
+3. Client 按 `partNumber` 顺序逐片直接 PUT 分片并上报进度；单个文件的分片必须串行上传，避免 Provider 以 HTTP 400 拒绝并发分片。分片 URL 返回 403 时通过 `POST /api/files/client-export-sessions/:jobId/part-urls` 续期指定分片后重试；
 4. Client 通过 `POST /api/files/client-export-sessions/:jobId/complete` 请求 Provider complete，获得真实 key；
 5. Client 上报 `fileId/key/size/sha256`（上传完成后顺序读源文件计算）。
 
