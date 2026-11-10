@@ -475,7 +475,7 @@ async function runFreshInstall({ adapter, args, psk, clientId, log = () => {} })
 				if (active.status !== 0 || active.stdout.trim() !== "active") {
 					throw installerError(
 						LINUX_INSTALLER_ERROR.VERIFICATION_FAILED,
-						`vcpdeck-client.service 启动失败: ${active.stderr || active.stdout || "未 active"}`,
+						`vcpdeck-client.service 启动失败: ${active.stderr || active.stdout || "未 active"}；用 journalctl -u ${SERVICE_NAME} -n 30 --no-pager 查看原因`,
 					);
 				}
 				saveState("starting");
@@ -604,7 +604,9 @@ async function installRuntime(adapter, args) {
 
 /** 通过低层 install.cjs 安装业务构件到固定 app-dir。 */
 async function installApplication(adapter, args) {
-	ensureDirs(adapter, [APP_DIR]);
+	// 父目录同样必须显式落权限：recursive mkdir 的 mode 受 root umask 影响，
+	// 若建成 0700，systemd 以服务账户切换工作目录会直接 200/CHDIR。
+	ensureDirs(adapter, [dirname(APP_DIR), APP_DIR]);
 	if (!args.releaseVersion || !args.archiveCache || !args.archiveSha256 || !args.installCjs) {
 		throw installerError(
 			LINUX_INSTALLER_ERROR.VERIFICATION_FAILED,
@@ -675,7 +677,7 @@ async function verifyInstalled(adapter, { psk, clientId, args }) {
 	if (status.status !== 0 || status.stdout.trim() !== "active") {
 		throw installerError(
 			LINUX_INSTALLER_ERROR.VERIFICATION_FAILED,
-			`vcpdeck-client.service 未 active`,
+			`vcpdeck-client.service 未 active；用 journalctl -u ${SERVICE_NAME} -n 30 --no-pager 查看原因`,
 		);
 	}
 	const enabled = adapter.exec(["systemctl", "is-enabled", SERVICE_NAME]);
@@ -1623,6 +1625,7 @@ module.exports = {
 	assertSafeLayout,
 	checkAccount,
 	installAccount,
+	installApplication,
 	commandAvailable,
 	preflightSudo,
 	writeAtomic,

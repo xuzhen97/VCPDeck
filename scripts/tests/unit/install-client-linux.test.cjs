@@ -38,6 +38,7 @@ const {
 	resolveEffectiveOrigin,
 	runMigrationCutover,
 	preflightSudo,
+	installApplication,
 	commandAvailable,
 } = require("../../install-client-linux.cjs");
 
@@ -1018,4 +1019,54 @@ test("preflight 阶段先校验 sudo 再落盘目录，迁移准备路径同样�
 		prepare.indexOf("preflightSudo(adapter)") < prepare.indexOf("ensureDirs(adapter"),
 		"迁移准备同样必须先校验 sudo",
 	);
+});
+
+test("installApplication 先把父目录 /opt/vcpdeck 落成 0755，再落 APP_DIR", async () => {
+	const calls = [];
+	const adapter = {
+		statInfo: () => ({ exists: false }),
+		mkdirp: (path, options) => calls.push(["mkdirp", path, options]),
+		chown: (path, owner, group) => calls.push(["chown", path, owner, group]),
+		chmod: (path, mode) => calls.push(["chmod", path, mode]),
+		installClientArtifact: (options) => calls.push(["install", options.version]),
+	};
+	await installApplication(adapter, {
+		releaseVersion: "0.23.3",
+		archiveCache: "/tmp/archive.zip",
+		archiveSha256: "a".repeat(64),
+		installCjs: "/tmp/install-client.cjs",
+		bootstrapNode: "/usr/bin/node",
+	});
+	assert.deepEqual(
+		calls.map((call) => (call[0] === "install" ? "install" : call[1])),
+		[
+			"/opt/vcpdeck",
+			"/opt/vcpdeck",
+			"/opt/vcpdeck",
+			APP_DIR,
+			APP_DIR,
+			APP_DIR,
+			"install",
+		],
+	);
+	// systemd 以服务账户 CHDIR 依赖父目录 o+x；recursive mkdir 的 mode 受 root
+	// umask 影响（0077 时会建成 0700 直接 200/CHDIR），必须显式 0755 root:root。
+	assert.deepEqual(calls[0], [
+		"mkdirp",
+		"/opt/vcpdeck",
+		{ mode: 0o755, owner: "root", group: "root" },
+	]);
+	assert.deepEqual(calls[3], [
+		"mkdirp",
+		APP_DIR,
+		{ mode: 0o755, owner: "root", group: "root" },
+	]);
+});
+
+test("启动失败的错误消息带 journalctl 指引，不止 is-active 的 stderr", () => {
+	const source = readFileSync(require.resolve("../../install-client-linux.cjs"), "utf8");
+	const hits = (
+		source.match(/journalctl -u \$\{SERVICE_NAME\} -n 30 --no-pager/g) ?? []
+	).length;
+	assert.ok(hits >= 2, "starting 与 verifyInstalled 都应给出排查命令");
 });
