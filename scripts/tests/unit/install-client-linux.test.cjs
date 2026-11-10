@@ -37,6 +37,8 @@ const {
 	resolveInstallMode,
 	resolveEffectiveOrigin,
 	runMigrationCutover,
+	preflightSudo,
+	commandAvailable,
 } = require("../../install-client-linux.cjs");
 
 const SERVICE_SECTION = `[Service]
@@ -947,4 +949,73 @@ test("writeAtomic 3 参数错误顺序（漏 path）会让 fs.writeFileSync 收�
 	} finally {
 		rmSync(sandbox, { recursive: true, force: true });
 	}
+});
+
+// ── preflight：sudo 前置校验与 /etc/sudoers.d 补齐 ──
+test("preflightSudo 缺 sudo 时以稳定错误码 fail closed，且不创建任何目录", () => {
+	const adapter = {
+		exec: () => ({ status: 1, stdout: "", stderr: "" }),
+		statInfo: () => ({ exists: false }),
+		mkdirp: () => assert.fail("缺 sudo 时不得创建目录"),
+	};
+	let caught;
+	try {
+		preflightSudo(adapter);
+	} catch (error) {
+		caught = error;
+	}
+	assert.ok(caught, "缺 sudo 应抛出 LINUX_SUDO_UNAVAILABLE");
+	assert.equal(caught.code, LINUX_INSTALLER_ERROR.SUDO_UNAVAILABLE);
+	assert.match(caught.message, /apt-get install -y sudo/);
+	assert.match(caught.message, /本次未创建服务账户/);
+});
+
+test("preflightSudo 补齐缺失的 /etc/sudoers.d，已存在时零改动", () => {
+	const created = [];
+	preflightSudo({
+		exec: () => ({ status: 0, stdout: "", stderr: "" }),
+		statInfo: () => ({ exists: false }),
+		mkdirp: (path, options) => created.push(["mkdirp", path, options]),
+		chown: (path, owner, group) => created.push(["chown", path, owner, group]),
+		chmod: (path, mode) => created.push(["chmod", path, mode]),
+	});
+	assert.deepEqual(created, [
+		["mkdirp", "/etc/sudoers.d", { mode: 0o755, owner: "root", group: "root" }],
+		["chown", "/etc/sudoers.d", "root", "root"],
+		["chmod", "/etc/sudoers.d", 0o755],
+	]);
+
+	const touched = [];
+	preflightSudo({
+		exec: () => ({ status: 0, stdout: "", stderr: "" }),
+		statInfo: () => ({ exists: true, type: "dir", owner: "root" }),
+		mkdirp: () => touched.push("mkdirp"),
+		chown: () => touched.push("chown"),
+		chmod: () => touched.push("chmod"),
+	});
+	// 已存在的目录（发行版自带的 sudoers.d 常为 0750）不得被改写属主与权限。
+	assert.deepEqual(touched, []);
+});
+
+test("commandAvailable 以退出码判定命令是否存在", () => {
+	assert.equal(commandAvailable({ exec: () => ({ status: 0 }) }, "sudo"), true);
+	assert.equal(commandAvailable({ exec: () => ({ status: 1 }) }, "sudo"), false);
+});
+
+test("preflight 阶段先校验 sudo 再落盘目录，迁移准备路径同样前置校验", () => {
+	const source = readFileSync(require.resolve("../../install-client-linux.cjs"), "utf8");
+	const preflight = source.slice(source.indexOf('case "preflight": {'));
+	const body = preflight.slice(0, preflight.indexOf("break;"));
+	assert.ok(
+		body.indexOf("preflightSudo(adapter)") < body.indexOf("ensureDirs(adapter"),
+		"preflight 必须先于目录落盘校验 sudo",
+	);
+	const prepare = source.slice(
+		source.indexOf("async function prepareMigrationInstall"),
+		source.indexOf("async function runMigrationCutover"),
+	);
+	assert.ok(
+		prepare.indexOf("preflightSudo(adapter)") < prepare.indexOf("ensureDirs(adapter"),
+		"迁移准备同样必须先校验 sudo",
+	);
 });

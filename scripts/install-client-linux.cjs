@@ -69,6 +69,7 @@ const NODE_DIST_DIR_PATTERN = /^(?:node-)?v?\d+\.\d+\.\d+(?:-[a-zA-Z0-9_]+)*$/;
 const LINUX_INSTALLER_ERROR = {
 	NOT_ROOT: "LINUX_NOT_ROOT",
 	SUDO_AUTH_FAILED: "LINUX_SUDO_AUTH_FAILED",
+	SUDO_UNAVAILABLE: "LINUX_SUDO_UNAVAILABLE",
 	ACCOUNT_CONFLICT: "LINUX_ACCOUNT_CONFLICT",
 	UNCLEAN_LAYOUT: "LINUX_UNCLEAN_LAYOUT",
 	DISABLED: "LINUX_INSTALLER_DISABLED",
@@ -417,7 +418,8 @@ async function runFreshInstall({ adapter, args, psk, clientId, log = () => {} })
 		state.stage = stage;
 		switch (stage) {
 			case "preflight": {
-				// 已在上层完成 Server readiness 与 Node 校验；此处落盘初始状态。
+				// 已在上层完成 Server readiness 与 Node 校验；先校验 sudo 前提（缺失时在此处失败，不留半成品），再落盘初始状态。
+				preflightSudo(adapter);
 				ensureDirs(adapter, [dirname(ENV_FILE), dirname(UNIT_FILE), VAR_DIR]);
 				saveState("preflight");
 				break;
@@ -617,6 +619,33 @@ async function installApplication(adapter, args) {
 		appDir: APP_DIR,
 		sha256: args.archiveSha256,
 	});
+}
+
+/** 探测 PATH 中是否存在指定命令（命令名均为本文件常量，不做 shell 展开）。 */
+function commandAvailable(adapter, name) {
+	const probe = adapter.exec(["sh", "-c", `command -v ${name} >/dev/null 2>&1`]);
+	return probe.status === 0;
+}
+
+/**
+ * preflight：sudo 前提缺失时在任何落盘前 fail closed，并补齐 /etc/sudoers.d。
+ *
+ * 最小化镜像常不装 sudo，该目录也随包缺失；若拖到 sudoers 阶段才失败，账户、运行时
+ * 与构件均已落地，且暴露的是裸 ENOENT。已存在的 /etc/sudoers.d 原样保留，不改写
+ * 发行版既有的属主与权限。
+ */
+function preflightSudo(adapter) {
+	const missing = ["sudo", "visudo"].filter((name) => !commandAvailable(adapter, name));
+	if (missing.length > 0) {
+		throw installerError(
+			LINUX_INSTALLER_ERROR.SUDO_UNAVAILABLE,
+			`未找到命令 ${missing.join("、")}：系统缺少 sudo 包，无法建立 root 等价授权。请先安装后重跑（Debian/Ubuntu: apt-get install -y sudo；RHEL 系: dnf install -y sudo）；本次未创建服务账户、未安装运行时与构件`,
+		);
+	}
+	const sudoersDir = dirname(SUDOERS_FILE);
+	const info = adapter.statInfo(sudoersDir);
+	assertSafeLayout(sudoersDir, info);
+	if (!info.exists) ensureDirs(adapter, [sudoersDir]);
 }
 
 /** 安装并校验 sudoers（root-only 临时文件 + visudo 校验后原子落 0440）。 */
@@ -1063,6 +1092,7 @@ function resolveMigrationSource(c) {
  */
 /** 为 M1 准备 A2 目录、账户、构件、配置、sudoers 与 systemd，但不启动服务。 */
 async function prepareMigrationInstall({ adapter, args, psk, clientId }) {
+	preflightSudo(adapter);
 	ensureDirs(adapter, [dirname(ENV_FILE), dirname(UNIT_FILE), VAR_DIR]);
 	writeAtomic(adapter, CLIENT_ID_FILE, `${clientId}\n`, {
 		mode: 0o600,
@@ -1593,6 +1623,8 @@ module.exports = {
 	assertSafeLayout,
 	checkAccount,
 	installAccount,
+	commandAvailable,
+	preflightSudo,
 	writeAtomic,
 	runFreshInstall,
 	discoverMigrationSource,

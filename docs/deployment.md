@@ -212,7 +212,7 @@ Bazzite 缺少 `curl`、`unzip`、`tar`、`xz` 或系统 CA 证书时，安装�
 
 Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 `windows-system-task`/SYSTEM 开机任务模型不同，也不同于旧版 Linux 用户私有 PM2 安装：
 
-- **权限前提**：安装必须 root 或可用 sudo；无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，**无 PM2/用户服务/linger/cron 回退**。该门禁在安装依赖、下载构件之前执行：失败时本机不发生任何改动，旧用户级 PM2 安装保持不变，也不会出现双实例；安装器会直接提示需要 root 或可完成 `sudo -v` 的用户（可交互输入密码）。
+- **权限前提**：安装必须 root 或可用 sudo；无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，**无 PM2/用户服务/linger/cron 回退**。该门禁在安装依赖、下载构件之前执行：失败时本机不发生任何改动，旧用户级 PM2 安装保持不变，也不会出现双实例；安装器会直接提示需要 root 或可完成 `sudo -v` 的用户（可交互输入密码）。系统须自带 `sudo` 与 `visudo`（最小化镜像常缺）：preflight 在创建账户、安装运行时与构件之前校验，缺失时以 `LINUX_SUDO_UNAVAILABLE` 失败并给出 apt/dnf 安装命令；`/etc/sudoers.d` 缺失时按 `0755 root:root` 补建，已存在则原样保留（不改写发行版既有权限）。
 - **布局**（均在版本目录之外）：
   - `/opt/vcpdeck/client`：系统应用 + 各版本 `apps/<version>/`（Launcher 保留在版本目录内供未来升级）；
   - `/var/lib/vcpdeck-client`：持久身份 `client-id`、迁移状态与运行时状态；
