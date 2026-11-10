@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.23.3] - 2026-11-10
+
 ### Fixed
 
 - **Linux 安装器不再在缺 sudo 包的最小化镜像上跑到半程才失败**：`install-client-linux.cjs` 的 preflight 阶段新增 `sudo`/`visudo` 存在性校验并补齐 `/etc/sudoers.d`。该目录由 sudo 包提供、安装器此前从不创建，在没装 sudo 的系统上会一直跑到 `configuration` 阶段才报裸 `ENOENT: ... open '/etc/sudoers.d/.vcpdeck-sudoers-<pid>.tmp'`，而此时服务账户、运行时与 100MB 级构件均已落地，重装代价高且错误信息无从下手。现在缺命令时立即以 `LINUX_SUDO_UNAVAILABLE` 失败并给出 apt/dnf 安装命令（不创建账户、不安装运行时与构件），清理式迁移的准备阶段同样前置校验；目录缺失时按 `0755 root:root` 补建，已存在则原样保留，不改写发行版既有的 `/etc/sudoers.d` 权限。
