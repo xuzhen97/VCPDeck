@@ -27,6 +27,7 @@ import {
   parseMachineRegister,
   parseTaskClientEvent,
   parseTaskCommandResult,
+  parseTailnetJobResult,
   parseTerminalStateReport,
   type JobLogLine,
   type JobProgress,
@@ -54,6 +55,7 @@ import { clientPsk } from "../client/client-psk.js";
 import { GitSshService } from "../git-ssh/git-ssh.service.js";
 import { JobLogService } from "../job/job-log.service.js";
 import { TaskDispatchService } from "../task/task-dispatch.service.js";
+import { TailnetService } from "../tailnet/tailnet.service.js";
 
 const CLIENT_LIVENESS_SWEEP_INTERVAL_MS = 5_000;
 /** 心跳租约对账的节流间隔：每次都要读全量在线 Client 与其 running Job，不必 5 秒一次。 */
@@ -111,6 +113,10 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(TaskDispatchService)
     private readonly taskDispatch?: TaskDispatchService,
+    // Tailnet 密钥交付与摘要校验（ADR-0062）；旧测试构造可省略
+    @Optional()
+    @Inject(TailnetService)
+    private readonly tailnet?: TailnetService,
   ) {}
 
   onModuleInit() {
@@ -277,6 +283,13 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     }
     await this.clientService.register(register, client.id);
     client.data.clientId = register.clientId;
+    if (this.tailnet && register.tailnet) {
+      try {
+        await this.tailnet.recordSnapshot(register.clientId, register.tailnet);
+      } catch {
+        // 坏摘要不阻断注册，也不覆盖历史。
+      }
+    }
     this.trackSocket(register.clientId, client.id);
     client.join(register.clientId);
     await this.terminalService.handleClientRegistered(register.clientId, client.id);
@@ -293,6 +306,21 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
     console.log(`[ws] registered: ${register.clientId} (${register.hostname})`);
     return { ok: true };
   }
+
+	// ── Tailnet 密钥请求（ADR-0062）：所有权校验后单播交付，失败静默 ──
+	@SubscribeMessage(Events.TAILNET_SECRET_REQUEST)
+	async handleTailnetSecretRequest(
+		@ConnectedSocket() client: Socket,
+		@MessageBody() data: unknown,
+	) {
+		if (!this.tailnet) return;
+		try {
+			const response = await this.tailnet.authorizeSecret(client.id, data);
+			client.emit(Events.TAILNET_SECRET_RESPONSE, response);
+		} catch {
+			// 拒绝原因不回流：客户端按本地 TTL 超时，避免成为探测接口。
+		}
+	}
 
 	// ── FRP runtime 状态上报（socket lease 信任边界；严格解析在 service 内） ──
 	@SubscribeMessage(Events.FRP_STATE)
@@ -592,11 +620,78 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   @SubscribeMessage(Events.JOB_DONE)
-  async handleJobDone(@MessageBody() data: JobDone) {
+  async handleJobDone(
+    @MessageBody() data: JobDone,
+    @ConnectedSocket() client?: Socket,
+  ) {
     // 先冲掉该 Job 在途输出，再结算：保证 output_first 落在 settled 之前且 spoolBytes 准确。
     await this.flushOutput(data.jobId);
     const raw = data as any;
     const type: string = raw.type;
+
+    // ── Tailnet 管理任务：先验 socket 归属，拒绝伪造结果；结果必须过严格 parser ──
+    if (type === "tailnet.manage") {
+      const owner = await this.jobService.findOwnerClientId(data.jobId);
+      if (!client || !owner || owner !== (client.data.clientId as string | undefined)) {
+        return;
+      }
+      if (raw.error) {
+        const errorCode: string =
+          typeof raw.error.code === "string"
+            ? raw.error.code
+            : "TAILNET_OPERATION_MISMATCH";
+        const errorMessage: string =
+          typeof raw.error.message === "string" ? raw.error.message : "";
+        const next = await this.jobService.markDone(data.jobId, type, {
+          errorCode,
+          errorMessage,
+        });
+        this.server.emit(Events.JOB_UPDATE, {
+          jobId: data.jobId,
+          type,
+          status: JobStatus.ERROR,
+          errorCode,
+          errorMessage,
+        } satisfies JobUpdate);
+        if (next) this.sendDispatch(next);
+        return;
+      }
+      let result: Record<string, unknown>;
+      try {
+        result = parseTailnetJobResult(raw.result) as unknown as Record<
+          string,
+          unknown
+        >;
+      } catch {
+        const next = await this.jobService.markDone(data.jobId, type, {
+          errorCode: "TAILNET_OPERATION_MISMATCH",
+          errorMessage: "任务结果不合法",
+        });
+        this.server.emit(Events.JOB_UPDATE, {
+          jobId: data.jobId,
+          type,
+          status: JobStatus.ERROR,
+          errorCode: "TAILNET_OPERATION_MISMATCH",
+          errorMessage: "任务结果不合法",
+        } satisfies JobUpdate);
+        if (next) this.sendDispatch(next);
+        return;
+      }
+      try {
+        await this.tailnet?.recordSnapshot(owner, result.snapshot);
+      } catch {
+        // 摘要写入失败不阻断任务终态；下一次注册或管理结果会刷新。
+      }
+      const next = await this.jobService.markDone(data.jobId, type, result);
+      this.server.emit(Events.JOB_UPDATE, {
+        jobId: data.jobId,
+        type,
+        status: JobStatus.DONE,
+        result,
+      } satisfies JobUpdate);
+      if (next) this.sendDispatch(next);
+      return;
+    }
 
     // ── FRP reconcile：system Job 由 reconciliation service 直接终结，不走 create/delete 收敛 ──
     if (type === "frp.reconcile") {

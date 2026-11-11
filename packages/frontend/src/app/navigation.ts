@@ -8,6 +8,7 @@ import {
 	ListTodo,
 	Lock,
 	MonitorCog,
+	Network,
 	Rocket,
 	Settings,
 	UserRound,
@@ -64,6 +65,7 @@ export const MODULES: NavModule[] = [
 			{ path: "/settings/tokens", label: "Token", icon: KeyRound },
 			{ path: "/settings/git-ssh", label: "Git 密钥", icon: Lock },
 			{ path: "/settings/storage", label: "存储", icon: Database },
+			{ path: "/settings/tailnet", label: "Tailnet 凭据", icon: Network },
 			{
 				path: "/settings/identities",
 				label: "身份管理",

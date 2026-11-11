@@ -38,6 +38,8 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 
 Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+、Alibaba Cloud Linux 3 和 Bazzite x64 + glibc + systemd 组合。Alibaba Cloud Linux 3（`ID=alinux` 3.x）基于 Anolis OS 8，属 RHEL 8/CentOS 8 生态（glibc 2.32、dnf），依赖包名与 RHEL 9 一致，因此按 dnf 族纳入；其 2.x 属 CentOS 7 生态（glibc 2.17），与 CentOS 7 一同拒绝。ARM64、Alpine/musl、CentOS 7、WSL、容器和无 systemd Linux 会在下载大构件前明确拒绝；Node.js 自身支持某架构不代表 FRP、PTY 和 Release 原生依赖已支持。
 
+**Tailnet 自动安装/入网矩阵独立且更窄**：仅 Windows 10/11 与 Windows Server 2016+ x64（需管理员）、Ubuntu 22.04/24.04 与 Debian 12/13 x64（需 root、systemd、TUN）。其它平台仍可只读探测，但未安装时拒绝自动安装，也不会降级为普通 Job 手工执行。上述组合**尚未完成 Windows/Linux 真机安装与入网验收**，当前只经过单元测试、注入式安装器测试和自动验证。
+
 **Windows SYSTEM 安装额外前提**：安装命令必须在**已提升的管理员 PowerShell** 中执行（同时要求 Administrators 成员与 high-integrity 令牌）；bootstrap 使用 `WindowsPrincipal.IsInRole(Administrator)` 区分 UAC 过滤令牌，低层安装器再通过 `whoami /groups` 独立复核完整性，未提升立即失败且不申请 UAC。固定安装到 `C:\ProgramData\VCPDeck\Client`，由 `NT AUTHORITY\SYSTEM` 下的 `\VCPDeck\Client` 开机任务守护，不依赖用户登录、不使用 PM2。
 
 **Linux A2 额外前提**：全新安装要求 root 或可用 sudo（安装器 `sudo -v` 验证），无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，不回退 PM2/用户服务；安装后的 `vcpdeck` 账户是 root 等价 Client（见 [`security.md`](./security.md) §4.5）。
@@ -85,6 +87,7 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 - Release archive 的可选 `availability` 字段（旧记录缺失时按 `available` 读取）；新记录可为 `available`、`deleting` 或 `cleaned`，下载/编排/安装消费者会对清理态 fail closed；
 - `0.2.1+` 新增独立 Release 上传会话 API；新 CLI 对旧 Server 的 404 会回退 legacy raw，引导升级兼容；
 - Client 新增 capability；
+- Tailnet 的 `/api/tailnet` REST、`tailnet.manage` Job、`tailnet:*` 事件、`TailnetCredential`/`TailnetClientOperation` 表与 nullable `Client.tailnetSnapshot` 均为增量；旧 Client 不声明 `tailnet.manage` 即按“不支持”处理；旧 Server 不认识新能力字段与新端点，必须先升级 Server 再升级 Client，不能把新 Client 指向旧 Server；
 - Socket payload 新增接收方明确忽略的可选字段；
 - 新增独立 API、Job 类型或事件且旧端不会收到；
 - 新增数据库表或 nullable/default 字段。
@@ -100,6 +103,7 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 - 数据库字段改名、非空约束或数据回填；
 - Release manifest、上传会话或 Launcher 控制协议变化；
 - 改变 FrpsInstance secret DTO、默认实例、端口池、mapping 状态/删除语义或 Client 单/多 frpc runtime。
+- 新增 `capabilityDetails.tailnet` 与注册顶层 `tailnet` 摘要：旧 Server 的严格 parser 会拒绝未知的 `capabilityDetails` 字段，因此该变更**必须 Server 先行**，不得先部署新 Client；新 Server 兼容旧 Client 的缺省值；
 
 ### 5.3 破坏性变化
 
@@ -141,6 +145,7 @@ FRP 恢复对账通过 capability `frp.reconcileProtocolVersion=1` 协商：新 
 
 - 升级前备份 SQLite 及 Storage/Release 数据；
 - 生产升级应审查 Prisma migration 或 preStart 行为；
+- Tailnet 新增 `TailnetCredential`、`TailnetClientOperation` 两表与 nullable `Client.tailnetSnapshot`，属纯增量、无回填；开发启动的 `db push` 可直接应用，旧 Server 回退会忽略这些表/列，但**根密钥文件必须与数据库配对备份**，否则凭据不可解密；
 - 开发/启动脚本使用 `prisma db push`（不带 `--accept-data-loss`）：纯增量变更直接生效，会丢数据的变更直接失败而不静默放行；该方式仍只适合开发，不是生产迁移保证；
 - Launcher 回退应用版本不自动回退数据库 schema；涉及不可向后兼容迁移时，必须采用 expand/migrate/contract 多阶段方案；
 - 回滚前确认旧 Server 能读取已升级 schema，否则应从备份恢复整个数据集。
@@ -168,6 +173,7 @@ manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身�
 - **跨版本注册矩阵**：用**上一个已发布版本的真实客户端载荷**（不是同版本）对新 Server 发起注册，必须得到 ack；新增或退役 `capabilityDetails` 字段、capability 字符串、注册字段时必测（2026-10-12 事故即此门禁缺失）；
 - Terminal capability、真实 PTY、snapshot/seq、控制权和重连；
 - 数据库从上一支持版本升级；
+- **Tailnet 升级顺序**：先部署新 Server，再更新 Client；用更新前 Client（无 `tailnet` 字段）注册新 Server 必须成功，且只能视为“不支持 Tailnet”；禁止旧 Server + 新 Client 组合，旧 Server 会因未知 `capabilityDetails.tailnet` 拒绝注册；
 - Launcher 正常更新和失败回退（含瞬时下载失败的最多三次有界重试）；
 - Release archive `available/deleting/cleaned` 消费分流、Server 清理 CAS/Provider 恢复、上传会话宽限和 Launcher `retention.json` 损坏保护；
 - Frontend 与新 Server 的 REST/Socket.IO/SSE；

@@ -6,9 +6,10 @@ import { ProfilePanel } from "@/pages/profile-panel";
 import { StoragePanel } from "@/pages/storage-panel";
 import { GitSshPanel } from "@/pages/git-ssh-panel";
 import { TokensPanel } from "@/pages/tokens-panel";
+import { TailnetCredentialsPanel } from "@/pages/tailnet-credentials-panel";
 
 /**
- * 设置模块：二级导航（个人资料 / Token / 存储 / 身份管理）由 `ConsoleShell`
+ * 设置模块：二级导航（个人资料 / Token / Git 密钥 / 存储 / Tailnet 凭据 / 身份管理）由 `ConsoleShell`
  * 按 URL 渲染，本组件只负责 section 校验与面板挂载。
  */
 export function SettingsPage() {
@@ -18,13 +19,13 @@ export function SettingsPage() {
 	const section = /^\/settings\/([^/]+)/.exec(location.pathname)?.[1] ?? "profile";
 	if (section === "identities" && !identity?.isAdmin)
 		return <Navigate to="/settings/profile" replace />;
-	if (!["profile", "tokens", "storage", "git-ssh", "identities"].includes(section))
+	if (!["profile", "tokens", "storage", "git-ssh", "tailnet", "identities"].includes(section))
 		return <Navigate to="/settings/profile" replace />;
 	return (
 		<div className="space-y-6">
 			<PageHeading
 				title="设置"
-				description="管理个人资料、访问 Token、存储与 Git 密钥。"
+				description="管理个人资料、访问 Token、存储、Git 密钥与 Tailnet 凭据。"
 			/>
 			<p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
 				普通身份拥有全部远程业务权限，请仅创建可信操作者身份。
@@ -32,6 +33,7 @@ export function SettingsPage() {
 			{section === "profile" && <ProfilePanel />}
 			{section === "tokens" && <TokensPanel />}
 			{section === "git-ssh" && <GitSshPanel />}
+			{section === "tailnet" && <TailnetCredentialsPanel />}
 			{section === "storage" && <StoragePanel />}
 			{section === "identities" && identity?.isAdmin && <IdentitiesPanel />}
 		</div>

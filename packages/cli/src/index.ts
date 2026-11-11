@@ -10,6 +10,7 @@ import { runJobsCommand } from "./jobs-command.js";
 import { runFrpCommand } from "./frp-command.js";
 import { runClientsCommand } from "./clients-command.js";
 import { runReleaseCommand } from "./release-command.js";
+import { runTailnetCommand } from "./tailnet-command.js";
 
 /** CLI 运行时依赖，测试可注入输出。 */
 export interface CliContext {
@@ -70,6 +71,11 @@ export async function run(
 			await runClientsCommand(subcommand, rest, { log });
 			return 0;
 		}
+		if (command === "tailnet") {
+			// 懒加载：明文密钥只从 stdin 读取，命令模块按需解析
+			await runTailnetCommand(subcommand, rest, { log, error });
+			return 0;
+		}
 		if (command === "features") {
 			// 懒加载：验证执行依赖 Job 轮询
 			const { runFeaturesCommand } = await import("./features-command.js");
@@ -124,6 +130,15 @@ export function helpText(): string {
 		"",
 		"Clients:",
 		"  vcpdeck clients list [--env=<name>] [--json]",
+		"",
+		"Tailnet（ADR-0062）:",
+		"  vcpdeck tailnet keys import --name=<name> --key-stdin [--reuse=unknown|single|reusable] [--expires-at=<ISO>] [--env=<name>] [--json]",
+		"  vcpdeck tailnet keys list [--page=<n>] [--page-size=<n>] [--env=<name>] [--json]",
+		"  vcpdeck tailnet keys delete <id> [--env=<name>] [--json]",
+		"  vcpdeck tailnet status <client-name-or-id> [--env=<name>] [--json]",
+		"  vcpdeck tailnet inspect <client-name-or-id> [--wait] [--env=<name>] [--json]",
+		"  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--wait] [--env=<name>] [--json]",
+		"  密钥只从受限文件重定向的 stdin 读取；删除仅清理本地记录，不撤销 Provider 密钥",
 		"",
 		"Features:",
 		"  vcpdeck features list [--client=<name|id>] [--scope=generic|machine] [--status=<status>] [--include-retired] [--env=<name>] [--json]",

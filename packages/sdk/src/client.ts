@@ -11,6 +11,7 @@ import { createReleasesApi } from "./releases.js";
 import { createStorageApi } from "./storage.js";
 import { createStorageSharesApi } from "./storage-shares.js";
 import { createTasksApi } from "./tasks.js";
+import { createTailnetApi } from "./tailnet.js";
 import { createTerminalsApi } from "./terminal.js";
 import { createAgentsApi } from "./agents.js";
 
@@ -78,6 +79,8 @@ export class VcpDeckClient {
 	readonly tasks;
 	/** Agent placement 只读投影。 */
 	readonly agents;
+	/** Tailnet 凭据与机器管理（ADR-0062）。 */
+	readonly tailnet;
 	/** Remote Dev Session（ADR-0058）。 */
 	readonly health = {
 		get: (signal?: AbortSignal) =>
@@ -103,6 +106,7 @@ export class VcpDeckClient {
 		this.terminals = createTerminalsApi(this);
 		this.tasks = createTasksApi(this);
 		this.agents = createAgentsApi(this);
+		this.tailnet = createTailnetApi(this);
 	}
 
 	/** 发起 JSON REST 请求并归一化失败响应。 */

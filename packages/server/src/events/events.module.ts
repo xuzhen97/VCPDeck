@@ -12,6 +12,8 @@ import { TerminalModule } from "../terminal/terminal.module.js";
 import { ReleaseModule } from "../release/release.module.js";
 import { GitSshModule } from "../git-ssh/git-ssh.module.js";
 import { TaskModule } from "../task/task.module.js";
+import { TailnetModule } from "../tailnet/tailnet.module.js";
+import { TailnetController } from "../tailnet/tailnet.controller.js";
 
 @Module({
 	imports: [
@@ -25,9 +27,10 @@ import { TaskModule } from "../task/task.module.js";
 		TerminalModule,
 		GitSshModule,
 		TaskModule,
+		TailnetModule,
 	],
 	providers: [ClientGateway, AppGateway],
 	exports: [ClientGateway],
-	controllers: [EventsController],
+	controllers: [EventsController, TailnetController],
 })
 export class EventsModule {}

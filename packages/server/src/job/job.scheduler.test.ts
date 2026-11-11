@@ -6,7 +6,7 @@ function prismaMock() {
 		job: {
 			count: vi.fn().mockResolvedValue(0),
 			findFirst: vi.fn().mockResolvedValue(null),
-			update: vi.fn().mockResolvedValue({}),
+			updateMany: vi.fn().mockResolvedValue({ count: 1 }),
 		},
 	} as never;
 }
@@ -23,7 +23,7 @@ describe("JobScheduler", () => {
 					payload: "{}",
 					timeout: null,
 				}),
-				update: vi.fn().mockResolvedValue({}),
+				updateMany: vi.fn().mockResolvedValue({ count: 1 }),
 			},
 		} as never;
 		const scheduler = new JobScheduler(prisma);
@@ -50,7 +50,7 @@ describe("JobScheduler", () => {
 				count: vi.fn().mockResolvedValue(0),
 				// 模拟 DB：只有 agent.run pending，findFirst（排除 agent.run）返回 null
 				findFirst: vi.fn().mockResolvedValue(null),
-				update: vi.fn().mockResolvedValue({}),
+				updateMany: vi.fn().mockResolvedValue({ count: 1 }),
 			},
 		} as never;
 		const scheduler = new JobScheduler(prisma);
@@ -70,7 +70,7 @@ describe("JobScheduler", () => {
 			}),
 		);
 		expect(
-			(prisma as { job: { update: ReturnType<typeof vi.fn> } }).job.update,
+			(prisma as { job: { updateMany: ReturnType<typeof vi.fn> } }).job.updateMany,
 		).not.toHaveBeenCalled();
 	});
 
@@ -79,7 +79,7 @@ describe("JobScheduler", () => {
 			job: {
 				count: ReturnType<typeof vi.fn>;
 				findFirst: ReturnType<typeof vi.fn>;
-				update: ReturnType<typeof vi.fn>;
+				updateMany: ReturnType<typeof vi.fn>;
 			};
 		};
 		const scheduler = new JobScheduler(prisma as never);
@@ -99,7 +99,7 @@ describe("JobScheduler", () => {
 			job: {
 				count: vi.fn().mockResolvedValue(3),
 				findFirst: vi.fn(),
-				update: vi.fn(),
+				updateMany: vi.fn(),
 			},
 		} as never;
 		const scheduler = new JobScheduler(prisma);
@@ -117,7 +117,7 @@ describe("JobScheduler", () => {
 			job: {
 				count: ReturnType<typeof vi.fn>;
 				findFirst: ReturnType<typeof vi.fn>;
-				update: ReturnType<typeof vi.fn>;
+				updateMany: ReturnType<typeof vi.fn>;
 			};
 		};
 		const drainMock = { isDraining: vi.fn().mockReturnValue(true) };
@@ -143,7 +143,7 @@ describe("JobScheduler", () => {
 					timeout: null,
 					createdAt,
 				}),
-				update: vi.fn().mockResolvedValue({}),
+				updateMany: vi.fn().mockResolvedValue({ count: 1 }),
 			},
 		} as never;
 		const jobLog = { record: vi.fn(async (_input: unknown) => {}) };

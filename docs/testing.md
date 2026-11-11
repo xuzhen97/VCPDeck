@@ -13,6 +13,7 @@
 | Shared 单元测试 | Vitest，`packages/shared/src/*.test.ts` | parse 函数、错误码、状态和边界常量 |
 | Server 单元测试 | Vitest，模块旁测试 | Service 状态机、Controller 映射、Prisma mock |
 | Client 单元测试 | Vitest | dispatcher、executor、文件路径、PTY/终端 supervisor |
+| Tailnet 单元/集成测试 | Vitest，`packages/{shared,server,client}/src/tailnet` | 契约 parser、AES-GCM 凭据状态机、探测/安装矩阵、受限临时文件、socket 单播、Job 阶段以及 CLI/UI 安全文案 |
 | SDK 单元测试 | Vitest | URL、认证头、分页、错误归一化 |
 | CLI 单元/本地集成测试 | Vitest，`packages/cli/src/*.test.ts` | 多环境严格配置、选择优先级、项目查找、凭据引用、命令与 Release SDK 接线 |
 | Frontend 组件测试 | Vitest + Testing Library + jsdom | 路由、状态、交互、敏感信息不渲染 |
@@ -87,6 +88,17 @@ pnpm --filter @vcpdeck/frontend test
 pnpm --filter @vcpdeck/launcher test
 ```
 
+Tailnet 聚焦回归（不启动真实 `tailscaled`、不安装软件、不执行真实 `msiexec`/`systemctl`/`tailscale up`）：
+
+```bash
+pnpm --filter @vcpdeck/server exec vitest run src/tailnet
+pnpm --filter @vcpdeck/client exec vitest run src/tailnet
+pnpm --filter @vcpdeck/frontend exec vitest run src/pages/machine-tailnet-panel.test.tsx
+pnpm --filter @vcpdeck/cli exec vitest run src/tailnet-command.test.ts
+```
+
+Server 的 `tailnet.integration.test.ts` 与 `tailnet-key.service.test.ts` 在系统临时目录用 `prisma db push --url` 建独立 SQLite，结束后尽力删除；不得指向开发库。
+
 真实 FRP 全链路（**仅专用可丢弃环境**；当前会使用开发库、删除全部 `frpMappings`，并终止 `3001` 及测试 FRPS 相关端口占用进程；先备份，不能与开发/生产实例并行）：
 
 ```bash
@@ -129,6 +141,8 @@ pnpm test:cli       # 即 node scripts/tests/e2e/test-cli-capabilities.cjs
 | Shared DTO/事件/错误码 | Shared 单测 + Server/Client 双端测试 + compatibility 更新 |
 | Prisma schema/查询 | Service 测试 + migration/升级测试 + 备份恢复验证 |
 | Job 状态机 | 并发、取消、断线、重连、终态幂等 |
+| Tailnet 契约与凭据 | Shared 全部 Tailnet parser 与 action 键集；Server AES-GCM 加解密、并发 reserve/issue/settle、socket/Job 归属、TTL 与单次交付、所有终态收敛；Client 注入式探测/安装/临时文件；旧 Client 缺省注册仍兼容 |
+| Tailnet 管理入口 | 平台矩阵与拒绝路径、官方固定构件 SHA-256/Authenticode、已有配置保护、`tailnet.manage` 阶段与取消不回滚、CLI stdin/无明文 argv、Frontend 未知/历史/120 秒过期与密钥清空；真机安装/入网矩阵单独手工验收 |
 | Exec command/script | 双端 parser、runtime capability、stdin、大小/输出截断、cwd root、timeout、进程树取消、最终输出留痕 |
 | 远程文件/路径 | 双端 parser、Windows/Linux 认证 root、UNC/盘符、symlink/junction、不存在目标父链、文本上限、覆盖/临时文件、大小/SHA、取消、断流、失败后下一 Job 派发、重连和 Socket/Job 归属 |
 | Terminal | 协议 parser、operator/viewer/token、snapshot/output 同序列、上游 gap/resync、UTF-8 上限、持续输入速率、generation、SQLite 状态、首次/重复 attach-detach TTL、expired 上报、真实 PTY 和进程树 |
@@ -148,6 +162,7 @@ pnpm test:cli       # 即 node scripts/tests/e2e/test-cli-capabilities.cjs
 - 使用临时目录和唯一 Client ID；
 - 不在 fixture 中提交真实 Token、PSK、OAuth 凭据或签名 URL；
 - 文件测试使用小型合成内容并验证清理；
+- Tailnet 测试只使用固定假密钥与注入式 runner，不下发真实 Auth key、不执行真实安装或联网注册；临时 SQLite、临时凭据目录和假 socket 必须清理；
 - 日志断言不得输出 command/script/file content；
 - 外部服务测试使用专用测试账户和最小权限目录；
 - E2E 失败后必须清理子进程、端口、临时 DB 和 FRP 映射；脚本里的“自动清理”不是所有异常出口都能清理的保证；
@@ -190,6 +205,7 @@ Release 不得只凭构建成功发布。至少确认：
 - Terminal attach/input/resync/close、snapshot/seq、控制权、Client/Server 重启、TTL/expired 和真实 PTY；
 - Agent 会话与 Run 独立于 Job（ADR-0041）：归档/恢复、失败后继续、每轮自动结算、会话操作审计分页、普通 Job 列表不含 Agent、Server drain 同时等待 Agent Run、显式 Agent migration 在遗留活跃 Run/删除预约时 fail closed；
 - FRPS probe、单实例映射、frpc 退出/重启、删除孤儿和凭据不泄漏；
+- Tailnet 凭据导入/列表/删除、inspect/ensure、审批/取消/中断阶段、旧 Client 兼容与专用历史 API；真机安装与入网必须按独立授权矩阵执行，不能由自动测试代替；
 - Windows/Linux 构件从上传到 Server 更新、Client 逐台更新、离线补更和失败回退的完整链路；Alibaba 后端必须证明上传/下载正文均不经过 Server；
 - 同一 Git Tag 的 Skill 安装/升级与 SDK/Shared 仓库外安装；
 - 数据库和 Storage 恢复；
@@ -218,6 +234,7 @@ Release 不得只凭构建成功发布。至少确认：
 - 远程文件 rootDir 认证、symlink/junction、不存在目标父链、import SHA-256、跨平台覆盖、running cancel、失败后下一 Job 派发和断线终局补报尚无满足长期安全要求的全链路验证；
 - 全链路 Release（Server + 多 Client + 故障回退）未自动化；
 - Client 一键安装已在 Ubuntu 22.04 与 Bazzite x64 完成 A2 安装、SELinux、冷重启和无人登录自动启动验收；Debian 12、Rocky Linux 9、AlmaLinux 9、Alibaba Cloud Linux 3、Windows 真实安装以及同 Server 的 M1 正向迁移仍需发布候选环境验收；
+- Tailnet 自动安装/入网只完成单元、注入式安装器和临时库集成验证；Windows x64 管理员、Ubuntu 22.04/24.04、Debian 12/13 root+systemd 的真机安装、服务启动、审批、取消清理与真实网络可达性尚未验收；
 - 缺数据库升级/回滚兼容测试；
 - 认证缺 strict parser、登录限速、Cookie Origin/CSRF、Credential 生命周期、既有 Socket 撤销和最后 admin 防锁死测试；
 - FRP 缺同 Client 多实例约束、secret 脱敏、默认实例原子性、Client 重启恢复、frpc 退出状态和删除孤儿的长期门禁；

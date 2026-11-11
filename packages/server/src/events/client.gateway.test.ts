@@ -42,6 +42,7 @@ function makeJobLog() {
 function makeGateway(
 	reconciliation = makeReconciliation(),
 	jobLog = makeJobLog(),
+	tailnet?: Record<string, unknown>,
 ) {
 	const clientService = {
 		register: vi.fn(async () => {}),
@@ -119,6 +120,8 @@ function makeGateway(
 		reconciliation as never,
 		gitSsh as never,
 		jobLog as never,
+		undefined,
+		tailnet as never,
 	);
 	const emit = vi.fn();
 	const to = vi.fn(() => ({ emit }));
@@ -714,6 +717,97 @@ describe("ClientGateway.handleJobDone", () => {
 			...result,
 			key: "aliyun-file-id",
 		});
+	});
+
+	it("Tailnet 结果先持久化安全摘要再结算 Job", async () => {
+		const tailnet = { recordSnapshot: vi.fn(async () => {}) };
+		const { gateway, jobService } = makeGateway(
+			undefined,
+			undefined,
+			tailnet,
+		);
+		const socket = makeSocket("socket-1");
+		socket.data.clientId = "c1";
+		const snapshot = {
+			installed: "yes",
+			version: "1.104.5",
+			service: "running",
+			backend: "running",
+			nodeName: "node.example.ts.net",
+			ipv4: ["100.64.0.1"],
+			ipv6: [],
+			observedAt: "2026-11-11T03:00:00.000Z",
+			errorCode: null,
+		};
+
+		await gateway.handleJobDone(
+			{
+				jobId: "job-tailnet-1",
+				type: "tailnet.manage",
+				result: { stage: "joined", snapshot },
+			} as never,
+			socket,
+		);
+
+		expect(tailnet.recordSnapshot).toHaveBeenCalledWith("c1", snapshot);
+		expect(jobService.markDone).toHaveBeenCalledWith(
+			"job-tailnet-1",
+			"tailnet.manage",
+			{ stage: "joined", snapshot },
+		);
+	});
+
+	it("Tailnet 结果拒绝非当前 socket 冒领", async () => {
+		const tailnet = { recordSnapshot: vi.fn(async () => {}) };
+		const { gateway, jobService } = makeGateway(
+			undefined,
+			undefined,
+			tailnet,
+		);
+		const socket = makeSocket("socket-2");
+		socket.data.clientId = "c2";
+
+		await gateway.handleJobDone(
+			{
+				jobId: "job-tailnet-1",
+				type: "tailnet.manage",
+				result: { stage: "joined", snapshot: {} },
+			} as never,
+			socket,
+		);
+
+		expect(tailnet.recordSnapshot).not.toHaveBeenCalled();
+		expect(jobService.markDone).not.toHaveBeenCalled();
+	});
+
+	it("Tailnet 结果不合规时终结为错误且不写入摘要", async () => {
+		const tailnet = { recordSnapshot: vi.fn(async () => {}) };
+		const { gateway, jobService } = makeGateway(
+			undefined,
+			undefined,
+			tailnet,
+		);
+		const socket = makeSocket("socket-1");
+		socket.data.clientId = "c1";
+
+		await gateway.handleJobDone(
+			{
+				jobId: "job-tailnet-1",
+				type: "tailnet.manage",
+				result: { stage: "joined", snapshot: { peer: "must-not-upload" } },
+			} as never,
+			socket,
+		);
+
+		expect(tailnet.recordSnapshot).not.toHaveBeenCalled();
+		expect(jobService.markDone).toHaveBeenCalledWith(
+			"job-tailnet-1",
+			"tailnet.manage",
+			{
+				errorCode: "TAILNET_OPERATION_MISMATCH",
+				errorMessage: "任务结果不合法",
+			},
+		);
 	});
 });
 

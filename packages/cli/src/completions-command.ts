@@ -19,6 +19,7 @@ export interface CompletionsCommandContext {
 const COMMAND_TREE: Record<string, string[]> = {
 	env: ["list", "show", "current", "check", "add", "remove", "use"],
 	clients: ["list"],
+	tailnet: ["keys", "status", "inspect", "ensure"],
 	jobs: ["list", "get", "run", "cancel"],
 	files: [
 		"roots",

@@ -12,5 +12,6 @@ export * from "./releases.js";
 export * from "./storage.js";
 export * from "./storage-shares.js";
 export * from "./tasks.js";
+export * from "./tailnet.js";
 export * from "./agents.js";
 export * from "./terminal.js";

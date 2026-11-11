@@ -21,6 +21,7 @@ VCPDeck 是高权限远程管理系统。任意已认证业务身份目前都可
 - Release 构件、上传分片 URL及下载路径；
 - Client 一键安装 bootstrap 响应和目标机 `launcher.env`；
 - **Git SSH 共享私钥及其加密根密钥**（Server 侧密文 + 自动创建或显式指定的根密钥文件 + 获选 Client 的受管副本）；
+- **Tailnet Auth key、其加密根密钥与 Client 受限临时凭据文件**；机器摘要中的节点名与私网地址也按敏感运维信息处理；
 
 这些内容不得进入普通日志、遥测、截图、Agent 回复、Issue 或未经加密的备份。
 
@@ -31,6 +32,7 @@ Browser / SDK / CLI ──身份认证──> Server
 外部消费者 ──长期 opaque Token──> Server 公开 Storage Share
 Client ──PSK──> Server /client
 Server ──受管密钥下发──> Client Git SSH 运行材料
+Server ──30 秒单播 Auth key──> Client 受限临时文件
 Server/Client ──本机随机 Token──> Launcher
 Browser/Client ──短期签名──> Storage
 Client frpc ──FRPS Token──> FRPS
@@ -156,6 +158,7 @@ Alibaba Release 上传的数据面直接连接 Provider：Server 只签发/刷�
 - CORS 只允许明确 Frontend Origin，不能使用宽泛 Origin；
 - FRPS Dashboard 不暴露到公网，凭据必须轮换；
 - Launcher 端口不得通过代理或防火墙暴露。
+- **Tailnet 是操作系统级第三方网络，不是 VCPDeck 数据面。** VCPDeck 控制通道仍必须使用 HTTPS/WSS，Tailnet 可达性不能替代认证、授权、TLS 校验或业务 ACL；本功能不自动修改目标机防火墙、DNS、路由、Exit Node 或子网路由。`backend=running` 与摘要中的地址只表示本机观测，不证明任意来源可达或物理直连。
 
 ## 11. 密钥生命周期
 
@@ -170,6 +173,8 @@ Alibaba Release 上传的数据面直接连接 Provider：Server 只签发/刷�
 | Local signSecret | `StorageBackendConfig.config` | 自动生成后持久化；疑似泄露时轮换，旧 URL 随即失效 |
 | Git SSH 共享私钥（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录）；获选 Client 的 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh/id_ed25519`（POSIX 0600；Windows 用 `icacls` 关闭继承并授权 SYSTEM、Administrators **与当前运行账户**，收紧后回读校验当前账户仍可写——Client 未必以 SYSTEM 运行，漏授权会把运行账户挡在目录外导致安装必然失败） | 轮换需在 Git 服务删除旧公钥并登记新公钥，再重新分发；本地清理不等于 Git 服务已撤销 |
 | Git SSH 根密钥 | 缺省由 Server 在版本目录外的数据根自动创建（`<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`；POSIX 目录 `0700`/文件 `0600`，Windows ACL 授权运行账户、SYSTEM 与 Administrators）；显式 `VCPDECK_GIT_SSH_KEY_FILE`（与其它受管密钥分离）优先且只读 | 不进 DB/REST/Web/日志；缺失/损坏/错绑时生成与换代 fail closed（Server 启动与其他能力不受影响）；**必须与 SQLite 配对备份**，只恢复数据库无法解密既有私钥；绝不因文件缺失而重建 |
+| Tailnet Auth key（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录）；Client 仅经当前注册 socket 的 30 秒单播拿到正文，写入权限受限的临时目录并在 Job 各终止路径清理 | 导入声明 `single`/`reusable`/`unknown` 与使用事实分离；同一 Job 只交付一次，`single`/`unknown` 交付后不自动重用，结果不明落 `uncertain`；删除本地记录**不撤销**提供方 key，也不证明设备退网 |
+| Tailnet 根密钥 | 只从 `VCPDECK_TAILNET_KEY_FILE` 读取 32 字节 base64；不自动生成、不复用 Git SSH 根密钥、不进 DB/REST/Web/日志 | 缺失/非法/解密失败统一 `TAILNET_KEY_UNAVAILABLE` 并 fail closed；**必须与 SQLite 配对备份**；轮换需重新导入或重加密既有凭据 |
 
 PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 Client → 更新 Server PSK并重启 → 更新各 Client → 验证注册。
 
@@ -179,6 +184,7 @@ PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 
 - Storage Share Token 格式、哈希持久化、管理面脱敏、公开 404/410/503、撤销、File 删除锁、Provider 永久缺失与临时故障分类；
 - Session/Credential 撤销、过期、重新启用、密码修改、既有 `/app` Socket、strict parser 和登录限速；
 - PSK 错误连接；
+- Tailnet Auth key 不回显/不进 Job、日志、SSE 或错误文本，跨 socket 与错误 `jobId`/`requestId` 拒绝，TTL 过期、一次性交付、临时文件权限与清理、并发预留/结算和旧 Client 拒绝；
 - FRP secret 脱敏、默认凭据、同 Client 多实例拒绝/隔离、端口、frpc 退出、Client 重启和删除孤儿；
 - 路径 traversal、认证 root、symlink/junction、不存在目标父链和跨 root；
 - exec 双端 parser、runtime capability、script/output/cwd 大小与路径边界、进程树取消；
@@ -205,6 +211,8 @@ PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 
 12. Terminal snapshot/output 序列、上游 gap、UTF-8 snapshot 上限、输入速率、generation、SQLite 实时状态和 TTL/过期上报仍有可靠性偏移；
 13. 认证业务普通 Error 可能返回 500，且缺登录限速、严格 parser、Credential 过期/lastUsed、既有 Socket 失效和最后 admin 防锁死；
 14. FRPS 凭据明文存库/返回/进入 Job 与 Client TOML，同一 Client 多实例不可靠，删除/重启/进程退出缺可靠收敛。
+15. **共享 PSK 下，能注册为某 `clientId` 的连接可接管该机器的 Tailnet 管理 Job，并收到一次性 Auth key。** 当前 socket/Job 归属校验只保证“发给当前连接”，不构成每机密码学身份；高权限或已失陷主机也能直接读取本机 Tailscale 状态，不能把 VCPDeck 的密钥保护当作主机隔离。
+16. **Tailnet Auth key 的提供方有效性、复用次数、设备上限与撤销状态无法在导入时验证。** `declaredReuse`/`declaredExpiresAt` 只是操作者声明；结果不明只能保守落 `uncertain`，删除 VCPDeck 记录不等于 Tailscale 侧已撤销。
 
 这些风险应进入 roadmap/Issue，并在暴露范围扩大前优先处理。远程文件详细事实见 [`design/remote-files.md`](./design/remote-files.md)，Terminal 见 [`design/remote-terminal.md`](./design/remote-terminal.md)。
 

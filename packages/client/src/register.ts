@@ -7,9 +7,15 @@ import type {
 	FrpCapabilityStatus,
 	GitSshCapability,
 	MachineRegister,
+	TailnetSnapshot,
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
-import { FRP_RECONCILE_PROTOCOL_VERSION, VERSION } from "@vcpdeck/shared";
+import {
+	FRP_RECONCILE_PROTOCOL_VERSION,
+	TAILNET_CAPABILITY,
+	TAILNET_PROTOCOL_VERSION,
+	VERSION,
+} from "@vcpdeck/shared";
 import { isFrpAvailable } from "./frpc-daemon.js";
 import type { RuntimeSecurityInfo } from "./privileged-capability.js";
 
@@ -36,6 +42,8 @@ export const CLIENT_ID =
  * @param runtimeSecurity 运行时安全摘要：非交互特权能力（capabilityDetails.privileged）
  *   与安装模式（顶层 installation）；缺省不上报，不新增可执行 capability 字符串。
  * @param gitSshStatus Git SSH 受管密钥能力（ADR-0037）：缺省即未报告。
+ * @param tailnetStatus 最近一次 Tailnet 只读观测（ADR-0062）：缺省即未报告；
+ *   摘要绝不含 Peer，也不表示已入网。
  */
 /**
  * M1 迁移验证专用模式（VCPDECK_MIGRATION_VERIFY_ONLY=1）：
@@ -52,6 +60,7 @@ export function getRegisterInfo(
 	runtimeSecurity?: RuntimeSecurityInfo,
 	env: NodeJS.ProcessEnv = process.env,
 	gitSshStatus?: GitSshCapability,
+	tailnetStatus?: TailnetSnapshot,
 ): MachineRegister {
 	const verifyOnly = isMigrationVerifyOnly(env);
 	const cpus = os.cpus();
@@ -67,6 +76,7 @@ export function getRegisterInfo(
 		// ACP Host 是 Client 的协议宿主能力，不表示目标 agent 已安装。
 		caps.push("acp");
 		// RDS 依赖 ACP Host 与本地终端/端口运行时；capability 只表示宿主存在。
+		caps.push(TAILNET_CAPABILITY);
 	}
 	const capabilityDetails: MachineRegister["capabilityDetails"] = {};
 	if (!verifyOnly) {
@@ -81,6 +91,10 @@ export function getRegisterInfo(
 		if (gitSshStatus !== undefined) {
 			capabilityDetails.gitSsh = gitSshStatus;
 		}
+		// Tailnet 管理协议（ADR-0062）：只声明协议版本，不表示已安装或已入网。
+		capabilityDetails.tailnet = {
+			protocolVersion: TAILNET_PROTOCOL_VERSION,
+		};
 	}
 	// 运行时安全摘要两种模式都上报（M1 验证依赖 privileged 与 installation）；不含本地路径或凭据。
 	if (runtimeSecurity?.privileged !== undefined) {
@@ -96,6 +110,9 @@ export function getRegisterInfo(
 		capabilities: caps,
 		capabilityDetails,
 	};
+	if (!verifyOnly && tailnetStatus !== undefined) {
+		register.tailnet = tailnetStatus;
+	}
 	if (runtimeSecurity?.installation !== undefined) {
 		register.installation = runtimeSecurity.installation;
 	}

@@ -55,7 +55,7 @@ var require_client_annotations = __commonJS({
     var MAX_PUBLIC_ADDRESSES = 4;
     var MAX_HOST_LENGTH = 253;
     var MAX_NOTES_LENGTH = 1e3;
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function isIPv4(value2) {
@@ -148,7 +148,7 @@ var require_client_annotations = __commonJS({
     function parsePublicAddress(value2) {
       if (value2 === void 0 || value2 === null)
         return null;
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new Error("annotations.publicAddress \u5FC5\u987B\u4E3A\u5BF9\u8C61\u6216 null");
       }
       for (const key of Object.keys(value2)) {
@@ -163,7 +163,7 @@ var require_client_annotations = __commonJS({
       };
     }
     function parseClientAnnotationsInput(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       for (const key of Object.keys(value2)) {
@@ -180,7 +180,7 @@ var require_client_annotations = __commonJS({
       return input.publicAddress !== null || input.notes !== null;
     }
     function parseClientAnnotations(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       if (Object.keys(value2).length === 0)
@@ -230,13 +230,13 @@ var require_client_installer = __commonJS({
       throw new Error("platform \u5FC5\u987B\u4E3A win-x64 \u6216 linux-x64");
     }
     function parseClientInstallerConfigUpdate(value2) {
-      if (!isRecord2(value2) || Object.keys(value2).length !== 1 || typeof value2.enabled !== "boolean") {
+      if (!isRecord3(value2) || Object.keys(value2).length !== 1 || typeof value2.enabled !== "boolean") {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B boolean enabled");
       }
       return { enabled: value2.enabled };
     }
     function parseClientInstallerNameUpdate(value2) {
-      if (!isRecord2(value2) || Object.keys(value2).length !== 1 || typeof value2.name !== "string") {
+      if (!isRecord3(value2) || Object.keys(value2).length !== 1 || typeof value2.name !== "string") {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B string name");
       }
       const name = value2.name.trim();
@@ -244,7 +244,7 @@ var require_client_installer = __commonJS({
         throw new Error("name \u957F\u5EA6\u5FC5\u987B\u4E3A 1-100");
       return { name };
     }
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
   }
@@ -293,7 +293,7 @@ var require_update = __commonJS({
       RETRY_NOT_ALLOWED: "RELEASE_RETRY_NOT_ALLOWED"
     };
     function parseReleaseUploadCreateInput(value2) {
-      if (!isRecord2(value2) || !hasOnlyKeys(value2, ["version", "platform", "sha256", "size"])) {
+      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["version", "platform", "sha256", "size"])) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B version/platform/sha256/size");
       }
       if (typeof value2.version !== "string" || !/^\d+\.\d+\.\d+$/.test(value2.version)) {
@@ -316,7 +316,7 @@ var require_update = __commonJS({
       };
     }
     function parseReleaseUploadPartRefresh(value2) {
-      if (!isRecord2(value2) || !hasOnlyKeys(value2, ["partNumbers"]) || !Array.isArray(value2.partNumbers)) {
+      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["partNumbers"]) || !Array.isArray(value2.partNumbers)) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B partNumbers \u6570\u7EC4");
       }
       const partNumbers = value2.partNumbers;
@@ -326,12 +326,12 @@ var require_update = __commonJS({
       return { partNumbers };
     }
     function parseReleaseUploadComplete(value2) {
-      if (!isRecord2(value2) || !hasOnlyKeys(value2, ["uploadedBytes"]) || typeof value2.uploadedBytes !== "number" || !Number.isSafeInteger(value2.uploadedBytes) || value2.uploadedBytes < 1 || value2.uploadedBytes > 2147483647) {
+      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["uploadedBytes"]) || typeof value2.uploadedBytes !== "number" || !Number.isSafeInteger(value2.uploadedBytes) || value2.uploadedBytes < 1 || value2.uploadedBytes > 2147483647) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B\u6709\u6548\u6574\u6570 uploadedBytes");
       }
       return { uploadedBytes: value2.uploadedBytes };
     }
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function hasOnlyKeys(value2, keys) {
@@ -559,6 +559,363 @@ var require_git_ssh = __commonJS({
   }
 });
 
+// ../shared/dist/tailnet.js
+var require_tailnet = __commonJS({
+  "../shared/dist/tailnet.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.TAILNET_ERROR_CODES = exports2.TAILNET_CAPABILITY = exports2.TAILNET_PROTOCOL_VERSION = void 0;
+    exports2.isTailnetErrorCode = isTailnetErrorCode;
+    exports2.parseTailnetKeyInput = parseTailnetKeyInput3;
+    exports2.parseTailnetKeyInfo = parseTailnetKeyInfo2;
+    exports2.parseTailnetJobPayload = parseTailnetJobPayload;
+    exports2.parseTailnetSnapshot = parseTailnetSnapshot;
+    exports2.parseTailnetJobResult = parseTailnetJobResult;
+    exports2.parseTailnetCapability = parseTailnetCapability;
+    exports2.parseTailnetSecretRequest = parseTailnetSecretRequest;
+    exports2.parseTailnetSecretResponse = parseTailnetSecretResponse;
+    exports2.assertTailnetSecretUsable = assertTailnetSecretUsable;
+    exports2.parseTailnetStatus = parseTailnetStatus2;
+    exports2.TAILNET_PROTOCOL_VERSION = 1;
+    exports2.TAILNET_CAPABILITY = "tailnet.manage";
+    exports2.TAILNET_ERROR_CODES = {
+      CLI_MISSING: "TAILNET_CLI_MISSING",
+      CLI_FAILED: "TAILNET_CLI_FAILED",
+      PROBE_TIMEOUT: "TAILNET_PROBE_TIMEOUT",
+      UNSUPPORTED_PLATFORM: "TAILNET_UNSUPPORTED_PLATFORM",
+      INSTALL_FAILED: "TAILNET_INSTALL_FAILED",
+      INSTALL_REBOOT_REQUIRED: "TAILNET_INSTALL_REBOOT_REQUIRED",
+      EXISTING_CONFIG: "TAILNET_EXISTING_CONFIG",
+      JOIN_FAILED: "TAILNET_JOIN_FAILED",
+      SECRET_TIMEOUT: "TAILNET_SECRET_TIMEOUT",
+      SECRET_DENIED: "TAILNET_SECRET_DENIED",
+      SECRET_EXPIRED: "TAILNET_SECRET_EXPIRED",
+      SECRET_MISMATCH: "TAILNET_SECRET_MISMATCH",
+      SECRET_CLEANUP_FAILED: "TAILNET_SECRET_CLEANUP_FAILED",
+      KEY_UNAVAILABLE: "TAILNET_KEY_UNAVAILABLE",
+      KEY_BUSY: "TAILNET_KEY_BUSY",
+      OPERATION_BUSY: "TAILNET_OPERATION_BUSY",
+      OPERATION_MISMATCH: "TAILNET_OPERATION_MISMATCH"
+    };
+    var TAILNET_ERROR_CODE_VALUES = Object.values(exports2.TAILNET_ERROR_CODES);
+    function isTailnetErrorCode(value2) {
+      return typeof value2 === "string" && TAILNET_ERROR_CODE_VALUES.includes(value2);
+    }
+    var MAX_NAME = 100;
+    var MAX_ID = 128;
+    var MAX_AUTH_KEY = 4096;
+    var MAX_VERSION = 100;
+    var MAX_NODE_NAME = 253;
+    var MAX_ADDRESSES = 16;
+    var ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+    var TAILNET_REUSE_VALUES = [
+      "single",
+      "reusable",
+      "unknown"
+    ];
+    var TAILNET_KEY_USE_VALUES = [
+      "available",
+      "reserved",
+      "spent",
+      "uncertain"
+    ];
+    var TAILNET_INSTALLED_VALUES = ["yes", "no", "unknown"];
+    var TAILNET_SERVICE_VALUES = ["running", "stopped", "unknown"];
+    var TAILNET_BACKEND_VALUES = [
+      "running",
+      "needs-login",
+      "needs-approval",
+      "stopped",
+      "unknown"
+    ];
+    var TAILNET_STAGE_VALUES = [
+      "inspected",
+      "installed",
+      "joined",
+      "existing-login",
+      "awaiting-approval",
+      "interrupted"
+    ];
+    var TAILNET_ACTION_KEYS = {
+      inspect: ["action"],
+      ensure: ["action", "credentialId", "installIfMissing"]
+    };
+    function requireRecord2(value2, label) {
+      if (typeof value2 !== "object" || value2 === null || Array.isArray(value2)) {
+        throw new Error(`${label} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      }
+      return value2;
+    }
+    function requireExactKeys(value2, label, allowed) {
+      const record = requireRecord2(value2, label);
+      for (const key of Object.keys(record)) {
+        if (!allowed.includes(key)) {
+          throw new Error(`${label} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      for (const key of allowed) {
+        if (!Object.hasOwn(record, key)) {
+          throw new Error(`${label} \u7F3A\u5C11\u5B57\u6BB5 ${key}`);
+        }
+      }
+      return record;
+    }
+    function requireBoundedString(value2, field, maxLength) {
+      if (typeof value2 !== "string" || value2.length === 0 || value2.length > maxLength) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 1-${maxLength} \u7684\u5B57\u7B26\u4E32`);
+      }
+      return value2;
+    }
+    function requireBoolean(value2, field) {
+      if (typeof value2 !== "boolean") {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u5E03\u5C14\u503C`);
+      }
+      return value2;
+    }
+    function requireEnum(value2, field, allowed) {
+      if (typeof value2 !== "string" || !allowed.includes(value2)) {
+        throw new Error(`${field} \u53D6\u503C\u4E0D\u5408\u6CD5`);
+      }
+      return value2;
+    }
+    function requireIsoInstant(value2, field) {
+      if (typeof value2 !== "string" || !ISO_INSTANT.test(value2) || !Number.isFinite(Date.parse(value2))) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u53EF\u89E3\u6790\u7684 ISO \u65F6\u95F4`);
+      }
+      return value2;
+    }
+    function requireAuthKey(value2, field) {
+      const key = requireBoundedString(value2, field, MAX_AUTH_KEY);
+      if (/[\r\n\0]/.test(key)) {
+        throw new Error(`${field} \u4E0D\u5F97\u5305\u542B CR/LF/NUL`);
+      }
+      return key;
+    }
+    function parseTailnetKeyInput3(value2) {
+      const record = requireExactKeys(value2, "tailnet key input", [
+        "name",
+        "authKey",
+        "declaredReuse",
+        "declaredExpiresAt"
+      ]);
+      return {
+        name: requireBoundedString(record.name, "name", MAX_NAME),
+        authKey: requireAuthKey(record.authKey, "authKey"),
+        declaredReuse: requireEnum(record.declaredReuse, "declaredReuse", TAILNET_REUSE_VALUES),
+        declaredExpiresAt: record.declaredExpiresAt === null ? null : requireIsoInstant(record.declaredExpiresAt, "declaredExpiresAt")
+      };
+    }
+    function parseTailnetKeyInfo2(value2) {
+      const record = requireExactKeys(value2, "tailnet key info", [
+        "id",
+        "name",
+        "declaredReuse",
+        "declaredExpiresAt",
+        "use",
+        "createdAt"
+      ]);
+      return {
+        id: requireBoundedString(record.id, "id", MAX_ID),
+        name: requireBoundedString(record.name, "name", MAX_NAME),
+        declaredReuse: requireEnum(record.declaredReuse, "declaredReuse", TAILNET_REUSE_VALUES),
+        declaredExpiresAt: record.declaredExpiresAt === null ? null : requireIsoInstant(record.declaredExpiresAt, "declaredExpiresAt"),
+        use: requireEnum(record.use, "use", TAILNET_KEY_USE_VALUES),
+        createdAt: requireIsoInstant(record.createdAt, "createdAt")
+      };
+    }
+    function parseTailnetJobPayload(value2) {
+      const record = requireRecord2(value2, "tailnet job payload");
+      const action = record.action;
+      if (action !== "inspect" && action !== "ensure") {
+        throw new Error("tailnet job payload \u7684 action \u4E0D\u5408\u6CD5");
+      }
+      requireExactKeys(record, "tailnet job payload", TAILNET_ACTION_KEYS[action]);
+      if (action === "inspect") {
+        return { action: "inspect" };
+      }
+      return {
+        action: "ensure",
+        credentialId: requireBoundedString(record.credentialId, "credentialId", MAX_ID),
+        installIfMissing: requireBoolean(record.installIfMissing, "installIfMissing")
+      };
+    }
+    function parseTailnetSnapshot(value2) {
+      const record = requireExactKeys(value2, "tailnet snapshot", [
+        "installed",
+        "version",
+        "service",
+        "backend",
+        "nodeName",
+        "ipv4",
+        "ipv6",
+        "observedAt",
+        "errorCode"
+      ]);
+      return {
+        installed: requireEnum(record.installed, "installed", TAILNET_INSTALLED_VALUES),
+        version: record.version === null ? null : requireBoundedString(record.version, "version", MAX_VERSION),
+        service: requireEnum(record.service, "service", TAILNET_SERVICE_VALUES),
+        backend: requireEnum(record.backend, "backend", TAILNET_BACKEND_VALUES),
+        nodeName: record.nodeName === null ? null : requireBoundedString(record.nodeName, "nodeName", MAX_NODE_NAME),
+        ipv4: requireAddresses(record.ipv4, "ipv4", 4),
+        ipv6: requireAddresses(record.ipv6, "ipv6", 6),
+        observedAt: requireIsoInstant(record.observedAt, "observedAt"),
+        errorCode: record.errorCode === null ? null : requireEnum(record.errorCode, "errorCode", TAILNET_ERROR_CODE_VALUES)
+      };
+    }
+    function parseTailnetJobResult(value2) {
+      const record = requireExactKeys(value2, "tailnet job result", [
+        "stage",
+        "snapshot"
+      ]);
+      return {
+        stage: requireEnum(record.stage, "stage", TAILNET_STAGE_VALUES),
+        snapshot: parseTailnetSnapshot(record.snapshot)
+      };
+    }
+    function parseTailnetCapability(value2) {
+      const record = requireExactKeys(value2, "tailnet capability", [
+        "protocolVersion"
+      ]);
+      if (record.protocolVersion !== exports2.TAILNET_PROTOCOL_VERSION) {
+        throw new Error("tailnet capability \u7684 protocolVersion \u4E0D\u5408\u6CD5");
+      }
+      return { protocolVersion: exports2.TAILNET_PROTOCOL_VERSION };
+    }
+    function parseTailnetSecretRequest(value2) {
+      const record = requireExactKeys(value2, "tailnet secret request", [
+        "protocolVersion",
+        "jobId",
+        "requestId"
+      ]);
+      if (record.protocolVersion !== exports2.TAILNET_PROTOCOL_VERSION) {
+        throw new Error("tailnet secret request \u7684 protocolVersion \u4E0D\u5408\u6CD5");
+      }
+      return {
+        protocolVersion: exports2.TAILNET_PROTOCOL_VERSION,
+        jobId: requireBoundedString(record.jobId, "jobId", MAX_ID),
+        requestId: requireBoundedString(record.requestId, "requestId", MAX_ID)
+      };
+    }
+    function parseTailnetSecretResponse(value2) {
+      const record = requireExactKeys(value2, "tailnet secret response", [
+        "protocolVersion",
+        "jobId",
+        "requestId",
+        "expiresAt",
+        "authKey"
+      ]);
+      if (record.protocolVersion !== exports2.TAILNET_PROTOCOL_VERSION) {
+        throw new Error("tailnet secret response \u7684 protocolVersion \u4E0D\u5408\u6CD5");
+      }
+      return {
+        protocolVersion: exports2.TAILNET_PROTOCOL_VERSION,
+        jobId: requireBoundedString(record.jobId, "jobId", MAX_ID),
+        requestId: requireBoundedString(record.requestId, "requestId", MAX_ID),
+        expiresAt: requireIsoInstant(record.expiresAt, "expiresAt"),
+        authKey: requireAuthKey(record.authKey, "authKey")
+      };
+    }
+    function assertTailnetSecretUsable(response, expected, nowMs = Date.now()) {
+      if (response.jobId !== expected.jobId || response.requestId !== expected.requestId) {
+        throw codedError(exports2.TAILNET_ERROR_CODES.SECRET_MISMATCH, "tailnet secret response \u4E0E\u5F53\u524D\u8BF7\u6C42\u4E0D\u5339\u914D");
+      }
+      if (Date.parse(response.expiresAt) <= nowMs) {
+        throw codedError(exports2.TAILNET_ERROR_CODES.SECRET_EXPIRED, "tailnet secret response \u5DF2\u8FC7\u671F");
+      }
+      return response;
+    }
+    function parseTailnetStatus2(value2) {
+      const record = requireExactKeys(value2, "tailnet status", [
+        "clientId",
+        "online",
+        "supported",
+        "snapshot"
+      ]);
+      return {
+        clientId: requireBoundedString(record.clientId, "clientId", MAX_ID),
+        online: requireBoolean(record.online, "online"),
+        supported: requireBoolean(record.supported, "supported"),
+        snapshot: record.snapshot === null ? null : parseTailnetSnapshot(record.snapshot)
+      };
+    }
+    function requireAddresses(value2, field, family) {
+      if (!Array.isArray(value2) || value2.length > MAX_ADDRESSES) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u4E0D\u8D85\u8FC7 ${MAX_ADDRESSES} \u9879\u7684\u6570\u7EC4`);
+      }
+      return value2.map((item) => {
+        if (typeof item !== "string" || !isIpLiteral(item, family)) {
+          throw new Error(`${field} \u542B\u975E\u6CD5 IP \u5730\u5740`);
+        }
+        return item;
+      });
+    }
+    function codedError(code, message) {
+      const error = new Error(message);
+      error.code = code;
+      return error;
+    }
+    function isIpLiteral(value2, family) {
+      return family === 4 ? isIPv4Literal(value2) : isIPv6Literal(value2);
+    }
+    function isIPv4Literal(value2) {
+      const parts2 = value2.split(".");
+      if (parts2.length !== 4)
+        return false;
+      for (const part of parts2) {
+        if (part.length === 0 || part.length > 3)
+          return false;
+        if (!/^[0-9]+$/.test(part))
+          return false;
+        if (part.length > 1 && part.startsWith("0"))
+          return false;
+        if (Number(part) > 255)
+          return false;
+      }
+      return true;
+    }
+    function isIPv6Literal(input) {
+      if (input.length < 2 || input.length > 45)
+        return false;
+      if (input.includes("%"))
+        return false;
+      const compressionIndex = input.indexOf("::");
+      if (compressionIndex === -1) {
+        const groups = input.split(":");
+        return countIPv6Groups(groups) === 8;
+      }
+      const right = input.slice(compressionIndex + 2);
+      if (right.includes("::"))
+        return false;
+      const leftPart = input.slice(0, compressionIndex);
+      const left = leftPart === "" ? [] : leftPart.split(":");
+      const tail = right === "" ? [] : right.split(":");
+      const effective = countIPv6Groups([...left, ...tail]);
+      return effective >= 0 && effective <= 7;
+    }
+    function countIPv6Groups(groups) {
+      let effective = 0;
+      for (let index = 0; index < groups.length; index += 1) {
+        const group = groups[index];
+        if (group.length === 0)
+          return -1;
+        if (group.includes(".")) {
+          if (index !== groups.length - 1)
+            return -1;
+          if (!isIPv4Literal(group))
+            return -1;
+          effective += 2;
+          continue;
+        }
+        if (!/^[0-9a-fA-F]{1,4}$/.test(group))
+          return -1;
+        effective += 1;
+      }
+      return effective;
+    }
+  }
+});
+
 // ../shared/dist/terminal.js
 var require_terminal = __commonJS({
   "../shared/dist/terminal.js"(exports2) {
@@ -679,11 +1036,11 @@ var require_terminal = __commonJS({
       }
     };
     exports2.TerminalProtocolError = TerminalProtocolError;
-    function isRecord2(v) {
+    function isRecord3(v) {
       return typeof v === "object" && v !== null && !Array.isArray(v);
     }
     function assertRecord(v, what) {
-      if (!isRecord2(v))
+      if (!isRecord3(v))
         throw new TerminalProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(v, allowed, what) {
@@ -1592,6 +1949,7 @@ var require_machine_register = __commonJS({
     exports2.parseMachineRegister = parseMachineRegister;
     var frp_runtime_js_1 = require_frp_runtime();
     var git_ssh_js_1 = require_git_ssh();
+    var tailnet_js_1 = require_tailnet();
     var MAX_CLIENT_ID = 128;
     var MAX_HOSTNAME = 256;
     var MAX_OS = 64;
@@ -1613,7 +1971,7 @@ var require_machine_register = __commonJS({
     };
     var RETIRED_DETAIL_KEYS = /* @__PURE__ */ new Set(["pi", "p2pTunnel"]);
     function parseRemoteDevCapabilityStatus(value2) {
-      if (!isRecord2(value2))
+      if (!isRecord3(value2))
         throw new Error("remoteDev \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
       for (const key of Object.keys(value2)) {
@@ -1636,7 +1994,7 @@ var require_machine_register = __commonJS({
       };
     }
     function parseAcpCapabilityStatus(value2) {
-      if (!isRecord2(value2))
+      if (!isRecord3(value2))
         throw new Error("acp \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
       for (const key of Object.keys(value2)) {
@@ -1658,7 +2016,7 @@ var require_machine_register = __commonJS({
         ...value2.code !== void 0 ? { code: value2.code } : {}
       };
     }
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function requireString(value2, field, maxLength) {
@@ -1668,7 +2026,7 @@ var require_machine_register = __commonJS({
       return value2;
     }
     function parseMachineInstallation(value2) {
-      if (!isRecord2(value2) || Object.keys(value2).length !== 1) {
+      if (!isRecord3(value2) || Object.keys(value2).length !== 1) {
         throw new Error("installation \u5FC5\u987B\u4E3A\u4EC5\u542B mode \u7684\u5BF9\u8C61");
       }
       const valid = [
@@ -1682,7 +2040,7 @@ var require_machine_register = __commonJS({
       return { mode: value2.mode };
     }
     function parsePrivilegedCapabilityStatus(value2) {
-      if (!isRecord2(value2) || Object.keys(value2).length !== 4) {
+      if (!isRecord3(value2) || Object.keys(value2).length !== 4) {
         throw new Error("privileged \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B available/mode/nonInteractive/runAsUser");
       }
       const { available, mode, nonInteractive, runAsUser } = value2;
@@ -1738,7 +2096,7 @@ var require_machine_register = __commonJS({
       return { compliant: true, reason: null };
     }
     function parseMachineRegister(value2) {
-      if (!isRecord2(value2))
+      if (!isRecord3(value2))
         throw new Error("register \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const clientId = requireString(value2.clientId, "clientId", MAX_CLIENT_ID);
       const hostname = requireString(value2.hostname, "hostname", MAX_HOSTNAME);
@@ -1764,9 +2122,17 @@ var require_machine_register = __commonJS({
       };
       if (value2.capabilityDetails !== void 0) {
         const details = value2.capabilityDetails;
-        if (!isRecord2(details))
+        if (!isRecord3(details))
           throw new Error("capabilityDetails \u5FC5\u987B\u4E3A\u5BF9\u8C61");
-        const known = ["terminal", "frp", "privileged", "gitSsh", "acp", "remoteDev"];
+        const known = [
+          "terminal",
+          "frp",
+          "privileged",
+          "gitSsh",
+          "acp",
+          "remoteDev",
+          "tailnet"
+        ];
         for (const key of Object.keys(details)) {
           if (RETIRED_DETAIL_KEYS.has(key))
             continue;
@@ -1793,10 +2159,16 @@ var require_machine_register = __commonJS({
         if (details.remoteDev !== void 0) {
           parsedDetails.remoteDev = parseRemoteDevCapabilityStatus(details.remoteDev);
         }
+        if (details.tailnet !== void 0) {
+          parsedDetails.tailnet = (0, tailnet_js_1.parseTailnetCapability)(details.tailnet);
+        }
         result.capabilityDetails = parsedDetails;
       }
       if (value2.installation !== void 0) {
         result.installation = parseMachineInstallation(value2.installation);
+      }
+      if (value2.tailnet !== void 0) {
+        result.tailnet = (0, tailnet_js_1.parseTailnetSnapshot)(value2.tailnet);
       }
       if (value2.remoteDevSessions !== void 0) {
         result.remoteDevSessions = parseRemoteDevSessionReports(value2.remoteDevSessions);
@@ -1812,7 +2184,7 @@ var require_machine_register = __commonJS({
         throw new Error(`remoteDevSessions \u8D85\u8FC7 ${MAX_REMOTE_DEV_SESSION_REPORTS} \u9879`);
       }
       return value2.map((item, index) => {
-        if (!isRecord2(item)) {
+        if (!isRecord3(item)) {
           throw new Error(`remoteDevSessions[${index}] \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
         }
         for (const key of Object.keys(item)) {
@@ -1879,7 +2251,7 @@ var require_feature = __commonJS({
       "INVALID_FEATURE_STATUS_TRANSITION",
       "FEATURE_CLIENT_UNKNOWN"
     ];
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function rejectUnknown(value2, allowed, field) {
@@ -1939,7 +2311,7 @@ var require_feature = __commonJS({
       return url2;
     }
     function parseFeatureInvocation(value2, field = "invoke") {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
       }
       if (value2.kind === "command") {
@@ -1979,7 +2351,7 @@ var require_feature = __commonJS({
       const seen = /* @__PURE__ */ new Set();
       return value2.map((raw, index) => {
         const field = `inputs[${index}]`;
-        if (!isRecord2(raw)) {
+        if (!isRecord3(raw)) {
           throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
         }
         rejectUnknown(raw, ["name", "type", "required", "description", "example", "options"], field);
@@ -2026,7 +2398,7 @@ var require_feature = __commonJS({
       });
     }
     function parseFeatureVerificationReport(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new FeatureProtocolError("verification \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       rejectUnknown(value2, ["ok", "durationMs", "evidence", "via"], "verification");
@@ -2056,7 +2428,7 @@ var require_feature = __commonJS({
       return report;
     }
     function parseFeatureCreateInput(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new FeatureProtocolError("\u529F\u80FD\u6761\u76EE\u5FC5\u987B\u662F\u5BF9\u8C61");
       }
       rejectUnknown(value2, [
@@ -2099,7 +2471,7 @@ var require_feature = __commonJS({
       return input;
     }
     function parseFeatureUpdateInput(value2) {
-      if (!isRecord2(value2)) {
+      if (!isRecord3(value2)) {
         throw new FeatureProtocolError("\u66F4\u65B0\u8BF7\u6C42\u5FC5\u987B\u662F\u5BF9\u8C61");
       }
       if (Object.keys(value2).length === 0) {
@@ -2281,11 +2653,11 @@ var require_a2a = __commonJS({
         }
       };
     }
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function assertRecord(value2, what) {
-      if (!isRecord2(value2))
+      if (!isRecord3(value2))
         throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(value2, allowed, what) {
@@ -2694,11 +3066,11 @@ var require_acp = __commonJS({
       }
     };
     exports2.AcpProtocolError = AcpProtocolError;
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function assertRecord(value2, what) {
-      if (!isRecord2(value2))
+      if (!isRecord3(value2))
         throw new AcpProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(value2, allowed, what) {
@@ -3092,11 +3464,11 @@ var require_task_client = __commonJS({
       }
     };
     exports2.TaskClientProtocolError = TaskClientProtocolError;
-    function isRecord2(value2) {
+    function isRecord3(value2) {
       return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
     }
     function assertRecord(value2, what) {
-      if (!isRecord2(value2))
+      if (!isRecord3(value2))
         throw new TaskClientProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(value2, allowed, what) {
@@ -3278,8 +3650,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = void 0;
+    exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseTailnetStatus = exports2.parseTailnetSnapshot = exports2.parseTailnetSecretResponse = exports2.parseTailnetSecretRequest = exports2.parseTailnetKeyInput = exports2.parseTailnetKeyInfo = exports2.parseTailnetJobResult = exports2.parseTailnetJobPayload = exports2.parseTailnetCapability = exports2.isTailnetErrorCode = exports2.assertTailnetSecretUsable = exports2.TAILNET_PROTOCOL_VERSION = exports2.TAILNET_ERROR_CODES = exports2.TAILNET_CAPABILITY = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -3343,6 +3715,49 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "parseGitSshTargetInput", { enumerable: true, get: function() {
       return git_ssh_js_1.parseGitSshTargetInput;
+    } });
+    var tailnet_js_1 = require_tailnet();
+    Object.defineProperty(exports2, "TAILNET_CAPABILITY", { enumerable: true, get: function() {
+      return tailnet_js_1.TAILNET_CAPABILITY;
+    } });
+    Object.defineProperty(exports2, "TAILNET_ERROR_CODES", { enumerable: true, get: function() {
+      return tailnet_js_1.TAILNET_ERROR_CODES;
+    } });
+    Object.defineProperty(exports2, "TAILNET_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return tailnet_js_1.TAILNET_PROTOCOL_VERSION;
+    } });
+    Object.defineProperty(exports2, "assertTailnetSecretUsable", { enumerable: true, get: function() {
+      return tailnet_js_1.assertTailnetSecretUsable;
+    } });
+    Object.defineProperty(exports2, "isTailnetErrorCode", { enumerable: true, get: function() {
+      return tailnet_js_1.isTailnetErrorCode;
+    } });
+    Object.defineProperty(exports2, "parseTailnetCapability", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetCapability;
+    } });
+    Object.defineProperty(exports2, "parseTailnetJobPayload", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetJobPayload;
+    } });
+    Object.defineProperty(exports2, "parseTailnetJobResult", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetJobResult;
+    } });
+    Object.defineProperty(exports2, "parseTailnetKeyInfo", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetKeyInfo;
+    } });
+    Object.defineProperty(exports2, "parseTailnetKeyInput", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetKeyInput;
+    } });
+    Object.defineProperty(exports2, "parseTailnetSecretRequest", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetSecretRequest;
+    } });
+    Object.defineProperty(exports2, "parseTailnetSecretResponse", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetSecretResponse;
+    } });
+    Object.defineProperty(exports2, "parseTailnetSnapshot", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetSnapshot;
+    } });
+    Object.defineProperty(exports2, "parseTailnetStatus", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetStatus;
     } });
     __exportStar(require_terminal(), exports2);
     var job_log_js_1 = require_job_log();
@@ -3432,7 +3847,10 @@ var require_dist = __commonJS({
       GIT_SSH_ACK: "git-ssh:ack",
       TASK_COMMAND: "task:command",
       TASK_COMMAND_RESULT: "task:command-result",
-      TASK_EVENT: "task:event"
+      TASK_EVENT: "task:event",
+      /** Server ⇄ Client：Tailnet 凭据短时交付（ADR-0062），正文仅目标 socket 接收 */
+      TAILNET_SECRET_REQUEST: "tailnet:secret-request",
+      TAILNET_SECRET_RESPONSE: "tailnet:secret-response"
     };
     var JobType;
     (function(JobType2) {
@@ -3451,18 +3869,19 @@ var require_dist = __commonJS({
       JobType2["FRP_LIST"] = "frp.list";
       JobType2["FRP_RECONCILE"] = "frp.reconcile";
       JobType2["FILE_ROOTS"] = "file.roots";
+      JobType2["TAILNET_MANAGE"] = "tailnet.manage";
     })(JobType || (exports2.JobType = JobType = {}));
-    var JobStatus5;
-    (function(JobStatus6) {
-      JobStatus6["IDLE"] = "idle";
-      JobStatus6["PENDING"] = "pending";
-      JobStatus6["RUNNING"] = "running";
-      JobStatus6["WAITING_INPUT"] = "waiting_input";
-      JobStatus6["DONE"] = "done";
-      JobStatus6["ERROR"] = "error";
-      JobStatus6["DISCONNECTED"] = "disconnected";
-      JobStatus6["CANCELLED"] = "cancelled";
-    })(JobStatus5 || (exports2.JobStatus = JobStatus5 = {}));
+    var JobStatus6;
+    (function(JobStatus7) {
+      JobStatus7["IDLE"] = "idle";
+      JobStatus7["PENDING"] = "pending";
+      JobStatus7["RUNNING"] = "running";
+      JobStatus7["WAITING_INPUT"] = "waiting_input";
+      JobStatus7["DONE"] = "done";
+      JobStatus7["ERROR"] = "error";
+      JobStatus7["DISCONNECTED"] = "disconnected";
+      JobStatus7["CANCELLED"] = "cancelled";
+    })(JobStatus6 || (exports2.JobStatus = JobStatus6 = {}));
     var machine_register_js_1 = require_machine_register();
     Object.defineProperty(exports2, "ClientInstallationComplianceReason", { enumerable: true, get: function() {
       return machine_register_js_1.ClientInstallationComplianceReason;
@@ -4203,6 +4622,86 @@ var init_tasks = __esm({
   }
 });
 
+// ../sdk/dist/tailnet.js
+function isRecord(value2) {
+  return typeof value2 === "object" && value2 !== null;
+}
+function requireCount(value2, field) {
+  if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < 0) {
+    throw new Error(`Tailnet \u5206\u9875\u54CD\u5E94\u5B57\u6BB5 ${field} \u4E0D\u5408\u6CD5`);
+  }
+  return value2;
+}
+function parseKeysPage(raw) {
+  if (!isRecord(raw) || !Array.isArray(raw.data)) {
+    throw new Error("Tailnet \u5206\u9875\u54CD\u5E94\u4E0D\u5408\u6CD5");
+  }
+  return {
+    data: raw.data.map((item) => (0, import_shared2.parseTailnetKeyInfo)(item)),
+    total: requireCount(raw.total, "total"),
+    page: requireCount(raw.page, "page"),
+    pageSize: requireCount(raw.pageSize, "pageSize"),
+    totalPages: requireCount(raw.totalPages, "totalPages")
+  };
+}
+function createTailnetApi(client) {
+  return {
+    /** 导入一枚凭据并保存密文；返回不含正文的投影。 */
+    importKey: async (input, signal) => {
+      const parsed = (0, import_shared2.parseTailnetKeyInput)(input);
+      return (0, import_shared2.parseTailnetKeyInfo)(await client.request("POST", "/api/tailnet/keys", {
+        name: parsed.name,
+        authKey: parsed.authKey,
+        declaredReuse: parsed.declaredReuse,
+        declaredExpiresAt: parsed.declaredExpiresAt
+      }, signal));
+    },
+    /** 分页列出凭据投影，顺序为最近导入优先。 */
+    listKeys: async (options = {}, signal) => {
+      const params = new URLSearchParams();
+      if (options.page !== void 0)
+        params.set("page", String(options.page));
+      if (options.pageSize !== void 0)
+        params.set("pageSize", String(options.pageSize));
+      const qs = params.toString();
+      return parseKeysPage(await client.request("GET", `/api/tailnet/keys${qs ? `?${qs}` : ""}`, void 0, signal));
+    },
+    /** 删除本地密文记录；reserved 中的凭据由 Server 拒绝。 */
+    deleteKey: async (id, signal) => {
+      const raw = await client.request("DELETE", `/api/tailnet/keys/${encodeURIComponent(id)}`, void 0, signal);
+      if (!isRecord(raw) || raw.deleted !== true) {
+        throw new Error("Tailnet \u5220\u9664\u54CD\u5E94\u4E0D\u5408\u6CD5");
+      }
+      return { deleted: true };
+    },
+    /** 机器 Tailnet 观测与能力状态；离线机器返回历史快照。 */
+    status: async (clientId, signal) => (0, import_shared2.parseTailnetStatus)(await client.request("GET", `/api/tailnet/clients/${encodeURIComponent(clientId)}`, void 0, signal)),
+    /** 发起管理 Job；正文由 SDK 显式构造，绝不透传调用方多余字段。 */
+    manage: async (clientId, payload, signal) => {
+      let body;
+      if (payload.action === "inspect") {
+        body = { action: "inspect" };
+      } else if (payload.action === "ensure") {
+        body = {
+          action: "ensure",
+          credentialId: payload.credentialId,
+          installIfMissing: payload.installIfMissing
+        };
+      } else {
+        throw new Error("Tailnet \u4EFB\u52A1 action \u4E0D\u5408\u6CD5");
+      }
+      return client.request("POST", `/api/tailnet/clients/${encodeURIComponent(clientId)}/jobs`, body, signal);
+    }
+  };
+}
+var import_shared2;
+var init_tailnet = __esm({
+  "../sdk/dist/tailnet.js"() {
+    "use strict";
+    import_shared2 = __toESM(require_dist(), 1);
+  }
+});
+
 // ../sdk/dist/terminal.js
 function createTerminalsApi(client) {
   const base = (clientId) => `/api/clients/${encodeURIComponent(clientId)}/terminals`;
@@ -4274,7 +4773,7 @@ function parseJson(text) {
     return void 0;
   }
 }
-function isRecord(value2) {
+function isRecord2(value2) {
   return typeof value2 === "object" && value2 !== null;
 }
 var VcpDeckApiError, VcpDeckClient;
@@ -4294,6 +4793,7 @@ var init_client = __esm({
     init_storage();
     init_storage_shares();
     init_tasks();
+    init_tailnet();
     init_terminal();
     init_agents();
     VcpDeckApiError = class extends Error {
@@ -4332,6 +4832,8 @@ var init_client = __esm({
       tasks;
       /** Agent placement 只读投影。 */
       agents;
+      /** Tailnet 凭据与机器管理（ADR-0062）。 */
+      tailnet;
       /** Remote Dev Session（ADR-0058）。 */
       health = {
         get: (signal) => this.request("GET", "/api/health", void 0, signal)
@@ -4356,6 +4858,7 @@ var init_client = __esm({
         this.terminals = createTerminalsApi(this);
         this.tasks = createTasksApi(this);
         this.agents = createAgentsApi(this);
+        this.tailnet = createTailnetApi(this);
       }
       /** 发起 JSON REST 请求并归一化失败响应。 */
       async request(method, path, body, signal) {
@@ -4392,7 +4895,7 @@ var init_client = __esm({
         const text = await response.text();
         const parsed = text ? parseJson(text) : void 0;
         if (!response.ok) {
-          const details = isRecord(parsed) ? parsed : void 0;
+          const details = isRecord2(parsed) ? parsed : void 0;
           const code = typeof details?.code === "string" ? details.code : void 0;
           const message = typeof details?.message === "string" ? details.message : response.statusText || `HTTP ${response.status}`;
           throw new VcpDeckApiError(message, response.status, code, parsed);
@@ -4421,6 +4924,7 @@ var init_dist = __esm({
     init_storage();
     init_storage_shares();
     init_tasks();
+    init_tailnet();
     init_agents();
     init_terminal();
   }
@@ -5159,7 +5663,7 @@ async function runExecJob(argv, context) {
   if (options.json === true) {
     log(JSON.stringify({ ...job, output }, null, 2));
   }
-  if (job.status !== import_shared2.JobStatus.DONE) {
+  if (job.status !== import_shared3.JobStatus.DONE) {
     if (options.json !== true)
       log(formatJobDetail(job, output));
     throw new Error(`Job ${job.jobId} \u7EC8\u6001\u4E3A ${job.status}`);
@@ -5225,7 +5729,7 @@ function jobTypeLabel(type) {
 }
 function formatJobsList(result) {
   const sorted = [...result.data].sort((a, b) => {
-    const active = (job) => job.status === import_shared2.JobStatus.RUNNING || job.status === import_shared2.JobStatus.PENDING || job.status === import_shared2.JobStatus.WAITING_INPUT ? 0 : 1;
+    const active = (job) => job.status === import_shared3.JobStatus.RUNNING || job.status === import_shared3.JobStatus.PENDING || job.status === import_shared3.JobStatus.WAITING_INPUT ? 0 : 1;
     const byActive = active(a) - active(b);
     if (byActive !== 0)
       return byActive;
@@ -5351,8 +5855,8 @@ function parseNonNegativeInteger(raw, flag) {
 function requireValidLevel(raw) {
   if (raw === void 0)
     return void 0;
-  if (!import_shared2.JOB_LOG_LEVELS.includes(raw)) {
-    throw new Error(`--level \u5FC5\u987B\u662F ${import_shared2.JOB_LOG_LEVELS.join("/")} \u4E4B\u4E00`);
+  if (!import_shared3.JOB_LOG_LEVELS.includes(raw)) {
+    throw new Error(`--level \u5FC5\u987B\u662F ${import_shared3.JOB_LOG_LEVELS.join("/")} \u4E4B\u4E00`);
   }
   return raw;
 }
@@ -5382,25 +5886,25 @@ function formatTable(rows, columns) {
     ...rows.map((row) => line(columns.map((column) => row[column])))
   ].join("\n");
 }
-var import_shared2, STATUS_FILTERS, DEFAULT_WAIT_TIMEOUT_SECONDS, POLL_INTERVAL_MS, TERMINAL_STATUSES2;
+var import_shared3, STATUS_FILTERS, DEFAULT_WAIT_TIMEOUT_SECONDS, POLL_INTERVAL_MS, TERMINAL_STATUSES2;
 var init_jobs_command = __esm({
   "dist/jobs-command.js"() {
     "use strict";
-    import_shared2 = __toESM(require_dist(), 1);
+    import_shared3 = __toESM(require_dist(), 1);
     init_dist();
     init_authenticated_client();
     init_arguments();
     init_client_resolver();
     init_privileged_capability();
     init_environment();
-    STATUS_FILTERS = /* @__PURE__ */ new Set([...Object.values(import_shared2.JobStatus), "active"]);
+    STATUS_FILTERS = /* @__PURE__ */ new Set([...Object.values(import_shared3.JobStatus), "active"]);
     DEFAULT_WAIT_TIMEOUT_SECONDS = 1800;
     POLL_INTERVAL_MS = 2e3;
     TERMINAL_STATUSES2 = /* @__PURE__ */ new Set([
-      import_shared2.JobStatus.DONE,
-      import_shared2.JobStatus.ERROR,
-      import_shared2.JobStatus.CANCELLED,
-      import_shared2.JobStatus.DISCONNECTED
+      import_shared3.JobStatus.DONE,
+      import_shared3.JobStatus.ERROR,
+      import_shared3.JobStatus.CANCELLED,
+      import_shared3.JobStatus.DISCONNECTED
     ]);
   }
 });
@@ -14329,23 +14833,23 @@ async function runAttach(argv, context) {
     process.exitCode = 1;
     log(`[vcpdeck] \u8FDE\u63A5\u5931\u8D25: ${err.message}`);
   });
-  socket.on(import_shared6.Events.TERMINAL_OUTPUT, (payload) => {
+  socket.on(import_shared8.Events.TERMINAL_OUTPUT, (payload) => {
     const chunk = payload;
     if (!chunk || typeof chunk.data !== "string")
       return;
     stdout.write(chunk.data);
-    socket.emit(import_shared6.Events.TERMINAL_ACK_OUTPUT, {
+    socket.emit(import_shared8.Events.TERMINAL_ACK_OUTPUT, {
       sessionId,
       attachmentId,
       seq: chunk.seq
     });
   });
-  socket.on(import_shared6.Events.TERMINAL_SNAPSHOT, (payload) => {
+  socket.on(import_shared8.Events.TERMINAL_SNAPSHOT, (payload) => {
     const snapshot = payload;
     if (typeof snapshot?.data === "string")
       stdout.write(snapshot.data);
   });
-  socket.on(import_shared6.Events.TERMINAL_EXIT, () => {
+  socket.on(import_shared8.Events.TERMINAL_EXIT, () => {
     log("\n[vcpdeck] \u4F1A\u8BDD\u5DF2\u7ED3\u675F");
     void removeReconnectToken(storePath, sessionId);
     cleanup();
@@ -14354,7 +14858,7 @@ async function runAttach(argv, context) {
     if (!closed)
       log("\n[vcpdeck] \u8FDE\u63A5\u5DF2\u65AD\u5F00");
   });
-  socket.emit(import_shared6.Events.TERMINAL_ATTACH, reconnectToken ? { sessionId, reconnectToken } : { sessionId }, async (response) => {
+  socket.emit(import_shared8.Events.TERMINAL_ATTACH, reconnectToken ? { sessionId, reconnectToken } : { sessionId }, async (response) => {
     const ack = response;
     if (!ack?.ok) {
       cleanup();
@@ -14371,7 +14875,7 @@ async function runAttach(argv, context) {
     const sendResize = () => {
       if (closed || !attachmentId)
         return;
-      socket.emit(import_shared6.Events.TERMINAL_RESIZE, {
+      socket.emit(import_shared8.Events.TERMINAL_RESIZE, {
         sessionId,
         attachmentId,
         cols: stdout.columns ?? 80,
@@ -14384,12 +14888,12 @@ async function runAttach(argv, context) {
       if (closed)
         return;
       if (buf.includes(17)) {
-        socket.emit(import_shared6.Events.TERMINAL_DETACH, { sessionId, attachmentId });
+        socket.emit(import_shared8.Events.TERMINAL_DETACH, { sessionId, attachmentId });
         cleanup();
         log("\n[vcpdeck] \u5DF2\u9000\u51FA attach");
         return;
       }
-      socket.emit(import_shared6.Events.TERMINAL_INPUT, {
+      socket.emit(import_shared8.Events.TERMINAL_INPUT, {
         sessionId,
         attachmentId,
         data: buf.toString("latin1")
@@ -14428,12 +14932,12 @@ async function removeReconnectToken(storePath, sessionId) {
   } catch {
   }
 }
-var import_shared6, import_promises5, import_node_os2, import_node_path2;
+var import_shared8, import_promises5, import_node_os2, import_node_path2;
 var init_terminal_command = __esm({
   "dist/terminal-command.js"() {
     "use strict";
     init_esm_debug3();
-    import_shared6 = __toESM(require_dist(), 1);
+    import_shared8 = __toESM(require_dist(), 1);
     import_promises5 = require("node:fs/promises");
     import_node_os2 = require("node:os");
     import_node_path2 = require("node:path");
@@ -14559,6 +15063,7 @@ var init_completions_command = __esm({
     COMMAND_TREE = {
       env: ["list", "show", "current", "check", "add", "remove", "use"],
       clients: ["list"],
+      tailnet: ["keys", "status", "inspect", "ensure"],
       jobs: ["list", "get", "run", "cancel"],
       files: [
         "roots",
@@ -14739,7 +15244,7 @@ async function runAddFeature(argv, client, resolveId, context, log) {
   const invoke = buildInvocation(stringOption(options, "invoke-command"), stringOption(options, "invoke-url"), "POST", timeoutSeconds);
   const verify = buildInvocation(stringOption(options, "verify-command"), stringOption(options, "verify-url"), "GET", timeoutSeconds);
   const inputsFile = stringOption(options, "inputs-file");
-  const inputs = inputsFile ? (0, import_shared7.parseFeatureInputs)(JSON.parse(await (0, import_promises6.readFile)(inputsFile, "utf8"))) : [];
+  const inputs = inputsFile ? (0, import_shared9.parseFeatureInputs)(JSON.parse(await (0, import_promises6.readFile)(inputsFile, "utf8"))) : [];
   const notesFile = stringOption(options, "notes-file");
   const notes = notesFile ? await (0, import_promises6.readFile)(notesFile, "utf8") : "";
   const clientId = await resolveId(clientFilter);
@@ -14845,7 +15350,7 @@ async function runUpdateFeature(argv, client, resolveId, log) {
   }
   const inputsFile = stringOption(options, "inputs-file");
   if (inputsFile !== void 0) {
-    patch.inputs = (0, import_shared7.parseFeatureInputs)(JSON.parse(await (0, import_promises6.readFile)(inputsFile, "utf8")));
+    patch.inputs = (0, import_shared9.parseFeatureInputs)(JSON.parse(await (0, import_promises6.readFile)(inputsFile, "utf8")));
   }
   const output = stringOption(options, "output");
   if (output !== void 0)
@@ -14911,7 +15416,7 @@ async function runVerification(client, clientId, verify, pollIntervalMs, log) {
   log(`[vcpdeck] \u9A8C\u8BC1\u547D\u4EE4\u5DF2\u4E0B\u53D1: ${job.jobId}`);
   const terminal = await waitForTerminalJob(client, job.jobId, verify.timeoutSeconds + 30, log, pollIntervalMs);
   const exitCode = terminal.result?.exitCode;
-  const ok = terminal.status === import_shared7.JobStatus.DONE && exitCode === 0;
+  const ok = terminal.status === import_shared9.JobStatus.DONE && exitCode === 0;
   return {
     ok,
     evidence: `job ${job.jobId} status=${terminal.status} exitCode=${exitCode ?? "null"}`,
@@ -14944,12 +15449,12 @@ function formatFeatureDetail(feature) {
     `  id: ${feature.id}`
   ].join("\n");
 }
-var import_promises6, import_shared7, DEFAULT_POLL_INTERVAL_MS2;
+var import_promises6, import_shared9, DEFAULT_POLL_INTERVAL_MS2;
 var init_features_command = __esm({
   "dist/features-command.js"() {
     "use strict";
     import_promises6 = require("node:fs/promises");
-    import_shared7 = __toESM(require_dist(), 1);
+    import_shared9 = __toESM(require_dist(), 1);
     init_arguments();
     init_authenticated_client();
     init_client_resolver();
@@ -15284,7 +15789,7 @@ __export(index_exports, {
   run: () => run
 });
 module.exports = __toCommonJS(index_exports);
-var import_shared8 = __toESM(require_dist(), 1);
+var import_shared10 = __toESM(require_dist(), 1);
 
 // dist/env-command.js
 init_authenticated_client();
@@ -15524,7 +16029,7 @@ var import_promises2 = require("node:fs/promises");
 var import_node_crypto = require("node:crypto");
 var import_promises3 = require("node:stream/promises");
 var import_node_stream = require("node:stream");
-var import_shared3 = __toESM(require_dist(), 1);
+var import_shared4 = __toESM(require_dist(), 1);
 init_authenticated_client();
 init_arguments();
 init_client_resolver();
@@ -15613,7 +16118,7 @@ async function runFileJob(client, clientId, type, payload, context, timeoutSecon
   const created = await client.jobs.create({ clientId, type, payload });
   const job = await waitForTerminalJob(client, created.jobId, timeoutSeconds, () => {
   }, context.pollIntervalMs ?? POLL_INTERVAL_MS2, onJob);
-  if (job.status !== import_shared3.JobStatus.DONE)
+  if (job.status !== import_shared4.JobStatus.DONE)
     throw formatFileJobFailure(job);
   return job.result;
 }
@@ -15943,7 +16448,7 @@ async function runShare(argv, context) {
     }
     const job = await waitForTerminalJob(client, jobId, timeoutSeconds, json ? () => {
     } : log, context.pollIntervalMs ?? POLL_INTERVAL_MS2, json ? void 0 : createTransferProgressReporter(log, "\u5BFC\u51FA"));
-    if (job.status !== import_shared3.JobStatus.DONE)
+    if (job.status !== import_shared4.JobStatus.DONE)
       throw formatFileJobFailure(job);
     const result = job.result ?? {};
     if (typeof result.fileId !== "string" || !result.fileId) {
@@ -16052,7 +16557,7 @@ async function runUpload(argv, context) {
   progressLog(`[vcpdeck] \u5BFC\u5165 Job: ${created.jobId}\uFF08${created.status}\uFF09\uFF0C\u7B49\u5F85\u76EE\u6807\u673A\u62C9\u53D6\u2026`);
   const job = await waitForTerminalJob(client, created.jobId, timeoutSeconds, () => {
   }, context.pollIntervalMs ?? POLL_INTERVAL_MS2, options.json === true ? void 0 : createTransferProgressReporter(log, "\u5BFC\u5165"));
-  if (job.status !== import_shared3.JobStatus.DONE)
+  if (job.status !== import_shared4.JobStatus.DONE)
     throw formatFileJobFailure(job);
   const imported = job.result;
   if (options.json === true) {
@@ -16439,7 +16944,7 @@ function parseTimeout(raw) {
 }
 
 // dist/clients-command.js
-var import_shared4 = __toESM(require_dist(), 1);
+var import_shared5 = __toESM(require_dist(), 1);
 init_authenticated_client();
 init_arguments();
 init_environment();
@@ -16540,7 +17045,7 @@ function formatClientsSummary(clients, targetVersion = null) {
 async function readCatchUpTargetVersion(client) {
   try {
     const result = await client.releases.list({ page: 1, pageSize: 100 });
-    return (0, import_shared4.selectLatestCatchUpTarget)(result.data)?.version ?? null;
+    return (0, import_shared5.selectLatestCatchUpTarget)(result.data)?.version ?? null;
   } catch {
     return null;
   }
@@ -16570,7 +17075,7 @@ var import_node_crypto2 = require("node:crypto");
 var import_node_fs3 = require("node:fs");
 var import_promises4 = require("node:fs/promises");
 init_dist();
-var import_shared5 = __toESM(require_dist(), 1);
+var import_shared6 = __toESM(require_dist(), 1);
 init_authenticated_client();
 init_client_resolver();
 init_arguments();
@@ -16643,7 +17148,7 @@ async function runRetryCommand(argv, context) {
 }
 async function resolveCatchUpTargetVersion(client) {
   const result = await client.releases.list({ page: 1, pageSize: 100 });
-  const target = (0, import_shared5.selectLatestCatchUpTarget)(result.data);
+  const target = (0, import_shared6.selectLatestCatchUpTarget)(result.data);
   if (!target) {
     throw new Error("\u5F53\u524D\u6CA1\u6709\u53EF\u7528\u7684\u8865\u66F4\u76EE\u6807\uFF1B\u8BF7\u7528 --version=<version> \u663E\u5F0F\u6307\u5B9A\u7248\u672C");
   }
@@ -16740,7 +17245,7 @@ async function waitForRelease(client, version, timeoutSeconds, log, context) {
         lastSummary = summary;
       }
       assertReleaseNotFailed(snapshot.release);
-      if (snapshot.release.status === import_shared5.ReleaseStatus.DONE) {
+      if (snapshot.release.status === import_shared6.ReleaseStatus.DONE) {
         assertReleaseCompleted(snapshot.release, snapshot.serverVersion);
         log(`[vcpdeck] \u53D1\u7248 ${version} \u9A8C\u6536\u5B8C\u6210`);
         return;
@@ -16822,11 +17327,11 @@ function countClientStates(release) {
     pending: 0
   };
   for (const entry of Object.values(release.clientStates)) {
-    if (entry.state === import_shared5.ReleaseClientState.DONE)
+    if (entry.state === import_shared6.ReleaseClientState.DONE)
       counts.done++;
-    else if (entry.state === import_shared5.ReleaseClientState.FAILED)
+    else if (entry.state === import_shared6.ReleaseClientState.FAILED)
       counts.failed++;
-    else if (entry.state === import_shared5.ReleaseClientState.UPDATING)
+    else if (entry.state === import_shared6.ReleaseClientState.UPDATING)
       counts.updating++;
     else
       counts.pending++;
@@ -16834,7 +17339,7 @@ function countClientStates(release) {
   return counts;
 }
 function assertReleaseNotFailed(release) {
-  if (release.status === import_shared5.ReleaseStatus.FAILED) {
+  if (release.status === import_shared6.ReleaseStatus.FAILED) {
     throw new Error(`\u53D1\u7248 ${release.version} \u5931\u8D25${release.errorMessage ? `: ${release.errorMessage}` : ""}`);
   }
 }
@@ -17017,6 +17522,296 @@ function exclusiveAlias6(options, first, second) {
   return firstValue ?? secondValue;
 }
 
+// dist/tailnet-command.js
+var import_shared7 = __toESM(require_dist(), 1);
+init_authenticated_client();
+init_arguments();
+init_client_resolver();
+init_environment();
+init_jobs_command();
+var MAX_KEY_BYTES = 4096;
+var DEFAULT_WAIT_TIMEOUT_SECONDS4 = 120;
+async function runTailnetCommand(subcommand, args, context = {}) {
+  if (subcommand === void 0 || subcommand === "--help" || subcommand === "-h" || args.includes("--help") || args.includes("-h")) {
+    (context.log ?? console.log)(tailnetUsage());
+    return;
+  }
+  switch (subcommand) {
+    case "keys":
+      await runKeysCommand(args[0], args.slice(1), context);
+      return;
+    case "status":
+      await runStatusCommand(args, context);
+      return;
+    case "inspect":
+      await runManageCommand("inspect", args, context);
+      return;
+    case "ensure":
+      await runManageCommand("ensure", args, context);
+      return;
+    default:
+      throw new Error(`\u672A\u77E5 tailnet \u5B50\u547D\u4EE4: ${subcommand}
+
+${tailnetUsage()}`);
+  }
+}
+function tailnetUsage() {
+  return [
+    "Tailnet \u547D\u4EE4\uFF08ADR-0062\uFF1B\u4EC5\u4F7F\u7528\u5B98\u65B9 Tailscale\uFF09:",
+    "  vcpdeck tailnet keys import --name=<name> --key-stdin [--reuse=unknown|single|reusable] [--expires-at=<ISO>] [--env=<name>] [--json]",
+    "  vcpdeck tailnet keys list [--page=<n>] [--page-size=<n>] [--env=<name>] [--json]",
+    "  vcpdeck tailnet keys delete <id> [--env=<name>]",
+    "  vcpdeck tailnet status <client-name-or-id> [--env=<name>] [--json]",
+    "  vcpdeck tailnet inspect <client-name-or-id> [--wait] [--env=<name>] [--json]",
+    "  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--wait] [--env=<name>] [--json]",
+    "",
+    "--key-stdin \u4ECE\u53D7\u9650\u672C\u5730\u6587\u4EF6\u91CD\u5B9A\u5411\u8BFB\u53D6\uFF0C\u62D2\u7EDD\u7EC8\u7AEF\u76F4\u63A5\u8F93\u5165\uFF1B\u4E0D\u63D0\u4F9B\u660E\u6587 argv\u3002",
+    "\u5220\u9664\u53EA\u79FB\u9664\u672C\u5730\u5BC6\u6587\u8BB0\u5F55\uFF0C\u4E0D\u4F1A\u64A4\u9500\u6216\u9000\u51FA Provider \u4FA7 Tailnet\u3002"
+  ].join("\n");
+}
+async function runKeysCommand(action, argv, context) {
+  if (action === "import")
+    return runImportKey(argv, context);
+  if (action === "list")
+    return runListKeys(argv, context);
+  if (action === "delete")
+    return runDeleteKey(argv, context);
+  throw new Error(tailnetUsage());
+}
+function environmentOption(options) {
+  return stringOption(options, "env") ?? stringOption(options, "environment");
+}
+async function authenticatedClient(options, context) {
+  if (context.client)
+    return context.client;
+  const environment = await resolveEnvironment({
+    environment: environmentOption(options),
+    paths: context.paths,
+    processEnv: context.processEnv
+  });
+  return createAuthenticatedClient(environment);
+}
+async function readStdinLimited(stream, limit) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of stream) {
+    const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    bytes += buffer.length;
+    if (bytes > limit)
+      throw new Error("\u5BC6\u94A5\u8F93\u5165\u8D85\u8FC7 4096 \u5B57\u8282\u4E0A\u9650");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+async function runImportKey(argv, context) {
+  const { options } = parseCommandArgs(argv, {
+    value: ["name", "reuse", "expires-at", "env", "environment"],
+    boolean: ["key-stdin", "json"]
+  });
+  const name = stringOption(options, "name");
+  if (!name)
+    throw new Error("keys import \u9700\u8981 --name=<name>");
+  if (options["key-stdin"] !== true) {
+    throw new Error("keys import \u5FC5\u987B\u663E\u5F0F\u4F7F\u7528 --key-stdin\uFF1B\u4E0D\u63A5\u53D7\u660E\u6587 argv\uFF0C\u793A\u4F8B\uFF1Avcpdeck tailnet keys import --name=home --key-stdin < ./tailnet.key");
+  }
+  const stdin = context.stdin ?? process.stdin;
+  const isTTY = context.stdinIsTTY ?? process.stdin.isTTY === true;
+  if (isTTY) {
+    throw new Error("--key-stdin \u62D2\u7EDD\u7EC8\u7AEF\u8F93\u5165\uFF1B\u8BF7\u4ECE\u6743\u9650\u53D7\u9650\u7684\u672C\u5730\u6587\u4EF6\u91CD\u5B9A\u5411\uFF0C\u907F\u514D\u5BC6\u94A5\u8FDB\u5165\u5C4F\u5E55\u6216\u5386\u53F2\u8BB0\u5F55");
+  }
+  const raw = await readStdinLimited(stdin, MAX_KEY_BYTES);
+  const authKey = raw.replace(/\r?\n$/, "");
+  if (authKey.length === 0)
+    throw new Error("stdin \u672A\u63D0\u4F9B\u5BC6\u94A5");
+  const reuse = stringOption(options, "reuse") ?? "unknown";
+  if (reuse !== "unknown" && reuse !== "single" && reuse !== "reusable") {
+    throw new Error("--reuse \u5FC5\u987B\u662F unknown/single/reusable \u4E4B\u4E00");
+  }
+  const input = (0, import_shared7.parseTailnetKeyInput)({
+    name,
+    authKey,
+    declaredReuse: reuse,
+    declaredExpiresAt: stringOption(options, "expires-at") ?? null
+  });
+  const client = await authenticatedClient(options, context);
+  const info = await client.tailnet.importKey(input);
+  const log = context.log ?? console.log;
+  if (options.json === true) {
+    log(JSON.stringify(info, null, 2));
+    return;
+  }
+  log(`[vcpdeck] \u5DF2\u5BFC\u5165 Tailnet \u51ED\u636E ${info.id}\uFF08${info.name}\uFF0C${info.declaredReuse}\uFF09\uFF1BProvider \u4FA7\u5BC6\u94A5\u672A\u6539\u53D8`);
+}
+async function runListKeys(argv, context) {
+  const { options } = parseCommandArgs(argv, {
+    value: ["page", "page-size", "env", "environment"],
+    boolean: ["json"]
+  });
+  const page = parsePositiveInt(stringOption(options, "page"), "--page");
+  const pageSize = parsePositiveInt(stringOption(options, "page-size"), "--page-size");
+  const client = await authenticatedClient(options, context);
+  const result = await client.tailnet.listKeys({ page, pageSize });
+  const log = context.log ?? console.log;
+  if (options.json === true) {
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (result.data.length === 0) {
+    log("\u6CA1\u6709\u672C\u5730 Tailnet \u51ED\u636E\u3002");
+    return;
+  }
+  const lines = [
+    "ID	\u540D\u79F0	\u58F0\u660E\u590D\u7528	\u7528\u9014	\u8FC7\u671F\u65F6\u95F4",
+    ...result.data.map((key) => [
+      key.id,
+      key.name,
+      key.declaredReuse,
+      key.use,
+      key.declaredExpiresAt ?? "\u2014"
+    ].join("	"))
+  ];
+  log(lines.join("\n"));
+}
+async function runDeleteKey(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment"],
+    boolean: ["json"]
+  });
+  const id = positionals[0];
+  if (!id)
+    throw new Error("keys delete \u9700\u8981\u51ED\u636E id");
+  const client = await authenticatedClient(options, context);
+  await client.tailnet.deleteKey(id);
+  const log = context.log ?? console.log;
+  if (options.json === true) {
+    log(JSON.stringify({ deleted: true }, null, 2));
+    return;
+  }
+  log(`[vcpdeck] \u5DF2\u5220\u9664\u672C\u5730 Tailnet \u51ED\u636E ${id}\uFF1BProvider \u4FA7\u5BC6\u94A5\u4ECD\u9700\u5728 Tailscale \u7BA1\u7406\u7AEF\u81EA\u884C\u64A4\u9500`);
+}
+async function runStatusCommand(argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["env", "environment"],
+    boolean: ["json"]
+  });
+  const filter = positionals[0];
+  if (!filter)
+    throw new Error("status \u9700\u8981\u673A\u5668\u540D\u79F0\u6216 clientId");
+  const client = await authenticatedClient(options, context);
+  const clientId = await resolveClientId(filter, context.paths, context.processEnv, client);
+  const status = await client.tailnet.status(clientId);
+  const log = context.log ?? console.log;
+  if (options.json === true) {
+    log(JSON.stringify(status, null, 2));
+    return;
+  }
+  log(formatStatus(clientId, status));
+}
+function formatStatus(clientId, status) {
+  const lines = [
+    `[tailnet] ${clientId} \xB7 ${status.online ? "\u5728\u7EBF" : "\u79BB\u7EBF"}`,
+    status.supported ? "\u80FD\u529B: \u652F\u6301 Tailnet \u7BA1\u7406\uFF08\u534F\u8BAE v1\uFF09" : "\u80FD\u529B: \u65E7\u7248 Client \u672A\u58F0\u660E Tailnet \u7BA1\u7406"
+  ];
+  if (!status.snapshot) {
+    lines.push("\u89C2\u6D4B: \u672A\u77E5 / \u672A\u62A5\u544A\uFF08\u6CA1\u6709\u53EF\u7528\u7684\u5386\u53F2\u6458\u8981\uFF09");
+    return lines.join("\n");
+  }
+  const snapshot = status.snapshot;
+  lines.push(`\u89C2\u6D4B\u65F6\u95F4: ${snapshot.observedAt}${status.online ? "" : "\uFF08\u5386\u53F2\uFF0C\u4E0D\u4EE3\u8868\u5F53\u524D\u53EF\u8FBE\uFF09"}`);
+  lines.push([
+    `Tailscale: installed=${snapshot.installed}`,
+    `service=${snapshot.service}`,
+    `backend=${snapshot.backend}`,
+    `version=${snapshot.version ?? "\u2014"}`
+  ].join(" "));
+  if (snapshot.nodeName)
+    lines.push(`\u8282\u70B9: ${snapshot.nodeName}`);
+  const addresses = [...snapshot.ipv4, ...snapshot.ipv6];
+  if (addresses.length > 0)
+    lines.push(`\u5730\u5740: ${addresses.join(", ")}`);
+  if (snapshot.errorCode)
+    lines.push(`\u9519\u8BEF\u7801: ${snapshot.errorCode}`);
+  if (snapshot.backend === "needs-approval") {
+    lines.push("\u63D0\u793A: \u7B49\u5F85 Tailscale \u7BA1\u7406\u7AEF\u6279\u51C6\uFF0C\u5C1A\u4E0D\u53EF\u8FBE");
+  }
+  return lines.join("\n");
+}
+async function runManageCommand(action, argv, context) {
+  const { positionals, options } = parseCommandArgs(argv, {
+    value: ["key-id", "env", "environment", "wait-timeout"],
+    boolean: ["json", "wait", "install-if-missing"]
+  });
+  const filter = positionals[0];
+  if (!filter)
+    throw new Error(`${action} \u9700\u8981\u673A\u5668\u540D\u79F0\u6216 clientId`);
+  if (action === "ensure") {
+    if (!stringOption(options, "key-id")) {
+      throw new Error("ensure \u9700\u8981 --key-id=<id>");
+    }
+    if (positionals.length > 1) {
+      throw new Error("ensure \u53EA\u63A5\u53D7\u5355\u53F0\u673A\u5668\uFF1B\u6279\u91CF\u8BF7\u9010\u4E2A\u6267\u884C");
+    }
+  }
+  const client = await authenticatedClient(options, context);
+  const clientId = await resolveClientId(filter, context.paths, context.processEnv, client);
+  const payload = action === "inspect" ? { action: "inspect" } : {
+    action: "ensure",
+    credentialId: stringOption(options, "key-id"),
+    installIfMissing: options["install-if-missing"] === true
+  };
+  const created = await client.tailnet.manage(clientId, payload);
+  const log = context.log ?? console.log;
+  const error = context.error ?? console.error;
+  if (options.json === true) {
+    if (options.wait !== true) {
+      log(JSON.stringify(created, null, 2));
+      return;
+    }
+    const job2 = await waitForTerminalJob(client, created.jobId, parseWaitTimeout(options), error, context.pollIntervalMs ?? 1e3);
+    log(JSON.stringify(job2, null, 2));
+    if (job2.status !== import_shared7.JobStatus.DONE) {
+      throw new Error(`Job ${job2.jobId} \u7EC8\u6001\u4E3A ${job2.status}`);
+    }
+    return;
+  }
+  log(`[vcpdeck] Tailnet ${action} Job \u5DF2\u521B\u5EFA: ${created.jobId}\uFF08${created.status}\uFF09`);
+  if (options.wait !== true) {
+    log(`\u7528 vcpdeck jobs get ${created.jobId} \u67E5\u8BE2\u7ED3\u679C\uFF0C\u6216\u52A0 --wait \u7B49\u5F85\u7EC8\u6001`);
+    return;
+  }
+  const job = await waitForTerminalJob(client, created.jobId, parseWaitTimeout(options), log, context.pollIntervalMs ?? 1e3);
+  if (job.status !== import_shared7.JobStatus.DONE) {
+    throw new Error(`Job ${job.jobId} \u7EC8\u6001\u4E3A ${job.status}`);
+  }
+  const stage = job.result && typeof job.result.stage === "string" ? job.result.stage : null;
+  if (stage === "awaiting-approval") {
+    log("\u7B49\u5F85 Tailscale \u7BA1\u7406\u7AEF\u6279\u51C6\uFF08awaiting-approval\uFF09\uFF1B\u6279\u51C6\u524D\u8BE5\u673A\u5668\u5C1A\u4E0D\u53EF\u8FBE\u3002");
+  } else if (stage === "joined") {
+    log("\u5DF2\u52A0\u5165 Tailnet\uFF08joined\uFF09\u3002");
+  } else if (stage) {
+    log(`\u9636\u6BB5: ${stage}`);
+  }
+}
+function parseWaitTimeout(options) {
+  const raw = stringOption(options, "wait-timeout");
+  if (raw === void 0)
+    return DEFAULT_WAIT_TIMEOUT_SECONDS4;
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds < 1) {
+    throw new Error("--wait-timeout \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570\u79D2");
+  }
+  return seconds;
+}
+function parsePositiveInt(raw, flag) {
+  if (raw === void 0)
+    return void 0;
+  const value2 = Number(raw);
+  if (!Number.isInteger(value2) || value2 < 1) {
+    throw new Error(`${flag} \u5FC5\u987B\u662F\u4E0D\u5C0F\u4E8E 1 \u7684\u6574\u6570`);
+  }
+  return value2;
+}
+
 // dist/index.js
 async function run(argv, context = {}) {
   const log = context.log ?? console.log;
@@ -17024,7 +17819,7 @@ async function run(argv, context = {}) {
   const [command, subcommand, ...rest] = argv;
   try {
     if (command === "version" || command === "--version" || command === "-v") {
-      log(import_shared8.VERSION);
+      log(import_shared10.VERSION);
       return 0;
     }
     if (command === "env") {
@@ -17060,6 +17855,10 @@ async function run(argv, context = {}) {
     }
     if (command === "clients") {
       await runClientsCommand(subcommand, rest, { log });
+      return 0;
+    }
+    if (command === "tailnet") {
+      await runTailnetCommand(subcommand, rest, { log, error });
       return 0;
     }
     if (command === "features") {
@@ -17110,6 +17909,15 @@ function helpText() {
     "",
     "Clients:",
     "  vcpdeck clients list [--env=<name>] [--json]",
+    "",
+    "Tailnet\uFF08ADR-0062\uFF09:",
+    "  vcpdeck tailnet keys import --name=<name> --key-stdin [--reuse=unknown|single|reusable] [--expires-at=<ISO>] [--env=<name>] [--json]",
+    "  vcpdeck tailnet keys list [--page=<n>] [--page-size=<n>] [--env=<name>] [--json]",
+    "  vcpdeck tailnet keys delete <id> [--env=<name>] [--json]",
+    "  vcpdeck tailnet status <client-name-or-id> [--env=<name>] [--json]",
+    "  vcpdeck tailnet inspect <client-name-or-id> [--wait] [--env=<name>] [--json]",
+    "  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--wait] [--env=<name>] [--json]",
+    "  \u5BC6\u94A5\u53EA\u4ECE\u53D7\u9650\u6587\u4EF6\u91CD\u5B9A\u5411\u7684 stdin \u8BFB\u53D6\uFF1B\u5220\u9664\u4EC5\u6E05\u7406\u672C\u5730\u8BB0\u5F55\uFF0C\u4E0D\u64A4\u9500 Provider \u5BC6\u94A5",
     "",
     "Features:",
     "  vcpdeck features list [--client=<name|id>] [--scope=generic|machine] [--status=<status>] [--include-retired] [--env=<name>] [--json]",

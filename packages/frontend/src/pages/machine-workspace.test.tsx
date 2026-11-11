@@ -1,6 +1,6 @@
 import type { VcpDeckClient } from "@vcpdeck/sdk";
 import { VcpDeckApiError } from "@vcpdeck/sdk";
-import type { ClientInfo } from "@vcpdeck/shared";
+import type { ClientInfo, TailnetStatus } from "@vcpdeck/shared";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -21,6 +21,7 @@ function renderWorkspace(
 	clients: ClientInfo[],
 	tab = "overview",
 	rename?: (clientId: string, name: string) => Promise<ClientInfo>,
+	tailnetStatus?: TailnetStatus,
 ) {
 	const sdk = {
 		clients: {
@@ -34,6 +35,23 @@ function renderWorkspace(
 		},
 		files: { roots: async () => [] },
 		auth: { me: async () => identity },
+		tailnet: {
+			status: async () =>
+				tailnetStatus ?? {
+					clientId: "c1",
+					online: true,
+					supported: false,
+					snapshot: null,
+				},
+			listKeys: async () => ({
+				data: [],
+				total: 0,
+				page: 1,
+				pageSize: 20,
+				totalPages: 0,
+			}),
+		},
+		jobs: {},
 	} as unknown as VcpDeckClient;
 	return render(
 		<MemoryRouter initialEntries={[`/machines/c1/${tab}`]}>
@@ -221,6 +239,58 @@ describe("MachineWorkspace overview", () => {
 		// 旧 Client 缺失的指标仍以可访问进度条和占位值展示；磁盘无数据时不渲染进度条
 		expect(screen.getAllByRole("progressbar")).toHaveLength(2);
 		expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
+	});
+});
+
+describe("MachineWorkspace Tailnet 入口", () => {
+	const client = {
+		clientId: "c1",
+		name: "workstation",
+		hostname: "workstation",
+		os: "win32",
+		cpuModel: "Intel",
+		totalMemMB: 16384,
+		disks: [],
+		clientVersion: "1.0.0",
+		capabilities: [],
+		capabilityDetails: {},
+		online: true,
+		cpuPercent: null,
+		memPercent: null,
+		lastHeartbeatAt: null,
+	} as unknown as ClientInfo;
+
+	it("导航提供 Tailnet，进入后直接显示管理面板", async () => {
+		renderWorkspace([client], "tailnet");
+
+		expect(await screen.findByRole("link", { name: "Tailnet" })).toBeVisible();
+		expect(
+			await screen.findByRole("heading", { name: "Tailnet" }),
+		).toBeVisible();
+	});
+});
+
+describe("MachineWorkspace 离线 Tailnet 历史", () => {
+	it("离线机器仍可查看专用历史摘要，不误判为未入网", async () => {
+		renderWorkspace([], "overview", undefined, {
+			clientId: "c1",
+			online: false,
+			supported: true,
+			snapshot: {
+				installed: "yes",
+				version: "1.104.5",
+				service: "stopped",
+				backend: "unknown",
+				nodeName: null,
+				ipv4: [],
+				ipv6: [],
+				observedAt: "2026-11-11T10:00:00.000Z",
+				errorCode: null,
+			},
+		});
+		expect(await screen.findByText("机器当前不在线")).toBeVisible();
+		expect(await screen.findByText("历史观测 / 离线")).toBeVisible();
+		expect(screen.queryByText("未入网")).toBeNull();
 	});
 });
 

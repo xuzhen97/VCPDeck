@@ -25,6 +25,7 @@ import { FrpPanel } from "@/pages/frp-panel";
 import { JobsPage } from "@/pages/jobs-page";
 import { MachineAnnotationsPanel } from "./machine-annotations-panel";
 import { MachineFeaturesPanel } from "./machine-features-panel";
+import { MachineTailnetPanel } from "./machine-tailnet-panel";
 import { TerminalPanel } from "@/pages/terminal-panel";
 
 export function MachineWorkspace() {
@@ -54,14 +55,17 @@ export function MachineWorkspace() {
 	const client = resource.data?.find((item) => item.clientId === clientId);
 	if (!client)
 		return (
-			<Card>
-				<CardContent className="py-12 text-center">
-					<h1 className="font-semibold">机器当前不在线</h1>
-					<p className="mt-2 text-sm text-muted-foreground">
-						Server 不提供离线 Client 的历史详情。
-					</p>
-				</CardContent>
-			</Card>
+			<div className="space-y-4">
+				<Card>
+					<CardContent className="py-12 text-center">
+						<h1 className="font-semibold">机器当前不在线</h1>
+						<p className="mt-2 text-sm text-muted-foreground">
+							Server 不提供离线 Client 的历史详情。
+						</p>
+					</CardContent>
+				</Card>
+				<MachineTailnetPanel clientId={clientId} />
+			</div>
 		);
 	return <Workspace client={client} tab={tab} />;
 }
@@ -239,6 +243,9 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 				{tab === "execute" && <ExecutePanel clientId={client.clientId} />}
 				{tab === "files" && <FilesPanel clientId={client.clientId} />}
 				{tab === "frp" && <FrpPanel clientId={client.clientId} />}
+				{tab === "tailnet" && (
+					<MachineTailnetPanel clientId={client.clientId} />
+				)}
 				{tab === "jobs" && <JobsPage clientId={client.clientId} />}
 				{tab === "terminal" && <TerminalPanel clientId={client.clientId} />}
 				{tab === "features" && (
@@ -249,6 +256,7 @@ function Workspace({ client, tab }: { client: ClientInfo; tab: string }) {
 					"execute",
 					"files",
 					"frp",
+					"tailnet",
 					"jobs",
 					"terminal",
 					"features",

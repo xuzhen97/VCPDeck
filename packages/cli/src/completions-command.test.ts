@@ -53,6 +53,7 @@ describe("completions command", () => {
 		for (const cmd of [
 			"env",
 			"clients",
+			"tailnet",
 			"jobs",
 			"files",
 			"terminal",

@@ -4,6 +4,7 @@ import type {
 	GitSshCapability,
 	MachineRegister,
 	StatusReport,
+	TailnetSnapshot,
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
 import { CLIENT_ID, getRegisterInfo } from "./register.js";
@@ -44,6 +45,14 @@ import {
 	shutdownFrpRuntime,
 } from "./frpc-daemon.js";
 import { attachFrpSocketBridge, type FrpSocketBridge } from "./frp-socket-bridge.js";
+import { TailnetSocketBridge } from "./tailnet/socket-bridge.js";
+import {
+	cancelTailnetJob,
+	getActiveTailnetJobIds,
+	setTailnetSecretBridge,
+} from "./tailnet/handler.js";
+import { probeTailnet } from "./tailnet/probe.js";
+import { cleanupTailnetSecretFiles } from "./tailnet/secret-file.js";
 import { createAcpHost } from "./acp/acp-host.js";
 import { attachAcpTaskBridge } from "./acp/acp-bridge.js";
 import { ClientLauncher } from "./launcher-control.js";
@@ -92,7 +101,10 @@ export interface ClientBridgeDeps {
 		terminalStatus: TerminalCapabilityStatus | undefined,
 		runtimeSecurity: RuntimeSecurityInfo | undefined,
 		gitSshStatus: GitSshCapability | undefined,
+		tailnetStatus: TailnetSnapshot | undefined,
 	) => MachineRegister;
+	/** Tailnet 只读观测；缺省、超时或失败都不阻塞注册。 */
+	getTailnetStatus?: () => Promise<TailnetSnapshot | undefined>;
 	getStatusReport: () => StatusReport;
 }
 
@@ -193,11 +205,15 @@ export function attachClientBridge(
 			// Git SSH 能力与注入结论必须在 REGISTER 前就绪：Server 只向已上报能力的 Client 下发密钥。
 			const gitSshStatus = await probeGitSshCapabilityForClient().catch(() => undefined);
 			await refreshGitSshEnv();
+			const tailnetStatus = deps.getTailnetStatus
+				? await deps.getTailnetStatus().catch(() => undefined)
+				: undefined;
 			if (generation !== connectionGeneration) return;
 			const payload = deps.getRegister(
 				terminalStatus,
 				runtimeSecurity,
 				gitSshStatus,
+				tailnetStatus,
 			);
 			pendingRegister = { payload, onAck };
 			socket.emit(Events.REGISTER, payload, onAck);
@@ -315,12 +331,34 @@ export function connect(): Socket {
 	// 新连接必须重新注册才允许处理密钥指令。
 	socket.on("disconnect", () => gitSshBridge?.markUnregistered());
 
+	// Tailnet 密钥交付桥（ADR-0062）：注册确认后才允许请求；断连立即清空。
+	const tailnetBridge = verifyOnly ? null : new TailnetSocketBridge(socket);
+	if (tailnetBridge) {
+		setTailnetSecretBridge(tailnetBridge);
+		socket.on("ack", (payload: { event?: string }) => {
+			if (payload?.event === Events.REGISTER) tailnetBridge.onRegistered();
+		});
+		socket.on("disconnect", () => {
+			tailnetBridge.onDisconnected();
+			setTailnetSecretBridge(null);
+		});
+		// 清理此前遗留的过期密钥目录；失败不影响连接。
+		void cleanupTailnetSecretFiles().catch(() => undefined);
+	}
+
 	// 自更新：有界 drain + 本机 Launcher 两阶段更新；apply 前计划内释放 frpc。
 	attachUpdateHandler({
 		socket,
 		launcher: new ClientLauncher(),
 		serverBase: SERVER_BASE,
-		beforeApply: () => shutdownFrpRuntime(),
+		beforeApply: () => {
+			// 更新前取消在途 Tailnet 管理任务：它们不是 executor Job，
+			// drain 无法等待，只能中止并让 handler 回传 interrupted。
+			for (const jobId of getActiveTailnetJobIds()) {
+				cancelTailnetJob(jobId);
+			}
+			return shutdownFrpRuntime();
+		},
 	});
 
 	// FRP socket 桥：注册确认后上报安全 runtime 快照（每次连接新代次）。
@@ -425,13 +463,15 @@ export function connect(): Socket {
 				if (installation !== undefined) info.installation = installation;
 				return info;
 			}),
-		getRegister: (terminalStatus, runtimeSecurity, gitSshStatus) =>
+		getRegister: (terminalStatus, runtimeSecurity, gitSshStatus, tailnetStatus) =>
 			getRegisterInfo(
 				terminalStatus,
 				runtimeSecurity,
 				process.env,
 				gitSshStatus,
+				tailnetStatus,
 			),
+		getTailnetStatus: () => probeWithTimeout(probeTailnet, 1500),
 		getStatusReport: () => ({
 			clientId: CLIENT_ID,
 			jobs: getStatusReport(),
@@ -460,7 +500,11 @@ export function connect(): Socket {
 			// 服务端用心跳里的租约对账 running Job，漏报会把长传输判成孤儿。
 			socket.emit(
 				Events.HEARTBEAT,
-				getHeartbeat([...getRunningJobIds(), ...getActiveTransferJobIds()]),
+				getHeartbeat([
+					...getRunningJobIds(),
+					...getActiveTransferJobIds(),
+					...getActiveTailnetJobIds(),
+				]),
 			);
 		}
 	}, 5_000);
@@ -473,6 +517,8 @@ export function connect(): Socket {
 
 		socket.on(Events.JOB_CANCEL, (data: { jobId: string }) => {
 			console.log(`[vcpdeck] job cancel: ${data.jobId}`);
+			// Tailnet 管理任务由 handler 中止并回传 interrupted，不走 executor。
+			if (cancelTailnetJob(data.jobId)) return;
 			killJob(data.jobId, socket);
 		});
 	}

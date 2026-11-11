@@ -7,6 +7,12 @@ import {
 	parseGitSshCapability,
 	type GitSshCapability,
 } from "./git-ssh.js";
+import {
+	parseTailnetCapability,
+	parseTailnetSnapshot,
+	type TailnetCapability,
+	type TailnetSnapshot,
+} from "./tailnet.js";
 
 // ── 严格边界：字段长度上限（防御异常注册消息撑爆存储与 UI） ──
 const MAX_CLIENT_ID = 128;
@@ -162,6 +168,8 @@ export interface MachineRegister {
 		acp?: AcpCapabilityStatus;
 		/** 可选：RDS 能力摘要（ADR-0058）；旧 Client 缺省即未报告 */
 		remoteDev?: RemoteDevCapabilityStatus;
+		/** 可选：Tailnet 管理协议能力（ADR-0062）；旧 Client 缺省即未报告 */
+		tailnet?: TailnetCapability;
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告） */
 	installation?: MachineInstallationStatus;
@@ -173,6 +181,13 @@ export interface MachineRegister {
 	 * `active`/`disconnected` 会话收敛为 `interrupted`。
 	 */
 	remoteDevSessions?: { sessionId: string; generationId: string }[];
+	/**
+	 * 可选：注册时对官方 Tailnet CLI 的只读观测摘要（ADR-0062）。
+	 *
+	 * 缺省 = 旧 Client 未报告，Server 不得据此把已入网机器显示为未入网；
+	 * 摘要只含自身信息，绝不包含 Peer 拓扑。
+	 */
+	tailnet?: TailnetSnapshot;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -357,7 +372,15 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 	if (value.capabilityDetails !== undefined) {
 		const details = value.capabilityDetails;
 		if (!isRecord(details)) throw new Error("capabilityDetails 必须为对象");
-		const known = ["terminal", "frp", "privileged", "gitSsh", "acp", "remoteDev"] as const;
+		const known = [
+			"terminal",
+			"frp",
+			"privileged",
+			"gitSsh",
+			"acp",
+			"remoteDev",
+			"tailnet",
+		] as const;
 		for (const key of Object.keys(details)) {
 			// ADR-0049 退役的键：旧 Client（如 0.18.2）仍会带 pi 摘要，
 			// 接受并丢弃，否则整个集群会因“未知字段”被拒注册。
@@ -386,11 +409,18 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 		if (details.remoteDev !== undefined) {
 			parsedDetails.remoteDev = parseRemoteDevCapabilityStatus(details.remoteDev);
 		}
+		if (details.tailnet !== undefined) {
+			parsedDetails.tailnet = parseTailnetCapability(details.tailnet);
+		}
 		result.capabilityDetails = parsedDetails;
 	}
 
 	if (value.installation !== undefined) {
 		result.installation = parseMachineInstallation(value.installation);
+	}
+
+	if (value.tailnet !== undefined) {
+		result.tailnet = parseTailnetSnapshot(value.tailnet);
 	}
 
 	if (value.remoteDevSessions !== undefined) {

@@ -5,6 +5,11 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { JobScheduler } from "./job.scheduler.js";
 import { JobLogService } from "./job-log.service.js";
 import { JobStatus, type JobProgress } from "@vcpdeck/shared";
+import {
+	TAILNET_CAPABILITY,
+	parseTailnetJobPayload,
+	type TailnetJobPayload,
+} from "@vcpdeck/shared";
 import type {
   JobCreateResult,
   DispatchPayload,
@@ -17,6 +22,7 @@ import type {
 } from "@vcpdeck/shared";
 import { FileService } from "../file/file.service.js";
 import { StorageService } from "../storage/storage.service.js";
+import { TailnetKeyService } from "../tailnet/tailnet-key.service.js";
 import { randomUUID } from "node:crypto";
 import type { UploadTarget } from "@vcpdeck/shared";
 
@@ -117,6 +123,8 @@ export class JobService {
     @Optional() private readonly outputDir: string = resolveJobOutputDir(),
     // Job 诊断事件链（ADR-0054）；测试可省略，省略时只保留原有行为。
     @Optional() @Inject(JobLogService) private readonly jobLog?: JobLogService,
+    // Tailnet 凭据预留/终结（ADR-0062）；测试可不传
+    @Optional() @Inject(TailnetKeyService) private readonly tailnetKeys?: TailnetKeyService,
   ) {}
 
   /** 创建等待浏览器上传的文件导入会话。 */
@@ -385,6 +393,10 @@ export class JobService {
 
     // 文件传输编排
     let finalPayload = { ...params.payload };
+
+    if (params.type === "tailnet.manage") {
+      return this.createTailnetJob(params, actor, client);
+    }
     if (params.type === "file.export") {
       const p = params.payload as { path: string; rootDir: string };
       const { fileId, key, uploadUrl, expiresAt } =
@@ -476,6 +488,140 @@ export class JobService {
     };
   }
 
+  /** Tailnet 管理 Job：同机在途唯一 + 凭据原子预留，任一失败整体回滚。 */
+  private async createTailnetJob(
+    params: {
+      clientId: string;
+      type: string;
+      payload: Record<string, unknown>;
+    },
+    actor: ActorContext,
+    client: { id: string; capabilities: string },
+  ): Promise<{ result: JobCreateResult; dispatch: DispatchPayload | null }> {
+    let payload: TailnetJobPayload;
+    try {
+      payload = parseTailnetJobPayload(params.payload);
+    } catch (error) {
+      throw Object.assign(new Error((error as Error).message), {
+        code: "INVALID_JOB_PAYLOAD",
+        statusCode: 400,
+      });
+    }
+    if (!parseCapabilities(client.capabilities).includes(TAILNET_CAPABILITY)) {
+      throw Object.assign(
+        new Error(`Client "${params.clientId}" lacks "tailnet.manage" capability`),
+        { code: "TAILNET_OPERATION_MISMATCH", statusCode: 400 },
+      );
+    }
+    if (!this.tailnetKeys) {
+      throw Object.assign(new Error("Tailnet 密钥服务不可用"), {
+        code: "TAILNET_KEY_UNAVAILABLE",
+        statusCode: 503,
+      });
+    }
+
+    const jobId = randomUUID();
+    await this.prisma.$transaction(async (tx) => {
+      try {
+        await tx.tailnetClientOperation.create({
+          data: { clientId: params.clientId, jobId },
+        });
+      } catch (error) {
+        if ((error as { code?: string }).code === "P2002") {
+          throw Object.assign(new Error("该机器已有 Tailnet 管理任务在途"), {
+            code: "TAILNET_OPERATION_BUSY",
+            statusCode: 409,
+          });
+        }
+        throw error;
+      }
+      if (payload.action === "ensure") {
+        await this.tailnetKeys!.reserve(tx as never, payload.credentialId, jobId);
+      }
+      await tx.job.create({
+        data: {
+          id: jobId,
+          clientId: params.clientId,
+          type: params.type,
+          status: "pending",
+          payload: JSON.stringify(payload),
+          timeout: null,
+          createdByIdentityId: actor.identityId,
+          createdByName: actor.displayName,
+          createdVia: actor.source,
+        },
+      });
+    });
+
+    await this.recordCreated(
+      jobId,
+      params.type,
+      payload as unknown as Record<string, unknown>,
+      actor,
+      null,
+    );
+    const dispatch = await this.scheduler.tryDispatch(params.clientId);
+    return {
+      result: {
+        jobId,
+        status: dispatch ? JobStatus.RUNNING : JobStatus.PENDING,
+        type: params.type,
+      },
+      dispatch,
+    };
+  }
+
+  /**
+   * Tailnet Job 的唯一终结入口：条件终结 Job、按是否已交付密钥结算凭据、
+   * 删除机器占位。重复调用幂等（count=0 时仍清理残余占位）。
+   */
+  private async finalizeTailnet(
+    jobId: string,
+    status: "done" | "error" | "cancelled",
+    result: Record<string, unknown> | null,
+  ): Promise<{
+    job: { id: string; clientId: string; createdAt: Date; finishedAt: Date | null } | null;
+    changed: boolean;
+  }> {
+    const errorCode =
+      typeof result?.errorCode === "string" ? result.errorCode : null;
+    const errorMessage =
+      typeof result?.errorMessage === "string"
+        ? result.errorMessage.slice(0, 200)
+        : null;
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.job.updateMany({
+        where: {
+          id: jobId,
+          status: { in: ["pending", "running", "waiting_input", "disconnected"] },
+        },
+        data: {
+          status,
+          result: result ? JSON.stringify(result) : null,
+          errorCode: status === "error" ? errorCode : null,
+          errorMessage: status === "error" ? errorMessage : null,
+          finishedAt: new Date(),
+        },
+      });
+      const credential = await tx.tailnetCredential.findFirst({
+        where: { reservedJobId: jobId },
+      });
+      const outcome =
+        !credential || credential.issuedAt === null
+          ? "unused"
+          : status === "done"
+            ? "consumed"
+            : "uncertain";
+      await this.tailnetKeys?.settle(tx as never, jobId, outcome);
+      await tx.tailnetClientOperation.deleteMany({ where: { jobId } });
+      const job = await tx.job.findUnique({
+        where: { id: jobId },
+        select: { id: true, clientId: true, createdAt: true, finishedAt: true },
+      });
+      return { job, changed: updated.count > 0 };
+    });
+  }
+
   /** stdout/stderr 片段落盘（tee）；Job 不存在时静默忽略，不阻塞实时转发。 */
   async appendOutputRaw(jobId: string, text: string) {
     if (!text) return;
@@ -527,6 +673,19 @@ export class JobService {
       effectiveStatus = "done";
     }
 
+    if (type === "tailnet.manage") {
+      const finalized = await this.finalizeTailnet(
+        jobId,
+        effectiveStatus === "error" ? "error" : "done",
+        result,
+      );
+      if (!finalized.job) throw new Error(`Job "${jobId}" not found`);
+      if (finalized.changed) {
+        await this.recordSettled(finalized.job, result, effectiveStatus);
+      }
+      return this.scheduler.onFinished(finalized.job.clientId);
+    }
+
     const job = await this.prisma.job.update({
       where: { id: jobId },
       data: {
@@ -542,6 +701,20 @@ export class JobService {
   }
 
   async markCancelled(jobId: string): Promise<DispatchPayload | null> {
+    const existing = await this.prisma.job.findUnique({ where: { id: jobId } });
+    if (existing?.type === "tailnet.manage") {
+      const finalized = await this.finalizeTailnet(jobId, "cancelled", null);
+      if (!finalized.job) return null;
+      if (finalized.changed) {
+        await this.jobLog?.record({
+          jobId,
+          event: "cancel_confirmed",
+          source: "server",
+          data: { by: "server", fromStatus: existing.status },
+        });
+      }
+      return this.scheduler.onFinished(finalized.job.clientId);
+    }
     const job = await this.prisma.job.update({
       where: { id: jobId },
       data: { status: "cancelled", finishedAt: new Date() },
@@ -583,6 +756,22 @@ export class JobService {
     ) {
       // 已是终态（或 pending 由 cancel 直接处理）→ 不覆盖既有结果。
       return null;
+    }
+    if (job.type === "tailnet.manage") {
+      await this.finalizeTailnet(jobId, "error", {
+        errorCode: "JOB_ORPHANED",
+        errorMessage: reason.slice(0, 200),
+      });
+      await this.jobLog?.record({
+        jobId,
+        event: "orphaned",
+        source: "server",
+        level: "error",
+        code: "JOB_ORPHANED",
+        message: reason.slice(0, 200),
+        data: { fromStatus: job.status },
+      });
+      return this.scheduler.onFinished(job.clientId);
     }
     await this.prisma.job.update({
       where: { id: jobId },
@@ -706,14 +895,20 @@ export class JobService {
         }
       } else {
         const newStatus = r.status === "done" ? "done" : "error";
-        await this.prisma.job.update({
-          where: { id: r.jobId },
-          data: {
-            status: newStatus,
-            result: JSON.stringify({ exitCode: r.exitCode ?? 1 }),
-            finishedAt: new Date(),
-          },
-        });
+        if (job.type === "tailnet.manage") {
+          await this.finalizeTailnet(r.jobId, newStatus, {
+            exitCode: r.exitCode ?? 1,
+          });
+        } else {
+          await this.prisma.job.update({
+            where: { id: r.jobId },
+            data: {
+              status: newStatus,
+              result: JSON.stringify({ exitCode: r.exitCode ?? 1 }),
+              finishedAt: new Date(),
+            },
+          });
+        }
         await this.jobLog?.record({
           jobId: r.jobId,
           event: "reconciled",

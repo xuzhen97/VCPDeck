@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Tailnet 管理最小集成（[ADR-0062](docs/adr/0062-tailnet-job-network-under-existing-architecture.md)）**：新增凭据导入/分页列表/删除、机器专用 `TailnetStatus` 与 `tailnet.manage` Typed Job（`inspect`/`ensure`），不改变现有 Job、Files、Storage、Terminal、FRP 数据面。Auth key 以 AES-256-GCM 密文存库，正文仅在当前注册 socket 上经 30 秒 TTL、单次 `requestId` 单播交付；Client 写入受限临时文件并在各终止路径清理。提供 `/api/tailnet`、SDK `client.tailnet`、CLI `vcpdeck tailnet keys|status|inspect|ensure`、设置中的全局 `Tailnet 凭据` 页和机器工作区独立 `Tailnet` 标签页（凭据统一在设置页导入/删除，机器页只选择凭据并执行操作）；自动安装仅限 Windows x64 管理员与 Ubuntu 22.04/24.04、Debian 12/13 x64 root+systemd，使用固定 `1.104.5` 官方构件并校验 SHA-256（Windows 另验 Authenticode），已有安装/身份时安全失败。
+
+### Changed
+
+- **Tailnet 需要 Server 先行升级**：Client 新增 `tailnet.manage` capability、`capabilityDetails.tailnet` 与可选注册摘要；旧 Server 的严格 parser 会拒绝这些新字段，因此不得先部署新 Client。新 Server 兼容旧 Client 的缺省值（按“不支持 Tailnet”处理）。数据库新增 `TailnetCredential`、`TailnetClientOperation` 两表与 nullable `Client.tailnetSnapshot` 列，属纯增量；Tailnet 根密钥仅从 `VCPDECK_TAILNET_KEY_FILE` 读取，必须与 SQLite 配对备份。
+- **Tailnet 自动安装/入网尚未完成真机验收**：当前只经过单元、注入式安装器、临时 SQLite 集成和前端组件验证；真机安装、服务启动、设备审批、取消清理与真实网络可达性仍需单独授权验收。
+
 ## [0.23.4] - 2026-11-11
 
 ### Fixed

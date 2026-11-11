@@ -60,6 +60,39 @@ export type {
 	GitSshTargetStatus,
 } from "./git-ssh.js";
 
+// ── Tailnet 管理协议（ADR-0062） ──
+export {
+	TAILNET_CAPABILITY,
+	TAILNET_ERROR_CODES,
+	TAILNET_PROTOCOL_VERSION,
+	assertTailnetSecretUsable,
+	isTailnetErrorCode,
+	parseTailnetCapability,
+	parseTailnetJobPayload,
+	parseTailnetJobResult,
+	parseTailnetKeyInfo,
+	parseTailnetKeyInput,
+	parseTailnetSecretRequest,
+	parseTailnetSecretResponse,
+	parseTailnetSnapshot,
+	parseTailnetStatus,
+} from "./tailnet.js";
+export type {
+	TailnetCapability,
+	TailnetErrorCode,
+	TailnetJobPayload,
+	TailnetJobResult,
+	TailnetKeyInfo,
+	TailnetKeyInput,
+	TailnetKeyUse,
+	TailnetReuse,
+	TailnetSecretExpectation,
+	TailnetSecretRequest,
+	TailnetSecretResponse,
+	TailnetSnapshot,
+	TailnetStatus,
+} from "./tailnet.js";
+
 // ── 远程 Pi 协议 ──
 
 // ── 交互式终端协议 ──
@@ -89,6 +122,10 @@ import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
 import type { GitSshCapability } from "./git-ssh.js";
 import type { ClientAnnotations } from "./client-annotations.js";
+import type {
+	TailnetCapability,
+	TailnetSnapshot,
+} from "./tailnet.js";
 // 显式 re-export 常用类型（部分工具链不解析 export * 通配转发）
 export type {
 	ReleaseArchiveAvailableInfo,
@@ -171,6 +208,9 @@ export const Events = {
 	TASK_COMMAND: "task:command",
 	TASK_COMMAND_RESULT: "task:command-result",
 	TASK_EVENT: "task:event",
+	/** Server ⇄ Client：Tailnet 凭据短时交付（ADR-0062），正文仅目标 socket 接收 */
+	TAILNET_SECRET_REQUEST: "tailnet:secret-request",
+	TAILNET_SECRET_RESPONSE: "tailnet:secret-response",
 } as const;
 
 // ── Job type ──
@@ -190,6 +230,7 @@ export enum JobType {
 	FRP_LIST = "frp.list",
 	FRP_RECONCILE = "frp.reconcile",
 	FILE_ROOTS = "file.roots",
+	TAILNET_MANAGE = "tailnet.manage",
 }
 
 // ── Job status ──
@@ -401,11 +442,15 @@ export interface ClientInfo {
 		acp?: AcpCapabilityStatus;
 		/** 可选：Remote Dev Session 能力摘要（ADR-0058，旧 Client 缺省即未报告） */
 		remoteDev?: RemoteDevCapabilityStatus;
+		/** 可选：Tailnet 管理协议能力（ADR-0062，旧 Client 缺省即未报告） */
+		tailnet?: TailnetCapability;
 	};
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告，不推断为任何模式） */
 	installation?: MachineInstallationStatus;
 	/** 可选：操作者声明的公网地址与备注（ADR-0055；旧 Server 缺省即未补充） */
 	annotations?: ClientAnnotations;
+	/** 可选：最近一次 Tailnet 观测摘要（ADR-0062；旧 Client/旧 Server 缺省即未报告） */
+	tailnet?: TailnetSnapshot;
 	online: boolean;
 	cpuPercent: number | null;
 	memPercent: number | null;

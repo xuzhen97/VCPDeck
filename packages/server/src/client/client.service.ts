@@ -9,6 +9,7 @@ import {
 	parseMachineInstallation,
 	parseGitSshCapability,
 	parsePrivilegedCapabilityStatus,
+	parseTailnetCapability,
 	type ClientAnnotations,
 	type ClientAnnotationsInput,
 	type MachineInstallationStatus,
@@ -364,6 +365,7 @@ export class ClientService {
       gitSsh?: ClientInfo["capabilityDetails"]["gitSsh"];
       acp?: ClientInfo["capabilityDetails"]["acp"];
       remoteDev?: ClientInfo["capabilityDetails"]["remoteDev"];
+      tailnet?: ClientInfo["capabilityDetails"]["tailnet"];
     };
     installation: MachineInstallationStatus | null;
   } {
@@ -375,6 +377,7 @@ export class ClientService {
         gitSsh?: ClientInfo["capabilityDetails"]["gitSsh"];
         acp?: ClientInfo["capabilityDetails"]["acp"];
         remoteDev?: ClientInfo["capabilityDetails"]["remoteDev"];
+        tailnet?: ClientInfo["capabilityDetails"]["tailnet"];
       };
       installation: MachineInstallationStatus | null;
     } = { details: {}, installation: null };
@@ -425,6 +428,13 @@ export class ClientService {
         );
       } catch {
         // remoteDev 摘要损坏：省略，不宽松猜测。
+      }
+    }
+    if (record.tailnet !== undefined) {
+      try {
+        result.details.tailnet = parseTailnetCapability(record.tailnet);
+      } catch {
+        // tailnet 能力摘要损坏：省略；旧 Client 缺省时视为未声明。
       }
     }
     if (record.installation !== undefined) {

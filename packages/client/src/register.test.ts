@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FRP_RECONCILE_PROTOCOL_VERSION, VERSION } from "@vcpdeck/shared";
 import { getRegisterInfo } from "./register.js";
-import type { TerminalCapabilityStatus } from "@vcpdeck/shared";
+import type {
+	TailnetSnapshot,
+	TerminalCapabilityStatus,
+} from "@vcpdeck/shared";
 
 let root = "";
 
@@ -149,6 +152,7 @@ describe("getRegisterInfo", () => {
 			"file.write",
 			"frp",
 			"acp",
+			"tailnet.manage",
 		]);
 		const json = JSON.stringify(info);
 		expect(json).not.toContain("C:\\");
@@ -250,10 +254,69 @@ describe("getRegisterInfo", () => {
 			expect(info.capabilityDetails).not.toHaveProperty("frp");
 		});
 
+		it("verify-only 不声明 Tailnet 能力或摘要", () => {
+			const info = getRegisterInfo(
+				undefined,
+				undefined,
+				{
+					...process.env,
+					VCPDECK_MIGRATION_VERIFY_ONLY: "1",
+				},
+				undefined,
+				{
+					installed: "yes",
+					version: "1.104.5",
+					service: "running",
+					backend: "running",
+					nodeName: null,
+					ipv4: [],
+					ipv6: [],
+					observedAt: "2026-11-11T00:00:00.000Z",
+					errorCode: null,
+				},
+			);
+			expect(info.capabilities).toEqual([]);
+			expect(info.capabilityDetails).not.toHaveProperty("tailnet");
+			expect(info.tailnet).toBeUndefined();
+		});
+
 		it("稳态（无 verify-only）照常发布 operational 能力", () => {
 			const info = getRegisterInfo( undefined,a2Security);
 			expect(info.capabilities).toContain("exec");
 			expect(info.capabilityDetails).toHaveProperty("frp");
+		});
+	});
+
+	describe("Tailnet 能力与摘要（ADR-0062）", () => {
+		const summary: TailnetSnapshot = {
+			installed: "yes",
+			version: "1.104.5",
+			service: "running",
+			backend: "running",
+			nodeName: "node.example.ts.net",
+			ipv4: ["100.64.0.1"],
+			ipv6: [],
+			observedAt: "2026-11-11T00:00:00.000Z",
+			errorCode: null,
+		};
+
+		it("声明 tailnet.manage 能力与协议 v1，并原样透传只读摘要", () => {
+			const info = getRegisterInfo(
+				undefined,
+				undefined,
+				process.env,
+				undefined,
+				summary,
+			);
+			expect(info.capabilities).toContain("tailnet.manage");
+			expect(info.capabilityDetails?.tailnet).toEqual({ protocolVersion: 1 });
+			expect(info.tailnet).toEqual(summary);
+		});
+
+		it("未提供摘要时不伪造 tailnet 字段（旧 Client 语义）", () => {
+			const info = getRegisterInfo();
+			expect(info.tailnet).toBeUndefined();
+			expect(info.capabilityDetails?.tailnet).toEqual({ protocolVersion: 1 });
 		});
 	});
 

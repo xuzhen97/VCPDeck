@@ -18,6 +18,7 @@ model Client {
   capabilities      String    @default("[]")
   capabilityDetails String    @default("{}")
   annotations       String    @default("{}")
+  tailnetSnapshot   String?   // 最近一次严格解析的 Tailnet 只读观测（ADR-0062），JSON；null 表示从未报告
   disks             String    @default("[]")
   online            Boolean   @default(false)
   lastHeartbeatAt   DateTime?
@@ -706,4 +707,28 @@ model TaskArtifact {
   createdAt DateTime @default(now())
 
   @@index([taskId, createdAt])
+}
+
+/// Tailnet 凭据密文与使用状态（ADR-0062）。authKey 只以 AES-256-GCM 密文保存，
+/// 明文仅存在于 Server 短时解密窗口；reservedJobId 唯一约束保证同一凭据同时只被一个 Job 预留。
+model TailnetCredential {
+  id                String    @id
+  name              String
+  ciphertext        String // base64(iv || tag || ciphertext)
+  keyVersion        Int       @default(1)
+  declaredReuse     String // single | reusable | unknown，由 Shared parser 校验
+  declaredExpiresAt DateTime?
+  use               String    @default("available") // available | reserved | spent | uncertain
+  reservedJobId     String?   @unique
+  issuedAt          DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+/// 每台 Client 当前唯一在途的 tailnet.manage 管理操作占位（ADR-0062）。
+/// 只用于防止同机并发管理操作；Job 仍是生命周期权威，本表不另立状态机。
+model TailnetClientOperation {
+  clientId  String   @id
+  jobId     String   @unique
+  createdAt DateTime @default(now())
 }

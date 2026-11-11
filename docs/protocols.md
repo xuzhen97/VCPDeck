@@ -54,6 +54,7 @@
 | `/api/storage` | 签名能力、文件流、Provider 配置和 Storage Share 管理 |
 | `/api/aliyundrive` | 阿里云盘配置、OAuth 和授权验证 |
 | `/api/frp` | FRPS 实例和映射 |
+| `/api/tailnet` | Tailnet 凭据元信息、机器观测与 Typed Job 管理 |
 | `/api/agents` | 逻辑 agent 到 Client 的受控 placement |
 | `/api/a2a` | A2A v1.0 JSON-RPC 入口与 Agent Card |
 | `/api/tasks` | Task 审计事件链与偏差检查（只读） |
@@ -221,6 +222,50 @@ A2A 是面向“agent 调 agent”的任务契约，不是 Job 控制面，也�
 
 当前 `input-required` 只由 ACP permission 请求触发；直接向这类 Task 追加普通文本会返回 `-32000`，必须先回答 permission。ACP 的自由文本追问没有独立的 A2A 状态：一轮 prompt 正常结束会收敛为 `completed`；需要继续时由调用方新建 Task，可用同一 `contextId` 分组。这是当前实现边界，不把 `completed` 伪造为可重开的 Task。
 
+### 2.12 Tailnet 管理协议
+
+Tailnet 是第三方操作系统私网，不是 VCPDeck 的新数据通道。VCPDeck 只管理官方 Tailscale 的凭据、安装/入网 Job 与最小观测；Server 派发、Files、Storage、Terminal、FRP 仍走原有链路（[ADR-0062](./adr/0062-tailnet-job-network-under-existing-architecture.md)）。
+
+REST 端点均要求 Cookie/Bearer，**不得标为 `@Public()`**：
+
+| 端点 | 语义 |
+| --- | --- |
+| `POST /api/tailnet/keys` | 导入凭据；body 为 `{ name, authKey, declaredReuse, declaredExpiresAt }`；返回凭据元信息，绝不回显正文 |
+| `GET /api/tailnet/keys?page=&pageSize=` | 分页返回 `PaginatedResult<TailnetKeyInfo>`；pageSize 夹取 1–100 |
+| `DELETE /api/tailnet/keys/:id` | 只删除本地凭据记录；被 Job 预留时返回 `TAILNET_KEY_BUSY`（409） |
+| `GET /api/tailnet/clients/:clientId` | 返回 `TailnetStatus`；机器不存在返回 404，**不是**“离线” |
+| `POST /api/tailnet/clients/:clientId/jobs` | body 为 `{ action: "inspect" }` 或 `{ action: "ensure", credentialId, installIfMissing }`；返回既有 `JobCreateResult` |
+
+凭据语义：
+
+- `declaredReuse` 为操作者声明，取值 `single`、`reusable` 或 `unknown`；导入时原样保存，不根据其它证据推断。
+- `use` 是 Server 状态，取值 `available`、`reserved`、`spent` 或 `uncertain`。`single` 与 `unknown` 在正文交付后不再自动回到 `available`；`reusable` 在任务完成（`done`）后才释放，密钥已交付后发生错误、取消或结果不明一律落 `uncertain`。
+- 删除本地记录不调用 Tailscale 侧撤销，也不证明设备已退网；撤销必须在 Tailscale 管理端完成。
+- Server 不提前验证 Auth key 在提供方的有效性、设备上限或可复用性；这些只能由 `ensure` 的真实结果和操作者声明共同说明。
+
+管理操作使用 `JobType.TAILNET_MANAGE = "tailnet.manage"`。持久化 payload 只引用凭据 ID，**严禁内联 `authKey`**；解析器按 action 白名单拒绝额外字段。结果只含阶段与摘要：
+
+```ts
+{ stage: "inspected" | "installed" | "joined" | "existing-login" | "awaiting-approval" | "interrupted", snapshot: TailnetSnapshot }
+```
+
+同一机器同时只允许一个 Tailnet 管理 Job，同一凭据同时只允许一个 Job 预留；并发冲突分别返回 `TAILNET_OPERATION_BUSY` 与 `TAILNET_KEY_BUSY`（409）。取消、超时、断线或安装后登录失败都必须如实报告阶段，**不会回滚**已安装软件、已生效登录或已有状态。
+
+凭据正文经 `/client` 的短时单播通道交付：
+
+| 事件 | 方向 | 载荷与约束 |
+| --- | --- | --- |
+| `tailnet:secret-request` | Client → Server | `{ protocolVersion: 1, jobId, requestId }`；只有当前注册 socket、Job 归属与能力都匹配时才处理 |
+| `tailnet:secret-response` | Server → Client | `{ …, expiresAt, authKey }`；30 秒 TTL、`requestId` 单次使用，只发往请求对应的 socket |
+
+正文不得进入 Job payload/result、日志、SSE、注解或普通错误文本。Client 必须再次校验 `jobId`、`requestId` 与过期时间，并在受限临时文件中使用后清理；清理失败返回 `TAILNET_SECRET_CLEANUP_FAILED`，不得虚报成功。
+
+`TailnetSnapshot` 只含 `installed`、`version`、`service`、`backend`、`nodeName`、`ipv4`、`ipv6`、`observedAt` 与固定 `errorCode`；**绝不含 Peer 列表或原始诊断输出**。`observedAt` 是 Client 本地观测时间，离线时只能表示历史；`backend=running` 只说明 Tailscale 自报已运行，不证明业务端口可达、策略放行或物理直连。未知状态收敛为 `unknown`，不猜测为“未入网”。
+
+Client 能力名为 `tailnet.manage`，并声明 `capabilityDetails.tailnet = { protocolVersion: 1 }`；旧 Client 缺该能力时按“不支持”处理，不降级为普通 `exec` 或明文传 key。`register` 可携带可选的 `tailnet` 摘要，管理 Job 的结果也携带同一 `snapshot`；Server 严格解析后保存最近一次观测，缺省表示旧 Client 未报告，不代表机器未入网。
+
+Tailnet 观测走独立的 `GET /api/tailnet/clients/:clientId`；原有 `GET /api/clients` 仍只返回在线机器数组，不为 Tailnet 改成对象或混入远端可达性探测。
+
 ## 3. `/client` Socket.IO 协议
 
 Client 使用 `auth.psk` 建立连接。注册成功后，Server 将 Client room 标识绑定到 `clientId`。
@@ -256,6 +301,10 @@ Client 当前每 5 秒发送心跳。Server 每 5 秒扫描一次在线 Client�
 | `task:command` | Server → Client | A2A Task 的受控 ACP 命令：`start/prompt/cancel/permission/close` |
 | `task:command-result` | Client → Server | 按 `requestId` 回报命令结果；可带 `stopReason` |
 | `task:event` | Client → Server | ACP 归一化事件（message/tool/plan/permission/usage/session） |
+| `tailnet:secret-request` | Client → Server | Tailnet 凭据短时请求（`jobId`、单次 `requestId`、协议版本） |
+| `tailnet:secret-response` | Server → Client | 仅向当前注册 socket 单播的凭据响应；30 秒 TTL，正文不落库 |
+
+`register` 可选的顶层 `tailnet` 摘要与 `capabilityDetails.tailnet` 同样按 Shared 严格解析；旧 Server 不认识这些新增字段，因此**必须先升级 Server 再升级 Client**（见 [`compatibility.md`](./compatibility.md) §5.2）。
 
 所有跨信任边界 payload 长期必须先通过 Shared parse 函数或等价严格校验，再进入领域服务。Terminal 当前已采用严格 parser；exec 和文件 Job 的双端校验仍有本文件所列实现偏移。
 

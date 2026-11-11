@@ -145,6 +145,16 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 - **根密钥缺失、损坏或不匹配**：生成与换代一律以 `GIT_SSH_KEY_UNAVAILABLE` 拒绝，且**不会**自动重建（重建会让既有私钥永久不可读）。只能从备份恢复与该数据库**配对**的根密钥文件；若两者已同时丢失，需在 Git 服务撤销旧公钥、轮换新密钥并重新分发。
 - **取消某台机器**：从选机列表移除。这只清理该机本地受管副本；要真正阻断访问，必须在 Git 服务删除旧公钥并轮换。
 
+### 5.2 Tailnet 凭据与入网运维
+
+- **启用加密存储**：启动 Server 前设置 `VCPDECK_TAILNET_KEY_FILE`，指向一个仅运行账户可读、内容为 32 字节随机值的 base64 文件。Server **不会自动生成**该根密钥，也不复用它 Git SSH 根密钥；缺失、长度不符或解密失败时凭据接口返回 `TAILNET_KEY_UNAVAILABLE`（fail closed），其余功能不受影响。
+- **导入**：在「设置 → Tailnet 凭据」导入，或使用 `vcpdeck tailnet keys import --name <名称> --key-stdin` 从 stdin 读入，避免明文进入 argv/Shell 历史。机器详情中的 `Tailnet` 标签页只负责选择凭据并发起操作，不再提供导入与删除入口。导入时填写的 `single`/`reusable`/`unknown` 与过期时间只是**操作者声明**，Server 不会向 Tailscale 预验证有效性、次数或设备上限。
+- **使用与状态**：`available` 可被一个 Job 原子预留；`reserved` 期间删除返回 409；正文只向当前注册 socket 单次交付 30 秒有效。`single` 与 `unknown` 交付后不自动回到可用；`reusable` 也只有在任务完成（`done`）后才释放；密钥已交付后发生错误、取消或结果不明一律落 `uncertain`，需人工在 Tailscale 管理端核实后按需重新导入。
+- **删除**：`vcpdeck tailnet keys delete <id>` 或「设置 → Tailnet 凭据」中删除，只移除 VCPDeck 本地记录，**不会**在 Tailscale 撤销 key，也不证明设备已退网。真正的阻断必须在 Tailscale 管理端撤销 key/移除设备并复核 ACL。
+- **安装与入网**：面板上的安装/入网必须由操作者显式触发，刷新或打开页面不会安装。自动安装只对 Windows x64 管理员、Ubuntu 22.04/24.04 与 Debian 12/13 x64 root+systemd 声明支持；使用固定版本 `1.104.5` 的官方 HTTPS 构件并校验 SHA-256（Windows 另验 Authenticode）。已有 binary、unit 或 state 时返回 `TAILNET_EXISTING_CONFIG`，不覆盖、不升级、不卸载；取消、超时或安装后登录失败不会回滚已安装软件或已生效登录。Windows 安装返回 3010 时报告 `TAILNET_INSTALL_REBOOT_REQUIRED`，重启后再发起入网。
+- **观测**：`backend=running` 只表示 Tailscale 自报运行，不证明业务服务可访问、ACL 已放行或链路为 direct。离线时面板只能展示历史摘要；在线摘要超过 120 秒会提示“观测可能过期”。不要依据摘要把机器从“离线”或“不支持”状态改为可信。
+- **临时文件清理失败**：Job 会报 `TAILNET_SECRET_CLEANUP_FAILED`，不要声称已清理；先隔离该机，检查 Windows `%LOCALAPPDATA%\VCPDeck\tailnet-secrets` 或 POSIX `~/.vcpdeck/tailnet-secrets` 下残留子目录并手工删除，再轮换/撤销对应 key。
+
 ## 6. 备份
 
 备份集至少包括：
@@ -156,6 +166,7 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 5. Git SSH 根密钥文件（缺省 `<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`，或显式 `VCPDECK_GIT_SSH_KEY_FILE`）——必须与 SQLite **同批次**备份且分开存放，只恢复数据库无法解密既有私钥；
 6. Launcher state/current/apps（至少保留当前和上一版本）；
 7. FRPS 独立配置；
+8. Tailnet 根密钥文件（显式 `VCPDECK_TAILNET_KEY_FILE`）——必须与 SQLite **同批次**备份且分开存放；它不会自动生成，缺失时无法解密已导入的 Tailnet 凭据。
 
 推荐一致性顺序：
 
@@ -173,7 +184,7 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 1. 停止 Server 与 Launcher 自动拉起；
 2. 保留当前故障数据副本；
 3. 恢复与应用版本匹配的 SQLite、Storage、Release；
-4. 恢复配置和文件权限；
+4. 恢复配置、文件权限与 Tailnet 根密钥文件（如启用）；根密钥必须与数据库匹配，否则只能重新导入凭据；
 5. 启动对应 Server 版本；
 6. 检查 health/status、登录、Client 列表和 Storage；
 7. 启动 Client，观察重连对账；
@@ -292,6 +303,19 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 - 重连后观察 status report 对账；
 - 若 Client 进程已丢失本地任务，按安全错误结束，不伪造成功；
 - 取消请求可能需要重连后才能应用。
+
+### Tailnet 安装、入网或凭据失败
+
+- `TAILNET_CLI_MISSING`：目标机未安装且本次 `installIfMissing=false`；确认平台与权限后显式勾选安装，或先手工安装官方 Tailscale。
+- `TAILNET_UNSUPPORTED_PLATFORM`：不在 Windows x64 管理员、Ubuntu 22.04/24.04、Debian 12/13 x64 root+systemd 矩阵内。只读观测仍可用；不要用普通 `exec` 绕过自动安装限制。
+- `TAILNET_EXISTING_CONFIG`：发现已有 binary、unit、state 或已有身份。先人工核对现状；若确需接管，应由操作者按 Tailscale 官方流程处理，不能删除 state 后重试。
+- `TAILNET_OPERATION_BUSY` / `TAILNET_KEY_BUSY`：同一机器已有管理 Job，或该凭据已被其它 Job 预留。等待现有 Job 终态；不要手工清 `reservedJobId`。
+- `TAILNET_SECRET_TIMEOUT` / `TAILNET_SECRET_DENIED`：Client 未在窗口内拿到正文或当前 socket/能力不匹配；检查客户端版本、注册状态与 Job 归属，重新发起；不要改走明文参数。
+- `TAILNET_SECRET_EXPIRED` / `TAILNET_SECRET_MISMATCH`：正文已过期或与 `jobId`/`requestId` 不匹配，已被消费方拒绝；重新发起 Job，不复用旧响应。
+- `TAILNET_KEY_UNAVAILABLE`：根密钥未配置、不可读或无法解密；恢复配对根密钥后重启 Server。
+- `TAILNET_JOIN_FAILED` / `TAILNET_PROBE_TIMEOUT` / `TAILNET_CLI_FAILED`：查看安全错误码与阶段，先确认 `tailscaled` 服务、系统时间和出网；不要把原始 stdout/stderr 或 key 贴进工单。
+- `TAILNET_INSTALL_FAILED` / `TAILNET_INSTALL_REBOOT_REQUIRED`：安装失败或需重启；保留 Job 记录和系统日志，按固定版本材料重新评估，不降级为手工执行用户提供的二进制。
+- 取消只终止后续步骤，**不会**自动卸载、退网或撤销已发生的更改。
 
 ### 远程文件 Job 结果不明
 
@@ -421,6 +445,10 @@ File 到期对象仍由现有每 10 分钟任务处理。Release 清理不负责
 ### 11.1 Git SSH 私钥泄漏/失陷
 
 任一持有共享 PSK 的机器失陷、PSK 泄漏或私钥疑似泄漏，一律按**整套 Git 私钥失陷**处置：① 在 Git 服务删除该公钥；② 控制台生成新密钥并人工登记新公钥；③ 只向仍受信的机器重新分发；④ 安排维护窗口轮换 PSK；⑤ 核对 Job、TerminalAudit 与 Git 服务访问记录。**本地清理确认不能替代以上步骤**。
+
+### 11.2 Tailnet Auth key 或设备疑似失陷
+
+发现未知设备、疑似 key 泄漏、共享 PSK 被冒用或 Client 主机失陷时：① 在 Tailscale 管理端立即撤销相关 Auth key、移除未知设备并复核 ACL/路由；② 若共享 PSK 可能已泄漏，按维护窗口轮换并重连所有 Client；③ 在 VCPDeck 删除对应凭据记录仅作为清理，**不能替代**提供方侧撤销；④ 检查 Tailnet 管理 Job、`tailnet:secret-request/response` 审计与临时目录残留；⑤ 对曾落盘的受限临时凭据目录执行手工清理并确认权限；⑥ 复核该机上的业务访问日志与其它凭据。
 
 发生安全或数据事件时：
 

@@ -467,3 +467,57 @@ describe("注册时的 RDS 存活上报", () => {
 		).toThrow();
 	});
 });
+
+describe("注册时的 Tailnet 摘要（ADR-0062）", () => {
+	const base = {
+		clientId: "c1",
+		hostname: "host",
+		os: "win32",
+		cpuModel: "cpu",
+		totalMemMB: 1024,
+		clientVersion: "0.24.0",
+		capabilities: ["exec", "tailnet.manage"],
+	};
+	const snapshot = {
+		installed: "yes",
+		version: "1.104.5",
+		service: "running",
+		backend: "running",
+		nodeName: "node.example.ts.net",
+		ipv4: ["100.64.0.1"],
+		ipv6: [],
+		observedAt: "2026-11-11T00:00:00.000Z",
+		errorCode: null,
+	};
+
+	it("缺省表示旧 Client 未上报，不推断能力", () => {
+		const parsed = parseMachineRegister(base);
+		expect(parsed.tailnet).toBeUndefined();
+		expect(parsed.capabilityDetails?.tailnet).toBeUndefined();
+	});
+
+	it("解析版本化能力与完整摘要", () => {
+		const parsed = parseMachineRegister({
+			...base,
+			capabilityDetails: { tailnet: { protocolVersion: 1 } },
+			tailnet: snapshot,
+		});
+		expect(parsed.capabilityDetails?.tailnet).toEqual({ protocolVersion: 1 });
+		expect(parsed.tailnet?.backend).toBe("running");
+	});
+
+	it("拒绝夹带 Peer 的摘要与未知能力字段", () => {
+		expect(() =>
+			parseMachineRegister({
+				...base,
+				tailnet: { ...snapshot, peer: { HostName: "must-not-upload" } },
+			}),
+		).toThrow();
+		expect(() =>
+			parseMachineRegister({
+				...base,
+				capabilityDetails: { tailnet: { protocolVersion: 1, installed: true } },
+			}),
+		).toThrow();
+	});
+});

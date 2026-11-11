@@ -10,6 +10,7 @@ import {
 	handleFrpList,
 	handleFrpReconcile,
 } from "./frpc-daemon.js";
+import { handleTailnetJob } from "./tailnet/handler.js";
 
 export function dispatch(job: JobDispatch, socket: Socket) {
 	// 优雅停机守卫：更新期间拒绝新任务（服务端不再派活，双重保险）
@@ -108,6 +109,9 @@ export function dispatch(job: JobDispatch, socket: Socket) {
 				{ ...(job as any).payload, _jobId: job.jobId },
 				socket,
 			);
-		default:			throw new Error(`Unknown job type: ${(job as any).type}`);
+		case "tailnet.manage":
+			return handleTailnetJob(job, socket);
+		default:
+			throw new Error(`Unknown job type: ${(job as any).type}`);
 	}
 }

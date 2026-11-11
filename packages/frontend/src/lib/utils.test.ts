@@ -33,6 +33,7 @@ describe("MACHINE_TABS", () => {
 			"execute",
 			"files",
 			"frp",
+			"tailnet",
 			"jobs",
 			"terminal",
 			"features",

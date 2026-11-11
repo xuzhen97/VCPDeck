@@ -1,6 +1,6 @@
 # VCPDeck 前端、CLI 与 Skill 对接指南
 
-> 更新时间：2026-08-18
+> 更新时间：2026-11-11
 > 适用范围：当前 `main` 分支
 > 事实来源：当前代码实现优先于历史设计文档
 
@@ -28,6 +28,7 @@
 | 功能目录 | 已实现 | 不涉及 | 已实现（Tab + 全局页，无验证入口） | 已实现 list/get/add/verify/update | 已实现「功能复用」章节 | 验证由调用方执行，Server 只记账；`active` 只能由成功验证产生 |
 | Job WebSocket 实时输出 | 部分实现 | 已实现 | 未实现 | 未实现 | 未实现 | 暂不作为对接方案 |
 | Release 上传与自更新 | 已实现 | 已实现更新配合 | 已实现审计页 | 已实现双平台上传 | CLI 总 Skill 中已实现该功能章节 | 上传后 Server 先自更新，再逐台更新在线 Client |
+| Tailnet 凭据与机器观测 | 已实现 | 已实现 | 已实现（设置页全局凭据 + 机器工作区） | 已实现 `tailnet` 命令组 | 未实现 Tailnet 章节 | 需显式导入 Auth key；自动安装矩阵有限，真机安装/入网未验收，见 §7.9 |
 | `agent.run` | 仅有类型占位 | 未实现 | 未实现 | 未实现 | 未实现 | 不得调用 |
 
 当前 Frontend 已完成登录、Dashboard、在线机器工作区、command/script、Job、受控文件浏览、FRP、Storage/阿里云盘、功能目录、发布审计和账号设置。VCPDeck Skill 是 CLI 的统一能力入口；机器、Job、文件、Terminal、FRP 映射、Storage 状态、功能目录与 Release 等章节均以 CLI 当前 help/源码为准。
@@ -850,6 +851,79 @@ Client 先写临时文件再 rename。父目录必须已存在。该操作会替
 
 ---
 
+### 7.9 Tailnet 管理（ADR-0062）
+
+Tailnet 只作为一个可选的机器网络接入手段：VCPDeck 不把 Job、Files、Storage、Terminal 或 FRP 改成经 Tailnet 传输，也不自动修改防火墙、DNS、路由、Exit Node 或子网路由。控制面仍必须使用 HTTPS/WSS。
+
+REST（均需 Cookie/Bearer）：
+
+| 端点 | 用途 |
+| --- | --- |
+| `POST /api/tailnet/keys` | 导入 `{ name, authKey, declaredReuse, declaredExpiresAt }`，返回安全元信息 |
+| `GET /api/tailnet/keys?page=&pageSize=` | 分页列出凭据元信息 |
+| `DELETE /api/tailnet/keys/:id` | 只删本地记录；预留中返回 409 |
+| `GET /api/tailnet/clients/:clientId` | 专用 `TailnetStatus`；404 表示机器不存在，不是离线 |
+| `POST /api/tailnet/clients/:clientId/jobs` | 创建 `tailnet.manage` Job：`{action:"inspect"}` 或 `{action:"ensure",credentialId,installIfMissing}` |
+
+SDK：
+
+```ts
+const status = await client.tailnet.status(clientId);
+const imported = await client.tailnet.importKey({
+  name: "office-pc",
+  authKey,
+  declaredReuse: "unknown",
+  declaredExpiresAt: null,
+});
+const created = await client.tailnet.manage(clientId, { action: "inspect" });
+const job = await client.jobs.wait(created.result.jobId);
+```
+
+CLI：
+
+```bash
+vcpdeck tailnet keys import --name <name> --key-stdin [--reuse single|reusable|unknown] [--expires-at <ISO>] [--json]
+vcpdeck tailnet keys list [--json]
+vcpdeck tailnet keys delete <id>
+vcpdeck tailnet status <clientId> [--json]
+vcpdeck tailnet inspect <clientId> [--wait] [--json]
+vcpdeck tailnet ensure <clientId> --key-id <id> [--install-if-missing] [--wait] [--json]
+```
+
+Auth key 只从 stdin 读入，**不接受 `--auth-key` 明文参数**。`--wait` 只轮询既有 Job，不会自动重试或自动安装；`awaiting-approval` 表示需要在 Tailscale 管理端完成设备批准。
+
+Frontend 的 `/settings/tailnet` 是全局凭据维护入口，与 Token、Git 密钥等设置项并列；机器工作区的 `Tailnet` 标签页只选择已有凭据并发起 `inspect`/`ensure`，不在机器页重复导入或删除。凭据属于 Server 全局资产，不绑定单台机器。
+
+Job result 的 `stage` 取值为 `inspected`、`installed`、`joined`、`existing-login`、`awaiting-approval`、`interrupted`。取消、超时或断线不会撤销已安装软件、已生效登录或其他机器的变更；`interrupted` 必须结合摘要人工核对。
+
+**用普通 exec Job 从 Tailnet 内访问业务服务**：这只是现有命令能力的用法，不是新的数据面。先确认服务监听地址/端口、Tailnet ACL 与目标机防火墙，再只向指定 Tailnet 地址发起连接；证书验证必须保留，禁止 `-k`/`CERT_NONE`，也不回退到公网地址。
+
+```python
+import http.client
+import socket
+import ssl
+
+HOST = "<service-hostname>"     # 证书中的 DNS 名，用于 SNI 和主机名校验
+IP = "<100.x.y.z>"             # 目标机 Tailnet 地址，不是公网 IP
+PORT = 443
+CA = "<ca-bundle-path>"         # 若使用系统信任库，可改回默认 context
+
+ctx = ssl.create_default_context(cafile=CA)
+sock = socket.create_connection((IP, PORT), timeout=10)
+tls = ctx.wrap_socket(sock, server_hostname=HOST)
+conn = http.client.HTTPSConnection(HOST, PORT, context=ctx)
+conn.sock = tls
+conn.request("GET", "/<path>", headers={"Authorization": "Bearer <token>"})
+resp = conn.getresponse()
+print(resp.status, resp.reason)
+```
+
+`server_hostname=HOST` 同时完成 SNI 与证书主机名校验；连接的目标是 `IP`。若服务证书只签给 IP，则 `HOST` 应使用该 IP 并确保 SAN 匹配，不要关闭校验。示例中的域名、地址、CA 与 Token 都必须替换为占位环境值，不得写入仓库或普通日志。
+
+实现：`packages/shared/src/tailnet.ts`、`packages/server/src/tailnet/`、`packages/client/src/tailnet/`、`packages/sdk/src/tailnet.ts`、`packages/cli/src/tailnet-command.ts`、`packages/frontend/src/pages/tailnet-credentials-panel.tsx`、`packages/frontend/src/pages/machine-tailnet-panel.tsx`。
+
+---
+
 ## 8. Storage 与文件传输
 
 ### 8.1 申请上传 URL
@@ -1406,6 +1480,11 @@ Token 在 Frontend `/settings/tokens` 创建并与 Identity 关联；CLI 与 SDK
 | `SIZE_EXCEEDED` | 建议 file.export |
 | `SHA256_MISMATCH` | 重新准备来源并重试 import |
 | 预签名 URL 403 | 重新申请 URL，不复用过期签名 |
+| `TAILNET_KEY_UNAVAILABLE` | 提示运维恢复 `VCPDECK_TAILNET_KEY_FILE` 配对根密钥，不重试导入 |
+| `TAILNET_OPERATION_BUSY` / `TAILNET_KEY_BUSY` | 等待同机管理 Job 或该凭据的现有 Job 结束，不手工清预留 |
+| `TAILNET_EXISTING_CONFIG` | 停止自动流程，人工核对既有安装/身份；不删 state 后重试 |
+| `TAILNET_SECRET_TIMEOUT` / `DENIED` / `EXPIRED` / `MISMATCH` | 重新发起 Job；不把 key 改走明文参数或复用旧响应 |
+| Tailnet `interrupted` | 展示阶段并人工核对，不自动重试，不声称已回滚 |
 | 网络/5xx | 5 秒退避；超过调用端上限后返回 Job ID供后续查询 |
 
 ---
@@ -1430,6 +1509,8 @@ Token 在 Frontend `/settings/tokens` 创建并与 Identity 关联；CLI 与 SDK
 14. **无业务授权与数据隔离**：普通身份可调用全部远程操作接口，Job 可跨身份查询；
 15. **认证业务错误映射不正确**：登录和个人资料更新的预期 401/409 可能返回 500；
 16. **Client PSK 有固定开发默认值**：生产或共享网络环境必须显式配置唯一 PSK。
+17. **Tailnet 自动安装/入网尚未真机验收**：矩阵仅覆盖 Windows 10/11 与 Server 2016+ x64（管理员）、Ubuntu 22.04/24.04、Debian 12/13 x64（root+systemd）；`backend=running` 和摘要地址不等于业务可达或物理直连，离线摘要只能视为历史。
+18. **Tailnet 凭据声明不可在导入时验证**：`single`/`reusable`/`unknown` 与过期时间只是操作者声明；删除本地记录不撤销提供方 key。共享 PSK 下，能注册为同一 `clientId` 的连接可接管管理 Job 并收到一次性 Auth key，不能把 socket 归属当作每机身份。
 
 后续扩展优先级建议：先修安全和数据正确性（路径、凭证脱敏、import、FRP 单 Client 多实例/恢复/delete），再补统一错误模型和分页，最后根据实际需求增加 `/app` 实时事件与输出 spool。
 

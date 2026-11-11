@@ -29,6 +29,7 @@ export const MACHINE_TABS = [
 	["execute", "执行"],
 	["files", "文件"],
 	["frp", "映射"],
+	["tailnet", "Tailnet"],
 	["jobs", "任务记录"],
 	["terminal", "终端"],
 	["features", "功能"],

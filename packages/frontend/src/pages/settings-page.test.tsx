@@ -33,6 +33,17 @@ function renderSettings(
 		create: vi.fn().mockResolvedValue(token),
 		revoke: vi.fn().mockResolvedValue({ ok: true }),
 	};
+	const tailnet = {
+		listKeys: vi.fn().mockResolvedValue({
+			data: [],
+			total: 0,
+			page: 1,
+			pageSize: 20,
+			totalPages: 0,
+		}),
+		importKey: vi.fn(),
+		deleteKey: vi.fn().mockResolvedValue({ deleted: true }),
+	};
 	const client = {
 		auth: { me: async () => identity(isAdmin), updateMe: vi.fn(), tokens },
 		identities: {
@@ -72,6 +83,7 @@ function renderSettings(
 				reason: "not_configured",
 			}),
 		},
+		tailnet,
 		pi: {
 			profiles: {
 				list: vi.fn().mockResolvedValue({
@@ -143,7 +155,7 @@ function renderSettings(
 			</SdkProvider>
 		</MemoryRouter>,
 	);
-	return { tokens };
+	return { tokens, tailnet };
 }
 
 describe("SettingsPage", () => {
@@ -176,6 +188,18 @@ describe("SettingsPage", () => {
 		expect(tokens.revoke).not.toHaveBeenCalled();
 		await userEvent.click(screen.getByRole("button", { name: "确认撤销" }));
 		expect(tokens.revoke).toHaveBeenCalledWith("t1");
+	});
+
+	it("renders the global Tailnet credential panel as a settings section", async () => {
+		const { tailnet } = renderSettings(true, "/settings/tailnet");
+
+		expect(
+			await screen.findByRole("heading", { name: "Tailnet 凭据" }),
+		).toBeVisible();
+		expect(tailnet.listKeys).toHaveBeenCalledWith(
+			{ page: 1, pageSize: 20 },
+			expect.anything(),
+		);
 	});
 
 	it("旧 Pi 设置地址落入既有未知段兜底，不再跳转 Agent", async () => {
