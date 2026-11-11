@@ -1422,12 +1422,17 @@ const PM2_NAME_PATTERN = /^[A-Za-z0-9._@-]+$/;
  * 优先 VCPDeck 私有安装；否则找用户 nvm 或系统全局安装（旧 Linux 安装常用
  * `~/.nvm` 全局 PM2）。不用 `command -v pm2` 的 shim：其 shebang 依赖非交互
  * PATH 里的 node，而迁移流程不控制该 PATH。
+ * 私有 Node 只用固定层级 glob，避免依赖 GNU find 的 `-executable`（该判定在
+ * MSYS/非 Linux 环境与 Linux 不一致，不能作为迁移前置条件）。
  */
 const PM2_RESOLVE_SNIPPET =
 	'node=""; pm2=""; ' +
 	'if [ -f "$HOME/.vcpdeck/tools/pm2/node_modules/pm2/bin/pm2" ]; then ' +
 	'pm2="$HOME/.vcpdeck/tools/pm2/node_modules/pm2/bin/pm2"; ' +
-	'node="$(find "$HOME/.vcpdeck/runtime/node" -type f -path "*/bin/node" -executable -print -quit 2>/dev/null)"; ' +
+	'for n in "$HOME/.vcpdeck/runtime/node"/*/bin/node "$HOME/.vcpdeck/runtime/node"/bin/node; do ' +
+	'[ -x "$n" ] || continue; ' +
+	'node="$n"; break; ' +
+	'done; ' +
 	'else ' +
 	'for c in "$HOME/.nvm/versions/node"/*/lib/node_modules/pm2/bin/pm2 /usr/local/lib/node_modules/pm2/bin/pm2 /usr/lib/node_modules/pm2/bin/pm2; do ' +
 	'[ -f "$c" ] || continue; ' +
