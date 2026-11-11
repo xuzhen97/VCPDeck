@@ -37,6 +37,8 @@ describe.skipIf(process.platform !== "win32")(
 				await rm(src, { recursive: true, force: true });
 				await rm(dest, { recursive: true, force: true });
 			}
-		});
+			// PowerShell 在并行跑全量测试时启动和压缩都可能超过默认 5 秒，放宽单测超时，
+			// 不改变解压行为本身；失败仍会真实失败。
+		}, 30_000);
 	},
 );
