@@ -103,8 +103,10 @@ test("buildUnitContent 的 [Service] 段与 ADR-0023 精确一致", () => {
 test("buildSudoersContent 精确匹配 Q2 root 等价授权", () => {
 	assert.equal(
 		buildSudoersContent().trim(),
-		`Defaults:${ACCOUNT_NAME} !requiretty\n${ACCOUNT_NAME} ALL=(ALL:ALL) NOPASSWD: ALL`,
+		`${ACCOUNT_NAME} ALL=(ALL:ALL) NOPASSWD: ALL`,
 	);
+	// sudo 1.9.x 已移除 requiretty，写入会让 visudo 拒绝整个文件（Ubuntu 22.04+ 必现）。
+	assert.ok(!buildSudoersContent().includes("requiretty"));
 });
 
 test("真实 adapter 的 sudoers 临时文件与目标目录同文件系统", () => {

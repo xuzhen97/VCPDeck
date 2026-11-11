@@ -124,9 +124,17 @@ UMask=0027
 NoNewPrivileges=false`;
 }
 
-/** 生成 sudoers 授权（Q2 root 等价）。 */
+/**
+ * 生成 sudoers 授权（Q2 root 等价）。
+ *
+ * 不写 `Defaults:<user> !requiretty`：较新的 sudo（1.9.x，Ubuntu 22.04+ 实测）
+ * 已移除 requiretty 选项，visudo 会以 `unknown setting: 'requiretty'` 拒绝整个
+ * 文件，使安装器在 sudoers 阶段以 LINUX_ACCOUNT_CONFLICT 失败。服务运行在
+ * systemd 下本就没有 tty，支持矩阵内的发行版默认 requiretty 关闭，真正生效的
+ * 是下面这行 NOPASSWD。
+ */
 function buildSudoersContent() {
-	return `Defaults:${ACCOUNT_NAME} !requiretty\n${ACCOUNT_NAME} ALL=(ALL:ALL) NOPASSWD: ALL\n`;
+	return `${ACCOUNT_NAME} ALL=(ALL:ALL) NOPASSWD: ALL\n`;
 }
 
 /** 生成敏感启动环境文件内容（仅固定 7 键；配置了宿主启动命令时为 8 键）。

@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- **Linux 安装器不再写入已被 sudo 移除的 `requiretty`，Ubuntu 22.04+ 不再卡在 sudoers 阶段**：`buildSudoersContent` 原来输出 `Defaults:vcpdeck !requiretty` 加 `vcpdeck ALL=(ALL:ALL) NOPASSWD: ALL`，而较新的 sudo（1.9.x，Ubuntu 22.04+ 实测）已移除 `requiretty` 选项，`visudo -c` 报 `syntax error: unknown setting: 'requiretty'` 并拒绝整个文件，安装走到 `sudoers` 阶段后以 `LINUX_ACCOUNT_CONFLICT` 失败（2026-11-11 在 Ubuntu VM 上实测，属支持矩阵内必现）。现在只写 `vcpdeck ALL=(ALL:ALL) NOPASSWD: ALL`：服务运行在 systemd 下本就没有 tty，支持矩阵内发行版默认 `requiretty` 关闭，真正生效的是 NOPASSWD 一行。
+
 - **Linux A2 Client 服务不再因 `/opt/vcpdeck` 父目录权限起不来（`200/CHDIR`）**：`installApplication` 原来只对 `/opt/vcpdeck/client` 调 `ensureDirs`，父目录 `/opt/vcpdeck` 是 `mkdirSync(..., { recursive: true })` 顺带创建的，mode 完全由 root umask 决定；umask 为 `0077` 时建成 `0700 root:root`，systemd 以 `vcpdeck` 身份切换 `WorkingDirectory` 时没有 `o+x`，服务反复重启并报 `status=200/CHDIR`。安装器此前只把它转译成一句 `vcpdeck-client.service 启动失败: Error: Command failed: systemctl is-active ...`，journal 里真正的原因 `Changing to the requested working directory failed: Permission denied` 完全看不到（2026-11-10 在 hermes-wb 实测）。现在 `installApplication` 显式先把 `/opt/vcpdeck` 落成 `0755 root:root` 再落 `APP_DIR`（`/opt/vcpdeck/client` 仍由 configuration 阶段交回 `vcpdeck:vcpdeck 0750`）；`starting` 与 `verifyInstalled` 的失败消息附带 `journalctl -u vcpdeck-client.service -n 30 --no-pager` 指引。
 
 ## [0.23.3] - 2026-11-10
