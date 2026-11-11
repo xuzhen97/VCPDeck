@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.23.4] - 2026-11-11
+
 ### Fixed
 
 - **Linux 安装器不再写入已被 sudo 移除的 `requiretty`，Ubuntu 22.04+ 不再卡在 sudoers 阶段**：`buildSudoersContent` 原来输出 `Defaults:vcpdeck !requiretty` 加 `vcpdeck ALL=(ALL:ALL) NOPASSWD: ALL`，而较新的 sudo（1.9.x，Ubuntu 22.04+ 实测）已移除 `requiretty` 选项，`visudo -c` 报 `syntax error: unknown setting: 'requiretty'` 并拒绝整个文件，安装走到 `sudoers` 阶段后以 `LINUX_ACCOUNT_CONFLICT` 失败（2026-11-11 在 Ubuntu VM 上实测，属支持矩阵内必现）。现在只写 `vcpdeck ALL=(ALL:ALL) NOPASSWD: ALL`：服务运行在 systemd 下本就没有 tty，支持矩阵内发行版默认 `requiretty` 关闭，真正生效的是 NOPASSWD 一行。
