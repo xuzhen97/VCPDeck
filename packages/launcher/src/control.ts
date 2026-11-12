@@ -2,7 +2,8 @@
  * Launcher 本地控制通道服务端。
  * 详见 docs/design/release-and-update.md。
  * 监听 127.0.0.1 随机端口 + 随机 token，写 control.json 供被守护进程调用：
- * - POST /prepare：下载/校验/解压新版本（服务进程仍在运行）
+ * - POST /prepare：受理后台下载/校验/解压/组装（服务进程仍在运行）
+ * - GET /prepare/status：查询后台 prepare 状态
  * - POST /apply：停掉本进程并切换版本（响应可能无法送达，属正常）
  * preStart 钩子（如 prisma db push）在切换前由编排侧调用 runPreStart。
  */
@@ -16,6 +17,10 @@ import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import type { AddressInfo } from "node:net";
+import type {
+	LauncherPrepareStatus,
+	ReleaseDeltaCandidate,
+} from "@vcpdeck/shared";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,8 +29,11 @@ export interface ControlHandlers {
 		version: string;
 		url: string;
 		sha256: string;
+		candidates?: ReleaseDeltaCandidate[];
 	}): Promise<void>;
 	apply(): Promise<void>;
+	/** 后台 prepare 状态快照；/apply 仅在 ready 时放行 */
+	prepareStatus(): LauncherPrepareStatus;
 }
 
 export interface ControlServerOptions {
@@ -40,6 +48,36 @@ export interface ControlServerHandle {
 	port: number;
 	token: string;
 	close(): Promise<void>;
+}
+
+/** 候选增量包为跨信任边界输入，逐项校验后透传，不宽松猜测字段。 */
+function parseCandidates(
+	value: unknown,
+): ReleaseDeltaCandidate[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) throw new Error("candidates 必须是数组");
+	return value.map((item) => {
+		if (!item || typeof item !== "object" || Array.isArray(item)) {
+			throw new Error("candidates 条目无效");
+		}
+		const c = item as Record<string, unknown>;
+		if (
+			typeof c.fromVersion !== "string" ||
+			typeof c.url !== "string" ||
+			typeof c.sha256 !== "string" ||
+			typeof c.size !== "number" ||
+			!Number.isFinite(c.size) ||
+			c.size < 0
+		) {
+			throw new Error("candidates 条目字段无效");
+		}
+		return {
+			fromVersion: c.fromVersion,
+			url: c.url,
+			sha256: c.sha256,
+			size: c.size,
+		};
+	});
 }
 
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -87,6 +125,7 @@ export async function createControlServer(
 					version?: string;
 					url?: string;
 					sha256?: string;
+					candidates?: unknown;
 				};
 				if (!body.version || !body.url || !body.sha256) {
 					respond(res, 400, {
@@ -95,15 +134,37 @@ export async function createControlServer(
 					});
 					return;
 				}
+				let candidates: ReleaseDeltaCandidate[] | undefined;
+				try {
+					candidates = parseCandidates(body.candidates);
+				} catch {
+					respond(res, 400, {
+						code: "BAD_REQUEST",
+						message: "candidates 无效",
+					});
+					return;
+				}
 				await options.handlers.prepare({
 					version: body.version,
 					url: body.url,
 					sha256: body.sha256,
+					...(candidates ? { candidates } : {}),
 				});
 				respond(res, 200, { ok: true });
 				return;
 			}
+			if (req.method === "GET" && req.url === "/prepare/status") {
+				respond(res, 200, options.handlers.prepareStatus());
+				return;
+			}
 			if (req.method === "POST" && req.url === "/apply") {
+				if (options.handlers.prepareStatus().state !== "ready") {
+					respond(res, 409, {
+						code: "ASSEMBLE_FAILED",
+						message: "版本尚未准备就绪",
+					});
+					return;
+				}
 				await options.handlers.apply();
 				respond(res, 200, { ok: true });
 				return;

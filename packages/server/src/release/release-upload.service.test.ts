@@ -20,23 +20,61 @@ function release(archives: Record<string, unknown> = {}) {
 	};
 }
 
+function sessionKey(row: {
+	version: string;
+	platform: string;
+	artifactKind?: string;
+	fromVersion?: string;
+}): string {
+	return JSON.stringify([
+		row.version,
+		row.platform,
+		row.artifactKind ?? "full",
+		row.fromVersion ?? "",
+	]);
+}
+
 function fixture(options: { backend?: "local" | "alibaba"; row?: any } = {}) {
 	let row = options.row ?? null;
+	const rows = new Map<string, any>();
+	const byId = new Map<string, any>();
+	if (row) {
+		rows.set(sessionKey(row), row);
+		byId.set(row.id, row);
+	}
 	const delegate = {
-		findUnique: vi.fn(async () => row),
+		findUnique: vi.fn(async ({ where }: any) => {
+			if (where.id) return byId.get(where.id) ?? null;
+			const unique =
+				where.version_platform_artifactKind_fromVersion ?? where.version_platform;
+			return rows.get(sessionKey(unique)) ?? null;
+		}),
+		findMany: vi.fn(async ({ where }: any) =>
+			[...byId.values()].filter((item) => item.version === where.version),
+		),
 		create: vi.fn(async ({ data }: any) => {
 			row = {
 				...data,
 				createdByName: data.createdByName,
 				createdVia: data.createdVia,
 			};
+			rows.set(sessionKey(row), row);
+			byId.set(row.id, row);
 			return row;
 		}),
-		delete: vi.fn(async () => {
-			row = null;
+		delete: vi.fn(async ({ where }: any) => {
+			const removed = byId.get(where.id);
+			if (removed) {
+				rows.delete(sessionKey(removed));
+				byId.delete(where.id);
+			}
+			if (row?.id === where.id) row = null;
 		}),
-		update: vi.fn(async ({ data }: any) => {
-			row = { ...row, ...data };
+		update: vi.fn(async ({ where, data }: any) => {
+			const current = byId.get(where.id) ?? row;
+			row = { ...current, ...data };
+			rows.set(sessionKey(row), row);
+			byId.set(row.id, row);
 			return row;
 		}),
 	};
@@ -65,19 +103,23 @@ function fixture(options: { backend?: "local" | "alibaba"; row?: any } = {}) {
 		completeReleaseDirectUpload: vi.fn(async () => undefined),
 		delete: vi.fn(async () => undefined),
 	};
+	const toPublicArchives = (archives: Record<string, any>) =>
+		Object.fromEntries(
+			Object.entries(archives).map(([platform, archive]: [string, any]) => {
+				if (!archive.storage) return [platform, archive];
+				const { key: _key, ...storage } = archive.storage;
+				return [platform, { ...archive, storage }];
+			}),
+		);
 	const releases = {
 		findByVersion: vi.fn(async () => null as any),
 		findByVersionWithStorage: vi.fn(async () => null as any),
-		create: vi.fn(async ({ archives }: any) => {
-			const publicArchives = Object.fromEntries(
-				Object.entries(archives).map(([platform, archive]: [string, any]) => {
-					if (!archive.storage) return [platform, archive];
-					const { key: _key, ...storage } = archive.storage;
-					return [platform, { ...archive, storage }];
-				}),
-			);
-			return release(publicArchives) as any;
-		}),
+		create: vi.fn(async ({ archives }: any) =>
+			release(toPublicArchives(archives)) as any,
+		),
+		replaceArchives: vi.fn(async (_version: string, archives: any) =>
+			release(toPublicArchives(archives)) as any,
+		),
 		addArchive: vi.fn(
 			async (_version: string, platform: string, archive: any) =>
 				release({ [platform]: archive }) as any,
@@ -97,6 +139,10 @@ function fixture(options: { backend?: "local" | "alibaba"; row?: any } = {}) {
 		releases,
 		orchestrator,
 		getRow: () => row,
+		addRow: (next: any) => {
+			rows.set(sessionKey(next), next);
+			byId.set(next.id, next);
+		},
 	};
 }
 
@@ -105,6 +151,9 @@ function pendingRow(overrides: Record<string, unknown> = {}) {
 		id: "session-1",
 		version: "0.2.1",
 		platform: "win-x64",
+		artifactKind: "full",
+		fromVersion: "",
+		expectedFromVersions: "[]",
 		sha256: SHA,
 		size: 100,
 		provider: "alibaba",
@@ -293,6 +342,313 @@ describe("ReleaseUploadService", () => {
 		await expect(service.createSession(input)).rejects.toMatchObject({
 			code: "RELEASE_UPLOAD_PROVIDER_FAILED",
 			message: "外部存储操作失败，请稍后重试",
+		});
+	});
+
+	it("同一版本平台可并存 full 与 delta 会话并按四元组各自定位", async () => {
+		const { service, delegate } = fixture();
+		const full = await service.createSession({
+			...input,
+			artifactKind: "full",
+			fromVersion: "",
+		});
+		const delta = await service.createSession({
+			...input,
+			artifactKind: "delta",
+			fromVersion: "0.22.1",
+		});
+		expect(full).toMatchObject({ mode: "direct" });
+		expect(delta).toMatchObject({ mode: "direct" });
+		if (full.mode !== "direct" || delta.mode !== "direct") {
+			throw new Error("预期直传模式");
+		}
+		expect(full.sessionId).not.toBe(delta.sessionId);
+		expect(delegate.findUnique).toHaveBeenCalledWith({
+			where: {
+				version_platform_artifactKind_fromVersion: {
+					version: "0.2.1",
+					platform: "win-x64",
+					artifactKind: "full",
+					fromVersion: "",
+				},
+			},
+		});
+		expect(delegate.findUnique).toHaveBeenCalledWith({
+			where: {
+				version_platform_artifactKind_fromVersion: {
+					version: "0.2.1",
+					platform: "win-x64",
+					artifactKind: "delta",
+					fromVersion: "0.22.1",
+				},
+			},
+		});
+		expect(delegate.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({
+					artifactKind: "full",
+					fromVersion: "",
+				}),
+			}),
+		);
+		expect(delegate.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({
+					artifactKind: "delta",
+					fromVersion: "0.22.1",
+				}),
+			}),
+		);
+	});
+
+	it("重复同一四元组复用既有会话而非新建冲突会话", async () => {
+		const { service, delegate } = fixture();
+		const first = await service.createSession({
+			...input,
+			artifactKind: "delta",
+			fromVersion: "0.22.1",
+		});
+		const second = await service.createSession({
+			...input,
+			artifactKind: "delta",
+			fromVersion: "0.22.1",
+		});
+		expect(first).toMatchObject({ mode: "direct" });
+		expect(second).toMatchObject({ mode: "direct" });
+		if (first.mode !== "direct" || second.mode !== "direct") {
+			throw new Error("预期直传模式");
+		}
+		expect(second.sessionId).toBe(first.sessionId);
+		expect(delegate.create).toHaveBeenCalledOnce();
+	});
+
+	describe("内容寻址增量构件", () => {
+		it("首个 full 会话持久化 expectedFromVersions 声明", async () => {
+			const { service, delegate } = fixture();
+			await service.createSession({
+				...input,
+				expectedFromVersions: ["0.22.1", "0.22.0"],
+			});
+			expect(delegate.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: expect.objectContaining({
+						expectedFromVersions: '["0.22.1","0.22.0"]',
+					}),
+				}),
+			);
+		});
+
+		it("delta 会话按基线版本命名上传文件", async () => {
+			const { service, storage } = fixture();
+			await service.createSession({
+				...input,
+				artifactKind: "delta",
+				fromVersion: "0.22.1",
+			});
+			expect(storage.createReleaseDirectUpload).toHaveBeenCalledWith(
+				100,
+				"vcpdeck-0.2.1-win-x64-delta-0.22.1.zip",
+			);
+		});
+
+		it("双平台 full 与 delta 全部就绪才触发编排", async () => {
+			const f = fixture();
+			f.addRow(
+				pendingRow({
+					id: "s-full-win",
+					platform: "win-x64",
+					artifactKind: "full",
+					expectedFromVersions: '["0.22.1"]',
+				}),
+			);
+			f.addRow(
+				pendingRow({
+					id: "s-full-linux",
+					platform: "linux-x64",
+					artifactKind: "full",
+				}),
+			);
+			f.addRow(
+				pendingRow({
+					id: "s-delta-win",
+					platform: "win-x64",
+					artifactKind: "delta",
+					fromVersion: "0.22.1",
+				}),
+			);
+			f.addRow(
+				pendingRow({
+					id: "s-delta-linux",
+					platform: "linux-x64",
+					artifactKind: "delta",
+					fromVersion: "0.22.1",
+				}),
+			);
+
+			await f.service.completeSession("s-full-win", 100);
+			expect(f.orchestrator.startRelease).not.toHaveBeenCalled();
+			await f.service.completeSession("s-full-linux", 100);
+			expect(f.orchestrator.startRelease).not.toHaveBeenCalled();
+			await f.service.completeSession("s-delta-win", 100);
+			expect(f.orchestrator.startRelease).not.toHaveBeenCalled();
+			const result = await f.service.completeSession("s-delta-linux", 100);
+
+			await vi.waitFor(() =>
+				expect(f.orchestrator.startRelease).toHaveBeenCalledWith("0.2.1"),
+			);
+			expect(result.release.archives["win-x64"]).toMatchObject({
+				protocolVersion: 2,
+				expectedFromVersions: ["0.22.1"],
+				fileName: "vcpdeck-0.2.1-win-x64.zip",
+				deltas: [
+					{
+						fromVersion: "0.22.1",
+						fileName: "vcpdeck-0.2.1-win-x64-delta-0.22.1.zip",
+					},
+				],
+			});
+			expect(result.release.archives["linux-x64"]).toMatchObject({
+				protocolVersion: 2,
+				expectedFromVersions: ["0.22.1"],
+				fileName: "vcpdeck-0.2.1-linux-x64.zip",
+				deltas: [
+					{
+						fromVersion: "0.22.1",
+						fileName: "vcpdeck-0.2.1-linux-x64-delta-0.22.1.zip",
+					},
+				],
+			});
+		});
+
+		it("声明的 delta 基线未全部就绪时不触发编排", async () => {
+			const f = fixture();
+			f.addRow(
+				pendingRow({
+					id: "s-full-win",
+					platform: "win-x64",
+					artifactKind: "full",
+					expectedFromVersions: '["0.22.1","0.22.0"]',
+				}),
+			);
+			f.addRow(
+				pendingRow({
+					id: "s-full-linux",
+					platform: "linux-x64",
+					artifactKind: "full",
+				}),
+			);
+			f.addRow(
+				pendingRow({
+					id: "s-d-win",
+					platform: "win-x64",
+					artifactKind: "delta",
+					fromVersion: "0.22.1",
+				}),
+			);
+			f.addRow(
+				pendingRow({
+					id: "s-d-linux",
+					platform: "linux-x64",
+					artifactKind: "delta",
+					fromVersion: "0.22.1",
+				}),
+			);
+			for (const id of ["s-full-win", "s-full-linux", "s-d-win", "s-d-linux"]) {
+				await f.service.completeSession(id, 100);
+			}
+			expect(f.orchestrator.startRelease).not.toHaveBeenCalled();
+		});
+
+		it("delta 早于 full 完成时仍能在 full 就绪后补齐元数据", async () => {
+			const f = fixture();
+			f.addRow(
+				pendingRow({
+					id: "s-d-win",
+					platform: "win-x64",
+					artifactKind: "delta",
+					fromVersion: "0.22.1",
+				}),
+			);
+			f.addRow(
+				pendingRow({
+					id: "s-full-win",
+					platform: "win-x64",
+					artifactKind: "full",
+					expectedFromVersions: '["0.22.1"]',
+				}),
+			);
+			await f.service.completeSession("s-d-win", 100);
+			expect(f.orchestrator.startRelease).not.toHaveBeenCalled();
+			const result = await f.service.completeSession("s-full-win", 100);
+			expect(result.release.archives["win-x64"]).toMatchObject({
+				expectedFromVersions: ["0.22.1"],
+				deltas: [{ fromVersion: "0.22.1" }],
+			});
+			expect(f.orchestrator.startRelease).not.toHaveBeenCalled();
+		});
+
+		it("reconcileArchives 把每个 delta 会话的 Provider key 写进 archives", async () => {
+			const f = fixture();
+			f.addRow(
+				pendingRow({
+					id: "s-d-win",
+					platform: "win-x64",
+					artifactKind: "delta",
+					fromVersion: "0.22.1",
+					providerKey: "delta-object",
+				}),
+			);
+			f.addRow(
+				pendingRow({
+					id: "s-full-win",
+					platform: "win-x64",
+					artifactKind: "full",
+					expectedFromVersions: '["0.22.1"]',
+					providerKey: "full-object",
+				}),
+			);
+			await f.service.completeSession("s-d-win", 100);
+			await f.service.completeSession("s-full-win", 100);
+
+			const written = (f.releases.create.mock.calls.at(-1)![0] as any)
+				.archives as Record<string, any>;
+			expect(written["win-x64"].storage).toMatchObject({
+				key: "full-object",
+			});
+			expect(written["win-x64"].deltas).toEqual([
+				expect.objectContaining({
+					fromVersion: "0.22.1",
+					providerKey: "delta-object",
+				}),
+			]);
+		});
+
+		it("Release 已存在其它平台时整表覆盖 archives 而非只追加单平台", async () => {
+			const f = fixture();
+			f.addRow(
+				pendingRow({
+					id: "s-full-win",
+					platform: "win-x64",
+					artifactKind: "full",
+				}),
+			);
+			f.releases.findByVersionWithStorage.mockResolvedValue(
+				release({
+					"linux-x64": {
+						sha256: "b".repeat(64),
+						size: 999,
+						fileName: "linux.zip",
+					},
+				}) as any,
+			);
+			const result = await f.service.completeSession("s-full-win", 100);
+			expect(f.releases.replaceArchives).toHaveBeenCalledWith(
+				"0.2.1",
+				expect.objectContaining({
+					"win-x64": expect.objectContaining({ sha256: SHA }),
+				}),
+			);
+			expect(result.release.version).toBe("0.2.1");
 		});
 	});
 });

@@ -8,10 +8,18 @@
 
 - **Tailnet 管理最小集成（[ADR-0062](docs/adr/0062-tailnet-job-network-under-existing-architecture.md)）**：新增凭据导入/分页列表/删除、机器专用 `TailnetStatus` 与 `tailnet.manage` Typed Job（`inspect`/`ensure`），不改变现有 Job、Files、Storage、Terminal、FRP 数据面。Auth key 以 AES-256-GCM 密文存库，正文仅在当前注册 socket 上经 30 秒 TTL、单次 `requestId` 单播交付；Client 写入受限临时文件并在各终止路径清理。提供 `/api/tailnet`、SDK `client.tailnet`、CLI `vcpdeck tailnet keys|status|inspect|ensure`、设置中的全局 `Tailnet 凭据` 页和机器工作区独立 `Tailnet` 标签页（凭据统一在设置页导入/删除，机器页只选择凭据并执行操作）；自动安装仅限 Windows x64 管理员与 Ubuntu 22.04/24.04、Debian 12/13 x64 root+systemd，使用固定 `1.104.5` 官方构件并校验 SHA-256（Windows 另验 Authenticode），已有安装/身份时安全失败。
 
+- **Release 增量包可下载**：`GET /api/releases/:version/file` 支持可选 `fromVersion=x.y.z`，Launcher 可按基线版本取对应增量包。Server 在 `Release.archives[platform].deltas[]` 中记录每个 delta 的外部存储对象 key，direct 后端据此换取直链、Local 后端直出 `vcpdeck-<version>-<platform>-delta-<fromVersion>.zip`；不带该参数时行为与之前完全一致。`providerKey` 与既有的 `archive.storage.key` 一样只留在 Server 内部，不进入任何 API 响应。
+
+- **发布清单签名与 Launcher 协议门槛**：打包管线用 Ed25519 对 full 的 `manifest.json` 与 delta 的 `delta.json` 签名（包内 `<清单>.sig`），Launcher `prepare` 先验签、再对包内条目做路径预检并按清单逐文件校验 hash/size/mode，未变文件从本地历史版本目录硬链接复用，任一步失败删除半成品并降级 full；缺签名的旧格式包仍直通，迁移期兼容。新增 `GET /api/releases/:version/update?platform=&launcher=` 更新计划端点与 `CONTROL_PROTOCOL_VERSION`（当前为 2）门槛，低于门槛返回 `LAUNCHER_UPGRADE_REQUIRED`，不再给旧 Launcher 可执行跳转。
+
 ### Changed
 
 - **Tailnet 需要 Server 先行升级**：Client 新增 `tailnet.manage` capability、`capabilityDetails.tailnet` 与可选注册摘要；旧 Server 的严格 parser 会拒绝这些新字段，因此不得先部署新 Client。新 Server 兼容旧 Client 的缺省值（按“不支持 Tailnet”处理）。数据库新增 `TailnetCredential`、`TailnetClientOperation` 两表与 nullable `Client.tailnetSnapshot` 列，属纯增量；Tailnet 根密钥仅从 `VCPDECK_TAILNET_KEY_FILE` 读取，必须与 SQLite 配对备份。
 - **Tailnet 自动安装/入网尚未完成真机验收**：当前只经过单元、注入式安装器、临时 SQLite 集成和前端组件验证；真机安装、服务启动、设备审批、取消清理与真实网络可达性仍需单独授权验收。
+
+### Fixed
+
+- **增量包下载不再误取全量包**：此前 `/file` 只按平台定位一个 zip 路径与一个 Provider key，即便带 `fromVersion` 也会返回 full 包，Launcher 随后用 delta 的 sha256 校验 full 字节必然失败。现在按基线精确定位；`fromVersion` 非法返回 400、无对应 delta 返回稳定 404，direct 模式下本次改动前上传的存量 Release 缺 delta 对象 key 时明确返回 502 并提示重传，不静默回落到 full 包。
 
 ## [0.23.4] - 2026-11-11
 

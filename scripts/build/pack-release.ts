@@ -26,6 +26,7 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,12 +35,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { ZipArchive } from "archiver";
+import type { ReleaseFileEntry } from "@vcpdeck/shared";
 import {
 	bundleClient,
 	bundleLauncher,
 	bundleServer,
 } from "./bundle-apps.js";
 import { copyInstallerAsset } from "./release-installer-assets.js";
+import { buildFileList, signManifest } from "./release-manifest.js";
 
 const ROOT = resolve(__dirname, "../..");
 const PLATFORMS = "win-x64,linux-x64";
@@ -370,38 +373,69 @@ async function stagePackage(
  */
 type ArchiveVariant = "win-x64" | "linux-x64";
 
+/**
+ * 平台族排除规则：不再逐项枚举具体原生依赖目录，改为按目录名 token 统一命中。
+ * 语义由 isExcluded 解释——不含 "/" 的 token 命中任意目录段名子串，
+ * 以 "." 开头的规则命中任意路径段后缀，含 "/" 的规则保持旧的精确目录排除。
+ * 新增对方平台的原生依赖会自动被覆盖，无需改表。
+ */
 export const VARIANT_EXCLUDES: Record<ArchiveVariant, string[]> = {
-	"win-x64": [
-		"server/dist/frp/linux-x64",
-		"client/dist/frp/linux-x64",
-		"server/node_modules/@libsql/linux-x64-gnu",
-		"server/node_modules/@libsql/linux-x64-musl",
-		"client/node_modules/@lydell/node-pty-linux-x64",
-	],
-	"linux-x64": [
-		"server/dist/frp/win-x64",
-		"client/dist/frp/win-x64",
-		"server/node_modules/@libsql/win32-x64-msvc",
-		"client/node_modules/@lydell/node-pty-win32-x64",
-	],
+	"win-x64": ["linux", ".pdb"],
+	"linux-x64": ["win32", "win-x64", ".pdb"],
 };
 
-/** 递归收集 staging 文件（正斜杠相对路径），按目录级排除列表过滤 */
+/** 判断相对路径是否命中排除规则；目录命中时由调用方跳过整棵子树。 */
+function isExcluded(
+	relPath: string,
+	excludes: string[],
+	isDirectory: boolean,
+): boolean {
+	const segments = relPath.split("/");
+	for (const rule of excludes) {
+		if (rule.includes("/")) {
+			// 向后兼容：精确目录路径排除（含其子路径）
+			if (relPath === rule || relPath.startsWith(`${rule}/`)) return true;
+		} else if (rule.startsWith(".")) {
+			// 扩展名规则：任意路径段（含文件名）以此结尾
+			if (segments.some((seg) => seg.endsWith(rule))) return true;
+		} else {
+			// 平台族 token：任意目录段名包含此 token 即排除（文件名不参与）
+			const dirSegments = isDirectory ? segments : segments.slice(0, -1);
+			if (dirSegments.some((seg) => seg.includes(rule))) return true;
+		}
+	}
+	return false;
+}
 
-function collectFiles(
+/** 递归收集 staging 文件（正斜杠相对路径），按排除规则过滤并计算内容哈希与权限元数据。 */
+export function collectFiles(
 	root: string,
 	excludes: string[],
-): Array<{ abs: string; name: string }> {
-	const out: Array<{ abs: string; name: string }> = [];
+): Array<{ abs: string; name: string; sha256: string; size: number; mode: number }> {
+	const out: Array<{
+		abs: string;
+		name: string;
+		sha256: string;
+		size: number;
+		mode: number;
+	}> = [];
 	const walk = (dir: string, rel: string): void => {
 		for (const entry of readdirSync(dir, { withFileTypes: true })) {
 			const abs = join(dir, entry.name);
 			const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+			if (isExcluded(relPath, excludes, entry.isDirectory())) continue;
 			if (entry.isDirectory()) {
-				if (excludes.includes(relPath)) continue;
 				walk(abs, relPath);
 			} else if (entry.isFile()) {
-				out.push({ abs, name: relPath });
+				const content = readFileSync(abs);
+				const stats = statSync(abs);
+				out.push({
+					abs,
+					name: relPath,
+					sha256: createHash("sha256").update(content).digest("hex"),
+					size: stats.size,
+					mode: stats.mode & 0o777,
+				});
 			}
 		}
 	};
@@ -409,17 +443,39 @@ function collectFiles(
 	return out;
 }
 
-function createArchive(
+/** 读取发布签名私钥：优先 PEM 环境变量，其次 PEM 文件路径；缺失即报错，绝不静默跳过签名。 */
+function readReleasePrivateKeyPem(): string {
+	const pem = process.env.VCPDECK_RELEASE_PRIVATE_KEY_PEM;
+	if (pem && pem.trim().length > 0) return pem;
+	const keyPath = process.env.VCPDECK_RELEASE_PRIVATE_KEY_PATH;
+	if (keyPath && keyPath.trim().length > 0) {
+		return readFileSync(keyPath, "utf8");
+	}
+	throw new Error(
+		"缺少发布签名私钥：请设置 VCPDECK_RELEASE_PRIVATE_KEY_PEM 或 VCPDECK_RELEASE_PRIVATE_KEY_PATH",
+	);
+}
+
+/** 生成 full zip：按 variant 投影出与包内文件集合自洽的清单，签名绑定该清单后随包分发。 */
+export async function createArchive(
 	stagingDir: string,
 	version: string,
 	output: string,
 	variant: ArchiveVariant,
 ): Promise<string> {
-	const archivePath = join(ROOT, output, `vcpdeck-${version}-${variant}.zip`);
-	mkdirSync(join(ROOT, output), { recursive: true });
-	if (existsSync(archivePath)) rmSync(archivePath, { force: true });
+	// 磁盘 manifest.json 由 main() 生成，是全平台权威元数据源；私钥缺失即抛，绝不产出未签名发布包。
+	const baseManifest = JSON.parse(
+		readFileSync(join(stagingDir, "manifest.json"), "utf8"),
+	) as Record<string, unknown>;
+	const privateKeyPem = readReleasePrivateKeyPem();
 
-	const linuxElfs: Array<{ gz: string; entry: string }> =
+	// 包内磁盘文件按 variant 排除规则裁剪；manifest.json 不再原样入包，改由下方写入 variant 专属清单。
+	const packedFiles = collectFiles(stagingDir, VARIANT_EXCLUDES[variant]).filter(
+		(f) => f.name !== "manifest.json",
+	);
+
+	// linux frp 裸 ELF 由 .gz 内存解压注入（开发机杀毒会删磁盘裸 ELF），仅 linux-x64 需要。
+	const linuxElfs: Array<{ entry: string; content: Buffer }> =
 		variant === "win-x64"
 			? []
 			: [
@@ -431,12 +487,44 @@ function createArchive(
 						gz: join(stagingDir, "server", "dist", "frp", "linux-x64", "frps.gz"),
 						entry: "server/dist/frp/linux-x64/frps",
 					},
-				];
-	for (const { gz } of linuxElfs) {
-		if (!existsSync(gz)) throw new Error(`缺少 gz 包装: ${gz}`);
-	}
+				].map(({ gz, entry }) => {
+					if (!existsSync(gz)) throw new Error(`缺少 gz 包装: ${gz}`);
+					return { entry, content: gunzipSync(readFileSync(gz)) };
+				});
 
-	const files = collectFiles(stagingDir, VARIANT_EXCLUDES[variant]);
+	// 以磁盘清单元数据为权威，按包内实际条目投影：清单条目集合严格等于包内非元数据文件集合，
+	// 裸 ELF 按解压内容补 sha256/size/mode，杜绝两份包共用同一份全平台清单。
+	const baseFiles = Array.isArray(baseManifest.files)
+		? (baseManifest.files as ReleaseFileEntry[])
+		: [];
+	const baseByPath = new Map(baseFiles.map((f) => [f.path, f]));
+	const variantFiles: ReleaseFileEntry[] = [
+		...packedFiles.map((f) => {
+			const declared = baseByPath.get(f.name);
+			if (!declared) {
+				throw new Error(`manifest.json 缺少包内文件条目: ${f.name}`);
+			}
+			return declared;
+		}),
+		...linuxElfs.map(({ entry, content }) => ({
+			path: entry,
+			sha256: createHash("sha256").update(content).digest("hex"),
+			size: content.length,
+			mode: 0o755,
+		})),
+	].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+
+	const variantManifest: Record<string, unknown> = {
+		...baseManifest,
+		files: variantFiles,
+	};
+	const manifestJson = JSON.stringify(variantManifest, null, 2);
+	const signature = signManifest(variantManifest, privateKeyPem);
+
+	const archivePath = join(ROOT, output, `vcpdeck-${version}-${variant}.zip`);
+	mkdirSync(join(ROOT, output), { recursive: true });
+	if (existsSync(archivePath)) rmSync(archivePath, { force: true });
+
 	return new Promise((resolvePromise, reject) => {
 		const out = createWriteStream(archivePath);
 		const archive = new ZipArchive({ zlib: { level: 6 } });
@@ -444,13 +532,56 @@ function createArchive(
 		out.on("error", reject);
 		archive.on("error", reject);
 		archive.pipe(out);
-		for (const f of files) archive.file(f.abs, { name: f.name });
-		for (const { gz, entry } of linuxElfs) {
+		for (const f of packedFiles) archive.file(f.abs, { name: f.name });
+		for (const { entry, content } of linuxElfs) {
 			// mode 0o755：zip 内记录 Unix 可执行位，Linux unzip 解压后 frpc/frps 可直接运行
-			archive.append(gunzipSync(readFileSync(gz)), {
-				name: entry,
-				mode: 0o755,
-			});
+			archive.append(content, { name: entry, mode: 0o755 });
+		}
+		archive.append(manifestJson, { name: "manifest.json" });
+		archive.append(signature, { name: "manifest.json.sig" });
+		void archive.finalize();
+	});
+}
+
+/** 生成增量包：仅包含变更集文件、delta.json 清单及其签名。 */
+export async function createDeltaArchive(opts: {
+	stagingDir: string;
+	version: string;
+	output: string;
+	variant: ArchiveVariant;
+	fromVersion: string;
+	changedFiles: ReleaseFileEntry[];
+	manifest: Record<string, unknown>;
+	privateKeyPem: string;
+}): Promise<string> {
+	const archivePath = join(
+		ROOT,
+		opts.output,
+		`vcpdeck-${opts.version}-${opts.variant}-delta-${opts.fromVersion}.zip`,
+	);
+	mkdirSync(join(ROOT, opts.output), { recursive: true });
+	if (existsSync(archivePath)) rmSync(archivePath, { force: true });
+
+	const deltaJson = JSON.stringify(opts.manifest);
+	const signature = signManifest(opts.manifest, opts.privateKeyPem);
+	// 在 Promise 之外预读，缺少变更文件直接以同步异常冒泡（async ⇒ rejected Promise）。
+	const payloads = opts.changedFiles.map((f) => ({
+		name: f.path,
+		mode: f.mode,
+		content: readFileSync(join(opts.stagingDir, f.path)),
+	}));
+
+	return new Promise((resolvePromise, reject) => {
+		const out = createWriteStream(archivePath);
+		const archive = new ZipArchive({ zlib: { level: 6 } });
+		out.on("close", () => resolvePromise(archivePath));
+		out.on("error", reject);
+		archive.on("error", reject);
+		archive.pipe(out);
+		archive.append(deltaJson, { name: "delta.json" });
+		archive.append(signature, { name: "delta.json.sig" });
+		for (const p of payloads) {
+			archive.append(p.content, { name: p.name, mode: p.mode });
 		}
 		void archive.finalize();
 	});
@@ -513,6 +644,11 @@ async function main(): Promise<void> {
 		await bundleLauncher(join(stagingDir, "launcher", "dist", "main.js"));
 		await stagePackage("server", stagingDir);
 		await stagePackage("client", stagingDir);
+		// 目标版本完整文件清单：在写 manifest.json 之前收集，避免清单自引用。
+		// 保持旧六键不变，仅追加 protocolVersion 与 files，sha256 仍留空由服务端写入。
+		const releaseFiles = buildFileList(
+			collectFiles(stagingDir, []).filter((f) => f.name !== "manifest.json"),
+		);
 		writeFileSync(
 			join(stagingDir, "manifest.json"),
 			JSON.stringify(
@@ -531,6 +667,8 @@ async function main(): Promise<void> {
 						},
 						client: { dir: "client", entry: "dist/index.js" },
 					},
+					protocolVersion: 2,
+					files: releaseFiles,
 				},
 				null,
 				2,

@@ -86,7 +86,194 @@ afterEach(async () => {
 	);
 });
 
+/** 起一个只回 { mode: "server" } 的桩 Server，捕获每个上传会话的请求体。 */
+async function uploadSessionsFixture(fileNames: string[]) {
+	const sessions: Array<Record<string, unknown>> = [];
+	const { port } = await listen((request, response) => {
+		const chunks: Buffer[] = [];
+		request.on("data", (chunk: Buffer) => chunks.push(chunk));
+		request.on("end", () => {
+			response.setHeader("content-type", "application/json");
+			if (request.url === "/api/releases/uploads") {
+				sessions.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+				response.end(JSON.stringify({ mode: "server" }));
+				return;
+			}
+			response.end(JSON.stringify({ release: release("uploaded") }));
+		});
+	});
+	const state = await fixture(port);
+	for (const name of fileNames) {
+		await writeFile(join(state.root, name), `archive-${name}`);
+	}
+	return {
+		sessions,
+		state,
+		zipPaths: fileNames.map((name) => join(state.root, name)),
+	};
+}
+
+function runUploadFixture(
+	fixture: Awaited<ReturnType<typeof uploadSessionsFixture>>,
+) {
+	return runReleaseCommand("upload", fixture.zipPaths, {
+		paths: fixture.state.paths,
+		processEnv: fixture.state.processEnv,
+		log: () => undefined,
+	});
+}
+
 describe("release command", () => {
+	describe("内容寻址产物集合上传", () => {
+		const V = "1.2.3";
+		const full = (platform: string) => `vcpdeck-${V}-${platform}.zip`;
+		const delta = (platform: string, from: string) =>
+			`vcpdeck-${V}-${platform}-delta-${from}.zip`;
+		/** 校验拒绝场景不应触碰环境解析，指向不存在的配置目录避免远程副作用。 */
+		const offlineContext = {
+			paths: {
+				globalConfigPath: join(
+					tmpdir(),
+					"vcpdeck-release-offline",
+					"config.json",
+				),
+				cwd: tmpdir(),
+			},
+			processEnv: {} as NodeJS.ProcessEnv,
+			log: () => undefined,
+		};
+
+		it("platformOfFile 解析 full 与 delta 命名，uploadOne 透传 artifactKind/fromVersion，首个 full 会话带 expectedFromVersions", async () => {
+			const f = await uploadSessionsFixture([
+				full("win-x64"),
+				full("linux-x64"),
+				delta("win-x64", "1.2.2"),
+				delta("linux-x64", "1.2.2"),
+			]);
+
+			await runUploadFixture(f);
+
+			expect(f.sessions).toHaveLength(4);
+			const fulls = f.sessions.filter((s) => s.artifactKind === "full");
+			const deltas = f.sessions.filter((s) => s.artifactKind === "delta");
+			expect(fulls).toHaveLength(2);
+			expect(deltas).toHaveLength(2);
+			expect(fulls.every((s) => s.fromVersion === "")).toBe(true);
+			expect(deltas.map((s) => s.fromVersion).sort()).toEqual([
+				"1.2.2",
+				"1.2.2",
+			]);
+			const withExpected = f.sessions.filter(
+				(s) => "expectedFromVersions" in s,
+			);
+			expect(withExpected).toHaveLength(1);
+			expect(withExpected[0]).toMatchObject({
+				artifactKind: "full",
+				expectedFromVersions: ["1.2.2"],
+			});
+			expect(f.sessions[0]).toMatchObject({
+				platform: "win-x64",
+				artifactKind: "full",
+				fromVersion: "",
+				expectedFromVersions: ["1.2.2"],
+			});
+			expect(deltas.every((s) => !("expectedFromVersions" in s))).toBe(true);
+		});
+
+		it("validateArchives 接受 2 full + 双平台各 3 delta 的完整集合", async () => {
+			const from = ["1.2.0", "1.2.1", "1.2.2"];
+			const f = await uploadSessionsFixture([
+				full("win-x64"),
+				full("linux-x64"),
+				...from.map((v) => delta("win-x64", v)),
+				...from.map((v) => delta("linux-x64", v)),
+			]);
+
+			await expect(runUploadFixture(f)).resolves.toBeUndefined();
+
+			expect(f.sessions).toHaveLength(8);
+			expect(
+				f.sessions.find((s) => "expectedFromVersions" in s),
+			).toMatchObject({
+				artifactKind: "full",
+				expectedFromVersions: ["1.2.0", "1.2.1", "1.2.2"],
+			});
+		});
+
+		const rejectCases: Array<{
+			name: string;
+			names: string[];
+			message: string;
+		}> = [
+			{
+				name: "拒绝缺一个平台的 delta",
+				names: [
+					full("win-x64"),
+					full("linux-x64"),
+					delta("win-x64", "1.2.0"),
+					delta("win-x64", "1.2.1"),
+					delta("win-x64", "1.2.2"),
+					delta("linux-x64", "1.2.0"),
+					delta("linux-x64", "1.2.1"),
+				],
+				message: "delta 基线版本集合必须一致",
+			},
+			{
+				name: "拒绝两平台 fromVersion 集合不一致",
+				names: [
+					full("win-x64"),
+					full("linux-x64"),
+					delta("win-x64", "1.2.0"),
+					delta("win-x64", "1.2.1"),
+					delta("win-x64", "1.2.2"),
+					delta("linux-x64", "1.2.0"),
+					delta("linux-x64", "1.2.1"),
+					delta("linux-x64", "1.1.9"),
+				],
+				message: "delta 基线版本集合必须一致",
+			},
+			{
+				name: "拒绝 4 个 delta",
+				names: [
+					full("win-x64"),
+					full("linux-x64"),
+					delta("win-x64", "1.2.0"),
+					delta("win-x64", "1.2.1"),
+					delta("win-x64", "1.2.2"),
+					delta("win-x64", "1.1.9"),
+					delta("linux-x64", "1.2.0"),
+					delta("linux-x64", "1.2.1"),
+					delta("linux-x64", "1.2.2"),
+					delta("linux-x64", "1.1.9"),
+				],
+				message: "delta 构件不得超过 3 个",
+			},
+			{
+				name: "拒绝混用版本号",
+				names: [
+					full("win-x64"),
+					full("linux-x64"),
+					delta("win-x64", "1.2.2"),
+					delta("linux-x64", "1.2.2"),
+					"vcpdeck-1.2.4-linux-x64-delta-1.2.3.zip",
+				],
+				message: "必须使用相同版本号",
+			},
+			{
+				name: "拒绝重复文件名",
+				names: [full("win-x64"), full("win-x64"), full("linux-x64")],
+				message: "构件文件名不得重复",
+			},
+		];
+		for (const { name, names, message } of rejectCases) {
+			it(name, async () => {
+				await expect(
+					runReleaseCommand("upload", names, offlineContext),
+				).rejects.toThrow(message);
+			});
+		}
+	});
+
 	it("先校验本地构件，再要求环境配置", async () => {
 		await expect(
 			runReleaseCommand("upload", [

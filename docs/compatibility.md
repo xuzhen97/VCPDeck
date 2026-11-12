@@ -18,7 +18,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | SDK ↔ Server | REST DTO 和错误 | SDK/Shared 可从同一 Git Tag 子目录安装；只支持与 Server 同版本的标准组合 |
 | CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | 用户级 Git package 安装；升级必须显式切换 Tag；`0.2.1+` CLI 支持 Alibaba Release 分片直传 |
 | CLI 配置 | 用户级/项目级 JSON `version=1`（ADR-0017） | `--token-env` 成为推荐入口但仍写入既有 Bearer 结构；0.1.0 password/Bearer 配置与 `--auth=bearer` 保持兼容；`--server` 直连保持兼容 |
-| Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry、`apps/retention.json` | 新安装使用带本地版本保留能力的 Launcher；旧 Launcher 不会因业务 Release 自动升级，存量机器需执行一次性迁移脚本；`launcherMinVersion` 字段仍未执行校验 |
+| Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry、`apps/retention.json` | 新安装使用带本地版本保留能力的 Launcher；旧 Launcher 不会因业务 Release 自动升级，存量机器需执行一次性迁移脚本；`launcherMinVersion` 仅在 `/update` 计划端点参与比较，打包脚本仍写 `0.0.0` |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
 | Node.js | release manifest 默认 `>=24` | Launcher 可选择系统或缓存 Node；Client 一键安装优先复用合格 x64 Node，否则安装用户私有 Node；开发环境也应使用 Node 24+ |
 | FRP | 打包的 frpc/frps + Shared FRP DTO；capability `frp.reconcileProtocolVersion=1` 协商恢复对账 | 构件应成对验证；Dashboard 确认状态机、operationJobId、稳定错误码和单 Client 单 FrpsInstance 约束要求 Shared/Server/Client/SDK/CLI/Frontend 同步发布；恢复对账只在新 Client + 新 Server 组合生效，混合版本降级为“不自动恢复”而不是错误执行 |
@@ -155,12 +155,12 @@ FRP 恢复对账通过 capability `frp.reconcileProtocolVersion=1` 协商：新 
 
 ## 7. Launcher 兼容缺口
 
-manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身版本比较和拒绝逻辑，打包脚本写入 `0.0.0`。Launcher 随发布 zip 提供，首次安装后位于 `<app-dir>/dist/main.js`；已有 Launcher 默认保留，不随业务版本自动覆盖。新安装的 Launcher 会在稳定启动后维护 `apps/retention.json` 并清理不受保护的本地旧版本；旧 Launcher 没有该能力。在最低版本校验缺口修复前：
+manifest 已声明 `launcherMinVersion`，打包脚本仍写入 `0.0.0`；版本校验只在 `GET /api/releases/:version/update` 上生效（Launcher major ≥ `CONTROL_PROTOCOL_VERSION`，且 archive 声明了更高的 `launcherMinVersion` 时逐段比较），旧 `/file` 下载入口不做校验，因此对仍走 `/file` 的旧 Launcher 不构成强制。Launcher 随发布 zip 提供，首次安装后位于 `<app-dir>/dist/main.js`；已有 Launcher 默认保留，不随业务版本自动覆盖。新安装的 Launcher 会在稳定启动后维护 `apps/retention.json` 并清理不受保护的本地旧版本；旧 Launcher 没有该能力。在存量 Launcher 迁移完成前：
 
 - Launcher 协议或目录结构不得做隐式破坏性变更；
 - 如必须升级 Launcher，应先使用明确的 Launcher 升级流程替换 `<app-dir>/dist/main.js`，再发布依赖它的业务构件；存量迁移可使用随 Client Release 分发的 `upgrade-launcher.cjs`，通过 `--app-dir`、`--source` 和 `--pm2-name` 显式指定目标，不建立长期自动升级状态机；
 - 发布说明必须写明最低 Launcher 要求和人工步骤；
-- 不得声称系统已自动强制最低 Launcher 版本；
+- 不得声称系统已对旧 `/file` 路径强制最低 Launcher 版本；
 - 发布脚本当前统一生成 `.zip`；Server/Launcher 按 `.zip` 保存和解压，Linux 目标机需要 `unzip`；Launcher 本地清理状态损坏时必须停用自动删除并人工恢复，不能按目录时间猜测历史。
 
 ## 8. 发布兼容门禁
@@ -183,4 +183,4 @@ manifest 已声明 `launcherMinVersion`，但当前代码没有 Launcher 自身�
 
 ## 9. 建议的后续增强
 
-在首次稳定发布前，应增加统一 `CONTROL_PROTOCOL_VERSION`，实现 Launcher 版本校验，并明确至少支持 N-1 Client 的窗口或明确只支持同版本。完成前维持“整套同版本部署”的保守策略。
+`CONTROL_PROTOCOL_VERSION` 已引入（当前为 2）：`/api/releases/:version/update` 按 Launcher major 校验，Launcher 对 `manifest.json`／`delta.json` 的 `protocolVersion` 严格按该值解析，缺省旧格式包继续直通。仍需明确至少支持 N-1 Client 的窗口，或明确只支持同版本；窗口定义前维持“整套同版本部署”的保守策略。

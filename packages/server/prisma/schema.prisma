@@ -204,6 +204,9 @@ model ReleaseUploadSession {
   id                  String   @id
   version             String
   platform            String
+  artifactKind        String   @default("full")
+  fromVersion         String   @default("")
+  expectedFromVersions String  @default("[]")
   sha256              String
   size                Int
   provider            String
@@ -218,7 +221,7 @@ model ReleaseUploadSession {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  @@unique([version, platform])
+  @@unique([version, platform, artifactKind, fromVersion])
   @@index([expiresAt])
 }
 

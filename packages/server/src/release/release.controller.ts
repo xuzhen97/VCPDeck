@@ -34,8 +34,12 @@ import { StorageService } from "../storage/storage.service.js";
 import { Public } from "../auth/public.decorator.js";
 import { Actor } from "../auth/actor.decorator.js";
 import {
+	CONTROL_PROTOCOL_VERSION,
+	ReleaseArtifactErrorCode,
 	hasAllReleaseArchives,
+	isReleaseArchiveAvailable,
 	type ActorContext,
+	type ReleaseDeltaCandidate,
 	type ReleasePlatform,
 } from "@vcpdeck/shared";
 
@@ -62,6 +66,25 @@ function sleep(ms: number): Promise<void> {
 
 function isPlatform(v: string | undefined): v is ReleasePlatform {
 	return v === "win-x64" || v === "linux-x64";
+}
+
+/** 纯数字三段版本解析（x.y.z），不依赖 semver；非法或缺省返回 null。 */
+function parseXyz(value: string | undefined): [number, number, number] | null {
+	if (!value) return null;
+	const matched = /^(\d+)\.(\d+)\.(\d+)$/.exec(value);
+	if (!matched) return null;
+	return [Number(matched[1]), Number(matched[2]), Number(matched[3])];
+}
+
+/** x.y.z 逐段比较（不引入新依赖）：a < b 返回 -1，相等返回 0，否则 1。 */
+function compareXyz(
+	a: readonly [number, number, number],
+	b: readonly [number, number, number],
+): number {
+	for (let i = 0; i < 3; i += 1) {
+		if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+	}
+	return 0;
 }
 
 /** Provider 返回的直链只允许带主机名的 HTTP(S) URL。 */
@@ -94,6 +117,8 @@ const RELEASE_ERROR_STATUS: Record<string, number> = {
 	RELEASE_DIRECT_UPLOAD_REQUIRED: 409,
 	RELEASE_CLIENT_NOT_FOUND: 404,
 	RELEASE_RETRY_NOT_ALLOWED: 409,
+	LAUNCHER_UPGRADE_REQUIRED: 403,
+	RELEASE_ARTIFACTS_INCOMPLETE: 409,
 };
 
 function toHttp(e: ReleaseError): HttpException {
@@ -161,16 +186,23 @@ export class ReleaseController {
 		}
 	}
 
-	/** 更新包下载：客户端 launcher 使用，公开（完整性由 sha256 校验兑底）；按平台选包 */
+	/** 更新包下载：客户端 launcher 使用，公开（完整性由 sha256 校验兑底）；按平台选包。
+	 * 带 fromVersion 时下载该基线对应的增量包；缺省行为与迁移前逐字一致。 */
 	@Public()
 	@Get(":version/file")
 	async download(
 		@Param("version") version: string,
 		@Res() res: Response,
 		@Query("platform") platform?: string,
+		@Query("fromVersion") fromVersion?: string,
 	) {
 		if (!isPlatform(platform)) {
 			throw new BadRequestException("platform 应为 win-x64 或 linux-x64");
+		}
+		// 空串按缺省处理；其余必须是 x.y.z，避免把查询参数拼进本地文件路径。
+		const deltaFromVersion = fromVersion || undefined;
+		if (deltaFromVersion && !VERSION_RE.test(deltaFromVersion)) {
+			throw new BadRequestException("fromVersion 应为 x.y.z 格式");
 		}
 		const info = await this.service.findByVersionWithStorage(version);
 		if (!info) {
@@ -202,19 +234,39 @@ export class ReleaseController {
 			);
 		}
 		// 上面已排除缺失、deleting 和 cleaned，剩余状态均为可用 archive。
+		const delta = deltaFromVersion
+			? archive.deltas?.find((d) => d.fromVersion === deltaFromVersion)
+			: undefined;
+		if (deltaFromVersion && !delta) {
+			throw new NotFoundException({
+				code: "RELEASE_ARCHIVE_MISSING",
+				message: `release ${version} 缺少 ${platform} 的 ${deltaFromVersion} 增量构件`,
+			});
+		}
+		const zipPath = releaseZipPath(version, platform, delta?.fromVersion);
+		const directKey = delta ? delta.providerKey : archive.storage?.key;
+		// 本次改动前上传的存量 Release 没有 delta key，明确报错而非静默回落到 full 包
+		// （后者会用 delta 的 sha256 校验 full 字节，必然失败）。
+		if (delta && archive?.storage?.mode === "direct" && !directKey) {
+			res.status(502).json({
+				code: "RELEASE_DIRECT_URL_UNAVAILABLE",
+				message: "增量构件缺少存储定位信息，请重新上传该版本",
+			});
+			return;
+		}
 		// ADR-0019：外部存储后端 302 到临时直链，目标机直连下载不占 Server 带宽
-		if (archive?.storage?.mode === "direct" && archive.storage.key) {
+		if (archive?.storage?.mode === "direct" && directKey) {
 			const directUrl = await this.resolveDirectUrl(
 				version,
 				platform,
-				archive.storage.key,
+				directKey,
 			);
 			if (directUrl) {
 				res.redirect(302, directUrl);
 				return;
 			}
 			// 降级：本地有构件时回到中转；否则明确失败
-			if (!existsSync(releaseZipPath(version, platform))) {
+			if (!existsSync(zipPath)) {
 				res.status(502).json({
 					code: "RELEASE_DIRECT_URL_UNAVAILABLE",
 					message: "直链换取失败且无本地构件可用",
@@ -223,7 +275,7 @@ export class ReleaseController {
 			}
 		}
 		res.sendFile(
-			releaseZipPath(version, platform),
+			zipPath,
 			{ headers: { "content-type": "application/zip" } },
 			(err?: Error | null) => {
 				if (err && !res.headersSent) {
@@ -234,6 +286,76 @@ export class ReleaseController {
 				}
 			},
 		);
+	}
+
+	/**
+	 * 新 Launcher 更新计划（ADR-0062）：只返回 JSON 计划，绝不 302 给旧 Launcher 误执行。
+	 * 门槛按已裁决口径：launcher 必须为 x.y.z 且 major ≥ CONTROL_PROTOCOL_VERSION；
+	 * archive 内可选的 launcherMinVersion（打包侧写入）再做更严格逐段比较。
+	 * 响应仅投影公开字段，绝不携带 Provider key、Token 或完整 archive。
+	 */
+	@Public()
+	@Get(":version/update")
+	async updatePlan(
+		@Param("version") version: string,
+		@Query("platform") platform?: string,
+		@Query("launcher") launcher?: string,
+	) {
+		const requested = parseXyz(launcher);
+		if (!requested || requested[0] < CONTROL_PROTOCOL_VERSION) {
+			throw toHttp(
+				new ReleaseError(
+					ReleaseArtifactErrorCode.LAUNCHER_UPGRADE_REQUIRED,
+					"Launcher 版本过低，请升级后重试",
+				),
+			);
+		}
+		if (!isPlatform(platform)) {
+			throw new BadRequestException("platform 应为 win-x64 或 linux-x64");
+		}
+		const info = await this.service.findByVersionWithStorage(version);
+		if (!info) {
+			throw new NotFoundException({
+				code: "RELEASE_NOT_FOUND",
+				message: `release ${version} 不存在`,
+			});
+		}
+		const archive = info.archives[platform];
+		if (!isReleaseArchiveAvailable(archive)) {
+			throw toHttp(
+				new ReleaseError(
+					ReleaseArtifactErrorCode.RELEASE_ARTIFACTS_INCOMPLETE,
+					`release ${version} 的 ${platform} 构件尚不齐备`,
+				),
+			);
+		}
+		const declaredMin = (archive as { launcherMinVersion?: unknown })
+			.launcherMinVersion;
+		const min = parseXyz(
+			typeof declaredMin === "string" ? declaredMin : undefined,
+		);
+		if (min && compareXyz(requested, min) < 0) {
+			throw toHttp(
+				new ReleaseError(
+					ReleaseArtifactErrorCode.LAUNCHER_UPGRADE_REQUIRED,
+					"Launcher 版本低于该发布包要求，请升级后重试",
+				),
+			);
+		}
+		const candidates: ReleaseDeltaCandidate[] = (archive.deltas ?? []).map(
+			(delta) => ({
+				fromVersion: delta.fromVersion,
+				url: `/api/releases/${version}/file?platform=${platform}&fromVersion=${encodeURIComponent(delta.fromVersion)}`,
+				sha256: delta.sha256,
+				size: delta.size,
+			}),
+		);
+		return {
+			url: `/api/releases/${version}/file?platform=${platform}`,
+			sha256: archive.sha256,
+			size: archive.size,
+			...(candidates.length > 0 ? { candidates } : {}),
+		};
 	}
 
 	/**

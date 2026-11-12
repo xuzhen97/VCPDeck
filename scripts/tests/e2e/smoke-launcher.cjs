@@ -174,6 +174,34 @@ async function main() {
 			body: body ? JSON.stringify(body) : undefined,
 		});
 
+	const getControl = async (pathName, token) =>
+		fetch(`http://127.0.0.1:${control.port}${pathName}`, {
+			headers: { "x-launcher-token": token },
+		});
+
+	/** prepare 后台执行：轮询 /prepare/status 直到 ready，failed 立即报错。 */
+	const waitForPrepareReady = async (token, version, timeoutMs = 30_000) => {
+		const deadline = Date.now() + timeoutMs;
+		let last = "无响应";
+		while (Date.now() < deadline) {
+			const res = await getControl("/prepare/status", token);
+			if (res.status === 200) {
+				const status = await res.json();
+				if (status.state === "ready" && status.version === version) return;
+				if (status.state === "failed") {
+					throw new Error(
+						`prepare ${version} 失败: ${status.errorCode ?? "UNKNOWN"}`,
+					);
+				}
+				last = status.state;
+			} else {
+				last = `HTTP ${res.status}`;
+			}
+			await new Promise((r) => setTimeout(r, 300));
+		}
+		throw new Error(`等待 prepare ${version} 就绪超时（末次状态: ${last}）`);
+	};
+
 	let control;
 	try {
 		await waitFor(
@@ -201,7 +229,8 @@ async function main() {
 			prep1.status === 200,
 			`prepare 失败: ${prep1.status} ${await prep1.text()}`,
 		);
-		console.log("✓ prepare 1.1.0 完成");
+		await waitForPrepareReady(control.token, "1.1.0");
+		console.log("✓ prepare 1.1.0 完成（/prepare/status = ready）");
 
 		const apply1 = await postControl("/apply", control.token);
 		assert(
@@ -226,7 +255,8 @@ async function main() {
 			sha256: badSha,
 		});
 		assert(prep2.status === 200, `prepare 1.2.0 失败: ${prep2.status}`);
-		console.log("✓ prepare 1.2.0（坏版本）完成");
+		await waitForPrepareReady(control.token, "1.2.0");
+		console.log("✓ prepare 1.2.0（坏版本）完成（/prepare/status = ready）");
 
 		const apply2 = await postControl("/apply", control.token);
 		assert(

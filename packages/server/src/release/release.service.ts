@@ -16,6 +16,7 @@ import {
 	isCatchUpTarget,
 	type ReleaseArchiveAvailableInfo,
 	type ReleaseArchiveDeletingInfo,
+	type ReleaseArchiveDelta,
 	type ReleaseArchiveInfo,
 	type ReleaseArchiveStorage,
 	type ReleaseArchiveStorageSummary,
@@ -50,14 +51,27 @@ export type ReleaseArchiveStorageRecord = ReleaseArchiveStorage & {
 	key: string;
 };
 
+/** Server 内部增量构件记录：额外持有 Provider 对象 key，仅供下载定位，不得进入 API 响应。 */
+export type ServerReleaseArchiveDelta = ReleaseArchiveDelta & {
+	/** 外部存储对象 key；本次改动前上传的存量记录缺省。 */
+	providerKey?: string;
+};
+
+/** archives JSON 中的增量元数据；清理/恢复流程需原样保留，避免整表回写时抹掉。 */
+type ReleaseArchiveExtras = Pick<
+	ReleaseArchiveAvailableInfo,
+	"protocolVersion" | "expectedFromVersions"
+> & { deltas?: ServerReleaseArchiveDelta[] };
+
 export type ServerReleaseArchiveInfo =
-	| (Omit<ReleaseArchiveAvailableInfo, "storage"> & {
+	| (Omit<ReleaseArchiveAvailableInfo, "storage" | "deltas"> & {
 			storage?: ReleaseArchiveStorageRecord;
-	  })
+	  } & ReleaseArchiveExtras)
 	| (Omit<ReleaseArchiveDeletingInfo, "storage"> & {
 			storage?: ReleaseArchiveStorageRecord;
-	  })
-	| Extract<ReleaseArchiveInfo, { availability: "cleaned" }>;
+	  } & ReleaseArchiveExtras)
+	| (Extract<ReleaseArchiveInfo, { availability: "cleaned" }> &
+			ReleaseArchiveExtras);
 
 export type ServerReleaseInfo = Omit<ReleaseInfo, "archives"> & {
 	archives: Partial<Record<ReleasePlatform, ServerReleaseArchiveInfo>>;
@@ -137,6 +151,68 @@ function parseStorage(value: unknown): ReleaseArchiveStorageRecord | undefined {
 	};
 }
 
+/**
+ * archives JSON 中增量元数据的白名单投影：仅接受结构合法的三键。
+ * 缺失或畸形按缺省处理，避免存量 Release 读回失败，也不宽松猜测未知形态。
+ */
+function parseArchiveExtras(entry: Record<string, unknown>): ReleaseArchiveExtras {
+	const extras: ReleaseArchiveExtras = {};
+	if (entry.deltas !== undefined) {
+		if (
+			Array.isArray(entry.deltas) &&
+			entry.deltas.every((delta) => {
+				if (typeof delta !== "object" || delta === null || Array.isArray(delta)) {
+					return false;
+				}
+				const d = delta as Record<string, unknown>;
+				return (
+					typeof d.fromVersion === "string" &&
+					/^\d+\.\d+\.\d+$/.test(d.fromVersion) &&
+					typeof d.sha256 === "string" &&
+					typeof d.size === "number" &&
+					typeof d.fileName === "string" &&
+					// providerKey 是 Server 内部字段；缺省兼容存量记录，存在时必须是非空字符串。
+					(d.providerKey === undefined ||
+						(typeof d.providerKey === "string" && d.providerKey.length > 0))
+				);
+			})
+		) {
+			extras.deltas = entry.deltas as ServerReleaseArchiveDelta[];
+		}
+	}
+	if (
+		entry.protocolVersion !== undefined &&
+		typeof entry.protocolVersion === "number" &&
+		Number.isInteger(entry.protocolVersion)
+	) {
+		extras.protocolVersion = entry.protocolVersion;
+	}
+	if (entry.expectedFromVersions !== undefined) {
+		const list = entry.expectedFromVersions;
+		if (
+			Array.isArray(list) &&
+			list.length <= 3 &&
+			list.every((v) => typeof v === "string" && /^\d+\.\d+\.\d+$/.test(v))
+		) {
+			extras.expectedFromVersions = list as string[];
+		}
+	}
+	return extras;
+}
+
+/** 从已解析的 archive 提取增量元数据，供清理/恢复构造原样透传。 */
+function archiveExtras(archive: ServerReleaseArchiveInfo): ReleaseArchiveExtras {
+	const extras: ReleaseArchiveExtras = {};
+	if (archive.deltas !== undefined) extras.deltas = archive.deltas;
+	if (archive.protocolVersion !== undefined) {
+		extras.protocolVersion = archive.protocolVersion;
+	}
+	if (archive.expectedFromVersions !== undefined) {
+		extras.expectedFromVersions = archive.expectedFromVersions;
+	}
+	return extras;
+}
+
 function parseArchive(value: unknown): ServerReleaseArchiveInfo | null {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		return null;
@@ -154,6 +230,7 @@ function parseArchive(value: unknown): ServerReleaseArchiveInfo | null {
 		size: entry.size,
 		fileName: entry.fileName,
 	};
+	const extras = parseArchiveExtras(entry);
 	if (entry.availability === "cleaned") {
 		if (
 			typeof entry.cleanedAt !== "string" ||
@@ -183,6 +260,7 @@ function parseArchive(value: unknown): ServerReleaseArchiveInfo | null {
 		}
 		return {
 			...base,
+			...extras,
 			availability: "cleaned",
 			...(storageSummary ? { storageSummary } : {}),
 			cleanedAt: entry.cleanedAt,
@@ -201,6 +279,7 @@ function parseArchive(value: unknown): ServerReleaseArchiveInfo | null {
 	if (entry.storage !== undefined && !storage) return null;
 	return {
 		...base,
+		...extras,
 		availability: entry.availability ?? "available",
 		...(storage ? { storage } : {}),
 	};
@@ -221,13 +300,17 @@ function parseArchives(raw: string): Partial<Record<ReleasePlatform, ServerRelea
 	return archives;
 }
 
-/** 去除 Server 内部 Provider key，生成可安全返回 API 的 archive。 */
+/** 去除 Server 内部 Provider key（含每个 delta 的对象 key），生成可安全返回 API 的 archive。 */
 function toPublicArchive(archive: ServerReleaseArchiveInfo): ReleaseArchiveInfo {
-	if (archive.storage) {
-		const { key: _key, ...storage } = archive.storage;
-		return { ...archive, storage } as ReleaseArchiveInfo;
+	const deltas = archive.deltas?.map(
+		({ providerKey: _providerKey, ...publicDelta }) => publicDelta,
+	);
+	const withDeltas = deltas ? { ...archive, deltas } : archive;
+	if (withDeltas.storage) {
+		const { key: _key, ...storage } = withDeltas.storage;
+		return { ...withDeltas, storage } as ReleaseArchiveInfo;
 	}
-	return archive;
+	return withDeltas as ReleaseArchiveInfo;
 }
 
 /** 将 Server 内部 Release 投影为不含 Provider key 的公开对象。 */
@@ -339,6 +422,18 @@ export class ReleaseService {
 		return toReleaseInfo(updated);
 	}
 
+	/** 以会话表重算结果整表覆盖 archives（不改变 release 其余字段）。 */
+	async replaceArchives(
+		version: string,
+		archives: Record<string, ServerReleaseArchiveInfo>,
+	): Promise<ReleaseInfo> {
+		const row = await this.prisma.release.update({
+			where: { version },
+			data: { archives: JSON.stringify(archives) },
+		});
+		return toReleaseInfo(row);
+	}
+
 	/** 分页列表（遵循 AGENTS.md 分页规范） */
 	async list(page = 1, pageSize = 20): Promise<PaginatedResult<ReleaseInfo>> {
 		const [rows, total] = await Promise.all([
@@ -410,6 +505,7 @@ export class ReleaseService {
 			sha256: archive.sha256,
 			size: archive.size,
 			fileName: archive.fileName,
+			...archiveExtras(archive),
 			availability: "deleting" as const,
 			...(archive.storage ? { storage: archive.storage } : {}),
 		};
@@ -437,6 +533,7 @@ export class ReleaseService {
 			sha256: archive.sha256,
 			size: archive.size,
 			fileName: archive.fileName,
+			...archiveExtras(archive),
 			availability: "cleaned" as const,
 			...(archive.storage
 				? {

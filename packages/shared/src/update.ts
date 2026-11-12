@@ -1,6 +1,70 @@
 // ── 自更新协议（server ↔ client 经 WebSocket，launcher 经本地控制通道） ──
 // 详见 docs/design/release-and-update.md
 
+/** 控制协议版本；破坏性协议变更时递增，Launcher 与 Server 双向校验。 */
+export const CONTROL_PROTOCOL_VERSION = 2;
+
+/** 发布构件种类：full 为旧格式整包，delta 为内容寻址增量包。 */
+export type ReleaseArtifactKind = "full" | "delta";
+
+/** 目标版本完整清单中的单个文件条目。 */
+export interface ReleaseFileEntry {
+	/** 相对 apps/<version>/ 的 POSIX 路径，禁止 ..、绝对路径与盘符 */
+	path: string;
+	/** 文件字节 sha256（64 位小写十六进制） */
+	sha256: string;
+	/** 文件字节数（非负安全整数） */
+	size: number;
+	/** POSIX 权限位 */
+	mode: number;
+}
+
+/** 平台归档记录内的增量构件信息。 */
+export interface ReleaseArchiveDelta {
+	fromVersion: string;
+	sha256: string;
+	size: number;
+	fileName: string;
+}
+
+/** delta 包内的清单（由发布者签名，Launcher 解压前校验）。 */
+export interface ReleaseDeltaManifest {
+	version: string;
+	protocolVersion: 2;
+	kind: "delta";
+	fromVersion: string;
+	files: ReleaseFileEntry[];
+}
+
+/** Server 下发给 Launcher 的候选增量包信息。 */
+export interface ReleaseDeltaCandidate {
+	fromVersion: string;
+	url: string;
+	sha256: string;
+	size: number;
+}
+
+/** Launcher 后台 prepare 状态。 */
+export type LauncherPrepareState = "idle" | "preparing" | "ready" | "failed";
+
+/** Launcher 后台 prepare 状态快照（经本地控制通道回报）。 */
+export interface LauncherPrepareStatus {
+	state: LauncherPrepareState;
+	version: string | null;
+	errorCode?: string;
+}
+
+/** 内容寻址发布构件稳定错误码（ADR-0062）。 */
+export const ReleaseArtifactErrorCode = {
+	LAUNCHER_UPGRADE_REQUIRED: "LAUNCHER_UPGRADE_REQUIRED",
+	MANIFEST_SIGNATURE_INVALID: "MANIFEST_SIGNATURE_INVALID",
+	MANIFEST_PATH_UNSAFE: "MANIFEST_PATH_UNSAFE",
+	FILE_HASH_MISMATCH: "FILE_HASH_MISMATCH",
+	DELTA_BASELINE_UNAVAILABLE: "DELTA_BASELINE_UNAVAILABLE",
+	ASSEMBLE_FAILED: "ASSEMBLE_FAILED",
+	RELEASE_ARTIFACTS_INCOMPLETE: "RELEASE_ARTIFACTS_INCOMPLETE",
+} as const;
+
 /** 更新包 manifest（打包时生成，随 archive 携带） */
 export interface UpdateManifest {
 	version: string;
@@ -27,6 +91,12 @@ export interface UpdateManifest {
 			entry: string;
 		};
 	};
+	/** 清单协议版本（内容寻址方案起为 2；旧 full 包缺省视为 1） */
+	protocolVersion?: number;
+	/** 构件种类；旧 full 包缺省 */
+	kind?: ReleaseArtifactKind;
+	/** 目标版本完整文件清单；签名与验签共用同一对象 */
+	files?: ReleaseFileEntry[];
 }
 
 /** 服务端 → 客户端：请求更新（含下载地址与校验值） */
@@ -37,6 +107,8 @@ export interface UpdateRequest {
 	sha256: string;
 	/** 优雅停机等待上限（ms），缺省 10 分钟 */
 	timeoutMs?: number;
+	/** 候选增量包；Server 不判断 Client 版本，由 Launcher 自行挑选基线 */
+	candidates?: ReleaseDeltaCandidate[];
 }
 
 /** 客户端 → 服务端：优雅停机完成，launcher 即将接管 */
@@ -117,6 +189,12 @@ export interface ReleaseUploadCreateInput {
 	platform: ReleasePlatform;
 	sha256: string;
 	size: number;
+	/** 构件种类；缺省按存量 full 会话处理 */
+	artifactKind?: ReleaseArtifactKind;
+	/** delta 包的基线版本；full 包为空串 */
+	fromVersion?: string;
+	/** 该版本声明应齐备的 delta 基线集合；仅首个 full 会话携带 */
+	expectedFromVersions?: string[];
 }
 
 /** 外部 Provider 的单个直传分片。 */
@@ -141,11 +219,26 @@ export type ReleaseUploadSession =
 export function parseReleaseUploadCreateInput(
 	value: unknown,
 ): ReleaseUploadCreateInput {
+	const shapeError =
+		"body 必须且只能包含 version/platform/sha256/size（可附 artifactKind/fromVersion/expectedFromVersions）";
+	const requiredKeys: readonly string[] = [
+		"version",
+		"platform",
+		"sha256",
+		"size",
+	];
+	const allowedKeys: readonly string[] = [
+		...requiredKeys,
+		"artifactKind",
+		"fromVersion",
+		"expectedFromVersions",
+	];
 	if (
 		!isRecord(value) ||
-		!hasOnlyKeys(value, ["version", "platform", "sha256", "size"])
+		Object.keys(value).some((key) => !allowedKeys.includes(key)) ||
+		requiredKeys.some((key) => !Object.keys(value).includes(key))
 	) {
-		throw new Error("body 必须且只能包含 version/platform/sha256/size");
+		throw new Error(shapeError);
 	}
 	if (
 		typeof value.version !== "string" ||
@@ -167,12 +260,44 @@ export function parseReleaseUploadCreateInput(
 	) {
 		throw new Error("size 应为 1–2147483647 的整数");
 	}
-	return {
+	const result: ReleaseUploadCreateInput = {
 		version: value.version,
 		platform: value.platform,
 		sha256: value.sha256,
 		size: value.size,
 	};
+	if (value.artifactKind !== undefined) {
+		const kind = value.artifactKind;
+		if (typeof kind !== "string" || (kind !== "full" && kind !== "delta")) {
+			throw new Error("artifactKind 应为 full 或 delta");
+		}
+		result.artifactKind = kind;
+	}
+	if (value.fromVersion !== undefined) {
+		const fromVersion = value.fromVersion;
+		if (
+			typeof fromVersion !== "string" ||
+			(fromVersion !== "" && !/^\d+\.\d+\.\d+$/.test(fromVersion))
+		) {
+			throw new Error("fromVersion 应为空串或 x.y.z 格式");
+		}
+		result.fromVersion = fromVersion;
+	}
+	if (value.expectedFromVersions !== undefined) {
+		const list = value.expectedFromVersions;
+		if (
+			!Array.isArray(list) ||
+			list.length > 3 ||
+			list.some(
+				(item) => typeof item !== "string" || !/^\d+\.\d+\.\d+$/.test(item),
+			) ||
+			new Set(list).size !== list.length
+		) {
+			throw new Error("expectedFromVersions 应为至多 3 个不重复的 x.y.z 版本");
+		}
+		result.expectedFromVersions = list as string[];
+	}
+	return result;
 }
 
 /** 严格解析需要刷新的分片编号。 */
@@ -228,12 +353,141 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
 	);
 }
 
+/** 清单签名规范化的固定键序（ADR-0062:24）；签名与验签必须共用。 */
+const RELEASE_MANIFEST_KEY_ORDER = [
+	"version",
+	"protocolVersion",
+	"kind",
+	"fromVersion",
+	"files",
+	"nodeVersion",
+	"launcherMinVersion",
+	"launcher",
+	"sha256",
+	"artifacts",
+] as const;
+
+/** 判断清单文件路径是否为相对 apps/<version>/ 的安全 POSIX 路径。 */
+export function isSafeReleaseFilePath(path: string): boolean {
+	if (typeof path !== "string" || path.length === 0) return false;
+	if (path.includes("\0") || path.includes("\\")) return false;
+	if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return false;
+	return path
+		.split("/")
+		.every(
+			(segment) =>
+				segment.length > 0 && segment !== "." && segment !== "..",
+		);
+}
+
+/** 按固定键序生成清单规范化字节；与对象自身键序无关。 */
+export function canonicalReleaseManifestJson(
+	manifest: Record<string, unknown>,
+): string {
+	const ordered: Record<string, unknown> = {};
+	for (const key of RELEASE_MANIFEST_KEY_ORDER) {
+		if (Object.prototype.hasOwnProperty.call(manifest, key)) {
+			ordered[key] = manifest[key];
+		}
+	}
+	return JSON.stringify(ordered);
+}
+
+/** 严格解析清单文件条目，拒绝未知字段与不安全路径。 */
+export function parseReleaseFileEntry(value: unknown): ReleaseFileEntry {
+	if (
+		!isRecord(value) ||
+		!hasOnlyKeys(value, ["path", "sha256", "size", "mode"])
+	) {
+		throw new Error("文件条目必须且只能包含 path/sha256/size/mode");
+	}
+	if (typeof value.path !== "string" || !isSafeReleaseFilePath(value.path)) {
+		throw new Error("path 应为相对 apps/<version>/ 的安全 POSIX 路径");
+	}
+	if (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)) {
+		throw new Error("sha256 应为 64 位小写十六进制");
+	}
+	if (
+		typeof value.size !== "number" ||
+		!Number.isSafeInteger(value.size) ||
+		value.size < 0
+	) {
+		throw new Error("size 应为非负安全整数");
+	}
+	if (
+		typeof value.mode !== "number" ||
+		!Number.isInteger(value.mode) ||
+		value.mode < 0 ||
+		value.mode > 0o7777
+	) {
+		throw new Error("mode 应为合法 POSIX 权限位");
+	}
+	return {
+		path: value.path,
+		sha256: value.sha256,
+		size: value.size,
+		mode: value.mode,
+	};
+}
+
+/** 严格解析 delta 包清单；键集合与协议版本均固定。 */
+export function parseReleaseDeltaManifest(value: unknown): ReleaseDeltaManifest {
+	if (
+		!isRecord(value) ||
+		!hasOnlyKeys(value, [
+			"version",
+			"protocolVersion",
+			"kind",
+			"fromVersion",
+			"files",
+		])
+	) {
+		throw new Error(
+			"delta 清单必须且只能包含 version/protocolVersion/kind/fromVersion/files",
+		);
+	}
+	if (
+		typeof value.version !== "string" ||
+		!/^\d+\.\d+\.\d+$/.test(value.version)
+	) {
+		throw new Error("version 格式应为 x.y.z");
+	}
+	if (value.protocolVersion !== CONTROL_PROTOCOL_VERSION) {
+		throw new Error("protocolVersion 应为 2");
+	}
+	if (value.kind !== "delta") {
+		throw new Error("kind 应为 delta");
+	}
+	if (
+		typeof value.fromVersion !== "string" ||
+		!/^\d+\.\d+\.\d+$/.test(value.fromVersion)
+	) {
+		throw new Error("fromVersion 格式应为 x.y.z");
+	}
+	if (!Array.isArray(value.files)) {
+		throw new Error("files 应为数组");
+	}
+	return {
+		version: value.version,
+		protocolVersion: CONTROL_PROTOCOL_VERSION,
+		kind: "delta",
+		fromVersion: value.fromVersion,
+		files: value.files.map(parseReleaseFileEntry),
+	};
+}
+
 /** 可用发布构件（旧记录允许缺失 availability）。 */
 export type ReleaseArchiveAvailableInfo = ReleaseArchiveBase & {
 	/** 旧 Release JSON 缺失该字段时按 available 兼容解析。 */
 	availability?: "available";
 	/** 外部存储直连信息（ADR-0019；Local 后端无此字段） */
 	storage?: ReleaseArchiveStorage;
+	/** 该平台已上传的增量构件；旧记录缺省 */
+	deltas?: ReleaseArchiveDelta[];
+	/** 清单协议版本；旧记录缺省按 1 处理 */
+	protocolVersion?: number;
+	/** 该版本声明应齐备的 delta 基线版本集合；缺省按空集兼容存量 Release */
+	expectedFromVersions?: string[];
 };
 
 /** 正在清理的发布构件。 */
@@ -302,10 +556,15 @@ export function isReleaseArchiveAvailable(
  */
 export function hasAllReleaseArchives(release: ReleaseInfo): boolean {
 	const archives = release.archives ?? {};
-	return (
-		isReleaseArchiveAvailable(archives["win-x64"]) &&
-		isReleaseArchiveAvailable(archives["linux-x64"])
-	);
+	const platforms: readonly ReleasePlatform[] = ["win-x64", "linux-x64"];
+	return platforms.every((platform) => {
+		const archive = archives[platform];
+		if (!isReleaseArchiveAvailable(archive)) return false;
+		const deltas = archive.deltas ?? [];
+		const present = new Set(deltas.map((delta) => delta.fromVersion));
+		const expected = archive.expectedFromVersions ?? [];
+		return expected.every((fromVersion) => present.has(fromVersion));
+	});
 }
 
 /**

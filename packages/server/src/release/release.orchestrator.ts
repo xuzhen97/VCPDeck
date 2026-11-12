@@ -422,6 +422,16 @@ export class ReleaseOrchestrator {
 			sha256: clientArchive.sha256,
 			timeoutMs: this.clientTimeoutMs,
 		};
+		// ADR-0062：仅在登记了增量构件时下发候选；旧 Launcher 的 UpdateRequest 形状保持不变。
+		const deltas = clientArchive.deltas ?? [];
+		if (deltas.length > 0) {
+			request.candidates = deltas.map((delta) => ({
+				fromVersion: delta.fromVersion,
+				url: `/api/releases/${version}/file?platform=${platform}&fromVersion=${encodeURIComponent(delta.fromVersion)}`,
+				sha256: delta.sha256,
+				size: delta.size,
+			}));
+		}
 		const outcomePromise = this.waitClientOutcome(
 			client.clientId,
 			version,

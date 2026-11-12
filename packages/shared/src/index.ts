@@ -151,6 +151,13 @@ export type {
 	UpdateManifest,
 	UpdateReady,
 	UpdateRequest,
+	LauncherPrepareState,
+	LauncherPrepareStatus,
+	ReleaseArchiveDelta,
+	ReleaseArtifactKind,
+	ReleaseDeltaCandidate,
+	ReleaseDeltaManifest,
+	ReleaseFileEntry,
 } from "./update.js";
 export {
 	ReleaseClientState,
@@ -161,6 +168,12 @@ export {
 	parseReleaseUploadPartRefresh,
 	platformFromOs,
 	isReleaseArchiveAvailable,
+	CONTROL_PROTOCOL_VERSION,
+	ReleaseArtifactErrorCode,
+	isSafeReleaseFilePath,
+	canonicalReleaseManifestJson,
+	parseReleaseFileEntry,
+	parseReleaseDeltaManifest,
 } from "./update.js";
 
 // ── Event names ──

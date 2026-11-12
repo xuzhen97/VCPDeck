@@ -211,3 +211,99 @@ describe("downloadWithRetry", () => {
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 	});
 });
+
+describe("prepare 后台状态机", () => {
+	function makeStubRetention() {
+		return {
+			initialize: vi.fn().mockResolvedValue(undefined),
+			recordSuccessful: vi.fn().mockResolvedValue(true),
+			cleanup: vi.fn().mockResolvedValue({
+				removed: [],
+				failed: [],
+				disabled: false,
+			}),
+		};
+	}
+
+	function controlHandlers(daemon: Daemon) {
+		return daemon as unknown as {
+			updater: { prepare: ReturnType<typeof vi.fn> };
+			buildControlHandlers(): {
+				prepare(input: {
+					version: string;
+					url: string;
+					sha256: string;
+				}): Promise<void>;
+				prepareStatus(): {
+					state: string;
+					version: string | null;
+					errorCode?: string;
+				};
+			};
+		};
+	}
+
+	it("初始状态为 idle", () => {
+		const daemon = new Daemon({
+			appDir: "/tmp/vcpdeck-launcher-test",
+			artifact: "client",
+			retention: makeStubRetention(),
+		});
+
+		expect(
+			controlHandlers(daemon).buildControlHandlers().prepareStatus(),
+		).toEqual({ state: "idle", version: null });
+	});
+
+	it("后台 prepare 失败 → prepareStatus 为 failed 且带 errorCode", async () => {
+		const daemon = new Daemon({
+			appDir: "/tmp/vcpdeck-launcher-test",
+			artifact: "client",
+			retention: makeStubRetention(),
+		});
+		const d = controlHandlers(daemon);
+		const err = Object.assign(new Error("签名无效"), {
+			code: "MANIFEST_SIGNATURE_INVALID",
+		});
+		d.updater = { prepare: vi.fn().mockRejectedValue(err) };
+
+		const handlers = d.buildControlHandlers();
+		await handlers.prepare({
+			version: "1.2.1",
+			url: "/full.zip",
+			sha256: "a".repeat(64),
+		});
+
+		await vi.waitFor(() => {
+			expect(handlers.prepareStatus()).toMatchObject({
+				state: "failed",
+				version: "1.2.1",
+				errorCode: "MANIFEST_SIGNATURE_INVALID",
+			});
+		});
+	});
+
+	it("后台 prepare 成功 → prepareStatus 为 ready", async () => {
+		const daemon = new Daemon({
+			appDir: "/tmp/vcpdeck-launcher-test",
+			artifact: "client",
+			retention: makeStubRetention(),
+		});
+		const d = controlHandlers(daemon);
+		d.updater = { prepare: vi.fn().mockResolvedValue(undefined) };
+
+		const handlers = d.buildControlHandlers();
+		await handlers.prepare({
+			version: "1.2.1",
+			url: "/full.zip",
+			sha256: "a".repeat(64),
+		});
+
+		await vi.waitFor(() => {
+			expect(handlers.prepareStatus()).toEqual({
+				state: "ready",
+				version: "1.2.1",
+			});
+		});
+	});
+});

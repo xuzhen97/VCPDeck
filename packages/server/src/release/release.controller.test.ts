@@ -566,5 +566,319 @@ describe("ReleaseController", () => {
 			expect(storage.getDirectDownloadUrl).toHaveBeenCalledTimes(1);
 			expect(res.status).toHaveBeenCalledWith(502);
 		});
+
+		describe("增量构件下载（fromVersion）", () => {
+			const delta = {
+				fromVersion: "1.2.0",
+				sha256: "d".repeat(64),
+				size: 512,
+				fileName: "vcpdeck-1.2.1-win-x64-delta-1.2.0.zip",
+				providerKey: "delta-object-1",
+			};
+			const winArchiveWithDelta = { ...winArchive, deltas: [delta] };
+
+			it("direct 模式用 delta 的 Provider key 换取直链，不用 full key", async () => {
+				service.findByVersion.mockResolvedValue({
+					version: "1.2.1",
+					archives: {
+						"win-x64": {
+							...winArchiveWithDelta,
+							storage: {
+								provider: "alibaba",
+								key: "full-object-1",
+								mode: "direct",
+							},
+						},
+					},
+				});
+				storage.getDirectDownloadUrl.mockResolvedValue({
+					url: "https://storage.example/delta",
+					expiresAt: Date.now() + 900_000,
+				});
+				const res = mockRes();
+
+				await controller.download("1.2.1", res as never, "win-x64", "1.2.0");
+
+				expect(storage.getDirectDownloadUrl).toHaveBeenCalledWith(
+					"delta-object-1",
+				);
+				expect(res.redirect).toHaveBeenCalledWith(
+					302,
+					"https://storage.example/delta",
+				);
+				expect(res.sendFile).not.toHaveBeenCalled();
+			});
+
+			it("local 模式 sendFile 到该基线的增量包路径", async () => {
+				service.findByVersion.mockResolvedValue({
+					version: "1.2.1",
+					archives: { "win-x64": winArchiveWithDelta },
+				});
+				const res = mockRes();
+
+				await controller.download("1.2.1", res as never, "win-x64", "1.2.0");
+
+				expect(res.sendFile).toHaveBeenCalledWith(
+					releaseZipPath("1.2.1", "win-x64", "1.2.0"),
+					expect.objectContaining({
+						headers: expect.objectContaining({
+							"content-type": "application/zip",
+						}),
+					}),
+					expect.any(Function),
+				);
+			});
+
+			it("不带 fromVersion 时仍用 full 的 key 与 full 路径（旧行为零变化）", async () => {
+				service.findByVersion.mockResolvedValue({
+					version: "1.2.1",
+					archives: {
+						"win-x64": {
+							...winArchiveWithDelta,
+							storage: {
+								provider: "alibaba",
+								key: "full-object-1",
+								mode: "direct",
+							},
+						},
+					},
+				});
+				storage.getDirectDownloadUrl.mockResolvedValue({
+					url: "https://storage.example/full",
+					expiresAt: Date.now() + 900_000,
+				});
+				const res = mockRes();
+
+				await controller.download("1.2.1", res as never, "win-x64");
+
+				expect(storage.getDirectDownloadUrl).toHaveBeenCalledWith(
+					"full-object-1",
+				);
+				expect(res.redirect).toHaveBeenCalledWith(
+					302,
+					"https://storage.example/full",
+				);
+			});
+
+			it("fromVersion 无对应 delta 时返回 404 稳定错误码", async () => {
+				service.findByVersion.mockResolvedValue({
+					version: "1.2.1",
+					archives: { "win-x64": winArchiveWithDelta },
+				});
+
+				const err = await catchHttpError(
+					controller.download("1.2.1", mockRes() as never, "win-x64", "1.1.9"),
+				);
+
+				expect(err.getStatus()).toBe(404);
+				expect(err.getResponse()).toMatchObject({
+					code: "RELEASE_ARCHIVE_MISSING",
+				});
+			});
+
+			it("fromVersion 非法（含路径注入）返回 400，且不查询 Release", async () => {
+				for (const bad of ["latest", "../../etc/passwd", "1.2.0/../1.2.0"]) {
+					const err = await catchHttpError(
+						controller.download("1.2.1", mockRes() as never, "win-x64", bad),
+					);
+					expect(err.getStatus()).toBe(400);
+				}
+				expect(service.findByVersion).not.toHaveBeenCalled();
+			});
+
+			it("direct 模式下 delta 缺 Provider key 时明确返回 502，不静默回落 full 包", async () => {
+				service.findByVersion.mockResolvedValue({
+					version: "1.2.1",
+					archives: {
+						"win-x64": {
+							...winArchive,
+							deltas: [{ ...delta, providerKey: undefined }],
+							storage: {
+								provider: "alibaba",
+								key: "full-object-1",
+								mode: "direct",
+							},
+						},
+					},
+				});
+				const res = mockRes();
+
+				await controller.download("1.2.1", res as never, "win-x64", "1.2.0");
+
+				expect(res.status).toHaveBeenCalledWith(502);
+				expect(res.redirect).not.toHaveBeenCalled();
+				expect(res.sendFile).not.toHaveBeenCalled();
+				expect(storage.getDirectDownloadUrl).not.toHaveBeenCalled();
+			});
+		});
+	});
+
+	describe("updatePlan", () => {
+		const deltas = [
+			{
+				fromVersion: "1.2.0",
+				sha256: "d".repeat(64),
+				size: 512,
+				fileName: "vcpdeck-1.2.1-win-x64-delta-1.2.0.zip",
+			},
+			{
+				fromVersion: "1.1.0",
+				sha256: "e".repeat(64),
+				size: 640,
+				fileName: "vcpdeck-1.2.1-win-x64-delta-1.1.0.zip",
+			},
+		];
+		const planArchive = {
+			sha256: "a".repeat(64),
+			size: 1024,
+			fileName: "vcpdeck-1.2.1-win-x64.zip",
+			availability: "available",
+			deltas,
+			protocolVersion: 2,
+			expectedFromVersions: ["1.2.0", "1.1.0"],
+		};
+
+		function mockPlanArchive(extra: Record<string, unknown> = {}) {
+			service.findByVersion.mockResolvedValue({
+				version: "1.2.1",
+				archives: { "win-x64": { ...planArchive, ...extra } },
+			});
+		}
+
+		it("launcher 缺省返回 403 LAUNCHER_UPGRADE_REQUIRED", async () => {
+			mockPlanArchive();
+
+			const err = await catchHttpError(
+				controller.updatePlan("1.2.1", "win-x64"),
+			);
+
+			expect(err.getStatus()).toBe(403);
+			expect(err.getResponse()).toMatchObject({
+				code: "LAUNCHER_UPGRADE_REQUIRED",
+			});
+		});
+
+		it("launcher=1.0.0（major 低于 CONTROL_PROTOCOL_VERSION）返回 403", async () => {
+			mockPlanArchive();
+
+			const err = await catchHttpError(
+				controller.updatePlan("1.2.1", "win-x64", "1.0.0"),
+			);
+
+			expect(err.getStatus()).toBe(403);
+			expect(err.getResponse()).toMatchObject({
+				code: "LAUNCHER_UPGRADE_REQUIRED",
+			});
+		});
+
+		it("launcher 不是 x.y.z 三段数字时返回 403", async () => {
+			mockPlanArchive();
+
+			for (const bad of ["2", "v2.0.0", "2.0", "2.0.0.1", "abc"]) {
+				const err = await catchHttpError(
+					controller.updatePlan("1.2.1", "win-x64", bad),
+				);
+				expect(err.getStatus()).toBe(403);
+			}
+		});
+
+		it("launcher=2.0.0 合法时返回 200 且 candidates 与 deltas 一一对应", async () => {
+			mockPlanArchive();
+
+			const result = await controller.updatePlan(
+				"1.2.1",
+				"win-x64",
+				"2.0.0",
+			);
+
+			expect(result).toEqual({
+				url: "/api/releases/1.2.1/file?platform=win-x64",
+				sha256: "a".repeat(64),
+				size: 1024,
+				candidates: [
+					{
+						fromVersion: "1.2.0",
+						url: "/api/releases/1.2.1/file?platform=win-x64&fromVersion=1.2.0",
+						sha256: "d".repeat(64),
+						size: 512,
+					},
+					{
+						fromVersion: "1.1.0",
+						url: "/api/releases/1.2.1/file?platform=win-x64&fromVersion=1.1.0",
+						sha256: "e".repeat(64),
+						size: 640,
+					},
+				],
+			});
+		});
+
+		it("archive 带 launcherMinVersion=2.1.0 时 launcher=2.0.0 返回 403，2.2.0 通过", async () => {
+			mockPlanArchive({ launcherMinVersion: "2.1.0" });
+
+			const denied = await catchHttpError(
+				controller.updatePlan("1.2.1", "win-x64", "2.0.0"),
+			);
+			expect(denied.getStatus()).toBe(403);
+			expect(denied.getResponse()).toMatchObject({
+				code: "LAUNCHER_UPGRADE_REQUIRED",
+			});
+
+			const result = await controller.updatePlan(
+				"1.2.1",
+				"win-x64",
+				"2.2.0",
+			);
+			expect(result).toMatchObject({ sha256: "a".repeat(64) });
+		});
+
+		it("无 deltas 时响应不含 candidates 键", async () => {
+			mockPlanArchive({ deltas: [] });
+
+			const result = await controller.updatePlan(
+				"1.2.1",
+				"win-x64",
+				"2.0.0",
+			);
+
+			expect(result).not.toHaveProperty("candidates");
+			expect(result).toEqual({
+				url: "/api/releases/1.2.1/file?platform=win-x64",
+				sha256: "a".repeat(64),
+				size: 1024,
+			});
+		});
+
+		it("release 不存在返回 404，platform 非法返回 400", async () => {
+			service.findByVersion.mockResolvedValue(null);
+			const missing = await catchHttpError(
+				controller.updatePlan("9.9.9", "win-x64", "2.0.0"),
+			);
+			expect(missing.getStatus()).toBe(404);
+
+			mockPlanArchive();
+			const badPlatform = await catchHttpError(
+				controller.updatePlan("1.2.1", "darwin-x64", "2.0.0"),
+			);
+			expect(badPlatform.getStatus()).toBe(400);
+		});
+
+		it("@Public 响应不泄露 Provider key、storage 或完整 archive", async () => {
+			mockPlanArchive({
+				storage: { provider: "alibaba", key: "secret-file-id", mode: "direct" },
+			});
+
+			const result = await controller.updatePlan(
+				"1.2.1",
+				"win-x64",
+				"2.0.0",
+			);
+
+			expect(JSON.stringify(result)).not.toContain("secret-file-id");
+			expect(result).not.toHaveProperty("storage");
+			expect(result).not.toHaveProperty("archives");
+			expect(result).not.toHaveProperty("deltas");
+			expect(result).not.toHaveProperty("protocolVersion");
+			expect(result).not.toHaveProperty("expectedFromVersions");
+		});
 	});
 });

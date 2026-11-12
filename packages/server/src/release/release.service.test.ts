@@ -656,4 +656,158 @@ describe("ReleaseService", () => {
 			expect(archive?.fileName).toBe("vcpdeck-1.2.1-win-x64.zip");
 		});
 	});
+
+	describe("内容寻址增量元数据透传", () => {
+		const deltas = [
+			{
+				fromVersion: "1.2.0",
+				sha256: "d".repeat(64),
+				size: 512,
+				fileName: "vcpdeck-1.2.1-win-x64-delta-1.2.0.zip",
+			},
+		];
+		const archiveWithExtras = {
+			sha256: "abc",
+			size: 1024,
+			fileName: "vcpdeck-1.2.1-win-x64.zip",
+			storage: { provider: "alibaba", key: "file-1", mode: "direct" },
+			deltas,
+			protocolVersion: 2,
+			expectedFromVersions: ["1.2.0"],
+		};
+
+		it("读取存量 Release 时保留 deltas/protocolVersion/expectedFromVersions", async () => {
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({ archives: JSON.stringify({ "win-x64": archiveWithExtras }) }),
+			);
+			const internal = await service.findByVersionWithStorage("1.2.1");
+			expect(internal?.archives["win-x64"]).toMatchObject({
+				deltas,
+				protocolVersion: 2,
+				expectedFromVersions: ["1.2.0"],
+			});
+		});
+
+		it("claim → finish → restore 全链路写回不丢 deltas[].fromVersion", async () => {
+			const original = JSON.stringify({ "win-x64": archiveWithExtras });
+			prisma.release.findUnique.mockResolvedValue(dbRow({ archives: original }));
+			prisma.release.updateMany.mockResolvedValue({ count: 1 });
+
+			await service.claimArchiveForCleanup("1.2.1", "win-x64");
+			const claimed = (
+				prisma.release.updateMany.mock.calls[0]![0] as any
+			).data.archives as string;
+			expect(claimed).toContain('"fromVersion":"1.2.0"');
+			expect(claimed).toContain('"availability":"deleting"');
+
+			prisma.release.findUnique.mockResolvedValue(dbRow({ archives: claimed }));
+			await service.finishArchiveCleanup(
+				"1.2.1",
+				"win-x64",
+				"2026-08-29T00:00:00.000Z",
+			);
+			const cleaned = (
+				prisma.release.updateMany.mock.calls[1]![0] as any
+			).data.archives as string;
+			expect(cleaned).toContain('"fromVersion":"1.2.0"');
+			expect(cleaned).toContain('"availability":"cleaned"');
+
+			// restore 只接受 deleting 态，故以 claimed 而非 cleaned 作为输入。
+			prisma.release.findUnique.mockResolvedValue(dbRow({ archives: claimed }));
+			await service.restoreArchiveAfterCleanup("1.2.1", "win-x64");
+			const restored = (
+				prisma.release.updateMany.mock.calls[2]![0] as any
+			).data.archives as string;
+			expect(restored).toContain('"fromVersion":"1.2.0"');
+			expect(restored).toContain('"availability":"available"');
+		});
+
+		it("create 写入增量元数据后读回不丢", async () => {
+			prisma.release.findUnique.mockResolvedValue(null);
+			prisma.release.create.mockImplementation(async ({ data }: any) =>
+				dbRow({ archives: data.archives }),
+			);
+			const info = await service.create({
+				version: "1.2.1",
+				archives: { "win-x64": archiveWithExtras as any },
+			});
+			expect(info.archives["win-x64"]).toMatchObject({
+				deltas,
+				protocolVersion: 2,
+				expectedFromVersions: ["1.2.0"],
+			});
+		});
+
+		it("内部读取保留 deltas[].providerKey，对外投影剥离", async () => {
+			const withKey = {
+				...archiveWithExtras,
+				deltas: [{ ...deltas[0], providerKey: "delta-object-key" }],
+			};
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({ archives: JSON.stringify({ "win-x64": withKey }) }),
+			);
+
+			const internal = await service.findByVersionWithStorage("1.2.1");
+			expect(internal?.archives["win-x64"]).toMatchObject({
+				deltas: [{ providerKey: "delta-object-key" }],
+			});
+
+			const publicInfo = await service.findByVersion("1.2.1");
+			expect(publicInfo?.archives["win-x64"]).toMatchObject({ deltas });
+			expect(JSON.stringify(publicInfo)).not.toContain("delta-object-key");
+			// 既有的 storage.key 剥离仍生效。
+			expect(JSON.stringify(publicInfo)).not.toContain("file-1");
+		});
+
+		it("claim → finish → restore 全链路写回不丢 deltas[].providerKey", async () => {
+			const withKey = {
+				...archiveWithExtras,
+				deltas: [{ ...deltas[0], providerKey: "delta-object-key" }],
+			};
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({ archives: JSON.stringify({ "win-x64": withKey }) }),
+			);
+			prisma.release.updateMany.mockResolvedValue({ count: 1 });
+
+			await service.claimArchiveForCleanup("1.2.1", "win-x64");
+			const claimed = (
+				prisma.release.updateMany.mock.calls[0]![0] as any
+			).data.archives as string;
+			expect(claimed).toContain('"providerKey":"delta-object-key"');
+
+			prisma.release.findUnique.mockResolvedValue(dbRow({ archives: claimed }));
+			await service.finishArchiveCleanup(
+				"1.2.1",
+				"win-x64",
+				"2026-08-29T00:00:00.000Z",
+			);
+			const cleaned = (
+				prisma.release.updateMany.mock.calls[1]![0] as any
+			).data.archives as string;
+			expect(cleaned).toContain('"providerKey":"delta-object-key"');
+
+			prisma.release.findUnique.mockResolvedValue(dbRow({ archives: claimed }));
+			await service.restoreArchiveAfterCleanup("1.2.1", "win-x64");
+			const restored = (
+				prisma.release.updateMany.mock.calls[2]![0] as any
+			).data.archives as string;
+			expect(restored).toContain('"providerKey":"delta-object-key"');
+		});
+
+		it("deltas[].providerKey 非字符串时整条 deltas 被丢弃，坏值不进内部状态", async () => {
+			prisma.release.findUnique.mockResolvedValue(
+				dbRow({
+					archives: JSON.stringify({
+						"win-x64": {
+							...archiveWithExtras,
+							deltas: [{ ...deltas[0], providerKey: 123 }],
+						},
+					}),
+				}),
+			);
+
+			const internal = await service.findByVersionWithStorage("1.2.1");
+			expect(internal?.archives["win-x64"]?.deltas).toBeUndefined();
+		});
+	});
 });

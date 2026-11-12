@@ -2,12 +2,17 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LauncherPrepareStatus } from "@vcpdeck/shared";
 import { createControlServer, runPreStart } from "./control.js";
 
 function makeHandlers() {
 	return {
 		prepare: vi.fn(),
 		apply: vi.fn(),
+		prepareStatus: vi.fn((): LauncherPrepareStatus => ({
+			state: "ready",
+			version: "1.2.1",
+		})),
 	};
 }
 
@@ -45,6 +50,24 @@ async function post(
 				"x-launcher-token": token,
 			},
 			body: body === undefined ? undefined : JSON.stringify(body),
+		});
+	} catch (e) {
+		throw new Error(
+			`控制通道请求失败: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
+}
+
+/** 测试辅助：向控制通道发 GET（/prepare/status 用） */
+async function get(
+	port: number,
+	path: string,
+	token: string,
+): Promise<Response> {
+	try {
+		return await fetch(`http://127.0.0.1:${port}${path}`, {
+			method: "GET",
+			headers: { "x-launcher-token": token },
 		});
 	} catch (e) {
 		throw new Error(
@@ -132,6 +155,98 @@ describe("createControlServer", () => {
 
 		const missRes = await post(control.port, "/nope", control.token);
 		expect(missRes.status).toBe(404);
+	});
+
+	it("/prepare 透传可选 candidates", async () => {
+		const handlers = makeHandlers();
+		handlers.prepare.mockResolvedValue(undefined);
+		server = await createControlServer({ handlers, controlFile });
+		const control = await readControlFile(controlFile);
+		const candidates = [
+			{
+				fromVersion: "0.9.0",
+				url: "/delta.zip",
+				sha256: "b".repeat(64),
+				size: 1,
+			},
+		];
+
+		const res = await post(control.port, "/prepare", control.token, {
+			version: "1.2.1",
+			url: "/full.zip",
+			sha256: "a".repeat(64),
+			candidates,
+		});
+
+		expect(res.status).toBe(200);
+		expect(handlers.prepare).toHaveBeenCalledWith({
+			version: "1.2.1",
+			url: "/full.zip",
+			sha256: "a".repeat(64),
+			candidates,
+		});
+	});
+
+	it("GET /prepare/status 返回 handlers.prepareStatus() 的状态", async () => {
+		const handlers = makeHandlers();
+		handlers.prepareStatus.mockReturnValue({
+			state: "failed",
+			version: "1.2.1",
+			errorCode: "MANIFEST_SIGNATURE_INVALID",
+		});
+		server = await createControlServer({ handlers, controlFile });
+		const control = await readControlFile(controlFile);
+
+		const res = await get(control.port, "/prepare/status", control.token);
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			state: "failed",
+			version: "1.2.1",
+			errorCode: "MANIFEST_SIGNATURE_INVALID",
+		});
+	});
+
+	it("GET /prepare/status 同样校验 token", async () => {
+		const handlers = makeHandlers();
+		server = await createControlServer({ handlers, controlFile });
+		const control = await readControlFile(controlFile);
+
+		const res = await get(control.port, "/prepare/status", "wrong-token");
+
+		expect(res.status).toBe(401);
+	});
+
+	it("/apply 在 state !== ready 时返回 409 且不调用 apply", async () => {
+		const handlers = makeHandlers();
+		handlers.prepareStatus.mockReturnValue({
+			state: "failed",
+			version: "1.2.1",
+			errorCode: "ASSEMBLE_FAILED",
+		});
+		server = await createControlServer({ handlers, controlFile });
+		const control = await readControlFile(controlFile);
+
+		const res = await post(control.port, "/apply", control.token);
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toMatchObject({ code: "ASSEMBLE_FAILED" });
+		expect(handlers.apply).not.toHaveBeenCalled();
+	});
+
+	it("/apply 在 preparing 状态也返回 409", async () => {
+		const handlers = makeHandlers();
+		handlers.prepareStatus.mockReturnValue({
+			state: "preparing",
+			version: "1.2.1",
+		});
+		server = await createControlServer({ handlers, controlFile });
+		const control = await readControlFile(controlFile);
+
+		const res = await post(control.port, "/apply", control.token);
+
+		expect(res.status).toBe(409);
+		expect(handlers.apply).not.toHaveBeenCalled();
 	});
 });
 

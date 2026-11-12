@@ -963,4 +963,71 @@ describe("ReleaseOrchestrator", () => {
 			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
 		});
 	});
+
+	describe("UpdateRequest candidates 透传", () => {
+		const delta = {
+			fromVersion: "1.2.0",
+			sha256: "d".repeat(64),
+			size: 512,
+			fileName: "vcpdeck-1.2.1-win-x64-delta-1.2.0.zip",
+		};
+
+		function setupResume(deltas?: typeof delta[]) {
+			const info = mockLoopRelease(deps, ReleaseStatus.UPDATING_CLIENTS);
+			if (deltas) Object.assign(info.archives["win-x64"]!, { deltas });
+			deps.releases.getActiveRelease.mockResolvedValue(
+				releaseInfo({ status: ReleaseStatus.UPDATING_SERVER }),
+			);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.1.0", os: "win32 10.0.26200" },
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+		}
+
+		it("archive 带 deltas 时透传 candidates 且不含 size/manifest/signature", async () => {
+			setupResume([delta]);
+
+			const phase = orchestrator.resumeAfterStartup();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+
+			const request = deps.channel.sendUpdateRequest.mock.calls[0]![1];
+			expect(request).toEqual({
+				releaseVersion: "1.2.1",
+				url: "/api/releases/1.2.1/file?platform=win-x64",
+				sha256: "a".repeat(64),
+				timeoutMs: 60_000,
+				candidates: [
+					{
+						fromVersion: "1.2.0",
+						url: "/api/releases/1.2.1/file?platform=win-x64&fromVersion=1.2.0",
+						sha256: "d".repeat(64),
+						size: 512,
+					},
+				],
+			});
+
+			orchestrator.onClientRegistered("c1", "1.2.1");
+			await phase;
+		});
+
+		it("archive 无 deltas 时 UpdateRequest 不带 candidates 键（旧形状不变）", async () => {
+			setupResume();
+
+			const phase = orchestrator.resumeAfterStartup();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledTimes(1);
+			});
+
+			const request = deps.channel.sendUpdateRequest.mock.calls[0]![1];
+			expect(request).not.toHaveProperty("candidates");
+			expect(request).not.toHaveProperty("size");
+			expect(request).not.toHaveProperty("manifest");
+			expect(request).not.toHaveProperty("signature");
+
+			orchestrator.onClientRegistered("c1", "1.2.1");
+			await phase;
+		});
+	});
 });

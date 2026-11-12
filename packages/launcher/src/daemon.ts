@@ -10,12 +10,20 @@ import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import type { UpdateManifest } from "@vcpdeck/shared";
+import {
+	ReleaseArtifactErrorCode,
+	type LauncherPrepareStatus,
+	type UpdateManifest,
+} from "@vcpdeck/shared";
 import { extractArchive } from "./archive.js";
 import { ensureNodeRuntime } from "./ensure-node.js";
 import { VersionStore } from "./versions.js";
 import { Updater } from "./updater.js";
-import { createControlServer, runPreStart } from "./control.js";
+import {
+	createControlServer,
+	runPreStart,
+	type ControlHandlers,
+} from "./control.js";
 import { VersionRetention, type RetentionCleanupResult } from "./version-retention.js";
 
 export interface DaemonConfig {
@@ -43,6 +51,18 @@ const CLIENT_PROBE_STABLE_MS = 3000;
 const DOWNLOAD_ATTEMPTS = 3;
 const DOWNLOAD_RETRY_DELAYS_MS = [500, 1000];
 const RETENTION_STARTUP_DELAY_MS = STABLE_WINDOW_MS;
+
+const KNOWN_RELEASE_CODES = new Set<string>(
+	Object.values(ReleaseArtifactErrorCode),
+);
+
+/** 只回报协议内稳定错误码，避免把原始异常文本写进状态或日志。 */
+function safePrepareErrorCode(err: unknown): string {
+	const raw = (err as { code?: unknown })?.code;
+	return typeof raw === "string" && KNOWN_RELEASE_CODES.has(raw)
+		? raw
+		: ReleaseArtifactErrorCode.ASSEMBLE_FAILED;
+}
 
 function isTransientDownloadStatus(status: number): boolean {
 	return status === 502 || status === 503 || status === 504;
@@ -145,8 +165,13 @@ export class Daemon {
 	private stopping = false;
 	private crashCount = 0;
 	private pendingVersion: string | null = null;
-	/** 后台 prepare 任务（受理后下载/校验/解压）；apply 前必须等待完成 */
+	/** 后台 prepare 任务（受理后下载/校验/组装）；apply 前必须等待完成 */
 	private prepareTask: Promise<void> | null = null;
+	/** 后台 prepare 状态快照；失败也要如实回报，不再静默吞掉 */
+	private prepareStatusValue: LauncherPrepareStatus = {
+		state: "idle",
+		version: null,
+	};
 	private nodePath: string | null = null;
 	private updater!: Updater;
 
@@ -179,26 +204,7 @@ export class Daemon {
 
 		const control = await createControlServer({
 			controlFile: join(this.appDir, "control.json"),
-			handlers: {
-				prepare: (input) => {
-					// 立即受理：下载/校验/解压可能耗时数分钟，先行返回 200，
-					// 避免请求方 fetch 默认超时在下载完成前切断连接。
-					// 从受理开始就保护目标，避免启动补扫删除正在解压的目录。
-					this.pendingVersion = input.version;
-					this.prepareTask = this.updater.prepare(input).catch((error) => {
-						if (this.pendingVersion === input.version) this.pendingVersion = null;
-						throw error;
-					});
-					this.prepareTask.catch(() => undefined);
-					return Promise.resolve();
-				},
-				apply: async () => {
-					if (this.prepareTask) await this.prepareTask;
-					const version = this.pendingVersion;
-					if (!version) throw new Error("尚未 prepare");
-					await this.applyUpdate(version);
-				},
-			},
+			handlers: this.buildControlHandlers(),
 			log: this.log,
 		});
 
@@ -206,6 +212,50 @@ export class Daemon {
 		await this.initializeRetention();
 		this.scheduleRetentionStartupCleanup();
 		this.log(`守护中: ${this.artifact} (control port ${control.port})`);
+	}
+
+	/** 控制通道处理器：prepare 后台执行，成功与失败都写入可查询状态。 */
+	private buildControlHandlers(): ControlHandlers {
+		return {
+			prepare: (input) => {
+				// 立即受理：下载/校验/组装可能耗时数分钟，先行返回 200，
+				// 避免请求方 fetch 默认超时在下载完成前切断连接。
+				// 从受理开始就保护目标，避免启动补扫删除正在解压的目录。
+				this.pendingVersion = input.version;
+				this.prepareStatusValue = {
+					state: "preparing",
+					version: input.version,
+				};
+				this.prepareTask = this.updater
+					.prepare(input)
+					.then(() => {
+						this.prepareStatusValue = {
+							state: "ready",
+							version: input.version,
+						};
+					})
+					.catch((error: unknown) => {
+						if (this.pendingVersion === input.version) {
+							this.pendingVersion = null;
+						}
+						const code = safePrepareErrorCode(error);
+						this.prepareStatusValue = {
+							state: "failed",
+							version: input.version,
+							errorCode: code,
+						};
+						this.log(`准备失败: ${code}`);
+					});
+				return Promise.resolve();
+			},
+			apply: async () => {
+				if (this.prepareTask) await this.prepareTask;
+				const version = this.pendingVersion;
+				if (!version) throw new Error("尚未 prepare");
+				await this.applyUpdate(version);
+			},
+			prepareStatus: () => ({ ...this.prepareStatusValue }),
+		};
 	}
 
 	/** 优雅停机：置停机标志并停掉被守护进程 */

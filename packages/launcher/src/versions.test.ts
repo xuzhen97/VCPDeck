@@ -241,6 +241,31 @@ describe("VersionStore", () => {
 		});
 	});
 
+	describe("硬链接共享文件留存", () => {
+		it("删除基线版本目录后，新版本下由硬链接共享的文件仍完整可读", async () => {
+			const { linkSync, readFileSync } = await import("node:fs");
+			const baseline = join(appsDir, "0.9.0");
+			const target = join(appsDir, "1.2.3");
+			await ensureDir(join(baseline, "server", "dist"));
+			await ensureDir(join(target, "server", "dist"));
+			await writeTextFile(
+				join(baseline, "server", "dist", "shared.js"),
+				"shared-content",
+			);
+			linkSync(
+				join(baseline, "server", "dist", "shared.js"),
+				join(target, "server", "dist", "shared.js"),
+			);
+
+			const store = new VersionStore({ appsDir });
+			await store.removeVersion("0.9.0");
+
+			expect(
+				readFileSync(join(target, "server", "dist", "shared.js"), "utf8"),
+			).toBe("shared-content");
+		});
+	});
+
 	describe("listVersions", () => {
 		it("列出全部版本目录", async () => {
 			const store = new VersionStore({ appsDir, platform: "linux" });

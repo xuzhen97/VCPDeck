@@ -1,8 +1,10 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
+	CONTROL_PROTOCOL_VERSION,
 	ReleaseUploadErrorCode,
 	hasAllReleaseArchives,
+	isReleaseArchiveAvailable,
 	parseReleaseUploadComplete,
 	parseReleaseUploadCreateInput,
 	parseReleaseUploadPartRefresh,
@@ -24,6 +26,58 @@ import { ReleaseOrchestrator } from "./release.orchestrator.js";
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1_000;
 
+/** 解析会话表暂存的声明集合；数据库 TEXT 可能损坏，只接受合法的 x.y.z 版本。 */
+function parseDeclared(raw: string): string[] {
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.filter(
+				(item): item is string =>
+					typeof item === "string" && /^\d+\.\d+\.\d+$/.test(item),
+			)
+			.slice(0, 3);
+	} catch {
+		return [];
+	}
+}
+
+type RegisteredArtifact = {
+	sha256: string;
+	size: number;
+	/** 全量构件需同时校验 Provider key；增量元数据的 key 仅用于下载定位，不参与 complete 校验（兼容存量记录）。 */
+	providerKey?: string;
+	checkKey: boolean;
+};
+
+/** 已登记构件中与本会话四元组对应的校验值；未登记或处于清理态时返回 null。 */
+function registeredArtifact(
+	archive: ServerReleaseArchiveInfo | undefined,
+	artifactKind: string,
+	fromVersion: string,
+): RegisteredArtifact | null {
+	if (
+		!archive ||
+		archive.availability === "deleting" ||
+		archive.availability === "cleaned"
+	) {
+		return null;
+	}
+	if (artifactKind === "delta") {
+		// delta 的 providerKey 只用于下载定位；complete 不校验它，以兼容缺字段的存量记录。
+		const delta = archive.deltas?.find((d) => d.fromVersion === fromVersion);
+		return delta
+			? { sha256: delta.sha256, size: delta.size, checkKey: false }
+			: null;
+	}
+	return {
+		sha256: archive.sha256,
+		size: archive.size,
+		providerKey: archive.storage?.key,
+		checkKey: true,
+	};
+}
+
 /** Server Controller 使用的 Shared Release 上传 parser。 */
 export const ReleaseUploadContract = {
 	parseCreate: parseReleaseUploadCreateInput,
@@ -37,6 +91,10 @@ type ReleaseUploadSessionRow = {
 	id: string;
 	version: string;
 	platform: string;
+	artifactKind: string;
+	fromVersion: string;
+	/** 该版本声明应齐备的 delta 基线集合，JSON 数组文本；仅首个 full 会话写入。 */
+	expectedFromVersions: string;
 	sha256: string;
 	size: number;
 	provider: string;
@@ -53,13 +111,26 @@ type ReleaseUploadSessionDelegate = {
 	findUnique(args: {
 		where:
 			| { id: string }
-			| { version_platform: { version: string; platform: string } };
+			| {
+					version_platform_artifactKind_fromVersion: {
+						version: string;
+						platform: string;
+						artifactKind: string;
+						fromVersion: string;
+					};
+			  };
 	}): Promise<ReleaseUploadSessionRow | null>;
+	findMany(args: {
+		where: { version: string };
+	}): Promise<ReleaseUploadSessionRow[]>;
 	create(args: {
 		data: {
 			id: string;
 			version: string;
 			platform: string;
+			artifactKind: string;
+			fromVersion: string;
+			expectedFromVersions: string;
 			sha256: string;
 			size: number;
 			provider: string;
@@ -119,28 +190,47 @@ export class ReleaseUploadService {
 		if (backend.kind !== "alibaba") return { mode: "server" };
 
 		const platform = input.platform as "win-x64" | "linux-x64";
+		const artifactKind = input.artifactKind ?? "full";
+		const fromVersion = input.fromVersion ?? "";
 		const existingRelease = await this.releases.findByVersion(input.version);
 		const existingArchive = existingRelease?.archives[platform];
-		if (existingArchive) {
-			if (
-				existingArchive.availability !== "deleting" &&
-				existingArchive.availability !== "cleaned" &&
-				existingArchive.sha256 === input.sha256 &&
-				existingArchive.size === input.size
-			) {
-				return { mode: "existing", release: existingRelease as ReleaseInfo };
+		// 全量会话按平台整体判重；增量会话只与同平台同一基线版本判重，
+		// 否则已登记的同平台 full 会把后续 delta 会话全部挡住。
+		if (artifactKind === "full") {
+			if (existingArchive) {
+				if (
+					isReleaseArchiveAvailable(existingArchive) &&
+					existingArchive.sha256 === input.sha256 &&
+					existingArchive.size === input.size
+				) {
+					return { mode: "existing", release: existingRelease as ReleaseInfo };
+				}
+				throw new ReleaseError(
+					"RELEASE_ARCHIVE_EXISTS",
+					`release ${input.version} 已存在 ${input.platform} 构件`,
+				);
 			}
-			throw new ReleaseError(
-				"RELEASE_ARCHIVE_EXISTS",
-				`release ${input.version} 已存在 ${input.platform} 构件`,
-			);
+		} else {
+			const delta = isReleaseArchiveAvailable(existingArchive)
+				? existingArchive.deltas?.find((d) => d.fromVersion === fromVersion)
+				: undefined;
+			if (delta) {
+				if (delta.sha256 === input.sha256 && delta.size === input.size) {
+					return { mode: "existing", release: existingRelease as ReleaseInfo };
+				}
+				throw new ReleaseError(
+					"RELEASE_ARCHIVE_EXISTS",
+					`release ${input.version} 已存在 ${input.platform} 增量构件`,
+				);
+			}
 		}
-
 		const existing = await this.uploadSessions.findUnique({
 			where: {
-				version_platform: {
+				version_platform_artifactKind_fromVersion: {
 					version: input.version,
 					platform: input.platform,
+					artifactKind,
+					fromVersion,
 				},
 			},
 		});
@@ -173,7 +263,12 @@ export class ReleaseUploadService {
 			await this.uploadSessions.delete({ where: { id: existing.id } });
 		}
 
-		const fileName = this.fileName(input.version, input.platform);
+		const fileName = this.fileName(
+			input.version,
+			input.platform,
+			artifactKind,
+			fromVersion,
+		);
 		const provider = await this.providerCall(() =>
 			this.storage.createReleaseDirectUpload(input.size, fileName),
 		);
@@ -183,6 +278,9 @@ export class ReleaseUploadService {
 				id: randomUUID(),
 				version: input.version,
 				platform: input.platform,
+				artifactKind,
+				fromVersion,
+				expectedFromVersions: JSON.stringify(input.expectedFromVersions ?? []),
 				sha256: input.sha256,
 				size: input.size,
 				provider: "alibaba",
@@ -251,7 +349,12 @@ export class ReleaseUploadService {
 		const already = await this.releases.findByVersionWithStorage(row.version);
 		const platform = row.platform as "win-x64" | "linux-x64";
 		const registered = already?.archives[platform];
-		if (row.status === "completed" || registered) {
+		const matched = registeredArtifact(
+			registered,
+			row.artifactKind,
+			row.fromVersion,
+		);
+		if (row.status === "completed" || matched) {
 			if (!already || !registered) {
 				throw new ReleaseUploadError(
 					ReleaseUploadErrorCode.SESSION_CONFLICT,
@@ -259,11 +362,10 @@ export class ReleaseUploadService {
 				);
 			}
 			if (
-				registered.availability === "deleting" ||
-				registered.availability === "cleaned" ||
-				registered.sha256 !== row.sha256 ||
-				registered.size !== row.size ||
-				registered.storage?.key !== row.providerKey
+				matched &&
+				(matched.sha256 !== row.sha256 ||
+					matched.size !== row.size ||
+					(matched.checkKey && matched.providerKey !== row.providerKey))
 			) {
 				throw new ReleaseUploadError(
 					ReleaseUploadErrorCode.SESSION_CONFLICT,
@@ -288,46 +390,93 @@ export class ReleaseUploadService {
 			);
 			await this.markProviderCompleted(row.id);
 		}
-		const archive: ServerReleaseArchiveInfo = {
-			sha256: row.sha256,
-			size: row.size,
-			fileName: this.fileName(row.version, platform),
-			availability: "available",
-			storage: {
-				provider: row.provider,
-				key: row.providerKey,
-				mode: "direct",
-			},
-		};
-		const current = await this.releases.findByVersionWithStorage(row.version);
-		let release: ReleaseInfo;
-		if (current?.archives[platform]) {
-			const stored = current.archives[platform];
-			if (
-				stored.availability === "deleting" ||
-				stored.availability === "cleaned" ||
-				stored.sha256 !== archive.sha256 ||
-				stored.size !== archive.size ||
-				stored.storage?.key !== archive.storage?.key
-			) {
-				throw new ReleaseUploadError(
-					ReleaseUploadErrorCode.SESSION_CONFLICT,
-					"Release 已登记不同构件",
-				);
-			}
-			release = toPublicReleaseInfo(current);
-		} else {
-			release = current
-				? await this.releases.addArchive(row.version, platform, archive)
-				: await this.releases.create({
-						version: row.version,
-						archives: { [platform]: archive },
-						createdByName: row.createdByName ?? undefined,
-						createdVia: row.createdVia ?? undefined,
-					});
-		}
+		const release = await this.reconcileArchives(row);
 		await this.markCompleted(row.id, release);
 		return { release };
+	}
+
+	/**
+	 * 按会话表已就绪会话整表重算 Release.archives 并写回。
+	 * 不依赖 CLI 上传顺序：delta 可以早于 full 完成，声明集合只由首个 full 会话携带，
+	 * 但同一版本的所有平台共享它，避免 hasAllReleaseArchives 因缺字段提前判为齐备。
+	 */
+	private async reconcileArchives(
+		row: ReleaseUploadSessionRow,
+	): Promise<ReleaseInfo> {
+		const sessions = await this.uploadSessions.findMany({
+			where: { version: row.version },
+		});
+		const ready = sessions
+			.filter(
+				(session) =>
+					session.status === "completed" ||
+					session.status === "provider_completed",
+			)
+			.map((session) => ({
+				...session,
+				artifactKind: session.artifactKind ?? "full",
+				fromVersion: session.fromVersion ?? "",
+			}));
+		let expectedFromVersions: string[] = [];
+		for (const session of ready) {
+			const declared = parseDeclared(session.expectedFromVersions ?? "[]");
+			if (declared.length > 0) {
+				expectedFromVersions = declared;
+				break;
+			}
+		}
+		const archives: Record<string, ServerReleaseArchiveInfo> = {};
+		for (const platform of ["win-x64", "linux-x64"] as const) {
+			const full = ready.find(
+				(session) =>
+					session.platform === platform && session.artifactKind === "full",
+			);
+			if (!full) continue;
+			const deltas = ready
+				.filter(
+					(session) =>
+						session.platform === platform &&
+						session.artifactKind === "delta" &&
+						session.fromVersion !== "",
+				)
+				.map((session) => ({
+					fromVersion: session.fromVersion,
+					sha256: session.sha256,
+					size: session.size,
+					fileName: this.fileName(
+						row.version,
+						platform,
+						"delta",
+						session.fromVersion,
+					),
+					// delta 的对象 key 必须落库，否则 /file?fromVersion= 拿不到增量包。
+					providerKey: session.providerKey,
+				}));
+			archives[platform] = {
+				sha256: full.sha256,
+				size: full.size,
+				fileName: this.fileName(row.version, platform, "full", ""),
+				availability: "available",
+				storage: {
+					provider: full.provider,
+					key: full.providerKey,
+					mode: "direct",
+				},
+				deltas,
+				protocolVersion: CONTROL_PROTOCOL_VERSION,
+				expectedFromVersions,
+			};
+		}
+		const current = await this.releases.findByVersionWithStorage(row.version);
+		if (current) {
+			return this.releases.replaceArchives(row.version, archives);
+		}
+		return this.releases.create({
+			version: row.version,
+			archives,
+			createdByName: row.createdByName ?? undefined,
+			createdVia: row.createdVia ?? undefined,
+		});
 	}
 
 	private async resumeSession(row: {
@@ -445,7 +594,11 @@ export class ReleaseUploadService {
 	private fileName(
 		version: string,
 		platform: "win-x64" | "linux-x64",
+		artifactKind: string,
+		fromVersion: string,
 	): string {
-		return `vcpdeck-${version}-${platform}.zip`;
+		return artifactKind === "delta"
+			? `vcpdeck-${version}-${platform}-delta-${fromVersion}.zip`
+			: `vcpdeck-${version}-${platform}.zip`;
 	}
 }

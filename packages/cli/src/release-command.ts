@@ -6,6 +6,7 @@ import {
 	ReleaseClientState,
 	ReleaseStatus,
 	selectLatestCatchUpTarget,
+	type ReleaseArtifactKind,
 	type ReleaseInfo,
 	type ReleasePlatform,
 } from "@vcpdeck/shared";
@@ -19,7 +20,8 @@ import {
 	type ResolvedEnvironment,
 } from "./environment.js";
 
-const VERSION_RE = /^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)\.zip$/;
+const VERSION_RE =
+	/^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)(?:-delta-(\d+\.\d+\.\d+))?\.zip$/;
 const VERSION_INPUT_RE = /^\d+\.\d+\.\d+$/;
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 1_800;
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
@@ -148,7 +150,7 @@ async function runUploadCommand(
 		value: ["env", "environment", "server", "username", "password", "timeout"],
 		boolean: ["wait"],
 	});
-	if (positionals.length !== 2) throw new Error(releaseUsage());
+	if (positionals.length < 2) throw new Error(releaseUsage());
 	validateArchives(positionals);
 	if (!options.wait && options.timeout !== undefined) {
 		throw new Error("--timeout 仅与 --wait 一起使用");
@@ -247,8 +249,23 @@ async function uploadRelease(
 ): Promise<VcpDeckClient> {
 	log(formatEnvironmentSummary(environment));
 	const client = await createAuthenticatedClient(environment);
-	for (const zipPath of zipPaths) {
-		await uploadOne(client, zipPath, log, context);
+	const archives = zipPaths.map(platformOfFile);
+	const expectedFromVersions = [
+		...new Set(
+			archives
+				.filter((archive) => archive.artifactKind === "delta")
+				.map((archive) => archive.fromVersion),
+		),
+	].sort();
+	let firstFullPending = true;
+	for (const [index, zipPath] of zipPaths.entries()) {
+		const archive = archives[index];
+		const isFirstFull = archive.artifactKind === "full" && firstFullPending;
+		if (isFirstFull) firstFullPending = false;
+		await uploadOne(client, zipPath, log, context, {
+			...archive,
+			expectedFromVersions: isFirstFull ? expectedFromVersions : undefined,
+		});
 	}
 	log("[vcpdeck] 上传完成（两个平台构件齐备后服务端自动开始更新）");
 	return client;
@@ -443,21 +460,62 @@ function validateArchives(zipPaths: string[]): void {
 	if (new Set(archives.map((archive) => archive.platform)).size !== 2) {
 		throw new Error("必须各提供一个 win-x64 与 linux-x64 构件");
 	}
+	// 文件名由 version|platform|artifactKind|fromVersion 唯一决定，四元组重复即文件名重复。
+	const identities = archives.map(
+		(archive) =>
+			`${archive.version}|${archive.platform}|${archive.artifactKind}|${archive.fromVersion}`,
+	);
+	if (new Set(identities).size !== identities.length) {
+		throw new Error("构件文件名不得重复");
+	}
+	const deltaSets: string[][] = [];
+	for (const platform of ["win-x64", "linux-x64"] as const) {
+		const group = archives.filter((archive) => archive.platform === platform);
+		if (
+			group.filter((archive) => archive.artifactKind === "full").length !== 1
+		) {
+			throw new Error("每个平台必须且只能有一个 full 构件");
+		}
+		const deltas = group.filter(
+			(archive) => archive.artifactKind === "delta",
+		);
+		if (deltas.length > 3) {
+			throw new Error("每个平台的 delta 构件不得超过 3 个");
+		}
+		deltaSets.push(
+			[...new Set(deltas.map((archive) => archive.fromVersion))].sort(),
+		);
+	}
+	const [winDeltas, linuxDeltas] = deltaSets;
+	if (
+		winDeltas.length !== linuxDeltas.length ||
+		winDeltas.some((version, index) => version !== linuxDeltas[index])
+	) {
+		throw new Error("两个平台的 delta 基线版本集合必须一致");
+	}
 }
 
-/** 从文件名解析平台（vcpdeck-<x.y.z>-<platform>.zip）。 */
+/** 从文件名解析产物坐标（full 或 -delta-<fromVersion> 增量包）。 */
 function platformOfFile(path: string): {
 	version: string;
 	platform: ReleasePlatform;
+	artifactKind: ReleaseArtifactKind;
+	fromVersion: string;
 } {
 	const name = path.split(/[\\/]/).pop() ?? "";
 	const match = VERSION_RE.exec(name);
 	if (!match) {
 		throw new Error(
-			`文件名应形如 vcpdeck-<x.y.z>-win-x64.zip / vcpdeck-<x.y.z>-linux-x64.zip: ${name}`,
+			`文件名应形如 vcpdeck-<x.y.z>-win-x64.zip / vcpdeck-<x.y.z>-linux-x64.zip（可附 -delta-<fromVersion>）: ${name}`,
 		);
 	}
-	return { version: match[1], platform: match[2] as ReleasePlatform };
+	const artifactKind: ReleaseArtifactKind = match[3] ? "delta" : "full";
+	return {
+		version: match[1],
+		platform: match[2] as ReleasePlatform,
+		artifactKind,
+		fromVersion: match[3] ?? "",
+	};
 }
 
 function sha256File(path: string): Promise<string> {
@@ -470,14 +528,26 @@ function sha256File(path: string): Promise<string> {
 	});
 }
 
-/** 上传单个平台包；Alibaba 直传 Provider，Local/旧 Server 使用 legacy raw。 */
+/** uploadOne 的产物描述；expectedFromVersions 仅首个 full 会话携带。 */
+type ArchiveUpload = ReturnType<typeof platformOfFile> & {
+	expectedFromVersions?: string[];
+};
+
+/** 上传单个产物；Alibaba 直传 Provider，Local/旧 Server 使用 legacy raw。 */
 async function uploadOne(
 	client: VcpDeckClient,
 	zipPath: string,
 	log: (message: string) => void,
 	context: ReleaseCommandContext,
+	archive: ArchiveUpload,
 ): Promise<ReleaseInfo> {
-	const { version, platform } = platformOfFile(zipPath);
+	const {
+		version,
+		platform,
+		artifactKind,
+		fromVersion,
+		expectedFromVersions,
+	} = archive;
 	const sha256 = await sha256File(zipPath);
 	const { size } = await stat(zipPath);
 	log(
@@ -491,6 +561,9 @@ async function uploadOne(
 			platform,
 			sha256,
 			size,
+			artifactKind,
+			fromVersion,
+			expectedFromVersions,
 		});
 	} catch (error) {
 		if (!(error instanceof VcpDeckApiError) || error.status !== 404) throw error;
