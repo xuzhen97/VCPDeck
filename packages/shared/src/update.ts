@@ -4,6 +4,14 @@
 /** 控制协议版本；破坏性协议变更时递增，Launcher 与 Server 双向校验。 */
 export const CONTROL_PROTOCOL_VERSION = 2;
 
+/**
+ * 能消费 `/update` 更新计划的 Launcher 最低版本。
+ * 该版本起 Launcher 才内置 v2 清单解析、清单验签、`/prepare` 状态查询与增量组装；
+ * 更早的 Launcher 只认 `/file` 全量下载，调用 `/update` 一律返回 `LAUNCHER_UPGRADE_REQUIRED`。
+ * 注意：这是 Launcher 的三段版本号，与控制协议号 `CONTROL_PROTOCOL_VERSION` 无关。
+ */
+export const MIN_UPDATE_PLAN_LAUNCHER_VERSION = "0.23.6";
+
 /** 发布构件种类：full 为旧格式整包，delta 为内容寻址增量包。 */
 export type ReleaseArtifactKind = "full" | "delta";
 

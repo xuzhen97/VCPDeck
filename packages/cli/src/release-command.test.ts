@@ -200,24 +200,48 @@ describe("release command", () => {
 			});
 		});
 
-		it("旧 Server 只接受四字段上传会话体时回落 legacy raw 上传", async () => {
-			const requests: string[] = [];
+		it("旧 Server 只接受四字段上传会话体时按兼容请求体重试直传会话", async () => {
+			const sessions: Array<Record<string, unknown>> = [];
+			const controlUrls: string[] = [];
 			const { port } = await listen((request, response) => {
 				const chunks: Buffer[] = [];
 				request.on("data", (chunk: Buffer) => chunks.push(chunk));
 				request.on("end", () => {
+					const url = request.url ?? "";
+					controlUrls.push(url);
 					response.setHeader("content-type", "application/json");
-					if (request.url === "/api/releases/uploads") {
-						requests.push("session");
-						response.statusCode = 400;
+					if (url === "/api/releases/uploads") {
+						const body = JSON.parse(
+							Buffer.concat(chunks).toString("utf8"),
+						) as Record<string, unknown>;
+						sessions.push(body);
+						// 0.23.4 的 Server 只接受四字段请求体，多带增量字段直接 400。
+						if (Object.keys(body).length > 4) {
+							response.statusCode = 400;
+							response.end(
+								JSON.stringify({
+									message:
+										"body 必须且只能包含 version/platform/sha256/size",
+								}),
+							);
+							return;
+						}
 						response.end(
 							JSON.stringify({
-								message: "body 必须且只能包含 version/platform/sha256/size",
+								mode: "direct",
+								sessionId: `session-${String(body.platform)}`,
+								partSize: 64,
+								parts: [
+									{
+										partNumber: 1,
+										url: `https://provider.example/${String(body.platform)}-p1`,
+									},
+								],
+								expiresAt: "2026-08-22T00:00:00.000Z",
 							}),
 						);
 						return;
 					}
-					requests.push("legacy");
 					response.end(JSON.stringify({ release: release("uploaded") }));
 				});
 			});
@@ -226,47 +250,81 @@ describe("release command", () => {
 			const linux = join(state.root, "vcpdeck-1.2.3-linux-x64.zip");
 			await writeFile(win, "win-archive");
 			await writeFile(linux, "linux-archive");
+			const providerRequests: string[] = [];
+			const directFetch = async (input: string | URL | Request) => {
+				providerRequests.push(String(input));
+				return new Response(null, { status: 200 });
+			};
 			const logs: string[] = [];
 
 			await runReleaseCommand("upload", [win, linux], {
 				paths: state.paths,
 				processEnv: state.processEnv,
+				directFetch: directFetch as typeof fetch,
 				log: (message) => logs.push(message),
 			});
 
-			expect(requests.filter((entry) => entry === "session")).toHaveLength(2);
-			expect(requests.filter((entry) => entry === "legacy")).toHaveLength(2);
-			expect(logs.join("\n")).toContain("legacy 引导上传");
+			// 每个平台两次会话：多字段被旧 Server 拒绝 → 四字段重开成功
+			expect(sessions).toHaveLength(4);
+			expect(sessions.filter((body) => Object.keys(body).length === 4)).toHaveLength(
+				2,
+			);
+			// 不再退到 legacy raw 上传，Alibaba 后端的旧 Server 会拒绝 raw 体
+			expect(
+				controlUrls.filter((url) => url.startsWith("/api/releases/upload?")),
+			).toHaveLength(0);
+			expect(providerRequests).toHaveLength(2);
+			expect(logs.join("\n")).toContain("四字段上传会话");
 		});
 
-		it("旧 Server 不支持增量构件时跳过 delta，不把它当成全量上传", async () => {
-			const requests: string[] = [];
+		it("旧 Server 不支持增量构件时跳过 delta，只直传全量包", async () => {
+			const sessions: Array<Record<string, unknown>> = [];
+			const controlUrls: string[] = [];
 			const { port } = await listen((request, response) => {
 				const chunks: Buffer[] = [];
 				request.on("data", (chunk: Buffer) => chunks.push(chunk));
 				request.on("end", () => {
+					const url = request.url ?? "";
+					controlUrls.push(url);
 					response.setHeader("content-type", "application/json");
-					if (request.url === "/api/releases/uploads") {
-						requests.push("session");
-						response.statusCode = 400;
+					if (url === "/api/releases/uploads") {
+						const body = JSON.parse(
+							Buffer.concat(chunks).toString("utf8"),
+						) as Record<string, unknown>;
+						sessions.push(body);
+						if (Object.keys(body).length > 4) {
+							response.statusCode = 400;
+							response.end(
+								JSON.stringify({
+									message:
+										"body 必须且只能包含 version/platform/sha256/size",
+								}),
+							);
+							return;
+						}
 						response.end(
 							JSON.stringify({
-								message: "body 必须且只能包含 version/platform/sha256/size",
+								mode: "direct",
+								sessionId: `session-${String(body.platform)}`,
+								partSize: 64,
+								parts: [
+									{
+										partNumber: 1,
+										url: `https://provider.example/${String(body.platform)}-p1`,
+									},
+								],
+								expiresAt: "2026-08-22T00:00:00.000Z",
 							}),
 						);
 						return;
 					}
-					requests.push("legacy");
 					response.end(JSON.stringify({ release: release("uploaded") }));
 				});
 			});
 			const state = await fixture(port);
 			const win = join(state.root, "vcpdeck-1.2.3-win-x64.zip");
 			const linux = join(state.root, "vcpdeck-1.2.3-linux-x64.zip");
-			const delta = join(
-				state.root,
-				"vcpdeck-1.2.3-win-x64-delta-1.2.2.zip",
-			);
+			const delta = join(state.root, "vcpdeck-1.2.3-win-x64-delta-1.2.2.zip");
 			const deltaLinux = join(
 				state.root,
 				"vcpdeck-1.2.3-linux-x64-delta-1.2.2.zip",
@@ -275,17 +333,27 @@ describe("release command", () => {
 			await writeFile(linux, "linux-archive");
 			await writeFile(delta, "delta-archive");
 			await writeFile(deltaLinux, "delta-archive-linux");
+			const providerRequests: string[] = [];
+			const directFetch = async (input: string | URL | Request) => {
+				providerRequests.push(String(input));
+				return new Response(null, { status: 200 });
+			};
 			const logs: string[] = [];
 
 			await runReleaseCommand("upload", [win, linux, delta, deltaLinux], {
 				paths: state.paths,
 				processEnv: state.processEnv,
+				directFetch: directFetch as typeof fetch,
 				log: (message) => logs.push(message),
 			});
 
-			expect(requests.filter((entry) => entry === "session")).toHaveLength(4);
-			// 增量包被跳过，只上传两个平台的全量包
-			expect(requests.filter((entry) => entry === "legacy")).toHaveLength(2);
+			// 两个全量包各两次会话（多字段被拒 + 四字段成功），两个增量包各一次即放弃
+			expect(sessions).toHaveLength(6);
+			// 增量包未被当成全量上传
+			expect(providerRequests).toHaveLength(2);
+			expect(
+				controlUrls.filter((url) => url.startsWith("/api/releases/upload?")),
+			).toHaveLength(0);
 			expect(logs.join("\n")).toContain("旧 Server 不支持增量构件");
 		});
 

@@ -23,6 +23,10 @@
 
 - **Tailnet 凭据导入不再要求手工准备根密钥**：此前必须在 Server 启动前配置 `VCPDECK_TAILNET_KEY_FILE`，否则「设置 → Tailnet 凭据」的导入一律以 `TAILNET_KEY_UNAVAILABLE` 失败，而界面只提示“请检查密钥格式与服务端根密钥配置”，无法区分是密钥格式还是根密钥问题。现在首次导入时 Server 在版本目录外的数据根自动创建受限根密钥（`<VCPDECK_APP_DIR | Server 工作目录>/data/tailnet/root.key`，POSIX `0700`/`0600`，Windows 收紧 ACL 并回读校验），并发首次创建只产生一把密钥，后续导入与重启复用；显式 `VCPDECK_TAILNET_KEY_FILE` 仍然优先且只读，缺失时不回退也不另建。库中已有密文而根密钥缺失、损坏或错绑时仍然 fail closed，不重建、不静默换钥。凭据页改为按稳定 `code` 分别提示根密钥不可用、输入格式不合法与凭据被占用。
 
+- **`/update` 计划端点不再把真实 Launcher 判为过低**：门槛原先拿 Launcher 主版本号与 `CONTROL_PROTOCOL_VERSION`（2）比较，任何 `0.23.x` Launcher 都会被 `403 LAUNCHER_UPGRADE_REQUIRED` 拒绝。改为与独立常量 `MIN_UPDATE_PLAN_LAUNCHER_VERSION`（`0.23.6`）逐段比较，archive 内的 `launcherMinVersion` 比较顺序不变；该端点仍无消费方，属预留入口。
+
+- **跨版本 CLI 上传不再误退 legacy raw**：旧 Server 的直传会话路由只接受 `version/platform/sha256/size` 四字段体，对带增量字段的请求回 400；CLI 原先据此退回 raw 上传，而 Alibaba 后端的旧 Server 会以 `RELEASE_DIRECT_UPLOAD_REQUIRED` 拒绝 raw 体。现在改为按四字段重开直传会话，只有路由缺失（404）才回落到 legacy raw；增量构件在旧 Server 上仍跳过。
+
 - **CLI 的 `files`/`terminal`/`frp`/`tailnet` 命令不再忽略 `--env`**：`resolveClientId` 此前在未拿到客户端时自行按默认环境新建一个，`--env`/`--environment` 的选择结果被丢弃；指向非默认环境的机器操作会回落到默认 Server 并报 `Network request failed`。现在要求调用方传入已按选项解析的客户端，23 处调用点补齐，并加回归测试（默认环境不可达、`--env` 指向可用环境）。
 
 - **旧 Server 的自更新不再卡在 apply 阶段**：Launcher 的 `/apply` 此前要求 prepare 已完成，否则直接回 409 `ASSEMBLE_FAILED`；而 0.23.4 及更早 Server 只发一次 `/prepare` 就立即 `/apply`，因此「先升级 Launcher、再发布业务版本」的迁移顺序必然失败。现在 `/apply` 在 prepare 进行中等待其完成，只有 prepare 尚未受理或已失败才回 409，并把 prepare 的稳定错误码透出。已用 0.23.4 Server + 0.23.6 Launcher 完成一次真实自更新演练（0.23.4 → 0.23.6）。

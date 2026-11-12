@@ -758,11 +758,11 @@ describe("ReleaseController", () => {
 			});
 		});
 
-		it("launcher=1.0.0（major 低于 CONTROL_PROTOCOL_VERSION）返回 403", async () => {
+		it("launcher=0.23.5（低于能消费计划的最低 Launcher）返回 403", async () => {
 			mockPlanArchive();
 
 			const err = await catchHttpError(
-				controller.updatePlan("1.2.1", "win-x64", "1.0.0"),
+				controller.updatePlan("1.2.1", "win-x64", "0.23.5"),
 			);
 
 			expect(err.getStatus()).toBe(403);
@@ -782,13 +782,13 @@ describe("ReleaseController", () => {
 			}
 		});
 
-		it("launcher=2.0.0 合法时返回 200 且 candidates 与 deltas 一一对应", async () => {
+		it("launcher=0.23.6 合法时返回 200 且 candidates 与 deltas 一一对应", async () => {
 			mockPlanArchive();
 
 			const result = await controller.updatePlan(
 				"1.2.1",
 				"win-x64",
-				"2.0.0",
+				"0.23.6",
 			);
 
 			expect(result).toEqual({
@@ -812,11 +812,11 @@ describe("ReleaseController", () => {
 			});
 		});
 
-		it("archive 带 launcherMinVersion=2.1.0 时 launcher=2.0.0 返回 403，2.2.0 通过", async () => {
-			mockPlanArchive({ launcherMinVersion: "2.1.0" });
+		it("archive 带 launcherMinVersion=0.24.0 时 launcher=0.23.6 返回 403，0.24.0 通过", async () => {
+			mockPlanArchive({ launcherMinVersion: "0.24.0" });
 
 			const denied = await catchHttpError(
-				controller.updatePlan("1.2.1", "win-x64", "2.0.0"),
+				controller.updatePlan("1.2.1", "win-x64", "0.23.6"),
 			);
 			expect(denied.getStatus()).toBe(403);
 			expect(denied.getResponse()).toMatchObject({
@@ -826,7 +826,7 @@ describe("ReleaseController", () => {
 			const result = await controller.updatePlan(
 				"1.2.1",
 				"win-x64",
-				"2.2.0",
+				"0.24.0",
 			);
 			expect(result).toMatchObject({ sha256: "a".repeat(64) });
 		});
@@ -837,7 +837,7 @@ describe("ReleaseController", () => {
 			const result = await controller.updatePlan(
 				"1.2.1",
 				"win-x64",
-				"2.0.0",
+				"0.23.6",
 			);
 
 			expect(result).not.toHaveProperty("candidates");
@@ -851,13 +851,13 @@ describe("ReleaseController", () => {
 		it("release 不存在返回 404，platform 非法返回 400", async () => {
 			service.findByVersion.mockResolvedValue(null);
 			const missing = await catchHttpError(
-				controller.updatePlan("9.9.9", "win-x64", "2.0.0"),
+				controller.updatePlan("9.9.9", "win-x64", "0.23.6"),
 			);
 			expect(missing.getStatus()).toBe(404);
 
 			mockPlanArchive();
 			const badPlatform = await catchHttpError(
-				controller.updatePlan("1.2.1", "darwin-x64", "2.0.0"),
+				controller.updatePlan("1.2.1", "darwin-x64", "0.23.6"),
 			);
 			expect(badPlatform.getStatus()).toBe(400);
 		});
@@ -870,7 +870,7 @@ describe("ReleaseController", () => {
 			const result = await controller.updatePlan(
 				"1.2.1",
 				"win-x64",
-				"2.0.0",
+				"0.23.6",
 			);
 
 			expect(JSON.stringify(result)).not.toContain("secret-file-id");
