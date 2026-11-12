@@ -533,14 +533,17 @@ type ArchiveUpload = ReturnType<typeof platformOfFile> & {
 	expectedFromVersions?: string[];
 };
 
-/** 上传单个产物；Alibaba 直传 Provider，Local/旧 Server 使用 legacy raw。 */
+/**
+ * 上传单个产物；Alibaba 直传 Provider，Local/旧 Server 使用 legacy raw。
+ * 旧 Server 不支持增量构件时返回 null（跳过该增量包）。
+ */
 async function uploadOne(
 	client: VcpDeckClient,
 	zipPath: string,
 	log: (message: string) => void,
 	context: ReleaseCommandContext,
 	archive: ArchiveUpload,
-): Promise<ReleaseInfo> {
+): Promise<ReleaseInfo | null> {
 	const {
 		version,
 		platform,
@@ -566,7 +569,22 @@ async function uploadOne(
 			expectedFromVersions,
 		});
 	} catch (error) {
-		if (!(error instanceof VcpDeckApiError) || error.status !== 404) throw error;
+		if (!(error instanceof VcpDeckApiError)) throw error;
+		// 旧 Server 可能没有直传会话路由（404），也可能只有
+		// version/platform/sha256/size 四字段的旧请求体（400）；两者都回落 legacy raw。
+		const legacyServer =
+			error.status === 404 ||
+			(error.status === 400 &&
+				error.message.includes("version/platform/sha256/size"));
+		if (!legacyServer) throw error;
+		// 旧 Server 只有一个「版本 + 平台」构件位，增量包传过去会覆盖全量包，
+		// 因此直接跳过；全量包照常上传，旧 Server 走全量更新。
+		if (artifactKind === "delta") {
+			log(
+				`[vcpdeck] 旧 Server 不支持增量构件，跳过 ${platform} 的 ${fromVersion} 增量包`,
+			);
+			return null;
+		}
 		log("[vcpdeck] 旧 Server 不支持直传会话，使用 legacy 引导上传");
 		return legacyUpload(client, zipPath, version, platform, sha256);
 	}

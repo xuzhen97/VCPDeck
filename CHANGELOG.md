@@ -23,6 +23,12 @@
 
 - **Tailnet 凭据导入不再要求手工准备根密钥**：此前必须在 Server 启动前配置 `VCPDECK_TAILNET_KEY_FILE`，否则「设置 → Tailnet 凭据」的导入一律以 `TAILNET_KEY_UNAVAILABLE` 失败，而界面只提示“请检查密钥格式与服务端根密钥配置”，无法区分是密钥格式还是根密钥问题。现在首次导入时 Server 在版本目录外的数据根自动创建受限根密钥（`<VCPDECK_APP_DIR | Server 工作目录>/data/tailnet/root.key`，POSIX `0700`/`0600`，Windows 收紧 ACL 并回读校验），并发首次创建只产生一把密钥，后续导入与重启复用；显式 `VCPDECK_TAILNET_KEY_FILE` 仍然优先且只读，缺失时不回退也不另建。库中已有密文而根密钥缺失、损坏或错绑时仍然 fail closed，不重建、不静默换钥。凭据页改为按稳定 `code` 分别提示根密钥不可用、输入格式不合法与凭据被占用。
 
+- **旧 Server 的自更新不再卡在 apply 阶段**：Launcher 的 `/apply` 此前要求 prepare 已完成，否则直接回 409 `ASSEMBLE_FAILED`；而 0.23.4 及更早 Server 只发一次 `/prepare` 就立即 `/apply`，因此「先升级 Launcher、再发布业务版本」的迁移顺序必然失败。现在 `/apply` 在 prepare 进行中等待其完成，只有 prepare 尚未受理或已失败才回 409，并把 prepare 的稳定错误码透出。已用 0.23.4 Server + 0.23.6 Launcher 完成一次真实自更新演练（0.23.4 → 0.23.6）。
+
+- **CLI 上传到旧 Server 不再用增量包覆盖全量包**：旧 Server 只有一个「版本 + 平台」构件位，`release upload` 的增量构件此前会在 legacy 兜底里按全量语义上传，覆盖同平台的全量包。现在识别出目标 Server 不支持增量会话时跳过该增量包并打印原因。
+
+- **安装脚本为非默认端口自动写入探活地址**：`install.cjs --port=<n>` 此前只写 `VCPDECK_PORT`，Server Launcher 仍按默认 3001 探活和下载，更新包下载会打到错误端口。现在端口不是 3001 时同时写入 `VCPDECK_PROBE_URL=http://127.0.0.1:<port>/api/status`。
+
 - **增量构件不再在清理后成为孤儿对象**：清理任务此前只删除全量包的 Provider 对象或本地 zip，archive 上登记的增量构件正文仍留在外部存储或 `data/releases`，长期占用空间且无从回收。现在逐个删除 delta 的 Provider 对象（存量记录缺对象 key 时按本地 delta 包路径删除），全部成功后再删除全量正文；任一失败恢复 `available` 重试，不留下半删除的全量包。
 
 - **更新候选增量包不再被 Client 丢弃**：`update:request` 携带的 `candidates` 此前没有转交本机 Launcher，增量包在真实更新链路里从不会被请求，只有 Launcher 单测覆盖。现在 Client 逐项校验候选字段、把相对下载地址解析为完整 URL 后随 `/prepare` 传递；候选不合法时直接上报 `update:failed`，不进入停机流程。

@@ -234,19 +234,52 @@ describe("createControlServer", () => {
 		expect(handlers.apply).not.toHaveBeenCalled();
 	});
 
-	it("/apply 在 preparing 状态也返回 409", async () => {
+	it("/apply 在 preparing 状态等待 handler 完成（兼容只发一次 /prepare 的旧 Server）", async () => {
 		const handlers = makeHandlers();
 		handlers.prepareStatus.mockReturnValue({
 			state: "preparing",
 			version: "1.2.1",
 		});
+		let finished = false;
+		handlers.apply.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					setTimeout(() => {
+						finished = true;
+						resolve();
+					}, 20);
+				}),
+		);
+		server = await createControlServer({ handlers, controlFile });
+		const control = await readControlFile(controlFile);
+
+		const res = await post(control.port, "/apply", control.token);
+
+		expect(res.status).toBe(200);
+		expect(handlers.apply).toHaveBeenCalledTimes(1);
+		expect(finished).toBe(true);
+	});
+
+	it("/apply 在 apply 抛出带 code 的错误时返回 409 与稳定错误码", async () => {
+		const handlers = makeHandlers();
+		handlers.prepareStatus.mockReturnValue({
+			state: "ready",
+			version: "1.2.1",
+		});
+		handlers.apply.mockRejectedValue(
+			Object.assign(new Error("版本准备失败"), {
+				code: "MANIFEST_SIGNATURE_INVALID",
+			}),
+		);
 		server = await createControlServer({ handlers, controlFile });
 		const control = await readControlFile(controlFile);
 
 		const res = await post(control.port, "/apply", control.token);
 
 		expect(res.status).toBe(409);
-		expect(handlers.apply).not.toHaveBeenCalled();
+		expect(await res.json()).toMatchObject({
+			code: "MANIFEST_SIGNATURE_INVALID",
+		});
 	});
 });
 

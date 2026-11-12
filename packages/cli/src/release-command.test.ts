@@ -200,6 +200,95 @@ describe("release command", () => {
 			});
 		});
 
+		it("旧 Server 只接受四字段上传会话体时回落 legacy raw 上传", async () => {
+			const requests: string[] = [];
+			const { port } = await listen((request, response) => {
+				const chunks: Buffer[] = [];
+				request.on("data", (chunk: Buffer) => chunks.push(chunk));
+				request.on("end", () => {
+					response.setHeader("content-type", "application/json");
+					if (request.url === "/api/releases/uploads") {
+						requests.push("session");
+						response.statusCode = 400;
+						response.end(
+							JSON.stringify({
+								message: "body 必须且只能包含 version/platform/sha256/size",
+							}),
+						);
+						return;
+					}
+					requests.push("legacy");
+					response.end(JSON.stringify({ release: release("uploaded") }));
+				});
+			});
+			const state = await fixture(port);
+			const win = join(state.root, "vcpdeck-1.2.3-win-x64.zip");
+			const linux = join(state.root, "vcpdeck-1.2.3-linux-x64.zip");
+			await writeFile(win, "win-archive");
+			await writeFile(linux, "linux-archive");
+			const logs: string[] = [];
+
+			await runReleaseCommand("upload", [win, linux], {
+				paths: state.paths,
+				processEnv: state.processEnv,
+				log: (message) => logs.push(message),
+			});
+
+			expect(requests.filter((entry) => entry === "session")).toHaveLength(2);
+			expect(requests.filter((entry) => entry === "legacy")).toHaveLength(2);
+			expect(logs.join("\n")).toContain("legacy 引导上传");
+		});
+
+		it("旧 Server 不支持增量构件时跳过 delta，不把它当成全量上传", async () => {
+			const requests: string[] = [];
+			const { port } = await listen((request, response) => {
+				const chunks: Buffer[] = [];
+				request.on("data", (chunk: Buffer) => chunks.push(chunk));
+				request.on("end", () => {
+					response.setHeader("content-type", "application/json");
+					if (request.url === "/api/releases/uploads") {
+						requests.push("session");
+						response.statusCode = 400;
+						response.end(
+							JSON.stringify({
+								message: "body 必须且只能包含 version/platform/sha256/size",
+							}),
+						);
+						return;
+					}
+					requests.push("legacy");
+					response.end(JSON.stringify({ release: release("uploaded") }));
+				});
+			});
+			const state = await fixture(port);
+			const win = join(state.root, "vcpdeck-1.2.3-win-x64.zip");
+			const linux = join(state.root, "vcpdeck-1.2.3-linux-x64.zip");
+			const delta = join(
+				state.root,
+				"vcpdeck-1.2.3-win-x64-delta-1.2.2.zip",
+			);
+			const deltaLinux = join(
+				state.root,
+				"vcpdeck-1.2.3-linux-x64-delta-1.2.2.zip",
+			);
+			await writeFile(win, "win-archive");
+			await writeFile(linux, "linux-archive");
+			await writeFile(delta, "delta-archive");
+			await writeFile(deltaLinux, "delta-archive-linux");
+			const logs: string[] = [];
+
+			await runReleaseCommand("upload", [win, linux, delta, deltaLinux], {
+				paths: state.paths,
+				processEnv: state.processEnv,
+				log: (message) => logs.push(message),
+			});
+
+			expect(requests.filter((entry) => entry === "session")).toHaveLength(4);
+			// 增量包被跳过，只上传两个平台的全量包
+			expect(requests.filter((entry) => entry === "legacy")).toHaveLength(2);
+			expect(logs.join("\n")).toContain("旧 Server 不支持增量构件");
+		});
+
 		const rejectCases: Array<{
 			name: string;
 			names: string[];

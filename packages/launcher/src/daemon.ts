@@ -250,6 +250,13 @@ export class Daemon {
 			},
 			apply: async () => {
 				if (this.prepareTask) await this.prepareTask;
+				if (this.prepareStatusValue.state === "failed") {
+					throw Object.assign(new Error("版本准备失败"), {
+						code:
+							this.prepareStatusValue.errorCode ??
+							ReleaseArtifactErrorCode.ASSEMBLE_FAILED,
+					});
+				}
 				const version = this.pendingVersion;
 				if (!version) throw new Error("尚未 prepare");
 				await this.applyUpdate(version);

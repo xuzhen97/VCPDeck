@@ -407,6 +407,10 @@ function buildEnvFile({
 	if (artifact === "server") {
 		if (adminPassword) lines.push(`VCPDECK_ADMIN_PASSWORD=${adminPassword}`);
 		if (dbUrl) lines.push(`DATABASE_URL=${dbUrl}`);
+		// 非默认端口必须同步探活地址，否则 Server Launcher 仍按 3001 探活/下载
+		if (port && Number(port) !== 3001) {
+			lines.push(`VCPDECK_PROBE_URL=http://127.0.0.1:${port}/api/status`);
+		}
 		// 必须在版本目录之外：Launcher 按版本目录启动 server，相对路径会随自更新漂移
 		if (releasesDir) lines.push(`VCPDECK_RELEASES_DIR=${releasesDir}`);
 	} else {
