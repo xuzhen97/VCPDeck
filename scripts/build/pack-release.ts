@@ -12,6 +12,8 @@
  *   4. 产出 win-x64 / linux-x64 两份 zip（均含 Launcher、Server、Client；archiver，构建机平台无关），供分发与自动
  *      更新上传（Server 按目标机平台选择对应包）；linux frp 裸 ELF 从 .gz 内存解压
  *      直接注入 zip（规避开发机杀毒删除裸 ELF）；计算 sha256
+ *      同时为每个平台写同版本 sidecar 清单（`vcpdeck-<version>-<variant>.manifest.json`），
+ *      并以最近 3 个历史 sidecar 为基线求差集，产出内容寻址增量包（ADR-0062）
  *   5. 保留版本文件与 skills/vcpdeck/vcpdeck.cjs，供提交后创建同版本 Git Tag
  *
  * 注意：manifest.sha256 由服务端上传时计算并写入 Release 表（zip 内含 manifest，
@@ -32,7 +34,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { ZipArchive } from "archiver";
@@ -43,7 +45,12 @@ import {
 	bundleServer,
 } from "./bundle-apps.js";
 import { copyInstallerAsset } from "./release-installer-assets.js";
-import { buildFileList, derivePublicKeyPem, signManifest } from "./release-manifest.js";
+import {
+	buildFileList,
+	derivePublicKeyPem,
+	diffFileList,
+	signManifest,
+} from "./release-manifest.js";
 
 const ROOT = resolve(__dirname, "../..");
 const PLATFORMS = "win-x64,linux-x64";
@@ -166,7 +173,7 @@ function findStorePkgJson(name: string): PkgJson {
 }
 
 /** 简单语义化版本比较（x.y.z[-pre]；预发布低于正式版） */
-function compareVersions(a: string, b: string): number {
+export function compareVersions(a: string, b: string): number {
 	const [aCore, aPre] = a.split("-");
 	const [bCore, bPre] = b.split("-");
 	const aParts = aCore.split(".").map(Number);
@@ -525,6 +532,11 @@ export async function createArchive(
 	const archivePath = join(ROOT, output, `vcpdeck-${version}-${variant}.zip`);
 	mkdirSync(join(ROOT, output), { recursive: true });
 	if (existsSync(archivePath)) rmSync(archivePath, { force: true });
+	// 同版本 sidecar 清单：供后续版本求增量差集；旧发布包的 manifest 没有 files，无法充当基线。
+	writeFileSync(
+		join(ROOT, output, `vcpdeck-${version}-${variant}.manifest.json`),
+		manifestJson,
+	);
 
 	return new Promise((resolvePromise, reject) => {
 		const out = createWriteStream(archivePath);
@@ -542,6 +554,110 @@ export async function createArchive(
 		archive.append(signature, { name: "manifest.json.sig" });
 		void archive.finalize();
 	});
+}
+
+/** 同版本 sidecar 清单文件名：`vcpdeck-<version>-<variant>.manifest.json`。 */
+const SIDECAR_PATTERN =
+	/^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)\.manifest\.json$/;
+
+/** 每个平台最多用于求差集的历史基线数，与 CLI 上传侧「每组最多 3 个 delta」一致。 */
+const DELTA_BASELINE_LIMIT = 3;
+
+/**
+ * 挑出可用作差集基线的 sidecar：同 variant、版本低于当前版本，按版本降序最多取 3 个。
+ * 旧发布包的 manifest.json 没有 files 字段，无法充当 Launcher 基线，因此只认本脚本写出的 sidecar。
+ */
+export function selectDeltaBaselines(
+	fileNames: string[],
+	version: string,
+	variant: ArchiveVariant,
+): string[] {
+	const candidates: Array<{ name: string; version: string }> = [];
+	for (const name of fileNames) {
+		const match = SIDECAR_PATTERN.exec(name);
+		if (!match || match[2] !== variant) continue;
+		if (compareVersions(match[1], version) >= 0) continue;
+		candidates.push({ name, version: match[1] });
+	}
+	return candidates
+		.sort((a, b) => compareVersions(b.version, a.version))
+		.slice(0, DELTA_BASELINE_LIMIT)
+		.map((entry) => entry.name);
+}
+
+/** 读取 sidecar 清单中的文件列表；没有 files 字段时返回空数组（求差集必然全量变更，不会误产 delta）。 */
+function readSidecarFiles(path: string): ReleaseFileEntry[] {
+	const parsed = JSON.parse(readFileSync(path, "utf8")) as { files?: unknown };
+	return Array.isArray(parsed.files) ? (parsed.files as ReleaseFileEntry[]) : [];
+}
+
+/**
+ * 为单个平台产出增量包：读取输出目录里的历史 sidecar 清单，求差集后逐基线生成 delta。
+ * 与基线完全一致、或变更量不小于全量包时跳过，不产无意义的 delta。
+ */
+export async function buildDeltas(opts: {
+	stagingDir: string;
+	version: string;
+	output: string;
+	variant: ArchiveVariant;
+	targetFiles: ReleaseFileEntry[];
+	fullSize: number;
+	privateKeyPem: string;
+}): Promise<string[]> {
+	const outputDir = join(ROOT, opts.output);
+	const sidecarNames = readdirSync(outputDir).filter((name) =>
+		SIDECAR_PATTERN.test(name),
+	);
+	const deltaPaths: string[] = [];
+	for (const baselineName of selectDeltaBaselines(
+		sidecarNames,
+		opts.version,
+		opts.variant,
+	)) {
+		const fromVersion = SIDECAR_PATTERN.exec(baselineName)?.[1];
+		if (!fromVersion) continue;
+		const changedFiles = diffFileList(
+			opts.targetFiles,
+			readSidecarFiles(join(outputDir, baselineName)),
+		);
+		if (changedFiles.length === 0) {
+			console.log(
+				`[pack-release] 跳过 delta ${fromVersion} → ${opts.version} (${opts.variant})：与基线完全一致`,
+			);
+			continue;
+		}
+		const changedBytes = changedFiles.reduce(
+			(total, file) => total + file.size,
+			0,
+		);
+		if (changedBytes >= opts.fullSize) {
+			console.log(
+				`[pack-release] 跳过 delta ${fromVersion} → ${opts.version} (${opts.variant})：变更量不小于全量包`,
+			);
+			continue;
+		}
+		const deltaPath = await createDeltaArchive({
+			stagingDir: opts.stagingDir,
+			version: opts.version,
+			output: opts.output,
+			variant: opts.variant,
+			fromVersion,
+			changedFiles,
+			manifest: {
+				version: opts.version,
+				protocolVersion: 2,
+				kind: "delta",
+				fromVersion,
+				files: changedFiles,
+			},
+			privateKeyPem: opts.privateKeyPem,
+		});
+		deltaPaths.push(deltaPath);
+		console.log(
+			`[pack-release] 增量包: ${deltaPath}（相对 ${fromVersion} 变更 ${changedFiles.length} 个文件）`,
+		);
+	}
+	return deltaPaths;
 }
 
 /** 生成增量包：仅包含变更集文件、delta.json 清单及其签名。 */
@@ -691,7 +807,11 @@ async function main(): Promise<void> {
 
 		// 3. 压缩（win-x64 / linux-x64 两份）+ linux frp 内存注入 + sha256
 		const variants: ArchiveVariant[] = ["win-x64", "linux-x64"];
-		const results: Array<{ name: string; sha256: string; platform: string }> = [];
+		const results: Array<{
+			name: string;
+			sha256: string;
+			platform: ArchiveVariant;
+		}> = [];
 		for (const variant of variants) {
 			const archivePath = await createArchive(
 				stagingDir,
@@ -704,13 +824,41 @@ async function main(): Promise<void> {
 				.digest("hex");
 			results.push({ name: archivePath, sha256, platform: variant });
 		}
+
+		// 3.1 增量包：以输出目录里最近 3 个历史 sidecar 清单为基线求差集。
+		//     旧发布包 manifest 没有 files，不能当基线，所以首个新格式版本自然不产 delta。
+		const outputDir = join(ROOT, args.output);
+		const privateKeyPem = readReleasePrivateKeyPem();
+		const deltaPaths: string[] = [];
+		for (const { name: fullPath, platform } of results) {
+			deltaPaths.push(
+				...(await buildDeltas({
+					stagingDir,
+					version: args.version,
+					output: args.output,
+					variant: platform,
+					targetFiles: readSidecarFiles(
+						join(
+							outputDir,
+							`vcpdeck-${args.version}-${platform}.manifest.json`,
+						),
+					),
+					fullSize: statSync(fullPath).size,
+					privateKeyPem,
+				})),
+			);
+		}
+
 		console.log("");
 		for (const { name, sha256 } of results) {
 			console.log(`[pack-release] 完成: ${name}`);
 			console.log(`[pack-release] sha256: ${sha256}`);
 		}
+		const uploadTargets = [...results.map((r) => r.name), ...deltaPaths]
+			.map((path) => basename(path))
+			.join(" ");
 		console.log(
-			"[pack-release] 使用 CLI 上传：vcpdeck release upload <win-x64.zip> <linux-x64.zip> [--env=<name>] --wait --timeout=1800（Alibaba 直传 Provider；Local 由 CLI 协商 Server raw stream）",
+			`[pack-release] 使用 CLI 上传：vcpdeck release upload ${uploadTargets} [--env=<name>] --wait --timeout=1800（Alibaba 直传 Provider；Local 由 CLI 协商 Server raw stream）`,
 		);
 		console.log(
 			`[pack-release] 安装/卸载脚本与 zip 平级: ${join(ROOT, args.output, "install.cjs / uninstall.cjs")}`,

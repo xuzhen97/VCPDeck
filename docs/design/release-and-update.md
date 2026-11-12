@@ -224,6 +224,8 @@ Server/Client 在 `/apply` 返回后不再把「本进程未被接管」立即�
 
 增量包通过同一入口的可选 `fromVersion=x.y.z` 参数下载（即更新计划中 `candidates[].url` 指向的地址）：Server 在 `Release.archives[platform].deltas[]` 中按基线版本定位构件，外部存储后端用该 delta 自己的对象 key 换取直链（与 full 包的 key 相互独立，短 TTL 缓存按对象 key 区分），Local 后端 `sendFile` 到 `vcpdeck-<version>-<platform>-delta-<fromVersion>.zip`。`fromVersion` 缺省或为空串时行为与迁移前逐字一致；非法格式返回 400，找不到对应 delta 返回稳定 404，direct 模式下 delta 缺对象 key（本次改动前上传的存量记录）返回 502 而不静默回落到 full 包——否则 Launcher 会用 delta 的 sha256 校验 full 字节而必然失败。`deltas[].providerKey` 是 Server 内部定位信息，与 `archive.storage.key` 一样在对外投影时剥离，不进入任何 API 响应。
 
+打包侧每次发布除 full zip 外，还写同版本 sidecar 清单 `vcpdeck-<version>-<platform>.manifest.json`（与 zip 平级、仅本地留存）；后续版本以输出目录里最近 3 个历史 sidecar 为基线求差集，产出 `vcpdeck-<version>-<platform>-delta-<fromVersion>.zip`。变更集为空、或变更文件总量不小于全量 zip 时直接跳过，不产无收益的增量包。旧发布包的 `manifest.json` 没有 `files` 字段，不能充当 Launcher 基线，因此首个带 sidecar 的版本不会产出 delta；CLI 按文件名识别 `artifactKind` 与 `fromVersion`，同一版本每平台最多登记 3 个 delta。
+
 当前 `preStart` 在停止旧 Server 之前执行。默认 `prisma db push` 可能与旧 Server 同时访问数据库，且其 schema 变化不会在应用回退时自动逆转；生产发布不能把该默认钩子当作安全迁移策略。
 
 ## 7. Client 更新流程
@@ -462,7 +464,7 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 当前优先缺口：
 
 1. 完成跨平台 archive 与 Launcher 随包分发的真实演练；
-2. 让打包主流程实际产出 delta 包（`createDeltaArchive` 目前只有单测覆盖，`pnpm release` 只产 full，`candidates` 因此恒为空）；
+2. 用真实历史版本跑一遍打包产 delta 的端到端演练（`pnpm release` 现已写 sidecar 并产出最近 3 个基线的 delta，尚无真实发布验证）；
 3. 决定 `/update` 计划端点的去向（接线给 Launcher 或删除），并同步 ADR-0062；
 4. 建立 systemd/Windows Service 安装流程；
 5. 完成 Server drain 失败后的闸门恢复(超时抛错路径自动解除,编排器失败路径显式 release());

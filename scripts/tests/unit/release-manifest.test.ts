@@ -88,6 +88,48 @@ describe("diffFileList", () => {
 	});
 });
 
+describe("compareVersions / selectDeltaBaselines", () => {
+	it("按数值逐段比较版本，0.9.10 高于 0.9.9", async () => {
+		const { compareVersions } = await packRelease;
+		assert.ok(compareVersions("0.9.10", "0.9.9") > 0);
+		assert.ok(compareVersions("0.23.4", "0.24.0") < 0);
+		assert.equal(compareVersions("1.2.3", "1.2.3"), 0);
+	});
+
+	it("只挑同 variant 且版本更低的 sidecar，按版本降序最多 3 个", async () => {
+		const { selectDeltaBaselines } = await packRelease;
+		const names = [
+			"vcpdeck-0.23.4-win-x64.manifest.json",
+			"vcpdeck-0.23.3-win-x64.manifest.json",
+			"vcpdeck-0.22.2-win-x64.manifest.json",
+			"vcpdeck-0.21.0-win-x64.manifest.json",
+			"vcpdeck-0.23.4-linux-x64.manifest.json",
+			"vcpdeck-0.24.0-win-x64.manifest.json",
+			"vcpdeck-0.23.4-win-x64.zip",
+		];
+		assert.deepEqual(selectDeltaBaselines(names, "0.24.0", "win-x64"), [
+			"vcpdeck-0.23.4-win-x64.manifest.json",
+			"vcpdeck-0.23.3-win-x64.manifest.json",
+			"vcpdeck-0.22.2-win-x64.manifest.json",
+		]);
+	});
+
+	it("当前版本与更高版本一律排除，避免自比或反向基线", async () => {
+		const { selectDeltaBaselines } = await packRelease;
+		assert.deepEqual(
+			selectDeltaBaselines(
+				[
+					"vcpdeck-0.24.0-win-x64.manifest.json",
+					"vcpdeck-0.25.0-win-x64.manifest.json",
+				],
+				"0.24.0",
+				"win-x64",
+			),
+			[],
+		);
+	});
+});
+
 describe("signManifest", () => {
 	const files = [
 		{ path: "bin/app", sha256: sha("a"), size: 100, mode: 0o644 },
@@ -460,6 +502,15 @@ describe("createArchive（Task 4）", () => {
 					"manifest.json.sig",
 				]);
 				assert.equal(entries.get("manifest.json")?.toString("utf8"), manifestBytes);
+				// 同版本 sidecar 清单与 zip 平级落盘，供后续版本求差集。
+				const sidecar = JSON.parse(
+					fsReadFileSync(
+						join(process.cwd(), dirs.outputRel, "vcpdeck-0.24.0-win-x64.manifest.json"),
+						"utf8",
+					),
+				) as { files: unknown[]; version: string };
+				assert.equal(sidecar.version, "0.24.0");
+				assert.equal(sidecar.files.length, 2);
 				const parsed = JSON.parse(manifestBytes);
 				assert.equal(parsed.sha256, "");
 				assert.equal(parsed.protocolVersion, 2);
@@ -927,6 +978,98 @@ describe("createArchive 按 variant 自洽清单（Task 4 收尾）", () => {
 					false,
 				);
 			});
+		} finally {
+			dirs.cleanup();
+		}
+	});
+});
+
+describe("buildDeltas（增量包基线选择与差集）", () => {
+	const baselineFiles = [
+		{ path: "bin/app", sha256: sha("a"), size: 3, mode: 0o644 },
+		{ path: "lib/core.js", sha256: sha("b"), size: 4, mode: 0o644 },
+	];
+
+	it("按历史 sidecar 求差集，delta.zip 只含变更文件与 delta.json(.sig)", async () => {
+		const { buildDeltas } = await packRelease;
+		const dirs = makeDirs();
+		try {
+			// 历史版本的 sidecar 清单（基线）；旧格式 zip 内 manifest 无 files，只能靠它。
+			mkdirSync(dirs.outputAbs, { recursive: true });
+			fsWriteFileSync(
+				join(dirs.outputAbs, "vcpdeck-0.23.4-win-x64.manifest.json"),
+				JSON.stringify({ version: "0.23.4", files: baselineFiles }),
+			);
+			// 当前 staging：bin/app 变更、lib/core.js 不变、新增 doc/new.txt。
+			writeStageFile(dirs.staging, "bin/app", "app2");
+			writeStageFile(dirs.staging, "lib/core.js", "core");
+			writeStageFile(dirs.staging, "doc/new.txt", "new");
+			const deltaPaths = await buildDeltas({
+				stagingDir: dirs.staging,
+				version: "0.24.0",
+				output: dirs.outputRel,
+				variant: "win-x64",
+				targetFiles: [
+					{ path: "bin/app", sha256: sha("c"), size: 4, mode: 0o644 },
+					{ path: "doc/new.txt", sha256: sha("d"), size: 3, mode: 0o644 },
+					{ path: "lib/core.js", sha256: sha("b"), size: 4, mode: 0o644 },
+				],
+				fullSize: 10_000,
+				privateKeyPem,
+			});
+
+			assert.equal(deltaPaths.length, 1);
+			assert.match(
+				deltaPaths[0],
+				/vcpdeck-0\.24\.0-win-x64-delta-0\.23\.4\.zip$/,
+			);
+			const entries = readZipEntries(deltaPaths[0]);
+			assert.deepEqual(
+				[...entries.keys()].filter((n) => !n.endsWith("/")).sort(),
+				["bin/app", "delta.json", "delta.json.sig", "doc/new.txt"],
+			);
+			const deltaManifest = parseReleaseDeltaManifest(
+				JSON.parse(entries.get("delta.json")?.toString("utf8") ?? ""),
+			);
+			assert.equal(deltaManifest.kind, "delta");
+			assert.equal(deltaManifest.fromVersion, "0.23.4");
+			assert.deepEqual(deltaManifest.files, [
+				{ path: "bin/app", sha256: sha("c"), size: 4, mode: 0o644 },
+				{ path: "doc/new.txt", sha256: sha("d"), size: 3, mode: 0o644 },
+			]);
+		} finally {
+			dirs.cleanup();
+		}
+	});
+
+	it("与基线一致、或变更量不小于全量包时跳过，不产 delta", async () => {
+		const { buildDeltas } = await packRelease;
+		const dirs = makeDirs();
+		try {
+			mkdirSync(dirs.outputAbs, { recursive: true });
+			fsWriteFileSync(
+				join(dirs.outputAbs, "vcpdeck-0.23.4-win-x64.manifest.json"),
+				JSON.stringify({ version: "0.23.4", files: baselineFiles }),
+			);
+			const baseOpts = {
+				stagingDir: dirs.staging,
+				version: "0.24.0",
+				output: dirs.outputRel,
+				variant: "win-x64" as const,
+				fullSize: 100,
+				privateKeyPem,
+			};
+			assert.deepEqual(
+				await buildDeltas({ ...baseOpts, targetFiles: baselineFiles }),
+				[],
+			);
+			assert.deepEqual(
+				await buildDeltas({
+					...baseOpts,
+					targetFiles: [{ ...baselineFiles[0], sha256: sha("e"), size: 9999 }],
+				}),
+				[],
+			);
 		} finally {
 			dirs.cleanup();
 		}

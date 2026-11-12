@@ -12,6 +12,8 @@
 
 - **发布清单签名与 Launcher 协议门槛**：打包管线用 Ed25519 对 full 的 `manifest.json` 与 delta 的 `delta.json` 签名（包内 `<清单>.sig`），Launcher `prepare` 先验签、再对包内条目做路径预检并按清单逐文件校验 hash/size/mode，未变文件从本地历史版本目录硬链接复用，任一步失败删除半成品并降级 full；缺签名的旧格式包仍直通，迁移期兼容。新增 `GET /api/releases/:version/update?platform=&launcher=` 更新计划端点与 `CONTROL_PROTOCOL_VERSION`（当前为 2）门槛，低于门槛返回 `LAUNCHER_UPGRADE_REQUIRED`，不再给旧 Launcher 可执行跳转。打包侧从签名私钥派生可信公钥并注入 Launcher 单文件（包内只含公钥）；私钥经 `VCPDECK_RELEASE_PRIVATE_KEY_PEM`／`VCPDECK_RELEASE_PRIVATE_KEY_PATH` 读取，缺失即打包失败。运维侧不再需要手工替换公钥，只有轮换演练时才用 `VCPDECK_RELEASE_PUBLIC_KEY_PEM` 覆盖。
 
+- **打包产出增量包**：`pnpm release` 在产出 full zip 的同时写同版本 sidecar 清单 `vcpdeck-<version>-<platform>.manifest.json`，并以输出目录里最近 3 个历史 sidecar 为基线求差集，产出 `vcpdeck-<version>-<platform>-delta-<fromVersion>.zip`（含 `delta.json` 与签名）。变更集为空或变更文件总量不小于全量 zip 时跳过。旧发布包的 `manifest.json` 没有 `files` 字段，不能充当基线，所以首个带 sidecar 的版本不会产出 delta。
+
 ### Changed
 
 - **Tailnet 需要 Server 先行升级**：Client 新增 `tailnet.manage` capability、`capabilityDetails.tailnet` 与可选注册摘要；旧 Server 的严格 parser 会拒绝这些新字段，因此不得先部署新 Client。新 Server 兼容旧 Client 的缺省值（按“不支持 Tailnet”处理）。数据库新增 `TailnetCredential`、`TailnetClientOperation` 两表与 nullable `Client.tailnetSnapshot` 列，属纯增量；Tailnet 根密钥仅从 `VCPDECK_TAILNET_KEY_FILE` 读取，必须与 SQLite 配对备份。
