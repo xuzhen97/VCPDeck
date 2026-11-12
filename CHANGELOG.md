@@ -21,6 +21,9 @@
 
 ### Fixed
 
+- **增量组装降级前记录原因**：Launcher 在候选 delta 组装失败、改走全量包之前，输出稳定错误码与基线／目标版本，避免静默降级无法定位。
+- **增量包清单改为完整目标清单**：`delta.json` 的 `files` 现列出新版本全部文件（包体仍只含变更字节），修复 Launcher 组装出的目标目录只剩变更文件、切换后 `preStart` 失败（0.23.9 事故）。
+
 - **服务端自更新改用增量包**：编排器更新自身时只下发全量 `url`，即使发布记录里登记了 delta，服务端每次仍下载整包（0.23.7 实测 98.0MB，而同批客户端走增量只取 3.0MB）。现在服务端同样把本机平台的候选随 `/prepare` 交给 Launcher，自选基线与组装失败降级全量的逻辑不变。
 
 - **`/update` 计划端点不再把真实 Launcher 判为过低**：门槛原先拿 Launcher 主版本号与 `CONTROL_PROTOCOL_VERSION`（2）比较，任何 `0.23.x` Launcher 都会被 `403 LAUNCHER_UPGRADE_REQUIRED` 拒绝。改为与独立常量 `MIN_UPDATE_PLAN_LAUNCHER_VERSION`（`0.23.6`）逐段比较，archive 内的 `launcherMinVersion` 比较顺序不变；该端点仍无消费方，属预留入口。

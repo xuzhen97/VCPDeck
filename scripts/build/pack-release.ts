@@ -643,12 +643,14 @@ export async function buildDeltas(opts: {
 			variant: opts.variant,
 			fromVersion,
 			changedFiles,
+			// delta.json 的 files 必须是完整目标清单：Launcher 逐条组装，包内有的复制校验、
+			// 包内没有的从基线目录硬链接；被删除的文件由清单缺失表达。
 			manifest: {
 				version: opts.version,
 				protocolVersion: 2,
 				kind: "delta",
 				fromVersion,
-				files: changedFiles,
+				files: opts.targetFiles,
 			},
 			privateKeyPem: opts.privateKeyPem,
 		});
@@ -660,7 +662,12 @@ export async function buildDeltas(opts: {
 	return deltaPaths;
 }
 
-/** 生成增量包：仅包含变更集文件、delta.json 清单及其签名。 */
+/**
+ * 生成增量包：包内只放变更集文件内容，delta.json 携带**完整**目标清单及其签名。
+ *
+ * 清单必须完整而不是只列变更集，否则 Launcher 组装出的目标目录只有变更文件，
+ * 其余文件不会从基线硬链接补齐（0.23.9 生产事故即此）。
+ */
 export async function createDeltaArchive(opts: {
 	stagingDir: string;
 	version: string;

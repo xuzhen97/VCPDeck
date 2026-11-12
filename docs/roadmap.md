@@ -31,7 +31,7 @@
 9. 确认 FRP 长期多实例方向：每 Client 强制单 FrpsInstance，或每实例独立 frpc runtime；以新 ADR 实施 secret 脱敏/存储、默认实例原子性、严格 parser、真实 active、Client 重启恢复、可靠删除和 Actor 审计；
 10. 完成 exec 断线终局补报，并完成 Server 重启窗口 Job 对账和 Windows/Linux 全链路 Release E2E，统一 archive 格式；
 11. 修复 Release drain 失败后的派发恢复、重复版本构件覆盖和活动 Release 并发上传边界；
-12. 发布链路剩余缺口：`/update` 计划端点接线或删除、签名密钥轮换与双钥并存、回退与新装机演练；真实发布周期 3 次（本机演练 + 生产 0.23.6／0.23.7）、存量 Launcher 迁移与 delta 参与真实切换（0.23.7 客户端实测 3.0MB、总耗时 0.5s）已完成，构件签名、严格 manifest/archive 校验、`launcherMinVersion` 校验、打包产 delta（sidecar + 最近 3 个基线差集）、清理连带删除增量构件、跨版本 CLI 上传兜底（旧 Server 只接受四字段会话体时按兼容请求体重开直传会话）、`/update` 计划端点门槛修正（改比 Launcher 三段版本）与服务端自更新也下发增量候选，均已完成（ADR-0063，仍为 Proposed）；
+12. 发布链路剩余缺口：`/update` 计划端点接线或删除、签名密钥轮换与双钥并存、回退与新装机演练；真实发布周期 4 次（本机演练 + 生产 0.23.6／0.23.7／0.23.10）、存量 Launcher 迁移与 delta 参与真实切换（0.23.7 客户端实测 3.0MB、总耗时 0.5s）已完成，构件签名、严格 manifest/archive 校验、`launcherMinVersion` 校验、打包产 delta（sidecar + 最近 3 个基线差集）、清理连带删除增量构件、跨版本 CLI 上传兜底（旧 Server 只接受四字段会话体时按兼容请求体重开直传会话）、`/update` 计划端点门槛修正（改比 Launcher 三段版本）、服务端自更新也下发增量候选、增量清单改为完整目标清单（修复 0.23.9 切换后 `preStart` 失败）与服务端首次经 delta 完成自更新（0.23.10 实测 3.4MB／总耗时 2.2s），均已完成；客户端侧因 0.23.7／0.23.8 遗留部分树本轮降级全量，待下一周期验证（ADR-0063，仍为 Proposed）；
 13. 结构化脱敏日志已覆盖 Job 路径（ADR-0054）；剩余：其余 `console.*` 的统一化、监控指标和告警；
 14. 建立自动备份、恢复演练和数据保留清理；
 15. 补齐浏览器 E2E、数据库升级测试和安全 fuzz；

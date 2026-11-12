@@ -1033,9 +1033,11 @@ describe("buildDeltas（增量包基线选择与差集）", () => {
 			);
 			assert.equal(deltaManifest.kind, "delta");
 			assert.equal(deltaManifest.fromVersion, "0.23.4");
+			// 清单必须是完整目标清单：Launcher 据此从基线硬链接未变更文件。
 			assert.deepEqual(deltaManifest.files, [
 				{ path: "bin/app", sha256: sha("c"), size: 4, mode: 0o644 },
 				{ path: "doc/new.txt", sha256: sha("d"), size: 3, mode: 0o644 },
+				{ path: "lib/core.js", sha256: sha("b"), size: 4, mode: 0o644 },
 			]);
 		} finally {
 			dirs.cleanup();

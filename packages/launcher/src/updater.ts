@@ -150,6 +150,10 @@ export class Updater {
 				});
 			} catch (err) {
 				if (!(err instanceof DeltaAssembleFailure)) throw err;
+				// 只记稳定错误码，不带路径或清单内容，便于事后判断降级原因
+				console.warn(
+					`[launcher] 增量组装失败（${err.code}），降级全量: ${candidate.fromVersion} → ${input.version}`,
+				);
 				await this.deps.versions.removeVersion(input.version);
 				await this.prepareOnce({
 					version: input.version,
@@ -279,7 +283,11 @@ export class Updater {
 
 			const targetManifest =
 				opts.kind === "delta"
-					? this.buildDeltaTargetManifest(fromVersion as string, opts.version)
+					? this.buildDeltaTargetManifest(
+							fromVersion as string,
+							opts.version,
+							files,
+						)
 					: manifest;
 			writeFileSync(
 				join(targetDir, "manifest.json"),
@@ -324,11 +332,12 @@ export class Updater {
 
 	/**
 	 * delta.json 严格五键不含 artifacts，而 isPrepared/applyUpdate 依赖 artifacts，
-	 * 因此目标目录清单以基线清单为底，仅覆盖 version 与协议/种类标记。
+	 * 因此目标目录清单以基线清单为底，仅覆盖 version、协议/种类标记与完整文件清单。
 	 */
 	private buildDeltaTargetManifest(
 		fromVersion: string,
 		version: string,
+		files: ReleaseFileEntry[],
 	): UpdateManifest {
 		let baseline: UpdateManifest;
 		try {
@@ -355,6 +364,7 @@ export class Updater {
 			version,
 			protocolVersion: CONTROL_PROTOCOL_VERSION,
 			kind: "delta",
+			files,
 		};
 	}
 
