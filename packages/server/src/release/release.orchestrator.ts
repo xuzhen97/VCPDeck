@@ -163,10 +163,23 @@ export class ReleaseOrchestrator {
 		}
 		await this.releases.transitionStatus(version, ReleaseStatus.UPDATING_SERVER);
 		try {
+			// ADR-0062：登记的增量构件同样适用于服务端自更新；launcher 自选基线，
+			// 组装失败才回退全量。不传 candidates 时每次都下载整包。
+			const serverDeltas = serverArchive.deltas ?? [];
 			await this.launcher.prepareUpdate({
 				version,
 				url: `/api/releases/${version}/file?platform=${serverPlatform}`,
 				sha256: serverArchive.sha256,
+				...(serverDeltas.length > 0
+					? {
+							candidates: serverDeltas.map((delta) => ({
+								fromVersion: delta.fromVersion,
+								url: `/api/releases/${version}/file?platform=${serverPlatform}&fromVersion=${encodeURIComponent(delta.fromVersion)}`,
+								sha256: delta.sha256,
+								size: delta.size,
+							})),
+						}
+					: {}),
 			});
 			await this.drain.drain();
 			this.channel.broadcastShutdown({ expectedVersion: version });

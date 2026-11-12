@@ -9,6 +9,7 @@
  *   2) POST /apply   —— launcher 停掉本进程并切换版本（响应通常无法送达）
  */
 import { Injectable, Optional } from "@nestjs/common";
+import type { ReleaseDeltaCandidate } from "@vcpdeck/shared";
 import { homedir } from "node:os";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -78,6 +79,8 @@ export class LauncherHttpClient {
 		version: string;
 		url: string;
 		sha256: string;
+		/** ADR-0062：登记的增量候选，launcher 自选基线组装；缺省时按全量下载 */
+		candidates?: ReleaseDeltaCandidate[];
 	}): Promise<void> {
 		const ctl = await this.readControl();
 		await this.post(ctl, "/prepare", input);
