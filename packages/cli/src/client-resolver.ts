@@ -1,21 +1,14 @@
-import { createAuthenticatedClient } from "./authenticated-client.js";
 import type { VcpDeckClient } from "@vcpdeck/sdk";
-import type { ConfigPaths } from "./config.js";
-import { resolveEnvironment } from "./environment.js";
 
-/** 按 CLI 环境解析配置，把机器名称或 clientId 解析为权威 clientId。 */
+/**
+ * 用调用方已按 `--env` 解析并鉴权的 SDK 客户端，把机器名称或 clientId 解析为权威 clientId。
+ * 必须传入 client：自行创建客户端会丢掉 `--env`/`--environment` 解析结果，回落到默认环境。
+ */
 export async function resolveClientId(
 	clientFilter: string,
-	paths?: ConfigPaths,
-	processEnv?: NodeJS.ProcessEnv,
-	client?: VcpDeckClient,
+	client: VcpDeckClient,
 ): Promise<string> {
-	const resolvedClient =
-		client ??
-		(await createAuthenticatedClient(
-			await resolveEnvironment({ paths, processEnv }),
-		));
-	const clients = await resolvedClient.clients.list();
+	const clients = await client.clients.list();
 	const matched = clients.find(
 		(entry) => entry.clientId === clientFilter || entry.name === clientFilter,
 	);

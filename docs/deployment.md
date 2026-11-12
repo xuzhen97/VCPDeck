@@ -437,7 +437,7 @@ Launcher 的自动回退只覆盖“新版本探活失败”。需要人工回�
 
 Launcher 随发布包分发但**不随业务版本自动更新**（[ADR-0015](./adr/0015-launcher-distributed-with-release.md)）。
 
-#### 一键升级（推荐，Client 机）
+#### 一键升级（推荐，PM2 托管部署）
 
 业务版本更新完成后，目标机 `apps/<V>/client/installer/upgrade-launcher.cjs` 已随包就位（材料零下载，直接取本机已解压版本的 launcher payload）。从操作机一条远程 Job 完成 Client Launcher 迁移：
 
@@ -459,6 +459,32 @@ node "<client-app>/apps/<V>/client/installer/upgrade-launcher.cjs" \
 ```
 
 脚本行为：停 PM2 守护 → 备份并覆盖 `<app-dir>/dist/main.js` → 按显式 `--pm2-name` 重启（重启失败才回退 `startOrRestart ecosystem.config.cjs`，兼容无该文件的旧版/手动安装）→ 校验在线；失败自动还原备份并重启旧版；已安装 sha256 与目标一致时幂等跳过。建议先用 `--dry-run` 核对源文件、目标 app-dir 和 PM2 名。首次引入该脚本前目标机上尚无此文件，可先用 `files upload` 上传一次。默认 `<app-dir>` 为 `~/.vcpdeck/launcher-client`；脚本从自身位置自动推导 app-dir，也可 `--app-dir=` 显式指定。PM2 名称只接受安全标识符，默认 `vcpdeck-client-launcher`；同机 Server Launcher 使用同一脚本时必须显式传入 Server 的 app-dir、源文件和 PM2 名。
+
+#### systemd / 计划任务部署（当前生产形态）
+
+生产 Client 目前由 systemd（Linux）或计划任务（Windows）托管，上面的 PM2 流程不适用；`scripts/upgrade-launcher-systemd.cjs` 目前是可复用库而非独立 CLI，按下列顺序手工执行（0.23.4 → 0.23.6 已在 17 台机器上验证）：
+
+Linux（`<app-dir>` 为 `/opt/vcpdeck/client`，服务名 `vcpdeck-client`）：
+
+1. 上传新 Launcher 到 `/tmp/vcpdeck-launcher-<V>.js`，用 `sha256sum` 核对；
+2. `sudo cp -a <app-dir>/dist/main.js <app-dir>/dist/main.js.<旧版本>.bak`；
+3. `sudo install -o vcpdeck -g vcpdeck -m 0640 /tmp/vcpdeck-launcher-<V>.js <app-dir>/dist/main.js.next`；
+4. 写回滚脚本：`mv <app-dir>/dist/main.js.next <app-dir>/dist/main.js` → `systemctl restart vcpdeck-client.service` → 等待探活（读 `control.json` 的 pid 做 `kill -0`）→ 失败则 `cp -a` 还原并重启；
+5. `sudo systemd-run --unit=vcpdeck-launcher-upgrade --collect --property=KillMode=process --property=TimeoutStartSec=300 /bin/sh <回滚脚本>`；必须脱开 Job 的 cgroup，否则重启服务会连带杀掉执行者；
+6. 验收：`dist/main.js` 的 sha256、`systemctl is-active vcpdeck-client`、`control.json` 的新 pid、`vcpdeck clients list` 是否 online。
+
+Windows（`<app-dir>` 为 `C:\ProgramData\VCPDeck\Client`，任务名 `\VCPDeck\Client`）：
+
+1. `files upload` 上传新 Launcher 到 `Windows\Temp\vcpdeck-launcher-<V>.js`（需 `--root="C:\"` + 相对路径）；
+2. 上传一个 cmd：备份 `dist\main.js` → 覆盖 → `schtasks /end /tn "\VCPDeck\Client"` → `timeout /t 3` → `schtasks /run /tn "\VCPDeck\Client"` → 自删；
+3. `schtasks /create /tn "\VCPDeck\UpgradeLauncher" /tr "C:\Windows\Temp\upgrade-vcpdeck.cmd" /sc once /st 23:59 /ru SYSTEM /rl HIGHEST /f`，再 `schtasks /run /tn "\VCPDeck\UpgradeLauncher"`；
+4. 验收同上，随后删除一次性任务与临时文件。
+
+注意：
+
+- 新版 Launcher 不接受 `--version-check`；用运行参数做“预校验”会真的再起一个 Launcher 并覆盖 `control.json`。只做文件 sha256 校验与重启后探活。
+- `files upload` 在旧 Server 上用 `--root` + 相对路径可用，但 CLI 收尾可能打印 `Cannot read properties of undefined (reading 'slice')` 伪错误，需另行 `sha256sum` 核对。
+- 目标 Launcher 必须 ≥ 0.23.6 才兼容“一次 prepare 立即 apply”的旧 Server，见 [compatibility.md](./compatibility.md)。
 
 #### 手动升级（回退方案）
 

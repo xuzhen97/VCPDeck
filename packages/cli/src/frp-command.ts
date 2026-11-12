@@ -184,12 +184,7 @@ async function runCreateMapping(
 		processEnv: context.processEnv,
 	});
 	const client = await createAuthenticatedClient(environment);
-	const clientId = await resolveClientId(
-		positionals[0],
-		context.paths,
-		context.processEnv,
-		client,
-	);
+	const clientId = await resolveClientId(positionals[0], client);
 	let mapping;
 	try {
 		mapping = await client.frp.createAndWait(
@@ -281,12 +276,7 @@ async function runMappings(
 	const client = await createAuthenticatedClient(environment);
 	const clientFilter = stringOption(options, "client");
 	const clientId = clientFilter
-		? await resolveClientId(
-				clientFilter,
-				context.paths,
-				context.processEnv,
-				client,
-			)
+		? await resolveClientId(clientFilter, client)
 		: undefined;
 	const result = await client.frp.list({
 		clientId,

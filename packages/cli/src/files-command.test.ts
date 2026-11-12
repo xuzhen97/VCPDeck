@@ -174,6 +174,32 @@ describe("files command", () => {
 		expect(output).not.toContain("vcp_test_token");
 	});
 
+	it("--env 覆盖时用该环境解析 Client，不回落默认环境", async () => {
+		const { port } = await listenWithJobs({ roots: ["/"] });
+		const { paths, processEnv } = await fixture(port);
+		await saveCliConfig(paths.globalConfigPath, {
+			version: 1,
+			defaultEnvironment: "dead",
+			environments: {
+				dead: {
+					server: "http://127.0.0.1:1",
+					auth: { type: "bearer", token: "vcp_dead_token" },
+				},
+				test: {
+					server: `http://127.0.0.1:${port}`,
+					auth: { type: "bearer", token: "vcp_test_token" },
+				},
+			},
+		});
+		const lines: string[] = [];
+		await runFilesCommand("roots", ["workstation", "--env=test"], {
+			paths,
+			processEnv,
+			log: (message) => lines.push(message),
+		});
+		expect(lines.join("\n")).toContain("可用根目录（1）");
+	});
+
 	it("list 缺省 --root 时自动探测唯一根并展示排序表格", async () => {
 		const entries = [
 			{

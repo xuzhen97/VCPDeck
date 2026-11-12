@@ -247,12 +247,7 @@ async function runStatusCommand(
 	const filter = positionals[0];
 	if (!filter) throw new Error("status 需要机器名称或 clientId");
 	const client = await authenticatedClient(options, context);
-	const clientId = await resolveClientId(
-		filter,
-		context.paths,
-		context.processEnv,
-		client,
-	);
+	const clientId = await resolveClientId(filter, client);
 	const status = await client.tailnet.status(clientId);
 	const log = context.log ?? console.log;
 	if (options.json === true) {
@@ -322,12 +317,7 @@ async function runManageCommand(
 		}
 	}
 	const client = await authenticatedClient(options, context);
-	const clientId = await resolveClientId(
-		filter,
-		context.paths,
-		context.processEnv,
-		client,
-	);
+	const clientId = await resolveClientId(filter, client);
 	const payload: TailnetJobPayload =
 		action === "inspect"
 			? { action: "inspect" }

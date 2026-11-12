@@ -5587,9 +5587,8 @@ var init_environment = __esm({
 });
 
 // dist/client-resolver.js
-async function resolveClientId(clientFilter, paths, processEnv, client) {
-  const resolvedClient = client ?? await createAuthenticatedClient(await resolveEnvironment({ paths, processEnv }));
-  const clients = await resolvedClient.clients.list();
+async function resolveClientId(clientFilter, client) {
+  const clients = await client.clients.list();
   const matched = clients.find((entry) => entry.clientId === clientFilter || entry.name === clientFilter);
   if (!matched) {
     throw new Error(`\u672A\u627E\u5230 Client "${clientFilter}"\uFF1B\u5148\u7528 vcpdeck clients list \u67E5\u770B\u53EF\u7528\u673A\u5668`);
@@ -5607,8 +5606,6 @@ async function findClientByClientId(client, clientId) {
 var init_client_resolver = __esm({
   "dist/client-resolver.js"() {
     "use strict";
-    init_authenticated_client();
-    init_environment();
   }
 });
 
@@ -5703,7 +5700,7 @@ async function runListJobs(argv, context) {
   const clientFilter = stringOption(options, "client");
   const log = context.log ?? console.log;
   const client = await createAuthenticatedClient(environment);
-  const clientId = clientFilter ? await resolveClientId(clientFilter, context.paths, context.processEnv) : void 0;
+  const clientId = clientFilter ? await resolveClientId(clientFilter, client) : void 0;
   const result = await client.jobs.list({ clientId, status, page });
   if (options.json === true) {
     log(JSON.stringify(result, null, 2));
@@ -5787,7 +5784,7 @@ async function runExecJob(argv, context) {
   const log = context.log ?? console.log;
   const error = context.error ?? console.error;
   const client = await createAuthenticatedClient(environment);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const targetClient = await findClientByClientId(client, clientId);
   const rootWarning = rootEquivalentWarning(targetClient);
   const payload = {
@@ -14832,7 +14829,7 @@ async function runShells(argv, context) {
   if (!clientFilter || positionals.length > 1)
     throw new Error(terminalUsage());
   const { environment, client } = await openContext2(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const shells = await client.terminals.shells(clientId);
   if (options.json === true) {
     (context.log ?? console.log)(JSON.stringify(shells, null, 2));
@@ -14857,7 +14854,7 @@ async function runNew(argv, context) {
   if (!clientFilter || positionals.length > 1)
     throw new Error(terminalUsage());
   const { environment, client } = await openContext2(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const log = context.log ?? console.log;
   const shells = await client.terminals.shells(clientId);
   const shellOption = stringOption(options, "shell");
@@ -14899,7 +14896,7 @@ async function runList2(argv, context) {
   if (!clientFilter || positionals.length > 1)
     throw new Error(terminalUsage());
   const { environment, client } = await openContext2(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const result = await client.terminals.list(clientId, { pageSize: 100 });
   const statusFilter = stringOption(options, "status")?.toLowerCase();
   const sessions = statusFilter ? result.data.filter((s) => s.status.toLowerCase() === statusFilter) : result.data;
@@ -14933,7 +14930,7 @@ async function runClose(argv, context) {
     throw new Error(terminalUsage());
   }
   const { environment, client } = await openContext2(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const session = await client.terminals.get(clientId, sessionId);
   const log = context.log ?? console.log;
   if (options.json !== true)
@@ -14965,7 +14962,7 @@ async function runAttach(argv, context) {
     throw new Error("terminal attach \u9700\u8981 Bearer \u73AF\u5883\uFF08env add --token-env=...\uFF09\uFF1B\u5BC6\u7801\u73AF\u5883\u6682\u4E0D\u652F\u6301");
   }
   const client = await createAuthenticatedClient(environment);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const info = await client.terminals.get(clientId, sessionId);
   const log = context.log ?? console.log;
   log(`[vcpdeck] attach ${clientFilter} \u4F1A\u8BDD ${sessionId}\uFF08${info?.shellLabel ?? "?"}, status=${info?.status ?? "?"}\uFF09\uFF1BCtrl+Q \u9000\u51FA`);
@@ -15284,7 +15281,7 @@ async function runFeaturesCommand(subcommand, argv, context = {}) {
     paths: context.paths,
     processEnv: context.processEnv
   }));
-  const resolveId = context.resolveClientIdFn ?? ((filter) => resolveClientId(filter, context.paths, context.processEnv, client));
+  const resolveId = context.resolveClientIdFn ?? ((filter) => resolveClientId(filter, client));
   if (subcommand === "list") {
     await runListFeatures(argv, client, resolveId, log);
     return;
@@ -15930,7 +15927,7 @@ async function resolveClientIdFor(context, argv, filter) {
   if (context.resolveClientIdFn)
     return context.resolveClientIdFn(filter);
   const client = await resolveClient(context, argv);
-  return resolveClientId(filter, context.paths, context.processEnv, client);
+  return resolveClientId(filter, client);
 }
 var init_agents_command = __esm({
   "dist/agents-command.js"() {
@@ -16335,7 +16332,7 @@ async function openContext(context, options) {
 async function runRoots(argv, context) {
   const { clientFilter, options } = parseFileArgs(argv, [], [], false);
   const { environment, client } = await openContext(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const roots = await fetchRoots(client, clientId, context);
   if (options.json === true) {
     (context.log ?? console.log)(JSON.stringify(roots, null, 2));
@@ -16350,7 +16347,7 @@ async function runRoots(argv, context) {
 async function runList(argv, context) {
   const { clientFilter, path, options } = parseFileArgs(argv, [], [], true);
   const { environment, client } = await openContext(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
   const entries = await runFileJob(client, clientId, "file.list", { rootDir, path }, context);
   if (options.json === true) {
@@ -16387,7 +16384,7 @@ function joinDisplayPath(rootDir, path) {
 async function runStat(argv, context) {
   const { clientFilter, path, options } = parseFileArgs(argv, [], [], true);
   const { environment, client } = await openContext(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
   const stat3 = await runFileJob(client, clientId, "file.stat", { rootDir, path }, context);
   if (options.json === true) {
@@ -16406,7 +16403,7 @@ async function runStat(argv, context) {
 async function runRead(argv, context) {
   const { clientFilter, path, options } = parseFileArgs(argv, ["max-bytes"], [], true);
   const { environment, client } = await openContext(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
   const maxBytes = parseMaxBytes(stringOption(options, "max-bytes"));
   const result = await runFileJob(client, clientId, "file.readText", { rootDir, path, ...maxBytes === void 0 ? {} : { maxBytes } }, context);
@@ -16434,7 +16431,7 @@ async function readWriteContent(options) {
 async function runWrite(argv, context) {
   const { clientFilter, path, options } = parseFileArgs(argv, ["input"], [], true);
   const { environment, client } = await openContext(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
   const content = await readWriteContent(options);
   const bytes = Buffer.byteLength(content, "utf8");
@@ -16453,7 +16450,7 @@ async function runWrite(argv, context) {
 async function runMkdir(argv, context) {
   const { clientFilter, path, options } = parseFileArgs(argv, [], [], true);
   const { environment, client } = await openContext(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
   const log = context.log ?? console.log;
   if (options.json !== true)
@@ -16469,7 +16466,7 @@ async function runMkdir(argv, context) {
 async function runDelete(argv, context) {
   const { clientFilter, path, options } = parseFileArgs(argv, [], ["recursive"], true);
   const { environment, client } = await openContext(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
   const recursive = options.recursive === true;
   const payload = { rootDir, path };
@@ -16495,7 +16492,7 @@ async function runMove(argv, context) {
   if (!clientFilter || !source || !destination)
     throw new Error(filesUsage());
   const { environment, client } = await openContext(context, options);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
   const overwrite = options.overwrite === true;
   const payload = { rootDir, source, destination };
@@ -16528,7 +16525,7 @@ async function runDownload(argv, context) {
     processEnv: context.processEnv
   });
   const client = await createAuthenticatedClient(environment);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
   const log = context.log ?? console.log;
   if (options.json !== true) {
@@ -16593,7 +16590,7 @@ async function runShare(argv, context) {
   let transfer = null;
   let jobId = null;
   if (!fileId) {
-    const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+    const clientId = await resolveClientId(clientFilter, client);
     const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
     if (!json) {
       log(formatEnvironmentSummary(environment));
@@ -16693,7 +16690,7 @@ async function runUpload(argv, context) {
     processEnv: context.processEnv
   });
   const client = await createAuthenticatedClient(environment);
-  const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+  const clientId = await resolveClientId(clientFilter, client);
   const rootDir = await resolveRootDir(client, clientId, stringOption(options, "root"), context);
   const overwrite = options.overwrite === true;
   const log = context.log ?? console.log;
@@ -16968,7 +16965,7 @@ async function runCreateMapping(argv, context) {
     processEnv: context.processEnv
   });
   const client = await createAuthenticatedClient(environment);
-  const clientId = await resolveClientId(positionals[0], context.paths, context.processEnv, client);
+  const clientId = await resolveClientId(positionals[0], client);
   let mapping;
   try {
     mapping = await client.frp.createAndWait({
@@ -17044,7 +17041,7 @@ async function runMappings(argv, context) {
   });
   const client = await createAuthenticatedClient(environment);
   const clientFilter = stringOption(options, "client");
-  const clientId = clientFilter ? await resolveClientId(clientFilter, context.paths, context.processEnv, client) : void 0;
+  const clientId = clientFilter ? await resolveClientId(clientFilter, client) : void 0;
   const result = await client.frp.list({
     clientId,
     page: parsePage2(stringOption(options, "page"))
@@ -17294,7 +17291,7 @@ async function runRetryCommand(argv, context) {
   const log = context.log ?? console.log;
   log(formatEnvironmentSummary(environment));
   const client = await createAuthenticatedClient(environment);
-  const clientId = await resolveClientId(positionals[0], context.paths, context.processEnv, client);
+  const clientId = await resolveClientId(positionals[0], client);
   const targetVersion = version ?? await resolveCatchUpTargetVersion(client);
   const result = await client.releases.retryClient(targetVersion, clientId);
   if (options.json) {
@@ -17901,7 +17898,7 @@ async function runStatusCommand(argv, context) {
   if (!filter)
     throw new Error("status \u9700\u8981\u673A\u5668\u540D\u79F0\u6216 clientId");
   const client = await authenticatedClient(options, context);
-  const clientId = await resolveClientId(filter, context.paths, context.processEnv, client);
+  const clientId = await resolveClientId(filter, client);
   const status = await client.tailnet.status(clientId);
   const log = context.log ?? console.log;
   if (options.json === true) {
@@ -17956,7 +17953,7 @@ async function runManageCommand(action, argv, context) {
     }
   }
   const client = await authenticatedClient(options, context);
-  const clientId = await resolveClientId(filter, context.paths, context.processEnv, client);
+  const clientId = await resolveClientId(filter, client);
   const payload = action === "inspect" ? { action: "inspect" } : {
     action: "ensure",
     credentialId: stringOption(options, "key-id"),

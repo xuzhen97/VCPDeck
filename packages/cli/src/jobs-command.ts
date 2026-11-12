@@ -127,7 +127,7 @@ async function runListJobs(
 	const log = context.log ?? console.log;
 	const client = await createAuthenticatedClient(environment);
 	const clientId = clientFilter
-		? await resolveClientId(clientFilter, context.paths, context.processEnv)
+		? await resolveClientId(clientFilter, client)
 		: undefined;
 	const result = await client.jobs.list({ clientId, status, page });
 	if (options.json === true) {
@@ -242,11 +242,7 @@ async function runExecJob(
 	const log = context.log ?? console.log;
 	const error = context.error ?? console.error;
 	const client = await createAuthenticatedClient(environment);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 
 	// ADR-0023：root 等价 Client 执行前风险提示（仅非 JSON 输出时打印）。
 	const targetClient = await findClientByClientId(client, clientId);
