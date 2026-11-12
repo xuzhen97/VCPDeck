@@ -7,7 +7,12 @@
  *   3) 等运行中 job 完成（超时强制继续）
  *   4) 回 update:ready → 调 launcher /apply（launcher 停掉本进程并切换）
  */
-import { Events, type UpdateFailed, type UpdateReady } from "@vcpdeck/shared";
+import {
+	Events,
+	type ReleaseDeltaCandidate,
+	type UpdateFailed,
+	type UpdateReady,
+} from "@vcpdeck/shared";
 import type { Socket } from "socket.io-client";
 import { CLIENT_ID } from "./register.js";
 import { getRunningJobIds } from "./executor.js";
@@ -50,12 +55,47 @@ export function attachUpdateHandler(deps: ClientUpdateDeps): () => void {
 	};
 }
 
+/**
+ * 候选增量包来自服务端，属跨信任边界输入：逐项校验字段，不宽松猜测，
+ * 并把相对下载地址解析为完整 URL 后再交给 Launcher。
+ */
+function parseCandidates(
+	value: unknown,
+	serverBase: string,
+): ReleaseDeltaCandidate[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) throw new Error("candidates 必须是数组");
+	return value.map((item) => {
+		if (!item || typeof item !== "object" || Array.isArray(item)) {
+			throw new Error("candidates 条目无效");
+		}
+		const c = item as Record<string, unknown>;
+		if (
+			typeof c.fromVersion !== "string" ||
+			typeof c.url !== "string" ||
+			typeof c.sha256 !== "string" ||
+			typeof c.size !== "number" ||
+			!Number.isFinite(c.size) ||
+			c.size < 0
+		) {
+			throw new Error("candidates 条目字段无效");
+		}
+		return {
+			fromVersion: c.fromVersion,
+			url: new URL(c.url, serverBase).toString(),
+			sha256: c.sha256,
+			size: c.size,
+		};
+	});
+}
+
 async function handleUpdateRequest(
 	req: {
 		releaseVersion?: string;
 		url?: string;
 		sha256?: string;
 		timeoutMs?: number;
+		candidates?: unknown;
 	},
 	deps: ClientUpdateDeps,
 ): Promise<void> {
@@ -64,6 +104,18 @@ async function handleUpdateRequest(
 
 	if (!req.releaseVersion || !req.url || !req.sha256) {
 		emitFailed(deps, req.releaseVersion ?? "unknown", "update:request 缺少字段");
+		return;
+	}
+
+	let candidates: ReleaseDeltaCandidate[] | undefined;
+	try {
+		candidates = parseCandidates(req.candidates, deps.serverBase);
+	} catch (e) {
+		emitFailed(
+			deps,
+			req.releaseVersion,
+			e instanceof Error ? e.message : String(e),
+		);
 		return;
 	}
 
@@ -76,6 +128,7 @@ async function handleUpdateRequest(
 			version: releaseVersion,
 			url: fullUrl,
 			sha256: req.sha256,
+			...(candidates ? { candidates } : {}),
 		});
 		log(`新版本已就绪: ${releaseVersion}`);
 

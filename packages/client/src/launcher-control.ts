@@ -8,6 +8,7 @@
 import { homedir } from "node:os";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { ReleaseDeltaCandidate } from "@vcpdeck/shared";
 
 export interface LauncherControl {
 	port: number;
@@ -73,6 +74,8 @@ export class ClientLauncher {
 		version: string;
 		url: string;
 		sha256: string;
+		/** 候选增量包；由 Launcher 按本地基线自选，缺省只用 full 包 */
+		candidates?: ReleaseDeltaCandidate[];
 	}): Promise<void> {
 		const ctl = await this.readControl();
 		await this.post(ctl, "/prepare", input);

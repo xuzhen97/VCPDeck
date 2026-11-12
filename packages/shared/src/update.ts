@@ -70,7 +70,7 @@ export interface UpdateManifest {
 	version: string;
 	/** 所需 Node 版本约束（如 ">=24"），launcher ensure-node 使用 */
 	nodeVersion: string;
-	/** launcher 最低兼容版本（当前字段预留，尚未执行校验） */
+	/** launcher 最低兼容版本（由 `/update` 计划端点校验；`/file` 下载路径不校验） */
 	launcherMinVersion: string;
 	/** 随发布包提供的稳定 Launcher 入口；首次安装时复制到 app-dir 外部路径 */
 	launcher?: {

@@ -101,6 +101,55 @@ describe("客户端优雅停机（update.ts）", () => {
 		expect(launcher.applyUpdate).toHaveBeenCalledTimes(1);
 	});
 
+	it("候选增量包：校验后把相对地址解析为完整 URL 转交 prepare", async () => {
+		const handler = socket.handlers.get(Events.UPDATE_REQUEST);
+		if (!handler) throw new Error("UPDATE_REQUEST 未注册");
+		handler({
+			...REQ,
+			candidates: [
+				{
+					fromVersion: "1.2.0",
+					url: "/api/releases/1.2.1/file?platform=win-x64&fromVersion=1.2.0",
+					sha256: "b".repeat(64),
+					size: 1024,
+				},
+			],
+		} as never);
+
+		await vi.waitFor(() => {
+			expect(launcher.prepareUpdate).toHaveBeenCalledTimes(1);
+		});
+		expect(launcher.prepareUpdate).toHaveBeenCalledWith({
+			version: "1.2.1",
+			url: "http://localhost:3001/api/releases/1.2.1/file",
+			sha256: "a".repeat(64),
+			candidates: [
+				{
+					fromVersion: "1.2.0",
+					url: "http://localhost:3001/api/releases/1.2.1/file?platform=win-x64&fromVersion=1.2.0",
+					sha256: "b".repeat(64),
+					size: 1024,
+				},
+			],
+		});
+	});
+
+	it("非法候选 → UPDATE_FAILED，不调用 prepare 也不进入 draining", async () => {
+		const handler = socket.handlers.get(Events.UPDATE_REQUEST);
+		if (!handler) throw new Error("UPDATE_REQUEST 未注册");
+		handler({ ...REQ, candidates: [{ fromVersion: 1 }] } as never);
+
+		await vi.waitFor(() => {
+			expect(lastEmit(socket, Events.UPDATE_FAILED)).toBeTruthy();
+		});
+		expect(lastEmit(socket, Events.UPDATE_FAILED)).toMatchObject({
+			releaseVersion: "1.2.1",
+			reason: expect.stringContaining("candidates"),
+		});
+		expect(launcher.prepareUpdate).not.toHaveBeenCalled();
+		expect(isDraining()).toBe(false);
+	});
+
 	it("beforeApply 顺序：prepare → drain → update:ready → beforeApply → apply", async () => {
 		const order: string[] = [];
 		launcher.prepareUpdate.mockImplementation(async () => {

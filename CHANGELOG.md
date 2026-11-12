@@ -19,6 +19,8 @@
 
 ### Fixed
 
+- **更新候选增量包不再被 Client 丢弃**：`update:request` 携带的 `candidates` 此前没有转交本机 Launcher，增量包在真实更新链路里从不会被请求，只有 Launcher 单测覆盖。现在 Client 逐项校验候选字段、把相对下载地址解析为完整 URL 后随 `/prepare` 传递；候选不合法时直接上报 `update:failed`，不进入停机流程。
+
 - **增量包下载不再误取全量包**：此前 `/file` 只按平台定位一个 zip 路径与一个 Provider key，即便带 `fromVersion` 也会返回 full 包，Launcher 随后用 delta 的 sha256 校验 full 字节必然失败。现在按基线精确定位；`fromVersion` 非法返回 400、无对应 delta 返回稳定 404，direct 模式下本次改动前上传的存量 Release 缺 delta 对象 key 时明确返回 502 并提示重传，不静默回落到 full 包。
 
 ## [0.23.4] - 2026-11-11
