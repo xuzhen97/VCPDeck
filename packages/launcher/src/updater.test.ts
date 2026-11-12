@@ -319,9 +319,12 @@ describe("Updater", () => {
 			expect(
 				readFileSync(join(target, "server", "dist", "shared.js"), "utf8"),
 			).toBe("shared\n");
-			expect(readFileSync(join(target, "manifest.json"), "utf8")).toContain(
-				'"version":"1.2.1"',
-			);
+			const targetManifest = JSON.parse(
+				readFileSync(join(target, "manifest.json"), "utf8"),
+			) as { version: string; kind?: string; files?: unknown[] };
+			expect(targetManifest.version).toBe("1.2.1");
+			// 目标清单记录新版本的完整文件清单，而不是基线版本的旧清单。
+			expect(targetManifest.files).toEqual(files);
 		});
 
 		it("候选基线不存在 → 忽略候选，用原 url 下载 full 包", async () => {
@@ -434,6 +437,7 @@ describe("Updater", () => {
 				},
 			);
 
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 			const updater = new Updater(deps as unknown as UpdaterDeps);
 			await expect(
 				updater.prepare({
@@ -458,6 +462,12 @@ describe("Updater", () => {
 				"http://server/full.zip",
 				expect.any(String),
 			);
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining(
+					`增量组装失败（${ReleaseArtifactErrorCode.DELTA_BASELINE_UNAVAILABLE}）`,
+				),
+			);
+			warn.mockRestore();
 		});
 
 		it("并发两次 prepare 使用不同 zipPath", async () => {

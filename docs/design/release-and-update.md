@@ -226,6 +226,8 @@ Server/Client 在 `/apply` 返回后不再把「本进程未被接管」立即�
 
 打包侧每次发布除 full zip 外，还写同版本 sidecar 清单 `vcpdeck-<version>-<platform>.manifest.json`（与 zip 平级、仅本地留存）；后续版本以输出目录里最近 3 个历史 sidecar 为基线求差集，产出 `vcpdeck-<version>-<platform>-delta-<fromVersion>.zip`。变更集为空、或变更文件总量不小于全量 zip 时直接跳过，不产无收益的增量包。旧发布包的 `manifest.json` 没有 `files` 字段，不能充当 Launcher 基线，因此首个带 sidecar 的版本不会产出 delta；CLI 按文件名识别 `artifactKind` 与 `fromVersion`，同一版本每平台最多登记 3 个 delta。
 
+delta 包内的 `delta.json` 必须携带**完整**目标清单（新版本全部路径的 `sha256/size/mode`），包体只放内容变更的文件字节。Launcher 按清单逐条组装：包内有的复制并复核哈希，包内没有的从基线版本目录硬链接后复核哈希，被删除的文件由清单中缺失表达。清单若只列变更集，组装出的目标目录就只剩变更文件（0.23.9 生产事故），切换后 `preStart` 必然失败。
+
 当前 `preStart` 在停止旧 Server 之前执行。默认 `prisma db push` 可能与旧 Server 同时访问数据库，且其 schema 变化不会在应用回退时自动逆转；生产发布不能把该默认钩子当作安全迁移策略。
 
 ## 7. Client 更新流程
