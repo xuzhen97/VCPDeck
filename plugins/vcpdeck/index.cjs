@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.23.6";
+    exports2.VERSION = "0.23.7";
   }
 });
 
@@ -247,7 +247,7 @@ var require_update = __commonJS({
   "../shared/dist/update.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.ReleaseRetryErrorCode = exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = exports2.ReleaseArtifactErrorCode = exports2.CONTROL_PROTOCOL_VERSION = void 0;
+    exports2.ReleaseRetryErrorCode = exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = exports2.ReleaseArtifactErrorCode = exports2.MIN_UPDATE_PLAN_LAUNCHER_VERSION = exports2.CONTROL_PROTOCOL_VERSION = void 0;
     exports2.parseReleaseUploadCreateInput = parseReleaseUploadCreateInput;
     exports2.parseReleaseUploadPartRefresh = parseReleaseUploadPartRefresh;
     exports2.parseReleaseUploadComplete = parseReleaseUploadComplete;
@@ -261,6 +261,7 @@ var require_update = __commonJS({
     exports2.selectLatestCatchUpTarget = selectLatestCatchUpTarget;
     exports2.platformFromOs = platformFromOs;
     exports2.CONTROL_PROTOCOL_VERSION = 2;
+    exports2.MIN_UPDATE_PLAN_LAUNCHER_VERSION = "0.23.6";
     exports2.ReleaseArtifactErrorCode = {
       LAUNCHER_UPGRADE_REQUIRED: "LAUNCHER_UPGRADE_REQUIRED",
       MANIFEST_SIGNATURE_INVALID: "MANIFEST_SIGNATURE_INVALID",
