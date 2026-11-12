@@ -220,7 +220,7 @@ Server/Client 在 `/apply` 返回后不再把「本进程未被接管」立即�
 
 下载入口统一为 `GET /api/releases/:version/file?platform=`（ADR-0019）：Local 后端直接 `sendFile`；外部存储后端由 Server 持凭证换取临时直链并 **302** 到直链（目标机 `fetch` 自动跟随，字节流直连存储不占 Server 带宽）；直链短时缓存、过期重新换取，短 TTL 不暴露给目标机与协议。archive 进入 `deleting` 后下载返回清理中的稳定错误，进入 `cleaned` 后返回正文已清理错误；两种状态均不会再参与编排、安装或补更。Server 换取 Alibaba 直链遇到网络错误或 HTTP `500/502/503/504` 时最多尝试 3 次；Launcher 从该更新入口下载时，遇到网络错误或 HTTP `502/503/504` 也最多尝试 3 次，每次重新请求更新入口以换取新的临时直链。确定性 `4xx`、URL 校验、SHA-256、解压、切换和探活失败不重试，系统没有无限后台重试。
 
-`GET /api/releases/:version/update?platform=&launcher=` 是 ADR-0062 规划的 JSON 更新计划端点，返回 `{url, sha256, size, candidates?}`；当前 Launcher 尚未调用它，属预留入口。该端点只返回计划、绝不 302，`launcher` 必须为 `x.y.z` 且 major ≥ `CONTROL_PROTOCOL_VERSION`（当前为 2），archive 内可选的 `launcherMinVersion` 再做逐段比较（打包侧当前统一写 `0.0.0`），不满足一律稳定返回 `LAUNCHER_UPGRADE_REQUIRED`；平台构件尚未齐备时返回 `RELEASE_ARTIFACTS_INCOMPLETE`。`candidates` 仅在登记了 delta 时出现，条目为 `{fromVersion, url, sha256, size}`，其 `url` 指回同一 `/file` 入口并带 `fromVersion`。Server 把同样的候选随 `UpdateRequest` 下发给 Client；Client 逐项校验后把相对 `url` 解析为完整地址并随 `/prepare` 转交 Launcher，由 Launcher 按本地 `apps/` 中实际存在的基线自择、都不存在则退回 full。计划响应、`UpdateRequest` 与 `/prepare` 都不携带 Provider key、Token 或完整 archive。**当前没有任何代码请求 `/update`**；后续需决定接线还是删除该端点。
+`GET /api/releases/:version/update?platform=&launcher=` 是 ADR-0063 规划的 JSON 更新计划端点，返回 `{url, sha256, size, candidates?}`；当前 Launcher 尚未调用它，属预留入口。该端点只返回计划、绝不 302，`launcher` 必须为 `x.y.z` 且 major ≥ `CONTROL_PROTOCOL_VERSION`（当前为 2），archive 内可选的 `launcherMinVersion` 再做逐段比较（打包侧当前统一写 `0.0.0`），不满足一律稳定返回 `LAUNCHER_UPGRADE_REQUIRED`；平台构件尚未齐备时返回 `RELEASE_ARTIFACTS_INCOMPLETE`。`candidates` 仅在登记了 delta 时出现，条目为 `{fromVersion, url, sha256, size}`，其 `url` 指回同一 `/file` 入口并带 `fromVersion`。Server 把同样的候选随 `UpdateRequest` 下发给 Client；Client 逐项校验后把相对 `url` 解析为完整地址并随 `/prepare` 转交 Launcher，由 Launcher 按本地 `apps/` 中实际存在的基线自择、都不存在则退回 full。计划响应、`UpdateRequest` 与 `/prepare` 都不携带 Provider key、Token 或完整 archive。**当前没有任何代码请求 `/update`**；后续需决定接线还是删除该端点。
 
 增量包通过同一入口的可选 `fromVersion=x.y.z` 参数下载（即更新计划中 `candidates[].url` 指向的地址）：Server 在 `Release.archives[platform].deltas[]` 中按基线版本定位构件，外部存储后端用该 delta 自己的对象 key 换取直链（与 full 包的 key 相互独立，短 TTL 缓存按对象 key 区分），Local 后端 `sendFile` 到 `vcpdeck-<version>-<platform>-delta-<fromVersion>.zip`。`fromVersion` 缺省或为空串时行为与迁移前逐字一致；非法格式返回 400，找不到对应 delta 返回稳定 404，direct 模式下 delta 缺对象 key（本次改动前上传的存量记录）返回 502 而不静默回落到 full 包——否则 Launcher 会用 delta 的 sha256 校验 full 字节而必然失败。`deltas[].providerKey` 是 Server 内部定位信息，与 `archive.storage.key` 一样在对外投影时剥离，不进入任何 API 响应。
 
@@ -361,7 +361,7 @@ Launcher 启动时：
 构件安全模型分两条路径，取决于包内是否带签名：
 
 - **新格式（带 `manifest.json.sig`／`delta.json.sig`）**：Launcher 先验签、再对包内条目做路径预检、再逐文件核对 `sha256/size/mode`；任一失败稳定返回 `MANIFEST_SIGNATURE_INVALID`／`MANIFEST_PATH_UNSAFE`／`FILE_HASH_MISMATCH`，不降级重试；
-- **旧格式（无签名文件）**：沿用“可信操作者 + SHA-256”直通，仅迁移期兼容，停用需按 ADR-0062 由后续 ADR 宣布。
+- **旧格式（无签名文件）**：沿用“可信操作者 + SHA-256”直通，仅迁移期兼容，停用需按 ADR-0063 由后续 ADR 宣布。
 
 共同边界：
 
@@ -465,7 +465,7 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 
 1. 完成跨平台 archive 与 Launcher 随包分发的真实演练；
 2. 用真实历史版本跑一遍打包产 delta 的端到端演练（`pnpm release` 现已写 sidecar 并产出最近 3 个基线的 delta，尚无真实发布验证）；
-3. 决定 `/update` 计划端点的去向（接线给 Launcher 或删除），并同步 ADR-0062；
+3. 决定 `/update` 计划端点的去向（接线给 Launcher 或删除），并同步 ADR-0063；
 4. 建立 systemd/Windows Service 安装流程；
 5. 完成 Server drain 失败后的闸门恢复(超时抛错路径自动解除,编排器失败路径显式 release());
 6. 防止重复版本覆盖 archive，并处理活动 Release 期间的新上传；

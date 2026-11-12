@@ -213,7 +213,7 @@ describe("Release 补更目标判定", () => {
 	});
 });
 
-// ── 内容寻址发布构件契约（ADR-0062，控制协议 v2）──
+// ── 内容寻址发布构件契约（ADR-0063，控制协议 v2）──
 
 /** 命名空间访问：集中引用新增契约导出。 */
 const releaseContract = update;
@@ -380,7 +380,7 @@ describe("控制协议常量与稳定错误码", () => {
 	});
 });
 
-describe("齐备判据覆盖声明的 delta 基线（ADR-0062:28 / ADR-0051 连带）", () => {
+describe("齐备判据覆盖声明的 delta 基线（ADR-0063:28 / ADR-0051 连带）", () => {
 	const archive = { sha256: "a".repeat(64), size: 1, fileName: "x.zip" };
 	const delta = {
 		fromVersion: "0.22.1",

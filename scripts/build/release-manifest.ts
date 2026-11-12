@@ -1,5 +1,5 @@
 /**
- * 打包侧清单、签名与 delta 差集纯函数（ADR-0062:24）。
+ * 打包侧清单、签名与 delta 差集纯函数（ADR-0063:24）。
  *
  * 规范化字节必须与 Launcher 验签共用 @vcpdeck/shared 的
  * canonicalReleaseManifestJson，不得在本文件复制键序或自行拼装 JSON。

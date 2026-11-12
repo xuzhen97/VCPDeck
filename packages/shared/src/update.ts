@@ -54,7 +54,7 @@ export interface LauncherPrepareStatus {
 	errorCode?: string;
 }
 
-/** 内容寻址发布构件稳定错误码（ADR-0062）。 */
+/** 内容寻址发布构件稳定错误码（ADR-0063）。 */
 export const ReleaseArtifactErrorCode = {
 	LAUNCHER_UPGRADE_REQUIRED: "LAUNCHER_UPGRADE_REQUIRED",
 	MANIFEST_SIGNATURE_INVALID: "MANIFEST_SIGNATURE_INVALID",
@@ -353,7 +353,7 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
 	);
 }
 
-/** 清单签名规范化的固定键序（ADR-0062:24）；签名与验签必须共用。 */
+/** 清单签名规范化的固定键序（ADR-0063:24）；签名与验签必须共用。 */
 const RELEASE_MANIFEST_KEY_ORDER = [
 	"version",
 	"protocolVersion",
