@@ -14,7 +14,7 @@ import {
 } from "@vcpdeck/shared";
 import { rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { ReleaseError, ReleaseService } from "./release.service.js";
+import { ReleaseError, ReleaseService, type ServerReleaseArchiveDelta } from "./release.service.js";
 import { releaseZipPath } from "./release-paths.js";
 import {
 	RELEASE_CLEANUP_POLICY,
@@ -212,6 +212,24 @@ export class ReleaseCleanupService implements OnModuleInit, OnModuleDestroy {
 		return result;
 	}
 
+	/** 删除该 archive 登记的增量构件正文（外部对象或本地 delta 包），返回释放字节数。 */
+	private async removeDeltaBodies(
+		version: string,
+		platform: ReleasePlatform,
+		deltas: ServerReleaseArchiveDelta[] | undefined,
+	): Promise<number> {
+		let bytes = 0;
+		for (const delta of deltas ?? []) {
+			if (delta.providerKey) {
+				await this.storage.delete(delta.providerKey);
+			} else {
+				await this.removeLocal(releaseZipPath(version, platform, delta.fromVersion));
+			}
+			bytes += delta.size;
+		}
+		return bytes;
+	}
+
 	private async cleanCandidate(
 		candidate: PlannedArchiveDeletion,
 		result: ReleaseCleanupRunResult,
@@ -226,6 +244,12 @@ export class ReleaseCleanupService implements OnModuleInit, OnModuleDestroy {
 		}
 		const localPath = releaseZipPath(candidate.version, candidate.platform);
 		try {
+			// 先删增量构件，失败时全量包仍在，可整体回退重试。
+			const deltaBytes = await this.removeDeltaBodies(
+				candidate.version,
+				candidate.platform,
+				claimed.deltas,
+			);
 			if (claimed.storage) {
 				await this.storage.delete(claimed.storage.key);
 			} else {
@@ -242,7 +266,7 @@ export class ReleaseCleanupService implements OnModuleInit, OnModuleDestroy {
 				return;
 			}
 			result.cleanedItems++;
-			result.cleanedBytes += candidate.archive.size;
+			result.cleanedBytes += candidate.archive.size + deltaBytes;
 		} catch {
 			await this.releases.restoreArchiveAfterCleanup(
 				candidate.version,
@@ -281,6 +305,11 @@ export class ReleaseCleanupService implements OnModuleInit, OnModuleDestroy {
 				continue;
 			}
 			try {
+				const deltaBytes = await this.removeDeltaBodies(
+					entry.version,
+					entry.platform,
+					archive.deltas,
+				);
 				if (archive.storage) {
 					await this.storage.delete(archive.storage.key);
 				} else {
@@ -294,7 +323,7 @@ export class ReleaseCleanupService implements OnModuleInit, OnModuleDestroy {
 					)
 				) {
 					result.cleanedItems++;
-					result.cleanedBytes += archive.size;
+					result.cleanedBytes += archive.size + deltaBytes;
 				}
 			} catch {
 				await this.releases.restoreArchiveAfterCleanup(

@@ -400,7 +400,7 @@ Launcher 的回退单位是应用版本目录，不是整个系统状态。涉�
 
 Server 启动时、每次 Release 完成后以及每日定时兜底会按固定策略执行清理；同一 Server 进程内清理互斥。`GET /api/releases/cleanup/preview` 只返回候选版本、平台、预计空间和过期上传会话数量，`POST /api/releases/cleanup/run` 重新计算并执行同一策略，页面不能指定版本或绕过保护集合。
 
-Server 清理流程先通过原始 `archives` JSON 的 CAS 将 archive 标为 `deleting`，再删除 Local 文件或当前 Storage Provider 对象，确认删除或对象已不存在后写入 `cleaned`。删除失败会恢复为 `available` 并保留可重试状态；Server 重启后会恢复遗留 `deleting`。`cleaned` 仍保留文件名、SHA-256、大小、平台和清理时间等审计字段，但不保留 Provider key，Release 行和 `clientStates` 不删除。
+Server 清理流程先通过原始 `archives` JSON 的 CAS 将 archive 标为 `deleting`，再删除 Local 文件或当前 Storage Provider 对象，确认删除或对象已不存在后写入 `cleaned`。archive 登记了增量构件时，先逐个删除各 delta 的 Provider 对象（缺对象 key 的存量记录按本地 delta 包路径删除），全部成功后才删除全量正文，避免留下无法回收的增量对象。删除失败会恢复为 `available` 并保留可重试状态；Server 重启后会恢复遗留 `deleting`。`cleaned` 仍保留文件名、SHA-256、大小、平台和清理时间等审计字段，但不保留 Provider key，Release 行和 `clientStates` 不删除。
 
 未完成直传会话在 `expiresAt` 后再宽限 24 小时，清理时先删除 Provider 临时对象，再删除会话元数据；Provider 操作失败时保留会话。`provider_completed` 会话不会按 pending 过期规则删除，只有其对应 archive 已清理后才会删除完成会话元数据。
 

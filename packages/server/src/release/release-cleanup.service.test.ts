@@ -131,6 +131,95 @@ describe("ReleaseCleanupService", () => {
 		expect(result.cleanedBytes).toBe(350);
 	});
 
+	it("同时删除本地增量包并按 fromVersion 定位", async () => {
+		const item = release({
+			archives: {
+				"win-x64": {
+					...archive("win-x64"),
+					deltas: [
+						{
+							fromVersion: "0.9.0",
+							sha256: "b".repeat(64),
+							size: 40,
+							fileName: "vcpdeck-1.0.0-win-x64-delta-0.9.0.zip",
+						},
+					],
+				},
+			},
+		});
+		const { service, removeLocal } = fixture([item]);
+
+		const result = await service.run();
+
+		expect(removeLocal).toHaveBeenCalledWith(
+			expect.stringContaining("vcpdeck-1.0.0-win-x64-delta-0.9.0.zip"),
+		);
+		expect(result.cleanedItems).toBe(2);
+		expect(result.cleanedBytes).toBe(190);
+	});
+
+	it("增量构件的 Provider 对象 key 一并删除", async () => {
+		const item = release({
+			archives: {
+				"win-x64": {
+					...archive("win-x64"),
+					storage: { provider: "alibaba", key: "full-key", mode: "direct" },
+					deltas: [
+						{
+							fromVersion: "0.9.0",
+							sha256: "b".repeat(64),
+							size: 40,
+							fileName: "vcpdeck-1.0.0-win-x64-delta-0.9.0.zip",
+							providerKey: "delta-key",
+						},
+					],
+				},
+			},
+		});
+		const { service, storage } = fixture([item], { backend: "alibaba" });
+
+		const result = await service.run();
+
+		expect(storage.delete).toHaveBeenCalledWith("delta-key");
+		expect(storage.delete).toHaveBeenCalledWith("full-key");
+		expect(result.cleanedBytes).toBe(190);
+	});
+
+	it("增量构件删除失败时不删全量包并回退 available", async () => {
+		const item = release({
+			archives: {
+				"win-x64": {
+					...archive("win-x64"),
+					storage: { provider: "alibaba", key: "full-key", mode: "direct" },
+					deltas: [
+						{
+							fromVersion: "0.9.0",
+							sha256: "b".repeat(64),
+							size: 40,
+							fileName: "vcpdeck-1.0.0-win-x64-delta-0.9.0.zip",
+							providerKey: "delta-key",
+						},
+					],
+				},
+			},
+		});
+		const { service, storage, releaseService } = fixture([item], {
+			backend: "alibaba",
+		});
+		storage.delete.mockRejectedValueOnce(Object.assign(new Error("denied"), { code: "EACCES" }));
+
+		const result = await service.run();
+
+		expect(storage.delete).toHaveBeenCalledWith("delta-key");
+		expect(storage.delete).not.toHaveBeenCalledWith("full-key");
+		expect(releaseService.restoreArchiveAfterCleanup).toHaveBeenCalledWith(
+			"1.0.0",
+			"win-x64",
+		);
+		expect(result.failed).toBe(1);
+		expect(result.retryable).toBe(true);
+	});
+
 	it("删除失败恢复 available 并报告可重试错误", async () => {
 		const { service, releaseService, removeLocal } = fixture();
 		removeLocal.mockRejectedValueOnce(Object.assign(new Error("disk full"), { code: "ENOSPC" }));

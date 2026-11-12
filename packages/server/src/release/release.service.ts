@@ -489,6 +489,7 @@ export class ReleaseService {
 		fileName: string;
 		availability: "deleting";
 		storage?: ReleaseArchiveStorageRecord;
+		deltas?: ServerReleaseArchiveDelta[];
 	} | null> {
 		const row = await this.prisma.release.findUnique({ where: { version } });
 		if (!row) return null;
