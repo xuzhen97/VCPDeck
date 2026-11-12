@@ -106,12 +106,7 @@ async function runRetryCommand(
 	const log = context.log ?? console.log;
 	log(formatEnvironmentSummary(environment));
 	const client = await createAuthenticatedClient(environment);
-	const clientId = await resolveClientId(
-		positionals[0],
-		context.paths,
-		context.processEnv,
-		client,
-	);
+	const clientId = await resolveClientId(positionals[0], client);
 	const targetVersion = version ?? (await resolveCatchUpTargetVersion(client));
 	const result = await client.releases.retryClient(targetVersion, clientId);
 	if (options.json) {

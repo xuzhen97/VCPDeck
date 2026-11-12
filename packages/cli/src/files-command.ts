@@ -274,11 +274,7 @@ async function runRoots(
 ): Promise<void> {
 	const { clientFilter, options } = parseFileArgs(argv, [], [], false);
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const roots = await fetchRoots(client, clientId, context);
 	if (options.json === true) {
 		(context.log ?? console.log)(JSON.stringify(roots, null, 2));
@@ -296,11 +292,7 @@ async function runList(
 ): Promise<void> {
 	const { clientFilter, path, options } = parseFileArgs(argv, [], [], true);
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const rootDir = await resolveRootDir(
 		client,
 		clientId,
@@ -356,11 +348,7 @@ async function runStat(
 ): Promise<void> {
 	const { clientFilter, path, options } = parseFileArgs(argv, [], [], true);
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const rootDir = await resolveRootDir(
 		client,
 		clientId,
@@ -408,11 +396,7 @@ async function runRead(
 		true,
 	);
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const rootDir = await resolveRootDir(
 		client,
 		clientId,
@@ -477,11 +461,7 @@ async function runWrite(
 		true,
 	);
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const rootDir = await resolveRootDir(
 		client,
 		clientId,
@@ -524,11 +504,7 @@ async function runMkdir(
 ): Promise<void> {
 	const { clientFilter, path, options } = parseFileArgs(argv, [], [], true);
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const rootDir = await resolveRootDir(
 		client,
 		clientId,
@@ -566,11 +542,7 @@ async function runDelete(
 		true,
 	);
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const rootDir = await resolveRootDir(
 		client,
 		clientId,
@@ -611,11 +583,7 @@ async function runMove(
 	const [clientFilter, source, destination] = positionals;
 	if (!clientFilter || !source || !destination) throw new Error(filesUsage());
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const rootDir = await resolveRootDir(
 		client,
 		clientId,
@@ -672,11 +640,7 @@ async function runDownload(
 		processEnv: context.processEnv,
 	});
 	const client = await createAuthenticatedClient(environment);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const rootDir = await resolveRootDir(
 		client,
 		clientId,
@@ -788,11 +752,7 @@ async function runShare(
 	let transfer: TransferResultShape | null = null;
 	let jobId: string | null = null;
 	if (!fileId) {
-		const clientId = await resolveClientId(
-			clientFilter,
-			context.paths,
-			context.processEnv,
-		);
+		const clientId = await resolveClientId(clientFilter, client);
 		const rootDir = await resolveRootDir(
 			client,
 			clientId,
@@ -943,11 +903,7 @@ async function runUpload(
 		processEnv: context.processEnv,
 	});
 	const client = await createAuthenticatedClient(environment);
-	const clientId = await resolveClientId(
-		clientFilter,
-		context.paths,
-		context.processEnv,
-	);
+	const clientId = await resolveClientId(clientFilter, client);
 	const rootDir = await resolveRootDir(
 		client,
 		clientId,

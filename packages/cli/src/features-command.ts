@@ -84,7 +84,7 @@ export async function runFeaturesCommand(
 	const resolveId =
 		context.resolveClientIdFn ??
 		((filter: string) =>
-			resolveClientId(filter, context.paths, context.processEnv, client));
+			resolveClientId(filter, client));
 
 	if (subcommand === "list") {
 		await runListFeatures(argv, client, resolveId, log);

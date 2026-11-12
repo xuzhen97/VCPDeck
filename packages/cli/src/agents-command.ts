@@ -152,5 +152,5 @@ async function resolveClientIdFor(
 ): Promise<string> {
 	if (context.resolveClientIdFn) return context.resolveClientIdFn(filter);
 	const client = await resolveClient(context, argv);
-	return resolveClientId(filter, context.paths, context.processEnv, client);
+	return resolveClientId(filter, client);
 }

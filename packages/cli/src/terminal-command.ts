@@ -120,7 +120,7 @@ async function runShells(
 	const [clientFilter] = positionals;
 	if (!clientFilter || positionals.length > 1) throw new Error(terminalUsage());
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+	const clientId = await resolveClientId(clientFilter, client);
 	const shells = await client.terminals.shells(clientId);
 	if (options.json === true) {
 		(context.log ?? console.log)(JSON.stringify(shells, null, 2));
@@ -154,7 +154,7 @@ async function runNew(
 	const [clientFilter] = positionals;
 	if (!clientFilter || positionals.length > 1) throw new Error(terminalUsage());
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+	const clientId = await resolveClientId(clientFilter, client);
 	const log = context.log ?? console.log;
 	const shells = (await client.terminals.shells(clientId)) as Array<{
 		id: string;
@@ -206,7 +206,7 @@ async function runList(
 	const [clientFilter] = positionals;
 	if (!clientFilter || positionals.length > 1) throw new Error(terminalUsage());
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+	const clientId = await resolveClientId(clientFilter, client);
 	// SDK 列表为分页 API；--status 为本地过滤（首页内），非服务端协议参数
 	const result = await client.terminals.list(clientId, { pageSize: 100 });
 	const statusFilter = stringOption(options, "status")?.toLowerCase();
@@ -253,7 +253,7 @@ async function runClose(
 		throw new Error(terminalUsage());
 	}
 	const { environment, client } = await openContext(context, options);
-	const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+	const clientId = await resolveClientId(clientFilter, client);
 	const session = (await client.terminals.get(clientId, sessionId)) as {
 		shellLabel?: string;
 		createdByName?: string | null;
@@ -312,7 +312,7 @@ async function runAttach(
 		);
 	}
 	const client = await createAuthenticatedClient(environment);
-	const clientId = await resolveClientId(clientFilter, context.paths, context.processEnv);
+	const clientId = await resolveClientId(clientFilter, client);
 	const info = (await client.terminals.get(clientId, sessionId)) as {
 		shellLabel?: string;
 		status?: string;
