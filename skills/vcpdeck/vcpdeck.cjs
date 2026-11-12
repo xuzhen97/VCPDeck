@@ -40,7 +40,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.23.4";
+    exports2.VERSION = "0.23.6";
   }
 });
 
@@ -17614,8 +17614,15 @@ async function uploadOne(client, zipPath, log, context, archive) {
       expectedFromVersions
     });
   } catch (error) {
-    if (!(error instanceof VcpDeckApiError) || error.status !== 404)
+    if (!(error instanceof VcpDeckApiError))
       throw error;
+    const legacyServer = error.status === 404 || error.status === 400 && error.message.includes("version/platform/sha256/size");
+    if (!legacyServer)
+      throw error;
+    if (artifactKind === "delta") {
+      log(`[vcpdeck] \u65E7 Server \u4E0D\u652F\u6301\u589E\u91CF\u6784\u4EF6\uFF0C\u8DF3\u8FC7 ${platform} \u7684 ${fromVersion} \u589E\u91CF\u5305`);
+      return null;
+    }
     log("[vcpdeck] \u65E7 Server \u4E0D\u652F\u6301\u76F4\u4F20\u4F1A\u8BDD\uFF0C\u4F7F\u7528 legacy \u5F15\u5BFC\u4E0A\u4F20");
     return legacyUpload(client, zipPath, version, platform, sha256);
   }
