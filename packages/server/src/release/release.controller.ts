@@ -34,7 +34,7 @@ import { StorageService } from "../storage/storage.service.js";
 import { Public } from "../auth/public.decorator.js";
 import { Actor } from "../auth/actor.decorator.js";
 import {
-	CONTROL_PROTOCOL_VERSION,
+	MIN_UPDATE_PLAN_LAUNCHER_VERSION,
 	ReleaseArtifactErrorCode,
 	hasAllReleaseArchives,
 	isReleaseArchiveAvailable,
@@ -290,8 +290,9 @@ export class ReleaseController {
 
 	/**
 	 * 新 Launcher 更新计划（ADR-0062）：只返回 JSON 计划，绝不 302 给旧 Launcher 误执行。
-	 * 门槛按已裁决口径：launcher 必须为 x.y.z 且 major ≥ CONTROL_PROTOCOL_VERSION；
-	 * archive 内可选的 launcherMinVersion（打包侧写入）再做更严格逐段比较。
+	 * 门槛：launcher 必须是 x.y.z，且不低于 `MIN_UPDATE_PLAN_LAUNCHER_VERSION`（首个能解析
+	 * v2 清单、验签并组装增量的 Launcher）；archive 内可选的 launcherMinVersion（打包侧写入）
+	 * 再做更严格逐段比较。这里的门槛是 Launcher 三段版本，与控制协议号无关。
 	 * 响应仅投影公开字段，绝不携带 Provider key、Token 或完整 archive。
 	 */
 	@Public()
@@ -302,7 +303,8 @@ export class ReleaseController {
 		@Query("launcher") launcher?: string,
 	) {
 		const requested = parseXyz(launcher);
-		if (!requested || requested[0] < CONTROL_PROTOCOL_VERSION) {
+		const floor = parseXyz(MIN_UPDATE_PLAN_LAUNCHER_VERSION);
+		if (!requested || !floor || compareXyz(requested, floor) < 0) {
 			throw toHttp(
 				new ReleaseError(
 					ReleaseArtifactErrorCode.LAUNCHER_UPGRADE_REQUIRED,

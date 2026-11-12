@@ -255,7 +255,7 @@ var require_update = __commonJS({
   "../shared/dist/update.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.ReleaseRetryErrorCode = exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = exports2.ReleaseArtifactErrorCode = exports2.CONTROL_PROTOCOL_VERSION = void 0;
+    exports2.ReleaseRetryErrorCode = exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = exports2.ReleaseArtifactErrorCode = exports2.MIN_UPDATE_PLAN_LAUNCHER_VERSION = exports2.CONTROL_PROTOCOL_VERSION = void 0;
     exports2.parseReleaseUploadCreateInput = parseReleaseUploadCreateInput;
     exports2.parseReleaseUploadPartRefresh = parseReleaseUploadPartRefresh;
     exports2.parseReleaseUploadComplete = parseReleaseUploadComplete;
@@ -269,6 +269,7 @@ var require_update = __commonJS({
     exports2.selectLatestCatchUpTarget = selectLatestCatchUpTarget3;
     exports2.platformFromOs = platformFromOs;
     exports2.CONTROL_PROTOCOL_VERSION = 2;
+    exports2.MIN_UPDATE_PLAN_LAUNCHER_VERSION = "0.23.6";
     exports2.ReleaseArtifactErrorCode = {
       LAUNCHER_UPGRADE_REQUIRED: "LAUNCHER_UPGRADE_REQUIRED",
       MANIFEST_SIGNATURE_INVALID: "MANIFEST_SIGNATURE_INVALID",
@@ -17613,15 +17614,32 @@ async function uploadOne(client, zipPath, log, context, archive) {
   } catch (error) {
     if (!(error instanceof VcpDeckApiError))
       throw error;
-    const legacyServer = error.status === 404 || error.status === 400 && error.message.includes("version/platform/sha256/size");
-    if (!legacyServer)
+    const olderServer = error.status === 404 || error.status === 400 && error.message.includes("version/platform/sha256/size");
+    if (!olderServer)
       throw error;
     if (artifactKind === "delta") {
       log(`[vcpdeck] \u65E7 Server \u4E0D\u652F\u6301\u589E\u91CF\u6784\u4EF6\uFF0C\u8DF3\u8FC7 ${platform} \u7684 ${fromVersion} \u589E\u91CF\u5305`);
       return null;
     }
-    log("[vcpdeck] \u65E7 Server \u4E0D\u652F\u6301\u76F4\u4F20\u4F1A\u8BDD\uFF0C\u4F7F\u7528 legacy \u5F15\u5BFC\u4E0A\u4F20");
-    return legacyUpload(client, zipPath, version, platform, sha256);
+    if (error.status === 404) {
+      log("[vcpdeck] \u65E7 Server \u6CA1\u6709\u76F4\u4F20\u4F1A\u8BDD\u8DEF\u7531\uFF0C\u4F7F\u7528 legacy \u5F15\u5BFC\u4E0A\u4F20");
+      return legacyUpload(client, zipPath, version, platform, sha256);
+    }
+    log(`[vcpdeck] \u65E7 Server \u53EA\u63A5\u53D7\u56DB\u5B57\u6BB5\u4E0A\u4F20\u4F1A\u8BDD\uFF0C\u6539\u7528\u517C\u5BB9\u8BF7\u6C42\u4F53\u91CD\u8BD5\uFF08${platform}\uFF09`);
+    try {
+      session = await client.releases.createUploadSession({
+        version,
+        platform,
+        sha256,
+        size
+      });
+    } catch (retryError) {
+      if (!(retryError instanceof VcpDeckApiError) || retryError.status !== 404) {
+        throw retryError;
+      }
+      log("[vcpdeck] \u65E7 Server \u6CA1\u6709\u76F4\u4F20\u4F1A\u8BDD\u8DEF\u7531\uFF0C\u4F7F\u7528 legacy \u5F15\u5BFC\u4E0A\u4F20");
+      return legacyUpload(client, zipPath, version, platform, sha256);
+    }
   }
   if (session.mode === "existing") {
     log(`[vcpdeck] ${platform} \u76F8\u540C\u6784\u4EF6\u5DF2\u767B\u8BB0\uFF0C\u8DF3\u8FC7\u4E0A\u4F20`);

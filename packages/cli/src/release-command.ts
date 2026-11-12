@@ -565,13 +565,13 @@ async function uploadOne(
 		});
 	} catch (error) {
 		if (!(error instanceof VcpDeckApiError)) throw error;
-		// 旧 Server 可能没有直传会话路由（404），也可能只有
-		// version/platform/sha256/size 四字段的旧请求体（400）；两者都回落 legacy raw。
-		const legacyServer =
+		// 旧 Server 有两种形态：完全没有直传会话路由（404），或路由存在但只接受
+		// version/platform/sha256/size 四字段请求体（400）。
+		const olderServer =
 			error.status === 404 ||
 			(error.status === 400 &&
 				error.message.includes("version/platform/sha256/size"));
-		if (!legacyServer) throw error;
+		if (!olderServer) throw error;
 		// 旧 Server 只有一个「版本 + 平台」构件位，增量包传过去会覆盖全量包，
 		// 因此直接跳过；全量包照常上传，旧 Server 走全量更新。
 		if (artifactKind === "delta") {
@@ -580,8 +580,31 @@ async function uploadOne(
 			);
 			return null;
 		}
-		log("[vcpdeck] 旧 Server 不支持直传会话，使用 legacy 引导上传");
-		return legacyUpload(client, zipPath, version, platform, sha256);
+		if (error.status === 404) {
+			log("[vcpdeck] 旧 Server 没有直传会话路由，使用 legacy 引导上传");
+			return legacyUpload(client, zipPath, version, platform, sha256);
+		}
+		// 会话路由在，只是请求体多带了增量字段：按四字段重开一次直传会话。
+		// 不能在这里直接退到 legacy raw——Alibaba 后端的旧 Server 会用
+		// RELEASE_DIRECT_UPLOAD_REQUIRED 拒绝 raw 上传。
+		log(`[vcpdeck] 旧 Server 只接受四字段上传会话，改用兼容请求体重试（${platform}）`);
+		try {
+			session = await client.releases.createUploadSession({
+				version,
+				platform,
+				sha256,
+				size,
+			});
+		} catch (retryError) {
+			if (
+				!(retryError instanceof VcpDeckApiError) ||
+				retryError.status !== 404
+			) {
+				throw retryError;
+			}
+			log("[vcpdeck] 旧 Server 没有直传会话路由，使用 legacy 引导上传");
+			return legacyUpload(client, zipPath, version, platform, sha256);
+		}
 	}
 
 	if (session.mode === "existing") {
