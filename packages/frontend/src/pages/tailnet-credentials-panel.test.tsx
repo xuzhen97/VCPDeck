@@ -1,5 +1,5 @@
 import type { TailnetKeyInfo } from "@vcpdeck/shared";
-import type { VcpDeckClient } from "@vcpdeck/sdk";
+import { VcpDeckApiError, type VcpDeckClient } from "@vcpdeck/sdk";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SdkProvider } from "@/api/context";
@@ -117,6 +117,58 @@ describe("TailnetCredentialsPanel", () => {
 			(screen.getByLabelText("Tailscale 授权密钥") as HTMLInputElement).value,
 		).toBe("");
 		expect(screen.queryByText("tskey-secret-value")).toBeNull();
+	});
+
+	it("根密钥不可用时提示检查受管文件，而不是笼统归咎密钥格式", async () => {
+		const importKey = vi.fn(async () => {
+			throw new VcpDeckApiError(
+				"Tailnet 根密钥不可用",
+				400,
+				"TAILNET_KEY_UNAVAILABLE",
+			);
+		});
+		renderPanel({ importKey });
+		await screen.findByText("home");
+
+		fireEvent.click(screen.getByRole("button", { name: "导入凭据" }));
+		fireEvent.change(screen.getByLabelText("凭据名称"), {
+			target: { value: "office" },
+		});
+		fireEvent.change(screen.getByLabelText("Tailscale 授权密钥"), {
+			target: { value: "tskey-secret-value" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "保存密钥" }));
+
+		expect(await screen.findByText(/根密钥不可用/)).toBeVisible();
+		expect(screen.getByText(/data\/tailnet\/root\.key/)).toBeVisible();
+		expect(screen.queryByText(/格式/)).toBeNull();
+		expect(
+			(screen.getByLabelText("Tailscale 授权密钥") as HTMLInputElement).value,
+		).toBe("");
+	});
+
+	it("输入格式错误时提示具体字段约束", async () => {
+		const importKey = vi.fn(async () => {
+			throw new VcpDeckApiError(
+				"authKey 不得包含换行",
+				400,
+				"INVALID_TAILNET_INPUT",
+			);
+		});
+		renderPanel({ importKey });
+		await screen.findByText("home");
+
+		fireEvent.click(screen.getByRole("button", { name: "导入凭据" }));
+		fireEvent.change(screen.getByLabelText("凭据名称"), {
+			target: { value: "office" },
+		});
+		fireEvent.change(screen.getByLabelText("Tailscale 授权密钥"), {
+			target: { value: "tskey-secret-value" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "保存密钥" }));
+
+		expect(await screen.findByText(/格式不合法/)).toBeVisible();
+		expect(screen.queryByText(/根密钥不可用/)).toBeNull();
 	});
 
 	it("删除需要确认，并说明不会撤销远端 Auth key", async () => {

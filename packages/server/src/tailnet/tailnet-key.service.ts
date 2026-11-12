@@ -22,9 +22,16 @@ import type {
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
 	loadTailnetKeyCipher,
+	tailnetCipherFromKey,
 	tailnetError,
 	type TailnetKeyCipher,
 } from "./tailnet-crypto.js";
+import {
+	createTailnetRootKey,
+	isExplicitTailnetRootKey,
+	readTailnetRootKey,
+	resolveTailnetRootKeyPath,
+} from "./tailnet-root-key.js";
 import type {
 	TailnetCredentialRow,
 	TailnetPrisma,
@@ -46,15 +53,49 @@ export class TailnetKeyService {
 		@Optional() private readonly env: NodeJS.ProcessEnv = process.env,
 		@Optional() private readonly readFileImpl: (path: string) => Promise<string> = (path) =>
 			readFile(path, "utf8"),
+		// 受管根密钥的数据根基于 cwd；显式注入仅为单测可替换。
+		@Optional() private readonly cwd: string = process.cwd(),
 	) {}
 
-	/** 只读加载根密钥；缺失或非法时 fail closed，不生成新密钥。 */
+	/**
+	 * 取得加解密用的 cipher。
+	 *
+	 * 显式 `VCPDECK_TAILNET_KEY_FILE` 只读，缺失即 fail closed；
+	 * 受管路径（`<appDir|cwd>/data/tailnet/root.key`）仅在**没有任何历史凭据**时
+	 * 首次自动创建，已有密文而根密钥缺失/损坏/错绑时绝不静默换钥。
+	 */
 	private async requireCipher(): Promise<TailnetKeyCipher> {
-		const cipher = await loadTailnetKeyCipher(this.env, this.readFileImpl);
-		if (!cipher) {
+		if (isExplicitTailnetRootKey(this.env)) {
+			const cipher = await loadTailnetKeyCipher(this.env, this.readFileImpl);
+			if (!cipher) {
+				throw tailnetError("TAILNET_KEY_UNAVAILABLE", UNAVAILABLE_MESSAGE);
+			}
+			return cipher;
+		}
+		const path = resolveTailnetRootKeyPath(this.env, this.cwd);
+		let existing: Buffer | null;
+		try {
+			existing = await readTailnetRootKey(path);
+		} catch {
+			// 损坏、符号链接或不可读：一律 fail closed，不覆盖重建。
 			throw tailnetError("TAILNET_KEY_UNAVAILABLE", UNAVAILABLE_MESSAGE);
 		}
-		return cipher;
+		if (existing) return tailnetCipherFromKey(existing);
+		// 没有根密钥：只有「数据库中还没有任何凭据密文」才允许首次自动创建。
+		if (await this.hasCiphertextHistory()) {
+			throw tailnetError("TAILNET_KEY_UNAVAILABLE", UNAVAILABLE_MESSAGE);
+		}
+		try {
+			return tailnetCipherFromKey(await createTailnetRootKey(path));
+		} catch {
+			throw tailnetError("TAILNET_KEY_UNAVAILABLE", UNAVAILABLE_MESSAGE);
+		}
+	}
+
+	/** 是否已有历史凭据密文；用于判断能否首次自动创建根密钥。 */
+	private async hasCiphertextHistory(): Promise<boolean> {
+		const total = await this.prisma.tailnetCredential.count();
+		return total > 0;
 	}
 
 	private static toInfo(row: TailnetCredentialRow): TailnetKeyInfo {

@@ -46,6 +46,23 @@ function describeError(cause: unknown): string {
 	return "操作失败，请稍后重试";
 }
 
+/** 导入失败按稳定 code 给出可操作提示，不再把所有原因混成一句。 */
+function describeImportError(cause: unknown): string {
+	if (cause instanceof VcpDeckApiError) {
+		if (cause.code === "TAILNET_KEY_UNAVAILABLE") {
+			return "导入失败：服务端 Tailnet 根密钥不可用。请检查缺省根密钥文件 data/tailnet/root.key（或显式 VCPDECK_TAILNET_KEY_FILE）是否与库中已有凭据配对。";
+		}
+		if (cause.code === "INVALID_TAILNET_INPUT") {
+			return "导入失败：授权密钥或声明字段格式不合法（密钥不得含换行，过期时间需为 ISO 时间）。";
+		}
+		if (cause.code === "TAILNET_KEY_BUSY") {
+			return "导入失败：凭据正被任务占用，请稍后重试。";
+		}
+		return `导入失败（${cause.code ?? cause.status}）`;
+	}
+	return "导入失败：请稍后重试";
+}
+
 /**
  * 设置页的 Tailnet 全局凭据面板（ADR-0062）。
  *
@@ -140,9 +157,9 @@ export function TailnetCredentialsPanel() {
 			setNotice("已导入密钥，仅保留名称、声明与使用状态等安全元数据。");
 			if (page === 1) reload();
 			else setPage(1);
-		} catch {
+		} catch (cause) {
 			setImportSecret("");
-			setImportError("导入失败：请检查密钥格式与服务端根密钥配置");
+			setImportError(describeImportError(cause));
 		} finally {
 			setImporting(false);
 		}

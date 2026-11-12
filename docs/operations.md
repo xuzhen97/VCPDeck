@@ -147,7 +147,7 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 
 ### 5.2 Tailnet 凭据与入网运维
 
-- **启用加密存储**：启动 Server 前设置 `VCPDECK_TAILNET_KEY_FILE`，指向一个仅运行账户可读、内容为 32 字节随机值的 base64 文件。Server **不会自动生成**该根密钥，也不复用它 Git SSH 根密钥；缺失、长度不符或解密失败时凭据接口返回 `TAILNET_KEY_UNAVAILABLE`（fail closed），其余功能不受影响。
+- **启用加密存储（零配置）**：无需手工准备根密钥。首次导入凭据时，Server 在版本目录外的数据根自动创建受限根密钥文件 `<VCPDECK_APP_DIR | Server 工作目录>/data/tailnet/root.key`（POSIX 目录 `0700`/文件 `0600`，Windows 关闭继承并授权运行账户、SYSTEM 与 Administrators，收紧后回读校验当前账户仍可写）；并发首次创建只产生一把密钥，重启、自更新与后续导入都复用它。它不复用 Git SSH 根密钥。显式 `VCPDECK_TAILNET_KEY_FILE` 仍然支持且**优先**，但**只读**：缺失、长度不符、非规范 base64 或解密失败时不自动回退、不另建文件，凭据接口返回 `TAILNET_KEY_UNAVAILABLE`（fail closed），Server 启动与其余功能不受影响。
 - **导入**：在「设置 → Tailnet 凭据」导入，或使用 `vcpdeck tailnet keys import --name <名称> --key-stdin` 从 stdin 读入，避免明文进入 argv/Shell 历史。机器详情中的 `Tailnet` 标签页只负责选择凭据并发起操作，不再提供导入与删除入口。导入时填写的 `single`/`reusable`/`unknown` 与过期时间只是**操作者声明**，Server 不会向 Tailscale 预验证有效性、次数或设备上限。
 - **使用与状态**：`available` 可被一个 Job 原子预留；`reserved` 期间删除返回 409；正文只向当前注册 socket 单次交付 30 秒有效。`single` 与 `unknown` 交付后不自动回到可用；`reusable` 也只有在任务完成（`done`）后才释放；密钥已交付后发生错误、取消或结果不明一律落 `uncertain`，需人工在 Tailscale 管理端核实后按需重新导入。
 - **删除**：`vcpdeck tailnet keys delete <id>` 或「设置 → Tailnet 凭据」中删除，只移除 VCPDeck 本地记录，**不会**在 Tailscale 撤销 key，也不证明设备已退网。真正的阻断必须在 Tailscale 管理端撤销 key/移除设备并复核 ACL。
@@ -166,7 +166,7 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 5. Git SSH 根密钥文件（缺省 `<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`，或显式 `VCPDECK_GIT_SSH_KEY_FILE`）——必须与 SQLite **同批次**备份且分开存放，只恢复数据库无法解密既有私钥；
 6. Launcher state/current/apps（至少保留当前和上一版本）；
 7. FRPS 独立配置；
-8. Tailnet 根密钥文件（显式 `VCPDECK_TAILNET_KEY_FILE`）——必须与 SQLite **同批次**备份且分开存放；它不会自动生成，缺失时无法解密已导入的 Tailnet 凭据。
+8. Tailnet 根密钥文件（缺省 `<VCPDECK_APP_DIR | 工作目录>/data/tailnet/root.key`，或显式 `VCPDECK_TAILNET_KEY_FILE`）——必须与 SQLite **同批次**备份且分开存放；只恢复数据库无法解密已导入的 Tailnet 凭据。
 
 推荐一致性顺序：
 
@@ -312,7 +312,7 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 - `TAILNET_OPERATION_BUSY` / `TAILNET_KEY_BUSY`：同一机器已有管理 Job，或该凭据已被其它 Job 预留。等待现有 Job 终态；不要手工清 `reservedJobId`。
 - `TAILNET_SECRET_TIMEOUT` / `TAILNET_SECRET_DENIED`：Client 未在窗口内拿到正文或当前 socket/能力不匹配；检查客户端版本、注册状态与 Job 归属，重新发起；不要改走明文参数。
 - `TAILNET_SECRET_EXPIRED` / `TAILNET_SECRET_MISMATCH`：正文已过期或与 `jobId`/`requestId` 不匹配，已被消费方拒绝；重新发起 Job，不复用旧响应。
-- `TAILNET_KEY_UNAVAILABLE`：根密钥未配置、不可读或无法解密；恢复配对根密钥后重启 Server。
+- `TAILNET_KEY_UNAVAILABLE`：根密钥不可读或与库中密文不匹配（显式路径缺失，或受管文件损坏/错绑）。Server **不会**因该错误重建文件——先恢复配对根密钥再重启；若确无备份且库中已有凭据，只能在 Tailscale 撤销旧 key 后清空凭据记录并重新导入。
 - `TAILNET_JOIN_FAILED` / `TAILNET_PROBE_TIMEOUT` / `TAILNET_CLI_FAILED`：查看安全错误码与阶段，先确认 `tailscaled` 服务、系统时间和出网；不要把原始 stdout/stderr 或 key 贴进工单。
 - `TAILNET_INSTALL_FAILED` / `TAILNET_INSTALL_REBOOT_REQUIRED`：安装失败或需重启；保留 Job 记录和系统日志，按固定版本材料重新评估，不降级为手工执行用户提供的二进制。
 - 取消只终止后续步骤，**不会**自动卸载、退网或撤销已发生的更改。

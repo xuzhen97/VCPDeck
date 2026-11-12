@@ -16,10 +16,12 @@
 
 ### Changed
 
-- **Tailnet 需要 Server 先行升级**：Client 新增 `tailnet.manage` capability、`capabilityDetails.tailnet` 与可选注册摘要；旧 Server 的严格 parser 会拒绝这些新字段，因此不得先部署新 Client。新 Server 兼容旧 Client 的缺省值（按“不支持 Tailnet”处理）。数据库新增 `TailnetCredential`、`TailnetClientOperation` 两表与 nullable `Client.tailnetSnapshot` 列，属纯增量；Tailnet 根密钥仅从 `VCPDECK_TAILNET_KEY_FILE` 读取，必须与 SQLite 配对备份。
+- **Tailnet 需要 Server 先行升级**：Client 新增 `tailnet.manage` capability、`capabilityDetails.tailnet` 与可选注册摘要；旧 Server 的严格 parser 会拒绝这些新字段，因此不得先部署新 Client。新 Server 兼容旧 Client 的缺省值（按“不支持 Tailnet”处理）。数据库新增 `TailnetCredential`、`TailnetClientOperation` 两表与 nullable `Client.tailnetSnapshot` 列，属纯增量；Tailnet 根密钥缺省由 Server 在首次导入时自动创建于版本目录外的数据根（显式 `VCPDECK_TAILNET_KEY_FILE` 仍优先且只读），必须与 SQLite 配对备份。
 - **Tailnet 自动安装/入网尚未完成真机验收**：当前只经过单元、注入式安装器、临时 SQLite 集成和前端组件验证；真机安装、服务启动、设备审批、取消清理与真实网络可达性仍需单独授权验收。
 
 ### Fixed
+
+- **Tailnet 凭据导入不再要求手工准备根密钥**：此前必须在 Server 启动前配置 `VCPDECK_TAILNET_KEY_FILE`，否则「设置 → Tailnet 凭据」的导入一律以 `TAILNET_KEY_UNAVAILABLE` 失败，而界面只提示“请检查密钥格式与服务端根密钥配置”，无法区分是密钥格式还是根密钥问题。现在首次导入时 Server 在版本目录外的数据根自动创建受限根密钥（`<VCPDECK_APP_DIR | Server 工作目录>/data/tailnet/root.key`，POSIX `0700`/`0600`，Windows 收紧 ACL 并回读校验），并发首次创建只产生一把密钥，后续导入与重启复用；显式 `VCPDECK_TAILNET_KEY_FILE` 仍然优先且只读，缺失时不回退也不另建。库中已有密文而根密钥缺失、损坏或错绑时仍然 fail closed，不重建、不静默换钥。凭据页改为按稳定 `code` 分别提示根密钥不可用、输入格式不合法与凭据被占用。
 
 - **增量构件不再在清理后成为孤儿对象**：清理任务此前只删除全量包的 Provider 对象或本地 zip，archive 上登记的增量构件正文仍留在外部存储或 `data/releases`，长期占用空间且无从回收。现在逐个删除 delta 的 Provider 对象（存量记录缺对象 key 时按本地 delta 包路径删除），全部成功后再删除全量正文；任一失败恢复 `available` 重试，不留下半删除的全量包。
 

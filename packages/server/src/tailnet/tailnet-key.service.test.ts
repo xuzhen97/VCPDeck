@@ -6,7 +6,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
@@ -118,12 +118,55 @@ describe("导入与列表", () => {
 
 	it("根密钥缺失时导入 fail closed，但已有元数据仍可读", async () => {
 		const info = await service.importKey(input());
-		const noKey = new TailnetKeyService(prisma, {});
+		// 已有历史凭据时，受管路径也不会自动生成本地缺少的根密钥。
+		const freshAppDir = mkdtempSync(join(dir, "no-key-"));
+		const noKey = new TailnetKeyService(
+			prisma,
+			{ VCPDECK_APP_DIR: freshAppDir },
+			undefined,
+			freshAppDir,
+		);
 		await expect(noKey.importKey(input())).rejects.toMatchObject({
 			code: "TAILNET_KEY_UNAVAILABLE",
 		});
+		expect(() => statSync(join(freshAppDir, "data"))).toThrow();
 		const page = await noKey.listKeys(1, 10);
 		expect(page.data.map((row) => row.id)).toContain(info.id);
+	});
+
+	it("库中无历史凭据时自动创建受管根密钥，并复用同一文件", async () => {
+		const appDir = mkdtempSync(join(dir, "auto-key-"));
+		const managed = new TailnetKeyService(
+			prisma,
+			{ VCPDECK_APP_DIR: appDir },
+			undefined,
+			appDir,
+		);
+		await managed.importKey(input());
+		const file = join(appDir, "data", "tailnet", "root.key");
+		const first = readFileSync(file, "utf8");
+		expect(Buffer.from(first.trim(), "base64")).toHaveLength(32);
+		await managed.importKey(input({ name: "第二条" }));
+		expect(readFileSync(file, "utf8")).toBe(first);
+		const page = await managed.listKeys(1, 10);
+		expect(page.total).toBe(2);
+	});
+
+	it("已有密文而受管根密钥丢失时 fail closed，且不重建密钥文件", async () => {
+		await service.importKey(input());
+		const appDir = mkdtempSync(join(dir, "lost-key-"));
+		const lost = new TailnetKeyService(
+			prisma,
+			{ VCPDECK_APP_DIR: appDir },
+			undefined,
+			appDir,
+		);
+		await expect(lost.importKey(input())).rejects.toMatchObject({
+			code: "TAILNET_KEY_UNAVAILABLE",
+		});
+		expect(() =>
+			statSync(join(appDir, "data", "tailnet", "root.key")),
+		).toThrow();
 	});
 });
 

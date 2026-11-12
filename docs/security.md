@@ -174,7 +174,7 @@ Alibaba Release 上传的数据面直接连接 Provider：Server 只签发/刷�
 | Git SSH 共享私钥（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录）；获选 Client 的 `<VCPDECK_CLIENT_DATA_DIR>/git-ssh/id_ed25519`（POSIX 0600；Windows 用 `icacls` 关闭继承并授权 SYSTEM、Administrators **与当前运行账户**，收紧后回读校验当前账户仍可写——Client 未必以 SYSTEM 运行，漏授权会把运行账户挡在目录外导致安装必然失败） | 轮换需在 Git 服务删除旧公钥并登记新公钥，再重新分发；本地清理不等于 Git 服务已撤销 |
 | Git SSH 根密钥 | 缺省由 Server 在版本目录外的数据根自动创建（`<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`；POSIX 目录 `0700`/文件 `0600`，Windows ACL 授权运行账户、SYSTEM 与 Administrators）；显式 `VCPDECK_GIT_SSH_KEY_FILE`（与其它受管密钥分离）优先且只读 | 不进 DB/REST/Web/日志；缺失/损坏/错绑时生成与换代 fail closed（Server 启动与其他能力不受影响）；**必须与 SQLite 配对备份**，只恢复数据库无法解密既有私钥；绝不因文件缺失而重建 |
 | Tailnet Auth key（密文） | Server DB（AES-256-GCM，`keyVersion` 分开记录）；Client 仅经当前注册 socket 的 30 秒单播拿到正文，写入权限受限的临时目录并在 Job 各终止路径清理 | 导入声明 `single`/`reusable`/`unknown` 与使用事实分离；同一 Job 只交付一次，`single`/`unknown` 交付后不自动重用，结果不明落 `uncertain`；删除本地记录**不撤销**提供方 key，也不证明设备退网 |
-| Tailnet 根密钥 | 只从 `VCPDECK_TAILNET_KEY_FILE` 读取 32 字节 base64；不自动生成、不复用 Git SSH 根密钥、不进 DB/REST/Web/日志 | 缺失/非法/解密失败统一 `TAILNET_KEY_UNAVAILABLE` 并 fail closed；**必须与 SQLite 配对备份**；轮换需重新导入或重加密既有凭据 |
+| Tailnet 根密钥 | 缺省由 Server 在首次导入时创建于版本目录外的数据根（`<VCPDECK_APP_DIR | 工作目录>/data/tailnet/root.key`；POSIX 目录 `0700`/文件 `0600`，Windows ACL 授权运行账户、SYSTEM 与 Administrators）；显式 `VCPDECK_TAILNET_KEY_FILE` 优先且只读；不复用 Git SSH 根密钥，不进 DB/REST/Web/日志 | 缺失/非法/解密失败统一 `TAILNET_KEY_UNAVAILABLE` 并 fail closed；**必须与 SQLite 配对备份**；已有密文时不重建、不静默换钥；轮换需重新导入或重加密既有凭据 |
 
 PSK 当前不支持双密钥平滑轮换。轮换应安排维护窗口：停止 Client → 更新 Server PSK并重启 → 更新各 Client → 验证注册。
 
