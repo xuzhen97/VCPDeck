@@ -144,6 +144,38 @@ describe("ReleaseOrchestrator", () => {
 			expect(deps.releases.markFailed).not.toHaveBeenCalled();
 		});
 
+		it("archive 登记了 deltas 时服务端自更新也下发 candidates", async () => {
+			const info = releaseInfo();
+			Object.assign(info.archives[currentPlatform]!, {
+				deltas: [
+					{
+						fromVersion: "1.2.0",
+						sha256: "d".repeat(64),
+						size: 512,
+						fileName: "vcpdeck-1.2.1-win-x64-delta-1.2.0.zip",
+					},
+				],
+			});
+			deps.releases.findByVersion.mockResolvedValue(info);
+			deps.releases.getActiveRelease.mockResolvedValue(null);
+
+			await orchestrator.startRelease("1.2.1");
+
+			expect(deps.launcher.prepareUpdate).toHaveBeenCalledWith({
+				version: "1.2.1",
+				url: `/api/releases/1.2.1/file?platform=${currentPlatform}`,
+				sha256: info.archives[currentPlatform]!.sha256,
+				candidates: [
+					{
+						fromVersion: "1.2.0",
+						url: `/api/releases/1.2.1/file?platform=${currentPlatform}&fromVersion=1.2.0`,
+						sha256: "d".repeat(64),
+						size: 512,
+					},
+				],
+			});
+		});
+
 		it("缺少本机平台构件时直接标记 failed，不进入更新阶段", async () => {
 			deps.releases.findByVersion.mockResolvedValue(
 				releaseInfo({

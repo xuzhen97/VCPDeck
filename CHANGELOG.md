@@ -23,6 +23,8 @@
 
 - **Tailnet 凭据导入不再要求手工准备根密钥**：此前必须在 Server 启动前配置 `VCPDECK_TAILNET_KEY_FILE`，否则「设置 → Tailnet 凭据」的导入一律以 `TAILNET_KEY_UNAVAILABLE` 失败，而界面只提示“请检查密钥格式与服务端根密钥配置”，无法区分是密钥格式还是根密钥问题。现在首次导入时 Server 在版本目录外的数据根自动创建受限根密钥（`<VCPDECK_APP_DIR | Server 工作目录>/data/tailnet/root.key`，POSIX `0700`/`0600`，Windows 收紧 ACL 并回读校验），并发首次创建只产生一把密钥，后续导入与重启复用；显式 `VCPDECK_TAILNET_KEY_FILE` 仍然优先且只读，缺失时不回退也不另建。库中已有密文而根密钥缺失、损坏或错绑时仍然 fail closed，不重建、不静默换钥。凭据页改为按稳定 `code` 分别提示根密钥不可用、输入格式不合法与凭据被占用。
 
+- **服务端自更新改用增量包**：编排器更新自身时只下发全量 `url`，即使发布记录里登记了 delta，服务端每次仍下载整包（0.23.7 实测 98.0MB，而同批客户端走增量只取 3.0MB）。现在服务端同样把本机平台的候选随 `/prepare` 交给 Launcher，自选基线与组装失败降级全量的逻辑不变。
+
 - **`/update` 计划端点不再把真实 Launcher 判为过低**：门槛原先拿 Launcher 主版本号与 `CONTROL_PROTOCOL_VERSION`（2）比较，任何 `0.23.x` Launcher 都会被 `403 LAUNCHER_UPGRADE_REQUIRED` 拒绝。改为与独立常量 `MIN_UPDATE_PLAN_LAUNCHER_VERSION`（`0.23.6`）逐段比较，archive 内的 `launcherMinVersion` 比较顺序不变；该端点仍无消费方，属预留入口。
 
 - **跨版本 CLI 上传不再误退 legacy raw**：旧 Server 的直传会话路由只接受 `version/platform/sha256/size` 四字段体，对带增量字段的请求回 400；CLI 原先据此退回 raw 上传，而 Alibaba 后端的旧 Server 会以 `RELEASE_DIRECT_UPLOAD_REQUIRED` 拒绝 raw 体。现在改为按四字段重开直传会话，只有路由缺失（404）才回落到 legacy raw；增量构件在旧 Server 上仍跳过。
