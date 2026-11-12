@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { canonicalReleaseManifestJson } from "@vcpdeck/shared";
 import {
 	buildFileList,
+	derivePublicKeyPem,
 	diffFileList,
 	signManifest,
 } from "../../build/release-manifest.js";
@@ -138,6 +139,27 @@ describe("signManifest", () => {
 		};
 		const data = Buffer.from(canonicalReleaseManifestJson(tampered), "utf8");
 		assert.equal(verify(null, data, publicKey, signature), false);
+	});
+});
+
+describe("derivePublicKeyPem", () => {
+	it("派生的公钥与密钥对公钥逐字一致，且能验证同一私钥的签名", () => {
+		const derived = derivePublicKeyPem(privateKeyPem);
+		assert.equal(
+			derived,
+			publicKey.export({ type: "spki", format: "pem" }).toString(),
+		);
+		const manifest: Record<string, unknown> = { version: "0.24.0", files: [] };
+		const signature = Buffer.from(
+			signManifest(manifest, privateKeyPem),
+			"base64",
+		);
+		const data = Buffer.from(canonicalReleaseManifestJson(manifest), "utf8");
+		assert.equal(verify(null, data, derived, signature), true);
+	});
+
+	it("非 PEM 输入直接报错，不返回可用于验签的空公钥", () => {
+		assert.throws(() => derivePublicKeyPem("not-a-private-key"));
 	});
 });
 

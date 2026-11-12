@@ -53,3 +53,16 @@ export function signManifest(
 		.sign(null, Buffer.from(json, "utf8"), privateKeyPem)
 		.toString("base64");
 }
+
+/**
+ * 从 Ed25519 私钥（PKCS#8 PEM）派生 SPKI 公钥 PEM。
+ *
+ * 打包管线用同一份私钥签名，再把派生公钥注入 Launcher 单文件，保证包内信任根
+ * 与签名密钥同源，避免手工替换错配；不读取任何环境变量。
+ */
+export function derivePublicKeyPem(privateKeyPem: string): string {
+	return crypto
+		.createPublicKey(privateKeyPem)
+		.export({ type: "spki", format: "pem" })
+		.toString();
+}

@@ -68,6 +68,6 @@ ADR-0012 曾把构件一次性从 513 MB 瘦到约 150 MB，但没有解决逐�
 
 **状态从 Proposed 转 Accepted 的退出条件**：上述门禁全绿 + ≥2 个真实发布周期演练 + 存量 Launcher 迁移完成 + 回退与新装机演练通过。**停旧格式**（不再产 full 兼容包）另需：连续 2 个发布周期无旧格式下载，且由后续 ADR 宣布，不设硬截止。
 
-**实施状态（2026-11-12）**：代码已按本 ADR 落地，单元与集成门禁全绿（`scripts/tests/unit` 25 项，Server／Launcher／Shared／CLI 既有测试与构建通过），`docs/design/release-and-update.md` 已按实现的 `/file?fromVersion=` 口径更正。状态**仍为 Proposed**：真机发布周期演练、存量 Launcher 迁移、回退与新装机演练均未执行，因此本文与 `docs/adr/README.md` 的状态不得被引用为 Accepted 结论。实施顺序存在偏差——实现先落盘、测试后补，未保留严格的 RED→GREEN 记录。
+**实施状态（2026-11-12）**：代码已按本 ADR 落地，单元与集成门禁全绿（`scripts/tests/unit` 25 项，Server／Launcher／Shared／CLI 既有测试与构建通过），`docs/design/release-and-update.md` 已按实现的 `/file?fromVersion=` 口径更正。状态**仍为 Proposed**：真机发布周期演练、存量 Launcher 迁移、回退与新装机演练均未执行，因此本文与 `docs/adr/README.md` 的状态不得被引用为 Accepted 结论。实施顺序存在偏差——实现先落盘、测试后补，未保留严格的 RED→GREEN 记录。（2026-11-12 补记）签名信任根已闭环：打包从签名私钥派生公钥并注入 Launcher 单文件，包内只含公钥；`VCPDECK_RELEASE_PRIVATE_KEY_PEM`／`VCPDECK_RELEASE_PRIVATE_KEY_PATH` 缺失即打包失败。`/update` 端点当前没有 Launcher 消费方，实际链路是编排器随 `UpdateRequest` 下发候选、Client 转交 `/prepare`；该端点接线或删除需在转 Accepted 前决定。增量包生产（`createDeltaArchive`）仍未接入打包主流程。
 
 **何时重新评估**：出现下列任一情况应创建新 ADR 重新评估，而非直接改本 ADR 结论——上传侧引入全局块去重（重评 ADR-0006:71 数据面边界）、签名信任根/密钥轮换模型变化、delta 窗口（最近 3 个成功版本）与 `RELEASE_CLEANUP_POLICY` 脱钩、或宣布停旧格式。

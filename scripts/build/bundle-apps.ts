@@ -76,10 +76,25 @@ export async function bundleClient(targets: BundleTarget[]): Promise<void> {
 	}
 }
 
-/** Launcher：独立打为单文件，安装到 app-dir/dist 后不随业务版本切换。 */
-export async function bundleLauncher(outfile: string): Promise<void> {
+/**
+ * Launcher：独立打为单文件，安装到 app-dir/dist 后不随业务版本切换。
+ *
+ * `trustedPublicKeyPem` 经 esbuild `define` 注入
+ * `packages/launcher/src/trusted-key.ts` 的 `__VCPDECK_RELEASE_PUBLIC_KEY_PEM__`，
+ * 使包内只带公钥、不带私钥；缺公钥直接失败，绝不产出无法验签的 Launcher。
+ */
+export async function bundleLauncher(
+	outfile: string,
+	trustedPublicKeyPem: string,
+): Promise<void> {
+	if (trustedPublicKeyPem.trim().length === 0) {
+		throw new Error("缺少可信公钥：Launcher 打包必须注入生产公钥");
+	}
 	await build({
 		...baseOptions("packages/launcher/tsconfig.json", []),
+		define: {
+			__VCPDECK_RELEASE_PUBLIC_KEY_PEM__: JSON.stringify(trustedPublicKeyPem),
+		},
 		entryPoints: [resolve(ROOT, "packages/launcher/src/main.ts")],
 		outfile,
 	});

@@ -220,7 +220,7 @@ Server/Client 在 `/apply` 返回后不再把「本进程未被接管」立即�
 
 下载入口统一为 `GET /api/releases/:version/file?platform=`（ADR-0019）：Local 后端直接 `sendFile`；外部存储后端由 Server 持凭证换取临时直链并 **302** 到直链（目标机 `fetch` 自动跟随，字节流直连存储不占 Server 带宽）；直链短时缓存、过期重新换取，短 TTL 不暴露给目标机与协议。archive 进入 `deleting` 后下载返回清理中的稳定错误，进入 `cleaned` 后返回正文已清理错误；两种状态均不会再参与编排、安装或补更。Server 换取 Alibaba 直链遇到网络错误或 HTTP `500/502/503/504` 时最多尝试 3 次；Launcher 从该更新入口下载时，遇到网络错误或 HTTP `502/503/504` 也最多尝试 3 次，每次重新请求更新入口以换取新的临时直链。确定性 `4xx`、URL 校验、SHA-256、解压、切换和探活失败不重试，系统没有无限后台重试。
 
-新 Launcher 先向 `GET /api/releases/:version/update?platform=&launcher=` 取 JSON 更新计划 `{url, sha256, size, candidates?}`（ADR-0062）：该端点只返回计划、绝不 302，`launcher` 必须为 `x.y.z` 且 major ≥ `CONTROL_PROTOCOL_VERSION`（当前为 2），archive 内可选的 `launcherMinVersion` 再做逐段比较（打包侧当前统一写 `0.0.0`），不满足一律稳定返回 `LAUNCHER_UPGRADE_REQUIRED`；平台构件尚未齐备时返回 `RELEASE_ARTIFACTS_INCOMPLETE`。`candidates` 仅在登记了 delta 时出现，条目为 `{fromVersion, url, sha256, size}`，其 `url` 指回同一 `/file` 入口并带 `fromVersion`。Server 也把同样的候选随 `UpdateRequest` 与 `/prepare` 下发给 Client，由 Launcher 按本地 `apps/` 中实际存在的基线自择、都不存在则退回 full；计划响应与 `UpdateRequest` 都不携带 Provider key、Token 或完整 archive。
+`GET /api/releases/:version/update?platform=&launcher=` 是 ADR-0062 规划的 JSON 更新计划端点，返回 `{url, sha256, size, candidates?}`；当前 Launcher 尚未调用它，属预留入口。该端点只返回计划、绝不 302，`launcher` 必须为 `x.y.z` 且 major ≥ `CONTROL_PROTOCOL_VERSION`（当前为 2），archive 内可选的 `launcherMinVersion` 再做逐段比较（打包侧当前统一写 `0.0.0`），不满足一律稳定返回 `LAUNCHER_UPGRADE_REQUIRED`；平台构件尚未齐备时返回 `RELEASE_ARTIFACTS_INCOMPLETE`。`candidates` 仅在登记了 delta 时出现，条目为 `{fromVersion, url, sha256, size}`，其 `url` 指回同一 `/file` 入口并带 `fromVersion`。Server 也把同样的候选随 `UpdateRequest` 与 `/prepare` 下发给 Client，由 Launcher 按本地 `apps/` 中实际存在的基线自择、都不存在则退回 full；计划响应与 `UpdateRequest` 都不携带 Provider key、Token 或完整 archive。**当前实际链路是编排器随 `UpdateRequest` 下发候选、Client 转交 `/prepare`，没有代码请求 `/update`**；后续需决定接线还是删除该端点。
 
 增量包通过同一入口的可选 `fromVersion=x.y.z` 参数下载（即更新计划中 `candidates[].url` 指向的地址）：Server 在 `Release.archives[platform].deltas[]` 中按基线版本定位构件，外部存储后端用该 delta 自己的对象 key 换取直链（与 full 包的 key 相互独立，短 TTL 缓存按对象 key 区分），Local 后端 `sendFile` 到 `vcpdeck-<version>-<platform>-delta-<fromVersion>.zip`。`fromVersion` 缺省或为空串时行为与迁移前逐字一致；非法格式返回 400，找不到对应 delta 返回稳定 404，direct 模式下 delta 缺对象 key（本次改动前上传的存量记录）返回 502 而不静默回落到 full 包——否则 Launcher 会用 delta 的 sha256 校验 full 字节而必然失败。`deltas[].providerKey` 是 Server 内部定位信息，与 `archive.storage.key` 一样在对外投影时剥离，不进入任何 API 响应。
 
@@ -356,20 +356,32 @@ Launcher 启动时：
 
 ## 9. 完整性、安全和信任边界
 
-当前构件安全模型是“可信操作者 + SHA-256 完整性”，不是完整的软件供应链签名：
+构件安全模型分两条路径，取决于包内是否带签名：
+
+- **新格式（带 `manifest.json.sig`／`delta.json.sig`）**：Launcher 先验签、再对包内条目做路径预检、再逐文件核对 `sha256/size/mode`；任一失败稳定返回 `MANIFEST_SIGNATURE_INVALID`／`MANIFEST_PATH_UNSAFE`／`FILE_HASH_MISMATCH`，不降级重试；
+- **旧格式（无签名文件）**：沿用“可信操作者 + SHA-256”直通，仅迁移期兼容，停用需按 ADR-0062 由后续 ADR 宣布。
+
+共同边界：
 
 - Release 上传受全局身份认证保护，但当前没有额外 admin-only 检查；
 - 构件下载和 `/api/status` 是公开端点；
 - Local raw 上传由 Server 重新计算 SHA-256；
 - Alibaba 直传时 Server 不接收正文：Provider 创建任务固定大小，CLI 完成字节数必须匹配会话，Launcher 下载后重新计算 SHA-256；
-- SHA-256 能检测内容不一致，不能证明发布者身份；
+- SHA-256 只证明内容一致，不证明发布者身份；来源认证现在由清单签名提供，其前提是“内置公钥确实属于预期发布者”，信任根随 Launcher 构件一起分发；
 - Launcher 控制通道依赖 loopback 和随机 Token；
 - 更新 URL 只接受带主机名的 HTTP/HTTPS；
-- archive、manifest 和 `preStart` 都属于高信任输入，只有可信发布者可以上传；
-- 当前没有独立 archive 条目路径穿越预检，不能接收不可信构件；
+- archive、manifest 和 `preStart` 都属于高信任输入；单文件路径、`..`、绝对路径与符号链接逃逸已在解压后预检，但 archive 仍须由可信发布者产出；
 - Token、Cookie、签名 URL、完整 archive 内容和 preStart 输出不得进入普通日志。
 
-增加 Ed25519 等发布者签名、固定信任公钥和密钥轮换前，不能把自动更新描述为对不可信发布链路具有来源认证。
+签名只覆盖清单（含 `files` 的 sha256/size/mode 列表），不覆盖 archive 字节本身；字节完整性仍由 SHA-256 保证。因此**不能把自动更新描述为对完全不可信发布链路具有来源认证**：签名信任根与 Launcher 自更新通道仍是最高价值目标，需要单独审查。
+
+### 9.1 签名密钥与内置公钥
+
+- 打包侧读取 `VCPDECK_RELEASE_PRIVATE_KEY_PEM`，或 `VCPDECK_RELEASE_PRIVATE_KEY_PATH` 指向的 PEM 文件；两者都缺时打包直接失败，**绝不产出未签名发布包**。
+- 打包流程从私钥派生 SPKI 公钥，经 esbuild `define` 注入 Launcher 单文件 `packages/launcher/src/trusted-key.ts`，包内**只含公钥**；签名与信任根同源，不需要手工替换公钥。
+- Launcher 运行时可用 `VCPDECK_RELEASE_PUBLIC_KEY_PEM` 覆盖内置公钥，用于轮换演练与临时排查；优先级为运行时覆盖 → 打包注入 → 内置占位值。
+- 未注入也未覆盖时使用内置占位公钥，真包验签必然失败：这是失败关闭（fail-closed），不是绕过。
+- 密钥轮换：新公钥随 Launcher 发布内置，旧 Launcher 只能验旧钥，因此必须**先升级 Launcher、再用新钥签业务版本**；双钥并存尚未实现（见 roadmap）。私钥属高价值凭据，只应存在于打包机环境，不得进入仓库、构件或日志。
 
 ## 10. 数据库与回滚
 
@@ -443,20 +455,20 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 - 灰度、分组或人工审批；
 - 将其他独立 Frontend 构件纳入统一 Release（当前 Frontend 已随 Server 构件分发）；
 - 更换 archive 格式或 manifest 版本；
-- 发布者数字签名和信任根；
+- 签名密钥轮换与双钥并存；
 - 自动数据库迁移/回滚；
 - 允许 N-1 Client 长期兼容。
 
 当前优先缺口：
 
 1. 完成跨平台 archive 与 Launcher 随包分发的真实演练；
-2. 实现 `launcherMinVersion` 强制校验；
-3. 建立 systemd/Windows Service 安装流程；
-4. 增加构件发布者数字签名；
+2. 让打包主流程实际产出 delta 包（`createDeltaArchive` 目前只有单测覆盖，`pnpm release` 只产 full，`candidates` 因此恒为空）；
+3. 决定 `/update` 计划端点的去向（接线给 Launcher 或删除），并同步 ADR-0062；
+4. 建立 systemd/Windows Service 安装流程；
 5. 完成 Server drain 失败后的闸门恢复(超时抛错路径自动解除,编排器失败路径显式 release());
 6. 防止重复版本覆盖 archive，并处理活动 Release 期间的新上传；
-7. 对 archive 条目和 manifest 做严格运行时验证；
-8. 完成 Server 重启窗口 Job 对账和跨平台全链路 Release E2E；
-9. 建立可回退的生产数据库迁移流程。
+7. 完成 Server 重启窗口 Job 对账和跨平台全链路 Release E2E；
+8. 建立可回退的生产数据库迁移流程；
+9. 签名密钥轮换与双钥并存。
 
 未实现事项统一进入 [`roadmap.md`](../roadmap.md) 或 Issue；本文只在其影响当前安全使用方式时保留已知缺口。

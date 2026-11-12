@@ -183,4 +183,4 @@ manifest 已声明 `launcherMinVersion`，打包脚本仍写入 `0.0.0`；版本
 
 ## 9. 建议的后续增强
 
-`CONTROL_PROTOCOL_VERSION` 已引入（当前为 2）：`/api/releases/:version/update` 按 Launcher major 校验，Launcher 对 `manifest.json`／`delta.json` 的 `protocolVersion` 严格按该值解析，缺省旧格式包继续直通。仍需明确至少支持 N-1 Client 的窗口，或明确只支持同版本；窗口定义前维持“整套同版本部署”的保守策略。
+`CONTROL_PROTOCOL_VERSION` 已引入（当前为 2）：`/api/releases/:version/update` 按 Launcher major 校验，Launcher 对 `manifest.json`／`delta.json` 的 `protocolVersion` 严格按该值解析，缺省旧格式包继续直通。仍需明确至少支持 N-1 Client 的窗口，或明确只支持同版本；窗口定义前维持“整套同版本部署”的保守策略。Launcher 的可信公钥在打包时由签名私钥派生并内置；手工拼装、未经注入的 Launcher 会在真包验签时失败（失败关闭）。因此密钥轮换必须先升级 Launcher，再用新钥签业务版本。

@@ -54,6 +54,7 @@ pnpm release --version=x.y.z
 ```
 
 - `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`：对应平台构件（均含 `launcher/`、`server/`、`client/`），既供手动分发，也供自动更新上传（两个平台各上传一次）；首次安装时 Launcher 放入 `<app-dir>/dist/main.js`，已有 Launcher 默认保留；
+- 打包机必须提供签名私钥：`VCPDECK_RELEASE_PRIVATE_KEY_PEM`（PEM 正文）或 `VCPDECK_RELEASE_PRIVATE_KEY_PATH`（PEM 文件路径），两者都缺时 `pnpm release` 直接失败，绝不产出未签名构件；可信公钥由该私钥派生后注入 Launcher 单文件，无需手工替换，轮换顺序见 [`design/release-and-update.md`](./design/release-and-update.md) §9.1；
 - `dist/VCPDeckBridge.zip`：VCPToolBox 插件商店下载构件；`pnpm release` 会同步版本并重建，必须与源码、manifest 和 `plugins.json` 一起提交，不能按普通 `dist` 忽略；
 - 业务代码为 esbuild 单文件，仅原生/引擎依赖保留为 node_modules。Linux 目标机自动更新依赖系统 `unzip` 命令（手动分发无此要求）。发布前应完成发布验收冒烟（Server 启动与 `/api/status`、Client 注册与能力上报、终端探测），不建议将工作区源码目录直接当作长期版本目录。
 
@@ -356,7 +357,7 @@ location / {
 pnpm release --version=x.y.z
 ```
 
-产出 `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`，并打印各自的 sha256；同时重建必须提交的插件商店构件 `dist/VCPDeckBridge.zip`。推荐统一使用 CLI：Alibaba 后端会协商分片并把构件直接 PUT 到 Provider，Server 只处理认证、会话和登记；Local 后端由 CLI 自动选择 Server raw stream。
+产出 `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`，并打印各自的 sha256（打包前须在构建机导出 `VCPDECK_RELEASE_PRIVATE_KEY_PEM` 或 `VCPDECK_RELEASE_PRIVATE_KEY_PATH`，缺失即终止）；同时重建必须提交的插件商店构件 `dist/VCPDeckBridge.zip`。推荐统一使用 CLI：Alibaba 后端会协商分片并把构件直接 PUT 到 Provider，Server 只处理认证、会话和登记；Local 后端由 CLI 自动选择 Server raw stream。
 
 #### 方式一：CLI（推荐命名环境；第二个平台齐备即自动开始更新）
 

@@ -6,7 +6,8 @@
  *   1. 同步 SDK/Shared/CLI/VCPDeckBridge 版本与 Shared 运行时版本 → 全量构建
  *      （shared/sdk/cli/vcp-plugin/server/client/launcher/frontend）→ 多平台 frp 下载
  *   2. esbuild 将业务代码 + 纯 JS 依赖打成少量单文件（原生模块、Prisma 运行时、
- *      原生模块与 Prisma 运行时等外部保留，staging 只安装这部分依赖）
+ *      原生模块与 Prisma 运行时等外部保留，staging 只安装这部分依赖）；
+ *      Launcher 单文件同时内置由签名私钥派生的可信公钥（只注入公钥，不含私钥）
  *   3. staging 组装：launcher/、server/ 与 client/（Launcher 单文件 + 业务构件与精简依赖）
  *   4. 产出 win-x64 / linux-x64 两份 zip（均含 Launcher、Server、Client；archiver，构建机平台无关），供分发与自动
  *      更新上传（Server 按目标机平台选择对应包）；linux frp 裸 ELF 从 .gz 内存解压
@@ -42,7 +43,7 @@ import {
 	bundleServer,
 } from "./bundle-apps.js";
 import { copyInstallerAsset } from "./release-installer-assets.js";
-import { buildFileList, signManifest } from "./release-manifest.js";
+import { buildFileList, derivePublicKeyPem, signManifest } from "./release-manifest.js";
 
 const ROOT = resolve(__dirname, "../..");
 const PLATFORMS = "win-x64,linux-x64";
@@ -640,8 +641,12 @@ async function main(): Promise<void> {
 
 		// 2. staging 组装
 		mkdirSync(join(stagingDir, "launcher", "dist"), { recursive: true });
-		console.log("[pack-release] Launcher esbuild 打包");
-		await bundleLauncher(join(stagingDir, "launcher", "dist", "main.js"));
+		console.log("[pack-release] Launcher esbuild 打包（内置派生可信公钥）");
+		// 公钥从签名私钥派生并注入单文件，包内只含公钥；私钥缺失在前面已明确报错。
+		await bundleLauncher(
+			join(stagingDir, "launcher", "dist", "main.js"),
+			derivePublicKeyPem(readReleasePrivateKeyPem()),
+		);
 		await stagePackage("server", stagingDir);
 		await stagePackage("client", stagingDir);
 		// 目标版本完整文件清单：在写 manifest.json 之前收集，避免清单自引用。

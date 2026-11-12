@@ -10,7 +10,7 @@
 
 - **Release 增量包可下载**：`GET /api/releases/:version/file` 支持可选 `fromVersion=x.y.z`，Launcher 可按基线版本取对应增量包。Server 在 `Release.archives[platform].deltas[]` 中记录每个 delta 的外部存储对象 key，direct 后端据此换取直链、Local 后端直出 `vcpdeck-<version>-<platform>-delta-<fromVersion>.zip`；不带该参数时行为与之前完全一致。`providerKey` 与既有的 `archive.storage.key` 一样只留在 Server 内部，不进入任何 API 响应。
 
-- **发布清单签名与 Launcher 协议门槛**：打包管线用 Ed25519 对 full 的 `manifest.json` 与 delta 的 `delta.json` 签名（包内 `<清单>.sig`），Launcher `prepare` 先验签、再对包内条目做路径预检并按清单逐文件校验 hash/size/mode，未变文件从本地历史版本目录硬链接复用，任一步失败删除半成品并降级 full；缺签名的旧格式包仍直通，迁移期兼容。新增 `GET /api/releases/:version/update?platform=&launcher=` 更新计划端点与 `CONTROL_PROTOCOL_VERSION`（当前为 2）门槛，低于门槛返回 `LAUNCHER_UPGRADE_REQUIRED`，不再给旧 Launcher 可执行跳转。
+- **发布清单签名与 Launcher 协议门槛**：打包管线用 Ed25519 对 full 的 `manifest.json` 与 delta 的 `delta.json` 签名（包内 `<清单>.sig`），Launcher `prepare` 先验签、再对包内条目做路径预检并按清单逐文件校验 hash/size/mode，未变文件从本地历史版本目录硬链接复用，任一步失败删除半成品并降级 full；缺签名的旧格式包仍直通，迁移期兼容。新增 `GET /api/releases/:version/update?platform=&launcher=` 更新计划端点与 `CONTROL_PROTOCOL_VERSION`（当前为 2）门槛，低于门槛返回 `LAUNCHER_UPGRADE_REQUIRED`，不再给旧 Launcher 可执行跳转。打包侧从签名私钥派生可信公钥并注入 Launcher 单文件（包内只含公钥）；私钥经 `VCPDECK_RELEASE_PRIVATE_KEY_PEM`／`VCPDECK_RELEASE_PRIVATE_KEY_PATH` 读取，缺失即打包失败。运维侧不再需要手工替换公钥，只有轮换演练时才用 `VCPDECK_RELEASE_PUBLIC_KEY_PEM` 覆盖。
 
 ### Changed
 
