@@ -54,7 +54,7 @@ pnpm release --version=x.y.z
 ```
 
 - `dist-release/vcpdeck-x.y.z-win-x64.zip` / `vcpdeck-x.y.z-linux-x64.zip`：对应平台构件（均含 `launcher/`、`server/`、`client/`），既供手动分发，也供自动更新上传（两个平台各上传一次）；首次安装时 Launcher 放入 `<app-dir>/dist/main.js`，已有 Launcher 默认保留；
-- 打包机必须提供签名私钥：`VCPDECK_RELEASE_PRIVATE_KEY_PEM`（PEM 正文）或 `VCPDECK_RELEASE_PRIVATE_KEY_PATH`（PEM 文件路径），两者都缺时 `pnpm release` 直接失败，绝不产出未签名构件；可信公钥由该私钥派生后注入 Launcher 单文件，无需手工替换，轮换顺序见 [`design/release-and-update.md`](./design/release-and-update.md) §9.1；
+- 打包机必须提供签名私钥：`VCPDECK_RELEASE_PRIVATE_KEY_PEM`（PEM 正文）或 `VCPDECK_RELEASE_PRIVATE_KEY_PATH`（PEM 文件路径），两者都缺时 `pnpm release` 直接失败，绝不产出未签名构件；可信公钥由该私钥派生后注入 Launcher 单文件，无需手工替换，轮换顺序见 [`design/release-and-update.md`](./design/release-and-update.md) §9.1。生成密钥对（Ed25519，私钥保存在仓库外并自行备份）：`node -e "const{generateKeyPairSync}=require('node:crypto');const{privateKey}=generateKeyPairSync('ed25519');require('node:fs').writeFileSync('release-signing-key.pem',privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600})"`，随后 `openssl pkey -in release-signing-key.pem -pubout` 派生公钥并核对内嵌指纹；
 - `dist/VCPDeckBridge.zip`：VCPToolBox 插件商店下载构件；`pnpm release` 会同步版本并重建，必须与源码、manifest 和 `plugins.json` 一起提交，不能按普通 `dist` 忽略；
 - 业务代码为 esbuild 单文件，仅原生/引擎依赖保留为 node_modules。Linux 目标机自动更新依赖系统 `unzip` 命令（手动分发无此要求）。发布前应完成发布验收冒烟（Server 启动与 `/api/status`、Client 注册与能力上报、终端探测），不建议将工作区源码目录直接当作长期版本目录。
 
@@ -62,7 +62,7 @@ pnpm release --version=x.y.z
 
 ### 4.1 Server
 
-> 使用 `install.cjs`（与发布 zip 平级提供于 `dist-release/`）安装时，脚本会从 zip 自动安装 Launcher 到 `<app-dir>/dist/main.js`，引导生成 `VCPDECK_PSK`、`VCPDECK_ADMIN_PASSWORD`、`DATABASE_URL`、`VCPDECK_RELEASES_DIR`（可选 `VCPDECK_PORT`，见下方 `--port`）并写入 `<app-dir>/launcher.env`（敏感值 Non-Windows 权限 600）；启动命令由脚本打印为 `node --env-file="<app-dir>/launcher.env" "<app-dir>/dist/main.js"`；下表为手铺环境变量时的完整清单。`install.cjs` 支持 `--port=<1-65535>` 覆盖 Server 监听端口（写入 `VCPDECK_PORT`）；改端口时需同步 client `--server-url` 与 Server Launcher `VCPDECK_PROBE_URL`，见 quickstart §3.1。
+> 使用 `install.cjs`（与发布 zip 平级提供于 `dist-release/`）安装时，脚本会从 zip 自动安装 Launcher 到 `<app-dir>/dist/main.js`，引导生成 `VCPDECK_PSK`、`VCPDECK_ADMIN_PASSWORD`、`DATABASE_URL`、`VCPDECK_RELEASES_DIR`（可选 `VCPDECK_PORT`，见下方 `--port`）并写入 `<app-dir>/launcher.env`（敏感值 Non-Windows 权限 600）；启动命令由脚本打印为 `node --env-file="<app-dir>/launcher.env" "<app-dir>/dist/main.js"`；下表为手铺环境变量时的完整清单。`install.cjs` 支持 `--port=<1-65535>` 覆盖 Server 监听端口（写入 `VCPDECK_PORT`；端口不是 3001 时同时写入 `VCPDECK_PROBE_URL=http://127.0.0.1:<port>/api/status`）；手铺环境变量或事后改端口时仍需自行同步 client `--server-url` 与 Server Launcher `VCPDECK_PROBE_URL`，见 quickstart §3.1。
 
 | 变量 | 当前默认/要求 | 说明 |
 | --- | --- | --- |
@@ -82,7 +82,7 @@ pnpm release --version=x.y.z
 
 **已知配置不一致：** 根目录和 `packages/server/.env.example` 目前写的是 `VCPDECK_CLIENT_PSK`，但 Server 与 Client 实际代码都读取 `VCPDECK_PSK`；`VCPDECK_CLIENT_PSK_FILE` 当前也未实现。部署必须设置 `VCPDECK_PSK`，不要依赖示例中的旧变量。
 
-Server 默认监听 `3001`，可用 `VCPDECK_PORT` 覆盖。改端口时三处必须同步（默认均为 3001）：Client 的 `VCPDECK_SERVER`、CLI 环境注册的 Server origin（或兼容 `--server`）、Server Launcher 的 `VCPDECK_PROBE_URL`；浏览器驾驶台随之访问 `http://<host>:<port>/`。
+Server 默认监听 `3001`，可用 `VCPDECK_PORT` 覆盖。改端口时三处必须同步（默认均为 3001）：Client 的 `VCPDECK_SERVER`、CLI 环境注册的 Server origin（或兼容 `--server`）、Server Launcher 的 `VCPDECK_PROBE_URL`（用 `install.cjs --port` 安装时由脚本自动写入）；浏览器驾驶台随之访问 `http://<host>:<port>/`。
 
 ### 4.2 CLI 多环境配置
 

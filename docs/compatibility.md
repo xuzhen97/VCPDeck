@@ -18,6 +18,7 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | SDK ↔ Server | REST DTO 和错误 | SDK/Shared 可从同一 Git Tag 子目录安装；只支持与 Server 同版本的标准组合 |
 | CLI/Skill | 同 Tag 的 `SKILL.md` + `vcpdeck.cjs` | 用户级 Git package 安装；升级必须显式切换 Tag；`0.2.1+` CLI 支持 Alibaba Release 分片直传 |
 | CLI 配置 | 用户级/项目级 JSON `version=1`（ADR-0017） | `--token-env` 成为推荐入口但仍写入既有 Bearer 结构；0.1.0 password/Bearer 配置与 `--auth=bearer` 保持兼容；`--server` 直连保持兼容 |
+| Launcher ↔ Server 控制通道 | loopback + `x-launcher-token`；`/prepare` 立即受理、`/apply` 等待 prepare 完成 | 0.23.6 起 `/apply` 在 prepare 进行中等待；先升级 Launcher 时必须用 ≥0.23.6（0.23.5 在 prepare 进行中直接回 409，旧 Server 不会重试），0.23.4 及更早 Server 的「一次 prepare 立即 apply」调用方式因此恢复可用 |
 | Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry、`apps/retention.json` | 新安装使用带本地版本保留能力的 Launcher；旧 Launcher 不会因业务 Release 自动升级，存量机器需执行一次性迁移脚本；`launcherMinVersion` 仅在 `/update` 计划端点参与比较，打包脚本仍写 `0.0.0` |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
 | Node.js | release manifest 默认 `>=24` | Launcher 可选择系统或缓存 Node；Client 一键安装优先复用合格 x64 Node，否则安装用户私有 Node；开发环境也应使用 Node 24+ |
@@ -158,7 +159,7 @@ FRP 恢复对账通过 capability `frp.reconcileProtocolVersion=1` 协商：新 
 manifest 已声明 `launcherMinVersion`，打包脚本仍写入 `0.0.0`；版本校验只在 `GET /api/releases/:version/update` 上生效（Launcher major ≥ `CONTROL_PROTOCOL_VERSION`，且 archive 声明了更高的 `launcherMinVersion` 时逐段比较），旧 `/file` 下载入口不做校验，因此对仍走 `/file` 的旧 Launcher 不构成强制。Launcher 随发布 zip 提供，首次安装后位于 `<app-dir>/dist/main.js`；已有 Launcher 默认保留，不随业务版本自动覆盖。新安装的 Launcher 会在稳定启动后维护 `apps/retention.json` 并清理不受保护的本地旧版本；旧 Launcher 没有该能力。在存量 Launcher 迁移完成前：
 
 - Launcher 协议或目录结构不得做隐式破坏性变更；
-- 如必须升级 Launcher，应先使用明确的 Launcher 升级流程替换 `<app-dir>/dist/main.js`，再发布依赖它的业务构件；存量迁移可使用随 Client Release 分发的 `upgrade-launcher.cjs`，通过 `--app-dir`、`--source` 和 `--pm2-name` 显式指定目标，不建立长期自动升级状态机；
+- 如必须升级 Launcher，应先使用明确的 Launcher 升级流程替换 `<app-dir>/dist/main.js`，再发布依赖它的业务构件；目标 Launcher 必须 ≥ 0.23.6：0.23.5 的 `/apply` 在 prepare 进行中直接回 409，而旧 Server 只发一次 `/prepare` 就立即 `/apply`，该组合必然失败；存量迁移可使用随 Client Release 分发的 `upgrade-launcher.cjs`，通过 `--app-dir`、`--source` 和 `--pm2-name` 显式指定目标，不建立长期自动升级状态机；
 - 发布说明必须写明最低 Launcher 要求和人工步骤；
 - 不得声称系统已对旧 `/file` 路径强制最低 Launcher 版本；
 - 发布脚本当前统一生成 `.zip`；Server/Launcher 按 `.zip` 保存和解压，Linux 目标机需要 `unzip`；Launcher 本地清理状态损坏时必须停用自动删除并人工恢复，不能按目录时间猜测历史。

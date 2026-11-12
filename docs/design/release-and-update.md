@@ -210,7 +210,7 @@ sequenceDiagram
 关键不变量：
 
 1. `/prepare` 立即受理并在业务进程仍运行时后台完成下载、SHA-256 校验和解压（响应不等待下载完成，避免请求方 HTTP 默认超时在下载完成前切断连接）；
-2. prepare 成功后才进入 drain，避免在长下载期间提前停止派发；
+2. `/prepare` 受理（下载、校验、解压转入后台）后即可进入 drain，不会在长下载期间提前停止派发；`/apply` 先等待 prepare 完成，prepare 失败时回传稳定错误码而不是静默切换，避免在构件不可用时白停业务进程；
 3. `ServerDrain` 只等待 `running/waiting_input` Job，不等待 Terminal 真实进程完全退出；
 4. 新 Server 启动后，从 SQLite 中的活动 Release 恢复，而不是依赖旧进程内存；
 5. `/api/status.serverVersion` 必须与目标版本完全相同，才进入 Client 阶段；
@@ -333,6 +333,8 @@ Launcher 启动时：
 | `POST /apply` | 先等待进行中的 prepare 完成，再对 pending 版本执行 preStart、停止、切换、启动、探活和回退 |
 
 两者都要求 `x-launcher-token`。`control.json` 是本机高敏感能力文件，应只允许 Launcher 和同一运行账户读取。Launcher 重启后 `pendingVersion` 丢失，必须重新 prepare。
+
+`/apply` 在 prepare 仍在进行时等待其完成，只有 prepare 尚未受理或已经失败才返回 409。因此「旧 Server 只发一次 `/prepare`、读到 200 就立即 `/apply`」仍可完成切换，不需要轮询 `/prepare/status`；0.23.5 曾在 prepare 进行中直接回 409，属该版本缺陷，0.23.6 起恢复本语义。
 
 ### 8.3 Node 运行时
 

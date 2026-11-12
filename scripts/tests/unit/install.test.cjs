@@ -317,6 +317,11 @@ test("buildEnvFile server 含 PSK/密码/DB/Releases，client 含 PSK/Server", (
 		port: 8080,
 	});
 	assert.match(withPort, /VCPDECK_PORT=8080/);
+	// 非默认端口时 install 同步写入探活地址，避免 Launcher 默认探 3001
+	assert.match(
+		withPort,
+		/VCPDECK_PROBE_URL=http:\/\/127\.0\.0\.1:8080\/api\/status/,
+	);
 
 	const client = install.buildEnvFile({
 		artifact: "client",

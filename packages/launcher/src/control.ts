@@ -158,14 +158,32 @@ export async function createControlServer(
 				return;
 			}
 			if (req.method === "POST" && req.url === "/apply") {
-				if (options.handlers.prepareStatus().state !== "ready") {
+				const status = options.handlers.prepareStatus();
+				if (status.state !== "ready" && status.state !== "preparing") {
 					respond(res, 409, {
-						code: "ASSEMBLE_FAILED",
-						message: "版本尚未准备就绪",
+						code: status.errorCode ?? "ASSEMBLE_FAILED",
+						message:
+							status.state === "failed" ? "版本准备失败" : "版本尚未准备就绪",
 					});
 					return;
 				}
-				await options.handlers.apply();
+				// /prepare 已改为后台受理后立即返回；只发一次 /prepare 就调用
+				// /apply 的旧 Server 不会轮询 /prepare/status，这里等后台任务
+				// 结束，保持旧的同步语义。
+				if (status.state === "preparing") {
+					log(`[launcher] apply 等待 prepare 完成: ${status.version ?? ""}`);
+				}
+				try {
+					await options.handlers.apply();
+				} catch (e) {
+					const code = (e as { code?: unknown }).code;
+					if (typeof code !== "string") throw e;
+					respond(res, 409, {
+						code,
+						message: e instanceof Error ? e.message : String(e),
+					});
+					return;
+				}
 				respond(res, 200, { ok: true });
 				return;
 			}
