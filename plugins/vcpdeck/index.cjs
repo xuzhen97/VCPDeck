@@ -47,7 +47,7 @@ var require_client_annotations = __commonJS({
     var MAX_PUBLIC_ADDRESSES = 4;
     var MAX_HOST_LENGTH = 253;
     var MAX_NOTES_LENGTH = 1e3;
-    function isRecord2(value) {
+    function isRecord3(value) {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     }
     function isIPv4(value) {
@@ -140,7 +140,7 @@ var require_client_annotations = __commonJS({
     function parsePublicAddress(value) {
       if (value === void 0 || value === null)
         return null;
-      if (!isRecord2(value)) {
+      if (!isRecord3(value)) {
         throw new Error("annotations.publicAddress \u5FC5\u987B\u4E3A\u5BF9\u8C61\u6216 null");
       }
       for (const key of Object.keys(value)) {
@@ -155,7 +155,7 @@ var require_client_annotations = __commonJS({
       };
     }
     function parseClientAnnotationsInput(value) {
-      if (!isRecord2(value)) {
+      if (!isRecord3(value)) {
         throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       for (const key of Object.keys(value)) {
@@ -172,7 +172,7 @@ var require_client_annotations = __commonJS({
       return input.publicAddress !== null || input.notes !== null;
     }
     function parseClientAnnotations(value) {
-      if (!isRecord2(value)) {
+      if (!isRecord3(value)) {
         throw new Error("annotations \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       if (Object.keys(value).length === 0)
@@ -222,13 +222,13 @@ var require_client_installer = __commonJS({
       throw new Error("platform \u5FC5\u987B\u4E3A win-x64 \u6216 linux-x64");
     }
     function parseClientInstallerConfigUpdate(value) {
-      if (!isRecord2(value) || Object.keys(value).length !== 1 || typeof value.enabled !== "boolean") {
+      if (!isRecord3(value) || Object.keys(value).length !== 1 || typeof value.enabled !== "boolean") {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B boolean enabled");
       }
       return { enabled: value.enabled };
     }
     function parseClientInstallerNameUpdate(value) {
-      if (!isRecord2(value) || Object.keys(value).length !== 1 || typeof value.name !== "string") {
+      if (!isRecord3(value) || Object.keys(value).length !== 1 || typeof value.name !== "string") {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B string name");
       }
       const name = value.name.trim();
@@ -236,7 +236,7 @@ var require_client_installer = __commonJS({
         throw new Error("name \u957F\u5EA6\u5FC5\u987B\u4E3A 1-100");
       return { name };
     }
-    function isRecord2(value) {
+    function isRecord3(value) {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     }
   }
@@ -312,7 +312,7 @@ var require_update = __commonJS({
         "fromVersion",
         "expectedFromVersions"
       ];
-      if (!isRecord2(value) || Object.keys(value).some((key) => !allowedKeys.includes(key)) || requiredKeys.some((key) => !Object.keys(value).includes(key))) {
+      if (!isRecord3(value) || Object.keys(value).some((key) => !allowedKeys.includes(key)) || requiredKeys.some((key) => !Object.keys(value).includes(key))) {
         throw new Error(shapeError);
       }
       if (typeof value.version !== "string" || !/^\d+\.\d+\.\d+$/.test(value.version)) {
@@ -357,7 +357,7 @@ var require_update = __commonJS({
       return result;
     }
     function parseReleaseUploadPartRefresh(value) {
-      if (!isRecord2(value) || !hasOnlyKeys(value, ["partNumbers"]) || !Array.isArray(value.partNumbers)) {
+      if (!isRecord3(value) || !hasOnlyKeys(value, ["partNumbers"]) || !Array.isArray(value.partNumbers)) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B partNumbers \u6570\u7EC4");
       }
       const partNumbers = value.partNumbers;
@@ -367,12 +367,12 @@ var require_update = __commonJS({
       return { partNumbers };
     }
     function parseReleaseUploadComplete(value) {
-      if (!isRecord2(value) || !hasOnlyKeys(value, ["uploadedBytes"]) || typeof value.uploadedBytes !== "number" || !Number.isSafeInteger(value.uploadedBytes) || value.uploadedBytes < 1 || value.uploadedBytes > 2147483647) {
+      if (!isRecord3(value) || !hasOnlyKeys(value, ["uploadedBytes"]) || typeof value.uploadedBytes !== "number" || !Number.isSafeInteger(value.uploadedBytes) || value.uploadedBytes < 1 || value.uploadedBytes > 2147483647) {
         throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B\u6709\u6548\u6574\u6570 uploadedBytes");
       }
       return { uploadedBytes: value.uploadedBytes };
     }
-    function isRecord2(value) {
+    function isRecord3(value) {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     }
     function hasOnlyKeys(value, keys) {
@@ -410,7 +410,7 @@ var require_update = __commonJS({
       return JSON.stringify(ordered);
     }
     function parseReleaseFileEntry(value) {
-      if (!isRecord2(value) || !hasOnlyKeys(value, ["path", "sha256", "size", "mode"])) {
+      if (!isRecord3(value) || !hasOnlyKeys(value, ["path", "sha256", "size", "mode"])) {
         throw new Error("\u6587\u4EF6\u6761\u76EE\u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B path/sha256/size/mode");
       }
       if (typeof value.path !== "string" || !isSafeReleaseFilePath(value.path)) {
@@ -433,7 +433,7 @@ var require_update = __commonJS({
       };
     }
     function parseReleaseDeltaManifest(value) {
-      if (!isRecord2(value) || !hasOnlyKeys(value, [
+      if (!isRecord3(value) || !hasOnlyKeys(value, [
         "version",
         "protocolVersion",
         "kind",
@@ -695,6 +695,363 @@ var require_git_ssh = __commonJS({
   }
 });
 
+// ../shared/dist/tailnet.js
+var require_tailnet = __commonJS({
+  "../shared/dist/tailnet.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.TAILNET_ERROR_CODES = exports2.TAILNET_CAPABILITY = exports2.TAILNET_PROTOCOL_VERSION = void 0;
+    exports2.isTailnetErrorCode = isTailnetErrorCode;
+    exports2.parseTailnetKeyInput = parseTailnetKeyInput2;
+    exports2.parseTailnetKeyInfo = parseTailnetKeyInfo2;
+    exports2.parseTailnetJobPayload = parseTailnetJobPayload;
+    exports2.parseTailnetSnapshot = parseTailnetSnapshot;
+    exports2.parseTailnetJobResult = parseTailnetJobResult;
+    exports2.parseTailnetCapability = parseTailnetCapability;
+    exports2.parseTailnetSecretRequest = parseTailnetSecretRequest;
+    exports2.parseTailnetSecretResponse = parseTailnetSecretResponse;
+    exports2.assertTailnetSecretUsable = assertTailnetSecretUsable;
+    exports2.parseTailnetStatus = parseTailnetStatus2;
+    exports2.TAILNET_PROTOCOL_VERSION = 1;
+    exports2.TAILNET_CAPABILITY = "tailnet.manage";
+    exports2.TAILNET_ERROR_CODES = {
+      CLI_MISSING: "TAILNET_CLI_MISSING",
+      CLI_FAILED: "TAILNET_CLI_FAILED",
+      PROBE_TIMEOUT: "TAILNET_PROBE_TIMEOUT",
+      UNSUPPORTED_PLATFORM: "TAILNET_UNSUPPORTED_PLATFORM",
+      INSTALL_FAILED: "TAILNET_INSTALL_FAILED",
+      INSTALL_REBOOT_REQUIRED: "TAILNET_INSTALL_REBOOT_REQUIRED",
+      EXISTING_CONFIG: "TAILNET_EXISTING_CONFIG",
+      JOIN_FAILED: "TAILNET_JOIN_FAILED",
+      SECRET_TIMEOUT: "TAILNET_SECRET_TIMEOUT",
+      SECRET_DENIED: "TAILNET_SECRET_DENIED",
+      SECRET_EXPIRED: "TAILNET_SECRET_EXPIRED",
+      SECRET_MISMATCH: "TAILNET_SECRET_MISMATCH",
+      SECRET_CLEANUP_FAILED: "TAILNET_SECRET_CLEANUP_FAILED",
+      KEY_UNAVAILABLE: "TAILNET_KEY_UNAVAILABLE",
+      KEY_BUSY: "TAILNET_KEY_BUSY",
+      OPERATION_BUSY: "TAILNET_OPERATION_BUSY",
+      OPERATION_MISMATCH: "TAILNET_OPERATION_MISMATCH"
+    };
+    var TAILNET_ERROR_CODE_VALUES = Object.values(exports2.TAILNET_ERROR_CODES);
+    function isTailnetErrorCode(value) {
+      return typeof value === "string" && TAILNET_ERROR_CODE_VALUES.includes(value);
+    }
+    var MAX_NAME = 100;
+    var MAX_ID = 128;
+    var MAX_AUTH_KEY = 4096;
+    var MAX_VERSION = 100;
+    var MAX_NODE_NAME = 253;
+    var MAX_ADDRESSES = 16;
+    var ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+    var TAILNET_REUSE_VALUES = [
+      "single",
+      "reusable",
+      "unknown"
+    ];
+    var TAILNET_KEY_USE_VALUES = [
+      "available",
+      "reserved",
+      "spent",
+      "uncertain"
+    ];
+    var TAILNET_INSTALLED_VALUES = ["yes", "no", "unknown"];
+    var TAILNET_SERVICE_VALUES = ["running", "stopped", "unknown"];
+    var TAILNET_BACKEND_VALUES = [
+      "running",
+      "needs-login",
+      "needs-approval",
+      "stopped",
+      "unknown"
+    ];
+    var TAILNET_STAGE_VALUES = [
+      "inspected",
+      "installed",
+      "joined",
+      "existing-login",
+      "awaiting-approval",
+      "interrupted"
+    ];
+    var TAILNET_ACTION_KEYS = {
+      inspect: ["action"],
+      ensure: ["action", "credentialId", "installIfMissing"]
+    };
+    function requireRecord(value, label) {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new Error(`${label} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
+      }
+      return value;
+    }
+    function requireExactKeys(value, label, allowed) {
+      const record = requireRecord(value, label);
+      for (const key of Object.keys(record)) {
+        if (!allowed.includes(key)) {
+          throw new Error(`${label} \u542B\u672A\u77E5\u5B57\u6BB5 ${key}`);
+        }
+      }
+      for (const key of allowed) {
+        if (!Object.hasOwn(record, key)) {
+          throw new Error(`${label} \u7F3A\u5C11\u5B57\u6BB5 ${key}`);
+        }
+      }
+      return record;
+    }
+    function requireBoundedString(value, field, maxLength) {
+      if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u957F\u5EA6 1-${maxLength} \u7684\u5B57\u7B26\u4E32`);
+      }
+      return value;
+    }
+    function requireBoolean(value, field) {
+      if (typeof value !== "boolean") {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u5E03\u5C14\u503C`);
+      }
+      return value;
+    }
+    function requireEnum(value, field, allowed) {
+      if (typeof value !== "string" || !allowed.includes(value)) {
+        throw new Error(`${field} \u53D6\u503C\u4E0D\u5408\u6CD5`);
+      }
+      return value;
+    }
+    function requireIsoInstant(value, field) {
+      if (typeof value !== "string" || !ISO_INSTANT.test(value) || !Number.isFinite(Date.parse(value))) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u53EF\u89E3\u6790\u7684 ISO \u65F6\u95F4`);
+      }
+      return value;
+    }
+    function requireAuthKey(value, field) {
+      const key = requireBoundedString(value, field, MAX_AUTH_KEY);
+      if (/[\r\n\0]/.test(key)) {
+        throw new Error(`${field} \u4E0D\u5F97\u5305\u542B CR/LF/NUL`);
+      }
+      return key;
+    }
+    function parseTailnetKeyInput2(value) {
+      const record = requireExactKeys(value, "tailnet key input", [
+        "name",
+        "authKey",
+        "declaredReuse",
+        "declaredExpiresAt"
+      ]);
+      return {
+        name: requireBoundedString(record.name, "name", MAX_NAME),
+        authKey: requireAuthKey(record.authKey, "authKey"),
+        declaredReuse: requireEnum(record.declaredReuse, "declaredReuse", TAILNET_REUSE_VALUES),
+        declaredExpiresAt: record.declaredExpiresAt === null ? null : requireIsoInstant(record.declaredExpiresAt, "declaredExpiresAt")
+      };
+    }
+    function parseTailnetKeyInfo2(value) {
+      const record = requireExactKeys(value, "tailnet key info", [
+        "id",
+        "name",
+        "declaredReuse",
+        "declaredExpiresAt",
+        "use",
+        "createdAt"
+      ]);
+      return {
+        id: requireBoundedString(record.id, "id", MAX_ID),
+        name: requireBoundedString(record.name, "name", MAX_NAME),
+        declaredReuse: requireEnum(record.declaredReuse, "declaredReuse", TAILNET_REUSE_VALUES),
+        declaredExpiresAt: record.declaredExpiresAt === null ? null : requireIsoInstant(record.declaredExpiresAt, "declaredExpiresAt"),
+        use: requireEnum(record.use, "use", TAILNET_KEY_USE_VALUES),
+        createdAt: requireIsoInstant(record.createdAt, "createdAt")
+      };
+    }
+    function parseTailnetJobPayload(value) {
+      const record = requireRecord(value, "tailnet job payload");
+      const action = record.action;
+      if (action !== "inspect" && action !== "ensure") {
+        throw new Error("tailnet job payload \u7684 action \u4E0D\u5408\u6CD5");
+      }
+      requireExactKeys(record, "tailnet job payload", TAILNET_ACTION_KEYS[action]);
+      if (action === "inspect") {
+        return { action: "inspect" };
+      }
+      return {
+        action: "ensure",
+        credentialId: requireBoundedString(record.credentialId, "credentialId", MAX_ID),
+        installIfMissing: requireBoolean(record.installIfMissing, "installIfMissing")
+      };
+    }
+    function parseTailnetSnapshot(value) {
+      const record = requireExactKeys(value, "tailnet snapshot", [
+        "installed",
+        "version",
+        "service",
+        "backend",
+        "nodeName",
+        "ipv4",
+        "ipv6",
+        "observedAt",
+        "errorCode"
+      ]);
+      return {
+        installed: requireEnum(record.installed, "installed", TAILNET_INSTALLED_VALUES),
+        version: record.version === null ? null : requireBoundedString(record.version, "version", MAX_VERSION),
+        service: requireEnum(record.service, "service", TAILNET_SERVICE_VALUES),
+        backend: requireEnum(record.backend, "backend", TAILNET_BACKEND_VALUES),
+        nodeName: record.nodeName === null ? null : requireBoundedString(record.nodeName, "nodeName", MAX_NODE_NAME),
+        ipv4: requireAddresses(record.ipv4, "ipv4", 4),
+        ipv6: requireAddresses(record.ipv6, "ipv6", 6),
+        observedAt: requireIsoInstant(record.observedAt, "observedAt"),
+        errorCode: record.errorCode === null ? null : requireEnum(record.errorCode, "errorCode", TAILNET_ERROR_CODE_VALUES)
+      };
+    }
+    function parseTailnetJobResult(value) {
+      const record = requireExactKeys(value, "tailnet job result", [
+        "stage",
+        "snapshot"
+      ]);
+      return {
+        stage: requireEnum(record.stage, "stage", TAILNET_STAGE_VALUES),
+        snapshot: parseTailnetSnapshot(record.snapshot)
+      };
+    }
+    function parseTailnetCapability(value) {
+      const record = requireExactKeys(value, "tailnet capability", [
+        "protocolVersion"
+      ]);
+      if (record.protocolVersion !== exports2.TAILNET_PROTOCOL_VERSION) {
+        throw new Error("tailnet capability \u7684 protocolVersion \u4E0D\u5408\u6CD5");
+      }
+      return { protocolVersion: exports2.TAILNET_PROTOCOL_VERSION };
+    }
+    function parseTailnetSecretRequest(value) {
+      const record = requireExactKeys(value, "tailnet secret request", [
+        "protocolVersion",
+        "jobId",
+        "requestId"
+      ]);
+      if (record.protocolVersion !== exports2.TAILNET_PROTOCOL_VERSION) {
+        throw new Error("tailnet secret request \u7684 protocolVersion \u4E0D\u5408\u6CD5");
+      }
+      return {
+        protocolVersion: exports2.TAILNET_PROTOCOL_VERSION,
+        jobId: requireBoundedString(record.jobId, "jobId", MAX_ID),
+        requestId: requireBoundedString(record.requestId, "requestId", MAX_ID)
+      };
+    }
+    function parseTailnetSecretResponse(value) {
+      const record = requireExactKeys(value, "tailnet secret response", [
+        "protocolVersion",
+        "jobId",
+        "requestId",
+        "expiresAt",
+        "authKey"
+      ]);
+      if (record.protocolVersion !== exports2.TAILNET_PROTOCOL_VERSION) {
+        throw new Error("tailnet secret response \u7684 protocolVersion \u4E0D\u5408\u6CD5");
+      }
+      return {
+        protocolVersion: exports2.TAILNET_PROTOCOL_VERSION,
+        jobId: requireBoundedString(record.jobId, "jobId", MAX_ID),
+        requestId: requireBoundedString(record.requestId, "requestId", MAX_ID),
+        expiresAt: requireIsoInstant(record.expiresAt, "expiresAt"),
+        authKey: requireAuthKey(record.authKey, "authKey")
+      };
+    }
+    function assertTailnetSecretUsable(response, expected, nowMs = Date.now()) {
+      if (response.jobId !== expected.jobId || response.requestId !== expected.requestId) {
+        throw codedError(exports2.TAILNET_ERROR_CODES.SECRET_MISMATCH, "tailnet secret response \u4E0E\u5F53\u524D\u8BF7\u6C42\u4E0D\u5339\u914D");
+      }
+      if (Date.parse(response.expiresAt) <= nowMs) {
+        throw codedError(exports2.TAILNET_ERROR_CODES.SECRET_EXPIRED, "tailnet secret response \u5DF2\u8FC7\u671F");
+      }
+      return response;
+    }
+    function parseTailnetStatus2(value) {
+      const record = requireExactKeys(value, "tailnet status", [
+        "clientId",
+        "online",
+        "supported",
+        "snapshot"
+      ]);
+      return {
+        clientId: requireBoundedString(record.clientId, "clientId", MAX_ID),
+        online: requireBoolean(record.online, "online"),
+        supported: requireBoolean(record.supported, "supported"),
+        snapshot: record.snapshot === null ? null : parseTailnetSnapshot(record.snapshot)
+      };
+    }
+    function requireAddresses(value, field, family) {
+      if (!Array.isArray(value) || value.length > MAX_ADDRESSES) {
+        throw new Error(`${field} \u5FC5\u987B\u4E3A\u4E0D\u8D85\u8FC7 ${MAX_ADDRESSES} \u9879\u7684\u6570\u7EC4`);
+      }
+      return value.map((item) => {
+        if (typeof item !== "string" || !isIpLiteral(item, family)) {
+          throw new Error(`${field} \u542B\u975E\u6CD5 IP \u5730\u5740`);
+        }
+        return item;
+      });
+    }
+    function codedError(code, message) {
+      const error = new Error(message);
+      error.code = code;
+      return error;
+    }
+    function isIpLiteral(value, family) {
+      return family === 4 ? isIPv4Literal(value) : isIPv6Literal(value);
+    }
+    function isIPv4Literal(value) {
+      const parts = value.split(".");
+      if (parts.length !== 4)
+        return false;
+      for (const part of parts) {
+        if (part.length === 0 || part.length > 3)
+          return false;
+        if (!/^[0-9]+$/.test(part))
+          return false;
+        if (part.length > 1 && part.startsWith("0"))
+          return false;
+        if (Number(part) > 255)
+          return false;
+      }
+      return true;
+    }
+    function isIPv6Literal(input) {
+      if (input.length < 2 || input.length > 45)
+        return false;
+      if (input.includes("%"))
+        return false;
+      const compressionIndex = input.indexOf("::");
+      if (compressionIndex === -1) {
+        const groups = input.split(":");
+        return countIPv6Groups(groups) === 8;
+      }
+      const right = input.slice(compressionIndex + 2);
+      if (right.includes("::"))
+        return false;
+      const leftPart = input.slice(0, compressionIndex);
+      const left = leftPart === "" ? [] : leftPart.split(":");
+      const tail = right === "" ? [] : right.split(":");
+      const effective = countIPv6Groups([...left, ...tail]);
+      return effective >= 0 && effective <= 7;
+    }
+    function countIPv6Groups(groups) {
+      let effective = 0;
+      for (let index = 0; index < groups.length; index += 1) {
+        const group = groups[index];
+        if (group.length === 0)
+          return -1;
+        if (group.includes(".")) {
+          if (index !== groups.length - 1)
+            return -1;
+          if (!isIPv4Literal(group))
+            return -1;
+          effective += 2;
+          continue;
+        }
+        if (!/^[0-9a-fA-F]{1,4}$/.test(group))
+          return -1;
+        effective += 1;
+      }
+      return effective;
+    }
+  }
+});
+
 // ../shared/dist/terminal.js
 var require_terminal = __commonJS({
   "../shared/dist/terminal.js"(exports2) {
@@ -815,11 +1172,11 @@ var require_terminal = __commonJS({
       }
     };
     exports2.TerminalProtocolError = TerminalProtocolError;
-    function isRecord2(v) {
+    function isRecord3(v) {
       return typeof v === "object" && v !== null && !Array.isArray(v);
     }
     function assertRecord(v, what) {
-      if (!isRecord2(v))
+      if (!isRecord3(v))
         throw new TerminalProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(v, allowed, what) {
@@ -1728,6 +2085,7 @@ var require_machine_register = __commonJS({
     exports2.parseMachineRegister = parseMachineRegister;
     var frp_runtime_js_1 = require_frp_runtime();
     var git_ssh_js_1 = require_git_ssh();
+    var tailnet_js_1 = require_tailnet();
     var MAX_CLIENT_ID = 128;
     var MAX_HOSTNAME = 256;
     var MAX_OS = 64;
@@ -1749,7 +2107,7 @@ var require_machine_register = __commonJS({
     };
     var RETIRED_DETAIL_KEYS = /* @__PURE__ */ new Set(["pi", "p2pTunnel"]);
     function parseRemoteDevCapabilityStatus(value) {
-      if (!isRecord2(value))
+      if (!isRecord3(value))
         throw new Error("remoteDev \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
       for (const key of Object.keys(value)) {
@@ -1772,7 +2130,7 @@ var require_machine_register = __commonJS({
       };
     }
     function parseAcpCapabilityStatus(value) {
-      if (!isRecord2(value))
+      if (!isRecord3(value))
         throw new Error("acp \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const allowed = /* @__PURE__ */ new Set(["available", "protocolVersion", "code"]);
       for (const key of Object.keys(value)) {
@@ -1794,7 +2152,7 @@ var require_machine_register = __commonJS({
         ...value.code !== void 0 ? { code: value.code } : {}
       };
     }
-    function isRecord2(value) {
+    function isRecord3(value) {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     }
     function requireString(value, field, maxLength) {
@@ -1804,7 +2162,7 @@ var require_machine_register = __commonJS({
       return value;
     }
     function parseMachineInstallation(value) {
-      if (!isRecord2(value) || Object.keys(value).length !== 1) {
+      if (!isRecord3(value) || Object.keys(value).length !== 1) {
         throw new Error("installation \u5FC5\u987B\u4E3A\u4EC5\u542B mode \u7684\u5BF9\u8C61");
       }
       const valid = [
@@ -1818,7 +2176,7 @@ var require_machine_register = __commonJS({
       return { mode: value.mode };
     }
     function parsePrivilegedCapabilityStatus(value) {
-      if (!isRecord2(value) || Object.keys(value).length !== 4) {
+      if (!isRecord3(value) || Object.keys(value).length !== 4) {
         throw new Error("privileged \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B available/mode/nonInteractive/runAsUser");
       }
       const { available, mode, nonInteractive, runAsUser } = value;
@@ -1874,7 +2232,7 @@ var require_machine_register = __commonJS({
       return { compliant: true, reason: null };
     }
     function parseMachineRegister(value) {
-      if (!isRecord2(value))
+      if (!isRecord3(value))
         throw new Error("register \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       const clientId = requireString(value.clientId, "clientId", MAX_CLIENT_ID);
       const hostname = requireString(value.hostname, "hostname", MAX_HOSTNAME);
@@ -1900,9 +2258,17 @@ var require_machine_register = __commonJS({
       };
       if (value.capabilityDetails !== void 0) {
         const details = value.capabilityDetails;
-        if (!isRecord2(details))
+        if (!isRecord3(details))
           throw new Error("capabilityDetails \u5FC5\u987B\u4E3A\u5BF9\u8C61");
-        const known = ["terminal", "frp", "privileged", "gitSsh", "acp", "remoteDev"];
+        const known = [
+          "terminal",
+          "frp",
+          "privileged",
+          "gitSsh",
+          "acp",
+          "remoteDev",
+          "tailnet"
+        ];
         for (const key of Object.keys(details)) {
           if (RETIRED_DETAIL_KEYS.has(key))
             continue;
@@ -1929,10 +2295,16 @@ var require_machine_register = __commonJS({
         if (details.remoteDev !== void 0) {
           parsedDetails.remoteDev = parseRemoteDevCapabilityStatus(details.remoteDev);
         }
+        if (details.tailnet !== void 0) {
+          parsedDetails.tailnet = (0, tailnet_js_1.parseTailnetCapability)(details.tailnet);
+        }
         result.capabilityDetails = parsedDetails;
       }
       if (value.installation !== void 0) {
         result.installation = parseMachineInstallation(value.installation);
+      }
+      if (value.tailnet !== void 0) {
+        result.tailnet = (0, tailnet_js_1.parseTailnetSnapshot)(value.tailnet);
       }
       if (value.remoteDevSessions !== void 0) {
         result.remoteDevSessions = parseRemoteDevSessionReports(value.remoteDevSessions);
@@ -1948,7 +2320,7 @@ var require_machine_register = __commonJS({
         throw new Error(`remoteDevSessions \u8D85\u8FC7 ${MAX_REMOTE_DEV_SESSION_REPORTS} \u9879`);
       }
       return value.map((item, index) => {
-        if (!isRecord2(item)) {
+        if (!isRecord3(item)) {
           throw new Error(`remoteDevSessions[${index}] \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
         }
         for (const key of Object.keys(item)) {
@@ -2015,7 +2387,7 @@ var require_feature = __commonJS({
       "INVALID_FEATURE_STATUS_TRANSITION",
       "FEATURE_CLIENT_UNKNOWN"
     ];
-    function isRecord2(value) {
+    function isRecord3(value) {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     }
     function rejectUnknown(value, allowed, field) {
@@ -2075,7 +2447,7 @@ var require_feature = __commonJS({
       return url;
     }
     function parseFeatureInvocation(value, field = "invoke") {
-      if (!isRecord2(value)) {
+      if (!isRecord3(value)) {
         throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
       }
       if (value.kind === "command") {
@@ -2115,7 +2487,7 @@ var require_feature = __commonJS({
       const seen = /* @__PURE__ */ new Set();
       return value.map((raw, index) => {
         const field = `inputs[${index}]`;
-        if (!isRecord2(raw)) {
+        if (!isRecord3(raw)) {
           throw new FeatureProtocolError(`${field} \u5FC5\u987B\u4E3A\u5BF9\u8C61`);
         }
         rejectUnknown(raw, ["name", "type", "required", "description", "example", "options"], field);
@@ -2162,7 +2534,7 @@ var require_feature = __commonJS({
       });
     }
     function parseFeatureVerificationReport(value) {
-      if (!isRecord2(value)) {
+      if (!isRecord3(value)) {
         throw new FeatureProtocolError("verification \u5FC5\u987B\u4E3A\u5BF9\u8C61");
       }
       rejectUnknown(value, ["ok", "durationMs", "evidence", "via"], "verification");
@@ -2192,7 +2564,7 @@ var require_feature = __commonJS({
       return report;
     }
     function parseFeatureCreateInput(value) {
-      if (!isRecord2(value)) {
+      if (!isRecord3(value)) {
         throw new FeatureProtocolError("\u529F\u80FD\u6761\u76EE\u5FC5\u987B\u662F\u5BF9\u8C61");
       }
       rejectUnknown(value, [
@@ -2235,7 +2607,7 @@ var require_feature = __commonJS({
       return input;
     }
     function parseFeatureUpdateInput(value) {
-      if (!isRecord2(value)) {
+      if (!isRecord3(value)) {
         throw new FeatureProtocolError("\u66F4\u65B0\u8BF7\u6C42\u5FC5\u987B\u662F\u5BF9\u8C61");
       }
       if (Object.keys(value).length === 0) {
@@ -2417,11 +2789,11 @@ var require_a2a = __commonJS({
         }
       };
     }
-    function isRecord2(value) {
+    function isRecord3(value) {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     }
     function assertRecord(value, what) {
-      if (!isRecord2(value))
+      if (!isRecord3(value))
         throw new A2aProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(value, allowed, what) {
@@ -2830,11 +3202,11 @@ var require_acp = __commonJS({
       }
     };
     exports2.AcpProtocolError = AcpProtocolError;
-    function isRecord2(value) {
+    function isRecord3(value) {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     }
     function assertRecord(value, what) {
-      if (!isRecord2(value))
+      if (!isRecord3(value))
         throw new AcpProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(value, allowed, what) {
@@ -3228,11 +3600,11 @@ var require_task_client = __commonJS({
       }
     };
     exports2.TaskClientProtocolError = TaskClientProtocolError;
-    function isRecord2(value) {
+    function isRecord3(value) {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     }
     function assertRecord(value, what) {
-      if (!isRecord2(value))
+      if (!isRecord3(value))
         throw new TaskClientProtocolError(`${what} \u5FC5\u987B\u662F\u5BF9\u8C61`);
     }
     function assertKeys(value, allowed, what) {
@@ -3414,8 +3786,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parseReleaseDeltaManifest = exports2.parseReleaseFileEntry = exports2.canonicalReleaseManifestJson = exports2.isSafeReleaseFilePath = exports2.ReleaseArtifactErrorCode = exports2.CONTROL_PROTOCOL_VERSION = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = void 0;
+    exports2.isSafeReleaseFilePath = exports2.ReleaseArtifactErrorCode = exports2.CONTROL_PROTOCOL_VERSION = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseTailnetStatus = exports2.parseTailnetSnapshot = exports2.parseTailnetSecretResponse = exports2.parseTailnetSecretRequest = exports2.parseTailnetKeyInput = exports2.parseTailnetKeyInfo = exports2.parseTailnetJobResult = exports2.parseTailnetJobPayload = exports2.parseTailnetCapability = exports2.isTailnetErrorCode = exports2.assertTailnetSecretUsable = exports2.TAILNET_PROTOCOL_VERSION = exports2.TAILNET_ERROR_CODES = exports2.TAILNET_CAPABILITY = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parseReleaseDeltaManifest = exports2.parseReleaseFileEntry = exports2.canonicalReleaseManifestJson = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -3479,6 +3851,49 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "parseGitSshTargetInput", { enumerable: true, get: function() {
       return git_ssh_js_1.parseGitSshTargetInput;
+    } });
+    var tailnet_js_1 = require_tailnet();
+    Object.defineProperty(exports2, "TAILNET_CAPABILITY", { enumerable: true, get: function() {
+      return tailnet_js_1.TAILNET_CAPABILITY;
+    } });
+    Object.defineProperty(exports2, "TAILNET_ERROR_CODES", { enumerable: true, get: function() {
+      return tailnet_js_1.TAILNET_ERROR_CODES;
+    } });
+    Object.defineProperty(exports2, "TAILNET_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return tailnet_js_1.TAILNET_PROTOCOL_VERSION;
+    } });
+    Object.defineProperty(exports2, "assertTailnetSecretUsable", { enumerable: true, get: function() {
+      return tailnet_js_1.assertTailnetSecretUsable;
+    } });
+    Object.defineProperty(exports2, "isTailnetErrorCode", { enumerable: true, get: function() {
+      return tailnet_js_1.isTailnetErrorCode;
+    } });
+    Object.defineProperty(exports2, "parseTailnetCapability", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetCapability;
+    } });
+    Object.defineProperty(exports2, "parseTailnetJobPayload", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetJobPayload;
+    } });
+    Object.defineProperty(exports2, "parseTailnetJobResult", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetJobResult;
+    } });
+    Object.defineProperty(exports2, "parseTailnetKeyInfo", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetKeyInfo;
+    } });
+    Object.defineProperty(exports2, "parseTailnetKeyInput", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetKeyInput;
+    } });
+    Object.defineProperty(exports2, "parseTailnetSecretRequest", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetSecretRequest;
+    } });
+    Object.defineProperty(exports2, "parseTailnetSecretResponse", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetSecretResponse;
+    } });
+    Object.defineProperty(exports2, "parseTailnetSnapshot", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetSnapshot;
+    } });
+    Object.defineProperty(exports2, "parseTailnetStatus", { enumerable: true, get: function() {
+      return tailnet_js_1.parseTailnetStatus;
     } });
     __exportStar(require_terminal(), exports2);
     var job_log_js_1 = require_job_log();
@@ -3586,7 +4001,10 @@ var require_dist = __commonJS({
       GIT_SSH_ACK: "git-ssh:ack",
       TASK_COMMAND: "task:command",
       TASK_COMMAND_RESULT: "task:command-result",
-      TASK_EVENT: "task:event"
+      TASK_EVENT: "task:event",
+      /** Server ⇄ Client：Tailnet 凭据短时交付（ADR-0062），正文仅目标 socket 接收 */
+      TAILNET_SECRET_REQUEST: "tailnet:secret-request",
+      TAILNET_SECRET_RESPONSE: "tailnet:secret-response"
     };
     var JobType;
     (function(JobType2) {
@@ -3605,6 +4023,7 @@ var require_dist = __commonJS({
       JobType2["FRP_LIST"] = "frp.list";
       JobType2["FRP_RECONCILE"] = "frp.reconcile";
       JobType2["FILE_ROOTS"] = "file.roots";
+      JobType2["TAILNET_MANAGE"] = "tailnet.manage";
     })(JobType || (exports2.JobType = JobType = {}));
     var JobStatus2;
     (function(JobStatus3) {
@@ -4283,6 +4702,80 @@ function createTasksApi(client, nextId = randomUUID) {
   };
 }
 
+// ../sdk/dist/tailnet.js
+var import_shared2 = __toESM(require_dist(), 1);
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+function requireCount(value, field) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Tailnet \u5206\u9875\u54CD\u5E94\u5B57\u6BB5 ${field} \u4E0D\u5408\u6CD5`);
+  }
+  return value;
+}
+function parseKeysPage(raw) {
+  if (!isRecord(raw) || !Array.isArray(raw.data)) {
+    throw new Error("Tailnet \u5206\u9875\u54CD\u5E94\u4E0D\u5408\u6CD5");
+  }
+  return {
+    data: raw.data.map((item) => (0, import_shared2.parseTailnetKeyInfo)(item)),
+    total: requireCount(raw.total, "total"),
+    page: requireCount(raw.page, "page"),
+    pageSize: requireCount(raw.pageSize, "pageSize"),
+    totalPages: requireCount(raw.totalPages, "totalPages")
+  };
+}
+function createTailnetApi(client) {
+  return {
+    /** 导入一枚凭据并保存密文；返回不含正文的投影。 */
+    importKey: async (input, signal) => {
+      const parsed = (0, import_shared2.parseTailnetKeyInput)(input);
+      return (0, import_shared2.parseTailnetKeyInfo)(await client.request("POST", "/api/tailnet/keys", {
+        name: parsed.name,
+        authKey: parsed.authKey,
+        declaredReuse: parsed.declaredReuse,
+        declaredExpiresAt: parsed.declaredExpiresAt
+      }, signal));
+    },
+    /** 分页列出凭据投影，顺序为最近导入优先。 */
+    listKeys: async (options = {}, signal) => {
+      const params = new URLSearchParams();
+      if (options.page !== void 0)
+        params.set("page", String(options.page));
+      if (options.pageSize !== void 0)
+        params.set("pageSize", String(options.pageSize));
+      const qs = params.toString();
+      return parseKeysPage(await client.request("GET", `/api/tailnet/keys${qs ? `?${qs}` : ""}`, void 0, signal));
+    },
+    /** 删除本地密文记录；reserved 中的凭据由 Server 拒绝。 */
+    deleteKey: async (id, signal) => {
+      const raw = await client.request("DELETE", `/api/tailnet/keys/${encodeURIComponent(id)}`, void 0, signal);
+      if (!isRecord(raw) || raw.deleted !== true) {
+        throw new Error("Tailnet \u5220\u9664\u54CD\u5E94\u4E0D\u5408\u6CD5");
+      }
+      return { deleted: true };
+    },
+    /** 机器 Tailnet 观测与能力状态；离线机器返回历史快照。 */
+    status: async (clientId, signal) => (0, import_shared2.parseTailnetStatus)(await client.request("GET", `/api/tailnet/clients/${encodeURIComponent(clientId)}`, void 0, signal)),
+    /** 发起管理 Job；正文由 SDK 显式构造，绝不透传调用方多余字段。 */
+    manage: async (clientId, payload, signal) => {
+      let body;
+      if (payload.action === "inspect") {
+        body = { action: "inspect" };
+      } else if (payload.action === "ensure") {
+        body = {
+          action: "ensure",
+          credentialId: payload.credentialId,
+          installIfMissing: payload.installIfMissing
+        };
+      } else {
+        throw new Error("Tailnet \u4EFB\u52A1 action \u4E0D\u5408\u6CD5");
+      }
+      return client.request("POST", `/api/tailnet/clients/${encodeURIComponent(clientId)}/jobs`, body, signal);
+    }
+  };
+}
+
 // ../sdk/dist/terminal.js
 function createTerminalsApi(client) {
   const base = (clientId) => `/api/clients/${encodeURIComponent(clientId)}/terminals`;
@@ -4373,6 +4866,8 @@ var VcpDeckClient = class {
   tasks;
   /** Agent placement 只读投影。 */
   agents;
+  /** Tailnet 凭据与机器管理（ADR-0062）。 */
+  tailnet;
   /** Remote Dev Session（ADR-0058）。 */
   health = {
     get: (signal) => this.request("GET", "/api/health", void 0, signal)
@@ -4397,6 +4892,7 @@ var VcpDeckClient = class {
     this.terminals = createTerminalsApi(this);
     this.tasks = createTasksApi(this);
     this.agents = createAgentsApi(this);
+    this.tailnet = createTailnetApi(this);
   }
   /** 发起 JSON REST 请求并归一化失败响应。 */
   async request(method, path2, body, signal) {
@@ -4433,7 +4929,7 @@ var VcpDeckClient = class {
     const text = await response.text();
     const parsed = text ? parseJson(text) : void 0;
     if (!response.ok) {
-      const details = isRecord(parsed) ? parsed : void 0;
+      const details = isRecord2(parsed) ? parsed : void 0;
       const code = typeof details?.code === "string" ? details.code : void 0;
       const message = typeof details?.message === "string" ? details.message : response.statusText || `HTTP ${response.status}`;
       throw new VcpDeckApiError(message, response.status, code, parsed);
@@ -4448,7 +4944,7 @@ function parseJson(text) {
     return void 0;
   }
 }
-function isRecord(value) {
+function isRecord2(value) {
   return typeof value === "object" && value !== null;
 }
 

@@ -255,15 +255,29 @@ var require_update = __commonJS({
   "../shared/dist/update.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.ReleaseRetryErrorCode = exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = void 0;
+    exports2.ReleaseRetryErrorCode = exports2.ReleaseUploadErrorCode = exports2.ReleaseClientState = exports2.ReleaseStatus = exports2.ReleaseArtifactErrorCode = exports2.CONTROL_PROTOCOL_VERSION = void 0;
     exports2.parseReleaseUploadCreateInput = parseReleaseUploadCreateInput;
     exports2.parseReleaseUploadPartRefresh = parseReleaseUploadPartRefresh;
     exports2.parseReleaseUploadComplete = parseReleaseUploadComplete;
+    exports2.isSafeReleaseFilePath = isSafeReleaseFilePath;
+    exports2.canonicalReleaseManifestJson = canonicalReleaseManifestJson;
+    exports2.parseReleaseFileEntry = parseReleaseFileEntry;
+    exports2.parseReleaseDeltaManifest = parseReleaseDeltaManifest;
     exports2.isReleaseArchiveAvailable = isReleaseArchiveAvailable;
     exports2.hasAllReleaseArchives = hasAllReleaseArchives;
     exports2.isCatchUpTarget = isCatchUpTarget;
     exports2.selectLatestCatchUpTarget = selectLatestCatchUpTarget3;
     exports2.platformFromOs = platformFromOs;
+    exports2.CONTROL_PROTOCOL_VERSION = 2;
+    exports2.ReleaseArtifactErrorCode = {
+      LAUNCHER_UPGRADE_REQUIRED: "LAUNCHER_UPGRADE_REQUIRED",
+      MANIFEST_SIGNATURE_INVALID: "MANIFEST_SIGNATURE_INVALID",
+      MANIFEST_PATH_UNSAFE: "MANIFEST_PATH_UNSAFE",
+      FILE_HASH_MISMATCH: "FILE_HASH_MISMATCH",
+      DELTA_BASELINE_UNAVAILABLE: "DELTA_BASELINE_UNAVAILABLE",
+      ASSEMBLE_FAILED: "ASSEMBLE_FAILED",
+      RELEASE_ARTIFACTS_INCOMPLETE: "RELEASE_ARTIFACTS_INCOMPLETE"
+    };
     var ReleaseStatus2;
     (function(ReleaseStatus3) {
       ReleaseStatus3["UPLOADED"] = "uploaded";
@@ -293,8 +307,21 @@ var require_update = __commonJS({
       RETRY_NOT_ALLOWED: "RELEASE_RETRY_NOT_ALLOWED"
     };
     function parseReleaseUploadCreateInput(value2) {
-      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["version", "platform", "sha256", "size"])) {
-        throw new Error("body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B version/platform/sha256/size");
+      const shapeError = "body \u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B version/platform/sha256/size\uFF08\u53EF\u9644 artifactKind/fromVersion/expectedFromVersions\uFF09";
+      const requiredKeys = [
+        "version",
+        "platform",
+        "sha256",
+        "size"
+      ];
+      const allowedKeys = [
+        ...requiredKeys,
+        "artifactKind",
+        "fromVersion",
+        "expectedFromVersions"
+      ];
+      if (!isRecord3(value2) || Object.keys(value2).some((key) => !allowedKeys.includes(key)) || requiredKeys.some((key) => !Object.keys(value2).includes(key))) {
+        throw new Error(shapeError);
       }
       if (typeof value2.version !== "string" || !/^\d+\.\d+\.\d+$/.test(value2.version)) {
         throw new Error("version \u683C\u5F0F\u5E94\u4E3A x.y.z");
@@ -308,12 +335,34 @@ var require_update = __commonJS({
       if (typeof value2.size !== "number" || !Number.isSafeInteger(value2.size) || value2.size < 1 || value2.size > 2147483647) {
         throw new Error("size \u5E94\u4E3A 1\u20132147483647 \u7684\u6574\u6570");
       }
-      return {
+      const result = {
         version: value2.version,
         platform: value2.platform,
         sha256: value2.sha256,
         size: value2.size
       };
+      if (value2.artifactKind !== void 0) {
+        const kind = value2.artifactKind;
+        if (typeof kind !== "string" || kind !== "full" && kind !== "delta") {
+          throw new Error("artifactKind \u5E94\u4E3A full \u6216 delta");
+        }
+        result.artifactKind = kind;
+      }
+      if (value2.fromVersion !== void 0) {
+        const fromVersion = value2.fromVersion;
+        if (typeof fromVersion !== "string" || fromVersion !== "" && !/^\d+\.\d+\.\d+$/.test(fromVersion)) {
+          throw new Error("fromVersion \u5E94\u4E3A\u7A7A\u4E32\u6216 x.y.z \u683C\u5F0F");
+        }
+        result.fromVersion = fromVersion;
+      }
+      if (value2.expectedFromVersions !== void 0) {
+        const list = value2.expectedFromVersions;
+        if (!Array.isArray(list) || list.length > 3 || list.some((item) => typeof item !== "string" || !/^\d+\.\d+\.\d+$/.test(item)) || new Set(list).size !== list.length) {
+          throw new Error("expectedFromVersions \u5E94\u4E3A\u81F3\u591A 3 \u4E2A\u4E0D\u91CD\u590D\u7684 x.y.z \u7248\u672C");
+        }
+        result.expectedFromVersions = list;
+      }
+      return result;
     }
     function parseReleaseUploadPartRefresh(value2) {
       if (!isRecord3(value2) || !hasOnlyKeys(value2, ["partNumbers"]) || !Array.isArray(value2.partNumbers)) {
@@ -338,12 +387,107 @@ var require_update = __commonJS({
       const actual = Object.keys(value2);
       return actual.length === keys.length && actual.every((key) => keys.includes(key));
     }
+    var RELEASE_MANIFEST_KEY_ORDER = [
+      "version",
+      "protocolVersion",
+      "kind",
+      "fromVersion",
+      "files",
+      "nodeVersion",
+      "launcherMinVersion",
+      "launcher",
+      "sha256",
+      "artifacts"
+    ];
+    function isSafeReleaseFilePath(path) {
+      if (typeof path !== "string" || path.length === 0)
+        return false;
+      if (path.includes("\0") || path.includes("\\"))
+        return false;
+      if (path.startsWith("/") || /^[A-Za-z]:/.test(path))
+        return false;
+      return path.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
+    }
+    function canonicalReleaseManifestJson(manifest) {
+      const ordered = {};
+      for (const key of RELEASE_MANIFEST_KEY_ORDER) {
+        if (Object.prototype.hasOwnProperty.call(manifest, key)) {
+          ordered[key] = manifest[key];
+        }
+      }
+      return JSON.stringify(ordered);
+    }
+    function parseReleaseFileEntry(value2) {
+      if (!isRecord3(value2) || !hasOnlyKeys(value2, ["path", "sha256", "size", "mode"])) {
+        throw new Error("\u6587\u4EF6\u6761\u76EE\u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B path/sha256/size/mode");
+      }
+      if (typeof value2.path !== "string" || !isSafeReleaseFilePath(value2.path)) {
+        throw new Error("path \u5E94\u4E3A\u76F8\u5BF9 apps/<version>/ \u7684\u5B89\u5168 POSIX \u8DEF\u5F84");
+      }
+      if (typeof value2.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value2.sha256)) {
+        throw new Error("sha256 \u5E94\u4E3A 64 \u4F4D\u5C0F\u5199\u5341\u516D\u8FDB\u5236");
+      }
+      if (typeof value2.size !== "number" || !Number.isSafeInteger(value2.size) || value2.size < 0) {
+        throw new Error("size \u5E94\u4E3A\u975E\u8D1F\u5B89\u5168\u6574\u6570");
+      }
+      if (typeof value2.mode !== "number" || !Number.isInteger(value2.mode) || value2.mode < 0 || value2.mode > 4095) {
+        throw new Error("mode \u5E94\u4E3A\u5408\u6CD5 POSIX \u6743\u9650\u4F4D");
+      }
+      return {
+        path: value2.path,
+        sha256: value2.sha256,
+        size: value2.size,
+        mode: value2.mode
+      };
+    }
+    function parseReleaseDeltaManifest(value2) {
+      if (!isRecord3(value2) || !hasOnlyKeys(value2, [
+        "version",
+        "protocolVersion",
+        "kind",
+        "fromVersion",
+        "files"
+      ])) {
+        throw new Error("delta \u6E05\u5355\u5FC5\u987B\u4E14\u53EA\u80FD\u5305\u542B version/protocolVersion/kind/fromVersion/files");
+      }
+      if (typeof value2.version !== "string" || !/^\d+\.\d+\.\d+$/.test(value2.version)) {
+        throw new Error("version \u683C\u5F0F\u5E94\u4E3A x.y.z");
+      }
+      if (value2.protocolVersion !== exports2.CONTROL_PROTOCOL_VERSION) {
+        throw new Error("protocolVersion \u5E94\u4E3A 2");
+      }
+      if (value2.kind !== "delta") {
+        throw new Error("kind \u5E94\u4E3A delta");
+      }
+      if (typeof value2.fromVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(value2.fromVersion)) {
+        throw new Error("fromVersion \u683C\u5F0F\u5E94\u4E3A x.y.z");
+      }
+      if (!Array.isArray(value2.files)) {
+        throw new Error("files \u5E94\u4E3A\u6570\u7EC4");
+      }
+      return {
+        version: value2.version,
+        protocolVersion: exports2.CONTROL_PROTOCOL_VERSION,
+        kind: "delta",
+        fromVersion: value2.fromVersion,
+        files: value2.files.map(parseReleaseFileEntry)
+      };
+    }
     function isReleaseArchiveAvailable(archive) {
       return Boolean(archive && (archive.availability === void 0 || archive.availability === "available"));
     }
     function hasAllReleaseArchives(release) {
       const archives = release.archives ?? {};
-      return isReleaseArchiveAvailable(archives["win-x64"]) && isReleaseArchiveAvailable(archives["linux-x64"]);
+      const platforms = ["win-x64", "linux-x64"];
+      return platforms.every((platform) => {
+        const archive = archives[platform];
+        if (!isReleaseArchiveAvailable(archive))
+          return false;
+        const deltas = archive.deltas ?? [];
+        const present = new Set(deltas.map((delta) => delta.fromVersion));
+        const expected = archive.expectedFromVersions ?? [];
+        return expected.every((fromVersion) => present.has(fromVersion));
+      });
     }
     function isCatchUpTarget(release) {
       if (release.status !== ReleaseStatus2.UPDATING_CLIENTS && release.status !== ReleaseStatus2.DONE) {
@@ -3650,8 +3794,8 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.JobStatus = exports2.JobType = exports2.Events = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseTailnetStatus = exports2.parseTailnetSnapshot = exports2.parseTailnetSecretResponse = exports2.parseTailnetSecretRequest = exports2.parseTailnetKeyInput = exports2.parseTailnetKeyInfo = exports2.parseTailnetJobResult = exports2.parseTailnetJobPayload = exports2.parseTailnetCapability = exports2.isTailnetErrorCode = exports2.assertTailnetSecretUsable = exports2.TAILNET_PROTOCOL_VERSION = exports2.TAILNET_ERROR_CODES = exports2.TAILNET_CAPABILITY = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = void 0;
+    exports2.isSafeReleaseFilePath = exports2.ReleaseArtifactErrorCode = exports2.CONTROL_PROTOCOL_VERSION = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseTailnetStatus = exports2.parseTailnetSnapshot = exports2.parseTailnetSecretResponse = exports2.parseTailnetSecretRequest = exports2.parseTailnetKeyInput = exports2.parseTailnetKeyInfo = exports2.parseTailnetJobResult = exports2.parseTailnetJobPayload = exports2.parseTailnetCapability = exports2.isTailnetErrorCode = exports2.assertTailnetSecretUsable = exports2.TAILNET_PROTOCOL_VERSION = exports2.TAILNET_ERROR_CODES = exports2.TAILNET_CAPABILITY = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parseReleaseDeltaManifest = exports2.parseReleaseFileEntry = exports2.canonicalReleaseManifestJson = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
@@ -3803,6 +3947,24 @@ var require_dist = __commonJS({
     } });
     Object.defineProperty(exports2, "isReleaseArchiveAvailable", { enumerable: true, get: function() {
       return update_js_1.isReleaseArchiveAvailable;
+    } });
+    Object.defineProperty(exports2, "CONTROL_PROTOCOL_VERSION", { enumerable: true, get: function() {
+      return update_js_1.CONTROL_PROTOCOL_VERSION;
+    } });
+    Object.defineProperty(exports2, "ReleaseArtifactErrorCode", { enumerable: true, get: function() {
+      return update_js_1.ReleaseArtifactErrorCode;
+    } });
+    Object.defineProperty(exports2, "isSafeReleaseFilePath", { enumerable: true, get: function() {
+      return update_js_1.isSafeReleaseFilePath;
+    } });
+    Object.defineProperty(exports2, "canonicalReleaseManifestJson", { enumerable: true, get: function() {
+      return update_js_1.canonicalReleaseManifestJson;
+    } });
+    Object.defineProperty(exports2, "parseReleaseFileEntry", { enumerable: true, get: function() {
+      return update_js_1.parseReleaseFileEntry;
+    } });
+    Object.defineProperty(exports2, "parseReleaseDeltaManifest", { enumerable: true, get: function() {
+      return update_js_1.parseReleaseDeltaManifest;
     } });
     exports2.Events = {
       REGISTER: "register",
@@ -17080,7 +17242,7 @@ init_authenticated_client();
 init_client_resolver();
 init_arguments();
 init_environment();
-var VERSION_RE = /^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)\.zip$/;
+var VERSION_RE = /^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)(?:-delta-(\d+\.\d+\.\d+))?\.zip$/;
 var VERSION_INPUT_RE = /^\d+\.\d+\.\d+$/;
 var DEFAULT_WAIT_TIMEOUT_SECONDS3 = 1800;
 var DEFAULT_POLL_INTERVAL_MS = 5e3;
@@ -17159,7 +17321,7 @@ async function runUploadCommand(argv, context) {
     value: ["env", "environment", "server", "username", "password", "timeout"],
     boolean: ["wait"]
   });
-  if (positionals.length !== 2)
+  if (positionals.length < 2)
     throw new Error(releaseUsage());
   validateArchives(positionals);
   if (!options.wait && options.timeout !== void 0) {
@@ -17221,8 +17383,20 @@ async function resolveCommandEnvironment(options, context) {
 async function uploadRelease(zipPaths, environment, log, context) {
   log(formatEnvironmentSummary(environment));
   const client = await createAuthenticatedClient(environment);
-  for (const zipPath of zipPaths) {
-    await uploadOne(client, zipPath, log, context);
+  const archives = zipPaths.map(platformOfFile);
+  const expectedFromVersions = [
+    ...new Set(archives.filter((archive) => archive.artifactKind === "delta").map((archive) => archive.fromVersion))
+  ].sort();
+  let firstFullPending = true;
+  for (const [index, zipPath] of zipPaths.entries()) {
+    const archive = archives[index];
+    const isFirstFull = archive.artifactKind === "full" && firstFullPending;
+    if (isFirstFull)
+      firstFullPending = false;
+    await uploadOne(client, zipPath, log, context, {
+      ...archive,
+      expectedFromVersions: isFirstFull ? expectedFromVersions : void 0
+    });
   }
   log("[vcpdeck] \u4E0A\u4F20\u5B8C\u6210\uFF08\u4E24\u4E2A\u5E73\u53F0\u6784\u4EF6\u9F50\u5907\u540E\u670D\u52A1\u7AEF\u81EA\u52A8\u5F00\u59CB\u66F4\u65B0\uFF09");
   return client;
@@ -17382,14 +17556,40 @@ function validateArchives(zipPaths) {
   if (new Set(archives.map((archive) => archive.platform)).size !== 2) {
     throw new Error("\u5FC5\u987B\u5404\u63D0\u4F9B\u4E00\u4E2A win-x64 \u4E0E linux-x64 \u6784\u4EF6");
   }
+  const identities = archives.map((archive) => `${archive.version}|${archive.platform}|${archive.artifactKind}|${archive.fromVersion}`);
+  if (new Set(identities).size !== identities.length) {
+    throw new Error("\u6784\u4EF6\u6587\u4EF6\u540D\u4E0D\u5F97\u91CD\u590D");
+  }
+  const deltaSets = [];
+  for (const platform of ["win-x64", "linux-x64"]) {
+    const group = archives.filter((archive) => archive.platform === platform);
+    if (group.filter((archive) => archive.artifactKind === "full").length !== 1) {
+      throw new Error("\u6BCF\u4E2A\u5E73\u53F0\u5FC5\u987B\u4E14\u53EA\u80FD\u6709\u4E00\u4E2A full \u6784\u4EF6");
+    }
+    const deltas = group.filter((archive) => archive.artifactKind === "delta");
+    if (deltas.length > 3) {
+      throw new Error("\u6BCF\u4E2A\u5E73\u53F0\u7684 delta \u6784\u4EF6\u4E0D\u5F97\u8D85\u8FC7 3 \u4E2A");
+    }
+    deltaSets.push([...new Set(deltas.map((archive) => archive.fromVersion))].sort());
+  }
+  const [winDeltas, linuxDeltas] = deltaSets;
+  if (winDeltas.length !== linuxDeltas.length || winDeltas.some((version, index) => version !== linuxDeltas[index])) {
+    throw new Error("\u4E24\u4E2A\u5E73\u53F0\u7684 delta \u57FA\u7EBF\u7248\u672C\u96C6\u5408\u5FC5\u987B\u4E00\u81F4");
+  }
 }
 function platformOfFile(path) {
   const name = path.split(/[\\/]/).pop() ?? "";
   const match = VERSION_RE.exec(name);
   if (!match) {
-    throw new Error(`\u6587\u4EF6\u540D\u5E94\u5F62\u5982 vcpdeck-<x.y.z>-win-x64.zip / vcpdeck-<x.y.z>-linux-x64.zip: ${name}`);
+    throw new Error(`\u6587\u4EF6\u540D\u5E94\u5F62\u5982 vcpdeck-<x.y.z>-win-x64.zip / vcpdeck-<x.y.z>-linux-x64.zip\uFF08\u53EF\u9644 -delta-<fromVersion>\uFF09: ${name}`);
   }
-  return { version: match[1], platform: match[2] };
+  const artifactKind = match[3] ? "delta" : "full";
+  return {
+    version: match[1],
+    platform: match[2],
+    artifactKind,
+    fromVersion: match[3] ?? ""
+  };
 }
 function sha256File(path) {
   return new Promise((resolve2, reject) => {
@@ -17397,8 +17597,8 @@ function sha256File(path) {
     (0, import_node_fs3.createReadStream)(path).on("error", reject).on("data", (chunk) => hash.update(chunk)).on("end", () => resolve2(hash.digest("hex")));
   });
 }
-async function uploadOne(client, zipPath, log, context) {
-  const { version, platform } = platformOfFile(zipPath);
+async function uploadOne(client, zipPath, log, context, archive) {
+  const { version, platform, artifactKind, fromVersion, expectedFromVersions } = archive;
   const sha256 = await sha256File(zipPath);
   const { size } = await (0, import_promises4.stat)(zipPath);
   log(`[vcpdeck] \u4E0A\u4F20 ${zipPath} (${(size / 1024 / 1024).toFixed(1)} MB, ${platform}, sha256=${sha256.slice(0, 12)}\u2026)`);
@@ -17408,7 +17608,10 @@ async function uploadOne(client, zipPath, log, context) {
       version,
       platform,
       sha256,
-      size
+      size,
+      artifactKind,
+      fromVersion,
+      expectedFromVersions
     });
   } catch (error) {
     if (!(error instanceof VcpDeckApiError) || error.status !== 404)
