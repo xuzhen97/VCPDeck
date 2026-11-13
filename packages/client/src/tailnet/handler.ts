@@ -15,6 +15,7 @@ import {
 	type TailnetSnapshot,
 } from "@vcpdeck/shared";
 import { Events } from "@vcpdeck/shared";
+import { privileged } from "../privileged-command.js";
 import { installTailnet } from "./installer.js";
 import { probeTailnet } from "./probe.js";
 import { withTailnetSecretFile } from "./secret-file.js";
@@ -133,21 +134,25 @@ function runCommand(
 }
 
 async function startTailnetService(signal: AbortSignal): Promise<void> {
-	if (process.platform === "win32") {
-		await runCommand("sc.exe", ["start", "Tailscale"], signal);
-		return;
-	}
-	await runCommand("systemctl", ["start", "tailscaled"], signal);
+	const start =
+		process.platform === "win32"
+			? privileged("sc.exe", ["start", "Tailscale"])
+			: privileged("systemctl", ["start", "tailscaled"]);
+	await runCommand(start.command, start.args, signal);
 }
 
 function runTailscaleUp(
 	secretPath: string,
 	signal: AbortSignal,
 ): Promise<TailnetJoinResult> {
+	const join = privileged(
+		"tailscale",
+		buildTailnetJoinArgs(secretPath, process.platform === "win32"),
+	);
 	return new Promise<TailnetJoinResult>((resolve, reject) => {
 		execFile(
-			"tailscale",
-			buildTailnetJoinArgs(secretPath, process.platform === "win32"),
+			join.command,
+			join.args,
 			{
 				timeout: 90_000,
 				signal,
@@ -336,12 +341,9 @@ export async function handleTailnetJob(
 			emitResult(socket, job, { stage: "awaiting-approval", snapshot });
 			return;
 		}
-		// 除 needs-login 外的状态（stopped/unknown）无法证明无既有身份，拒绝覆盖。
-		if (snapshot.backend !== "needs-login" || hasExistingIdentity(snapshot)) {
-			emitError(socket, job, "TAILNET_EXISTING_CONFIG");
-			return;
-		}
 
+		// 服务没起来时探测只能给出 stopped/unknown，既看不出登录态也证明不了
+		// 未登录。先按需启动服务并重新观测，再决定是否可以安全入网。
 		if (snapshot.service !== "running") {
 			await deps.startService(signal);
 			snapshot = await deps.probe();
@@ -353,13 +355,16 @@ export async function handleTailnetJob(
 				emitResult(socket, job, { stage: "awaiting-approval", snapshot });
 				return;
 			}
-			if (
-				snapshot.backend !== "needs-login" ||
-				hasExistingIdentity(snapshot)
-			) {
-				emitError(socket, job, "TAILNET_EXISTING_CONFIG");
+			if (snapshot.service !== "running") {
+				emitError(socket, job, "TAILNET_CLI_FAILED");
 				return;
 			}
+		}
+
+		// 除 needs-login 外的状态（stopped/unknown）无法证明无既有身份，拒绝覆盖。
+		if (snapshot.backend !== "needs-login" || hasExistingIdentity(snapshot)) {
+			emitError(socket, job, "TAILNET_EXISTING_CONFIG");
+			return;
 		}
 
 		deps.allowSecret(job.jobId);

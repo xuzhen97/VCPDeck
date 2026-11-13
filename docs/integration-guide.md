@@ -1482,7 +1482,7 @@ Token 在 Frontend `/settings/tokens` 创建并与 Identity 关联；CLI 与 SDK
 | 预签名 URL 403 | 重新申请 URL，不复用过期签名 |
 | `TAILNET_KEY_UNAVAILABLE` | 提示运维恢复配对根密钥（缺省 `data/tailnet/root.key`，或显式 `VCPDECK_TAILNET_KEY_FILE`），不重试导入 |
 | `TAILNET_OPERATION_BUSY` / `TAILNET_KEY_BUSY` | 等待同机管理 Job 或该凭据的现有 Job 结束，不手工清预留 |
-| `TAILNET_EXISTING_CONFIG` | 停止自动流程，人工核对既有安装/身份；不删 state 后重试 |
+| `TAILNET_EXISTING_CONFIG` | 停止自动流程，人工核对既有安装/身份；非 root 账户先确认免密 sudo，不删 state 后重试 |
 | `TAILNET_SECRET_TIMEOUT` / `DENIED` / `EXPIRED` / `MISMATCH` | 重新发起 Job；不把 key 改走明文参数或复用旧响应 |
 | Tailnet `interrupted` | 展示阶段并人工核对，不自动重试，不声称已回滚 |
 | 网络/5xx | 5 秒退避；超过调用端上限后返回 Job ID供后续查询 |

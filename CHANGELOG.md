@@ -6,7 +6,7 @@
 
 ### Added
 
-- **Tailnet 管理最小集成（[ADR-0062](docs/adr/0062-tailnet-job-network-under-existing-architecture.md)）**：新增凭据导入/分页列表/删除、机器专用 `TailnetStatus` 与 `tailnet.manage` Typed Job（`inspect`/`ensure`），不改变现有 Job、Files、Storage、Terminal、FRP 数据面。Auth key 以 AES-256-GCM 密文存库，正文仅在当前注册 socket 上经 30 秒 TTL、单次 `requestId` 单播交付；Client 写入受限临时文件并在各终止路径清理。提供 `/api/tailnet`、SDK `client.tailnet`、CLI `vcpdeck tailnet keys|status|inspect|ensure`、设置中的全局 `Tailnet 凭据` 页和机器工作区独立 `Tailnet` 标签页（凭据统一在设置页导入/删除，机器页只选择凭据并执行操作）；自动安装仅限 Windows x64 管理员与 Ubuntu 22.04/24.04、Debian 12/13 x64 root+systemd，使用固定 `1.104.5` 官方构件并校验 SHA-256（Windows 另验 Authenticode），已有安装/身份时安全失败。
+- **Tailnet 管理最小集成（[ADR-0062](docs/adr/0062-tailnet-job-network-under-existing-architecture.md)）**：新增凭据导入/分页列表/删除、机器专用 `TailnetStatus` 与 `tailnet.manage` Typed Job（`inspect`/`ensure`），不改变现有 Job、Files、Storage、Terminal、FRP 数据面。Auth key 以 AES-256-GCM 密文存库，正文仅在当前注册 socket 上经 30 秒 TTL、单次 `requestId` 单播交付；Client 写入受限临时文件并在各终止路径清理。提供 `/api/tailnet`、SDK `client.tailnet`、CLI `vcpdeck tailnet keys|status|inspect|ensure`、设置中的全局 `Tailnet 凭据` 页和机器工作区独立 `Tailnet` 标签页（凭据统一在设置页导入/删除，机器页只选择凭据并执行操作）；自动安装仅限 Windows x64 管理员与 Ubuntu 22.04/24.04、Debian 12/13 x64（root 或免密 sudo 账户）+systemd，使用固定 `1.104.5` 官方构件并校验 SHA-256（Windows 另验 Authenticode），已有安装/身份时安全失败。
 
 - **Release 增量包可下载**：`GET /api/releases/:version/file` 支持可选 `fromVersion=x.y.z`，Launcher 可按基线版本取对应增量包。Server 在 `Release.archives[platform].deltas[]` 中记录每个 delta 的外部存储对象 key，direct 后端据此换取直链、Local 后端直出 `vcpdeck-<version>-<platform>-delta-<fromVersion>.zip`；不带该参数时行为与之前完全一致。`providerKey` 与既有的 `archive.storage.key` 一样只留在 Server 内部，不进入任何 API 响应。
 
@@ -17,9 +17,11 @@
 ### Changed
 
 - **Tailnet 需要 Server 先行升级**：Client 新增 `tailnet.manage` capability、`capabilityDetails.tailnet` 与可选注册摘要；旧 Server 的严格 parser 会拒绝这些新字段，因此不得先部署新 Client。新 Server 兼容旧 Client 的缺省值（按“不支持 Tailnet”处理）。数据库新增 `TailnetCredential`、`TailnetClientOperation` 两表与 nullable `Client.tailnetSnapshot` 列，属纯增量；Tailnet 根密钥缺省由 Server 在首次导入时自动创建于版本目录外的数据根（显式 `VCPDECK_TAILNET_KEY_FILE` 仍优先且只读），必须与 SQLite 配对备份。
-- **Tailnet 自动安装/入网尚未完成真机验收**：当前只经过单元、注入式安装器、临时 SQLite 集成和前端组件验证；真机安装、服务启动、设备审批、取消清理与真实网络可达性仍需单独授权验收。
+- **Tailnet 自动安装仅限受支持平台**：自动安装仅限 Windows x64 管理员与 Ubuntu 22.04/24.04、Debian 12/13 x64（root 或免密 sudo 账户）+systemd，使用固定 `1.104.5` 官方构件并校验 SHA-256（Windows 另验 Authenticode），已有安装/身份时安全失败。真机入网已在 Linux 上验证，安装器仍只有单元与注入式验证。
 
 ### Fixed
+
+- **Tailnet 入网在 Linux 专用非 root 账户下不再必然失败**：Client 以 `vcpdeck` 账户运行时，`systemctl start tailscaled`、`tailscale up` 与安装期的 unit/二进制落盘都没有提权，`tailscale up` 被本地 API 以 `Access denied: checkprefs access denied` 拒绝，任务以 `TAILNET_JOIN_FAILED` 结束；已安装但服务停用的机器更早就会被 `TAILNET_EXISTING_CONFIG` 拒绝——服务停止时探测只能给出 `stopped`/`unknown`，原判定顺序让「先启动服务再重新观测」的分支实际不可达。现在这些需要 root 的命令统一经 `sudo -n` 执行（ADR-0023 的免密 sudo，无 sudo 时立即失败而非交互等密码），安装前置权限判定接受免密 sudo 账户，并把「按需启动服务 → 重新观测 → 再判定」移到拒绝之前：启动后观测到 `needs-login` 才请求密钥入网，启动失败或启动后仍观测不到运行态返回 `TAILNET_CLI_FAILED`，观测到 `stopped` 或已有节点名/IP 仍返回 `TAILNET_EXISTING_CONFIG`。
 
 - **Tailnet「加入」不再一律报 `TAILNET_KEY_UNAVAILABLE`**：`JobModule` 此前没有导入 `TailnetModule`，而 `JobService` 用 `@Optional() @Inject(TailnetKeyService)` 接收密钥服务，缺失依赖被 Nest 静默解析成 `undefined`，于是 `createTailnetJob` 在创建 Job 之前就抛 `TAILNET_KEY_UNAVAILABLE`（503，文案为「Tailnet 密钥服务不可用」）。表现为根密钥与凭据都正常、凭据仍显示「可用」，但机器页的 Tailnet 操作全部失败，库里也不会留下 Job 或 `TailnetClientOperation` 记录。现在 `JobModule` 导入 `TailnetModule`，并补模块装配回归测试锁住这条依赖。
 

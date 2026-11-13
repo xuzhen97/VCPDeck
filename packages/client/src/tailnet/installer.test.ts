@@ -5,6 +5,7 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { privileged } from "../privileged-command.js";
 import {
 	installTailnet,
 	TAILNET_ARTIFACT_SHA256,
@@ -46,6 +47,7 @@ function makeDeps(overrides: Partial<TailnetInstallDeps> = {}): {
 			return { code: 0, stdout: "" };
 		},
 		placeLinuxFiles: async () => undefined,
+		escalate: (command, args) => ({ command, args }),
 		...overrides,
 	};
 	return { deps, calls, downloads };
@@ -161,5 +163,16 @@ describe("Tailnet 安装器", () => {
 			["systemctl", "enable"],
 		]);
 		expect(calls[2]?.args).toEqual(["enable", "--now", "tailscaled"]);
+	});
+
+	it("非 root 账户启用服务时经 escalate 提权执行", async () => {
+		const { deps, calls } = makeDeps({
+			escalate: (command, args) => privileged(command, args, "linux", 999),
+		});
+		await installTailnet(SIGNAL, deps);
+		expect(calls[calls.length - 1]).toEqual({
+			command: "sudo",
+			args: ["-n", "systemctl", "enable", "--now", "tailscaled"],
+		});
 	});
 });

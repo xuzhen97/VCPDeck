@@ -12,6 +12,11 @@ import { get as httpsGet } from "node:https";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { TailnetErrorCode } from "@vcpdeck/shared";
+import {
+	hasNonInteractiveSudo,
+	type PrivilegedCommand,
+	privileged,
+} from "../privileged-command.js";
 import { TAILNET_ARTIFACTS, selectTailnetInstall } from "./platform.js";
 
 /** 官方材料的 SHA256（计划阶段核实，来自官方同源清单）。 */
@@ -44,6 +49,8 @@ export interface TailnetInstallDeps {
 		args: string[],
 		options: { signal: AbortSignal; timeoutMs: number },
 	) => Promise<TailnetInstallRunResult>;
+	/** 为需要 root 的命令补提权前缀；测试注入恒等实现。 */
+	escalate: (command: string, args: string[]) => PrivilegedCommand;
 	placeLinuxFiles: (extractDir: string) => Promise<void>;
 }
 
@@ -92,7 +99,11 @@ function isPrivileged(): boolean {
 			return false;
 		}
 	}
-	return typeof process.getuid === "function" && process.getuid() === 0;
+	if (typeof process.getuid === "function" && process.getuid() === 0) {
+		return true;
+	}
+	// ADR-0023：Linux Client 以专用非 root 账户运行，root 等价权限来自免密 sudo。
+	return hasNonInteractiveSudo();
 }
 
 function defaultRun(
@@ -244,22 +255,28 @@ function verifyWindowsSignature(path: string): Promise<boolean> {
 	});
 }
 
+/** 用 `install -D` 落盘单个文件；需要 root 时自动补 `sudo -n`。 */
+function installFileSync(source: string, target: string, mode: string): void {
+	const put = privileged("install", ["-D", "-m", mode, source, target]);
+	execFileSync(put.command, put.args, {
+		stdio: "ignore",
+		timeout: 60_000,
+	});
+}
+
 async function placeLinuxFiles(extractDir: string): Promise<void> {
 	const entries = await fs.readdir(extractDir, { withFileTypes: true });
 	const root = entries.find(
 		(entry) => entry.isDirectory() && entry.name.startsWith("tailscale_"),
 	);
 	const base = root ? join(extractDir, root.name) : extractDir;
-	await fs.mkdir("/usr/local/bin", { recursive: true });
 	for (const binary of ["tailscale", "tailscaled"]) {
-		const target = join("/usr/local/bin", binary);
-		await fs.copyFile(join(base, binary), target);
-		await fs.chmod(target, 0o755);
+		installFileSync(join(base, binary), join("/usr/local/bin", binary), "0755");
 	}
-	await fs.mkdir("/etc/systemd/system", { recursive: true });
-	await fs.copyFile(
+	installFileSync(
 		join(base, "systemd", "tailscaled.service"),
 		"/etc/systemd/system/tailscaled.service",
+		"0644",
 	);
 }
 
@@ -295,6 +312,7 @@ export function createDefaultTailnetInstallDeps(): TailnetInstallDeps {
 		sha256File,
 		verifyWindowsSignature,
 		run: defaultRun,
+		escalate: (command, args) => privileged(command, args),
 		placeLinuxFiles,
 	};
 }
@@ -443,11 +461,11 @@ export async function installTailnet(
 		await deps.placeLinuxFiles(extractDir);
 		throwIfAborted(signal);
 
-		const enabled = await deps.run(
-			"systemctl",
-			["enable", "--now", "tailscaled"],
-			{ signal, timeoutMs: 60_000 },
-		);
+		const enable = deps.escalate("systemctl", ["enable", "--now", "tailscaled"]);
+		const enabled = await deps.run(enable.command, enable.args, {
+			signal,
+			timeoutMs: 60_000,
+		});
 		if (enabled.code !== 0) {
 			throw installError("TAILNET_INSTALL_FAILED", "无法启用 tailscaled 服务");
 		}

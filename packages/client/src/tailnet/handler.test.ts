@@ -304,9 +304,19 @@ describe("handleTailnetJob ensure", () => {
 		expect(calls.request).toBe(0);
 	});
 
-	it("服务已停止且无法确认未登录时拒绝覆盖（EXISTING_CONFIG）", async () => {
+	it("服务已停止时先启动服务并重新观测，仍无法证明未登录则拒绝覆盖", async () => {
+		const snapshots = [
+			snapshot({ service: "stopped", backend: "unknown" }),
+			snapshot({ service: "running", backend: "stopped" }),
+		];
 		const { deps, calls } = baseDeps({
-			probe: async () => snapshot({ service: "stopped", backend: "stopped" }),
+			probe: async () => {
+				calls.probe += 1;
+				return (
+					snapshots.shift() ??
+					snapshot({ service: "running", backend: "unknown" })
+				);
+			},
 		});
 		configureTailnetJobDeps(deps);
 		const { socket, emits } = fakeSocket();
@@ -318,6 +328,89 @@ describe("handleTailnetJob ensure", () => {
 
 		const payload = donePayload(emits);
 		expect(payload.error.code).toBe("TAILNET_EXISTING_CONFIG");
+		expect(calls.start).toBe(1);
+		expect(calls.probe).toBe(2);
+		expect(calls.request).toBe(0);
+	});
+
+	it("服务未运行时先启动服务，观测到 needs-login 后照常入网", async () => {
+		const snapshots = [
+			snapshot({ service: "stopped", backend: "unknown" }),
+			snapshot({ service: "running", backend: "needs-login" }),
+			snapshot({
+				service: "running",
+				backend: "running",
+				nodeName: "node.example.ts.net",
+				ipv4: ["100.64.0.1"],
+			}),
+		];
+		const { deps, calls } = baseDeps({
+			probe: async () => {
+				calls.probe += 1;
+				return snapshots.shift() ?? snapshot({ backend: "running" });
+			},
+		});
+		configureTailnetJobDeps(deps);
+		const { socket, emits } = fakeSocket();
+
+		await handleTailnetJob(
+			tailnetJob({ action: "ensure", credentialId: "key-1", installIfMissing: false }),
+			socket,
+		);
+
+		const payload = donePayload(emits);
+		expect(payload.result.stage).toBe("joined");
+		expect(calls.start).toBe(1);
+		expect(calls.join).toBe(1);
+		expect(calls.request).toBe(1);
+	});
+
+	it("启动服务失败时回传 TAILNET_CLI_FAILED，不请求密钥", async () => {
+		const { deps, calls } = baseDeps({
+			probe: async () => {
+				calls.probe += 1;
+				return snapshot({ service: "stopped", backend: "unknown" });
+			},
+			startService: async () => {
+				calls.start += 1;
+				throw Object.assign(new Error("无法启动 tailscaled"), {
+					code: "TAILNET_CLI_FAILED",
+				});
+			},
+		});
+		configureTailnetJobDeps(deps);
+		const { socket, emits } = fakeSocket();
+
+		await handleTailnetJob(
+			tailnetJob({ action: "ensure", credentialId: "key-1", installIfMissing: false }),
+			socket,
+		);
+
+		const payload = donePayload(emits);
+		expect(payload.error.code).toBe("TAILNET_CLI_FAILED");
+		expect(calls.start).toBe(1);
+		expect(calls.request).toBe(0);
+	});
+
+	it("启动服务后仍观测不到运行态时回传 TAILNET_CLI_FAILED", async () => {
+		const { deps, calls } = baseDeps({
+			probe: async () => {
+				calls.probe += 1;
+				return snapshot({ service: "stopped", backend: "unknown" });
+			},
+		});
+		configureTailnetJobDeps(deps);
+		const { socket, emits } = fakeSocket();
+
+		await handleTailnetJob(
+			tailnetJob({ action: "ensure", credentialId: "key-1", installIfMissing: false }),
+			socket,
+		);
+
+		const payload = donePayload(emits);
+		expect(payload.error.code).toBe("TAILNET_CLI_FAILED");
+		expect(calls.start).toBe(1);
+		expect(calls.probe).toBe(2);
 		expect(calls.request).toBe(0);
 	});
 

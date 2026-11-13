@@ -151,7 +151,9 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 - **导入**：在「设置 → Tailnet 凭据」导入，或使用 `vcpdeck tailnet keys import --name <名称> --key-stdin` 从 stdin 读入，避免明文进入 argv/Shell 历史。机器详情中的 `Tailnet` 标签页只负责选择凭据并发起操作，不再提供导入与删除入口。导入时填写的 `single`/`reusable`/`unknown` 与过期时间只是**操作者声明**，Server 不会向 Tailscale 预验证有效性、次数或设备上限。
 - **使用与状态**：`available` 可被一个 Job 原子预留；`reserved` 期间删除返回 409；正文只向当前注册 socket 单次交付 30 秒有效。`single` 与 `unknown` 交付后不自动回到可用；`reusable` 也只有在任务完成（`done`）后才释放；密钥已交付后发生错误、取消或结果不明一律落 `uncertain`，需人工在 Tailscale 管理端核实后按需重新导入。
 - **删除**：`vcpdeck tailnet keys delete <id>` 或「设置 → Tailnet 凭据」中删除，只移除 VCPDeck 本地记录，**不会**在 Tailscale 撤销 key，也不证明设备已退网。真正的阻断必须在 Tailscale 管理端撤销 key/移除设备并复核 ACL。
-- **安装与入网**：面板上的安装/入网必须由操作者显式触发，刷新或打开页面不会安装。自动安装只对 Windows x64 管理员、Ubuntu 22.04/24.04 与 Debian 12/13 x64 root+systemd 声明支持；使用固定版本 `1.104.5` 的官方 HTTPS 构件并校验 SHA-256（Windows 另验 Authenticode）。已有 binary、unit 或 state 时返回 `TAILNET_EXISTING_CONFIG`，不覆盖、不升级、不卸载；取消、超时或安装后登录失败不会回滚已安装软件或已生效登录。Windows 安装返回 3010 时报告 `TAILNET_INSTALL_REBOOT_REQUIRED`，重启后再发起入网。
+- **安装与入网**：面板上的安装/入网必须由操作者显式触发，刷新或打开页面不会安装。自动安装只对 Windows x64 管理员、Ubuntu 22.04/24.04 与 Debian 12/13 x64（root 或具备免密 sudo 的专用账户）+systemd 声明支持；使用固定版本 `1.104.5` 的官方 HTTPS 构件并校验 SHA-256（Windows 另验 Authenticode）。已有 binary、unit 或 state 时返回 `TAILNET_EXISTING_CONFIG`，不覆盖、不升级、不卸载；取消、超时或安装后登录失败不会回滚已安装软件或已生效登录。Windows 安装返回 3010 时报告 `TAILNET_INSTALL_REBOOT_REQUIRED`，重启后再发起入网。
+- **Linux 提权**：Client 以专用非 root 账户运行时（ADR-0023），服务启动、unit 与二进制落盘、`tailscale up` 一律经 `sudo -n` 执行；没有免密 sudo 时该步直接失败（`TAILNET_CLI_FAILED` / `TAILNET_INSTALL_FAILED`），不会降级为无权限执行或交互等待密码。
+- **入网前置判定**：`tailscaled` 未运行时探测只能给出 `stopped`/`unknown`，因此流程会先按需启动服务并重新观测：观测到 `needs-login` 且无既有身份才请求密钥入网；启动后仍观测不到运行态返回 `TAILNET_CLI_FAILED`，观测到 `stopped` 或已有节点名/IP 返回 `TAILNET_EXISTING_CONFIG`。
 - **观测**：`backend=running` 只表示 Tailscale 自报运行，不证明业务服务可访问、ACL 已放行或链路为 direct。离线时面板只能展示历史摘要；在线摘要超过 120 秒会提示“观测可能过期”。不要依据摘要把机器从“离线”或“不支持”状态改为可信。
 - **临时文件清理失败**：Job 会报 `TAILNET_SECRET_CLEANUP_FAILED`，不要声称已清理；先隔离该机，检查 Windows `%LOCALAPPDATA%\VCPDeck\tailnet-secrets` 或 POSIX `~/.vcpdeck/tailnet-secrets` 下残留子目录并手工删除，再轮换/撤销对应 key。
 
@@ -307,13 +309,13 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 ### Tailnet 安装、入网或凭据失败
 
 - `TAILNET_CLI_MISSING`：目标机未安装且本次 `installIfMissing=false`；确认平台与权限后显式勾选安装，或先手工安装官方 Tailscale。
-- `TAILNET_UNSUPPORTED_PLATFORM`：不在 Windows x64 管理员、Ubuntu 22.04/24.04、Debian 12/13 x64 root+systemd 矩阵内。只读观测仍可用；不要用普通 `exec` 绕过自动安装限制。
-- `TAILNET_EXISTING_CONFIG`：发现已有 binary、unit、state 或已有身份。先人工核对现状；若确需接管，应由操作者按 Tailscale 官方流程处理，不能删除 state 后重试。
+- `TAILNET_UNSUPPORTED_PLATFORM`：不在 Windows x64 管理员、Ubuntu 22.04/24.04、Debian 12/13 x64（root 或免密 sudo 账户）+systemd 矩阵内。只读观测仍可用；不要用普通 `exec` 绕过自动安装限制。
+- `TAILNET_EXISTING_CONFIG`：发现已有 binary、unit、state 或已有身份，也可能是在启动服务并重新观测后仍看到 `stopped`/已有节点名。先人工核对现状；若确需接管，应由操作者按 Tailscale 官方流程处理，不能删除 state 后重试。
 - `TAILNET_OPERATION_BUSY` / `TAILNET_KEY_BUSY`：同一机器已有管理 Job，或该凭据已被其它 Job 预留。等待现有 Job 终态；不要手工清 `reservedJobId`。
 - `TAILNET_SECRET_TIMEOUT` / `TAILNET_SECRET_DENIED`：Client 未在窗口内拿到正文或当前 socket/能力不匹配；检查客户端版本、注册状态与 Job 归属，重新发起；不要改走明文参数。
 - `TAILNET_SECRET_EXPIRED` / `TAILNET_SECRET_MISMATCH`：正文已过期或与 `jobId`/`requestId` 不匹配，已被消费方拒绝；重新发起 Job，不复用旧响应。
 - `TAILNET_KEY_UNAVAILABLE`：先看错误文案区分来源。「Tailnet 密钥服务不可用」是 Server 内部装配异常（`JobService` 没拿到 `TailnetKeyService`，0.23.11 及更早版本的 `JobModule` 未导入 `TailnetModule`），与密钥文件无关，升级到修复版本即可；「Tailnet 根密钥不可用」才是根密钥不可读或与库中密文不匹配（显式路径缺失，或受管文件损坏/错绑）。Server **不会**因该错误重建文件——先恢复配对根密钥再重启；若确无备份且库中已有凭据，只能在 Tailscale 撤销旧 key 后清空凭据记录并重新导入。
-- `TAILNET_JOIN_FAILED` / `TAILNET_PROBE_TIMEOUT` / `TAILNET_CLI_FAILED`：查看安全错误码与阶段，先确认 `tailscaled` 服务、系统时间和出网；不要把原始 stdout/stderr 或 key 贴进工单。
+- `TAILNET_JOIN_FAILED` / `TAILNET_PROBE_TIMEOUT` / `TAILNET_CLI_FAILED`：查看安全错误码与阶段，先确认 `tailscaled` 服务、系统时间和出网；`TAILNET_CLI_FAILED` 也可能表示以非 root 账户运行时缺少免密 sudo（`sudo -n true` 失败），或服务启动后仍无法观测。不要把原始 stdout/stderr 或 key 贴进工单。
 - `TAILNET_INSTALL_FAILED` / `TAILNET_INSTALL_REBOOT_REQUIRED`：安装失败或需重启；保留 Job 记录和系统日志，按固定版本材料重新评估，不降级为手工执行用户提供的二进制。
 - 取消只终止后续步骤，**不会**自动卸载、退网或撤销已发生的更改。
 
