@@ -45,6 +45,19 @@ function keyBusy(message: string): Error {
 	return tailnetError("TAILNET_KEY_BUSY", message, 409);
 }
 
+/**
+ * 预留失败的安全文案：只描述凭据当前状态与下一步，不含密文、掩码尾码或 Tailscale 侧细节。
+ *
+ * 前端只消费 `code`；这段文案服务于 CLI、SDK 与直接调 API 的运维。
+ */
+function describeUnusableCredential(row: TailnetCredentialRow | null): string {
+	if (row === null) return "凭据不存在或不可取用";
+	if (row.use === "reserved") return "凭据已被其它 Job 预留";
+	if (row.use === "spent") return "凭据已消耗，需要重新导入";
+	if (row.use === "uncertain") return "凭据状态不确定，需要重新导入";
+	return "凭据当前不可用";
+}
+
 @Injectable()
 export class TailnetKeyService {
 	constructor(
@@ -204,7 +217,7 @@ export class TailnetKeyService {
 			data: { use: "reserved", reservedJobId: jobId },
 		});
 		if (result.count !== 1) {
-			throw keyBusy("凭据不可取用");
+			throw keyBusy(describeUnusableCredential(existing));
 		}
 	}
 

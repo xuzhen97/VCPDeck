@@ -39,6 +39,30 @@ const USE_LABELS: Record<TailnetKeyUse, string> = {
 	uncertain: "状态不确定",
 };
 
+/** 只有 `available` 能被预留；其余状态点下去只会拿到 409，所以不让选并说明原因。 */
+const UNUSABLE_HINTS: Partial<Record<TailnetKeyUse, string>> = {
+	reserved: "正在被某个 Job 使用",
+	spent: "已使用过，不能重复使用",
+	uncertain: "上次下发后结果不明，需重新导入新密钥",
+};
+
+/**
+ * 机器页可能遇到的操作失败给出下一步动作。
+ *
+ * 保留稳定 code 便于对照文档与日志，同时避免只显示一个错误码让操作者无从下手。
+ */
+const ERROR_HINTS: Record<string, string> = {
+	TAILNET_KEY_BUSY:
+		"该凭据当前不可用（已预留、已消耗或状态不确定）；请改用可用凭据，或到设置页重新导入一枚新 Auth key。",
+	TAILNET_KEY_UNAVAILABLE:
+		"服务端的 Tailnet 密钥服务或根密钥不可用；先确认 Server 已升级到 0.23.12 以上，否则核对数据目录的 data/tailnet/root.key 是否与库中凭据配对。",
+	TAILNET_EXISTING_CONFIG:
+		"该机器已有 Tailscale 安装或既有身份，VCPDeck 不覆盖；请人工核对现状后再决定。",
+	TAILNET_JOIN_FAILED:
+		"入网被 Tailscale 拒绝：确认授权密钥未过期、未被撤销，且机器时间正确。",
+	TAILNET_OPERATION_BUSY: "该机器已有在途的 Tailnet 管理 Job，等它结束后再试。",
+};
+
 const INSTALLED_LABELS: Record<TailnetSnapshot["installed"], string> = {
 	yes: "已安装",
 	no: "未安装",
@@ -97,7 +121,10 @@ function readStage(result: Record<string, unknown> | null): {
 
 function describeError(cause: unknown): string {
 	if (cause instanceof VcpDeckApiError && cause.code?.startsWith("TAILNET_")) {
-		return `操作失败（${cause.code}）`;
+		const hint = ERROR_HINTS[cause.code];
+		return hint
+			? `操作失败（${cause.code}）：${hint}`
+			: `操作失败（${cause.code}）`;
 	}
 	return "操作失败，请稍后重试";
 }
@@ -164,6 +191,17 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 	const canOperate =
 		status !== null && status.online && status.supported && !busy;
 
+	const availableKeys = keys.filter((key) => key.use === "available");
+	const selectedKey = keys.find((key) => key.id === selectedKeyId) ?? null;
+	const canJoin = canOperate && selectedKey?.use === "available";
+
+	// Job 结束会改变凭据状态；选中项不再可用时清空，避免点下去必然收到 409。
+	useEffect(() => {
+		if (selectedKeyId.length === 0) return;
+		const current = keys.find((key) => key.id === selectedKeyId);
+		if (current?.use !== "available") setSelectedKeyId("");
+	}, [keys, selectedKeyId]);
+
 	async function runManage(payload: TailnetJobPayload) {
 		setBusy(true);
 		setActionError(null);
@@ -198,6 +236,8 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 			}
 			reload();
 		} catch (cause) {
+			// 失败也可能改变凭据状态（例如交付后落 uncertain），刷新一次以免界面停留在旧值。
+			reload();
 			setActionError(describeError(cause));
 		} finally {
 			setBusy(false);
@@ -323,8 +363,14 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 									>
 										<option value="">未选择</option>
 										{keys.map((key) => (
-											<option key={key.id} value={key.id}>
-												{key.name}
+											<option
+												key={key.id}
+												value={key.id}
+												disabled={key.use !== "available"}
+											>
+												{key.use === "available"
+													? key.name
+													: `${key.name}（${USE_LABELS[key.use]}，不可用于加入）`}
 											</option>
 										))}
 									</select>
@@ -337,6 +383,11 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 												<span className="font-medium">{key.name}</span>
 												<span>{REUSE_LABELS[key.declaredReuse]}</span>
 												<span>使用：{USE_LABELS[key.use]}</span>
+												{UNUSABLE_HINTS[key.use] && (
+													<span className="text-xs text-muted-foreground">
+														{UNUSABLE_HINTS[key.use]}
+													</span>
+												)}
 												{key.declaredExpiresAt && (
 													<span className="text-xs text-muted-foreground">
 														声明过期于{" "}
@@ -346,6 +397,13 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 											</li>
 										))}
 									</ul>
+									{availableKeys.length === 0 && (
+										<p className="text-xs text-destructive">
+											没有可用于加入的凭据：只有「可用」的凭据能被预留。状态不确定表示上次下发后结果不明，
+											一次性 Auth key 不能保证可重复使用，因此 VCPDeck
+											不会自动重试；请先到设置页导入一枚新的 Auth key。
+										</p>
+									)}
 								</>
 							)}
 						</section>
@@ -385,7 +443,7 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 								<Button
 									type="button"
 									size="sm"
-									disabled={!canOperate || selectedKeyId.length === 0}
+									disabled={!canJoin}
 									onClick={() =>
 										void runManage({
 											action: "ensure",

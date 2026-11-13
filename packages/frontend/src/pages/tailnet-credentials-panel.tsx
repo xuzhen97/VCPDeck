@@ -34,6 +34,19 @@ const USE_LABELS: Record<TailnetKeyInfo["use"], string> = {
 	uncertain: "状态不确定",
 };
 
+/**
+ * 非可用状态的下一步动作。
+ *
+ * `uncertain` 不是「失败」也不是「可用」：正文已下发但结果不明，
+ * 一次性密钥可能已经被消费，所以只允许重新导入，不给「再试一次」。
+ */
+const USE_HINTS: Partial<Record<TailnetKeyInfo["use"], string>> = {
+	reserved: "正在被某个 Job 使用，结束后自动回到可用或进入其它状态。",
+	spent: "已使用过，不能再次加入；需要新的 Auth key。",
+	uncertain:
+		"上次下发后结果不明，不能再次用于加入。请在 Tailscale 管理端核实该 key 是否需要撤销，然后导入一枚新的 Auth key；本记录确认无用后可删除。",
+};
+
 function formatTime(value: string): string {
 	const time = new Date(value);
 	return Number.isNaN(time.getTime()) ? "时间未知" : time.toLocaleString();
@@ -223,6 +236,11 @@ export function TailnetCredentialsPanel() {
 									<p className="text-xs text-muted-foreground">
 										导入于 {formatTime(key.createdAt)}
 									</p>
+									{USE_HINTS[key.use] && (
+										<p className="text-xs text-muted-foreground">
+											{USE_HINTS[key.use]}
+										</p>
+									)}
 								</div>
 								<Button
 									type="button"

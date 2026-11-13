@@ -183,6 +183,28 @@ describe("预留与交付", () => {
 		expectCode((rejected as PromiseRejectedResult).reason, "TAILNET_KEY_BUSY");
 	});
 
+	it("预留失败按凭据实际状态给出下一步文案", async () => {
+		const info = await service.importKey(input());
+		await service.reserve(prisma, info.id, "job-a");
+		await expect(
+			service.reserve(prisma, info.id, "job-b"),
+		).rejects.toMatchObject({
+			code: "TAILNET_KEY_BUSY",
+			message: "凭据已被其它 Job 预留",
+		});
+		// 交付后结果不明会落 uncertain：此时只能重新导入，不能靠重试恢复。
+		await prisma.tailnetCredential.update({
+			where: { id: info.id },
+			data: { use: "uncertain", reservedJobId: null },
+		});
+		await expect(
+			service.reserve(prisma, info.id, "job-c"),
+		).rejects.toMatchObject({
+			code: "TAILNET_KEY_BUSY",
+			message: "凭据状态不确定，需要重新导入",
+		});
+	});
+
 	it("同一 jobId 重复预留幂等", async () => {
 		const info = await service.importKey(input());
 		await service.reserve(prisma, info.id, "job-a");

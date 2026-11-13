@@ -1,5 +1,5 @@
 import type { TailnetKeyInfo, TailnetSnapshot, TailnetStatus } from "@vcpdeck/shared";
-import type { VcpDeckClient } from "@vcpdeck/sdk";
+import { VcpDeckApiError, type VcpDeckClient } from "@vcpdeck/sdk";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,6 +31,7 @@ const emptyKeyPage = keyPage([]);
 function renderPanel(options: {
 	status?: TailnetStatus;
 	keys?: TailnetKeyInfo[];
+	listKeys?: ReturnType<typeof vi.fn>;
 	manage?: ReturnType<typeof vi.fn>;
 	wait?: ReturnType<typeof vi.fn>;
 	cancel?: ReturnType<typeof vi.fn>;
@@ -41,10 +42,11 @@ function renderPanel(options: {
 		supported: true,
 		snapshot: freshSnapshot,
 	};
+	const keys = options.keys ?? [];
 	const sdk = {
 		tailnet: {
 			status: vi.fn(async () => status),
-			listKeys: vi.fn(async () => keyPage(options.keys ?? [])),
+			listKeys: options.listKeys ?? vi.fn(async () => keyPage(keys)),
 			deleteKey: vi.fn(async () => ({ deleted: true })),
 			manage: options.manage ?? vi.fn(async () => ({
 				jobId: "job-1",
@@ -184,8 +186,9 @@ describe("MachineTailnetPanel", () => {
 		renderPanel({ keys });
 		expect(await screen.findByText("一次性凭据")).toBeVisible();
 		expect(screen.getByText("可复用凭据")).toBeVisible();
-		expect(screen.getByText(/已消耗/)).toBeVisible();
-		expect(screen.getByText(/状态不确定/)).toBeVisible();
+		// 下拉里的不可用选项也会带上状态文案，因此按列表行的完整文本断言。
+		expect(screen.getByText("使用：已消耗")).toBeVisible();
+		expect(screen.getByText("使用：状态不确定")).toBeVisible();
 	});
 
 	it("mount 不触发管理操作；inspect 与 ensure 才调用 manage", async () => {
@@ -240,5 +243,59 @@ describe("MachineTailnetPanel", () => {
 		expect(screen.getByText(/取消不会自动撤销/)).toBeVisible();
 		fireEvent.click(screen.getByRole("button", { name: "取消 Job" }));
 		await waitFor(() => expect(cancel).toHaveBeenCalledWith("job-1"));
+	});
+
+	it("非可用凭据不可选，并说明需要重新导入", async () => {
+		const keys: TailnetKeyInfo[] = [
+			{
+				id: "k1",
+				name: "vcpdeck",
+				declaredReuse: "reusable",
+				declaredExpiresAt: null,
+				use: "uncertain",
+				createdAt: "2026-11-13T03:28:47.779Z",
+			},
+		];
+		renderPanel({ keys });
+		expect(
+			await screen.findByRole("option", {
+				name: "vcpdeck（状态不确定，不可用于加入）",
+			}),
+		).toBeDisabled();
+		expect(screen.getByText(/没有可用于加入的凭据/)).toBeVisible();
+		expect(screen.getByRole("button", { name: /加入 Tailnet/ })).toBeDisabled();
+	});
+
+	it("凭据不可取用时给出下一步动作并重新拉取列表", async () => {
+		const keys: TailnetKeyInfo[] = [
+			{
+				id: "k1",
+				name: "home",
+				declaredReuse: "reusable",
+				declaredExpiresAt: null,
+				use: "available",
+				createdAt: "2026-11-11T09:00:00.000Z",
+			},
+		];
+		const listKeys = vi.fn(async () => keyPage(keys));
+		const manage = vi.fn(async () => {
+			throw new VcpDeckApiError(
+				"凭据状态不确定，需要重新导入",
+				409,
+				"TAILNET_KEY_BUSY",
+			);
+		});
+		renderPanel({ keys, listKeys, manage });
+		await screen.findByText("Tailnet 凭据");
+		fireEvent.change(screen.getByLabelText("选择 Tailnet 凭据"), {
+			target: { value: "k1" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /加入 Tailnet/ }));
+		expect(
+			await screen.findByText(
+				/操作失败（TAILNET_KEY_BUSY）：该凭据当前不可用/,
+			),
+		).toBeVisible();
+		await waitFor(() => expect(listKeys.mock.calls.length).toBeGreaterThan(1));
 	});
 });
