@@ -75,7 +75,7 @@ function tailnetUsage(): string {
 		"  vcpdeck tailnet keys delete <id> [--env=<name>]",
 		"  vcpdeck tailnet status <client-name-or-id> [--env=<name>] [--json]",
 		"  vcpdeck tailnet inspect <client-name-or-id> [--wait] [--env=<name>] [--json]",
-		"  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--wait] [--env=<name>] [--json]",
+		"  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--allow-uncertain-reuse] [--wait] [--env=<name>] [--json]",
 		"",
 		"--key-stdin 从受限本地文件重定向读取，拒绝终端直接输入；不提供明文 argv。",
 		"删除只移除本地密文记录，不会撤销或退出 Provider 侧 Tailnet。",
@@ -304,7 +304,7 @@ async function runManageCommand(
 ): Promise<void> {
 	const { positionals, options } = parseCommandArgs(argv, {
 		value: ["key-id", "env", "environment", "wait-timeout"],
-		boolean: ["json", "wait", "install-if-missing"],
+		boolean: ["json", "wait", "install-if-missing", "allow-uncertain-reuse"],
 	});
 	const filter = positionals[0];
 	if (!filter) throw new Error(`${action} 需要机器名称或 clientId`);
@@ -325,6 +325,11 @@ async function runManageCommand(
 					action: "ensure",
 					credentialId: stringOption(options, "key-id") as string,
 					installIfMissing: options["install-if-missing"] === true,
+					// ADR-0064：只有显式加 --allow-uncertain-reuse 才带这个字段，
+					// 缺省时请求体与旧版本逐字相同。
+					...(options["allow-uncertain-reuse"] === true
+						? { allowUncertainReuse: true }
+						: {}),
 				};
 	const created = await client.tailnet.manage(clientId, payload);
 	const log = context.log ?? console.log;

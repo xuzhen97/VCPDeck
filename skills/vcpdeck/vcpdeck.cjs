@@ -783,7 +783,11 @@ var require_tailnet = __commonJS({
     ];
     var TAILNET_ACTION_KEYS = {
       inspect: ["action"],
-      ensure: ["action", "credentialId", "installIfMissing"]
+      ensure: ["action", "credentialId", "installIfMissing", "allowUncertainReuse"]
+    };
+    var TAILNET_ACTION_OPTIONAL_KEYS = {
+      inspect: [],
+      ensure: ["allowUncertainReuse"]
     };
     function requireRecord2(value2, label) {
       if (typeof value2 !== "object" || value2 === null || Array.isArray(value2)) {
@@ -791,7 +795,7 @@ var require_tailnet = __commonJS({
       }
       return value2;
     }
-    function requireExactKeys(value2, label, allowed) {
+    function requireExactKeys(value2, label, allowed, optional = []) {
       const record = requireRecord2(value2, label);
       for (const key of Object.keys(record)) {
         if (!allowed.includes(key)) {
@@ -799,6 +803,8 @@ var require_tailnet = __commonJS({
         }
       }
       for (const key of allowed) {
+        if (optional.includes(key))
+          continue;
         if (!Object.hasOwn(record, key)) {
           throw new Error(`${label} \u7F3A\u5C11\u5B57\u6BB5 ${key}`);
         }
@@ -874,15 +880,19 @@ var require_tailnet = __commonJS({
       if (action !== "inspect" && action !== "ensure") {
         throw new Error("tailnet job payload \u7684 action \u4E0D\u5408\u6CD5");
       }
-      requireExactKeys(record, "tailnet job payload", TAILNET_ACTION_KEYS[action]);
+      requireExactKeys(record, "tailnet job payload", TAILNET_ACTION_KEYS[action], TAILNET_ACTION_OPTIONAL_KEYS[action]);
       if (action === "inspect") {
         return { action: "inspect" };
       }
-      return {
+      const payload = {
         action: "ensure",
         credentialId: requireBoundedString(record.credentialId, "credentialId", MAX_ID),
         installIfMissing: requireBoolean(record.installIfMissing, "installIfMissing")
       };
+      if (record.allowUncertainReuse !== void 0) {
+        payload.allowUncertainReuse = requireBoolean(record.allowUncertainReuse, "allowUncertainReuse");
+      }
+      return payload;
     }
     function parseTailnetSnapshot(value2) {
       const record = requireExactKeys(value2, "tailnet snapshot", [
@@ -4848,7 +4858,9 @@ function createTailnetApi(client) {
         body = {
           action: "ensure",
           credentialId: payload.credentialId,
-          installIfMissing: payload.installIfMissing
+          installIfMissing: payload.installIfMissing,
+          // 只有显式确认时才带上：缺省请求体与 0.23.16 及更早逐字相同
+          ...payload.allowUncertainReuse === true ? { allowUncertainReuse: true } : {}
         };
       } else {
         throw new Error("Tailnet \u4EFB\u52A1 action \u4E0D\u5408\u6CD5");
@@ -17788,7 +17800,7 @@ function tailnetUsage() {
     "  vcpdeck tailnet keys delete <id> [--env=<name>]",
     "  vcpdeck tailnet status <client-name-or-id> [--env=<name>] [--json]",
     "  vcpdeck tailnet inspect <client-name-or-id> [--wait] [--env=<name>] [--json]",
-    "  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--wait] [--env=<name>] [--json]",
+    "  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--allow-uncertain-reuse] [--wait] [--env=<name>] [--json]",
     "",
     "--key-stdin \u4ECE\u53D7\u9650\u672C\u5730\u6587\u4EF6\u91CD\u5B9A\u5411\u8BFB\u53D6\uFF0C\u62D2\u7EDD\u7EC8\u7AEF\u76F4\u63A5\u8F93\u5165\uFF1B\u4E0D\u63D0\u4F9B\u660E\u6587 argv\u3002",
     "\u5220\u9664\u53EA\u79FB\u9664\u672C\u5730\u5BC6\u6587\u8BB0\u5F55\uFF0C\u4E0D\u4F1A\u64A4\u9500\u6216\u9000\u51FA Provider \u4FA7 Tailnet\u3002"
@@ -17964,7 +17976,7 @@ function formatStatus(clientId, status) {
 async function runManageCommand(action, argv, context) {
   const { positionals, options } = parseCommandArgs(argv, {
     value: ["key-id", "env", "environment", "wait-timeout"],
-    boolean: ["json", "wait", "install-if-missing"]
+    boolean: ["json", "wait", "install-if-missing", "allow-uncertain-reuse"]
   });
   const filter = positionals[0];
   if (!filter)
@@ -17982,7 +17994,10 @@ async function runManageCommand(action, argv, context) {
   const payload = action === "inspect" ? { action: "inspect" } : {
     action: "ensure",
     credentialId: stringOption(options, "key-id"),
-    installIfMissing: options["install-if-missing"] === true
+    installIfMissing: options["install-if-missing"] === true,
+    // ADR-0064：只有显式加 --allow-uncertain-reuse 才带这个字段，
+    // 缺省时请求体与旧版本逐字相同。
+    ...options["allow-uncertain-reuse"] === true ? { allowUncertainReuse: true } : {}
   };
   const created = await client.tailnet.manage(clientId, payload);
   const log = context.log ?? console.log;
@@ -18141,7 +18156,7 @@ function helpText() {
     "  vcpdeck tailnet keys delete <id> [--env=<name>] [--json]",
     "  vcpdeck tailnet status <client-name-or-id> [--env=<name>] [--json]",
     "  vcpdeck tailnet inspect <client-name-or-id> [--wait] [--env=<name>] [--json]",
-    "  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--wait] [--env=<name>] [--json]",
+    "  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--allow-uncertain-reuse] [--wait] [--env=<name>] [--json]",
     "  \u5BC6\u94A5\u53EA\u4ECE\u53D7\u9650\u6587\u4EF6\u91CD\u5B9A\u5411\u7684 stdin \u8BFB\u53D6\uFF1B\u5220\u9664\u4EC5\u6E05\u7406\u672C\u5730\u8BB0\u5F55\uFF0C\u4E0D\u64A4\u9500 Provider \u5BC6\u94A5",
     "",
     "Features:",

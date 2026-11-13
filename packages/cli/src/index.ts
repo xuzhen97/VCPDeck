@@ -137,7 +137,7 @@ export function helpText(): string {
 		"  vcpdeck tailnet keys delete <id> [--env=<name>] [--json]",
 		"  vcpdeck tailnet status <client-name-or-id> [--env=<name>] [--json]",
 		"  vcpdeck tailnet inspect <client-name-or-id> [--wait] [--env=<name>] [--json]",
-		"  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--wait] [--env=<name>] [--json]",
+		"  vcpdeck tailnet ensure <client-name-or-id> --key-id=<id> [--install-if-missing] [--allow-uncertain-reuse] [--wait] [--env=<name>] [--json]",
 		"  密钥只从受限文件重定向的 stdin 读取；删除仅清理本地记录，不撤销 Provider 密钥",
 		"",
 		"Features:",

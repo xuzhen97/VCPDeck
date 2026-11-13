@@ -1481,7 +1481,7 @@ Token 在 Frontend `/settings/tokens` 创建并与 Identity 关联；CLI 与 SDK
 | `SHA256_MISMATCH` | 重新准备来源并重试 import |
 | 预签名 URL 403 | 重新申请 URL，不复用过期签名 |
 | `TAILNET_KEY_UNAVAILABLE` | 提示运维恢复配对根密钥（缺省 `data/tailnet/root.key`，或显式 `VCPDECK_TAILNET_KEY_FILE`），不重试导入 |
-| `TAILNET_OPERATION_BUSY` / `TAILNET_KEY_BUSY` | 等待同机管理 Job 或该凭据的现有 Job 结束，不手工清预留；`spent`/`uncertain` 的凭据不可复用，需导入新的 Auth key |
+| `TAILNET_OPERATION_BUSY` / `TAILNET_KEY_BUSY` | 等待同机管理 Job 或该凭据的现有 Job 结束，不手工清预留；`spent` 与不可复用的 `uncertain` 需导入新的 Auth key，可复用的 `uncertain` 只能在 `ensure` 载荷带 `allowUncertainReuse: true` 且操作者已确认时再试一次（ADR-0064） |
 | `TAILNET_EXISTING_CONFIG` | 停止自动流程，人工核对既有安装/身份；非 root 账户先确认免密 sudo，不删 state 后重试 |
 | `TAILNET_SECRET_TIMEOUT` / `DENIED` / `EXPIRED` / `MISMATCH` | 重新发起 Job；不把 key 改走明文参数或复用旧响应 |
 | Tailnet `interrupted` | 展示阶段并人工核对，不自动重试，不声称已回滚 |

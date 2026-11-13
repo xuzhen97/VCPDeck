@@ -536,7 +536,9 @@ export class JobService {
         throw error;
       }
       if (payload.action === "ensure") {
-        await this.tailnetKeys!.reserve(tx as never, payload.credentialId, jobId);
+        await this.tailnetKeys!.reserve(tx as never, payload.credentialId, jobId, {
+          allowUncertainReuse: payload.allowUncertainReuse === true,
+        });
       }
       await tx.job.create({
         data: {

@@ -194,6 +194,49 @@ describe("parseTailnetJobPayload", () => {
 		).toThrow();
 		expect(() => parseTailnetJobPayload(null)).toThrow();
 	});
+
+	it("allowUncertainReuse 可缺省，显式给出时必须是布尔", () => {
+		// 缺省不带确认：老调用方的载荷解析结果逐字不变，字段不会被补成 false
+		expect(
+			parseTailnetJobPayload({
+				action: "ensure",
+				credentialId: "k1",
+				installIfMissing: true,
+			}),
+		).toEqual({
+			action: "ensure",
+			credentialId: "k1",
+			installIfMissing: true,
+		});
+		expect(
+			parseTailnetJobPayload({
+				action: "ensure",
+				credentialId: "k1",
+				installIfMissing: true,
+				allowUncertainReuse: true,
+			}),
+		).toEqual({
+			action: "ensure",
+			credentialId: "k1",
+			installIfMissing: true,
+			allowUncertainReuse: true,
+		});
+		// 非布尔不做宽松解释：字符串、数字、null 一律拒绝
+		for (const bad of ["true", 1, null]) {
+			expect(() =>
+				parseTailnetJobPayload({
+					action: "ensure",
+					credentialId: "k1",
+					installIfMissing: false,
+					allowUncertainReuse: bad,
+				}),
+			).toThrow("allowUncertainReuse");
+		}
+		// inspect 不接受该字段：白名单按 action 生效
+		expect(() =>
+			parseTailnetJobPayload({ action: "inspect", allowUncertainReuse: true }),
+		).toThrow("未知字段");
+	});
 });
 
 describe("parseTailnetSnapshot", () => {

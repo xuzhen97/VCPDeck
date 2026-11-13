@@ -171,13 +171,15 @@ describe("TailnetCredentialsPanel", () => {
 		expect(screen.queryByText(/根密钥不可用/)).toBeNull();
 	});
 
-	it("状态不确定的凭据说明不能再次加入，指向重新导入", async () => {
+	it("状态不确定的凭据说明确认复用与重新导入两条路径", async () => {
 		renderPanel({
 			listKeys: vi.fn(async () => keyPage([{ ...key, use: "uncertain" }])),
 		});
 		expect(await screen.findByText(/状态不确定/)).toBeVisible();
-		expect(screen.getByText(/不能再次用于加入/)).toBeVisible();
-		expect(screen.getByText(/导入一枚新的 Auth key/)).toBeVisible();
+		expect(
+			screen.getByText(/可在机器页勾选确认后再下发一次/),
+		).toBeVisible();
+		expect(screen.getByText(/只能导入新的 Auth key/)).toBeVisible();
 	});
 
 	it("删除需要确认，并说明不会撤销远端 Auth key", async () => {

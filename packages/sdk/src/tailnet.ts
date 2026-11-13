@@ -117,6 +117,10 @@ export function createTailnetApi(client: Pick<VcpDeckClient, "request">) {
 					action: "ensure",
 					credentialId: payload.credentialId,
 					installIfMissing: payload.installIfMissing,
+					// 只有显式确认时才带上：缺省请求体与 0.23.16 及更早逐字相同
+					...(payload.allowUncertainReuse === true
+						? { allowUncertainReuse: true }
+						: {}),
 				};
 			} else {
 				throw new Error("Tailnet 任务 action 不合法");

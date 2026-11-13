@@ -148,6 +148,37 @@ describe("Tailnet SDK", () => {
 		expect(JSON.stringify(body)).not.toContain("must-not-send");
 	});
 
+	it("manage 只在显式确认时携带 allowUncertainReuse（ADR-0064）", async () => {
+		const request = vi.fn().mockResolvedValue({
+			jobId: "job-1",
+			status: "pending",
+			type: "tailnet.manage",
+		});
+		const api = createTailnetApi({ request });
+		await api.manage("client/1", {
+			action: "ensure",
+			credentialId: "key-uncertain",
+			installIfMissing: true,
+			allowUncertainReuse: true,
+		});
+		expect((request.mock.calls[0][2] as Record<string, unknown>).allowUncertainReuse)
+			.toBe(true);
+
+		// 未确认时请求体逐字与旧版本一致，不出现该字段（哪怕是 false）
+		await api.manage("client/1", {
+			action: "ensure",
+			credentialId: "key-available",
+			installIfMissing: false,
+		});
+		const body = request.mock.calls[1][2] as Record<string, unknown>;
+		expect(body).toEqual({
+			action: "ensure",
+			credentialId: "key-available",
+			installIfMissing: false,
+		});
+		expect("allowUncertainReuse" in body).toBe(false);
+	});
+
 	it("错误传播不携带请求正文", async () => {
 		const fetcher = vi.fn(async () =>
 			jsonResponse({ code: "INVALID_TAILNET_INPUT", message: "输入无效" }, 400),

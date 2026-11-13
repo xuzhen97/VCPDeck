@@ -39,12 +39,20 @@ const USE_LABELS: Record<TailnetKeyUse, string> = {
 	uncertain: "状态不确定",
 };
 
-/** 只有 `available` 能被预留；其余状态点下去只会拿到 409，所以不让选并说明原因。 */
+/**
+ * 只有 `available` 能被直接预留；其余状态点下去只会拿到 409，所以不让选并说明原因。
+ *
+ * 例外是 ADR-0064 的逐次确认：`uncertain` 且导入时声明为 `reusable` 的记录，
+ * 操作者确认该 key 仍有效后可以再下发一次。
+ */
 const UNUSABLE_HINTS: Partial<Record<TailnetKeyUse, string>> = {
 	reserved: "正在被某个 Job 使用",
 	spent: "已使用过，不能重复使用",
 	uncertain: "上次下发后结果不明，需重新导入新密钥",
 };
+
+/** `uncertain` 且声明可复用时，确认后仍可再下发一次（ADR-0064）。 */
+const REUSABLE_UNCERTAIN_HINT = "上次下发后结果不明；确认该 key 仍有效时可勾选下方选项重试";
 
 /**
  * 机器页可能遇到的操作失败给出下一步动作。
@@ -157,6 +165,12 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 	const [job, setJob] = useState<ActiveJob | null>(null);
 	const [selectedKeyId, setSelectedKeyId] = useState("");
 	const [installIfMissing, setInstallIfMissing] = useState(false);
+	/**
+	 * ADR-0064：对「可复用 + 状态不确定」凭据的逐次确认。
+	 *
+	 * 记住「确认的是哪一枚」而不是一个布尔值：换凭据自动失效，不需要额外的重置副作用。
+	 */
+	const [confirmedKeyId, setConfirmedKeyId] = useState<string | null>(null);
 
 	const reload = useCallback(() => {
 		setReloadToken((value) => value + 1);
@@ -192,14 +206,31 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 		status !== null && status.online && status.supported && !busy;
 
 	const availableKeys = keys.filter((key) => key.use === "available");
+	const reusableUncertainKeys = keys.filter(
+		(key) => key.use === "uncertain" && key.declaredReuse === "reusable",
+	);
 	const selectedKey = keys.find((key) => key.id === selectedKeyId) ?? null;
-	const canJoin = canOperate && selectedKey?.use === "available";
+	// 选中项能否被服务端预留：可用的总是能；状态不确定的只有「可复用 + 显式确认」才行。
+	const selectedReusableUncertain =
+		selectedKey?.use === "uncertain" && selectedKey.declaredReuse === "reusable";
+	const allowUncertainReuse =
+		selectedReusableUncertain && confirmedKeyId === selectedKeyId;
+	const canJoin =
+		canOperate &&
+		(selectedKey?.use === "available" ||
+			(selectedReusableUncertain && allowUncertainReuse));
 
-	// Job 结束会改变凭据状态；选中项不再可用时清空，避免点下去必然收到 409。
+	// Job 结束会改变凭据状态；选中项再也不能用时清空，避免点下去必然收到 409。
 	useEffect(() => {
 		if (selectedKeyId.length === 0) return;
 		const current = keys.find((key) => key.id === selectedKeyId);
-		if (current?.use !== "available") setSelectedKeyId("");
+		const usable =
+			current?.use === "available" ||
+			(current?.use === "uncertain" && current.declaredReuse === "reusable");
+		if (!usable) {
+			setSelectedKeyId("");
+			setConfirmedKeyId(null);
+		}
 	}, [keys, selectedKeyId]);
 
 	async function runManage(payload: TailnetJobPayload) {
@@ -359,49 +390,65 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 										id="tailnet-key-select"
 										className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
 										value={selectedKeyId}
-										onChange={(event) => setSelectedKeyId(event.target.value)}
+										onChange={(event) => {
+											setSelectedKeyId(event.target.value);
+											// 换凭据就重新确认：上一枚 key 的确认不能沿用到这一次
+											setConfirmedKeyId(null);
+										}}
 									>
 										<option value="">未选择</option>
-										{keys.map((key) => (
-											<option
-												key={key.id}
-												value={key.id}
-												disabled={key.use !== "available"}
-											>
-												{key.use === "available"
-													? key.name
-													: `${key.name}（${USE_LABELS[key.use]}，不可用于加入）`}
-											</option>
-										))}
+										{keys.map((key) => {
+											const selectable =
+												key.use === "available" ||
+												(key.use === "uncertain" &&
+													key.declaredReuse === "reusable");
+											return (
+												<option key={key.id} value={key.id} disabled={!selectable}>
+													{!selectable
+														? `${key.name}（${USE_LABELS[key.use]}，不可用于加入）`
+														: key.use === "available"
+															? key.name
+															: `${key.name}（状态不确定，确认后可重试）`}
+												</option>
+											);
+										})}
 									</select>
 									<ul className="space-y-2">
-										{keys.map((key) => (
-											<li
-												key={key.id}
-												className="flex flex-wrap items-baseline gap-x-3 gap-y-1"
-											>
-												<span className="font-medium">{key.name}</span>
-												<span>{REUSE_LABELS[key.declaredReuse]}</span>
-												<span>使用：{USE_LABELS[key.use]}</span>
-												{UNUSABLE_HINTS[key.use] && (
-													<span className="text-xs text-muted-foreground">
-														{UNUSABLE_HINTS[key.use]}
-													</span>
-												)}
-												{key.declaredExpiresAt && (
-													<span className="text-xs text-muted-foreground">
-														声明过期于{" "}
-														{formatObservedAt(key.declaredExpiresAt)}
-													</span>
-												)}
-											</li>
-										))}
+										{keys.map((key) => {
+											const reusableUncertain =
+												key.use === "uncertain" && key.declaredReuse === "reusable";
+											const hint = reusableUncertain
+												? REUSABLE_UNCERTAIN_HINT
+												: UNUSABLE_HINTS[key.use];
+											return (
+												<li
+													key={key.id}
+													className="flex flex-wrap items-baseline gap-x-3 gap-y-1"
+												>
+													<span className="font-medium">{key.name}</span>
+													<span>{REUSE_LABELS[key.declaredReuse]}</span>
+													<span>使用：{USE_LABELS[key.use]}</span>
+													{hint && (
+														<span className="text-xs text-muted-foreground">
+															{hint}
+														</span>
+													)}
+													{key.declaredExpiresAt && (
+														<span className="text-xs text-muted-foreground">
+															声明过期于{" "}
+															{formatObservedAt(key.declaredExpiresAt)}
+														</span>
+													)}
+												</li>
+											);
+										})}
 									</ul>
 									{availableKeys.length === 0 && (
 										<p className="text-xs text-destructive">
-											没有可用于加入的凭据：只有「可用」的凭据能被预留。状态不确定表示上次下发后结果不明，
-											一次性 Auth key 不能保证可重复使用，因此 VCPDeck
-											不会自动重试；请先到设置页导入一枚新的 Auth key。
+											没有可直接使用的凭据：只有「可用」的凭据能被直接预留。
+											{reusableUncertainKeys.length > 0
+												? "已声明可复用的「状态不确定」凭据在勾选确认后仍可再下发一次——前提是该 Auth key 未过期且未被撤销。"
+												: "状态不确定表示上次下发后结果不明，一次性 Auth key 不能保证可重复使用，因此 VCPDeck 不会自动重试；请先到设置页导入一枚新的 Auth key。"}
 										</p>
 									)}
 								</>
@@ -439,6 +486,24 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 									管理员/root 权限；已有安装或状态时不覆盖）
 								</span>
 							</label>
+							{selectedReusableUncertain && (
+								<label className="flex items-start gap-2 text-xs text-muted-foreground">
+									<input
+										type="checkbox"
+										checked={allowUncertainReuse}
+										disabled={!canOperate}
+										onChange={(event) =>
+											setConfirmedKeyId(
+												event.target.checked ? selectedKeyId : null,
+											)
+										}
+									/>
+									<span>
+										我确认这枚 Auth key 仍然有效且未被撤销，允许在「状态不确定」的情况下再下发一次
+										（一次性 key 不能重试；确认错误只会再失败一次，不会自动重试）
+									</span>
+								</label>
+							)}
 							<div className="flex flex-wrap items-center gap-2">
 								<Button
 									type="button"
@@ -449,6 +514,9 @@ export function MachineTailnetPanel({ clientId }: { clientId: string }) {
 											action: "ensure",
 											credentialId: selectedKeyId,
 											installIfMissing,
+											...(allowUncertainReuse && selectedReusableUncertain
+												? { allowUncertainReuse: true }
+												: {}),
 										})
 									}
 								>

@@ -108,7 +108,17 @@ export interface TailnetCapability {
 /** 持久化的 Tailnet Job 输入；严禁内联 authKey。 */
 export type TailnetJobPayload =
 	| { action: "inspect" }
-	| { action: "ensure"; credentialId: string; installIfMissing: boolean };
+	| {
+			action: "ensure";
+			credentialId: string;
+			installIfMissing: boolean;
+			/**
+			 * 操作者逐次确认「可复用凭据落 uncertain 后仍可再下发一次」（ADR-0064）。
+			 *
+			 * 缺省即不带确认，行为与 0.23.16 及更早完全一致。
+			 */
+			allowUncertainReuse?: boolean;
+	  };
 
 /** Tailnet Job 的安全结果；只含阶段与摘要。 */
 export interface TailnetJobResult {
@@ -196,7 +206,13 @@ const TAILNET_STAGE_VALUES = [
  */
 const TAILNET_ACTION_KEYS = {
 	inspect: ["action"],
-	ensure: ["action", "credentialId", "installIfMissing"],
+	ensure: ["action", "credentialId", "installIfMissing", "allowUncertainReuse"],
+} as const;
+
+/** 可缺省的协议增量：只对 `ensure` 生效，缺省时按 false 处理。 */
+const TAILNET_ACTION_OPTIONAL_KEYS = {
+	inspect: [],
+	ensure: ["allowUncertainReuse"],
 } as const;
 
 function requireRecord(
@@ -209,11 +225,17 @@ function requireRecord(
 	return value as Record<string, unknown>;
 }
 
-/** 严格白名单：拒绝未知字段也拒绝缺失字段；错误只报键名，不回显取值。 */
+/**
+ * 严格白名单：拒绝未知字段也拒绝缺失字段；错误只报键名，不回显取值。
+ *
+ * `optional` 里的键允许缺省，但仍必须是已知键——协议增量据此加入时，
+ * 老调用方不带该字段的行为逐字不变。
+ */
 function requireExactKeys(
 	value: unknown,
 	label: string,
 	allowed: readonly string[],
+	optional: readonly string[] = [],
 ): Record<string, unknown> {
 	const record = requireRecord(value, label);
 	for (const key of Object.keys(record)) {
@@ -222,6 +244,7 @@ function requireExactKeys(
 		}
 	}
 	for (const key of allowed) {
+		if (optional.includes(key)) continue;
 		if (!Object.hasOwn(record, key)) {
 			throw new Error(`${label} 缺少字段 ${key}`);
 		}
@@ -343,11 +366,16 @@ export function parseTailnetJobPayload(value: unknown): TailnetJobPayload {
 	if (action !== "inspect" && action !== "ensure") {
 		throw new Error("tailnet job payload 的 action 不合法");
 	}
-	requireExactKeys(record, "tailnet job payload", TAILNET_ACTION_KEYS[action]);
+	requireExactKeys(
+		record,
+		"tailnet job payload",
+		TAILNET_ACTION_KEYS[action],
+		TAILNET_ACTION_OPTIONAL_KEYS[action],
+	);
 	if (action === "inspect") {
 		return { action: "inspect" };
 	}
-	return {
+	const payload: TailnetJobPayload = {
 		action: "ensure",
 		credentialId: requireBoundedString(
 			record.credentialId,
@@ -359,6 +387,14 @@ export function parseTailnetJobPayload(value: unknown): TailnetJobPayload {
 			"installIfMissing",
 		),
 	};
+	// 缺省表示不带确认；显式给了就必须是布尔，不做字符串/数字的宽松解释。
+	if (record.allowUncertainReuse !== undefined) {
+		payload.allowUncertainReuse = requireBoolean(
+			record.allowUncertainReuse,
+			"allowUncertainReuse",
+		);
+	}
+	return payload;
 }
 
 /** 解析观测摘要；未知枚举、任意错误码文本与 Peer 字段一律拒绝。 */

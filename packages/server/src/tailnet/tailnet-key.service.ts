@@ -49,12 +49,23 @@ function keyBusy(message: string): Error {
  * 预留失败的安全文案：只描述凭据当前状态与下一步，不含密文、掩码尾码或 Tailscale 侧细节。
  *
  * 前端只消费 `code`；这段文案服务于 CLI、SDK 与直接调 API 的运维。
+ * `allowUncertainReuse` 为 true 时，`uncertain` 与 `single/unknown` 的说法必须分开：
+ * 前者是「确认了但记录不可复用」，后者是「一次性密钥根本不能重复下发」。
  */
-function describeUnusableCredential(row: TailnetCredentialRow | null): string {
+function describeUnusableCredential(
+	row: TailnetCredentialRow | null,
+	allowUncertainReuse = false,
+): string {
 	if (row === null) return "凭据不存在或不可取用";
 	if (row.use === "reserved") return "凭据已被其它 Job 预留";
 	if (row.use === "spent") return "凭据已消耗，需要重新导入";
-	if (row.use === "uncertain") return "凭据状态不确定，需要重新导入";
+	if (row.use === "uncertain") {
+		if (!allowUncertainReuse) return "凭据状态不确定，需要重新导入";
+		if (row.declaredReuse !== "reusable") {
+			return "凭据状态不确定，且导入时未声明为可复用，不能重试";
+		}
+		return "凭据状态不确定，且正被其它操作占用";
+	}
 	return "凭据当前不可用";
 }
 
@@ -195,12 +206,15 @@ export class TailnetKeyService {
 	/**
 	 * 在调用方事务内预留凭据；同一 jobId 重复预留幂等。
 	 *
-	 * 条件更新保证并发下只有一个 Job 能拿到 `available` 的凭据。
+	 * 条件更新保证并发下只有一个 Job 能拿到 `available` 的凭据。ADR-0064 的
+	 * 唯一增量：操作者逐次确认后，`uncertain` 且声明为 `reusable` 的记录
+	 * 也可以被预留一次；`single`/`unknown` 即使确认也不放开，仍走 fail closed。
 	 */
 	async reserve(
 		tx: TailnetTransaction,
 		id: string,
 		jobId: string,
+		options: { allowUncertainReuse?: boolean } = {},
 	): Promise<void> {
 		const existing = await tx.tailnetCredential.findUnique({
 			where: { id },
@@ -212,12 +226,20 @@ export class TailnetKeyService {
 		) {
 			return;
 		}
+		const allowUncertainReuse = options.allowUncertainReuse === true;
 		const result = await tx.tailnetCredential.updateMany({
-			where: { id, use: "available", reservedJobId: null },
+			where: allowUncertainReuse
+				? {
+						id,
+						reservedJobId: null,
+						use: { in: ["available", "uncertain"] },
+						declaredReuse: "reusable",
+					}
+				: { id, use: "available", reservedJobId: null },
 			data: { use: "reserved", reservedJobId: jobId },
 		});
 		if (result.count !== 1) {
-			throw keyBusy(describeUnusableCredential(existing));
+			throw keyBusy(describeUnusableCredential(existing, allowUncertainReuse));
 		}
 	}
 

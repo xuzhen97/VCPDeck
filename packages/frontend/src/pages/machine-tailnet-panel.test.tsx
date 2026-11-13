@@ -245,12 +245,12 @@ describe("MachineTailnetPanel", () => {
 		await waitFor(() => expect(cancel).toHaveBeenCalledWith("job-1"));
 	});
 
-	it("非可用凭据不可选，并说明需要重新导入", async () => {
+	it("一次性或未声明复用性的不确定凭据不可选，并说明需要重新导入", async () => {
 		const keys: TailnetKeyInfo[] = [
 			{
 				id: "k1",
 				name: "vcpdeck",
-				declaredReuse: "reusable",
+				declaredReuse: "single",
 				declaredExpiresAt: null,
 				use: "uncertain",
 				createdAt: "2026-11-13T03:28:47.779Z",
@@ -262,8 +262,81 @@ describe("MachineTailnetPanel", () => {
 				name: "vcpdeck（状态不确定，不可用于加入）",
 			}),
 		).toBeDisabled();
-		expect(screen.getByText(/没有可用于加入的凭据/)).toBeVisible();
+		expect(screen.getByText(/没有可直接使用的凭据/)).toBeVisible();
 		expect(screen.getByRole("button", { name: /加入 Tailnet/ })).toBeDisabled();
+	});
+
+	it("可复用但状态不确定的凭据需要显式确认后才可加入（ADR-0064）", async () => {
+		const keys: TailnetKeyInfo[] = [
+			{
+				id: "k1",
+				name: "vcpdeck",
+				declaredReuse: "reusable",
+				declaredExpiresAt: null,
+				use: "uncertain",
+				createdAt: "2026-11-13T03:28:47.779Z",
+			},
+		];
+		const manage = vi.fn(async () => ({
+			jobId: "job-9",
+			status: "pending",
+			type: "tailnet.manage",
+		}));
+		renderPanel({ keys, manage });
+		// 可选中，但未确认时按钮仍禁用
+		const option = await screen.findByRole("option", {
+			name: "vcpdeck（状态不确定，确认后可重试）",
+		});
+		expect(option).not.toBeDisabled();
+		fireEvent.change(screen.getByLabelText("选择 Tailnet 凭据"), {
+			target: { value: "k1" },
+		});
+		const join = screen.getByRole("button", { name: /加入 Tailnet/ });
+		expect(join).toBeDisabled();
+
+		fireEvent.click(screen.getByRole("checkbox", { name: /我确认这枚 Auth key/ }));
+		expect(join).not.toBeDisabled();
+		fireEvent.click(join);
+		await waitFor(() =>
+			expect(manage).toHaveBeenCalledWith(
+				"c1",
+				expect.objectContaining({
+					action: "ensure",
+					credentialId: "k1",
+					allowUncertainReuse: true,
+				}),
+			),
+		);
+	});
+
+	it("可用凭据的请求体不带确认字段，保持与旧服务端一致", async () => {
+		const keys: TailnetKeyInfo[] = [
+			{
+				id: "k2",
+				name: "home",
+				declaredReuse: "reusable",
+				declaredExpiresAt: null,
+				use: "available",
+				createdAt: "2026-11-11T09:00:00.000Z",
+			},
+		];
+		const manage = vi.fn(async () => ({
+			jobId: "job-8",
+			status: "pending",
+			type: "tailnet.manage",
+		}));
+		renderPanel({ keys, manage });
+		fireEvent.change(await screen.findByLabelText("选择 Tailnet 凭据"), {
+			target: { value: "k2" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /加入 Tailnet/ }));
+		await waitFor(() =>
+			expect(manage).toHaveBeenCalledWith("c1", {
+				action: "ensure",
+				credentialId: "k2",
+				installIfMissing: false,
+			}),
+		);
 	});
 
 	it("凭据不可取用时给出下一步动作并重新拉取列表", async () => {

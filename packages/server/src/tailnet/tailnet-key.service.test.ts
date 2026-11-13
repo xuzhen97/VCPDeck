@@ -213,6 +213,60 @@ describe("预留与交付", () => {
 		).resolves.toBeUndefined();
 	});
 
+	it("显式确认后，可复用且状态不确定的凭据仍可预留一次（ADR-0064）", async () => {
+		const info = await service.importKey(input({ declaredReuse: "reusable" }));
+		await prisma.tailnetCredential.update({
+			where: { id: info.id },
+			data: { use: "uncertain", reservedJobId: null },
+		});
+
+		await expect(
+			service.reserve(prisma, info.id, "job-retry", {
+				allowUncertainReuse: true,
+			}),
+		).resolves.toBeUndefined();
+		const row = await prisma.tailnetCredential.findUnique({
+			where: { id: info.id },
+		});
+		// 只做 uncertain → reserved；不新增「自动回 available」的状态迁移
+		expect(row?.use).toBe("reserved");
+		expect(row?.reservedJobId).toBe("job-retry");
+	});
+
+	it("确认不放开一次性/未声明复用性的凭据", async () => {
+		for (const declaredReuse of ["single", "unknown"] as const) {
+			const info = await service.importKey(
+				input({ name: `凭据-${declaredReuse}`, declaredReuse }),
+			);
+			await prisma.tailnetCredential.update({
+				where: { id: info.id },
+				data: { use: "uncertain", reservedJobId: null },
+			});
+			await expect(
+				service.reserve(prisma, info.id, "job-retry", {
+					allowUncertainReuse: true,
+				}),
+			).rejects.toMatchObject({
+				code: "TAILNET_KEY_BUSY",
+				message: "凭据状态不确定，且导入时未声明为可复用，不能重试",
+			});
+		}
+	});
+
+	it("不确认时状态不确定仍按原样拒绝", async () => {
+		const info = await service.importKey(input({ declaredReuse: "reusable" }));
+		await prisma.tailnetCredential.update({
+			where: { id: info.id },
+			data: { use: "uncertain", reservedJobId: null },
+		});
+		await expect(
+			service.reserve(prisma, info.id, "job-retry"),
+		).rejects.toMatchObject({
+			code: "TAILNET_KEY_BUSY",
+			message: "凭据状态不确定，需要重新导入",
+		});
+	});
+
 	it("交付返回明文；single 交付后即作废且不可重复下发", async () => {
 		const info = await service.importKey(input());
 		await service.reserve(prisma, info.id, "job-a");
