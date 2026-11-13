@@ -317,8 +317,19 @@ export class ClientGateway implements OnModuleInit, OnModuleDestroy {
 		try {
 			const response = await this.tailnet.authorizeSecret(client.id, data);
 			client.emit(Events.TAILNET_SECRET_RESPONSE, response);
-		} catch {
-			// 拒绝原因不回流：客户端按本地 TTL 超时，避免成为探测接口。
+		} catch (error) {
+			// 拒绝原因不回流客户端：客户端按本地 TTL 超时，避免成为探测接口。
+			// 但服务端必须留痕，否则「凭据已交付」「协议版本不一致」这类拒绝在
+			// 客户端只剩一句 30 秒超时，无从判断卡在哪一道校验（2026-11-13 踩过）。
+			const jobId =
+				typeof (data as { jobId?: unknown } | null)?.jobId === "string"
+					? (data as { jobId: string }).jobId
+					: "?";
+			const code = (error as { code?: unknown })?.code;
+			const message = (error as { message?: unknown })?.message;
+			console.warn(
+				`[ws] tailnet secret request rejected: job=${jobId} code=${typeof code === "string" ? code : "UNKNOWN"} message=${typeof message === "string" ? message : "?"}`,
+			);
 		}
 	}
 

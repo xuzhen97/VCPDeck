@@ -236,7 +236,10 @@ export class TailnetKeyService {
 						declaredReuse: "reusable",
 					}
 				: { id, use: "available", reservedJobId: null },
-			data: { use: "reserved", reservedJobId: jobId },
+			// 新预留就是新的交付窗口：清掉上一次的交付标记。`issuedAt` 只表示
+			// 「本次预留已交付」，若不清空，一次失败或已完成的 Job 会把凭据永久
+			// 钉在「已交付」上，`issue()` 对任何后继 Job 都拒绝再下发。
+			data: { use: "reserved", reservedJobId: jobId, issuedAt: null },
 		});
 		if (result.count !== 1) {
 			throw keyBusy(describeUnusableCredential(existing, allowUncertainReuse));

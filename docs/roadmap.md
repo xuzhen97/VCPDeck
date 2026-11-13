@@ -1,6 +1,6 @@
 # VCPDeck 路线图
 
-> 状态：Planning｜维护责任：项目负责人｜最后核验：2026-08-23｜说明：优先级候选，不代表交付承诺
+> 状态：Planning｜维护责任：项目负责人｜最后核验：2026-11-13｜说明：优先级候选，不代表交付承诺
 
 ## 1. 已形成闭环
 
@@ -38,6 +38,7 @@
 16. 清理/归档与代码冲突的历史设计文档；
 17. 按 ADR-0019 完成发布构件上传/下载双向数据面分离：Alibaba 由 CLI 分片直传 Provider、下载经统一入口 302，Server 只管理权限、持久化会话、元数据和编排；Local 保留 Server raw stream。
 18. 执行 ADR-0041 的 contract 步骤：确认该版本稳定后，清理遗留 `agent.session` Job 行与 Job 上不再使用的三个模式列（本次发布只做 expand，刻意不删，以保证回退无需恢复备份）。
+19. Launcher 不随自更新替换：自更新只替换 `apps/<version>/` 下的构件，Launcher 入口（Server 侧 `<appDir>/dist/main.js`、Client 侧 `<clientDir>/dist/main.js`）由安装或人工覆盖决定，运行中的控制通道会长期冻结在旧构建。生产已两次撞上：gcp01 停在 0.23.11 的 launcher，连续三个版本自更新都以 409 `ASSEMBLE_FAILED` 失败；instabox01 的入口只是一个 37,940 B 的残缺文件，`/prepare/status` 直接 404。两次都靠人工覆盖入口文件才恢复。候选方向（择一或组合，需先有 ADR）：Client 注册时上报 launcher 版本与端点能力，让发版记录能直接显示「launcher 冻结」并拒绝下发；`/apply` 前由调用方探测端点能力并给出可执行提示；把 launcher 自身纳入更新流程（要先解决「替换正在运行的入口」的原子性、回滚与自毁窗口）。
 
 ## 3. 中期候选：可运营性
 

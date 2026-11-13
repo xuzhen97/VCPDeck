@@ -233,6 +233,22 @@ describe("预留与交付", () => {
 		expect(row?.reservedJobId).toBe("job-retry");
 	});
 
+	it("可复用凭据在 Job 终结后能再次交付（预留清空上一次的交付标记）", async () => {
+		const info = await service.importKey(input({ declaredReuse: "reusable" }));
+		await service.reserve(prisma, info.id, "job-a");
+		await expect(service.issue(info.id, "job-a")).resolves.toBe(AUTH_KEY);
+		await service.settle(prisma, "job-a", "uncertain");
+
+		// 生产事故回归：settle 保留 issuedAt 时，第二次 issue 会以
+		// 「凭据已交付，不重复下发」拒绝，用户看到的却只是 30 秒密钥超时。
+		await expect(
+			service.reserve(prisma, info.id, "job-retry", {
+				allowUncertainReuse: true,
+			}),
+		).resolves.toBeUndefined();
+		await expect(service.issue(info.id, "job-retry")).resolves.toBe(AUTH_KEY);
+	});
+
 	it("确认不放开一次性/未声明复用性的凭据", async () => {
 		for (const declaredReuse of ["single", "unknown"] as const) {
 			const info = await service.importKey(

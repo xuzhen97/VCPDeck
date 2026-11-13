@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Events } from "@vcpdeck/shared";
 import { ClientGateway } from "./client.gateway.js";
 import type { Socket } from "socket.io";
 
@@ -1256,5 +1257,62 @@ describe("ClientGateway Job 日志相位（ADR-0054）", () => {
 		expect(jobLog.record).toHaveBeenCalledWith(
 			expect.objectContaining({ jobId: "job-flush", event: "output_first" }),
 		);
+	});
+});
+
+describe("ClientGateway tailnet 密钥交付", () => {
+	it("拒绝时只留脱敏打点，不把原因回流给客户端", async () => {
+		const authorizeSecret = vi.fn(async () => {
+			throw Object.assign(new Error("凭据已交付，不重复下发"), {
+				code: "TAILNET_KEY_BUSY",
+			});
+		});
+		const { gateway } = makeGateway(undefined, undefined, { authorizeSecret });
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const socket = makeSocket("socket-1");
+			await gateway.handleTailnetSecretRequest(socket, {
+				protocolVersion: 1,
+				jobId: "job-1",
+				requestId: "req-1",
+			});
+			expect(socket.emit).not.toHaveBeenCalled();
+			// 生产事故回归：客户端只看到 30 秒超时，服务端必须能指出是哪道校验拒绝
+			expect(warn).toHaveBeenCalledTimes(1);
+			const line = String(warn.mock.calls[0]?.[0] ?? "");
+			expect(line).toContain("tailnet secret request rejected");
+			expect(line).toContain("job=job-1");
+			expect(line).toContain("TAILNET_KEY_BUSY");
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	it("通过校验时单播交付给请求方", async () => {
+		const response = {
+			protocolVersion: 1,
+			jobId: "job-1",
+			requestId: "req-1",
+			expiresAt: "2026-11-13T13:15:10.000Z",
+			authKey: "tskey-auth-test",
+		};
+		const authorizeSecret = vi.fn(async () => response);
+		const { gateway } = makeGateway(undefined, undefined, { authorizeSecret });
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const socket = makeSocket("socket-1");
+			await gateway.handleTailnetSecretRequest(socket, {
+				protocolVersion: 1,
+				jobId: "job-1",
+				requestId: "req-1",
+			});
+			expect(socket.emit).toHaveBeenCalledWith(
+				Events.TAILNET_SECRET_RESPONSE,
+				response,
+			);
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
 	});
 });
