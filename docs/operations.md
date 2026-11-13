@@ -312,7 +312,7 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 - `TAILNET_OPERATION_BUSY` / `TAILNET_KEY_BUSY`：同一机器已有管理 Job，或该凭据已被其它 Job 预留。等待现有 Job 终态；不要手工清 `reservedJobId`。
 - `TAILNET_SECRET_TIMEOUT` / `TAILNET_SECRET_DENIED`：Client 未在窗口内拿到正文或当前 socket/能力不匹配；检查客户端版本、注册状态与 Job 归属，重新发起；不要改走明文参数。
 - `TAILNET_SECRET_EXPIRED` / `TAILNET_SECRET_MISMATCH`：正文已过期或与 `jobId`/`requestId` 不匹配，已被消费方拒绝；重新发起 Job，不复用旧响应。
-- `TAILNET_KEY_UNAVAILABLE`：根密钥不可读或与库中密文不匹配（显式路径缺失，或受管文件损坏/错绑）。Server **不会**因该错误重建文件——先恢复配对根密钥再重启；若确无备份且库中已有凭据，只能在 Tailscale 撤销旧 key 后清空凭据记录并重新导入。
+- `TAILNET_KEY_UNAVAILABLE`：先看错误文案区分来源。「Tailnet 密钥服务不可用」是 Server 内部装配异常（`JobService` 没拿到 `TailnetKeyService`，0.23.11 及更早版本的 `JobModule` 未导入 `TailnetModule`），与密钥文件无关，升级到修复版本即可；「Tailnet 根密钥不可用」才是根密钥不可读或与库中密文不匹配（显式路径缺失，或受管文件损坏/错绑）。Server **不会**因该错误重建文件——先恢复配对根密钥再重启；若确无备份且库中已有凭据，只能在 Tailscale 撤销旧 key 后清空凭据记录并重新导入。
 - `TAILNET_JOIN_FAILED` / `TAILNET_PROBE_TIMEOUT` / `TAILNET_CLI_FAILED`：查看安全错误码与阶段，先确认 `tailscaled` 服务、系统时间和出网；不要把原始 stdout/stderr 或 key 贴进工单。
 - `TAILNET_INSTALL_FAILED` / `TAILNET_INSTALL_REBOOT_REQUIRED`：安装失败或需重启；保留 Job 记录和系统日志，按固定版本材料重新评估，不降级为手工执行用户提供的二进制。
 - 取消只终止后续步骤，**不会**自动卸载、退网或撤销已发生的更改。

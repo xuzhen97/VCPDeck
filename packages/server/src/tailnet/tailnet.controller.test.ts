@@ -8,6 +8,7 @@ import { BadRequestException, HttpException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import type { ActorContext } from "@vcpdeck/shared";
 import { EventsModule } from "../events/events.module.js";
+import { JobModule } from "../job/job.module.js";
 import { TailnetModule } from "./tailnet.module.js";
 import { TailnetController } from "./tailnet.controller.js";
 
@@ -162,6 +163,13 @@ describe("Tailnet 模块装配", () => {
 		const controllers = Reflect.getMetadata("controllers", EventsModule) as unknown[];
 		expect(controllers).toContain(TailnetController);
 		const imports = Reflect.getMetadata("imports", EventsModule) as unknown[];
+		expect(imports).toContain(TailnetModule);
+	});
+
+	it("JobModule 导入 TailnetModule，JobService 才能拿到 TailnetKeyService", () => {
+		// JobService 用 @Optional() @Inject(TailnetKeyService) 注入；缺少这条导入时
+		// Nest 会把依赖解析成 undefined，Tailnet Job 一律以 TAILNET_KEY_UNAVAILABLE 失败。
+		const imports = Reflect.getMetadata("imports", JobModule) as unknown[];
 		expect(imports).toContain(TailnetModule);
 	});
 
