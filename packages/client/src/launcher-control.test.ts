@@ -12,6 +12,15 @@ function errResponse(status: number, body: string) {
 	return { ok: false, status, text: async () => body };
 }
 
+function jsonResponse(body: unknown) {
+	return {
+		ok: true,
+		status: 200,
+		json: async () => body,
+		text: async () => JSON.stringify(body),
+	};
+}
+
 describe("ClientLauncher", () => {
 	let dir: string;
 	let controlFile: string;
@@ -104,5 +113,55 @@ describe("ClientLauncher", () => {
 		fetchImpl.mockResolvedValue(errResponse(500, "切换失败"));
 
 		await expect(launcher.applyUpdate()).rejects.toThrow("切换失败");
+	});
+
+	it("waitForPrepared：preparing 轮询到 ready 才返回", async () => {
+		fetchImpl
+			.mockResolvedValueOnce(
+				jsonResponse({ state: "preparing", version: "1.2.1" }),
+			)
+			.mockResolvedValueOnce(jsonResponse({ state: "ready", version: "1.2.1" }));
+
+		await expect(
+			launcher.waitForPrepared({ intervalMs: 1, timeoutMs: 1000 }),
+		).resolves.toBeUndefined();
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		expect(fetchImpl).toHaveBeenLastCalledWith(
+			"http://127.0.0.1:43124/prepare/status",
+			expect.objectContaining({ method: "GET" }),
+		);
+	});
+
+	it("waitForPrepared：准备失败立即抛错并带稳定错误码", async () => {
+		fetchImpl.mockResolvedValue(
+			jsonResponse({
+				state: "failed",
+				version: "1.2.1",
+				errorCode: "MANIFEST_SIGNATURE_INVALID",
+			}),
+		);
+
+		await expect(
+			launcher.waitForPrepared({ intervalMs: 1, timeoutMs: 1000 }),
+		).rejects.toThrow("launcher 准备失败: MANIFEST_SIGNATURE_INVALID");
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+	});
+
+	it("waitForPrepared：超过期限抛超时错误", async () => {
+		fetchImpl.mockResolvedValue(
+			jsonResponse({ state: "preparing", version: "1.2.1" }),
+		);
+
+		await expect(
+			launcher.waitForPrepared({ intervalMs: 1, timeoutMs: 5 }),
+		).rejects.toThrow("launcher 准备超时");
+	});
+
+	it("waitForPrepared：未知 state 视为协议错误", async () => {
+		fetchImpl.mockResolvedValue(jsonResponse({ state: "weird", version: null }));
+
+		await expect(launcher.waitForPrepared({ intervalMs: 1 })).rejects.toThrow(
+			"状态未知: weird",
+		);
 	});
 });

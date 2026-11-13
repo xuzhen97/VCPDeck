@@ -75,13 +75,15 @@ export interface ClientUpdateChannel {
 
 /** 本机 launcher 控制通道客户端（B6 实现） */
 export interface LauncherClient {
-	/** 第一阶段：launcher 下载/校验/解压新版本（服务端此时仍在运行） */
+	/** 第一阶段：launcher 受理新版本准备（下载/校验/解压），返回不代表完成 */
 	prepareUpdate(input: {
 		version: string;
 		url: string;
 		sha256: string;
 	}): Promise<void>;
-	/** 第二阶段：launcher 停掉本进程并切换版本（正常情况不会返回） */
+	/** 第二阶段的闸门：等 launcher 后台 prepare 完成（轮询 /prepare/status） */
+	waitForPrepared(options?: { timeoutMs?: number }): Promise<void>;
+	/** 第三阶段：launcher 停掉本进程并切换版本（正常情况不会返回） */
 	applyUpdate(): Promise<void>;
 }
 
@@ -181,6 +183,9 @@ export class ReleaseOrchestrator {
 						}
 					: {}),
 			});
+			// /prepare 是「受理」而非「完成」；launcher 冻结在安装版本，不保证
+			// 代等，这里由调用方轮询 /prepare/status 直到 ready。
+			await this.launcher.waitForPrepared();
 			await this.drain.drain();
 			this.channel.broadcastShutdown({ expectedVersion: version });
 			await this.launcher.applyUpdate();

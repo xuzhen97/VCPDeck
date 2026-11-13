@@ -210,7 +210,7 @@ sequenceDiagram
 关键不变量：
 
 1. `/prepare` 立即受理并在业务进程仍运行时后台完成下载、SHA-256 校验和解压（响应不等待下载完成，避免请求方 HTTP 默认超时在下载完成前切断连接）；
-2. `/prepare` 受理（下载、校验、解压转入后台）后即可进入 drain，不会在长下载期间提前停止派发；`/apply` 先等待 prepare 完成，prepare 失败时回传稳定错误码而不是静默切换，避免在构件不可用时白停业务进程；
+2. `/prepare` 受理（下载、校验、解压转入后台）后即可进入 drain，不会在长下载期间提前停止派发；**调用方（Server 更新自身、Client 更新自己）在 `/apply` 之前轮询 `/prepare/status` 直到 `ready`**，`failed` 立即带着 Launcher 的稳定错误码失败，不白停业务进程。Launcher 端的 `/apply` 也会等待进行中的 prepare，但那只是对旧调用方的兼容兜底：Launcher 会被冻结在安装时的构件版本、不随自更新替换，把等待责任放在 Launcher 上等于让正确性取决于「安装时点」；
 3. `ServerDrain` 只等待 `running/waiting_input` Job，不等待 Terminal 真实进程完全退出；
 4. 新 Server 启动后，从 SQLite 中的活动 Release 恢复，而不是依赖旧进程内存；
 5. `/api/status.serverVersion` 必须与目标版本完全相同，才进入 Client 阶段；
@@ -336,7 +336,9 @@ Launcher 启动时：
 
 两者都要求 `x-launcher-token`。`control.json` 是本机高敏感能力文件，应只允许 Launcher 和同一运行账户读取。Launcher 重启后 `pendingVersion` 丢失，必须重新 prepare。
 
-`/apply` 在 prepare 仍在进行时等待其完成，只有 prepare 尚未受理或已经失败才返回 409。因此「旧 Server 只发一次 `/prepare`、读到 200 就立即 `/apply`」仍可完成切换，不需要轮询 `/prepare/status`；0.23.5 曾在 prepare 进行中直接回 409，属该版本缺陷，0.23.6 起恢复本语义。
+`/apply` 在 prepare 仍在进行时等待其完成，只有 prepare 尚未受理或已经失败才返回 409。因此「旧 Server 只发一次 `/prepare`、读到 200 就立即 `/apply`」仍可完成切换；0.23.5 曾在 prepare 进行中直接回 409，0.23.6 起恢复本语义。
+
+轮询 `/prepare/status` 自 0.23.15 起是调用方的必备步骤，不是可选优化：Launcher 不随自更新替换，机器上可能长期停着旧 Launcher，而旧 Launcher 的 `/apply` 放行时机各不相同。0.23.11 及更早的 Launcher 在后台组装期间直接回 409，且拿不到具体错误码时把 `code` 回落成 `ASSEMBLE_FAILED`、文案「版本尚未准备就绪」，于是「组装慢」被误报成「组装失败」；0.23.12 起才在 `/apply` 里等后台组装结束。gcp01 的 launcher 停在 0.23.11，就是凭这一路径连续三个版本自更新失败。调用方先等 `ready` 后，两种 Launcher 都只需回答「现在就绪了吗」。
 
 ### 8.3 Node 运行时
 

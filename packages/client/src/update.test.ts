@@ -26,6 +26,7 @@ type FakeSocket = ReturnType<typeof makeSocket>;
 function makeLauncher() {
 	return {
 		prepareUpdate: vi.fn(),
+		waitForPrepared: vi.fn(),
 		applyUpdate: vi.fn(),
 	};
 }
@@ -56,6 +57,7 @@ describe("客户端优雅停机（update.ts）", () => {
 		launcher = makeLauncher();
 		runningJobs = [];
 		launcher.prepareUpdate.mockResolvedValue(undefined);
+		launcher.waitForPrepared.mockResolvedValue(undefined);
 		launcher.applyUpdate.mockResolvedValue(undefined);
 		attachUpdateHandler({
 			socket: socket as never,
@@ -150,10 +152,13 @@ describe("客户端优雅停机（update.ts）", () => {
 		expect(isDraining()).toBe(false);
 	});
 
-	it("beforeApply 顺序：prepare → drain → update:ready → beforeApply → apply", async () => {
+	it("beforeApply 顺序：prepare → 等 ready → drain → update:ready → beforeApply → apply", async () => {
 		const order: string[] = [];
 		launcher.prepareUpdate.mockImplementation(async () => {
 			order.push("prepare");
+		});
+		launcher.waitForPrepared.mockImplementation(async () => {
+			order.push("prepared");
 		});
 		launcher.applyUpdate.mockImplementation(async () => {
 			order.push("apply");
@@ -175,7 +180,32 @@ describe("客户端优雅停机（update.ts）", () => {
 			expect(launcher.applyUpdate).toHaveBeenCalledTimes(1);
 		});
 
-		expect(order).toEqual(["prepare", "ready=true", "beforeApply", "apply"]);
+		expect(order).toEqual([
+			"prepare",
+			"prepared",
+			"ready=true",
+			"beforeApply",
+			"apply",
+		]);
+	});
+
+	it("waitForPrepared 失败 → UPDATE_FAILED、不发 READY、不 apply", async () => {
+		launcher.waitForPrepared.mockRejectedValue(
+			new Error("launcher 准备失败: MANIFEST_SIGNATURE_INVALID"),
+		);
+
+		fireUpdateRequest(socket);
+		await vi.waitFor(() => {
+			expect(lastEmit(socket, Events.UPDATE_FAILED)).toBeTruthy();
+		});
+
+		expect(lastEmit(socket, Events.UPDATE_FAILED)).toMatchObject({
+			releaseVersion: "1.2.1",
+			reason: expect.stringContaining("MANIFEST_SIGNATURE_INVALID"),
+		});
+		expect(lastEmit(socket, Events.UPDATE_READY)).toBeUndefined();
+		expect(launcher.applyUpdate).not.toHaveBeenCalled();
+		expect(isDraining()).toBe(false);
 	});
 
 	it("prepare 失败 → UPDATE_FAILED 且不发 READY", async () => {

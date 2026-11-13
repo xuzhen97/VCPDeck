@@ -130,6 +130,9 @@ async function handleUpdateRequest(
 			sha256: req.sha256,
 			...(candidates ? { candidates } : {}),
 		});
+		// /prepare 是「受理」而非「完成」；launcher 冻结在安装版本，不保证
+		// 代等，这里由调用方轮询 /prepare/status 直到 ready。
+		await deps.launcher.waitForPrepared();
 		log(`新版本已就绪: ${releaseVersion}`);
 
 		// 2) 优雅停机：等运行中 job 完成（超时强制继续）

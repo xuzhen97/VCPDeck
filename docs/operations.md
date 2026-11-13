@@ -220,6 +220,7 @@ Job 路径之外仍有较自由的 `console.*`，接入集中日志前应进行�
 
 - 先运行 `vcpdeck release status <version>` 查询权威状态；非幂等 legacy raw POST 网络结果不明时不要盲目重复；
 - `release status` 里某台机器仍显示 `failed`、但 `clients list` 显示它已在目标版本（人工 `apply`、重装等旁路升级）：注册钩子与周期对账会把该条目改成 `done`，不需要重新发版；长时间不收敛时检查该机器是否仍在线并重新注册；
+- `launcher /apply 失败: HTTP 409 {"code":"ASSEMBLE_FAILED","message":"版本尚未准备就绪"}`：Launcher 在后台组装，`/apply` 被判定为「还没就绪」。Launcher 会被冻结在安装时的构件版本、不随自更新替换，同一台机器的 Launcher 版本可能远落后于 Server/Client。0.23.15 起 Server/Client 会在 `/apply` 前轮询 `/prepare/status` 直到 `ready`，新发版不会再出现此错误；已经卡住的机器按下面顺序处理：先确认 Launcher 落后（对比 `current` 指向版本的 `launcher/dist/main.js` 与 `client/dist/main.js`，两者大小/内容不一致即为冻结），必要时手工把 `apps/<最新>/launcher/dist/main.js` 覆盖到实际运行的 launcher 入口并重启对应服务，再重发版。升级到 0.23.15 前，手工覆盖 Launcher 仍是唯一让旧 Launcher 摆脱该竞态的办法；
 - Alibaba 后端正常流程会先创建 `/api/releases/uploads` 会话，再由 CLI 直接 PUT Provider 分片；Server 日志和入站流量不应出现完整 zip；
 - `RELEASE_DIRECT_UPLOAD_REQUIRED` 表示当前 Alibaba 后端拒绝 legacy raw 上传，必须使用 `0.2.1+` CLI，不能通过延长 Server 超时或代理中转绕过；
 - `RELEASE_UPLOAD_PROVIDER_FAILED`：检查阿里云 OAuth、配额、文件夹权限和网络；响应只给安全摘要，详细外部响应不得进入普通日志；

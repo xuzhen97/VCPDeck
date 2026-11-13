@@ -59,6 +59,7 @@ function mockChannel() {
 function mockLauncher() {
 	return {
 		prepareUpdate: vi.fn(),
+		waitForPrepared: vi.fn(),
 		applyUpdate: vi.fn(),
 	};
 }
@@ -140,8 +141,37 @@ describe("ReleaseOrchestrator", () => {
 			expect(deps.channel.broadcastShutdown).toHaveBeenCalledWith({
 				expectedVersion: "1.2.1",
 			});
+			// /prepare 受理后必须等 launcher 后台 prepare 到 ready，再 drain 与广播。
+			expect(deps.launcher.waitForPrepared).toHaveBeenCalledTimes(1);
+			const callOrder = (fn: {
+				mock: { invocationCallOrder: number[] };
+			}): number => fn.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY;
+			expect(callOrder(deps.launcher.prepareUpdate)).toBeLessThan(
+				callOrder(deps.launcher.waitForPrepared),
+			);
+			expect(callOrder(deps.launcher.waitForPrepared)).toBeLessThan(
+				callOrder(deps.drain.drain),
+			);
 			expect(deps.launcher.applyUpdate).toHaveBeenCalled();
 			expect(deps.releases.markFailed).not.toHaveBeenCalled();
+		});
+
+		it("等 prepare 就绪失败 → drain 解除闸门并落库失败，不 apply", async () => {
+			deps.releases.findByVersion.mockResolvedValue(releaseInfo());
+			deps.releases.getActiveRelease.mockResolvedValue(null);
+			deps.launcher.waitForPrepared.mockRejectedValue(
+				new Error("launcher 准备失败: ASSEMBLE_FAILED"),
+			);
+
+			await orchestrator.startRelease("1.2.1");
+
+			expect(deps.drain.drain).not.toHaveBeenCalled();
+			expect(deps.launcher.applyUpdate).not.toHaveBeenCalled();
+			expect(deps.drain.release).toHaveBeenCalled();
+			expect(deps.releases.markFailed).toHaveBeenCalledWith(
+				"1.2.1",
+				expect.stringContaining("ASSEMBLE_FAILED"),
+			);
 		});
 
 		it("archive 登记了 deltas 时服务端自更新也下发 candidates", async () => {
