@@ -340,6 +340,14 @@ Launcher 启动时：
 
 轮询 `/prepare/status` 自 0.23.15 起是调用方的必备步骤，不是可选优化：`/prepare` 受理后立刻把状态置为 `preparing`，下载/验签/组装在后台进行、完成后才变 `ready`，而 `/apply` 是否放行取决于这一状态（0.23.11 只认 `ready`，0.23.6–0.23.10 与 0.23.12+ 另接受 `preparing` 并等待后台任务）。只发一次 `/prepare` 就紧跟 `/apply` 的调用方在 0.23.11 上几乎必然撞到 `preparing`，得到 409 `{"code":"ASSEMBLE_FAILED","message":"版本尚未准备就绪"}`——「正在组装」被呈现成「组装失败」。Launcher 不随自更新替换，机器上可能长期停着旧 Launcher，把等待留给它等于让正确性取决于安装时点；gcp01 的 launcher 停在 0.23.11，就是这样连续三个版本自更新失败。调用方先等 `ready`（`idle`/`preparing` 都只代表尚未就绪）后，新旧 Launcher 都只需回答「现在就绪了吗」。
 
+控制通道自身也可能抖：`fetch` 在回环上失败时只抛 `TypeError: fetch failed`，真实 errno 在 `cause` 链里，而一次瞬时断连不该让整个发布失败。因此调用方把「连不上」与「Launcher 明确拒绝」分开处理：
+
+- 幂等 `GET /prepare/status` 单次失败先就地重试三次（间隔 200ms）；
+- 仍连不上时继续按轮询间隔重试，直到准备期限用完才失败，而不是就地中止；
+- 明确返回的 HTTP 非 2xx（例如旧 Launcher 没有该路由、鉴权失败）立即失败，不当成网络抖动；
+- `POST /prepare` 与 `POST /apply` 不自动重发——`/apply` 一旦生效就重复执行切换；
+- 失败落库的消息带上是哪一步断的（`服务端更新失败（通知 launcher 准备 / 等待 launcher 准备完成 / 等待运行中 Job 收敛 / 通知客户端停机 / 切换版本）: 原因`），并保留 `cause` 链里的 errno，例如 `launcher /prepare/status 连不上: fetch failed / ECONNRESET`。
+
 ### 8.3 Node 运行时
 
 启动版本时 Launcher 按 manifest `nodeVersion`：

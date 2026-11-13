@@ -164,6 +164,9 @@ export class ReleaseOrchestrator {
 			return;
 		}
 		await this.releases.transitionStatus(version, ReleaseStatus.UPDATING_SERVER);
+		// 记录失败发生在哪一步：只留 `fetch failed` 时无从判断断在准备、等待
+		// 还是切换（2026-11-13 生产：Release 只显示 `服务端更新失败: fetch failed`）。
+		let stage = "通知 launcher 准备";
 		try {
 			// ADR-0062：登记的增量构件同样适用于服务端自更新；launcher 自选基线，
 			// 组装失败才回退全量。不传 candidates 时每次都下载整包。
@@ -185,9 +188,13 @@ export class ReleaseOrchestrator {
 			});
 			// /prepare 是「受理」而非「完成」；launcher 冻结在安装版本，不保证
 			// 代等，这里由调用方轮询 /prepare/status 直到 ready。
+			stage = "等待 launcher 准备完成";
 			await this.launcher.waitForPrepared();
+			stage = "等待运行中 Job 收敛";
 			await this.drain.drain();
+			stage = "通知客户端停机";
 			this.channel.broadcastShutdown({ expectedVersion: version });
+			stage = "切换版本";
 			await this.launcher.applyUpdate();
 			// apply 后本进程应被 launcher 停止；连接被掐断与「进程仍存活」无法
 			// 可靠区分，不在此落库失败——终局以新进程重启后的版本对账为准。
@@ -197,7 +204,10 @@ export class ReleaseOrchestrator {
 			// 只有重启才能恢复（2026-10-07 生产事故）。
 			this.drain.release();
 			const message = e instanceof Error ? e.message : String(e);
-			await this.releases.markFailed(version, `服务端更新失败: ${message}`);
+			await this.releases.markFailed(
+				version,
+				`服务端更新失败（${stage}）: ${message}`,
+			);
 		}
 	}
 

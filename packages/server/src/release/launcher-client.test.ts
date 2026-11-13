@@ -108,6 +108,8 @@ describe("LauncherHttpClient", () => {
 			fetchImpl.mockRejectedValue(new TypeError("fetch failed"));
 
 			await expect(client.applyUpdate()).resolves.toBeUndefined();
+			// POST 不重试：/apply 若已生效，重发会重复执行切换
+			expect(fetchImpl).toHaveBeenCalledTimes(1);
 		});
 
 		it("普通 fetch failed 错误也视为 launcher 已接管", async () => {
@@ -167,6 +169,66 @@ describe("LauncherHttpClient", () => {
 			await expect(
 				client.waitForPrepared({ intervalMs: 1, timeoutMs: 5 }),
 			).rejects.toThrow("launcher 准备超时");
+		});
+
+		it("单次 GET 网络层失败会先重试再成功", async () => {
+			fetchImpl
+				.mockRejectedValueOnce(new TypeError("fetch failed"))
+				.mockResolvedValueOnce(
+					jsonResponse({ state: "ready", version: "1.2.1" }),
+				);
+
+			await expect(
+				client.waitForPrepared({ intervalMs: 1, timeoutMs: 1000 }),
+			).resolves.toBeUndefined();
+			expect(fetchImpl).toHaveBeenCalledTimes(2);
+		});
+
+		it("控制通道暂时连不上时继续轮询，不就地终止发布", async () => {
+			// 一次轮询用尽重试次数后仍然连不上，下一轮恢复
+			fetchImpl
+				.mockRejectedValueOnce(new TypeError("fetch failed"))
+				.mockRejectedValueOnce(new TypeError("fetch failed"))
+				.mockRejectedValueOnce(new TypeError("fetch failed"))
+				.mockResolvedValueOnce(
+					jsonResponse({ state: "ready", version: "1.2.1" }),
+				);
+
+			await expect(
+				client.waitForPrepared({ intervalMs: 1, timeoutMs: 2000 }),
+			).resolves.toBeUndefined();
+			expect(fetchImpl).toHaveBeenCalledTimes(4);
+		});
+
+		it("launcher 明确返回 HTTP 错误时立即失败，不当作连不上继续等", async () => {
+			fetchImpl.mockResolvedValue(errResponse(500, "内部错误"));
+
+			await expect(
+				client.waitForPrepared({ intervalMs: 1, timeoutMs: 5000 }),
+			).rejects.toThrow("launcher /prepare/status 失败: HTTP 500");
+			expect(fetchImpl).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("网络层错误文案", () => {
+		it("把 cause 链里的 errno 带进消息，POST 不重试", async () => {
+			fetchImpl.mockRejectedValue(
+				Object.assign(new TypeError("fetch failed"), {
+					cause: {
+						code: "ECONNREFUSED",
+						message: "connect ECONNREFUSED 127.0.0.1:43123",
+					},
+				}),
+			);
+
+			await expect(
+				client.prepareUpdate({
+					version: "1.2.1",
+					url: "/x",
+					sha256: "a".repeat(64),
+				}),
+			).rejects.toThrow("launcher /prepare 连不上: fetch failed / ECONNREFUSED");
+			expect(fetchImpl).toHaveBeenCalledTimes(1);
 		});
 	});
 });

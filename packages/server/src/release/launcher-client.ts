@@ -38,6 +38,12 @@ export interface LauncherHttpClientOptions {
 const DEFAULT_PREPARE_POLL_INTERVAL_MS = 1000;
 const DEFAULT_PREPARE_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** 幂等 GET 的网络层重试次数与间隔：本机回环也可能因连接复用竞态失败一次。 */
+const NETWORK_ATTEMPT_LIMIT = 3;
+const NETWORK_RETRY_DELAY_MS = 200;
+/** cause 链最多展开几层：undici 的 fetch failed 常把真实 errno 藏在第二层。 */
+const NETWORK_CAUSE_DEPTH = 3;
+
 const DEFAULT_CONTROL_FILE = join(
 	process.env.VCPDECK_APP_DIR ?? join(homedir(), ".vcpdeck", "launcher"),
 	"control.json",
@@ -45,6 +51,39 @@ const DEFAULT_CONTROL_FILE = join(
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 控制通道连不上（网络层失败）：与 launcher 明确的 HTTP 拒绝区分，可重试。 */
+class LauncherUnreachableError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "LauncherUnreachableError";
+	}
+}
+
+/**
+ * 把 fetch 的网络层异常压成一行。
+ *
+ * undici 只暴露 `TypeError: fetch failed`，真正的 errno 在 `cause` 链里；
+ * 只记外层消息会让「连不上」与「连接被重置」无法区分（2026-11-13 生产：
+ * Release 只留下 `服务端更新失败: fetch failed`，无从判断哪一步断的）。
+ */
+function describeTransportError(error: unknown): string {
+	if (!(error instanceof Error)) return String(error);
+	const parts: string[] = [error.message];
+	let cause: unknown = (error as { cause?: unknown }).cause;
+	for (let depth = 0; depth < NETWORK_CAUSE_DEPTH && cause; depth += 1) {
+		const row = cause as { code?: unknown; message?: unknown; cause?: unknown };
+		const detail =
+			typeof row.code === "string"
+				? row.code
+				: typeof row.message === "string"
+					? row.message
+					: null;
+		if (detail !== null) parts.push(detail);
+		cause = row.cause;
+	}
+	return parts.join(" / ");
 }
 
 /** /prepare/status 是跨进程输入，逐字段校验，未知 state 不宽松猜测。 */
@@ -109,20 +148,37 @@ export class LauncherHttpClient {
 		path: string,
 		body?: unknown,
 	): Promise<unknown> {
-		const res = await this.fetchImpl(`http://127.0.0.1:${ctl.port}${path}`, {
-			method,
-			headers: {
-				"content-type": "application/json",
-				"x-launcher-token": ctl.token,
-			},
-			...(method === "POST" ? { body: JSON.stringify(body ?? {}) } : {}),
-		});
-		if (!res.ok) {
-			const text = await res.text().catch(() => "");
-			throw new Error(`launcher ${path} 失败: HTTP ${res.status} ${text}`);
+		const url = `http://127.0.0.1:${ctl.port}${path}`;
+		// GET 是幂等探测，网络层失败可以安全重发；POST 不重试：/prepare 与
+		// /apply 的重发会重复执行（prepare 幂等性靠 launcher 自检，apply 没有）。
+		const attempts = method === "GET" ? NETWORK_ATTEMPT_LIMIT : 1;
+		for (let attempt = 1; ; attempt += 1) {
+			let res: Response;
+			try {
+				res = await this.fetchImpl(url, {
+					method,
+					headers: {
+						"content-type": "application/json",
+						"x-launcher-token": ctl.token,
+					},
+					...(method === "POST" ? { body: JSON.stringify(body ?? {}) } : {}),
+				});
+			} catch (e) {
+				if (attempt < attempts) {
+					await sleep(NETWORK_RETRY_DELAY_MS);
+					continue;
+				}
+				throw new LauncherUnreachableError(
+					`launcher ${path} 连不上: ${describeTransportError(e)}`,
+				);
+			}
+			if (!res.ok) {
+				const text = await res.text().catch(() => "");
+				throw new Error(`launcher ${path} 失败: HTTP ${res.status} ${text}`);
+			}
+			if (method === "GET") return (await res.json()) as unknown;
+			return undefined;
 		}
-		if (method === "GET") return (await res.json()) as unknown;
-		return undefined;
 	}
 
 	/** 查询后台准备状态。 */
@@ -155,9 +211,20 @@ export class LauncherHttpClient {
 		const intervalMs = options.intervalMs ?? DEFAULT_PREPARE_POLL_INTERVAL_MS;
 		const deadline = Date.now() + timeoutMs;
 		for (;;) {
-			const status = parsePrepareStatus(
-				await this.send(ctl, "GET", "/prepare/status"),
-			);
+			let status: LauncherPrepareStatus;
+			try {
+				status = parsePrepareStatus(
+					await this.send(ctl, "GET", "/prepare/status"),
+				);
+			} catch (e) {
+				// 控制通道瞬时连不上（launcher 刚切换端口/回环抖动）继续等；
+				// 明确的 HTTP 拒绝或响应非法说明 launcher 真的答不了，立即失败。
+				if (!(e instanceof LauncherUnreachableError) || Date.now() >= deadline) {
+					throw e;
+				}
+				await sleep(intervalMs);
+				continue;
+			}
 			if (status.state === "ready") return;
 			if (status.state === "failed") {
 				throw new Error(

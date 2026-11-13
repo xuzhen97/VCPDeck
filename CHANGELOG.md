@@ -21,6 +21,7 @@
 
 ### Fixed
 
+- **服务端自更新不再被控制通道抖动打断**：发布时 Server 通过本机 `control.json` 调用 Launcher，回环上的 `fetch` 偶发 `TypeError: fetch failed`（真实 errno 藏在 `cause` 链里）。过去一次失败就让整个发布落库为 `failed`，而消息只剩 `服务端更新失败: fetch failed`，既看不出断在哪一步，也无从判断要不要重试。现在幂等的 `GET /prepare/status` 单次失败先就地重试三次，仍连不上则继续按轮询间隔重试到准备期限；明确返回的 HTTP 错误仍然立即失败；`POST /prepare` 与 `POST /apply` 不自动重发（`/apply` 已生效时会重复切换）。失败消息同时带上断点与 errno，例如 `服务端更新失败（等待 launcher 准备完成）: launcher /prepare/status 连不上: fetch failed / ECONNRESET`。
 - **Tailnet 不再把用不了的凭据摆成可选项**：凭据交付出错、取消或结果不明会落 `uncertain`，此后既不能被预留也不能复用；但机器页的下拉一直把它当普通凭据列出，选中后点「加入 Tailnet」只得到服务端 409 `TAILNET_KEY_BUSY`，界面仅显示一个错误码，看上去像「凭据坏了却没人说为什么」。现在机器页只把 `available` 列为可选项，其余状态在列表里标注原因与下一步（`uncertain` 明确要求导入新的 Auth key——它的正文已经下发过，一次性 key 不能保证还能用，所以不提供「再试一次」）；没有可用凭据时给出显式提示；操作失败后重新拉取凭据列表，界面不会停在旧状态。服务端 `TAILNET_KEY_BUSY` 的文案同时改为按实际状态说明（已被预留／已消耗／状态不确定），CLI 与 SDK 调用方能直接读到原因。
 
 - **自更新不再把「正在组装」误判为「组装失败」**：`/prepare` 只是「受理」——Launcher 受理后立刻把状态置为 `preparing`，在后台下载/验签/组装，然后才回 200。`/apply` 的放行条件取决于这一状态：0.23.11 的 Launcher（签名发布重写版）只认 `ready`，否则回 409 `{"code":"ASSEMBLE_FAILED","message":"版本尚未准备就绪"}`；调用方读到 `/prepare` 的 200 就立刻 `/apply`，而组装要几十秒，于是几乎必然撞上 `preparing` 被拒——「正在组装」被报成「组装失败」。0.23.12 起 Launcher 恢复「`preparing` 时等后台任务」，但 Launcher 会被冻结在安装时的构件版本、不随自更新替换，能否通过仍取决于「安装时点」：gcp01 的 launcher 停在 0.23.11，连续三个版本自更新失败，最后只能手工覆盖 launcher 才恢复。现在 Server 更新自身与 Client 更新自己都先轮询 `/prepare/status` 直到 `ready` 再 `/apply`（`idle`/`preparing` 都只代表尚未就绪，继续等），`failed` 立即带 Launcher 的稳定错误码失败、不再白停业务进程；Launcher 端的兼容等待保留，旧调用方行为不变。

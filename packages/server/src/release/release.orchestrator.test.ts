@@ -172,6 +172,10 @@ describe("ReleaseOrchestrator", () => {
 				"1.2.1",
 				expect.stringContaining("ASSEMBLE_FAILED"),
 			);
+			expect(deps.releases.markFailed).toHaveBeenCalledWith(
+				"1.2.1",
+				expect.stringContaining("等待 launcher 准备完成"),
+			);
 		});
 
 		it("archive 登记了 deltas 时服务端自更新也下发 candidates", async () => {
@@ -247,6 +251,11 @@ describe("ReleaseOrchestrator", () => {
 			expect(deps.releases.markFailed).toHaveBeenCalledWith(
 				"1.2.1",
 				expect.stringContaining("下载失败"),
+			);
+			// 失败原因要带上是哪一步断的：只留底层文案时排障得靠猜
+			expect(deps.releases.markFailed).toHaveBeenCalledWith(
+				"1.2.1",
+				expect.stringContaining("通知 launcher 准备"),
 			);
 			expect(deps.channel.broadcastShutdown).not.toHaveBeenCalled();
 		});
