@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.23.16";
+    exports2.VERSION = "0.23.17";
   }
 });
 
@@ -775,7 +775,11 @@ var require_tailnet = __commonJS({
     ];
     var TAILNET_ACTION_KEYS = {
       inspect: ["action"],
-      ensure: ["action", "credentialId", "installIfMissing"]
+      ensure: ["action", "credentialId", "installIfMissing", "allowUncertainReuse"]
+    };
+    var TAILNET_ACTION_OPTIONAL_KEYS = {
+      inspect: [],
+      ensure: ["allowUncertainReuse"]
     };
     function requireRecord(value, label) {
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -783,7 +787,7 @@ var require_tailnet = __commonJS({
       }
       return value;
     }
-    function requireExactKeys(value, label, allowed) {
+    function requireExactKeys(value, label, allowed, optional = []) {
       const record = requireRecord(value, label);
       for (const key of Object.keys(record)) {
         if (!allowed.includes(key)) {
@@ -791,6 +795,8 @@ var require_tailnet = __commonJS({
         }
       }
       for (const key of allowed) {
+        if (optional.includes(key))
+          continue;
         if (!Object.hasOwn(record, key)) {
           throw new Error(`${label} \u7F3A\u5C11\u5B57\u6BB5 ${key}`);
         }
@@ -866,15 +872,19 @@ var require_tailnet = __commonJS({
       if (action !== "inspect" && action !== "ensure") {
         throw new Error("tailnet job payload \u7684 action \u4E0D\u5408\u6CD5");
       }
-      requireExactKeys(record, "tailnet job payload", TAILNET_ACTION_KEYS[action]);
+      requireExactKeys(record, "tailnet job payload", TAILNET_ACTION_KEYS[action], TAILNET_ACTION_OPTIONAL_KEYS[action]);
       if (action === "inspect") {
         return { action: "inspect" };
       }
-      return {
+      const payload = {
         action: "ensure",
         credentialId: requireBoundedString(record.credentialId, "credentialId", MAX_ID),
         installIfMissing: requireBoolean(record.installIfMissing, "installIfMissing")
       };
+      if (record.allowUncertainReuse !== void 0) {
+        payload.allowUncertainReuse = requireBoolean(record.allowUncertainReuse, "allowUncertainReuse");
+      }
+      return payload;
     }
     function parseTailnetSnapshot(value) {
       const record = requireExactKeys(value, "tailnet snapshot", [
@@ -4767,7 +4777,9 @@ function createTailnetApi(client) {
         body = {
           action: "ensure",
           credentialId: payload.credentialId,
-          installIfMissing: payload.installIfMissing
+          installIfMissing: payload.installIfMissing,
+          // 只有显式确认时才带上：缺省请求体与 0.23.16 及更早逐字相同
+          ...payload.allowUncertainReuse === true ? { allowUncertainReuse: true } : {}
         };
       } else {
         throw new Error("Tailnet \u4EFB\u52A1 action \u4E0D\u5408\u6CD5");
