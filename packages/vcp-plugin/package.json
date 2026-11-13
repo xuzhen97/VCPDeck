@@ -1,6 +1,6 @@
 {
   "name": "@vcpdeck/vcp-plugin",
-  "version": "0.23.17",
+  "version": "0.23.18",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
