@@ -234,6 +234,9 @@ export class ReleaseOrchestrator {
 			}
 			return;
 		}
+		void this.reconcileClientVersion(clientId, clientVersion).catch((e) => {
+			console.error(`[release] 客户端失败记录对账失败: ${e}`);
+		});
 		void this.triggerCatchUp(clientId, clientVersion).catch((e) => {
 			console.error(`[release] 客户端补更触发失败: ${e}`);
 		});
@@ -308,7 +311,12 @@ export class ReleaseOrchestrator {
 		clientVersion: string,
 	): Promise<void> {
 		const target = (await this.releases.getLatestActiveTarget()) ?? null;
-		if (!target || clientVersion === target.version) return;
+		if (!target) return;
+		if (clientVersion === target.version) {
+			// 已经跑在目标版本上：把残留的失败记录对账成完成。
+			await this.reconcileClientVersion(clientId, clientVersion);
+			return;
+		}
 		if (!canRetryClientUpdate(target.clientStates[clientId], new Date()))
 			return;
 		if (this.activePhase) {
@@ -316,6 +324,58 @@ export class ReleaseOrchestrator {
 			return;
 		}
 		await this.runClientPhase(target.version);
+	}
+
+	/**
+	 * 记录自愈（按客户端上报的版本）：该版本的发版记录里若还留着这台机器的
+	 * 失败条目，就地改为完成。
+	 *
+	 * 与 `reconcileUptoDateClients` 的分工：这里是「注册时顺手对账」，能修历史
+	 * 版本行（客户端旁路升级后，旧版本的发版记录仍标着它失败）；那边是周期
+	 * 对账，只覆盖当前补更目标。
+	 */
+	private async reconcileClientVersion(
+		clientId: string,
+		clientVersion: string,
+	): Promise<void> {
+		const release = await this.releases.findByVersion(clientVersion);
+		if (!release) return;
+		if (release.clientStates[clientId]?.state !== ReleaseClientState.FAILED)
+			return;
+		await this.releases.markClientState(
+			clientVersion,
+			clientId,
+			ReleaseClientState.DONE,
+		);
+		console.log(
+			`[release] 客户端 ${clientId} 已在 ${clientVersion}，失败记录已对账为完成`,
+		);
+	}
+
+	/**
+	 * 记录自愈：客户端已经运行目标版本，却仍留着失败记录的，就地改为完成。
+	 *
+	 * 客户端靠人工 apply、重装或其他旁路到达目标版本时，更新循环只会把
+	 * 「已是目标版本」的机器过滤掉（`runClientLoop`），失败记录便不再被重算，
+	 * 发版结果会长期显示一台其实已经升级成功的机器失败。
+	 */
+	private async reconcileUptoDateClients(version: string): Promise<void> {
+		const release = await this.releases.findByVersion(version);
+		if (!release) return;
+		const online = await this.channel.listOnlineClients();
+		for (const client of online) {
+			if (client.clientVersion !== version) continue;
+			const entry = release.clientStates[client.clientId];
+			if (entry?.state !== ReleaseClientState.FAILED) continue;
+			await this.releases.markClientState(
+				version,
+				client.clientId,
+				ReleaseClientState.DONE,
+			);
+			console.log(
+				`[release] 客户端 ${client.clientId} 已在 ${version}，失败记录已对账为完成`,
+			);
+		}
 	}
 
 	/** 客户端阶段互斥入口（重入时复用进行中的循环） */
@@ -369,6 +429,8 @@ export class ReleaseOrchestrator {
 		version: string,
 		forcedClientId?: string,
 	): Promise<void> {
+		// 先对账：靠人工或旁路升到目标版本的客户端，失败记录要自愈。
+		await this.reconcileUptoDateClients(version);
 		const processedClientIds = new Set<string>();
 		while (true) {
 			const release = await this.releases.findByVersion(version);

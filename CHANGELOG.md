@@ -21,6 +21,7 @@
 
 ### Fixed
 
+- **发版记录会自愈**：客户端靠人工 `apply`、重装或其他旁路升到目标版本后，`release status` 里那条 `failed` 原本不再重算——更新循环只处理版本落后的机器，失败条目会永久留在记录里，让人误以为机器没升级。现在注册钩子会按客户端上报的版本对账该版本的发版记录（也覆盖历史版本行），周期对账再覆盖当前补更目标：版本已对上而条目仍是 `failed` 时就地改成 `done`。失败次数与永久失败类别仍按原规则用于「落后机器」的重试判定。
 - **Tailnet 入网在 Linux 专用非 root 账户下不再必然失败**：Client 以 `vcpdeck` 账户运行时，`systemctl start tailscaled`、`tailscale up` 与安装期的 unit/二进制落盘都没有提权，`tailscale up` 被本地 API 以 `Access denied: checkprefs access denied` 拒绝，任务以 `TAILNET_JOIN_FAILED` 结束；已安装但服务停用的机器更早就会被 `TAILNET_EXISTING_CONFIG` 拒绝——服务停止时探测只能给出 `stopped`/`unknown`，原判定顺序让「先启动服务再重新观测」的分支实际不可达。现在这些需要 root 的命令统一经 `sudo -n` 执行（ADR-0023 的免密 sudo，无 sudo 时立即失败而非交互等密码），安装前置权限判定接受免密 sudo 账户，并把「按需启动服务 → 重新观测 → 再判定」移到拒绝之前：启动后观测到 `needs-login` 才请求密钥入网，启动失败或启动后仍观测不到运行态返回 `TAILNET_CLI_FAILED`，观测到 `stopped` 或已有节点名/IP 仍返回 `TAILNET_EXISTING_CONFIG`。
 
 - **Tailnet「加入」不再一律报 `TAILNET_KEY_UNAVAILABLE`**：`JobModule` 此前没有导入 `TailnetModule`，而 `JobService` 用 `@Optional() @Inject(TailnetKeyService)` 接收密钥服务，缺失依赖被 Nest 静默解析成 `undefined`，于是 `createTailnetJob` 在创建 Job 之前就抛 `TAILNET_KEY_UNAVAILABLE`（503，文案为「Tailnet 密钥服务不可用」）。表现为根密钥与凭据都正常、凭据仍显示「可用」，但机器页的 Tailnet 操作全部失败，库里也不会留下 Job 或 `TailnetClientOperation` 记录。现在 `JobModule` 导入 `TailnetModule`，并补模块装配回归测试锁住这条依赖。

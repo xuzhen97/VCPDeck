@@ -785,6 +785,82 @@ describe("ReleaseOrchestrator", () => {
 		});
 	});
 
+	describe("发版记录自愈", () => {
+		const failedEntry = {
+			state: ReleaseClientState.FAILED,
+			reason: "launcher /apply 失败: HTTP 409 ASSEMBLE_FAILED",
+			at: "2026-10-14T00:00:00.000Z",
+			kind: "transient" as const,
+			attempts: 1,
+		};
+
+		it("客户端已运行目标版本时，注册钩子把失败记录对账成完成", async () => {
+			const target = releaseInfo({
+				status: ReleaseStatus.DONE,
+				clientStates: { c1: failedEntry },
+			});
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			deps.releases.findByVersion.mockResolvedValue(target);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			orchestrator.onClientRegistered("c1", "1.2.1");
+
+			await vi.waitFor(() => {
+				expect(deps.releases.markClientState).toHaveBeenCalledWith(
+					"1.2.1",
+					"c1",
+					ReleaseClientState.DONE,
+				);
+			});
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
+		});
+
+		it("客户端注册到历史版本时，该版本记录里的失败条目也自愈", async () => {
+			const previous = releaseInfo({
+				version: "1.2.0",
+				status: ReleaseStatus.DONE,
+				clientStates: { c1: failedEntry },
+			});
+			deps.releases.getLatestActiveTarget.mockResolvedValue(null);
+			deps.releases.findByVersion.mockResolvedValue(previous);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			orchestrator.onClientRegistered("c1", "1.2.0");
+
+			await vi.waitFor(() => {
+				expect(deps.releases.markClientState).toHaveBeenCalledWith(
+					"1.2.0",
+					"c1",
+					ReleaseClientState.DONE,
+				);
+			});
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
+		});
+
+		it("周期对账把已在目标版本的失败记录自愈，且不再派发更新", async () => {
+			const target = releaseInfo({
+				status: ReleaseStatus.DONE,
+				clientStates: { c1: failedEntry },
+			});
+			deps.releases.getLatestActiveTarget.mockResolvedValue(target);
+			deps.releases.findByVersion.mockResolvedValue(target);
+			deps.releases.markClientState.mockResolvedValue({});
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{ clientId: "c1", clientVersion: "1.2.1", os: "linux 6.8 x64" },
+			]);
+
+			await orchestrator.sweepCatchUp();
+
+			expect(deps.releases.markClientState).toHaveBeenCalledWith(
+				"1.2.1",
+				"c1",
+				ReleaseClientState.DONE,
+			);
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
+			expect(deps.releases.transitionStatus).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("人工强制重试", () => {
 		const overLimit = {
 			state: ReleaseClientState.FAILED,
