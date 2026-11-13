@@ -40,7 +40,31 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.23.18";
+    exports2.VERSION = "0.23.19";
+  }
+});
+
+// ../shared/dist/network.js
+var require_network = __commonJS({
+  "../shared/dist/network.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.describeTransportError = describeTransportError;
+    var TRANSPORT_CAUSE_DEPTH = 3;
+    function describeTransportError(error) {
+      if (!(error instanceof Error))
+        return String(error);
+      const parts2 = [error.message];
+      let cause = error.cause;
+      for (let depth = 0; depth < TRANSPORT_CAUSE_DEPTH && cause; depth += 1) {
+        const row = cause;
+        const detail = typeof row.code === "string" ? row.code : typeof row.message === "string" ? row.message : null;
+        if (detail !== null)
+          parts2.push(detail);
+        cause = row.cause;
+      }
+      return parts2.join(" / ");
+    }
   }
 });
 
@@ -3805,13 +3829,17 @@ var require_dist = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.isSafeReleaseFilePath = exports2.ReleaseArtifactErrorCode = exports2.CONTROL_PROTOCOL_VERSION = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseTailnetStatus = exports2.parseTailnetSnapshot = exports2.parseTailnetSecretResponse = exports2.parseTailnetSecretRequest = exports2.parseTailnetKeyInput = exports2.parseTailnetKeyInfo = exports2.parseTailnetJobResult = exports2.parseTailnetJobPayload = exports2.parseTailnetCapability = exports2.isTailnetErrorCode = exports2.assertTailnetSecretUsable = exports2.TAILNET_PROTOCOL_VERSION = exports2.TAILNET_ERROR_CODES = exports2.TAILNET_CAPABILITY = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.VERSION = void 0;
-    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parseReleaseDeltaManifest = exports2.parseReleaseFileEntry = exports2.canonicalReleaseManifestJson = void 0;
+    exports2.ReleaseArtifactErrorCode = exports2.CONTROL_PROTOCOL_VERSION = exports2.isReleaseArchiveAvailable = exports2.platformFromOs = exports2.parseReleaseUploadPartRefresh = exports2.parseReleaseUploadCreateInput = exports2.parseReleaseUploadComplete = exports2.ReleaseUploadErrorCode = exports2.ReleaseStatus = exports2.ReleaseClientState = exports2.parseJobLogLine = exports2.JobLogProtocolError = exports2.JOB_LOG_SERVER_EVENTS = exports2.JOB_LOG_LIMITS = exports2.JOB_LOG_LEVELS = exports2.JOB_LOG_CLIENT_EVENTS = exports2.parseTailnetStatus = exports2.parseTailnetSnapshot = exports2.parseTailnetSecretResponse = exports2.parseTailnetSecretRequest = exports2.parseTailnetKeyInput = exports2.parseTailnetKeyInfo = exports2.parseTailnetJobResult = exports2.parseTailnetJobPayload = exports2.parseTailnetCapability = exports2.isTailnetErrorCode = exports2.assertTailnetSecretUsable = exports2.TAILNET_PROTOCOL_VERSION = exports2.TAILNET_ERROR_CODES = exports2.TAILNET_CAPABILITY = exports2.parseGitSshTargetInput = exports2.parseGitSshCommand = exports2.parseGitSshCapability = exports2.parseGitSshAck = exports2.isGitSshTargetState = exports2.isGitSshFailureCode = exports2.GitSshProtocolError = exports2.GIT_SSH_TARGET_STATES = exports2.GIT_SSH_PROTOCOL_VERSION = exports2.GIT_SSH_MAX_TARGETS = exports2.GIT_SSH_FAILURE_CODES = exports2.parseClientInstallerPlatform = exports2.parseClientInstallerNameUpdate = exports2.parseClientInstallerConfigUpdate = exports2.ClientInstallerErrorCode = exports2.parseClientAnnotationsInput = exports2.parseClientAnnotations = exports2.hasClientAnnotations = exports2.describeTransportError = exports2.VERSION = void 0;
+    exports2.parseFeatureVerificationReport = exports2.parseFeatureUpdateInput = exports2.parseFeatureInvocation = exports2.parseFeatureInputs = exports2.parseFeatureCreateInput = exports2.parseFeatureContract = exports2.getFeatureFreshness = exports2.FeatureProtocolError = exports2.FEATURE_VERIFICATION_SOURCES = exports2.FEATURE_STATUSES = exports2.FEATURE_STALE_AFTER_DAYS = exports2.FEATURE_SCOPES = exports2.FEATURE_ERROR_CODES = exports2.parseFrpRuntimeStateReport = exports2.parseFrpRuntimeStateAck = exports2.parseFrpReconcileResult = exports2.parseFrpReconcilePayload = exports2.parseFrpCapabilityStatus = exports2.FRP_RECONCILE_PROTOCOL_VERSION = exports2.StorageShareErrorCode = exports2.FrpJobType = exports2.FrpProtocolError = exports2.FRP_ERROR_CODES = exports2.FRP_MAPPING_STATUSES = exports2.StorageProviderKind = exports2.AuthErrorCode = exports2.FileErrorCode = exports2.parsePrivilegedCapabilityStatus = exports2.parseMachineRegister = exports2.parseMachineInstallation = exports2.parseRemoteDevCapabilityStatus = exports2.parseAcpCapabilityStatus = exports2.getClientInstallationCompliance = exports2.PrivilegedCapabilityMode = exports2.MachineInstallationMode = exports2.ClientInstallationComplianceReason = exports2.JobStatus = exports2.JobType = exports2.Events = exports2.parseReleaseDeltaManifest = exports2.parseReleaseFileEntry = exports2.canonicalReleaseManifestJson = exports2.isSafeReleaseFilePath = void 0;
     exports2.parseFrpOperationTimeout = parseFrpOperationTimeout;
     exports2.parseFrpMappingCreateRequest = parseFrpMappingCreateRequest;
     var version_js_1 = require_version();
     Object.defineProperty(exports2, "VERSION", { enumerable: true, get: function() {
       return version_js_1.VERSION;
+    } });
+    var network_js_1 = require_network();
+    Object.defineProperty(exports2, "describeTransportError", { enumerable: true, get: function() {
+      return network_js_1.describeTransportError;
     } });
     var client_annotations_js_1 = require_client_annotations();
     Object.defineProperty(exports2, "hasClientAnnotations", { enumerable: true, get: function() {
