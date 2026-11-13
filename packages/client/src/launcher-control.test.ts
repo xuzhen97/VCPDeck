@@ -165,4 +165,67 @@ describe("ClientLauncher", () => {
 			"状态未知: weird",
 		);
 	});
+
+	it("prepareUpdate：传输层失败重试后成功（launcher 恢复响应）", async () => {
+		fetchImpl
+			.mockRejectedValueOnce(new TypeError("fetch failed"))
+			.mockResolvedValueOnce(okResponse());
+
+		await expect(
+			launcher.prepareUpdate({
+				version: "1.2.1",
+				url: "http://x",
+				sha256: "a".repeat(64),
+			}),
+		).resolves.toBeUndefined();
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it("prepareUpdate：重试用尽后给出可诊断原因（展开 cause 链）", async () => {
+		fetchImpl.mockRejectedValue(
+			Object.assign(new TypeError("fetch failed"), {
+				cause: { code: "ECONNRESET" },
+			}),
+		);
+
+		await expect(
+			launcher.prepareUpdate({
+				version: "1.2.1",
+				url: "http://x",
+				sha256: "a".repeat(64),
+			}),
+		).rejects.toThrow("launcher /prepare 连不上: fetch failed / ECONNRESET");
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
+	});
+
+	it("waitForPrepared：传输层失败不中断轮询", async () => {
+		fetchImpl
+			.mockRejectedValueOnce(new TypeError("fetch failed"))
+			.mockResolvedValueOnce(
+				jsonResponse({ state: "preparing", version: "1.2.1" }),
+			)
+			.mockResolvedValueOnce(jsonResponse({ state: "ready", version: "1.2.1" }));
+
+		await expect(
+			launcher.waitForPrepared({ intervalMs: 1, timeoutMs: 1000 }),
+		).resolves.toBeUndefined();
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
+	});
+
+	it("waitForPrepared：HTTP 拒绝不是瞬时故障，立即抛错", async () => {
+		fetchImpl.mockResolvedValue(errResponse(503, "busy"));
+
+		await expect(
+			launcher.waitForPrepared({ intervalMs: 1, timeoutMs: 1000 }),
+		).rejects.toThrow("launcher /prepare/status 失败: HTTP 503 busy");
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+	});
+
+	it("waitForPrepared：超时消息带上最后一次传输层原因", async () => {
+		fetchImpl.mockRejectedValue(new TypeError("fetch failed"));
+
+		await expect(
+			launcher.waitForPrepared({ intervalMs: 1, timeoutMs: 5 }),
+		).rejects.toThrow("launcher 准备超时（5ms）: fetch failed");
+	});
 });

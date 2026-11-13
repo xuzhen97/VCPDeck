@@ -156,7 +156,10 @@ async function handleUpdateRequest(
 		// apply 后本进程应被 launcher 停止；连接被掐断与「进程仍存活」无法
 		// 可靠区分，不在此上报失败——终局以重连注册版本为准。
 	} catch (e) {
-		emitFailed(deps, releaseVersion, e instanceof Error ? e.message : String(e));
+		const reason = e instanceof Error ? e.message : String(e);
+		// 失败原因同时落本机日志：Server 只收到一行 reason，现场追查需要原始上下文。
+		log(`更新失败: ${reason}`);
+		emitFailed(deps, releaseVersion, reason);
 	} finally {
 		draining = false;
 	}

@@ -17,6 +17,7 @@ import {
 	type LauncherPrepareStatus,
 	ReleaseArtifactErrorCode,
 	type ReleaseDeltaCandidate,
+	describeTransportError,
 } from "@vcpdeck/shared";
 import { homedir } from "node:os";
 import { readFile } from "node:fs/promises";
@@ -41,8 +42,6 @@ const DEFAULT_PREPARE_TIMEOUT_MS = 10 * 60 * 1000;
 /** 幂等 GET 的网络层重试次数与间隔：本机回环也可能因连接复用竞态失败一次。 */
 const NETWORK_ATTEMPT_LIMIT = 3;
 const NETWORK_RETRY_DELAY_MS = 200;
-/** cause 链最多展开几层：undici 的 fetch failed 常把真实 errno 藏在第二层。 */
-const NETWORK_CAUSE_DEPTH = 3;
 
 const DEFAULT_CONTROL_FILE = join(
 	process.env.VCPDECK_APP_DIR ?? join(homedir(), ".vcpdeck", "launcher"),
@@ -59,31 +58,6 @@ class LauncherUnreachableError extends Error {
 		super(message);
 		this.name = "LauncherUnreachableError";
 	}
-}
-
-/**
- * 把 fetch 的网络层异常压成一行。
- *
- * undici 只暴露 `TypeError: fetch failed`，真正的 errno 在 `cause` 链里；
- * 只记外层消息会让「连不上」与「连接被重置」无法区分（2026-11-13 生产：
- * Release 只留下 `服务端更新失败: fetch failed`，无从判断哪一步断的）。
- */
-function describeTransportError(error: unknown): string {
-	if (!(error instanceof Error)) return String(error);
-	const parts: string[] = [error.message];
-	let cause: unknown = (error as { cause?: unknown }).cause;
-	for (let depth = 0; depth < NETWORK_CAUSE_DEPTH && cause; depth += 1) {
-		const row = cause as { code?: unknown; message?: unknown; cause?: unknown };
-		const detail =
-			typeof row.code === "string"
-				? row.code
-				: typeof row.message === "string"
-					? row.message
-					: null;
-		if (detail !== null) parts.push(detail);
-		cause = row.cause;
-	}
-	return parts.join(" / ");
 }
 
 /** /prepare/status 是跨进程输入，逐字段校验，未知 state 不宽松猜测。 */

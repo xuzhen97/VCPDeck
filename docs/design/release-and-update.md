@@ -348,6 +348,8 @@ Launcher 启动时：
 - `POST /prepare` 与 `POST /apply` 不自动重发——`/apply` 一旦生效就重复执行切换；
 - 失败落库的消息带上是哪一步断的（`服务端更新失败（通知 launcher 准备 / 等待 launcher 准备完成 / 等待运行中 Job 收敛 / 通知客户端停机 / 切换版本）: 原因`），并保留 `cause` 链里的 errno，例如 `launcher /prepare/status 连不上: fetch failed / ECONNRESET`。
 
+Client 更新自己时（0.23.19 起）用同一套区分，但重试位置不同：`POST /prepare` 是幂等的（Launcher 对已准备版本直接短路），所以传输层失败就地重试三次（间隔 100ms×次数），用尽才失败；`waitForPrepared` 的轮询本身是重试，遇传输层失败只记下最后一次原因继续等到期限，超时消息带尾缀（`launcher 准备超时（600000ms）: fetch failed / ECONNRESET`）；Launcher 明确返回的 HTTP/协议错误仍然立即失败。每次调用都重读 `control.json`，因为 Launcher 重启会换端口与 Token。这条链路必须容错的直接原因是 Launcher 的 `prepare` 会把事件循环占满：解压（`execFileSync`）、`cpSync` 覆盖、逐文件 hash 校验与硬链接都是同步 I/O，慢盘机器实测阻塞 18s（gcp01 `解压完成 0.2s` → `总耗时 47.1s`），远超 Node 默认 5s 的 keep-alive 窗口，复用连接被 launcher 作废后客户端只能拿到 `fetch failed`/`ECONNRESET`。0.23.17 与 0.23.18 首轮各有 9 台因此整批失败，而补更时因 `isPrepared()` 短路不再阻塞而秒成功。Launcher 侧的根因（组装期间既不响应也不报告进度）仍待解决，记录在 [`../roadmap.md`](../roadmap.md) 第 20 条。
+
 ### 8.3 Node 运行时
 
 启动版本时 Launcher 按 manifest `nodeVersion`：

@@ -224,6 +224,35 @@ describe("客户端优雅停机（update.ts）", () => {
 		expect(isDraining()).toBe(false);
 	});
 
+	it("更新失败时把原因同时写本机日志（Server 只收到一行 reason）", async () => {
+		const log = vi.fn();
+		const otherSocket = makeSocket();
+		const otherLauncher = makeLauncher();
+		const reason = "launcher /prepare 连不上: fetch failed / ECONNRESET";
+		otherLauncher.prepareUpdate.mockRejectedValue(new Error(reason));
+		otherLauncher.waitForPrepared.mockResolvedValue(undefined);
+		otherLauncher.applyUpdate.mockResolvedValue(undefined);
+		attachUpdateHandler({
+			socket: otherSocket as never,
+			launcher: otherLauncher as never,
+			serverBase: "http://localhost:3001",
+			getRunningJobIds: () => [],
+			pollIntervalMs: 50,
+			log,
+		});
+		const handler = otherSocket.handlers.get(Events.UPDATE_REQUEST);
+		if (!handler) throw new Error("UPDATE_REQUEST 未注册");
+		handler(REQ as never);
+
+		await vi.waitFor(() => {
+			expect(log).toHaveBeenCalledWith(`更新失败: ${reason}`);
+		});
+		expect(lastEmit(otherSocket, Events.UPDATE_FAILED)).toMatchObject({
+			releaseVersion: "1.2.1",
+			reason,
+		});
+	});
+
 	it("等待超时 → 强制继续（仍发 READY 并 apply）", async () => {
 		vi.useFakeTimers();
 		runningJobs = ["job-1"]; // 一直不完成

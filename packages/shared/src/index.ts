@@ -1,5 +1,8 @@
 export { VERSION } from "./version.js";
 
+// ── 传输层错误展开（Server/Client 共用诊断） ──
+export { describeTransportError } from "./network.js";
+
 // ── Client 操作者注解（ADR-0055） ──
 export {
 	hasClientAnnotations,

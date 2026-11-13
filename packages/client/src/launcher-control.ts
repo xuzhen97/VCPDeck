@@ -16,6 +16,7 @@ import {
 	type LauncherPrepareStatus,
 	ReleaseArtifactErrorCode,
 	type ReleaseDeltaCandidate,
+	describeTransportError,
 } from "@vcpdeck/shared";
 
 export interface LauncherControl {
@@ -34,6 +35,15 @@ export interface ClientLauncherOptions {
 const DEFAULT_PREPARE_POLL_INTERVAL_MS = 1000;
 const DEFAULT_PREPARE_TIMEOUT_MS = 10 * 60 * 1000;
 
+/**
+ * 控制通道的传输层重试：launcher 在 prepare 期间用同步 I/O 组装/校验，
+ * 事件循环被占满超过 HTTP keep-alive 窗口后，复用的连接会被作废，客户端
+ * 只看到裸 `fetch failed`（ECONNRESET）。重试一次即可命中，因为 launcher
+ * 已恢复响应；这里的重试只是不让一次瞬时失败打断整次更新。
+ */
+const CONTROL_ATTEMPT_LIMIT = 3;
+const CONTROL_RETRY_DELAY_MS = 100;
+
 const DEFAULT_CONTROL_FILE = join(
 	process.env.VCPDECK_APP_DIR ?? join(homedir(), ".vcpdeck", "launcher"),
 	"control.json",
@@ -41,6 +51,15 @@ const DEFAULT_CONTROL_FILE = join(
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 区分协议级失败与传输层失败：本模块与 parser 抛出的协议错误消息一律以
+ * `launcher ` 开头；其余（undici 的 fetch failed、control.json 读取失败）
+ * 都属于「控制通道暂时不可用」，可以重试。
+ */
+function isTransportFailure(error: unknown): boolean {
+	return !(error instanceof Error && error.message.startsWith("launcher "));
 }
 
 /** /prepare/status 是跨进程输入，逐字段校验，未知 state 不宽松猜测。 */
@@ -98,6 +117,30 @@ export class ClientLauncher {
 		return { port: parsed.port, token: parsed.token };
 	}
 
+	/**
+	 * 控制通道调用：每次重读 control.json（launcher 重启会换端口），传输层
+	 * 失败有限重试；协议级失败（HTTP 状态、响应无效）立即抛出。
+	 */
+	private async call(
+		method: "GET" | "POST",
+		path: string,
+		body?: unknown,
+	): Promise<unknown> {
+		for (let attempt = 1; ; attempt += 1) {
+			try {
+				return await this.send(await this.readControl(), method, path, body);
+			} catch (e) {
+				if (!isTransportFailure(e)) throw e;
+				if (attempt >= CONTROL_ATTEMPT_LIMIT) {
+					throw new Error(
+						`launcher ${path} 连不上: ${describeTransportError(e)}`,
+					);
+				}
+				await sleep(CONTROL_RETRY_DELAY_MS * attempt);
+			}
+		}
+	}
+
 	private async send(
 		ctl: LauncherControl,
 		method: "GET" | "POST",
@@ -122,8 +165,7 @@ export class ClientLauncher {
 
 	/** 查询后台准备状态。 */
 	async getPrepareStatus(): Promise<LauncherPrepareStatus> {
-		const ctl = await this.readControl();
-		return parsePrepareStatus(await this.send(ctl, "GET", "/prepare/status"));
+		return parsePrepareStatus(await this.call("GET", "/prepare/status"));
 	}
 
 	/** 第一阶段：让 launcher 受理新版本准备（下载/校验/解压），返回不代表完成。 */
@@ -134,33 +176,54 @@ export class ClientLauncher {
 		/** 候选增量包；由 Launcher 按本地基线自选，缺省只用 full 包 */
 		candidates?: ReleaseDeltaCandidate[];
 	}): Promise<void> {
-		const ctl = await this.readControl();
-		await this.send(ctl, "POST", "/prepare", input);
+		// 重复受理是安全的：launcher 的 prepare 对已准备好的版本直接短路。
+		await this.call("POST", "/prepare", input);
 	}
 
 	/**
 	 * 第二阶段的闸门：轮询 /prepare/status 直到 ready。
 	 * prepared 失败立即抛错（带 launcher 的稳定错误码），超时抛错。
+	 *
+	 * 传输层失败不算失败：launcher 在 prepare 期间用同步 I/O 组装，事件循环
+	 * 被占满时复用的连接会被作废（裸 `fetch failed`），此时它只是暂时答不上
+	 * 话，继续轮询即可；只有拖到总超时才算失败。
 	 */
 	async waitForPrepared(
 		options: { timeoutMs?: number; intervalMs?: number } = {},
 	): Promise<void> {
-		const ctl = await this.readControl();
 		const timeoutMs = options.timeoutMs ?? DEFAULT_PREPARE_TIMEOUT_MS;
 		const intervalMs = options.intervalMs ?? DEFAULT_PREPARE_POLL_INTERVAL_MS;
 		const deadline = Date.now() + timeoutMs;
+		let lastTransport: string | null = null;
 		for (;;) {
-			const status = parsePrepareStatus(
-				await this.send(ctl, "GET", "/prepare/status"),
-			);
-			if (status.state === "ready") return;
-			if (status.state === "failed") {
-				throw new Error(
-					`launcher 准备失败: ${status.errorCode ?? ReleaseArtifactErrorCode.ASSEMBLE_FAILED}`,
+			let status: LauncherPrepareStatus | null = null;
+			try {
+				status = parsePrepareStatus(
+					await this.send(
+						await this.readControl(),
+						"GET",
+						"/prepare/status",
+					),
 				);
+				lastTransport = null;
+			} catch (e) {
+				if (!isTransportFailure(e)) throw e;
+				lastTransport = describeTransportError(e);
+			}
+			if (status !== null) {
+				if (status.state === "ready") return;
+				if (status.state === "failed") {
+					throw new Error(
+						`launcher 准备失败: ${status.errorCode ?? ReleaseArtifactErrorCode.ASSEMBLE_FAILED}`,
+					);
+				}
 			}
 			if (Date.now() >= deadline) {
-				throw new Error(`launcher 准备超时（${timeoutMs}ms）`);
+				throw new Error(
+					lastTransport === null
+						? `launcher 准备超时（${timeoutMs}ms）`
+						: `launcher 准备超时（${timeoutMs}ms）: ${lastTransport}`,
+				);
 			}
 			await sleep(intervalMs);
 		}

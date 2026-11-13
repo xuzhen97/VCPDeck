@@ -39,6 +39,7 @@
 17. 按 ADR-0019 完成发布构件上传/下载双向数据面分离：Alibaba 由 CLI 分片直传 Provider、下载经统一入口 302，Server 只管理权限、持久化会话、元数据和编排；Local 保留 Server raw stream。
 18. 执行 ADR-0041 的 contract 步骤：确认该版本稳定后，清理遗留 `agent.session` Job 行与 Job 上不再使用的三个模式列（本次发布只做 expand，刻意不删，以保证回退无需恢复备份）。
 19. Launcher 不随自更新替换：自更新只替换 `apps/<version>/` 下的构件，Launcher 入口（Server 侧 `<appDir>/dist/main.js`、Client 侧 `<clientDir>/dist/main.js`）由安装或人工覆盖决定，运行中的控制通道会长期冻结在旧构建。生产已两次撞上：gcp01 停在 0.23.11 的 launcher，连续三个版本自更新都以 409 `ASSEMBLE_FAILED` 失败；instabox01 的入口只是一个 37,940 B 的残缺文件，`/prepare/status` 直接 404。两次都靠人工覆盖入口文件才恢复。候选方向（择一或组合，需先有 ADR）：Client 注册时上报 launcher 版本与端点能力，让发版记录能直接显示「launcher 冻结」并拒绝下发；`/apply` 前由调用方探测端点能力并给出可执行提示；把 launcher 自身纳入更新流程（要先解决「替换正在运行的入口」的原子性、回滚与自毁窗口）。
+20. Launcher `prepare` 用同步 I/O 阻塞事件循环：解压（`execFileSync`）、`cpSync` 覆盖、逐文件 hash 校验与硬链接全在事件循环里同步执行，同进程的控制端口（`/prepare/status`、`/apply`）在整段组装期间无法响应。慢盘机器实测阻塞 18s（gcp01：`解压完成 0.2s` → `总耗时 47.1s`）与 3s（instabox01：`0.1s` → `9.0s`），超过 Node 默认 5s keep-alive 窗口后调用方的复用连接被作废，表现为 `TypeError: fetch failed`/`ECONNRESET`——0.23.17 与 0.23.18 首轮各 9 台失败（几乎同一批 Windows 与云 VM）即此，补更时因 `isPrepared()` 短路不再阻塞而秒成功。当前的处理在调用方：0.23.19 起客户端把传输层失败当瞬时故障（`POST /prepare` 重试 3 次、轮询阶段继续等）并记录原始原因，0.23.16 起 Server 侧同款重试。未解决的是根本原因——Launcher 仍是「组装时既不响应也不报告进度」。候选方向：把解压/复制/校验移出主线程（子进程或 worker thread），使控制端口在 `preparing` 期间仍可响应并上报进度；或在 `preparing` 前先把控制面切成独立的小进程/监听器。需先确认控制协议是否要因此增加进度字段（属于协议变更）。
 
 ## 3. 中期候选：可运营性
 
