@@ -115,8 +115,9 @@ describe("ClientLauncher", () => {
 		await expect(launcher.applyUpdate()).rejects.toThrow("切换失败");
 	});
 
-	it("waitForPrepared：preparing 轮询到 ready 才返回", async () => {
+	it("waitForPrepared：idle/preparing 轮询到 ready 才返回", async () => {
 		fetchImpl
+			.mockResolvedValueOnce(jsonResponse({ state: "idle", version: null }))
 			.mockResolvedValueOnce(
 				jsonResponse({ state: "preparing", version: "1.2.1" }),
 			)
@@ -125,7 +126,7 @@ describe("ClientLauncher", () => {
 		await expect(
 			launcher.waitForPrepared({ intervalMs: 1, timeoutMs: 1000 }),
 		).resolves.toBeUndefined();
-		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(fetchImpl).toHaveBeenLastCalledWith(
 			"http://127.0.0.1:43124/prepare/status",
 			expect.objectContaining({ method: "GET" }),

@@ -54,7 +54,14 @@ function parsePrepareStatus(value: unknown): LauncherPrepareStatus {
 	}
 	const status = value as Record<string, unknown>;
 	const { state } = status;
-	if (state !== "ready" && state !== "preparing" && state !== "failed") {
+	// idle = 尚未受理/尚未开始；preparing = 后台下载或组装中。两者都只代表
+	// 「还没好」，由调用方继续轮询到 ready 或 failed。
+	if (
+		state !== "idle" &&
+		state !== "preparing" &&
+		state !== "ready" &&
+		state !== "failed"
+	) {
 		throw new Error(`launcher /prepare/status 状态未知: ${String(state)}`);
 	}
 	const version = status.version;

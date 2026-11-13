@@ -338,7 +338,7 @@ Launcher 启动时：
 
 `/apply` 在 prepare 仍在进行时等待其完成，只有 prepare 尚未受理或已经失败才返回 409。因此「旧 Server 只发一次 `/prepare`、读到 200 就立即 `/apply`」仍可完成切换；0.23.5 曾在 prepare 进行中直接回 409，0.23.6 起恢复本语义。
 
-轮询 `/prepare/status` 自 0.23.15 起是调用方的必备步骤，不是可选优化：Launcher 不随自更新替换，机器上可能长期停着旧 Launcher，而旧 Launcher 的 `/apply` 放行时机各不相同。0.23.11 及更早的 Launcher 在后台组装期间直接回 409，且拿不到具体错误码时把 `code` 回落成 `ASSEMBLE_FAILED`、文案「版本尚未准备就绪」，于是「组装慢」被误报成「组装失败」；0.23.12 起才在 `/apply` 里等后台组装结束。gcp01 的 launcher 停在 0.23.11，就是凭这一路径连续三个版本自更新失败。调用方先等 `ready` 后，两种 Launcher 都只需回答「现在就绪了吗」。
+轮询 `/prepare/status` 自 0.23.15 起是调用方的必备步骤，不是可选优化：`/apply` 的放行条件只看后台状态（`ready`，旧版 Launcher 另接受 `preparing`），而 `/prepare` 返回之后、后台任务登记之前存在状态仍是 `idle` 的瞬间，此时紧跟的 `/apply` 会得到 409，并在拿不到具体错误码时把 `code` 回落成 `ASSEMBLE_FAILED`、文案「版本尚未准备就绪」——「还没开始组装」被呈现成「组装失败」。Launcher 不随自更新替换，机器上可能长期停着旧 Launcher，把等待留给它等于让正确性取决于安装时点；gcp01 的 launcher 停在 0.23.11，就是这样连续三个版本自更新失败。调用方先等 `ready` 后，新旧 Launcher 都只需回答「现在就绪了吗」。
 
 ### 8.3 Node 运行时
 
