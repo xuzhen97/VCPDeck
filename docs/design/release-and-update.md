@@ -336,9 +336,9 @@ Launcher 启动时：
 
 两者都要求 `x-launcher-token`。`control.json` 是本机高敏感能力文件，应只允许 Launcher 和同一运行账户读取。Launcher 重启后 `pendingVersion` 丢失，必须重新 prepare。
 
-`/apply` 在 prepare 仍在进行时等待其完成，只有 prepare 尚未受理或已经失败才返回 409。因此「旧 Server 只发一次 `/prepare`、读到 200 就立即 `/apply`」仍可完成切换；0.23.5 曾在 prepare 进行中直接回 409，0.23.6 起恢复本语义。
+`/apply` 在 prepare 仍在进行时等待其完成，只有 prepare 尚未受理或已经失败才返回 409。因此「旧 Server 只发一次 `/prepare`、读到 200 就立即 `/apply`」仍可完成切换；0.23.5 曾在 prepare 进行中直接回 409，0.23.6 起恢复本语义。0.23.11 的签名发布重写又把放行条件收紧成只认 `ready`（`ASSEMBLE_FAILED` 固定码），0.23.12 通过 `7cf7872` 再次恢复；这两次反复正说明「等 prepare 完成」这件事不能交给 Launcher 单方面决定。
 
-轮询 `/prepare/status` 自 0.23.15 起是调用方的必备步骤，不是可选优化：`/apply` 的放行条件只看后台状态（`ready`，旧版 Launcher 另接受 `preparing`），而 `/prepare` 返回之后、后台任务登记之前存在状态仍是 `idle` 的瞬间，此时紧跟的 `/apply` 会得到 409，并在拿不到具体错误码时把 `code` 回落成 `ASSEMBLE_FAILED`、文案「版本尚未准备就绪」——「还没开始组装」被呈现成「组装失败」。Launcher 不随自更新替换，机器上可能长期停着旧 Launcher，把等待留给它等于让正确性取决于安装时点；gcp01 的 launcher 停在 0.23.11，就是这样连续三个版本自更新失败。调用方先等 `ready` 后，新旧 Launcher 都只需回答「现在就绪了吗」。
+轮询 `/prepare/status` 自 0.23.15 起是调用方的必备步骤，不是可选优化：`/prepare` 受理后立刻把状态置为 `preparing`，下载/验签/组装在后台进行、完成后才变 `ready`，而 `/apply` 是否放行取决于这一状态（0.23.11 只认 `ready`，0.23.6–0.23.10 与 0.23.12+ 另接受 `preparing` 并等待后台任务）。只发一次 `/prepare` 就紧跟 `/apply` 的调用方在 0.23.11 上几乎必然撞到 `preparing`，得到 409 `{"code":"ASSEMBLE_FAILED","message":"版本尚未准备就绪"}`——「正在组装」被呈现成「组装失败」。Launcher 不随自更新替换，机器上可能长期停着旧 Launcher，把等待留给它等于让正确性取决于安装时点；gcp01 的 launcher 停在 0.23.11，就是这样连续三个版本自更新失败。调用方先等 `ready`（`idle`/`preparing` 都只代表尚未就绪）后，新旧 Launcher 都只需回答「现在就绪了吗」。
 
 ### 8.3 Node 运行时
 
