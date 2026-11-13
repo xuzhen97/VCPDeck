@@ -5,7 +5,9 @@
  * 启动、修复或升级 Tailscale。任何异常都必须降级为 unknown。
  */
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { isIP } from "node:net";
+import { win32 } from "node:path";
 import type { TailnetErrorCode, TailnetSnapshot } from "@vcpdeck/shared";
 
 /** 单次只读命令的输出上限，防止异常输出撑爆内存。 */
@@ -37,10 +39,13 @@ export interface TailnetProbeDeps {
 	now: () => string;
 }
 
-function defaultRun(args: string[]): Promise<TailnetCommandResult> {
+function runBinary(
+	command: string,
+	args: string[],
+): Promise<TailnetCommandResult> {
 	return new Promise((resolve) => {
 		execFile(
-			"tailscale",
+			command,
 			args,
 			{
 				timeout: PROBE_TIMEOUT_MS,
@@ -67,6 +72,68 @@ function defaultRun(args: string[]): Promise<TailnetCommandResult> {
 			},
 		);
 	});
+}
+
+/**
+ * PATH 未刷新时的可执行文件兜底位置。
+ *
+ * 安装器成功后只更新系统 PATH（Windows 落在注册表），而已经运行的 client
+ * 进程仍持有启动时的环境快照，裸名调用会一直 ENOENT。这里给出各平台的
+ * 已知安装位置，仅在裸名解析失败后回退，不改变 PATH 优先的既有行为。
+ */
+export function fallbackBinaryCandidates(
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env,
+): string[] {
+	if (platform === "win32") {
+		const programFiles = env.ProgramFiles ?? "C:\\Program Files";
+		return [win32.join(programFiles, "Tailscale", "tailscale.exe")];
+	}
+	return ["/usr/local/bin/tailscale", "/usr/bin/tailscale"];
+}
+
+/** 首个真实存在的兜底路径；每次重新检查，安装后同进程内也能解析到。 */
+function existingBinary(
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env,
+): string | null {
+	for (const candidate of fallbackBinaryCandidates(platform, env)) {
+		if (existsSync(candidate)) {
+			return candidate;
+		}
+	}
+	return null;
+}
+
+/**
+ * 解析 tailscale 可执行文件。
+ *
+ * 已知安装位置存在时返回绝对路径（`tailscale up` 等写操作同样受
+ * 「PATH 未刷新」影响），否则退回裸名交给 PATH 解析。
+ */
+export function resolveTailscaleBinary(
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env,
+): string {
+	return existingBinary(platform, env) ?? "tailscale";
+}
+
+/**
+ * 执行只读探测命令。
+ *
+ * 先按 PATH 用裸名调用；只有 ENOENT（命令不存在）才回退到已知安装位置。
+ * 其余失败（超时、非 0 退出、输出超限）原样返回，不做第二次尝试。
+ */
+async function defaultRun(args: string[]): Promise<TailnetCommandResult> {
+	const primary = await runBinary("tailscale", args);
+	if (!primary.missing) {
+		return primary;
+	}
+	const fallback = existingBinary();
+	if (fallback === null) {
+		return primary;
+	}
+	return runBinary(fallback, args);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

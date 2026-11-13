@@ -17,7 +17,7 @@ import {
 import { Events } from "@vcpdeck/shared";
 import { privileged } from "../privileged-command.js";
 import { installTailnet } from "./installer.js";
-import { probeTailnet } from "./probe.js";
+import { probeTailnet, resolveTailscaleBinary } from "./probe.js";
 import { withTailnetSecretFile } from "./secret-file.js";
 import type { TailnetSocketBridge } from "./socket-bridge.js";
 
@@ -146,7 +146,7 @@ function runTailscaleUp(
 	signal: AbortSignal,
 ): Promise<TailnetJoinResult> {
 	const join = privileged(
-		"tailscale",
+		resolveTailscaleBinary(),
 		buildTailnetJoinArgs(secretPath, process.platform === "win32"),
 	);
 	return new Promise<TailnetJoinResult>((resolve, reject) => {
