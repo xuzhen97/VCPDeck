@@ -1,6 +1,6 @@
 # VCPDeck 兼容性与升级策略
 
-> 状态：Current｜维护责任：发布维护者｜最后核验：2026-10-22｜适用版本：`0.22.2` / 当前 `main`
+> 状态：Current｜维护责任：发布维护者｜最后核验：2026-11-14｜适用版本：`0.22.2` / 当前 `main`
 
 ## 1. 当前结论
 
@@ -22,6 +22,9 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 | Launcher ↔ 构件 | manifest `nodeVersion`、artifact entry、`apps/retention.json` | 新安装使用带本地版本保留能力的 Launcher；旧 Launcher 不会因业务 Release 自动升级，存量机器需执行一次性迁移脚本；`/update` 计划端点要求 Launcher ≥ `MIN_UPDATE_PLAN_LAUNCHER_VERSION`（当前 `0.23.6`），`launcherMinVersion` 在同一端点参与比较，打包脚本仍写 `0.0.0` |
 | 数据库 ↔ Server | Prisma schema/migrations | 向前升级前必须备份；不承诺自动降级 |
 | Node.js | release manifest 默认 `>=24` | Launcher 可选择系统或缓存 Node；Client 一键安装优先复用合格 x64 Node，否则安装用户私有 Node；开发环境也应使用 Node 24+ |
+| Client 平台上报 | 注册顶层可选 `releasePlatform`（`win-x64` / `linux-x64` / `linux-x64-musl`）与 `installation.mode`、`capabilityDetails.privileged` | 新 Client 必须先有能解析这些取值的新 Server；旧 Client 缺字段按“未报告”处理，不推断 |
+| Client musl 构件 | Release `archives["linux-x64-musl"]`（可选、仅 Client、只提供全量）；包内 `client/release-target.json` 描述符随签名清单的 `files` 一并被 hash 覆盖 | 缺失时 musl 目标 fail closed，绝不回退 glibc 包；双平台（`win-x64` + `linux-x64`）齐备规则不变，musl 不构成第三必需平台 |
+| Launcher 私有 musl Node | 描述符锁定 Node 24 的版本/URL/SHA-256；缓存键 `<platform>/node-<version>-<sha256>` | 目标机不安装发行版 Node、不用 npm/opkg；校验失败不切换并保留旧服务 |
 | FRP | 打包的 frpc/frps + Shared FRP DTO；capability `frp.reconcileProtocolVersion=1` 协商恢复对账 | 构件应成对验证；Dashboard 确认状态机、operationJobId、稳定错误码和单 Client 单 FrpsInstance 约束要求 Shared/Server/Client/SDK/CLI/Frontend 同步发布；恢复对账只在新 Client + 新 Server 组合生效，混合版本降级为“不自动恢复”而不是错误执行 |
 
 ## 3. 支持矩阵
@@ -37,7 +40,9 @@ VCPDeck 尚未发布稳定兼容承诺。Server、Client、Shared、SDK、CLI、
 
 “支持”表示进入发布验收矩阵，不表示所有历史版本永久兼容。
 
-Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+、Alibaba Cloud Linux 3 和 Bazzite x64 + glibc + systemd 组合。Alibaba Cloud Linux 3（`ID=alinux` 3.x）基于 Anolis OS 8，属 RHEL 8/CentOS 8 生态（glibc 2.32、dnf），依赖包名与 RHEL 9 一致，因此按 dnf 族纳入；其 2.x 属 CentOS 7 生态（glibc 2.17），与 CentOS 7 一同拒绝。ARM64、Alpine/musl、CentOS 7、WSL、容器和无 systemd Linux 会在下载大构件前明确拒绝；Node.js 自身支持某架构不代表 FRP、PTY 和 Release 原生依赖已支持。
+Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x64，以及 Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+、Alibaba Cloud Linux 3 和 Bazzite x64 + glibc + systemd 组合。Alibaba Cloud Linux 3（`ID=alinux` 3.x）基于 Anolis OS 8，属 RHEL 8/CentOS 8 生态（glibc 2.32、dnf），依赖包名与 RHEL 9 一致，因此按 dnf 族纳入；其 2.x 属 CentOS 7 生态（glibc 2.17），与 CentOS 7 一同拒绝。ARM64、未单列的 Alpine/musl（含其余 musl 发行版）、CentOS 7、WSL、容器和无 systemd Linux 会在下载大构件前明确拒绝；Node.js 自身支持某架构不代表 FRP、PTY 和 Release 原生依赖已支持。
+
+**iStoreOS 例外（ADR-0065）**：iStoreOS 24.10 x64 走独立的 musl + procd 安装路径，不经过上面的通用 glibc 安装器。支持边界严格限定为该发行版与 `linux-x64-musl` 目标：Alpine 等其它 musl 发行版、ARM64、非 procd init、`/opt` 落在 tmpfs 或未知文件系统的机器仍在下载大构件前拒绝。该路径已完成本地实现、单元测试与注入式安装器测试，并在目标验收机 iStoreOS 24.10.8 x64（Linux 6.6.144）通过平台门禁、musl PTY 编译/冒烟与完整安装（官方 bootstrap、0.23.20、procd-root 在线验收）；重启、冷启动与固件升级后的行为尚未验收，不得对外承诺“已验证可用”。首台 24.10.8 实测：musl 构件 6,702,008 bytes，完整 `linux-x64` 构件 102,855,218 bytes（约为其 6.5%）；安装后 `/opt/vcpdeck/client` 236,548 KiB，其中私有 Node 运行时 218,264 KiB、业务 apps 18,000 KiB；Launcher/Client 空闲 RSS 约 63/86 MiB。该数据是单机单次测量，不是所有设备或场景的容量承诺。
 
 **Tailnet 自动安装/入网矩阵独立且更窄**：仅 Windows 10/11 与 Windows Server 2016+ x64（需管理员）、Ubuntu 22.04/24.04 与 Debian 12/13 x64（需 root、systemd、TUN）。其它平台仍可只读探测，但未安装时拒绝自动安装，也不会降级为普通 Job 手工执行。上述组合**尚未完成 Windows/Linux 真机安装与入网验收**，当前只经过单元测试、注入式安装器测试和自动验证。
 
@@ -45,7 +50,7 @@ Client 一键安装第一版仅支持 Windows 10/11 x64、Windows Server 2019+ x
 
 **Linux A2 额外前提**：全新安装要求 root 或可用 sudo（安装器 `sudo -v` 验证），无法取得权限直接 `LINUX_SUDO_AUTH_FAILED` 失败关闭，不回退 PM2/用户服务；安装后的 `vcpdeck` 账户是 root 等价 Client（见 [`security.md`](./security.md) §4.5）。
 
-**系统级部署契约（ADR-0027）**：Client 注册上报 `installation.mode` 与 `capabilityDetails.privileged`。当前合规组合只有 `windows-system-task` + `windows-system`（Windows）与 `systemd-root-equivalent` + `sudo-all`（Linux）。旧 Client 缺字段、`legacy-pm2`、平台与模式不匹配、特权模式/可用性不满足都只记“未报告”或稳定不合规原因，**不猜测、不推断为合规**；`Shared` 的 `getClientInstallationCompliance` 是唯一判定入口。该判定**独立于业务 Release 版本**：`clientVersion` 已是最新仍可能提示“需要人工升级”。存量迁移不在 Server 上批量下发，需在目标机手动执行对应平台的安装命令。
+**系统级部署契约（ADR-0027）**：Client 注册上报 `installation.mode` 与 `capabilityDetails.privileged`。合规组合为 `windows-system-task` + `windows-system`（Windows）、`systemd-root-equivalent` + `sudo-all`（glibc + systemd Linux）以及 `procd-root` + `direct-root`（iStoreOS 24.10 x64 musl + procd）。`direct-root` 只接受 `{ available: true, mode: "direct-root", nonInteractive: true, runAsUser: "root" }`，表示 Client 本身以 root 运行、**不是沙箱**；它不冒充 `sudo-all`，也不会把 `nonInteractiveSudo` 置真。显式上报 `releasePlatform="linux-x64-musl"` 时还必须同时满足 `installation.mode="procd-root"`，否则稳定原因 `platform-mode-mismatch`；缺字段仍按未报告处理。旧 Client 缺字段、`legacy-pm2`、平台与模式不匹配、特权模式/可用性不满足都只记“未报告”或稳定不合规原因，**不猜测、不推断为合规**；`Shared` 的 `getClientInstallationCompliance` 是唯一判定入口。该判定**独立于业务 Release 版本**：`clientVersion` 已是最新仍可能提示“需要人工升级”。存量迁移不在 Server 上批量下发，需在目标机手动执行对应平台的安装命令。
 
 ### 远程 Agent 升级顺序（已退役）
 
@@ -74,6 +79,8 @@ P2P 隧道与浏览器远程桌面已按 [ADR-0053](./adr/0053-retire-p2p-tunnel
 7. Frontend 随 server 构件同版本分发（`server/public/` 同源托管，[ADR-0013](./adr/0013-frontend-bundled-with-server.md)）；跨源单独托管时需与目标 Server 版本同步发布并刷新缓存。
 
 Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba 直链遇到网络错误或 HTTP `500/502/503/504` 最多尝试 3 次；Launcher 从 Server 更新入口下载遇到网络错误或 HTTP `502/503/504` 最多尝试 3 次，并在每次尝试重新请求入口。确定性 `4xx`、URL 校验、SHA-256、解压、切换和探活失败不重试，也不改变失败 Client 不自动无限重试的语义。
+
+**iStoreOS musl 目标的更新约束**：Server 先于 Client 升级；musl Client 只接受全量包，发布侧不产出也不接受 `linux-x64-musl` 增量包，因此该机器每次更新都按全量下载。更新前 Launcher 必须重新校验目标包的签名/完整性与 `client/release-target.json`（平台、角色、运行时版本与 SHA-256）；校验不通过时拒绝切换并保留旧服务。私有运行时启动失败（版本、架构或 libc 不符）属于**目标拒绝**，不得回落到系统 Node、glibc 构件或另一种安装模式；人工修复后重发或重装唯一入口仍是 procd bootstrap。
 
 不要先手工部署新 Client 再保留旧 Server。
 
@@ -105,6 +112,7 @@ Release 下载的瞬时网络失败只做有界恢复：Server 换取 Alibaba �
 - Release manifest、上传会话或 Launcher 控制协议变化；
 - 改变 FrpsInstance secret DTO、默认实例、端口池、mapping 状态/删除语义或 Client 单/多 frpc runtime。
 - 新增 `capabilityDetails.tailnet` 与注册顶层 `tailnet` 摘要：旧 Server 的严格 parser 会拒绝未知的 `capabilityDetails` 字段，因此该变更**必须 Server 先行**，不得先部署新 Client；新 Server 兼容旧 Client 的缺省值；
+- 新增注册顶层 `releasePlatform`、`installation.mode="procd-root"`、`privileged.mode="direct-root"` 与 Release `archives["linux-x64-musl"]`：旧 Server 不认识这些取值，同样必须 **Server 先行**；新 Server 对旧 Client 的缺字段保持“未报告”语义，不推断平台或特权模式；
 
 ### 5.3 破坏性变化
 
@@ -160,6 +168,7 @@ manifest 已声明 `launcherMinVersion`，打包脚本仍写入 `0.0.0`；版本
 
 - Launcher 协议或目录结构不得做隐式破坏性变更；
 - 如必须升级 Launcher，应先使用明确的 Launcher 升级流程替换 `<app-dir>/dist/main.js`，再发布依赖它的业务构件；目标 Launcher 必须 ≥ 0.23.6：0.23.5 的 `/apply` 在 prepare 进行中直接回 409，而旧 Server 只发一次 `/prepare` 就立即 `/apply`，该组合必然失败；存量迁移可使用随 Client Release 分发的 `upgrade-launcher.cjs`，通过 `--app-dir`、`--source` 和 `--pm2-name` 显式指定目标，不建立长期自动升级状态机；
+- iStoreOS procd 部署的稳定 Launcher 位于 `/opt/vcpdeck/client/launcher/`，业务版本**不会**自动替换它；升级只能用 `upgrade-launcher-procd.cjs --staging <dir>`（校验目标 → 停服务 → 原子替换 `dist/` → 启动并验收，任一步失败回滚旧 `dist`），且不触碰业务 `apps` 指针、`/opt/vcpdeck/state` 身份与自动更新状态；
 - 发布说明必须写明最低 Launcher 要求和人工步骤；
 - 不得声称系统已对旧 `/file` 路径强制最低 Launcher 版本；
 - 发布脚本当前统一生成 `.zip`；Server/Launcher 按 `.zip` 保存和解压，Linux 目标机需要 `unzip`；Launcher 本地清理状态损坏时必须停用自动删除并人工恢复，不能按目录时间猜测历史。

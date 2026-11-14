@@ -116,5 +116,9 @@ export function getRegisterInfo(
 	if (runtimeSecurity?.installation !== undefined) {
 		register.installation = runtimeSecurity.installation;
 	}
+	// ADR-0065：发布平台只在真实探测出结果时上报；旧 Server 会忽略未知字段。
+	if (runtimeSecurity?.releasePlatform !== undefined) {
+		register.releasePlatform = runtimeSecurity.releasePlatform;
+	}
 	return register;
 }

@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { VcpDeckApiError, type VcpDeckClient } from "@vcpdeck/sdk";
 import {
+	REQUIRED_RELEASE_PLATFORMS,
 	ReleaseClientState,
 	ReleaseStatus,
 	selectLatestCatchUpTarget,
@@ -21,7 +22,7 @@ import {
 } from "./environment.js";
 
 const VERSION_RE =
-	/^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)(?:-delta-(\d+\.\d+\.\d+))?\.zip$/;
+	/^vcpdeck-(\d+\.\d+\.\d+)-(linux-x64-musl|win-x64|linux-x64)(?:-delta-(\d+\.\d+\.\d+))?\.zip$/;
 const VERSION_INPUT_RE = /^\d+\.\d+\.\d+$/;
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 1_800;
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
@@ -253,16 +254,27 @@ async function uploadRelease(
 		),
 	].sort();
 	let firstFullPending = true;
-	for (const [index, zipPath] of zipPaths.entries()) {
-		const archive = archives[index];
-		const isFirstFull = archive.artifactKind === "full" && firstFullPending;
+	// musl 全量先传、增量次之、双平台 full 最后：常规编排在双平台齐备时才启动，
+	// 因此第三包晚到时不会出现「已开始更新但 musl 包还没传」的半支持状态。
+	const ordered = zipPaths
+		.map((zipPath, index) => ({ zipPath, index, archive: archives[index] }))
+		.sort(
+			(a, b) =>
+				uploadOrderRank(a.archive) - uploadOrderRank(b.archive) ||
+				a.index - b.index,
+		);
+	for (const { zipPath, archive } of ordered) {
+		const isFirstFull =
+			archive.artifactKind === "full" &&
+			archive.platform !== "linux-x64-musl" &&
+			firstFullPending;
 		if (isFirstFull) firstFullPending = false;
 		await uploadOne(client, zipPath, log, context, {
 			...archive,
 			expectedFromVersions: isFirstFull ? expectedFromVersions : undefined,
 		});
 	}
-	log("[vcpdeck] 上传完成（两个平台构件齐备后服务端自动开始更新）");
+	log("[vcpdeck] 上传完成（双平台构件齐备后服务端自动开始更新）");
 	return client;
 }
 
@@ -450,10 +462,7 @@ function sleep(ms: number): Promise<void> {
 function validateArchives(zipPaths: string[]): void {
 	const archives = zipPaths.map(platformOfFile);
 	if (new Set(archives.map((archive) => archive.version)).size !== 1) {
-		throw new Error("两个平台构件必须使用相同版本号");
-	}
-	if (new Set(archives.map((archive) => archive.platform)).size !== 2) {
-		throw new Error("必须各提供一个 win-x64 与 linux-x64 构件");
+		throw new Error("所有构件必须使用相同版本号");
 	}
 	// 文件名由 version|platform|artifactKind|fromVersion 唯一决定，四元组重复即文件名重复。
 	const identities = archives.map(
@@ -463,13 +472,22 @@ function validateArchives(zipPaths: string[]): void {
 	if (new Set(identities).size !== identities.length) {
 		throw new Error("构件文件名不得重复");
 	}
+	const musl = archives.filter(
+		(archive) => archive.platform === "linux-x64-musl",
+	);
+	if (musl.length > 1) {
+		throw new Error("linux-x64-musl 最多只能提供一个构件");
+	}
+	if (musl.some((archive) => archive.artifactKind !== "full")) {
+		throw new Error("linux-x64-musl 只接受 full 构件，不提供跨 libc 增量包");
+	}
 	const deltaSets: string[][] = [];
-	for (const platform of ["win-x64", "linux-x64"] as const) {
+	for (const platform of REQUIRED_RELEASE_PLATFORMS) {
 		const group = archives.filter((archive) => archive.platform === platform);
 		if (
 			group.filter((archive) => archive.artifactKind === "full").length !== 1
 		) {
-			throw new Error("每个平台必须且只能有一个 full 构件");
+			throw new Error(`${platform} 必须且只能有一个 full 构件`);
 		}
 		const deltas = group.filter(
 			(archive) => archive.artifactKind === "delta",
@@ -488,6 +506,15 @@ function validateArchives(zipPaths: string[]): void {
 	) {
 		throw new Error("两个平台的 delta 基线版本集合必须一致");
 	}
+}
+
+/** 上传顺序：musl 全量 0、增量 1、双平台 full 2。 */
+function uploadOrderRank(archive: {
+	platform: ReleasePlatform;
+	artifactKind: ReleaseArtifactKind;
+}): number {
+	if (archive.platform === "linux-x64-musl") return 0;
+	return archive.artifactKind === "delta" ? 1 : 2;
 }
 
 /** 从文件名解析产物坐标（full 或 -delta-<fromVersion> 增量包）。 */

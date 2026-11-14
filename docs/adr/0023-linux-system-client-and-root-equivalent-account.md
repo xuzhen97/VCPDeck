@@ -9,6 +9,8 @@
 
 ## 背景
 
+> 局部取代（2026-11-14）：[ADR-0065](./0065-istoreos-musl-procd-client.md) 已获批准，仅在 iStoreOS 分支取代第 1–7、11–12 项涉及平台门禁、systemd/账户/sudo、目录和系统维护方式的约束，采用 musl/procd/root 与持久状态目录。其他平台的 systemd/sudo-all 决策和本文历史正文保持不变；批准不表示兼容实现已交付。
+
 Linux Client 一键安装当前把 Node.js、PM2、Launcher、业务版本和状态放在安装用户 Home，并由 PM2 生成 systemd startup unit。Bazzite 在 SELinux enforcing 下出现 PM2 unit 对用户 Home 中 `#!/usr/bin/env node` 入口执行失败，机器重启且用户未登录时 Client 无法恢复。继续为发行版维护 PM2 system service、user service 或登录后启动等多套路径，会扩大兼容矩阵且不能提供一致的无人登录冷启动保证。
 
 VCPDeck 当前面向少量可信操作者，远程 Job、Terminal、Pi 和文件能力继承 Client OS 权限。维护者要求受控 Linux 节点能够执行任意高权限操作，并接受由 Server 承担控制面、Job 和 Session 级审计，而不是把 Client 限制为最低权限节点。这改变了 ADR-0009 的一般最低权限建议，必须明确记录 root 等价风险和审计边界。

@@ -10,6 +10,7 @@ import {
 function makePrivilegedEnv(opts: {
 	platform?: NodeJS.Platform;
 	username?: string;
+	uid?: number;
 	sudoStatus?: number;
 	sudoThrows?: boolean;
 	windowsIdentity?: string;
@@ -18,6 +19,7 @@ function makePrivilegedEnv(opts: {
 	return {
 		platform: opts.platform ?? "linux",
 		currentUser: () => opts.username ?? "vcpdeck",
+		effectiveUid: () => opts.uid,
 		runNonInteractiveSudo: async () => {
 			if (opts.sudoThrows) throw new Error("spawn failed");
 			return opts.sudoStatus ?? 1;
@@ -145,5 +147,57 @@ describe("detectInstallationInfo", () => {
 
 	it("非 Windows/Linux 返回 undefined（未报告）", () => {
 		expect(detectInstallationInfo({ platform: "darwin" })).toBeUndefined();
+	});
+});
+
+describe("probePrivilegedCapability 真实 EUID（ADR-0065）", () => {
+	it("EUID 为 0 时不跑 sudo，直接判 direct-root", async () => {
+		let sudoCalls = 0;
+		const status = await probePrivilegedCapability({
+			platform: "linux",
+			currentUser: () => "not-a-proof",
+			effectiveUid: () => 0,
+			runNonInteractiveSudo: async () => {
+				sudoCalls += 1;
+				return 1;
+			},
+			runWindowsIdentity: async () => "",
+		});
+		expect(status).toEqual({
+			available: true,
+			mode: "direct-root",
+			nonInteractive: true,
+			runAsUser: "root",
+		});
+		expect(sudoCalls).toBe(0);
+	});
+
+	it("用户名是 root 但 EUID 非 0 时仍走 sudo，不冒充 root", async () => {
+		const status = await probePrivilegedCapability({
+			platform: "linux",
+			currentUser: () => "root",
+			effectiveUid: () => 1000,
+			runNonInteractiveSudo: async () => 1,
+			runWindowsIdentity: async () => "",
+		});
+		expect(status).toEqual({
+			available: false,
+			mode: "unavailable",
+			nonInteractive: false,
+			runAsUser: "root",
+		});
+	});
+
+	it("EUID 不可读时按未知处理，继续 sudo 探测", async () => {
+		const status = await probePrivilegedCapability({
+			platform: "linux",
+			currentUser: () => "vcpdeck",
+			effectiveUid: () => {
+				throw new Error("geteuid unavailable");
+			},
+			runNonInteractiveSudo: async () => 0,
+			runWindowsIdentity: async () => "",
+		});
+		expect(status?.mode).toBe("sudo-all");
 	});
 });

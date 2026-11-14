@@ -3,12 +3,17 @@ import { userInfo } from "node:os";
 import type {
 	MachineInstallationStatus,
 	PrivilegedCapabilityStatus,
+	ReleasePlatform,
 } from "@vcpdeck/shared";
 
 /** 特权能力探测的可注入环境（默认取真实进程环境；测试可整体替换，不触达系统）。 */
 export interface PrivilegedProbeEnv {
 	readonly platform: NodeJS.Platform;
 	readonly currentUser: () => string;
+	/**
+	 * 真实进程 EUID（ADR-0065）；不可读时返回 undefined，表示"未知"而不是"非 root"。
+	 */
+	readonly effectiveUid: () => number | undefined;
 	readonly runNonInteractiveSudo: () => Promise<number>;
 	/** Windows 真实身份探测（whoami.exe，无 shell）；返回原始输出，空串表示失败。 */
 	readonly runWindowsIdentity: () => Promise<string>;
@@ -20,10 +25,12 @@ export interface InstallationProbeEnv {
 	readonly installationMode?: string;
 }
 
-/** 注册时上报的运行时安全摘要（特权能力 + 安装模式）。 */
+/** 注册时上报的运行时安全摘要（特权能力 + 安装模式 + 发布平台）。 */
 export interface RuntimeSecurityInfo {
 	privileged?: PrivilegedCapabilityStatus;
 	installation?: MachineInstallationStatus;
+	/** 可选：本机真实发布平台（ADR-0065；无法证明时不填，服务端按未报告处理） */
+	releasePlatform?: ReleasePlatform;
 }
 
 /** sudo 探测固定超时（毫秒）：超时可视为“非交互 sudo 不可用”，失败关闭。 */
@@ -110,10 +117,20 @@ function defaultRunNonInteractiveSudo(): Promise<number> {
 	});
 }
 
+/** 默认探测：真实进程 EUID；不可读（如非 POSIX）时返回 undefined，不猜测。 */
+function defaultEffectiveUid(): number | undefined {
+	try {
+		return typeof process.geteuid === "function" ? process.geteuid() : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 function createDefaultPrivilegedProbeEnv(): PrivilegedProbeEnv {
 	return {
 		platform: process.platform,
 		currentUser: defaultCurrentUser,
+		effectiveUid: defaultEffectiveUid,
 		runNonInteractiveSudo: defaultRunNonInteractiveSudo,
 		runWindowsIdentity: defaultRunWindowsIdentity,
 	};
@@ -165,6 +182,16 @@ export async function probePrivilegedCapability(
 		return { available: false, mode: "unavailable", nonInteractive: false, runAsUser };
 	}
 	if (env.platform !== "linux") return undefined;
+	// ADR-0065：EUID=0 是 root 的真实证据，此时不跑 sudo，直接判 direct-root（procd 场景）。
+	let euid: number | undefined;
+	try {
+		euid = env.effectiveUid();
+	} catch {
+		euid = undefined;
+	}
+	if (euid === 0) {
+		return { available: true, mode: "direct-root", nonInteractive: true, runAsUser: "root" };
+	}
 	let runAsUser: string;
 	try {
 		runAsUser = safeRunAsUser(env.currentUser());
@@ -185,7 +212,7 @@ export async function probePrivilegedCapability(
 
 /**
  * 探测 Client 安装模式。
- * Linux：`VCPDECK_INSTALLATION_MODE=systemd-root-equivalent` 声明 A2；其余 Linux 视为待迁移 legacy-pm2。
+ * Linux：`VCPDECK_INSTALLATION_MODE=systemd-root-equivalent` 声明 A2，`procd-root` 声明 procd 系统服务（ADR-0065）；其余 Linux 视为待迁移 legacy-pm2。
  * Windows（ADR-0027）：环境值精确为 `windows-system-task` 时上报新模式；其他/缺失均为 legacy-pm2。
  * 其他平台返回 undefined 表示未报告。
  */
@@ -199,6 +226,9 @@ export function detectInstallationInfo(
 		return { mode: "legacy-pm2" };
 	}
 	if (env.platform !== "linux") return undefined;
+	if (env.installationMode === "procd-root") {
+		return { mode: "procd-root" };
+	}
 	if (env.installationMode === "systemd-root-equivalent") {
 		return { mode: "systemd-root-equivalent" };
 	}

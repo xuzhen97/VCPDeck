@@ -7,6 +7,8 @@
 
 ## 背景
 
+> 后续扩展（2026-11-14）：[ADR-0065](./0065-istoreos-musl-procd-client.md) 已获批准，仅为 iStoreOS 增加 musl PTY 与 Client-only 平台构件，并扩展第 3、4、4.1 节的构件选择边界。本文其余 Accepted 结论及历史正文保持不变；批准不表示兼容实现已交付。
+
 原发布构件把 `server/` 与 `client/` 的**整个生产 node_modules**（约 500MB、十余万文件）原样复制进 archive，再依赖构建机平台差异产出 zip/tar.gz。存在以下问题：
 
 1. 体积与文件数不适合分发（一次发布 zip 约 513MB）；

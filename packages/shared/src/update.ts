@@ -1,5 +1,9 @@
 // ── 自更新协议（server ↔ client 经 WebSocket，launcher 经本地控制通道） ──
 // 详见 docs/design/release-and-update.md
+import {
+	parseReleasePlatform,
+	REQUIRED_RELEASE_PLATFORMS,
+} from "./release-target.js";
 
 /** 控制协议版本；破坏性协议变更时递增，Launcher 与 Server 双向校验。 */
 export const CONTROL_PROTOCOL_VERSION = 2;
@@ -172,7 +176,7 @@ export interface ReleaseClientEntry {
 }
 
 /** 发布包支持的目标平台（打包脚本产出对应的分发 zip） */
-export type ReleasePlatform = "win-x64" | "linux-x64";
+export type ReleasePlatform = "win-x64" | "linux-x64" | "linux-x64-musl";
 
 /** Release 上传会话稳定错误码。 */
 export const ReleaseUploadErrorCode = {
@@ -254,9 +258,8 @@ export function parseReleaseUploadCreateInput(
 	) {
 		throw new Error("version 格式应为 x.y.z");
 	}
-	if (value.platform !== "win-x64" && value.platform !== "linux-x64") {
-		throw new Error("platform 应为 win-x64 或 linux-x64");
-	}
+	// musl 变体是合法上传平台（ADR-0065）；其余未知值严格拒绝。
+	const platform = parseReleasePlatform(value.platform);
 	if (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)) {
 		throw new Error("sha256 应为 64 位小写十六进制");
 	}
@@ -270,7 +273,7 @@ export function parseReleaseUploadCreateInput(
 	}
 	const result: ReleaseUploadCreateInput = {
 		version: value.version,
-		platform: value.platform,
+		platform,
 		sha256: value.sha256,
 		size: value.size,
 	};
@@ -304,6 +307,16 @@ export function parseReleaseUploadCreateInput(
 			throw new Error("expectedFromVersions 应为至多 3 个不重复的 x.y.z 版本");
 		}
 		result.expectedFromVersions = list as string[];
+	}
+	if (
+		platform === "linux-x64-musl" &&
+		(result.artifactKind === "delta" ||
+			(result.fromVersion !== undefined && result.fromVersion !== "") ||
+			(result.expectedFromVersions !== undefined &&
+				result.expectedFromVersions.length > 0))
+	) {
+		// 跨 libc 无法用二进制差集拼包，服务端同样只接受 musl 全量构件。
+		throw new Error("linux-x64-musl 只接受完整构件，不接受增量包或基线列表");
 	}
 	return result;
 }
@@ -564,8 +577,8 @@ export function isReleaseArchiveAvailable(
  */
 export function hasAllReleaseArchives(release: ReleaseInfo): boolean {
 	const archives = release.archives ?? {};
-	const platforms: readonly ReleasePlatform[] = ["win-x64", "linux-x64"];
-	return platforms.every((platform) => {
+	// 双平台齐备规则不变；musl 是可选附加构件，不参与「齐备」判定（ADR-0065）。
+	return REQUIRED_RELEASE_PLATFORMS.every((platform) => {
 		const archive = archives[platform];
 		if (!isReleaseArchiveAvailable(archive)) return false;
 		const deltas = archive.deltas ?? [];

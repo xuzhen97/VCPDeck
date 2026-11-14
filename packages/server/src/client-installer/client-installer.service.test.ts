@@ -242,6 +242,97 @@ describe("ClientInstallerService", () => {
 		});
 	});
 
+it("config 完整展示第三平台：缺 musl 构件时保留该项并给出原因", async () => {
+		const { prisma, releases, clients } = mocks(false);
+		const service = new ClientInstallerService(
+			prisma as never,
+			releases as never,
+			clients as never,
+		);
+		const config = await service.getConfig();
+		expect(config.platforms["linux-x64-musl"]).toEqual({
+			available: false,
+			reasonCode: "CLIENT_INSTALLER_ARCHIVE_MISSING",
+		});
+		releases.findByVersion.mockResolvedValueOnce({
+			...release(),
+			archives: {
+				...release().archives,
+				"linux-x64-musl": {
+					sha256: "c".repeat(64),
+					size: 30,
+					fileName: "vcpdeck-1.2.1-linux-x64-musl.zip",
+				},
+			},
+		});
+		const ready = await service.getConfig();
+		expect(ready.platforms["linux-x64-musl"].available).toBe(true);
+	});
+
+	it("musl preflight 走 procd 引导器与 Node20 约束，低层安装器是校验后的 node 安装器", async () => {
+		const { prisma, releases, clients } = mocks(true);
+		const service = new ClientInstallerService(
+			prisma as never,
+			releases as never,
+			clients as never,
+		);
+		releases.findByVersion.mockResolvedValueOnce({
+			...release(),
+			archives: {
+				...release().archives,
+				"linux-x64-musl": {
+					sha256: "c".repeat(64),
+					size: 30,
+					fileName: "vcpdeck-1.2.1-linux-x64-musl.zip",
+				},
+			},
+		});
+		const preflight = await service.preflight("linux-x64-musl");
+		expect(preflight.installerUrl).toBe(
+			"/api/client-installer/assets/install-client-procd-bootstrap.sh",
+		);
+		expect(preflight.lowLevelInstallerUrl).toBe(
+			"/api/client-installer/assets/install-client-procd.cjs",
+		);
+		expect(preflight.nodeConstraint).toBe(">=20");
+		expect(preflight.installerSha256).toMatch(/^[a-f0-9]{64}$/);
+		const procdAssets = preflight.procdAssets ?? [];
+		expect(procdAssets.map((asset) => asset.name).sort()).toEqual([
+			"client-procd-layout.cjs",
+			"client-procd-lifecycle.cjs",
+			"procd-archive.cjs",
+			"vcpdeck-client.procd",
+		]);
+		for (const asset of procdAssets) {
+			expect(asset.sha256).toMatch(/^[a-f0-9]{64}$/);
+		}
+	});
+
+	it("musl bootstrap 走同版本 Release 的 musl 构件下载地址", async () => {
+		const { prisma, releases, clients } = mocks(true);
+		const service = new ClientInstallerService(
+			prisma as never,
+			releases as never,
+			clients as never,
+		);
+		releases.findByVersion.mockResolvedValueOnce({
+			...release(),
+			archives: {
+				...release().archives,
+				"linux-x64-musl": {
+					sha256: "c".repeat(64),
+					size: 30,
+					fileName: "vcpdeck-1.2.1-linux-x64-musl.zip",
+				},
+			},
+		});
+		const bootstrap = await service.bootstrap("linux-x64-musl");
+		expect(bootstrap.archiveUrl).toBe(
+			`/api/releases/${encodeURIComponent(VERSION)}/file?platform=linux-x64-musl`,
+		);
+		expect(bootstrap.archiveSha256).toBe("c".repeat(64));
+	});
+
 	it("验收接口要求正确共享 PSK", () => {
 		const { prisma, releases, clients } = mocks(true);
 		const service = new ClientInstallerService(

@@ -26,6 +26,7 @@ const ClientInstallerErrorCode = {
 	ASSET_MISSING: "CLIENT_INSTALLER_ASSET_MISSING",
 	PSK_INVALID: "CLIENT_INSTALLER_PSK_INVALID",
 } as const;
+/** ADR-0065：三平台均在此入口暴露；musl 复用同一配置/预检通道，但安装与低层脚本独立。 */
 type ClientInstallerPlatform = ReleasePlatform;
 export interface ClientInstallerConfigInfo {
 	enabled: boolean;
@@ -34,7 +35,7 @@ export interface ClientInstallerConfigInfo {
 	updatedVia: string | null;
 	serverVersion: string;
 	releaseReady: boolean;
-	platforms: Record<ReleasePlatform, { available: boolean; reasonCode?: string }>;
+	platforms: Record<ClientInstallerPlatform, { available: boolean; reasonCode?: string }>;
 	/** 系统级部署迁移汇总（ADR-0027）：全部 Client（含离线）按最后有效摘要判定，独立于业务版本 */
 	migration: {
 		compliantCount: number;
@@ -82,6 +83,8 @@ export interface ClientInstallerPreflight {
 	nodeConstraint: string;
 	nodeMirrors: string[];
 	npmRegistries: string[];
+	/** 仅 musl：引导脚本会以 root 执行的辅助资产及其 SHA-256。 */
+	procdAssets?: Array<{ name: string; sha256: string }>;
 }
 export interface ClientInstallerBootstrap {
 	serverVersion: string;
@@ -100,14 +103,32 @@ const INSTALLER_ASSETS = [
 	"install-client.cjs",
 	"install-client-linux.cjs",
 	"install.cjs",
+	"client-procd-layout.cjs",
+	"client-procd-lifecycle.cjs",
+	"procd-archive.cjs",
+	"vcpdeck-client.procd",
+	"install-client-procd.cjs",
+	"uninstall-client-procd.cjs",
+	"upgrade-launcher-procd.cjs",
+	"install-client-procd-bootstrap.sh",
+	"musl-inputs.lock.json",
 	"uninstall-client-bootstrap.sh",
 	"uninstall-client-bootstrap.ps1",
 	"uninstall-client.cjs",
 	"uninstall-client-linux.cjs",
 ] as const;
 
-/** 按平台选择安装器资产：linux-x64 走 A2 systemd 安装器，win-x64 走 SYSTEM 开机任务安装器（ADR-0027）。 */
+/** musl 引导脚本会下载并执行的辅助资产；逐个随 preflight 下发 SHA-256（ADR-0065）。 */
+const PROCD_HELPER_ASSETS = [
+	"client-procd-layout.cjs",
+	"client-procd-lifecycle.cjs",
+	"procd-archive.cjs",
+	"vcpdeck-client.procd",
+] as const satisfies readonly (typeof INSTALLER_ASSETS)[number][];
+
+/** 按平台选择安装器资产：linux-x64 走 A2 systemd 安装器，win-x64 走 SYSTEM 开机任务安装器（ADR-0027），linux-x64-musl 走 iStoreOS procd 安装器（ADR-0065）。 */
 function installerAssetName(platform: ClientInstallerPlatform): string {
+	if (platform === "linux-x64-musl") return "install-client-procd-bootstrap.sh";
 	return platform === "linux-x64" ? "install-client-linux.cjs" : "install-client.cjs";
 }
 
@@ -154,6 +175,10 @@ export class ClientInstallerService {
 					releaseReady,
 					isReleaseArchiveAvailable(release?.archives["linux-x64"]),
 				),
+				"linux-x64-musl": this.platformStatus(
+					releaseReady && this.muslInstallerReady(),
+					isReleaseArchiveAvailable(release?.archives["linux-x64-musl"]),
+				),
 			},
 			migration: buildMigrationSummary(allClients),
 		};
@@ -189,7 +214,9 @@ export class ClientInstallerService {
 		const installer = this.readAsset(
 			installerName as (typeof INSTALLER_ASSETS)[number],
 		);
-		const lowLevelInstaller = this.readAsset("install.cjs");
+		const lowLevelName =
+			platform === "linux-x64-musl" ? "install-client-procd.cjs" : "install.cjs";
+		const lowLevelInstaller = this.readAsset(lowLevelName);
 		return {
 			serverVersion: VERSION,
 			releaseVersion: release.version,
@@ -197,9 +224,18 @@ export class ClientInstallerService {
 			archiveSize: archive.size,
 			installerUrl: `/api/client-installer/assets/${installerName}`,
 			installerSha256: sha256(installer),
-			lowLevelInstallerUrl: "/api/client-installer/assets/install.cjs",
+			lowLevelInstallerUrl: `/api/client-installer/assets/${lowLevelName}`,
 			lowLevelInstallerSha256: sha256(lowLevelInstaller),
-			nodeConstraint: ">=24",
+			...(platform === "linux-x64-musl"
+				? {
+						procdAssets: PROCD_HELPER_ASSETS.map((name) => ({
+							name,
+							sha256: sha256(this.readAsset(name)),
+						})),
+					}
+				: {}),
+			// iStoreOS 系统 Node 20 只用于运行无新语法的安装器；业务与稳定 Launcher 仍用私有 Node 24。
+			nodeConstraint: platform === "linux-x64-musl" ? ">=20" : ">=24",
 			nodeMirrors: ["https://npmmirror.com/mirrors/node", "https://nodejs.org/dist"],
 			npmRegistries: ["https://registry.npmmirror.com", "https://registry.npmjs.org"],
 		};
@@ -259,6 +295,19 @@ export class ClientInstallerService {
 				401,
 			);
 		}
+	}
+
+	/** musl 一键安装只有在 Reviewed 运行时锁与 procd 安装器资产同时随包分发时才就绪（ADR-0065）。 */
+	private muslInstallerReady(): boolean {
+		const root = installerAssetsDir();
+		// 打包后锁文件与资产同目录；仓库开发环境回到 scripts/build/ 下读取同一份 Reviewed 锁。
+		return (
+			(existsSync(resolve(root, "musl-inputs.lock.json")) ||
+				existsSync(resolve(root, "build", "musl-inputs.lock.json"))) &&
+			existsSync(resolve(root, "install-client-procd-bootstrap.sh")) &&
+			existsSync(resolve(root, "install-client-procd.cjs")) &&
+			existsSync(resolve(root, "procd-archive.cjs"))
+		);
 	}
 
 	private async requireReadyRelease(platform: ReleasePlatform) {

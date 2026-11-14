@@ -82,6 +82,39 @@ describe("computeReleaseCleanupPlan", () => {
 		]);
 	});
 
+	it("可选 musl 构件纳入清理遍历，但不影响双平台完整性判定", () => {
+		const musl = {
+			sha256: "c".repeat(64),
+			size: 300,
+			fileName: "linux-x64-musl.zip",
+		};
+		const plan = computeReleaseCleanupPlan({
+			releases: [
+			// failed 发布不占用 done 保留名额，三个平台的构件都进入清理候选。
+			release("1.0.3", ReleaseStatus.FAILED, oldDate, {
+				"win-x64": archive("win-x64"),
+				"linux-x64": archive("linux-x64"),
+				"linux-x64-musl": musl,
+			}),
+				// 只有 musl 包的 uploaded 仍是不完整发布，满三十天可清理。
+				release("1.0.2", ReleaseStatus.UPLOADED, oldDate, {
+					"linux-x64-musl": musl,
+				}),
+			],
+			now,
+			currentServerVersion: "9.9.9",
+			latestTargetVersion: null,
+			activeReleaseVersion: null,
+			backendKind: "local",
+		});
+		expect(plan.candidates.map((x) => `${x.version}:${x.platform}`)).toEqual([
+			"1.0.3:win-x64",
+			"1.0.3:linux-x64",
+			"1.0.3:linux-x64-musl",
+			"1.0.2:linux-x64-musl",
+		]);
+	});
+
 	it("保护当前版本、活动版本和最新目标，并跳过 cleaned/deleting", () => {
 		const plan = computeReleaseCleanupPlan({
 			releases: [

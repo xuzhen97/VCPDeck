@@ -27,3 +27,14 @@ describe("Client Installer parsers", () => {
 		expect(() => parseClientInstallerNameUpdate({ name: "" })).toThrow();
 	});
 });
+
+describe("一键安装平台边界（ADR-0065）", () => {
+	it("musl Client 走独立的 procd 安装器，平台解析接受三项", () => {
+		expect(parseClientInstallerPlatform("linux-x64")).toBe("linux-x64");
+		expect(parseClientInstallerPlatform("linux-x64-musl")).toBe(
+			"linux-x64-musl",
+		);
+		expect(() => parseClientInstallerPlatform("linux-arm64")).toThrow();
+		expect(() => parseClientInstallerPlatform("linux-x64-glibc")).toThrow();
+	});
+});

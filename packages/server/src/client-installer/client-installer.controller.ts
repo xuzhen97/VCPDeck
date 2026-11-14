@@ -25,8 +25,14 @@ import {
 } from "./client-installer.service.js";
 
 function parsePlatform(value: unknown): ReleasePlatform {
-	if (value === "win-x64" || value === "linux-x64") return value;
-	throw new Error("platform 必须为 win-x64 或 linux-x64");
+	if (
+		value === "win-x64" ||
+		value === "linux-x64" ||
+		value === "linux-x64-musl"
+	) {
+		return value;
+	}
+	throw new Error("platform 必须为 win-x64、linux-x64 或 linux-x64-musl");
 }
 
 function parseConfigUpdate(value: unknown): { enabled: boolean } {
@@ -55,6 +61,15 @@ const ASSET_CONTENT_TYPES: Record<string, string> = {
 	"install-client.cjs": "text/javascript; charset=utf-8",
 	"install-client-linux.cjs": "text/javascript; charset=utf-8",
 	"install.cjs": "text/javascript; charset=utf-8",
+	"client-procd-layout.cjs": "text/javascript; charset=utf-8",
+	"client-procd-lifecycle.cjs": "text/javascript; charset=utf-8",
+	"procd-archive.cjs": "text/javascript; charset=utf-8",
+	"vcpdeck-client.procd": "text/plain; charset=utf-8",
+	"install-client-procd.cjs": "text/javascript; charset=utf-8",
+	"uninstall-client-procd.cjs": "text/javascript; charset=utf-8",
+	"upgrade-launcher-procd.cjs": "text/javascript; charset=utf-8",
+	"install-client-procd-bootstrap.sh": "text/x-shellscript; charset=utf-8",
+	"musl-inputs.lock.json": "application/json; charset=utf-8",
 	"uninstall-client-bootstrap.sh": "text/x-shellscript; charset=utf-8",
 	"uninstall-client-bootstrap.ps1": "text/plain; charset=utf-8",
 	"uninstall-client.cjs": "text/javascript; charset=utf-8",
@@ -99,7 +114,9 @@ export class ClientInstallerController {
 			const name =
 				platform === "win-x64"
 					? "install-client-bootstrap.ps1"
-					: "install-client-bootstrap.sh";
+					: platform === "linux-x64-musl"
+						? "install-client-procd-bootstrap.sh"
+						: "install-client-bootstrap.sh";
 			const contentType = ASSET_CONTENT_TYPES[name];
 			if (!contentType) throw new Error(`缺少资产类型: ${name}`);
 			response.type(contentType).send(this.service.readAsset(name));
@@ -122,15 +139,7 @@ export class ClientInstallerController {
 				.type(contentType)
 				.send(
 					this.service.readAsset(
-						name as
-							| "install-client-bootstrap.sh"
-							| "install-client-bootstrap.ps1"
-							| "install-client.cjs"
-							| "install-client-linux.cjs"
-							| "install.cjs"
-							| "uninstall-client-bootstrap.sh"
-							| "uninstall-client-bootstrap.ps1"
-							| "uninstall-client.cjs",
+						name as Parameters<ClientInstallerService["readAsset"]>[0],
 					),
 				);
 		} catch (error) {

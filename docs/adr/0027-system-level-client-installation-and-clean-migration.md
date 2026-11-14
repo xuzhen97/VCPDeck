@@ -8,6 +8,8 @@
 
 ## 背景
 
+> 后续扩展（2026-11-14）：[ADR-0065](./0065-istoreos-musl-procd-client.md) 已获批准，扩展第 5–6、10 项，仅为 iStoreOS 增加 procd 与直接 root 合规组合。本文其他 Accepted 结论、Windows 部署、既有清理式迁移策略及历史正文保持不变；批准不表示兼容实现已交付。
+
 Windows Client 当前依赖用户级 PM2 daemon、dump/resurrect 和登录触发计划任务。该模型必须等待指定用户登录，任务成功也不能证明 Launcher 与 Client 已上线，并且 PM2、任务、用户 Node/PATH 与安装状态可能分别漂移。生产机器已出现 PM2 daemon 恢复后 Launcher 延迟启动的故障，不满足无人登录开机自启要求。
 
 Linux A2 已使用 systemd 守护 Launcher，并允许 root 或可认证 sudo 的普通用户完成安装；运行时专用 `vcpdeck` 账户通过 `NOPASSWD: ALL` 获得 root 等价能力。两个平台需要统一为系统级生命周期模型，同时让控制面明确指出仍使用旧安装方式或特权状态不合规的机器。

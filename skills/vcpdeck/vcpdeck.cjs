@@ -40,7 +40,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.23.19";
+    exports2.VERSION = "0.23.20";
   }
 });
 
@@ -249,9 +249,9 @@ var require_client_installer = __commonJS({
       CLIENT_NOT_FOUND: "CLIENT_INSTALLER_CLIENT_NOT_FOUND"
     };
     function parseClientInstallerPlatform(value2) {
-      if (value2 === "win-x64" || value2 === "linux-x64")
+      if (value2 === "win-x64" || value2 === "linux-x64" || value2 === "linux-x64-musl")
         return value2;
-      throw new Error("platform \u5FC5\u987B\u4E3A win-x64 \u6216 linux-x64");
+      throw new Error("platform \u5FC5\u987B\u4E3A win-x64\u3001linux-x64 \u6216 linux-x64-musl");
     }
     function parseClientInstallerConfigUpdate(value2) {
       if (!isRecord3(value2) || Object.keys(value2).length !== 1 || typeof value2.enabled !== "boolean") {
@@ -274,6 +274,114 @@ var require_client_installer = __commonJS({
   }
 });
 
+// ../shared/dist/release-target.js
+var require_release_target = __commonJS({
+  "../shared/dist/release-target.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.RELEASE_PLATFORMS = exports2.REQUIRED_RELEASE_PLATFORMS = void 0;
+    exports2.isReleasePlatform = isReleasePlatform;
+    exports2.parseReleasePlatform = parseReleasePlatform;
+    exports2.clientReleasePlatform = clientReleasePlatform;
+    exports2.parseMuslReleaseTarget = parseMuslReleaseTarget;
+    exports2.selectClientReleaseArchive = selectClientReleaseArchive;
+    var update_js_1 = require_update();
+    exports2.REQUIRED_RELEASE_PLATFORMS = [
+      "win-x64",
+      "linux-x64"
+    ];
+    exports2.RELEASE_PLATFORMS = [
+      "win-x64",
+      "linux-x64",
+      "linux-x64-musl"
+    ];
+    function isReleasePlatform(value2) {
+      return typeof value2 === "string" && exports2.RELEASE_PLATFORMS.includes(value2);
+    }
+    function parseReleasePlatform(value2) {
+      if (!isReleasePlatform(value2)) {
+        throw new Error("platform \u5FC5\u987B\u4E3A win-x64\u3001linux-x64 \u6216 linux-x64-musl");
+      }
+      return value2;
+    }
+    function clientReleasePlatform(os, reported) {
+      if (reported !== void 0 && !isReleasePlatform(reported))
+        return void 0;
+      if (os.startsWith("win32")) {
+        return reported === void 0 || reported === "win-x64" ? "win-x64" : void 0;
+      }
+      if (os.startsWith("linux")) {
+        if (reported === void 0)
+          return "linux-x64";
+        return reported === "win-x64" ? void 0 : reported;
+      }
+      return void 0;
+    }
+    var MUSL_RUNTIME_HOSTS = ["nodejs.org", "unofficial-builds.nodejs.org"];
+    function isPlainRecord(value2) {
+      return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+    }
+    function requireExactKeys(value2, keys, label) {
+      const actual = Object.keys(value2).sort();
+      const expected = [...keys].sort();
+      if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+        throw new Error(`${label} \u5B57\u6BB5\u5FC5\u987B\u4E14\u53EA\u80FD\u662F ${keys.join("\u3001")}`);
+      }
+    }
+    function parseMuslReleaseTarget(value2) {
+      if (!isPlainRecord(value2))
+        throw new Error("release-target \u5FC5\u987B\u662F\u5BF9\u8C61");
+      requireExactKeys(value2, ["schema", "platform", "role", "runtime"], "release-target");
+      if (value2.schema !== 1)
+        throw new Error("release-target.schema \u5FC5\u987B\u4E3A 1");
+      if (value2.platform !== "linux-x64-musl") {
+        throw new Error("release-target.platform \u5FC5\u987B\u4E3A linux-x64-musl");
+      }
+      if (value2.role !== "client") {
+        throw new Error("release-target.role \u5FC5\u987B\u4E3A client");
+      }
+      if (!isPlainRecord(value2.runtime)) {
+        throw new Error("release-target.runtime \u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      requireExactKeys(value2.runtime, ["version", "url", "sha256"], "release-target.runtime");
+      const { version, url: url2, sha256 } = value2.runtime;
+      if (typeof version !== "string" || !/^24\.\d+\.\d+$/.test(version)) {
+        throw new Error("release-target.runtime.version \u5FC5\u987B\u662F Node 24 \u7248\u672C\u53F7");
+      }
+      if (typeof url2 !== "string") {
+        throw new Error("release-target.runtime.url \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(url2);
+      } catch {
+        throw new Error("release-target.runtime.url \u4E0D\u662F\u5408\u6CD5 URL");
+      }
+      const approvedHost = MUSL_RUNTIME_HOSTS.some((host) => host === parsedUrl.hostname);
+      if (parsedUrl.protocol !== "https:" || !approvedHost) {
+        throw new Error(`release-target.runtime.url \u5FC5\u987B\u6765\u81EA https://${MUSL_RUNTIME_HOSTS.join(" \u6216 https://")} \u7684\u9501\u5B9A\u7248\u672C`);
+      }
+      if (parsedUrl.pathname.split("/").pop() !== `node-v${version}-linux-x64-musl.tar.gz`) {
+        throw new Error("release-target.runtime.url \u6587\u4EF6\u540D\u5FC5\u987B\u4E0E\u9501\u5B9A\u7248\u672C\u3001\u5E73\u53F0\u4E00\u81F4");
+      }
+      if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/.test(sha256)) {
+        throw new Error("release-target.runtime.sha256 \u5FC5\u987B\u662F 64 \u4F4D\u5C0F\u5199\u5341\u516D\u8FDB\u5236 SHA-256");
+      }
+      return {
+        schema: 1,
+        platform: "linux-x64-musl",
+        role: "client",
+        runtime: { version, url: url2, sha256 }
+      };
+    }
+    function selectClientReleaseArchive(release, os, reported) {
+      const platform = clientReleasePlatform(os, reported);
+      const archive = platform ? release.archives?.[platform] : void 0;
+      return (0, update_js_1.isReleaseArchiveAvailable)(archive) ? archive : void 0;
+    }
+  }
+});
+
 // ../shared/dist/update.js
 var require_update = __commonJS({
   "../shared/dist/update.js"(exports2) {
@@ -292,6 +400,7 @@ var require_update = __commonJS({
     exports2.isCatchUpTarget = isCatchUpTarget;
     exports2.selectLatestCatchUpTarget = selectLatestCatchUpTarget3;
     exports2.platformFromOs = platformFromOs;
+    var release_target_js_1 = require_release_target();
     exports2.CONTROL_PROTOCOL_VERSION = 2;
     exports2.MIN_UPDATE_PLAN_LAUNCHER_VERSION = "0.23.6";
     exports2.ReleaseArtifactErrorCode = {
@@ -351,9 +460,7 @@ var require_update = __commonJS({
       if (typeof value2.version !== "string" || !/^\d+\.\d+\.\d+$/.test(value2.version)) {
         throw new Error("version \u683C\u5F0F\u5E94\u4E3A x.y.z");
       }
-      if (value2.platform !== "win-x64" && value2.platform !== "linux-x64") {
-        throw new Error("platform \u5E94\u4E3A win-x64 \u6216 linux-x64");
-      }
+      const platform = (0, release_target_js_1.parseReleasePlatform)(value2.platform);
       if (typeof value2.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value2.sha256)) {
         throw new Error("sha256 \u5E94\u4E3A 64 \u4F4D\u5C0F\u5199\u5341\u516D\u8FDB\u5236");
       }
@@ -362,7 +469,7 @@ var require_update = __commonJS({
       }
       const result = {
         version: value2.version,
-        platform: value2.platform,
+        platform,
         sha256: value2.sha256,
         size: value2.size
       };
@@ -386,6 +493,9 @@ var require_update = __commonJS({
           throw new Error("expectedFromVersions \u5E94\u4E3A\u81F3\u591A 3 \u4E2A\u4E0D\u91CD\u590D\u7684 x.y.z \u7248\u672C");
         }
         result.expectedFromVersions = list;
+      }
+      if (platform === "linux-x64-musl" && (result.artifactKind === "delta" || result.fromVersion !== void 0 && result.fromVersion !== "" || result.expectedFromVersions !== void 0 && result.expectedFromVersions.length > 0)) {
+        throw new Error("linux-x64-musl \u53EA\u63A5\u53D7\u5B8C\u6574\u6784\u4EF6\uFF0C\u4E0D\u63A5\u53D7\u589E\u91CF\u5305\u6216\u57FA\u7EBF\u5217\u8868");
       }
       return result;
     }
@@ -503,8 +613,7 @@ var require_update = __commonJS({
     }
     function hasAllReleaseArchives(release) {
       const archives = release.archives ?? {};
-      const platforms = ["win-x64", "linux-x64"];
-      return platforms.every((platform) => {
+      return release_target_js_1.REQUIRED_RELEASE_PLATFORMS.every((platform) => {
         const archive = archives[platform];
         if (!isReleaseArchiveAvailable(archive))
           return false;
@@ -2127,6 +2236,7 @@ var require_machine_register = __commonJS({
     exports2.getClientInstallationCompliance = getClientInstallationCompliance;
     exports2.parseMachineRegister = parseMachineRegister;
     var frp_runtime_js_1 = require_frp_runtime();
+    var release_target_js_1 = require_release_target();
     var git_ssh_js_1 = require_git_ssh();
     var tailnet_js_1 = require_tailnet();
     var MAX_CLIENT_ID = 128;
@@ -2140,12 +2250,16 @@ var require_machine_register = __commonJS({
     var MAX_RUN_AS_USER = 256;
     exports2.MachineInstallationMode = {
       SYSTEMD_ROOT_EQUIVALENT: "systemd-root-equivalent",
+      /** ADR-0065：iStoreOS/AX 等 procd 发行版，由 /etc/init.d 启动，进程本身就是 root。 */
+      PROCD_ROOT: "procd-root",
       WINDOWS_SYSTEM_TASK: "windows-system-task",
       LEGACY_PM2: "legacy-pm2"
     };
     exports2.PrivilegedCapabilityMode = {
       SUDO_ALL: "sudo-all",
       WINDOWS_SYSTEM: "windows-system",
+      /** ADR-0065：服务本身就以 root 运行，不需要 sudo 提权。 */
+      DIRECT_ROOT: "direct-root",
       UNAVAILABLE: "unavailable"
     };
     var RETIRED_DETAIL_KEYS = /* @__PURE__ */ new Set(["pi", "p2pTunnel"]);
@@ -2211,6 +2325,7 @@ var require_machine_register = __commonJS({
       const valid = [
         exports2.MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT,
         exports2.MachineInstallationMode.WINDOWS_SYSTEM_TASK,
+        exports2.MachineInstallationMode.PROCD_ROOT,
         exports2.MachineInstallationMode.LEGACY_PM2
       ];
       if (!valid.includes(value2.mode)) {
@@ -2226,12 +2341,15 @@ var require_machine_register = __commonJS({
       if (typeof available !== "boolean" || typeof nonInteractive !== "boolean") {
         throw new Error("privileged.available \u4E0E privileged.nonInteractive \u5FC5\u987B\u4E3A boolean");
       }
-      if (mode !== exports2.PrivilegedCapabilityMode.SUDO_ALL && mode !== exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM && mode !== exports2.PrivilegedCapabilityMode.UNAVAILABLE) {
-        throw new Error("privileged.mode \u5FC5\u987B\u4E3A sudo-all\u3001windows-system \u6216 unavailable");
+      if (mode !== exports2.PrivilegedCapabilityMode.SUDO_ALL && mode !== exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM && mode !== exports2.PrivilegedCapabilityMode.DIRECT_ROOT && mode !== exports2.PrivilegedCapabilityMode.UNAVAILABLE) {
+        throw new Error("privileged.mode \u5FC5\u987B\u4E3A sudo-all\u3001direct-root\u3001windows-system \u6216 unavailable");
       }
       const user = requireString(runAsUser, "privileged.runAsUser", MAX_RUN_AS_USER);
-      if ((mode === exports2.PrivilegedCapabilityMode.SUDO_ALL || mode === exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM) && (available !== true || nonInteractive !== true)) {
+      if ((mode === exports2.PrivilegedCapabilityMode.SUDO_ALL || mode === exports2.PrivilegedCapabilityMode.DIRECT_ROOT || mode === exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM) && (available !== true || nonInteractive !== true)) {
         throw new Error(`privileged.mode=${mode} \u5FC5\u987B available=true \u4E14 nonInteractive=true`);
+      }
+      if (mode === exports2.PrivilegedCapabilityMode.DIRECT_ROOT && user !== "root") {
+        throw new Error("privileged.mode=direct-root \u5FC5\u987B runAsUser=root");
       }
       if (mode === exports2.PrivilegedCapabilityMode.UNAVAILABLE && nonInteractive !== false) {
         throw new Error("privileged.mode=unavailable \u5FC5\u987B nonInteractive=false");
@@ -2263,12 +2381,15 @@ var require_machine_register = __commonJS({
       if (!isWin && !isLinux) {
         return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PLATFORM_UNSUPPORTED };
       }
-      const expected = isWin ? exports2.MachineInstallationMode.WINDOWS_SYSTEM_TASK : exports2.MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT;
-      if (mode !== expected) {
+      const modeMatches = isWin ? mode === exports2.MachineInstallationMode.WINDOWS_SYSTEM_TASK : mode === exports2.MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT || mode === exports2.MachineInstallationMode.PROCD_ROOT;
+      if (!modeMatches) {
+        return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PLATFORM_MODE_MISMATCH };
+      }
+      if (client.releasePlatform === "linux-x64-musl" && (!isLinux || mode !== exports2.MachineInstallationMode.PROCD_ROOT)) {
         return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PLATFORM_MODE_MISMATCH };
       }
       const privileged = client.capabilityDetails?.privileged;
-      const expectedPrivilege = isWin ? exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM : exports2.PrivilegedCapabilityMode.SUDO_ALL;
+      const expectedPrivilege = isWin ? exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM : mode === exports2.MachineInstallationMode.PROCD_ROOT ? exports2.PrivilegedCapabilityMode.DIRECT_ROOT : exports2.PrivilegedCapabilityMode.SUDO_ALL;
       if (privileged === void 0 || privileged.mode !== expectedPrivilege || privileged.available !== true || privileged.nonInteractive !== true) {
         return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PRIVILEGE_NONCOMPLIANT };
       }
@@ -2342,6 +2463,9 @@ var require_machine_register = __commonJS({
           parsedDetails.tailnet = (0, tailnet_js_1.parseTailnetCapability)(details.tailnet);
         }
         result.capabilityDetails = parsedDetails;
+      }
+      if (value2.releasePlatform !== void 0) {
+        result.releasePlatform = (0, release_target_js_1.parseReleasePlatform)(value2.releasePlatform);
       }
       if (value2.installation !== void 0) {
         result.installation = parseMachineInstallation(value2.installation);
@@ -3865,6 +3989,7 @@ var require_dist = __commonJS({
       return client_installer_js_1.parseClientInstallerPlatform;
     } });
     __exportStar(require_update(), exports2);
+    __exportStar(require_release_target(), exports2);
     var git_ssh_js_1 = require_git_ssh();
     Object.defineProperty(exports2, "GIT_SSH_FAILURE_CODES", { enumerable: true, get: function() {
       return git_ssh_js_1.GIT_SSH_FAILURE_CODES;
@@ -5656,12 +5781,17 @@ function readPrivileged(client) {
 }
 function isRootEquivalent(client) {
   const p = readPrivileged(client);
-  return Boolean(p && p.available && p.mode === "sudo-all" && p.nonInteractive);
+  if (!p || !p.available || !p.nonInteractive)
+    return false;
+  return p.mode === "sudo-all" || p.mode === "direct-root";
 }
 function formatPrivilegeSummary(client) {
   const p = readPrivileged(client);
   if (!p)
     return "\u672A\u62A5\u544A";
+  if (p.mode === "direct-root") {
+    return p.available ? "procd \xB7 \u76F4\u63A5 root\uFF08\u6574\u673A\u6743\u9650\uFF0C\u975E\u6C99\u7BB1\uFF09" : "\u76F4\u63A5 root \u7279\u6743\u4E0D\u53EF\u7528";
+  }
   if (isRootEquivalent(client))
     return "root \u7B49\u4EF7";
   return "root \u7B49\u4EF7\u4E0D\u53EF\u7528";
@@ -17280,7 +17410,7 @@ init_authenticated_client();
 init_client_resolver();
 init_arguments();
 init_environment();
-var VERSION_RE = /^vcpdeck-(\d+\.\d+\.\d+)-(win-x64|linux-x64)(?:-delta-(\d+\.\d+\.\d+))?\.zip$/;
+var VERSION_RE = /^vcpdeck-(\d+\.\d+\.\d+)-(linux-x64-musl|win-x64|linux-x64)(?:-delta-(\d+\.\d+\.\d+))?\.zip$/;
 var VERSION_INPUT_RE = /^\d+\.\d+\.\d+$/;
 var DEFAULT_WAIT_TIMEOUT_SECONDS3 = 1800;
 var DEFAULT_POLL_INTERVAL_MS = 5e3;
@@ -17426,9 +17556,9 @@ async function uploadRelease(zipPaths, environment, log, context) {
     ...new Set(archives.filter((archive) => archive.artifactKind === "delta").map((archive) => archive.fromVersion))
   ].sort();
   let firstFullPending = true;
-  for (const [index, zipPath] of zipPaths.entries()) {
-    const archive = archives[index];
-    const isFirstFull = archive.artifactKind === "full" && firstFullPending;
+  const ordered = zipPaths.map((zipPath, index) => ({ zipPath, index, archive: archives[index] })).sort((a, b) => uploadOrderRank(a.archive) - uploadOrderRank(b.archive) || a.index - b.index);
+  for (const { zipPath, archive } of ordered) {
+    const isFirstFull = archive.artifactKind === "full" && archive.platform !== "linux-x64-musl" && firstFullPending;
     if (isFirstFull)
       firstFullPending = false;
     await uploadOne(client, zipPath, log, context, {
@@ -17436,7 +17566,7 @@ async function uploadRelease(zipPaths, environment, log, context) {
       expectedFromVersions: isFirstFull ? expectedFromVersions : void 0
     });
   }
-  log("[vcpdeck] \u4E0A\u4F20\u5B8C\u6210\uFF08\u4E24\u4E2A\u5E73\u53F0\u6784\u4EF6\u9F50\u5907\u540E\u670D\u52A1\u7AEF\u81EA\u52A8\u5F00\u59CB\u66F4\u65B0\uFF09");
+  log("[vcpdeck] \u4E0A\u4F20\u5B8C\u6210\uFF08\u53CC\u5E73\u53F0\u6784\u4EF6\u9F50\u5907\u540E\u670D\u52A1\u7AEF\u81EA\u52A8\u5F00\u59CB\u66F4\u65B0\uFF09");
   return client;
 }
 async function waitForRelease(client, version, timeoutSeconds, log, context) {
@@ -17589,20 +17719,24 @@ function sleep4(ms) {
 function validateArchives(zipPaths) {
   const archives = zipPaths.map(platformOfFile);
   if (new Set(archives.map((archive) => archive.version)).size !== 1) {
-    throw new Error("\u4E24\u4E2A\u5E73\u53F0\u6784\u4EF6\u5FC5\u987B\u4F7F\u7528\u76F8\u540C\u7248\u672C\u53F7");
-  }
-  if (new Set(archives.map((archive) => archive.platform)).size !== 2) {
-    throw new Error("\u5FC5\u987B\u5404\u63D0\u4F9B\u4E00\u4E2A win-x64 \u4E0E linux-x64 \u6784\u4EF6");
+    throw new Error("\u6240\u6709\u6784\u4EF6\u5FC5\u987B\u4F7F\u7528\u76F8\u540C\u7248\u672C\u53F7");
   }
   const identities = archives.map((archive) => `${archive.version}|${archive.platform}|${archive.artifactKind}|${archive.fromVersion}`);
   if (new Set(identities).size !== identities.length) {
     throw new Error("\u6784\u4EF6\u6587\u4EF6\u540D\u4E0D\u5F97\u91CD\u590D");
   }
+  const musl = archives.filter((archive) => archive.platform === "linux-x64-musl");
+  if (musl.length > 1) {
+    throw new Error("linux-x64-musl \u6700\u591A\u53EA\u80FD\u63D0\u4F9B\u4E00\u4E2A\u6784\u4EF6");
+  }
+  if (musl.some((archive) => archive.artifactKind !== "full")) {
+    throw new Error("linux-x64-musl \u53EA\u63A5\u53D7 full \u6784\u4EF6\uFF0C\u4E0D\u63D0\u4F9B\u8DE8 libc \u589E\u91CF\u5305");
+  }
   const deltaSets = [];
-  for (const platform of ["win-x64", "linux-x64"]) {
+  for (const platform of import_shared6.REQUIRED_RELEASE_PLATFORMS) {
     const group = archives.filter((archive) => archive.platform === platform);
     if (group.filter((archive) => archive.artifactKind === "full").length !== 1) {
-      throw new Error("\u6BCF\u4E2A\u5E73\u53F0\u5FC5\u987B\u4E14\u53EA\u80FD\u6709\u4E00\u4E2A full \u6784\u4EF6");
+      throw new Error(`${platform} \u5FC5\u987B\u4E14\u53EA\u80FD\u6709\u4E00\u4E2A full \u6784\u4EF6`);
     }
     const deltas = group.filter((archive) => archive.artifactKind === "delta");
     if (deltas.length > 3) {
@@ -17614,6 +17748,11 @@ function validateArchives(zipPaths) {
   if (winDeltas.length !== linuxDeltas.length || winDeltas.some((version, index) => version !== linuxDeltas[index])) {
     throw new Error("\u4E24\u4E2A\u5E73\u53F0\u7684 delta \u57FA\u7EBF\u7248\u672C\u96C6\u5408\u5FC5\u987B\u4E00\u81F4");
   }
+}
+function uploadOrderRank(archive) {
+  if (archive.platform === "linux-x64-musl")
+    return 0;
+  return archive.artifactKind === "delta" ? 1 : 2;
 }
 function platformOfFile(path) {
   const name = path.split(/[\\/]/).pop() ?? "";

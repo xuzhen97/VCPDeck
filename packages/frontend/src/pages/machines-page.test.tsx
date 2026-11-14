@@ -121,11 +121,12 @@ describe("MachinesPage", () => {
 	});
 
 	it("displays root-equivalent risk and installation mode from capability details", async () => {
-		const privileged = (mode: "sudo-all" | "unavailable" | "windows-system") => ({
+		const privileged = (mode: "sudo-all" | "unavailable" | "windows-system" | "direct-root") => ({
 			available: mode !== "unavailable",
 			mode,
 			nonInteractive: mode !== "unavailable",
-			runAsUser: mode === "windows-system" ? "SYSTEM" : "vcpdeck",
+			runAsUser:
+				mode === "windows-system" ? "SYSTEM" : mode === "direct-root" ? "root" : "vcpdeck",
 		});
 		const base = {
 			name: "host",
@@ -160,13 +161,14 @@ describe("MachinesPage", () => {
 			make("win-new", "win32 10.0", { privileged: privileged("windows-system") }, { mode: "windows-system-task" }),
 			make("linux-new", "linux 6.8", { privileged: privileged("sudo-all") }, { mode: "systemd-root-equivalent" }),
 			make("legacy", "win32 10.0", { privileged: privileged("sudo-all") }, { mode: "legacy-pm2" }),
+			make("istoreos", "linux 6.6.144", { privileged: privileged("direct-root") }, { mode: "procd-root" }),
 			make("unknown", "linux 6.8", {}, undefined),
 			make("drift", "linux 6.8", { privileged: privileged("unavailable") }, { mode: "systemd-root-equivalent" }),
 			make("mismatch", "win32 10.0", { privileged: privileged("sudo-all") }, { mode: "systemd-root-equivalent" }),
 		]);
 
-		// 合规：Windows SYSTEM 与 Linux systemd 均显示系统级部署。
-		expect((await screen.findAllByText("系统级部署")).length).toBe(2);
+		// 合规：Windows SYSTEM、Linux systemd 与 procd 直接 root 均显示系统级部署。
+		expect((await screen.findAllByText("系统级部署")).length).toBe(3);
 		// 不合规：稳定原因文案。
 		expect(await screen.findByText("需要人工升级：旧版 PM2")).toBeVisible();
 		expect(screen.getByText("需要人工升级：安装模式未报告")).toBeVisible();
@@ -175,6 +177,9 @@ describe("MachinesPage", () => {
 		// 原 root 等价风险 chip 保留，并区分 Windows SYSTEM。
 		expect(screen.getAllByText("root 等价特权").length).toBeGreaterThanOrEqual(1);
 		expect(await screen.findByText("SYSTEM 特权")).toBeVisible();
+		expect(
+			await screen.findByText("procd · 直接 root（整机权限，非沙箱）"),
+		).toBeVisible();
 		// 未报告特权（旧 Client）。
 		expect(await screen.findByText("特权未报告")).toBeVisible();
 	});

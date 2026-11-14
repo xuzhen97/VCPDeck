@@ -131,7 +131,9 @@ client/
 
 打包统一产出 `.zip`（纯 JS 的 archiver 生成，构建机平台无关），Server 保存与 Launcher 解压都按 `.zip` 处理，先前的 tar.gz 全链路缺口已消除。
 
-每次发版产出两份按平台分开的 zip（win-x64 / linux-x64），构建机不再决定目标平台；Server 更新流程按目标机平台选择对应包（上传两次、下载带 `platform` 参数），详见 ADR-0012。Alibaba 后端的两个 zip 由 CLI 分片直传 Provider，Server 只处理会话和登记；Local 后端继续接收 raw stream。注意 Linux 目标机的终端后端来自 @lydell/node-pty 的 glibc 预编译包，不覆盖 musl（Alpine）环境。
+每次发版产出两份按平台分开的 zip（win-x64 / linux-x64），构建机不再决定目标平台；Server 更新流程按目标机平台选择对应包（上传两次、下载带 `platform` 参数），详见 ADR-0012。Alibaba 后端的两个 zip 由 CLI 分片直传 Provider，Server 只处理会话和登记；Local 后端继续接收 raw stream。注意 Linux 目标机的终端后端来自 @lydell/node-pty 的 glibc 预编译包，不覆盖 musl（Alpine）；iStoreOS musl 目标的 `pty.node` 必须按 §4.1 在真实 musl 环境重建，缺证据时该目标不提供终端。
+
+自 ADR-0065 起还可选产出第三份**仅 Client 的 musl 全量包** `vcpdeck-<version>-linux-x64-musl.zip`（平台 `linux-x64-musl`）。它只含 `client/`、`launcher/`、`installers/` 与解压后的 `frpc`，不含 `frps`、任何 Windows 构件、Server 目录与 Prisma；包内注入 `client/release-target.json` 描述符（schema/平台/角色/运行时版本与 SHA-256），并同时写入签名清单的 `files`，因此描述符受签名与 hash 约束，不新增顶层签名字段。该包不产出 delta，CLI 与 Server 都拒绝 musl delta。发布齐备性仍是 `win-x64` + `linux-x64` 两份必需构件，musl 仅可选，缺失不会让 Release 停留在未完成状态。它的 `@lydell/node-pty` 必须在明确的 musl x64 构建环境用锁定源码与匹配 Node 头文件编译出 `pty.node`，并由 ELF 检查拒绝 `GLIBC` 依赖；缺少该构建环境时不能产出该包，也不得用 glibc 二进制替代（本地环境尚未具备，属待补证据）。
 
 linux frp 裸 ELF 在打包时从 `.gz` 包装内存解压注入 zip（开发机杀毒会删除磁盘上的裸 ELF）；`.gz` 副本仍随包保留。
 
@@ -361,6 +363,8 @@ Client 更新自己时（0.23.19 起）用同一套区分，但重试位置不�
 
 当前约束解析只支持类似 `>=24` 的主版本下限，不是完整 SemVer range 实现。下载的 Node archive 当前没有独立发布者签名校验。复用当前运行时只在其版本满足 manifest 约束时发生；旧 Launcher 运行时不会绕过约束启动新业务版本。
 
+**musl 目标（iStoreOS）不走上述顺序**：版本目录内的 `client/release-target.json` 描述符给出锁定的 Node 24 musl 构件（版本、URL、SHA-256；当前为官方 nodejs.org 的 Linux x64 musl 归档）。Launcher 先查缓存 `<app-dir>/runtime/<platform>/node-<version>-<sha256>/`；命中也要重新执行并校验 `process.version`、`process.arch` 与 `glibcVersionRuntime` 为空，校验失败时删除坏缓存并重新下载一次（仍失败才拒绝）。未命中时下载 → 校验 SHA-256 → 解压到临时目录（归档自带顶层目录时剥掉一层）→ 执行校验 → 原子 rename 入缓存。任何一步失败都是目标拒绝，不回退系统 Node、glibc 构件或另一种安装模式。稳定 Launcher 自己的运行时仍在 `launcher/node/current`，业务更新不会替换它。`runtime/<platform>/node-<version>-<sha256>` 缓存目前没有自动回收（本地清理只覆盖 `apps/<version>`），需要人工删除不再被任何 `apps/<version>/client/release-target.json` 引用的目录。
+
 ### 8.4 守护、回退与本地版本清理
 
 - 业务进程异常退出后按指数退避重启，连续超过上限则等待人工处理或新版本；
@@ -422,6 +426,8 @@ Server 清理流程先通过原始 `archives` JSON 的 CAS 将 archive 标为 `d
 
 Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node 缓存、Server archive 或其他机器。`retention.json` 状态损坏时自动清理停用，运维应保留目录并人工修复/恢复状态；不得用猜测的历史顺序批量删除。
 
+musl 目标的本地清理目前只清理 `apps/<version>`：不得触碰稳定 Launcher 的 `launcher/node/current` 指针，也不得删除仍被某个 `apps/<version>/client/release-target.json` 引用的 `runtime/<platform>/node-<version>-<sha256>`。运行时缓存的自动回收尚未实现，需人工按上述引用关系清理；清理失败不得影响已健康运行的版本。
+
 ## 12. 故障与恢复边界
 
 | 故障 | 当前结果 | 恢复方式 |
@@ -441,6 +447,9 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 | 上传时已有活动 Release | 新上传记录可能停留 `uploaded` | 等活动 Release 完成后人工核对并重新触发/重新发布 |
 | 重复版本上传 | 当前文件移动发生在 DB 重复检查前，存在覆盖既有 archive 的风险 | 不复用版本号；核对 archive SHA 和 Release 记录 |
 | 非 Windows archive | 扩展名和解压器可能不匹配 | 当前不要声称支持；先修复格式协议并做真实演练 |
+| musl 描述符缺失、角色/平台不符或包内含 Server 构件 | 目标拒绝，旧服务继续运行 | 重新上传完整 musl 全量包；不得手工塞入 glibc Node 或 Server 构件 |
+| 私有 musl 运行时下载/校验/执行失败（版本、架构、libc） | 目标拒绝，不切换，也不回退系统 Node | 核对锁文件、网络与缓存后重发；必要时用 procd bootstrap 重装 |
+| procd 旧实例所有权无法证明 | 拒绝启动第二个实例（`PROCD_OWNER_ALIVE`/`PROCD_OWNER_UNPROVEN`） | 核对台账与 `/proc` 后人工处理；不得按进程名 `pkill` |
 | 应用回退但 DB 已升级 | 旧应用可能无法启动或错误读写 | 恢复兼容备份或部署兼容版本 |
 
 故障恢复必须以 SQLite Release 状态、Launcher current、实际进程版本和 archive SHA 四者共同核对，不能只看单一日志或 HTTP 成功响应。
@@ -460,7 +469,10 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 - 多 Client 串行、单机失败继续和离线补更；
 - archive 路径穿越、异常 manifest 和危险 preStart；
 - 数据库升级后应用回退；
-- Windows/Linux 真实构件从上传到 Server/Client 更新的全链路演练。
+- Windows/Linux 真实构件从上传到 Server/Client 更新的全链路演练；
+- musl 归档只含 Client 角色内容、描述符受签名覆盖、musl 目标只接受全量、缺少 musl 不改变双平台齐备判定；
+- procd 安装/幂等重装/卸载/稳定 Launcher 升级的注入式顺序测试，以及 `client/release-target.json` 的严格解析；
+- iStoreOS 重启与冷启动（ADR-0065 Task 11；musl PTY 与实机安装已在 24.10.8 通过，重启/冷启动待验）。
 
 详细命令和发布验收见 [`testing.md`](../testing.md)。当前 [`scripts/tests/e2e/smoke-launcher.cjs`](../../scripts/tests/e2e/smoke-launcher.cjs) 只证明 Launcher 局部流程，不替代真实 Server/Client 和数据库升级演练。
 
@@ -487,6 +499,7 @@ Launcher 的本地清理只作用于本机 `apps/<version>/`，不处理 Node �
 6. 防止重复版本覆盖 archive，并处理活动 Release 期间的新上传；
 7. 完成 Server 重启窗口 Job 对账和跨平台全链路 Release E2E；
 8. 建立可回退的生产数据库迁移流程；
-9. 签名密钥轮换与双钥并存。
+9. 签名密钥轮换与双钥并存；
+10. iStoreOS 24.10 x64 的 musl + procd 路径已本地实现，24.10.8 真机安装已通过；重启/冷启动与固件升级后的行为尚未验收。
 
 未实现事项统一进入 [`roadmap.md`](../roadmap.md) 或 Issue；本文只在其影响当前安全使用方式时保留已知缺口。

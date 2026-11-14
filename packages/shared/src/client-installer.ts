@@ -1,5 +1,5 @@
 /** Client 一键安装支持的平台。 */
-export type ClientInstallerPlatform = "win-x64" | "linux-x64";
+export type ClientInstallerPlatform = "win-x64" | "linux-x64" | "linux-x64-musl";
 
 /** Client 一键安装稳定错误码。 */
 export const ClientInstallerErrorCode = {
@@ -64,6 +64,11 @@ export interface ClientInstallerPreflight {
 	nodeConstraint: string;
 	nodeMirrors: string[];
 	npmRegistries: string[];
+	/**
+	 * 仅 musl 平台：procd 安装器所需的辅助资产及其 SHA-256。
+	 * 引导脚本逐个校验后才落盘执行，避免同源资产被替换。
+	 */
+	procdAssets?: Array<{ name: string; sha256: string }>;
 }
 
 /** 启用安装入口后返回的秘密 bootstrap 信息。 */
@@ -90,20 +95,27 @@ export interface ClientInstallerClientStatus {
 	installationMode: MachineInstallationMode | null;
 	/** 非交互 sudo 是否可用（旧 Client 未报告时为 null） */
 	nonInteractiveSudo: boolean | null;
+	/** 通用非交互特权是否可用（sudo-all 或 direct-root；旧 Client 未报告时为 null） */
+	privilegedAvailable: boolean | null;
+	/** 特权是否无需交互即可执行（与具体模式无关；旧 Client 未报告时为 null） */
+	privilegedNonInteractive: boolean | null;
 	/** 特权模式（旧 Client 未报告时为 null）：sudo-all / windows-system / unavailable */
 	privilegedMode: PrivilegedCapabilityMode | null;
+	/** 已持久化/已探测的发布平台（ADR-0065；旧 Client 或无法探测时为 null） */
+	releasePlatform?: ReleasePlatform | null;
 	connectedAt: string | null;
 	lastHeartbeatAt: string | null;
 }
 
 import type { MachineInstallationMode, PrivilegedCapabilityMode } from "./machine-register.js";
+import type { ReleasePlatform } from "./update.js";
 
 /** 严格解析安装平台。 */
 export function parseClientInstallerPlatform(
 	value: unknown,
 ): ClientInstallerPlatform {
-	if (value === "win-x64" || value === "linux-x64") return value;
-	throw new Error("platform 必须为 win-x64 或 linux-x64");
+	if (value === "win-x64" || value === "linux-x64" || value === "linux-x64-musl") return value;
+	throw new Error("platform 必须为 win-x64、linux-x64 或 linux-x64-musl");
 }
 
 /** 严格解析开关更新请求。 */

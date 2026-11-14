@@ -1,6 +1,6 @@
 # 架构决策记录（ADR）
 
-> 维护责任：架构维护者｜最后核验：2026-10-18
+> 维护责任：架构维护者｜最后核验：2026-11-14
 
 ADR 记录会长期影响系统结构、数据、协议、安全或运维的决策。ADR 一经 Accepted 不修改结论；后续变化用新 ADR supersede。
 
@@ -60,6 +60,8 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 
 ## 当前决策索引
 
+新增决策：[ADR-0065](./0065-istoreos-musl-procd-client.md)（Accepted，部分实施）：iStoreOS Client 采用 musl/procd/root 与持久状态目录，新增 Client-only 平台构件；局部扩展/取代 ADR-0012、0023、0027 的适用条款，现有 Windows/systemd 行为不变。iStoreOS 24.10.8 的 0.23.20 安装、procd-root 上线、干净卸载/重装与在线验收已通过；重启/冷启动及完整交付条件仍待验。
+
 状态为 Rejected 或 Superseded 的行，其摘要仅描述历史决策，不代表当前实施目标。ADR-0049 批准退役方向，不表示当前代码已退出专用能力。
 
 | ADR | 状态 | 决策 |
@@ -83,11 +85,11 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0020](./0020-cli-dataplane-namespace.md) | Accepted（Pi 调用范围由 ADR-0049 退役；Terminal 保留） | CLI 复用 `/app` 数据面命名空间接入终端与 Pi 交互 |
 | [0021](./0021-frp-dashboard-confirmed-mapping-lifecycle.md) | Accepted | FRP 映射以 Client 动作和 FRPS Dashboard 双重确认收敛 |
 | [0022](./0022-release-artifact-and-launcher-retention.md) | Accepted | Release 审计与归档正文分离生命周期，Server 与 Launcher 按各自权威独立清理 |
-| [0023](./0023-linux-system-client-and-root-equivalent-account.md) | Accepted（旧 PM2 回退迁移策略由 ADR-0027 取代） | Linux Client 使用 systemd 系统部署与 root 等价专用账户 |
+| [0023](./0023-linux-system-client-and-root-equivalent-account.md) | Accepted（旧 PM2 回退迁移策略由 ADR-0027 取代；iStoreOS 例外见 ADR-0065） | Linux Client 使用 systemd 系统部署与 root 等价专用账户 |
 | [0024](./0024-public-storage-share-capabilities.md) | Accepted | 使用长期 opaque capability 提供公开 Storage 分享，并以有效分享保护底层 File |
 | [0025](./0025-windows-client-highest-privilege-logon-task.md) | Superseded by ADR-0027 | 历史方案：Windows Client 使用当前用户、PM2 与最高权限登录任务 |
 | [0026](./0026-browser-client-webrtc-tcp-tunnel.md) | Superseded by ADR-0053 | 浏览器与 Client 使用 WebRTC 通用 TCP 隧道，ICE 直连优先并以 coturn 中继兜底 |
-| [0027](./0027-system-level-client-installation-and-clean-migration.md) | Accepted | Windows 使用 SYSTEM 开机任务、Linux 保持 systemd/sudo-all；旧 PM2 保留身份后清理式迁移，并提示不合规 Client 人工升级 |
+| [0027](./0027-system-level-client-installation-and-clean-migration.md) | Accepted（iStoreOS 扩展见 ADR-0065） | Windows 使用 SYSTEM 开机任务、Linux 保持 systemd/sudo-all；旧 PM2 保留身份后清理式迁移，并提示不合规 Client 人工升级 |
 | [0028](./0028-windows-desktop-capture-engine-in-session-vnc.md) | Superseded by ADR-0053 | Windows 桌面查看复用交互会话内的 VNC 服务端作为抓屏引擎，不自建会话内捕获组件 |
 | [0029](./0029-server-managed-isolated-pi-runtime.md) | Rejected（方向由 ADR-0048 否决） | Server 统一管理 Pi 配置/凭据/策略，Client 使用与用户原生 Pi 隔离的 VCPDeck Runtime，受信资源随 Client Release 发布 |
 | [0030](./0030-pi-resource-bundle-and-tool-policy.md) | Rejected（方向由 ADR-0048 否决） | Pi Bundle 位于版本目录并由 Client 逐资源校验；工具策略默认拒绝、审批超时即拒绝；策略经进程内桥接传递，不落盘不进环境变量 |

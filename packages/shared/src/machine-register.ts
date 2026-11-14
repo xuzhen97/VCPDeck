@@ -2,6 +2,8 @@ import {
 	parseFrpCapabilityStatus,
 	type FrpCapabilityStatus,
 } from "./frp-runtime.js";
+import { parseReleasePlatform } from "./release-target.js";
+import type { ReleasePlatform } from "./update.js";
 import type { TerminalCapabilityStatus } from "./terminal.js";
 import {
 	parseGitSshCapability,
@@ -28,6 +30,8 @@ const MAX_RUN_AS_USER = 256;
 /** Client 安装模式（ADR-0023：Linux A2 专用账户 + systemd；ADR-0027：Windows SYSTEM 开机任务；legacy-pm2 为待迁移旧安装）。 */
 export const MachineInstallationMode = {
 	SYSTEMD_ROOT_EQUIVALENT: "systemd-root-equivalent",
+	/** ADR-0065：iStoreOS/AX 等 procd 发行版，由 /etc/init.d 启动，进程本身就是 root。 */
+	PROCD_ROOT: "procd-root",
 	WINDOWS_SYSTEM_TASK: "windows-system-task",
 	LEGACY_PM2: "legacy-pm2",
 } as const;
@@ -44,6 +48,8 @@ export interface MachineInstallationStatus {
 export const PrivilegedCapabilityMode = {
 	SUDO_ALL: "sudo-all",
 	WINDOWS_SYSTEM: "windows-system",
+	/** ADR-0065：服务本身就以 root 运行，不需要 sudo 提权。 */
+	DIRECT_ROOT: "direct-root",
 	UNAVAILABLE: "unavailable",
 } as const;
 
@@ -171,6 +177,8 @@ export interface MachineRegister {
 		/** 可选：Tailnet 管理协议能力（ADR-0062）；旧 Client 缺省即未报告 */
 		tailnet?: TailnetCapability;
 	};
+	/** 可选：Client 实际运行的发布目标平台（ADR-0065；旧 Client 缺省即未报告） */
+	releasePlatform?: ReleasePlatform;
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告） */
 	installation?: MachineInstallationStatus;
 	/**
@@ -215,6 +223,7 @@ export function parseMachineInstallation(
 	const valid = [
 	MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT,
 	MachineInstallationMode.WINDOWS_SYSTEM_TASK,
+	MachineInstallationMode.PROCD_ROOT,
 	MachineInstallationMode.LEGACY_PM2,
 	];
 	if (!valid.includes(value.mode as MachineInstallationMode)) {
@@ -237,17 +246,26 @@ export function parsePrivilegedCapabilityStatus(
 	if (
 		mode !== PrivilegedCapabilityMode.SUDO_ALL &&
 		mode !== PrivilegedCapabilityMode.WINDOWS_SYSTEM &&
+		mode !== PrivilegedCapabilityMode.DIRECT_ROOT &&
 		mode !== PrivilegedCapabilityMode.UNAVAILABLE
 	) {
-		throw new Error("privileged.mode 必须为 sudo-all、windows-system 或 unavailable");
+		throw new Error(
+			"privileged.mode 必须为 sudo-all、direct-root、windows-system 或 unavailable",
+		);
 	}
 	const user = requireString(runAsUser, "privileged.runAsUser", MAX_RUN_AS_USER);
 	// 语义约束：sudo-all/windows-system 必须可用且非交互；unavailable 不得声明非交互可用。
 	if (
-		(mode === PrivilegedCapabilityMode.SUDO_ALL || mode === PrivilegedCapabilityMode.WINDOWS_SYSTEM) &&
+		(mode === PrivilegedCapabilityMode.SUDO_ALL ||
+			mode === PrivilegedCapabilityMode.DIRECT_ROOT ||
+			mode === PrivilegedCapabilityMode.WINDOWS_SYSTEM) &&
 		(available !== true || nonInteractive !== true)
 	) {
 		throw new Error(`privileged.mode=${mode} 必须 available=true 且 nonInteractive=true`);
+	}
+	// direct-root 指服务本身以 root 运行，runAsUser 必须是 root，不能拿别的账户冒充。
+	if (mode === PrivilegedCapabilityMode.DIRECT_ROOT && user !== "root") {
+		throw new Error("privileged.mode=direct-root 必须 runAsUser=root");
 	}
 	if (mode === PrivilegedCapabilityMode.UNAVAILABLE && nonInteractive !== false) {
 		throw new Error("privileged.mode=unavailable 必须 nonInteractive=false");
@@ -275,7 +293,7 @@ export type ClientInstallationComplianceReason =
 /** 合规判定所需的 Client 最小投影（与 ClientInfo 字段同形，独立于业务版本）。 */
 export type ClientInstallationComplianceSource = Pick<
 	MachineRegister,
-	"os" | "installation" | "capabilityDetails"
+	"os" | "installation" | "capabilityDetails" | "releasePlatform"
 >;
 
 /** 安装与特权合规判定结果；compliant=true 时 reason 为 null。 */
@@ -297,6 +315,7 @@ type PrivilegedStatusLike = Pick<
 export function getClientInstallationCompliance(
 	client: {
 		os: string;
+		releasePlatform?: ReleasePlatform;
 		installation?: MachineInstallationStatus;
 		capabilityDetails?: { privileged?: PrivilegedStatusLike };
 	},
@@ -313,12 +332,27 @@ export function getClientInstallationCompliance(
 	if (!isWin && !isLinux) {
 		return { compliant: false, reason: ClientInstallationComplianceReason.PLATFORM_UNSUPPORTED };
 	}
-	const expected = isWin ? MachineInstallationMode.WINDOWS_SYSTEM_TASK : MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT;
-	if (mode !== expected) {
+	// Linux 允许 systemd 与 procd 两种系统级安装；Windows 只认 SYSTEM 任务（ADR-0065 不扩展 Windows）。
+	const modeMatches = isWin
+		? mode === MachineInstallationMode.WINDOWS_SYSTEM_TASK
+		: mode === MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT ||
+			mode === MachineInstallationMode.PROCD_ROOT;
+	if (!modeMatches) {
+		return { compliant: false, reason: ClientInstallationComplianceReason.PLATFORM_MODE_MISMATCH };
+	}
+	// musl 构件只服务 procd + root 直跑的 Linux；声明了却装在 systemd/Windows 属平台与模式不一致。
+	if (
+		client.releasePlatform === "linux-x64-musl" &&
+		(!isLinux || mode !== MachineInstallationMode.PROCD_ROOT)
+	) {
 		return { compliant: false, reason: ClientInstallationComplianceReason.PLATFORM_MODE_MISMATCH };
 	}
 	const privileged = client.capabilityDetails?.privileged;
-	const expectedPrivilege = isWin ? PrivilegedCapabilityMode.WINDOWS_SYSTEM : PrivilegedCapabilityMode.SUDO_ALL;
+	const expectedPrivilege = isWin
+		? PrivilegedCapabilityMode.WINDOWS_SYSTEM
+		: mode === MachineInstallationMode.PROCD_ROOT
+			? PrivilegedCapabilityMode.DIRECT_ROOT
+			: PrivilegedCapabilityMode.SUDO_ALL;
 	if (
 		privileged === undefined ||
 		privileged.mode !== expectedPrivilege ||
@@ -413,6 +447,10 @@ export function parseMachineRegister(value: unknown): MachineRegister {
 			parsedDetails.tailnet = parseTailnetCapability(details.tailnet);
 		}
 		result.capabilityDetails = parsedDetails;
+	}
+
+	if (value.releasePlatform !== undefined) {
+		result.releasePlatform = parseReleasePlatform(value.releasePlatform);
 	}
 
 	if (value.installation !== undefined) {

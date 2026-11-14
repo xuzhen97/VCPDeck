@@ -36,6 +36,7 @@ import { Actor } from "../auth/actor.decorator.js";
 import {
 	MIN_UPDATE_PLAN_LAUNCHER_VERSION,
 	ReleaseArtifactErrorCode,
+	ReleaseStatus,
 	hasAllReleaseArchives,
 	isReleaseArchiveAvailable,
 	type ActorContext,
@@ -65,7 +66,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isPlatform(v: string | undefined): v is ReleasePlatform {
-	return v === "win-x64" || v === "linux-x64";
+	return v === "win-x64" || v === "linux-x64" || v === "linux-x64-musl";
 }
 
 /** 纯数字三段版本解析（x.y.z），不依赖 semver；非法或缺省返回 null。 */
@@ -197,7 +198,9 @@ export class ReleaseController {
 		@Query("fromVersion") fromVersion?: string,
 	) {
 		if (!isPlatform(platform)) {
-			throw new BadRequestException("platform 应为 win-x64 或 linux-x64");
+			throw new BadRequestException(
+				"platform 应为 win-x64、linux-x64 或 linux-x64-musl",
+			);
 		}
 		// 空串按缺省处理；其余必须是 x.y.z，避免把查询参数拼进本地文件路径。
 		const deltaFromVersion = fromVersion || undefined;
@@ -313,7 +316,9 @@ export class ReleaseController {
 			);
 		}
 		if (!isPlatform(platform)) {
-			throw new BadRequestException("platform 应为 win-x64 或 linux-x64");
+			throw new BadRequestException(
+				"platform 应为 win-x64、linux-x64 或 linux-x64-musl",
+			);
 		}
 		const info = await this.service.findByVersionWithStorage(version);
 		if (!info) {
@@ -321,6 +326,20 @@ export class ReleaseController {
 				code: "RELEASE_NOT_FOUND",
 				message: `release ${version} 不存在`,
 			});
+		}
+		// musl 是可选变体：只有进入客户端更新阶段（或已完成）才允许下发，
+		// 避免第三包刚上传、常规双平台编排尚未开始时就被单独拉走。
+		if (
+			platform === "linux-x64-musl" &&
+			info.status !== ReleaseStatus.UPDATING_CLIENTS &&
+			info.status !== ReleaseStatus.DONE
+		) {
+			throw toHttp(
+				new ReleaseError(
+					ReleaseArtifactErrorCode.RELEASE_ARTIFACTS_INCOMPLETE,
+					`release ${version} 尚未进入客户端更新阶段`,
+				),
+			);
 		}
 		const archive = info.archives[platform];
 		if (!isReleaseArchiveAvailable(archive)) {
@@ -377,7 +396,9 @@ export class ReleaseController {
 			throw new BadRequestException("版本号格式应为 x.y.z");
 		}
 		if (!isPlatform(platform)) {
-			throw new BadRequestException("platform 应为 win-x64 或 linux-x64");
+			throw new BadRequestException(
+				"platform 应为 win-x64、linux-x64 或 linux-x64-musl",
+			);
 		}
 		if (!sha256 || !SHA256_RE.test(sha256)) {
 			throw new BadRequestException("sha256 应为 64 位十六进制");

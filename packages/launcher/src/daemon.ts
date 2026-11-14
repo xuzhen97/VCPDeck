@@ -5,7 +5,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, readFileSync, createWriteStream } from "node:fs";
+import { createReadStream, existsSync, readFileSync, createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -13,10 +13,20 @@ import { pipeline } from "node:stream/promises";
 import {
 	ReleaseArtifactErrorCode,
 	type LauncherPrepareStatus,
+	type MuslReleaseTarget,
+	parseMuslReleaseTarget,
 	type UpdateManifest,
 } from "@vcpdeck/shared";
 import { extractArchive } from "./archive.js";
 import { ensureNodeRuntime } from "./ensure-node.js";
+import { ensureMuslRuntime } from "./musl-runtime.js";
+import { verifyManifestSignature } from "./assemble.js";
+import { loadTrustedPublicKeyPem } from "./trusted-key.js";
+import {
+	readOwnedProcessFacts,
+	reclaimOwnedProcess,
+	writeOwnedLedger,
+} from "./ownership.js";
 import { VersionStore } from "./versions.js";
 import { Updater } from "./updater.js";
 import {
@@ -77,6 +87,148 @@ export function readManifest(versionDir: string): UpdateManifest | null {
 	} catch {
 		return null;
 	}
+}
+
+/** 读取版本目录下的 musl 运行时描述；没有则说明是双平台 glibc 包。 */
+export function readClientReleaseTarget(
+	versionDir: string,
+): MuslReleaseTarget | null {
+	const path = join(versionDir, "client", "release-target.json");
+	if (!existsSync(path)) return null;
+	return parseMuslReleaseTarget(JSON.parse(readFileSync(path, "utf-8")));
+}
+
+/**
+ * 本机 Launcher 运行时是否为 musl：仅 Linux 生效，且无法证明 glibc 时按 musl 处理。
+ * 保守默认是有意为之——宁可拒绝可疑目标，也不跨 libc 切换。
+ */
+export function localRuntimeIsMusl(platform: string = process.platform): boolean {
+	if (platform !== "linux") return false;
+	try {
+		const report = process.report?.getReport?.() as
+			| { header?: { glibcVersionRuntime?: unknown } }
+			| undefined;
+		return typeof report?.header?.glibcVersionRuntime !== "string";
+	} catch {
+		return true;
+	}
+}
+
+function releaseTargetError(code: string, message: string): Error {
+	return Object.assign(new Error(message), { code });
+}
+
+function fileSha256(filePath: string): string {
+	return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+/**
+ * 停旧进程前的目标复验（纯本地、无网络）：清单、构件入口、描述文件、签名与哈希。
+ * musl Client 包必须带描述文件且签名可验；本机 musl 缺描述文件直接失败关闭。
+ */
+export function assertPreparedTarget(input: {
+	versionDir: string;
+	artifact: "server" | "client";
+	localMusl?: boolean;
+}): MuslReleaseTarget | null {
+	const { versionDir, artifact } = input;
+	const localMusl = input.localMusl ?? localRuntimeIsMusl();
+	let manifestRaw: unknown = null;
+	try {
+		manifestRaw = JSON.parse(readFileSync(join(versionDir, "manifest.json"), "utf-8"));
+	} catch {
+		manifestRaw = null;
+	}
+	if (
+		!manifestRaw ||
+		typeof manifestRaw !== "object" ||
+		Array.isArray(manifestRaw)
+	) {
+		throw releaseTargetError(
+			ReleaseArtifactErrorCode.RELEASE_ARTIFACTS_INCOMPLETE,
+			"目标构件清单不完整",
+		);
+	}
+	const manifest = manifestRaw as UpdateManifest;
+	const artifacts = manifest.artifacts as unknown as
+		| Record<string, { dir?: string; entry?: string } | undefined>
+		| undefined;
+	const target = artifacts?.[artifact];
+	if (!target?.dir || !target.entry) {
+		throw releaseTargetError(
+			ReleaseArtifactErrorCode.RELEASE_ARTIFACTS_INCOMPLETE,
+			`目标缺少 artifacts.${artifact}`,
+		);
+	}
+	if (!existsSync(join(versionDir, target.dir, target.entry))) {
+		throw releaseTargetError(
+			ReleaseArtifactErrorCode.RELEASE_ARTIFACTS_INCOMPLETE,
+			"目标入口缺失",
+		);
+	}
+	if (artifact !== "client") return null;
+
+	const descriptor = readClientReleaseTarget(versionDir);
+	if (!descriptor) {
+		if (localMusl) {
+			throw releaseTargetError(
+				ReleaseArtifactErrorCode.RELEASE_ARTIFACTS_INCOMPLETE,
+				"musl 客户端缺少 release-target.json",
+			);
+		}
+		return null;
+	}
+	if (!localMusl) {
+		throw releaseTargetError(
+			ReleaseArtifactErrorCode.RELEASE_ARTIFACTS_INCOMPLETE,
+			"目标平台与本机运行时不一致",
+		);
+	}
+	if (artifacts?.server) {
+		throw releaseTargetError(
+			ReleaseArtifactErrorCode.RELEASE_ARTIFACTS_INCOMPLETE,
+			"musl Client 包不得携带 Server 构件",
+		);
+	}
+	const descriptorPath = join(versionDir, "client", "release-target.json");
+	const files = Array.isArray(manifest.files) ? manifest.files : [];
+	const entry = files.find(
+		(file) =>
+			file &&
+			typeof file === "object" &&
+			(file as { path?: string }).path === "client/release-target.json",
+	) as { sha256?: string } | undefined;
+	if (
+		!entry ||
+		typeof entry.sha256 !== "string" ||
+		entry.sha256.toLowerCase() !== fileSha256(descriptorPath)
+	) {
+		throw releaseTargetError(
+			ReleaseArtifactErrorCode.RELEASE_ARTIFACTS_INCOMPLETE,
+			"release-target.json 哈希不匹配",
+		);
+	}
+	const signaturePath = join(versionDir, "manifest.json.sig");
+	if (!existsSync(signaturePath)) {
+		throw releaseTargetError(
+			ReleaseArtifactErrorCode.MANIFEST_SIGNATURE_INVALID,
+			"缺少发布清单签名",
+		);
+	}
+	const signature = readFileSync(signaturePath, "utf-8").trim();
+	if (
+		!verifyManifestSignature(
+			manifestRaw as Record<string, unknown>,
+			signature,
+			loadTrustedPublicKeyPem(),
+		)
+	) {
+		throw releaseTargetError(
+			ReleaseArtifactErrorCode.MANIFEST_SIGNATURE_INVALID,
+			"发布清单签名无效",
+		);
+	}
+	return descriptor;
 }
 
 function streamSha256(filePath: string): Promise<string> {
@@ -310,10 +462,9 @@ export class Daemon {
 			throw new Error(`manifest 缺少 artifacts.${this.artifact}: ${version}`);
 		}
 
-		this.nodePath = await ensureNodeRuntime({
-			constraint: manifest?.nodeVersion ?? ">=24",
-			cacheDir: join(this.appDir, "node"),
-		});
+		// 先准备新运行时，再回收旧 Client：运行时解析失败时旧进程仍在服务，不会两头落空。
+		this.nodePath = await this.resolveClientRuntime(versionDir, manifest);
+		this.reclaimStaleOwnedProcess();
 
 		const child = spawn(this.nodePath, [artifact.entry], {
 			cwd: join(versionDir, artifact.dir),
@@ -328,6 +479,7 @@ export class Daemon {
 		});
 		this.child = child;
 		this.childStartedAt = Date.now();
+		this.recordOwnedProcess(child.pid);
 		child.on("exit", (code) => {
 			if (this.child !== child) return;
 			this.child = null;
@@ -335,6 +487,68 @@ export class Daemon {
 			this.scheduleRestart(code);
 		});
 		this.log(`已启动 ${this.artifact} ${version}`);
+	}
+
+	/** musl Client 必须用包内锁定的私有 Node；glibc 包保持原 ensure-node 路径。 */
+	private async resolveClientRuntime(
+		versionDir: string,
+		manifest: UpdateManifest | null,
+	): Promise<string> {
+		const target =
+			this.artifact === "client" ? readClientReleaseTarget(versionDir) : null;
+		if (target) {
+			return ensureMuslRuntime(
+				target,
+				join(this.appDir, "runtime"),
+				manifest?.nodeVersion ?? ">=24",
+			);
+		}
+		return ensureNodeRuntime({
+			constraint: manifest?.nodeVersion ?? ">=24",
+			cacheDir: join(this.appDir, "node"),
+		});
+	}
+
+	/**
+	 * 停旧进程前的目标复验：清单、构件入口、描述文件、签名与 musl 运行时都必须仍然成立。
+	 * 任何一项不成立都直接抛错，调用方因此不会先停服务再发现新版本起不来。
+	 */
+	private async validatePreparedTarget(version: string): Promise<void> {
+		const versionDir = join(this.appDir, "apps", version);
+		const target = assertPreparedTarget({
+			versionDir,
+			artifact: this.artifact,
+		});
+		if (!target) return;
+		await ensureMuslRuntime(
+			target,
+			join(this.appDir, "runtime"),
+			readManifest(versionDir)?.nodeVersion ?? ">=24",
+		);
+	}
+
+	/** Linux Client 启动后写入 PID 所有权账本，供 procd 停服 / 卸载确认不遗留进程。 */
+	private recordOwnedProcess(pid: number | undefined): void {
+		if (!pid || process.platform !== "linux" || this.artifact !== "client") return;
+		const stateDir = process.env.VCPDECK_CLIENT_DATA_DIR ?? this.appDir;
+		try {
+			// 必须记录 Client 子进程的四元组；默认参数记的是 Launcher 自己。
+			writeOwnedLedger(stateDir, readOwnedProcessFacts(pid));
+		} catch (error) {
+			this.log(`所有权账本写入跳过: ${(error as Error).message}`);
+		}
+	}
+
+	/**
+	 * 启动前回收遗留的受管 Client：账本里若仍有一个活着的 Client（bootId+startTime+uid 一致），
+	 * 说明上一实例没有被 procd 停掉。按四元组复证后强杀它，再拉起新实例；
+	 * 复证不成立（PID 复用/重启）时不碰该进程，直接视为无有效记录。
+	 */
+	private reclaimStaleOwnedProcess(): void {
+		if (process.platform !== "linux" || this.artifact !== "client") return;
+		const stateDir = process.env.VCPDECK_CLIENT_DATA_DIR ?? this.appDir;
+		// 账本损坏时 fail-closed：不能把“读不出证据”当成“没有遗留进程”。
+		reclaimOwnedProcess(stateDir, { log: (message) => this.log(message) });
 	}
 
 	/** 崩溃退避拉起（运行满 30s 视为稳定，计数清零；超上限放弃） */
@@ -370,6 +584,8 @@ export class Daemon {
 		if (!child) return;
 		this.child = null;
 		child.kill("SIGTERM");
+		// 停机阶梯：Client 资源释放 8s < 这里的强杀 10s < procd term_timeout 15s。
+		// 改这一处必须同步 packages/client/src/shutdown.ts 与 scripts/vcpdeck-client.procd。
 		await new Promise<void>((resolve) => {
 			const timer = setTimeout(() => {
 				try {
@@ -485,6 +701,9 @@ export class Daemon {
 				this.updating = false;
 			},
 			probe: (version) => this.probe(version),
+			// musl 私有运行时缓存已存在说明本机是 musl 安装：跨 libc 不接受 delta。
+			acceptsDelta: () => !existsSync(join(this.appDir, "runtime")),
+			validatePreparedTarget: (version) => this.validatePreparedTarget(version),
 			onSuccessfulApply: (version, previous) =>
 				this.onSuccessfulApply(version, previous),
 		});

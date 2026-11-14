@@ -9,6 +9,7 @@ import {
 	ReleaseStatus,
 	type PaginatedResult,
 	ReleaseClientState,
+	isReleasePlatform,
 	type ReleaseClientEntry,
 	type ReleaseFailureKind,
 	type ReleaseInfo,
@@ -290,7 +291,7 @@ function parseArchives(raw: string): Partial<Record<ReleasePlatform, ServerRelea
 	try {
 		const parsed = JSON.parse(raw) as Record<string, unknown>;
 		for (const [platform, value] of Object.entries(parsed)) {
-			if (platform !== "win-x64" && platform !== "linux-x64") continue;
+			if (!isReleasePlatform(platform)) continue;
 			const archive = parseArchive(value);
 			if (archive) archives[platform] = archive;
 		}

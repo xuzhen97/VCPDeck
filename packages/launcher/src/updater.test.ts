@@ -38,6 +38,8 @@ interface MockedDeps {
 	artifact: "server" | "client";
 	probeRetries: number;
 	probeIntervalMs: number;
+	acceptsDelta: boolean;
+	validatePreparedTarget: MockFn;
 }
 
 const ENV_KEY = "VCPDECK_RELEASE_PUBLIC_KEY_PEM";
@@ -140,6 +142,8 @@ function makeDeps(overrides: Partial<MockedDeps> = {}): MockedDeps {
 		artifact: "server",
 		probeRetries: 3,
 		probeIntervalMs: 100,
+		acceptsDelta: true,
+		validatePreparedTarget: vi.fn(async () => undefined),
 		...overrides,
 	};
 }
@@ -636,5 +640,79 @@ describe("Updater", () => {
 
 			expect(deps.probe).toHaveBeenCalledTimes(3);
 		});
+	});
+});
+
+describe("目标验证钩子与 musl 拒绝 delta（Task 5）", () => {
+	it("prepare 快路命中也要重新验证，验证失败不触发下载", async () => {
+		const deps = makeDeps();
+		deps.versions.isPrepared.mockResolvedValue(true);
+		deps.validatePreparedTarget.mockRejectedValue(new Error("平台不匹配"));
+		const updater = new Updater(deps as unknown as UpdaterDeps);
+
+		await expect(
+			updater.prepare({
+				url: "http://server/full.zip",
+				sha256: "a".repeat(64),
+				version: "1.2.1",
+			}),
+		).rejects.toThrow("平台不匹配");
+		expect(deps.downloadZip).not.toHaveBeenCalled();
+	});
+
+	it("prepare 成功收尾时对目标再验证一次", async () => {
+		const deps = makeDeps();
+		deps.verifySha256.mockResolvedValue(true);
+		const updater = new Updater(deps as unknown as UpdaterDeps);
+
+		await updater.prepare({
+			url: "http://server/full.zip",
+			sha256: "a".repeat(64),
+			version: "1.2.1",
+		});
+
+		expect(deps.validatePreparedTarget).toHaveBeenCalledWith("1.2.1");
+	});
+
+	it("apply 在停旧进程前验证；验证失败时不再停进程、不切换", async () => {
+		const deps = makeDeps();
+		deps.versions.currentVersion.mockResolvedValue("1.1.0");
+		deps.validatePreparedTarget.mockRejectedValue(new Error("runtime 不可执行"));
+		const updater = new Updater(deps as unknown as UpdaterDeps);
+
+		await expect(updater.apply("1.2.1")).rejects.toThrow("runtime 不可执行");
+		expect(deps.stopProcess).not.toHaveBeenCalled();
+		expect(deps.versions.switchTo).not.toHaveBeenCalled();
+	});
+
+	it("musl 目标即使给出候选 delta 也只接受同目标全量包", async () => {
+		const deps = makeDeps({ acceptsDelta: false });
+		const baseline = join(deps.root, "apps", "0.9.0");
+		mkdirSync(baseline, { recursive: true });
+		writeFileSync(
+			join(baseline, "manifest.json"),
+			JSON.stringify(legacyManifest("0.9.0")),
+		);
+		deps.verifySha256.mockResolvedValue(true);
+		const updater = new Updater(deps as unknown as UpdaterDeps);
+
+		await updater.prepare({
+			url: "http://server/full.zip",
+			sha256: "a".repeat(64),
+			version: "1.2.1",
+			candidates: [
+				{
+					fromVersion: "0.9.0",
+					url: "http://server/delta.zip",
+					sha256: "b".repeat(64),
+					size: 1,
+				},
+			],
+		});
+
+		expect(deps.downloadZip).toHaveBeenCalledWith(
+			"http://server/full.zip",
+			expect.any(String),
+		);
 	});
 });

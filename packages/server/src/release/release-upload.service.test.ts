@@ -180,6 +180,19 @@ describe("ReleaseUploadService", () => {
 		expect(delegate.create).not.toHaveBeenCalled();
 	});
 
+	it("musl 只接受全量会话，增量在协商前就被拒绝", async () => {
+		const { service, delegate } = fixture({ backend: "local" });
+		await expect(
+			service.createSession({
+				...input,
+				platform: "linux-x64-musl",
+				artifactKind: "delta",
+				fromVersion: "0.2.0",
+			}),
+		).rejects.toThrow("linux-x64-musl 只接受完整构件");
+		expect(delegate.create).not.toHaveBeenCalled();
+	});
+
 	it("Alibaba 创建持久化会话但不持久化预签名 URL", async () => {
 		const { service, delegate, getRow } = fixture();
 		const result = await service.createSession(input);

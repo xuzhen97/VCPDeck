@@ -24,7 +24,7 @@ Client 主动连接 Server，因此目标机器无需向 Server 开放入站控�
 - pnpm workspace 开发/源码部署；
 - Node.js 24+（发布 manifest 默认 `>=24`）；
 - Server 需要可写的数据库、Storage 和 Release 目录；
-- 交互式终端依赖 `@lydell/node-pty` 预编译后端（随包携带 win-x64/linux-x64 预编译，Linux 仅 glibc；Alpine/musl 目标机终端能力不可用）；
+- 交互式终端依赖 `@lydell/node-pty` 预编译后端（随包携带 win-x64/linux-x64 glibc 预编译；iStoreOS musl 目标的 `pty.node` 已在 24.10.8 真机临时 Alpine chroot 中按锁定源码编译并冒烟通过、附 build-meta 证据，但完整安装与重启尚未验收；其余 Alpine/musl 目标不提供终端）；
 - FRP 能力需要匹配平台的 frpc/frps 构件（win-x64 与 linux-x64 均随包）；
 - 目标机不再需要编译工具链或网络下载依赖引擎（详见 ADR-0012）。
 
@@ -203,7 +203,7 @@ Linux（Bash）路径版本：把示例中的 `C:/vcpdeck/launcher` 换成 `/opt
 
 Linux 新安装器会校验 root/可用 sudo、下载并校验 Release 与 Client archive，部署到 `/opt/vcpdeck/client`，创建锁定密码的 `vcpdeck` 专用账户、`/etc/vcpdeck/client.env`、sudoers 和 `vcpdeck-client.service`，然后等待 Server 确认在线/版本/能力；Windows 安装必须从**已提升的管理员 PowerShell** 执行（脚本不会申请 UAC，未提升立即失败），固定安装到 `C:\ProgramData\VCPDeck\Client` 并复用其中已就绪的机器级私有 Node；重复安装会先结束既有 `\VCPDeck\Client` 任务，释放当前版本目录并重新加载恢复后的身份与环境（下载成功时也直接落到该目录，不写用户 Profile），Git 为可选工具（缺少时尝试 `winget install --id Git.Git --exact --scope machine --silent`，失败只警告不阻断），最后注册并启动 `\VCPDeck\Client` SYSTEM 开机任务，再向 Server 验收 `windows-system-task` 与 Windows SYSTEM 特权。存量安装（Windows 旧用户 PM2/登录任务、Linux 旧用户 PM2）均在生产并校验全部材料后**清理式迁移**：只删除能证明属于 VCPDeck 的 PM2 entry、旧自启与旧运行目录；Windows 会复用旧安装实际使用的全局 PM2 CLI，并对查询、删除和保存结果 fail closed；保留 `client-id`、Server Origin 与显示名称，无关 PM2 应用与个人文件不动。若已有配置指向其他 Server 则拒绝。Bazzite 依赖分层若提示重启，必须先重启系统，再重跑同一命令。
 
-支持范围：Windows 10/11 x64、Windows Server 2019+ x64；Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+、Alibaba Cloud Linux 3 和 Bazzite x64 + glibc + systemd（Alibaba Cloud Linux 3 为 Anolis OS 8/RHEL 8 生态、glibc 2.32，按 dnf 族处理；2.x 属 CentOS 7 生态，不支持）。不支持 ARM64、Alpine/musl、CentOS 7、WSL、容器、无 systemd Linux 及其他未经逐项验收的 Fedora Atomic 发行版。Node 与 PM2 下载优先国内镜像，失败回退官方源（Windows SYSTEM 安装不使用 PM2）。
+支持范围：Windows 10/11 x64、Windows Server 2019+ x64；Ubuntu 22.04+、Debian 12+、Rocky/AlmaLinux 9+、Alibaba Cloud Linux 3 和 Bazzite x64 + glibc + systemd（Alibaba Cloud Linux 3 为 Anolis OS 8/RHEL 8 生态、glibc 2.32，按 dnf 族处理；2.x 属 CentOS 7 生态，不支持）。iStoreOS 24.10 x64 走独立的 musl + procd 入口（见 §4.9），不经过本节的通用安装器；它仍受本节之外的前置条件约束，且实机安装已在 24.10.8 通过，重启与冷启动尚未验收。不支持 ARM64、Alpine/musl、CentOS 7、WSL、容器、无 systemd 的普通 Linux 及其他未经逐项验收的 Fedora Atomic 发行版。Node 与 PM2 下载优先国内镜像，失败回退官方源（Windows SYSTEM 安装不使用 PM2）。
 
 Bazzite 缺少 `curl`、`unzip`、`tar`、`xz` 或系统 CA 证书时，安装器只对实际缺少的固定 RPM 请求 sudo，并优先执行 `rpm-ostree install -y --apply-live`。实时应用未能使依赖可用时，会创建下一次启动使用的 deployment，提示手工重启并重跑同一条安装命令，然后安全退出；安装器不会自动重启。A2 安装把 Node.js 运行时放在 `/opt/vcpdeck/client/node`，不写入 Bazzite 基础镜像，也不使用 PM2。Bazzite 的 package layering 可能延长或阻塞系统更新，使用前应确认可接受该运维影响。
 
@@ -226,6 +226,48 @@ Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 `w
 - **M1 迁移**：存量 PM2 安装无需额外参数：不带 `--migrate` 时安装器会**自动探测**存量 PM2 源并改走清理式迁移（与 Windows 行为一致，页面固定命令即可）；已有 A2 身份且无旧 PM2 候选时按幂等修复处理，不变更身份；若 A2 与有效旧 PM2 同时存在则视为未完成迁移，优先恢复清理式迁移并以旧身份覆盖误生成的 A2 身份。自动探测范围包括 `/home`、`/var/home` 下用户的 `~/.vcpdeck/launcher-client`、root 的旧安装、ADR-0018 时代的固定目录 `/opt/vcpdeck/launcher-client`，以及 nvm/系统全局安装的 PM2；旧条目可以自定义名称，`pm_exec_path` 指向 node、脚本放在 `args` 的旧形式也支持。其他 PM2 应用（含 PM2 托管的 VCPDeck Server 与 VCP ToolBox）一律保留；探测不到、查询失败、条目歧义或名称非法时 fail closed。迁移以旧 `launcher.env` 的 `VCPDECK_SERVER` 为权威并保留该 Origin：loopback 与公网入口指向同一 Server 时，从任一入口执行都能直接升级，bootstrap、写入的 ENV 与验收均走旧 Origin；旧 Origin 不可达时报 `LINUX_MIGRATION_SERVER_UNREACHABLE` 且不动旧安装。多源歧义或有源但校验不通过时 fail closed（透出稳定原因），需要强制重装时传 `--migrate=false`（也可显式 `--migrate=true` / `--migrate-from-user=<name>`）。迁移保留 `client-id`、Server Origin 与显示名称，保留无关 PM2 应用；全部材料校验成功后才清理旧 VCPDeck PM2 entry、旧自启与旧运行目录，再启动 A2 稳态服务并全能力验收。失败只记录阶段状态并保留 A2 现场，可用同一命令重跑；**不会 resurrect 或恢复旧 PM2**（ADR-0027）。
 - **卸载**：`uninstall-client-linux.cjs` 停服务 → 删单元/sudoers/env/opt/var（含身份）→ `daemon-reload` → 删账户 → 校验消失；`--purge` 额外删 Release 缓存与迁移状态。
 
+### 4.9 iStoreOS 24.10 x64（musl + procd）
+
+iStoreOS 24.10 x64 不使用 §4.7/§4.8 的通用安装器（它要求 glibc + systemd），而走 ADR-0065 的 procd 路径。目标验收机为 iStoreOS 24.10.8 x64（Linux 6.6.144）。**已完成本地实现、单元测试与注入式安装器测试，并在 24.10.8 真机通过平台门禁、musl PTY 编译/冒烟与完整安装（官方 bootstrap、0.23.20、procd-root 在线验收）；重启、冷启动与固件升级后的行为尚未验收，不得对外承诺“已验证可用”。**
+
+前置条件（平台、root 与工具缺失会在下载大构件前失败；持久路径、空间与所有权由安装器在落盘前校验，此时构件已下载，失败不写入任何持久目录）：
+
+- `x86_64`、`/etc/os-release` 为 `ID=istoreos` 且 `VERSION_ID=24.10.x`、musl loader 存在、`/proc/1/comm` 为 `procd`；否则 `PROCD_PLATFORM_UNSUPPORTED`。
+- 以 root 执行（`geteuid()` 为 0），否则 `PROCD_ROOT_REQUIRED`。
+- 发行版自带 `node`（≥ 20，iStoreOS 24.10 自带）、`curl` 与 `sha256sum` 必须可用；缺任一项在下载大构件前报 `PROCD_TOOL_MISSING`。bootstrap 与低层安装器全程使用系统 Node（≥ 20）做引导、校验与解压，业务与 Launcher 则使用锁定的私有 musl Node 24，不替换系统 Node。
+- `/opt/vcpdeck/client`、`/opt/vcpdeck/state`、`/etc/vcpdeck` 所在文件系统为 `overlay`/`ext4`/`f2fs`/`btrfs`/`xfs`、不是符号链接，可用空间分别 ≥ 220 MB / 32 MB / 1 MB；tmpfs、未知文件系统或符号链接路径直接 `PROCD_UNSAFE_LAYOUT`。
+- 目标与每一级已存在祖先都必须属于 root，且不可 group/world 可写；目标为 `overlay` 时要求其 `upperdir` 落在持久介质（不能是 tmpfs 或 overlay 自身），否则同样 `PROCD_UNSAFE_LAYOUT`。
+
+安装：发版页的 iStoreOS 命令以 root 执行 `install-client-procd-bootstrap.sh`；bootstrap 先取 preflight，按其中 `procdAssets` 的 SHA-256 逐个校验 `client-procd-layout.cjs`、`client-procd-lifecycle.cjs`、`procd-archive.cjs`、`vcpdeck-client.procd`，再按 `lowLevelInstallerSha256` 校验低层 `install-client-procd.cjs`（这些模块会以 root 执行，不得只靠同源 TLS），在下载大构件前完成平台预检，再取目标 Release 的 `linux-x64-musl` 全量包（按 bootstrap 响应中的 SHA-256 校验），解出 `client/release-target.json` 作为运行时锁定描述（当前锁定官方 nodejs.org 的 Linux x64 musl 归档，版本与 SHA-256 固定），并用其中的 SHA-256 校验 Node musl 归档，由安装器预置到 `launcher/runtime/linux-x64-musl/node-<version>-<sha256>`。bootstrap 不执行 `opkg install`，不输出 URL、PSK 或凭据；业务与 Launcher 都使用这份锁定的私有 musl Node 24，不使用发行版自带的 Node 20。
+
+布局（全部在版本目录之外，见 §5）：
+
+- `/opt/vcpdeck/client/launcher/`：业务版本目录 `apps/<version>`（`apps/current` 指向当前版本）、稳定 Launcher 入口 `dist/main.js`、与 Launcher 缓存同布局的 musl Node `runtime/linux-x64-musl/node-<version>-<sha256>`（`node/current` 作为服务入口）、以及 0600 的 `launcher.env`（`VCPDECK_SERVER`/`VCPDECK_PSK`/`VCPDECK_ARTIFACT`/安装模式）；
+- `/opt/vcpdeck/state/`：`home/`（服务 HOME，身份在 `home/.vcpdeck/client-id`）、`owned-process.json`（实例所有权台账）及其它运行数据；
+- `/etc/vcpdeck/`：配置；
+- `/etc/init.d/vcpdeck-client`：procd 服务定义（`START=95`、`respawn 3600 5 0`、`term_timeout 15`），由安装器渲染绝对路径后落盘；`VCPDECK_INSTALLATION_MODE=procd-root` 使 Client 如实上报 `procd-root`。
+
+运维命令：
+
+```bash
+/etc/init.d/vcpdeck-client status|start|stop|restart
+```
+
+停机阶梯固定为 Client 释放受管资源 8s < Launcher 强杀 10s < procd `term_timeout` 15s。Launcher 启动前用 bootId + PID + startTime + UID 台账复证旧 Client；四元组仍一致时先回收该进程再启动；账本文件存在但无法解析、或回收失败时拒绝启动（`OWNED_PROCESS_ALIVE`），不按进程名 `pkill`。账本缺失视为没有遗留实例；服务停止但账本不可读时同样不允许继续启动。
+
+更新与回滚：musl Client 只收全量包；Launcher 切换前重新校验签名、包内容与 `client/release-target.json`，校验失败或私有运行时版本/架构/libc 不符时拒绝目标并保留旧服务。稳定 Launcher 自身用 `upgrade-launcher-procd.cjs --staging <dir>` 升级：只备份并替换 `launcher/dist`（`package.json` 存在时一并替换），保留 `apps/`、`node/`、`runtime/` 与 0600 `launcher.env`；失败自动恢复旧 `dist`。回滚业务版本用 `uninstall-client-procd.cjs` + 重装，或等待 Launcher 自动回退。
+
+卸载：
+
+```bash
+node uninstall-client-procd.cjs --uninstall
+node uninstall-client-procd.cjs --uninstall --purge --confirm-purge
+```
+
+默认只删服务定义与 `/opt/vcpdeck/client`，**保留身份、`/opt/vcpdeck/state` 与 `/etc/vcpdeck`**；`--purge` 才删状态与配置（必须同时给 `--confirm-purge`）。安装是幂等的：已安装且服务定义、`apps/current` 与 `launcher.env` 均匹配、服务正在运行且私有运行时可用时，只做 enable 与在线验收，不重建身份或 PSK；PSK/Server/客户端 ID 变化或服务未运行会重写 `launcher.env`，按停服 → 切 `apps/current` → 启动顺序重装，并由安装器等待 Server 确认同身份上线（`registered`、`online`、版本、能力上报与 `installationMode=procd-root`），120s 内未完成报 `PROCD_VERIFICATION_FAILED`。同时存在 systemd 单元或 PM2 残留时拒绝操作（`PROCD_UNINSTALL_MIXED`）。
+
+固件升级、刷机与恢复出厂是否保留 `/opt` 与 `/etc` 尚未验证；升级前应备份 `/opt/vcpdeck/state` 与 `/etc/vcpdeck`，并准备重装命令。
+
 ## 5. 持久化目录
 
 至少持久化：
@@ -237,6 +279,7 @@ Linux **全新安装** 走 A2 系统级部署（ADR-0023），与 Windows 的 `w
 - `data/releases` 或 `VCPDECK_RELEASES_DIR`；Release 清理只删除归档正文，不删除 Release 审计行和 `clientStates`；
 - Launcher `VCPDECK_APP_DIR`；其中 `apps/retention.json` 记录成功切换历史，状态损坏时 Launcher 会暂停本地旧版本自动删除；
 - Client 身份：Windows/旧版 Linux 在 `~/.vcpdeck/client-id`；**Linux A2** 在 `/var/lib/vcpdeck-client/client-id`（迁移时从旧目录保留）；Linux A2 专用账户 HOME 在 `/var/lib/vcpdeck-client/home`；
+- **iStoreOS procd**：身份、服务 HOME 与运行台账在 `/opt/vcpdeck/state`，配置在 `/etc/vcpdeck`；卸载默认保留两者，`--purge` 才删除；`/opt/vcpdeck/client` 是可重建的应用目录，不存身份；
 - **VCPDeck 数据根**（`VCPDECK_CLIENT_DATA_DIR`，由安装器写入 Client env）：Windows SYSTEM 为 `C:\ProgramData\VCPDeck\Client\data`，Linux A2 为 `/var/lib/vcpdeck-client`，通用部署回退 `<VCPDECK_APP_DIR>/data`；其下 `pi/` 保存 agentDir、`sessions/<namespace>/`、cache、tmp、diagnostics 与 `install-secret`。**它必须位于版本目录之外**，Release 切换与回滚不会移动或删除它；
 - **Git SSH 共享私钥密文**（Server SQLite）与根密钥文件（缺省为 `<VCPDECK_APP_DIR | 工作目录>/data/git-ssh/root.key`，或 `VCPDECK_GIT_SSH_KEY_FILE` 指定的路径）——两者必须**同批次**备份且分开存放、不得与密文放在同一介质：只恢复数据库而缺少对应根密钥无法解密既有私钥。零配置启用不等于无需备份；Client 侧受管副本（`<VCPDECK_CLIENT_DATA_DIR>/git-ssh`）不需要备份，丢失后重新分发即可；
 - frpc 工作目录（需要恢复映射运行信息时）。

@@ -31,6 +31,11 @@ function privilegedLabel(client: ClientInfo): string {
 	if (p.mode === "windows-system") {
 		return p.available && p.nonInteractive ? "SYSTEM 特权" : "SYSTEM 特权不可用";
 	}
+	if (p.mode === "direct-root") {
+		return p.available && p.nonInteractive
+			? "procd · 直接 root（整机权限，非沙箱）"
+			: "直接 root 特权不可用";
+	}
 	if (p.available && p.mode === "sudo-all" && p.nonInteractive) return "root 等价特权";
 	return "root 等价特权不可用";
 }
@@ -156,7 +161,8 @@ function MachineCard({ client }: { client: ClientInfo }) {
 						label={privilegedLabel(client)}
 						tone={
 							client.capabilityDetails?.privileged?.mode === "sudo-all" ||
-							client.capabilityDetails?.privileged?.mode === "windows-system"
+							client.capabilityDetails?.privileged?.mode === "windows-system" ||
+							client.capabilityDetails?.privileged?.mode === "direct-root"
 								? "warning"
 								: "neutral"
 						}

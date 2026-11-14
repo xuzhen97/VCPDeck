@@ -34,6 +34,7 @@ export type {
 
 // ── 自更新协议 ──
 export * from "./update.js";
+export * from "./release-target.js";
 
 // ── Git SSH 共享密钥分发协议（ADR-0037 / ADR-0038） ──
 export {
@@ -125,6 +126,7 @@ import type { TerminalCapabilityStatus } from "./terminal.js";
 import type { FrpCapabilityStatus } from "./frp-runtime.js";
 import type { GitSshCapability } from "./git-ssh.js";
 import type { ClientAnnotations } from "./client-annotations.js";
+import type { ReleasePlatform } from "./update.js";
 import type {
 	TailnetCapability,
 	TailnetSnapshot,
@@ -461,6 +463,8 @@ export interface ClientInfo {
 		/** 可选：Tailnet 管理协议能力（ADR-0062，旧 Client 缺省即未报告） */
 		tailnet?: TailnetCapability;
 	};
+	/** 可选：Client 实际运行的发布目标平台（ADR-0065；旧 Client 缺省即未报告） */
+	releasePlatform?: ReleasePlatform;
 	/** 可选：安装模式摘要（旧 Client 缺省表示未报告，不推断为任何模式） */
 	installation?: MachineInstallationStatus;
 	/** 可选：操作者声明的公网地址与备注（ADR-0055；旧 Server 缺省即未补充） */

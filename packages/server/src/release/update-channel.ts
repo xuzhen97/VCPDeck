@@ -6,7 +6,11 @@
  * Client 更新指令经 room（clientId）下发；详见 docs/design/release-and-update.md。
  */
 import { Inject, Injectable } from "@nestjs/common";
-import type { ServerShutdownNotice, UpdateRequest } from "@vcpdeck/shared";
+import type {
+	ReleasePlatform,
+	ServerShutdownNotice,
+	UpdateRequest,
+} from "@vcpdeck/shared";
 import { ClientService } from "../client/client.service.js";
 import type { ClientUpdateChannel } from "./release.orchestrator.js";
 
@@ -29,13 +33,21 @@ export class GatewayUpdateChannel implements ClientUpdateChannel {
 	}
 
 	async listOnlineClients(): Promise<
-		Array<{ clientId: string; clientVersion: string; os: string }>
+		Array<{
+			clientId: string;
+			clientVersion: string;
+			os: string;
+			releasePlatform?: ReleasePlatform;
+		}>
 	> {
 		const online = await this.clients.listOnline();
 		return online.map((c) => ({
 			clientId: c.clientId,
 			clientVersion: c.clientVersion,
 			os: c.os,
+			...(c.releasePlatform !== undefined
+				? { releasePlatform: c.releasePlatform }
+				: {}),
 		}));
 	}
 

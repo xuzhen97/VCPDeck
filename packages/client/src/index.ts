@@ -8,6 +8,7 @@ import type {
 	TerminalCapabilityStatus,
 } from "@vcpdeck/shared";
 import { CLIENT_ID, getRegisterInfo } from "./register.js";
+import { detectLibc, detectReleasePlatform } from "./release-platform.js";
 import { getHeartbeat } from "./heartbeat.js";
 import { killJob, getRunningJobIds, getStatusReport } from "./executor.js";
 import { getActiveTransferJobIds } from "./transfer-handler.js";
@@ -32,6 +33,7 @@ import {
 	wireManagerToSocket,
 } from "./terminal/protocol-bridge.js";
 import { killProcessTree } from "./terminal/process-tree.js";
+import { createShutdownRunner } from "./shutdown.js";
 import { attachUpdateHandler } from "./update.js";
 import { attachGitSshBridge } from "./git-ssh/git-ssh-bridge.js";
 import {
@@ -367,22 +369,6 @@ export function connect(): Socket {
 		manager: getFrpRuntimeManager(),
 	});
 
-	// 进程级停机（SIGTERM/SIGINT 各一次）：
-	// 先 dispose 桥（关闭本代次上报资格）→ 计划内停 frpc（防版本切换误判 crash）→ exit(0)。
-	let frpShuttingDown = false;
-	for (const signal of ["SIGTERM", "SIGINT"] as const) {
-		process.on(signal, () => {
-			if (frpShuttingDown) return;
-			frpShuttingDown = true;
-			frpBridge.dispose();
-			void shutdownFrpRuntime()
-				.catch(() => {
-					console.error("[frp] 停机释放失败（忽略）");
-				})
-				.finally(() => process.exit(0));
-		});
-	}
-
 	// ── 终端能力（延迟探测；失败仅禁用 Terminal Tab） ──
 	const terminalGenerationId = randomUUID();
 	const terminalManager = createTerminalManager({
@@ -403,6 +389,24 @@ export function connect(): Socket {
 		attachAcpTaskBridge(socket, {
 			clientId: CLIENT_ID,
 			createHost: createAcpHost,
+		});
+	}
+
+	// 进程级停机：Terminal 与 FRP 都已建立后才注册，重复信号只释放一次。
+	// 先 dispose 桥（关闭本代次上报资格）→ 并发释放受管资源（8s 上限）→ exit(0)。
+	// Launcher 强杀 10s、procd term_timeout 15s 都在本层之外，阶梯见 shutdown.ts。
+	const shutdown = createShutdownRunner(() => [
+		() => shutdownFrpRuntime(),
+		() => terminalManager.shutdown(),
+	]);
+	for (const signal of ["SIGTERM", "SIGINT"] as const) {
+		process.on(signal, () => {
+			frpBridge.dispose();
+			void shutdown()
+				.catch(() => {
+					console.error("[shutdown] 受管资源释放未全部完成（忽略）");
+				})
+				.finally(() => process.exit(0));
 		});
 	}
 
@@ -457,10 +461,33 @@ export function connect(): Socket {
 			probeWithTimeout(async (): Promise<RuntimeSecurityInfo | undefined> => {
 				const privileged = await probePrivilegedCapability();
 				const installation = detectInstallationInfo();
-				if (privileged === undefined && installation === undefined) return undefined;
+				let releasePlatform = detectReleasePlatform({
+					platform: process.platform,
+					arch: process.arch,
+					libc: detectLibc(),
+				});
+				// procd 安装声明只配 musl 构件；真实环境对不上时拒绝上报，避免平台跟模式错配。
+				if (
+					releasePlatform !== undefined &&
+					installation?.mode === "procd-root" &&
+					releasePlatform !== "linux-x64-musl"
+				) {
+					console.error(
+						`[vcpdeck] release platform conflict: procd-root 声明与真实平台 ${releasePlatform} 不一致，拒绝上报`,
+					);
+					releasePlatform = undefined;
+				}
+				if (
+					privileged === undefined &&
+					installation === undefined &&
+					releasePlatform === undefined
+				) {
+					return undefined;
+				}
 				const info: RuntimeSecurityInfo = {};
 				if (privileged !== undefined) info.privileged = privileged;
 				if (installation !== undefined) info.installation = installation;
+				if (releasePlatform !== undefined) info.releasePlatform = releasePlatform;
 				return info;
 			}),
 		getRegister: (terminalStatus, runtimeSecurity, gitSshStatus, tailnetStatus) =>

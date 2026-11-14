@@ -9,12 +9,14 @@ import {
 	parseMachineInstallation,
 	parseGitSshCapability,
 	parsePrivilegedCapabilityStatus,
+	parseReleasePlatform,
 	parseTailnetCapability,
 	type ClientAnnotations,
 	type ClientAnnotationsInput,
 	type MachineInstallationStatus,
 	type MachineRegister,
 	type PrivilegedCapabilityStatus,
+	type ReleasePlatform,
 	type Heartbeat,
 	type ClientInfo,
 	type DiskInfo,
@@ -68,6 +70,9 @@ export class ClientService {
     // 持久化契约：capabilityDetails JSON 列同时承载 terminal/frp/privileged 探测摘要
     // 与 installation 安装模式摘要（旧 Client 无 installation 字段时不写入，不推断）。
     const storedDetails: Record<string, unknown> = { ...(dto.capabilityDetails ?? {}) };
+    if (dto.releasePlatform !== undefined) {
+      storedDetails.releasePlatform = dto.releasePlatform;
+    }
     if (dto.installation !== undefined) {
       storedDetails.installation = dto.installation;
     }
@@ -267,7 +272,10 @@ export class ClientService {
         capabilitiesReported: false,
         installationMode: null,
         nonInteractiveSudo: null,
+        privilegedAvailable: null,
+        privilegedNonInteractive: null,
         privilegedMode: null,
+        releasePlatform: null,
         connectedAt: null,
         lastHeartbeatAt: null,
       };
@@ -280,7 +288,7 @@ export class ClientService {
     }
     const stored = client.capabilityDetails
       ? this.parseStoredDetails(client.capabilityDetails)
-      : { details: {} as Record<string, never>, installation: null };
+      : { details: {} as Record<string, never>, installation: null, releasePlatform: null };
     return {
       registered: true,
       online: client.online,
@@ -289,8 +297,16 @@ export class ClientService {
       hostname: client.hostname,
       capabilitiesReported: Array.isArray(capabilities) && capabilities.length > 0,
       installationMode: stored.installation?.mode ?? null,
-      nonInteractiveSudo: stored.details.privileged?.nonInteractive ?? null,
+      // nonInteractiveSudo 只描述 sudo 语义；direct-root 等非 sudo 模式如实返回 null（ADR-0065）。
+      nonInteractiveSudo:
+        stored.details.privileged?.mode === "sudo-all"
+          ? (stored.details.privileged.nonInteractive ?? null)
+          : null,
+      privilegedAvailable: stored.details.privileged?.available ?? null,
+      privilegedNonInteractive:
+        stored.details.privileged?.nonInteractive ?? null,
       privilegedMode: stored.details.privileged?.mode ?? null,
+      releasePlatform: stored.releasePlatform,
       connectedAt: client.connectedAt?.toISOString() ?? null,
       lastHeartbeatAt: client.lastHeartbeatAt?.toISOString() ?? null,
     };
@@ -309,7 +325,7 @@ export class ClientService {
     } catch {
       // ponytail: stored as JSON, fallback to empty on corruption
     }
-    const { details: capabilityDetails, installation } =
+    const { details: capabilityDetails, installation, releasePlatform } =
       this.parseStoredDetails(c.capabilityDetails);
     const info: ClientInfo = {
       clientId: c.id,
@@ -329,6 +345,9 @@ export class ClientService {
     };
     if (installation !== null) {
       info.installation = installation;
+    }
+    if (releasePlatform !== null) {
+      info.releasePlatform = releasePlatform;
     }
     const annotations = this.parseStoredAnnotations(c.annotations);
     if (annotations !== null) {
@@ -368,6 +387,8 @@ export class ClientService {
       tailnet?: ClientInfo["capabilityDetails"]["tailnet"];
     };
     installation: MachineInstallationStatus | null;
+    /** 已持久化的发布平台；旧记录/无法探测时为 null（未报告），不推断 */
+    releasePlatform: ReleasePlatform | null;
   } {
     const result: {
       details: {
@@ -380,7 +401,8 @@ export class ClientService {
         tailnet?: ClientInfo["capabilityDetails"]["tailnet"];
       };
       installation: MachineInstallationStatus | null;
-    } = { details: {}, installation: null };
+      releasePlatform: ReleasePlatform | null;
+    } = { details: {}, installation: null, releasePlatform: null };
     let raw: unknown;
     try {
       raw = JSON.parse(json);
@@ -435,6 +457,13 @@ export class ClientService {
         result.details.tailnet = parseTailnetCapability(record.tailnet);
       } catch {
         // tailnet 能力摘要损坏：省略；旧 Client 缺省时视为未声明。
+      }
+    }
+    if (record.releasePlatform !== undefined) {
+      try {
+        result.releasePlatform = parseReleasePlatform(record.releasePlatform);
+      } catch {
+        // releasePlatform 损坏：省略，按未报告处理，不猜测平台。
       }
     }
     if (record.installation !== undefined) {

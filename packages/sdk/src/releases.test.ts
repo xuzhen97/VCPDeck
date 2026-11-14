@@ -116,4 +116,29 @@ describe("releases", () => {
 			},
 		);
 	});
+
+	it("可选 musl 平台按 ReleasePlatform 原样透传到上传查询串", async () => {
+		const requestRaw = vi.fn(async () => ({
+			data: { release: { version: "1.2.3" } },
+			response: new Response(),
+		}));
+		const api = createReleasesApi({
+			request: vi.fn(),
+			requestRaw,
+		} as never);
+
+		await api.upload({
+			version: "1.2.3",
+			platform: "linux-x64-musl",
+			sha256: "a".repeat(64),
+			archive: "zip-bytes",
+			duplex: "half",
+		});
+
+		expect(requestRaw).toHaveBeenCalledWith(
+			"POST",
+			`/api/releases/upload?version=1.2.3&platform=linux-x64-musl&sha256=${"a".repeat(64)}`,
+			expect.objectContaining({ body: "zip-bytes" }),
+		);
+	});
 });

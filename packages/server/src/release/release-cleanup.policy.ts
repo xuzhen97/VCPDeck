@@ -1,4 +1,6 @@
 import {
+	RELEASE_PLATFORMS,
+	REQUIRED_RELEASE_PLATFORMS,
 	ReleaseStatus,
 	isReleaseArchiveAvailable,
 	type ReleaseArchiveStorage,
@@ -23,7 +25,6 @@ export const RELEASE_CLEANUP_POLICY = {
 } as const;
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
-const PLATFORMS: ReleasePlatform[] = ["win-x64", "linux-x64"];
 
 export interface ReleaseCleanupPolicyInput {
 	releases: ReleaseInfo[];
@@ -103,7 +104,7 @@ export function computeReleaseCleanupPlan(
 	for (const release of input.releases) {
 		const oldEnough = isOldEnough(release.createdAt, input.now);
 		if (isProtectedRelease(release, protectedVersions, oldEnough, recentDone)) {
-			for (const platform of PLATFORMS) {
+			for (const platform of RELEASE_PLATFORMS) {
 				const archive = release.archives[platform];
 				if (archive?.availability === "deleting") {
 					deleting.push({ version: release.version, platform });
@@ -111,11 +112,12 @@ export function computeReleaseCleanupPlan(
 			}
 			continue;
 		}
-		const hasAllArchives = PLATFORMS.every((platform) =>
+		const hasAllArchives = REQUIRED_RELEASE_PLATFORMS.every((platform) =>
 			isReleaseArchiveAvailable(release.archives[platform]),
 		);
 		if (release.status === ReleaseStatus.UPLOADED && hasAllArchives) continue;
-		for (const platform of PLATFORMS) {
+		// 清理枚举全部已知平台（含可选 musl），与编排的必需双平台分开。
+		for (const platform of RELEASE_PLATFORMS) {
 			const archive = release.archives[platform];
 			if (!archive) continue;
 			if (archive.availability === "deleting") {

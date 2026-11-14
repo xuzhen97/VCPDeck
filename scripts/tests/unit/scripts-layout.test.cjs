@@ -15,6 +15,14 @@ const publicScripts = [
 	"install-client-linux.cjs",
 	"install-client-bootstrap.sh",
 	"install-client-bootstrap.ps1",
+	"install-client-procd-bootstrap.sh",
+	"install-client-procd.cjs",
+	"client-procd-layout.cjs",
+	"client-procd-lifecycle.cjs",
+	"procd-archive.cjs",
+	"vcpdeck-client.procd",
+	"uninstall-client-procd.cjs",
+	"upgrade-launcher-procd.cjs",
 	"uninstall-client.cjs",
 	"uninstall-client-linux.cjs",
 	"uninstall-client-bootstrap.sh",
@@ -134,10 +142,30 @@ test("发布资产仍从公开根入口复制，Server/Client installer 与发�
 	assert.ok(assets, "Server 安装资产清单应存在");
 	assert.deepEqual(Array.from(assets.matchAll(/"([^"]+)"/g), (match) => match[1]), [
 		"install-client-bootstrap.sh", "install-client-bootstrap.ps1", "install-client.cjs",
-		"install-client-linux.cjs", "install.cjs", "uninstall-client-bootstrap.sh",
+		"install-client-linux.cjs", "install.cjs", "client-procd-layout.cjs", "client-procd-lifecycle.cjs", "procd-archive.cjs", "vcpdeck-client.procd",
+		"install-client-procd.cjs", "uninstall-client-procd.cjs", "upgrade-launcher-procd.cjs",
+		"install-client-procd-bootstrap.sh", "musl-inputs.lock.json",
+		"uninstall-client-bootstrap.sh",
 		"uninstall-client-bootstrap.ps1", "uninstall-client.cjs", "uninstall-client-linux.cjs",
 	]);
-	assert.match(server, /copyInstallerAsset\(join\(ROOT, "scripts", name\), join\(installerDir, name\)\)/);
+	assert.match(server, /copyInstallerAsset\(installerAssetSource\(name\), join\(installerDir, name\)\)/);
+	// 每个安装资产都必须能在仓库里找到真实源文件；musl 输入锁在 scripts/build/ 下。
+	const lockName = "musl-inputs.lock.json";
+	for (const name of [
+		"install-client-bootstrap.sh", "install-client-bootstrap.ps1", "install-client.cjs",
+		"install-client-linux.cjs", "install.cjs", "client-procd-layout.cjs", "client-procd-lifecycle.cjs", "procd-archive.cjs", "vcpdeck-client.procd",
+		"install-client-procd.cjs", "uninstall-client-procd.cjs", "upgrade-launcher-procd.cjs",
+		"install-client-procd-bootstrap.sh", lockName,
+		"uninstall-client-bootstrap.sh",
+		"uninstall-client-bootstrap.ps1", "uninstall-client.cjs", "uninstall-client-linux.cjs",
+	]) {
+		const source = name === lockName
+			? path.join(ROOT, "scripts", "build", name)
+			: path.join(ROOT, "scripts", name);
+		assert.ok(fs.existsSync(source), `安装资产源文件缺失: ${source}`);
+	}
+	assert.match(pack, /name === "musl-inputs.lock.json"/);
+	assert.match(pack, /MUSL_INPUT_LOCK_PATH/);
 	for (const name of ["upgrade-launcher.cjs", "upgrade-launcher-systemd.cjs"]) {
 		assert.ok(client.includes(`join(ROOT, "scripts", "${name}")`));
 		assert.ok(client.includes(`join(installerDir, "${name}")`));

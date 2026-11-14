@@ -521,3 +521,90 @@ describe("注册时的 Tailnet 摘要（ADR-0062）", () => {
 		).toThrow();
 	});
 });
+
+describe("iStoreOS musl/procd 契约（ADR-0065）", () => {
+	it("解析 procd-root 安装模式，拒绝额外字段", () => {
+		expect(parseMachineInstallation({ mode: "procd-root" })).toEqual({
+			mode: "procd-root",
+		});
+		expect(() =>
+			parseMachineInstallation({ mode: "procd-root", extra: 1 }),
+		).toThrow();
+	});
+
+	it("direct-root 仅接受可用、非交互且 runAsUser=root 的四字段形状", () => {
+		expect(
+			parsePrivilegedCapabilityStatus({
+				available: true,
+				mode: "direct-root",
+				nonInteractive: true,
+				runAsUser: "root",
+			}),
+		).toEqual({
+			available: true,
+			mode: "direct-root",
+			nonInteractive: true,
+			runAsUser: "root",
+		});
+		for (const invalid of [
+			{ available: false, mode: "direct-root", nonInteractive: true, runAsUser: "root" },
+			{ available: true, mode: "direct-root", nonInteractive: false, runAsUser: "root" },
+			{ available: true, mode: "direct-root", nonInteractive: true, runAsUser: "vcpdeck" },
+			{ available: true, mode: "direct-root", nonInteractive: true, runAsUser: "root", extra: true },
+		]) {
+			expect(() => parsePrivilegedCapabilityStatus(invalid)).toThrow();
+		}
+	});
+
+	it("注册消息可选上报 releasePlatform，未知平台仍拒绝", () => {
+		const parsed = parseMachineRegister(
+			validRegister({ releasePlatform: "linux-x64-musl" }),
+		);
+		expect(parsed.releasePlatform).toBe("linux-x64-musl");
+		expect(parseMachineRegister(validRegister()).releasePlatform).toBeUndefined();
+		expect(() =>
+			parseMachineRegister(
+				validRegister({ releasePlatform: "linux-arm64" as never }),
+			),
+		).toThrow();
+	});
+
+	it("procd-root + direct-root 合规；musl 声明必须搭配 Linux 与 procd", () => {
+		const directRoot = {
+			available: true,
+			mode: "direct-root",
+			nonInteractive: true,
+			runAsUser: "root",
+		} as const;
+		expect(
+			getClientInstallationCompliance({
+				os: "linux 6.6.144",
+				installation: { mode: "procd-root" },
+				capabilityDetails: { privileged: directRoot },
+				releasePlatform: "linux-x64-musl",
+			}),
+		).toEqual({ compliant: true, reason: null });
+		expect(
+			getClientInstallationCompliance({
+				os: "linux 6.6.144",
+				installation: { mode: "systemd-root-equivalent" },
+				capabilityDetails: { privileged: directRoot },
+				releasePlatform: "linux-x64-musl",
+			}),
+		).toEqual({ compliant: false, reason: "platform-mode-mismatch" });
+		expect(
+			getClientInstallationCompliance({
+				os: "win32 10.0",
+				installation: { mode: "windows-system-task" },
+				capabilityDetails: {
+					privileged: {
+						available: true,
+						mode: "windows-system",
+						nonInteractive: true,
+					},
+				},
+				releasePlatform: "linux-x64-musl",
+			}),
+		).toEqual({ compliant: false, reason: "platform-mode-mismatch" });
+	});
+});

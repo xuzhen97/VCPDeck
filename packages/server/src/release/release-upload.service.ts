@@ -2,6 +2,8 @@ import { Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
 	CONTROL_PROTOCOL_VERSION,
+	RELEASE_PLATFORMS,
+	ReleaseArtifactErrorCode,
 	ReleaseUploadErrorCode,
 	hasAllReleaseArchives,
 	isReleaseArchiveAvailable,
@@ -10,6 +12,7 @@ import {
 	parseReleaseUploadPartRefresh,
 	type ActorContext,
 	type ReleaseInfo,
+	type ReleasePlatform,
 	type ReleaseUploadCreateInput,
 	type ReleaseUploadPart,
 	type ReleaseUploadSession,
@@ -186,12 +189,22 @@ export class ReleaseUploadService {
 		input: ReleaseUploadCreateInput,
 		actor?: ActorContext,
 	): Promise<ReleaseUploadApiSession> {
-		const backend = await this.storage.getBackendConfig();
-		if (backend.kind !== "alibaba") return { mode: "server" };
-
-		const platform = input.platform as "win-x64" | "linux-x64";
+		const platform = input.platform as ReleasePlatform;
 		const artifactKind = input.artifactKind ?? "full";
 		const fromVersion = input.fromVersion ?? "";
+		// musl 只做全量：不登记增量会话，也不接受基线列表（跨 libc 无合法增量）。
+		if (
+			platform === "linux-x64-musl" &&
+			(artifactKind === "delta" || fromVersion !== "")
+		) {
+			throw new ReleaseError(
+				ReleaseArtifactErrorCode.ASSEMBLE_FAILED,
+				"linux-x64-musl 只接受完整构件，不接受增量会话",
+			);
+		}
+
+		const backend = await this.storage.getBackendConfig();
+		if (backend.kind !== "alibaba") return { mode: "server" };
 		const existingRelease = await this.releases.findByVersion(input.version);
 		const existingArchive = existingRelease?.archives[platform];
 		// 全量会话按平台整体判重；增量会话只与同平台同一基线版本判重，
@@ -347,7 +360,7 @@ export class ReleaseUploadService {
 			);
 		}
 		const already = await this.releases.findByVersionWithStorage(row.version);
-		const platform = row.platform as "win-x64" | "linux-x64";
+		const platform = row.platform as ReleasePlatform;
 		const registered = already?.archives[platform];
 		const matched = registeredArtifact(
 			registered,
@@ -426,7 +439,7 @@ export class ReleaseUploadService {
 			}
 		}
 		const archives: Record<string, ServerReleaseArchiveInfo> = {};
-		for (const platform of ["win-x64", "linux-x64"] as const) {
+		for (const platform of RELEASE_PLATFORMS) {
 			const full = ready.find(
 				(session) =>
 					session.platform === platform && session.artifactKind === "full",
@@ -593,7 +606,7 @@ export class ReleaseUploadService {
 
 	private fileName(
 		version: string,
-		platform: "win-x64" | "linux-x64",
+		platform: ReleasePlatform,
 		artifactKind: string,
 		fromVersion: string,
 	): string {

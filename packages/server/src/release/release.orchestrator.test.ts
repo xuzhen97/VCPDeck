@@ -620,6 +620,75 @@ describe("ReleaseOrchestrator", () => {
 				ReleaseStatus.DONE,
 			);
 		});
+
+		it("已报告 musl 的 Client 拿到 linux-x64-musl 全量包", async () => {
+			const target = releaseInfo({
+				status: ReleaseStatus.UPDATING_CLIENTS,
+				archives: {
+					...releaseInfo().archives,
+					"linux-x64-musl": {
+						sha256: "c".repeat(64),
+						size: 4096,
+						fileName: "vcpdeck-1.2.1-linux-x64-musl.zip",
+					},
+				},
+			});
+			deps.releases.getActiveRelease.mockResolvedValue(target);
+			deps.releases.findByVersion.mockResolvedValue(target);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{
+					clientId: "i1",
+					clientVersion: "1.1.0",
+					os: "linux 6.6.144",
+					releasePlatform: "linux-x64-musl",
+				},
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			const phase = orchestrator.resumeAfterStartup();
+			await vi.waitFor(() => {
+				expect(deps.channel.sendUpdateRequest).toHaveBeenCalledWith(
+					"i1",
+					expect.objectContaining({
+						releaseVersion: "1.2.1",
+						url: "/api/releases/1.2.1/file?platform=linux-x64-musl",
+					}),
+				);
+			});
+			orchestrator.onClientRegistered("i1", "1.2.1");
+			await phase;
+		});
+
+		it("musl Client 遇到缺少 musl 构件的发布时永久失败，不下发 glibc 包", async () => {
+			deps.releases.getActiveRelease.mockResolvedValue(
+				releaseInfo({ status: ReleaseStatus.UPDATING_CLIENTS }),
+			);
+			mockLoopRelease(deps, ReleaseStatus.UPDATING_CLIENTS);
+			deps.channel.listOnlineClients.mockResolvedValue([
+				{
+					clientId: "i1",
+					clientVersion: "1.1.0",
+					os: "linux 6.6.144",
+					releasePlatform: "linux-x64-musl",
+				},
+			]);
+			deps.releases.markClientState.mockResolvedValue({});
+
+			await orchestrator.resumeAfterStartup();
+
+			expect(deps.releases.markClientState).toHaveBeenCalledWith(
+				"1.2.1",
+				"i1",
+				"failed",
+				expect.stringContaining("linux-x64-musl"),
+				{ kind: "permanent" },
+			);
+			expect(deps.channel.sendUpdateRequest).not.toHaveBeenCalled();
+			expect(deps.releases.transitionStatus).toHaveBeenCalledWith(
+				"1.2.1",
+				ReleaseStatus.DONE,
+			);
+		});
 	});
 
 	describe("补更重试判定", () => {

@@ -71,7 +71,13 @@ function migration() {
 	};
 }
 
-function makeClient(releases: ReleaseInfo[]) {
+function makeClient(
+	releases: ReleaseInfo[],
+	platforms: Record<string, { available: boolean }> = {
+		"win-x64": { available: true },
+		"linux-x64": { available: true },
+	},
+) {
 	return {
 		auth: {
 			me: vi.fn(async () => ({
@@ -91,10 +97,7 @@ function makeClient(releases: ReleaseInfo[]) {
 				updatedVia: null,
 				serverVersion: "1.2.1",
 				releaseReady: true,
-				platforms: {
-					"win-x64": { available: true },
-					"linux-x64": { available: true },
-				},
+				platforms,
 				migration: migration(),
 			})),
 			updateConfig: vi.fn(async (enabled: boolean) => ({
@@ -104,10 +107,7 @@ function makeClient(releases: ReleaseInfo[]) {
 				updatedVia: "web",
 				serverVersion: "1.2.1",
 				releaseReady: true,
-				platforms: {
-					"win-x64": { available: true },
-					"linux-x64": { available: true },
-				},
+				platforms,
 				migration: migration(),
 			})),
 		},
@@ -180,6 +180,31 @@ describe("ReleasesPage", () => {
 		expect(screen.getByText("尚未开始")).toBeVisible();
 	});
 
+	it("可选 musl 构件在列表中标注为仅 Client，不混同双平台齐备", async () => {
+		const client = makeClient([
+			release({
+				archives: {
+					...release().archives,
+					"linux-x64-musl": {
+						sha256: "c".repeat(64),
+						size: 4096,
+						fileName: "vcpdeck-1.2.1-linux-x64-musl.zip",
+					},
+				},
+			}),
+		]);
+		render(
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<ReleasesPage />
+				</AuthProvider>
+			</SdkProvider>,
+		);
+
+		expect((await screen.findAllByText("1.2.1")).length).toBeGreaterThan(0);
+		expect(screen.getByText(/含可选 musl（仅 Client）/)).toBeVisible();
+	});
+
 	it("展示固定安装命令并允许任意登录用户启用", async () => {
 		const user = userEvent.setup();
 		const client = makeClient([release()]);
@@ -221,8 +246,36 @@ describe("ReleasesPage", () => {
 		expect(
 			screen.getByText(/普通用户可运行，但必须可完成 sudo 认证/),
 		).toBeVisible();
+		// 没有第三平台时不得伪造 iStoreOS 入口
+		expect(
+			screen.queryByText(/api\/client-installer\/scripts\/linux-x64-musl/),
+		).not.toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "启用一键安装" }));
 		expect(client.clientInstaller.updateConfig).toHaveBeenCalledWith(true);
+	});
+
+	it("配置存在 linux-x64-musl 时展示 iStoreOS 安装入口与状态", async () => {
+		const client = makeClient([release()], {
+			"win-x64": { available: true },
+			"linux-x64": { available: true },
+			"linux-x64-musl": { available: true },
+		});
+		render(
+			<SdkProvider client={client}>
+				<AuthProvider>
+					<ReleasesPage />
+				</AuthProvider>
+			</SdkProvider>,
+		);
+
+		const command = await screen.findByText(
+			/api\/client-installer\/scripts\/linux-x64-musl/,
+		);
+		expect(command).toHaveTextContent(
+			"/api/client-installer/scripts/linux-x64-musl",
+		);
+		expect(screen.getByText(/iStoreOS 24\.10 x64（musl \+ procd）/)).toBeVisible();
+		expect(screen.getByText(/· iStoreOS 可用/)).toBeVisible();
 	});
 
 	it("展示系统级部署汇总与待人工升级机器（含离线）", async () => {

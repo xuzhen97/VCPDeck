@@ -123,6 +123,11 @@ detect_linux_family() {
   local ID="" VERSION_ID=""
   # shellcheck disable=SC1090
   . "$os_release_path"
+  # iStoreOS/OpenWrt 的 musl 运行时不适用本脚本的 glibc 依赖策略，必须走专用 procd 引导。
+  if [[ -e /lib/ld-musl-x86_64.so.1 ]]; then
+    fail "检测到 musl 运行时：请使用 iStoreOS 专用 procd 引导脚本"
+    return 1
+  fi
   case "${ID:-}:${VERSION_ID:-}" in
   bazzite:*) printf '%s\n' bazzite ;;
   ubuntu:22.04 | ubuntu:22.10 | ubuntu:23.* | ubuntu:24.* | ubuntu:25.* | ubuntu:26.*) printf '%s\n' apt ;;

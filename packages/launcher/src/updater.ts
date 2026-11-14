@@ -50,6 +50,10 @@ export interface UpdaterDeps {
 	onSuccessfulApply?: (version: string, previous: string | null) => Promise<void>;
 	probeRetries?: number;
 	probeIntervalMs?: number;
+	/** musl 目标不接受 delta：跨 libc 没有可信基线（ADR-0065）；函数形式在 prepare 时才求值。 */
+	acceptsDelta?: boolean | (() => boolean);
+	/** 准备完成与停旧进程前都要验证目标（签名/完整性/平台/role/runtime）。 */
+	validatePreparedTarget?: (version: string) => Promise<void>;
 }
 
 const DEFAULT_PROBE_RETRIES = 3;
@@ -131,14 +135,24 @@ export class Updater {
 		candidates?: ReleaseDeltaCandidate[];
 	}): Promise<void> {
 		if (await this.deps.versions.isPrepared(input.version, this.deps.artifact)) {
+			// 快路也要重新验证：目录可能被替换，平台/role/runtime 也可能不再匹配。
+			await this.deps.validatePreparedTarget?.(input.version);
 			return;
 		}
 		await this.deps.versions.removeVersion(input.version);
 
-		const candidate = input.candidates?.find(
-			(c) =>
-				c.fromVersion !== input.version && this.baselineAvailable(c.fromVersion),
-		);
+		const acceptsDelta =
+			typeof this.deps.acceptsDelta === "function"
+				? this.deps.acceptsDelta()
+				: this.deps.acceptsDelta !== false;
+		const candidate =
+			!acceptsDelta
+				? undefined
+				: input.candidates?.find(
+						(c) =>
+							c.fromVersion !== input.version &&
+							this.baselineAvailable(c.fromVersion),
+					);
 		const startedAt = Date.now();
 		if (candidate) {
 			try {
@@ -171,6 +185,7 @@ export class Updater {
 			});
 		}
 		console.log(`[launcher] prepare ${input.version} 总耗时: ${secs(startedAt)}`);
+		await this.deps.validatePreparedTarget?.(input.version);
 	}
 
 	/** 单次下载 → 校验 → 解压 → 验签 → 组装；zip 与解压目录在 finally 清理。 */
@@ -293,6 +308,10 @@ export class Updater {
 				join(targetDir, "manifest.json"),
 				JSON.stringify(targetManifest),
 			);
+			// 保留 full 包签名，供停旧进程前的复验重新验签（delta 目标清单不等于 delta.json）。
+			if (opts.kind === "full") {
+				writeFileSync(join(targetDir, "manifest.json.sig"), signature);
+			}
 		} finally {
 			await rm(zipPath, { force: true }).catch(() => undefined);
 			await rm(extractedDir, { recursive: true, force: true }).catch(
@@ -371,6 +390,8 @@ export class Updater {
 	/** 第二阶段：切换并启动新版本；探活失败自动回退 */
 	async apply(version: string): Promise<void> {
 		const previous = await this.deps.versions.currentVersion();
+		// 停旧进程前再验证一次：两阶段之间目标可能被改动，先停就等于先失去服务。
+		await this.deps.validatePreparedTarget?.(version);
 		await this.deps.stopProcess();
 		await this.deps.versions.switchTo(version);
 		await this.deps.startProcess();

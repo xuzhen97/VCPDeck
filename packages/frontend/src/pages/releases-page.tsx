@@ -29,9 +29,15 @@ function releaseSizeSummary(release: ReleaseInfo): string {
 			: entries
 					.map(([platform, a]) => `${platform} ${formatSize(a?.size ?? 0)}`)
 					.join(" · ");
-	return entries.some(([, archive]) => archive?.availability === "cleaned")
-		? `${summary} · 归档已清理`
-		: summary;
+	const notes: string[] = [];
+	if (entries.some(([platform]) => platform === "linux-x64-musl")) {
+		// musl 是本版本的可选 Client-only 构件，不代表双平台齐备状态。
+		notes.push("含可选 musl（仅 Client）");
+	}
+	if (entries.some(([, archive]) => archive?.availability === "cleaned")) {
+		notes.push("归档已清理");
+	}
+	return notes.length > 0 ? `${summary} · ${notes.join(" · ")}` : summary;
 }
 
 function archiveStatus(archive: ReleaseArchiveInfo): {
@@ -159,6 +165,7 @@ export function ReleasesPage() {
 	const windowsCommand = `$script = (irm '${installerOrigin}/api/client-installer/scripts/win-x64').TrimStart([char]0xFEFF); & ([scriptblock]::Create($script)) -ServerOrigin '${installerOrigin}'`;
 	const linuxUninstallCommand = `curl -fsSL '${installerOrigin}/api/client-installer/assets/uninstall-client-bootstrap.sh' | bash -s -- '${installerOrigin}'`;
 	const windowsUninstallCommand = `$script = (irm '${installerOrigin}/api/client-installer/assets/uninstall-client-bootstrap.ps1').TrimStart([char]0xFEFF); & ([scriptblock]::Create($script)) -ServerOrigin '${installerOrigin}'`;
+	const istoreosCommand = `curl -fsSL '${installerOrigin}/api/client-installer/scripts/linux-x64-musl' | sudo sh -s -- '${installerOrigin}'`;
 	const localOrigin = ["localhost", "127.0.0.1", "::1"].includes(
 		window.location.hostname,
 	);
@@ -250,6 +257,7 @@ export function ReleasesPage() {
 				localOrigin={localOrigin}
 				linuxCommand={linuxCommand}
 				windowsCommand={windowsCommand}
+				istoreosCommand={istoreosCommand}
 				linuxUninstallCommand={linuxUninstallCommand}
 				windowsUninstallCommand={windowsUninstallCommand}
 				onToggle={setInstallerEnabled}
@@ -405,6 +413,7 @@ function InstallerCard({
 	localOrigin,
 	linuxCommand,
 	windowsCommand,
+	istoreosCommand,
 	linuxUninstallCommand,
 	windowsUninstallCommand,
 	onToggle,
@@ -416,11 +425,24 @@ function InstallerCard({
 	localOrigin: boolean;
 	linuxCommand: string;
 	windowsCommand: string;
+	istoreosCommand: string;
 	linuxUninstallCommand: string;
 	windowsUninstallCommand: string;
 	onToggle: (enabled: boolean) => Promise<void>;
 }) {
 	const copy = async (value: string) => copyText(value);
+	const installCommands: Array<[string, string, string]> = [
+		["Windows PowerShell 5.1+", windowsCommand, "需在已提升管理员 PowerShell 执行，脚本不申请 UAC"],
+		["Linux Bash", linuxCommand, "普通用户可运行，但必须可完成 sudo 认证；无 root/sudo 时会在下载前失败关闭，不改动现有安装"],
+	];
+	// 只有配置里存在第三平台时才展示 iStoreOS 命令：缺失时不伪造可用入口。
+	if (config?.platforms["linux-x64-musl"]) {
+		installCommands.push([
+			"iStoreOS 24.10 x64（musl + procd）",
+			istoreosCommand,
+			"以 root 执行；只接受 linux-x64-musl 全量构件，平台或持久化路径不符时在下载大构件前失败关闭",
+		]);
+	}
 	return (
 		<div className="space-y-4">
 		<Card>
@@ -461,12 +483,18 @@ function InstallerCard({
 					<span>
 						· Linux {config?.platforms["linux-x64"].available ? "可用" : "不可用"}
 					</span>
+					{config?.platforms["linux-x64-musl"] && (
+						<span>
+							· iStoreOS {
+								config.platforms["linux-x64-musl"].available
+									? "可用"
+									: "不可用"
+							}
+						</span>
+					)}
 				</div>
 				<InstallationCompliance config={config} />
-				{[
-					["Windows PowerShell 5.1+", windowsCommand, "需在已提升管理员 PowerShell 执行，脚本不申请 UAC"],
-					["Linux Bash", linuxCommand, "普通用户可运行，但必须可完成 sudo 认证；无 root/sudo 时会在下载前失败关闭，不改动现有安装"],
-				].map(([label, command, hint]) => (
+				{installCommands.map(([label, command, hint]) => (
 					<div key={label} className="space-y-2">
 						<div className="flex items-center justify-between gap-2">
 							<div>

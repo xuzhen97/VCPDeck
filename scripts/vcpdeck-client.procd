@@ -1,0 +1,18 @@
+#!/bin/sh /etc/rc.common
+# VCPDeck Client procd 服务定义（ADR-0065）。安装器替换占位符后落盘，勿手工编辑。
+# term_timeout 必须与 Client 停机阶梯保持一致：资源 8s < Launcher 强杀 10s < procd 15s。
+USE_PROCD=1
+START=95
+STOP=10
+
+start_service() {
+	procd_open_instance
+	procd_set_param command @NODE@ @ENTRY@
+	# procd 的 env 每次调用会覆盖前值，必须一次传入全部变量。
+	procd_set_param env HOME=@STATE_HOME@ VCPDECK_INSTALLATION_MODE=procd-root VCPDECK_APP_DIR=@APP_DIR@
+	procd_set_param respawn 3600 5 0
+	procd_set_param term_timeout 15
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}

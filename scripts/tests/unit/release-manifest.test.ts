@@ -1077,3 +1077,128 @@ describe("buildDeltas（增量包基线选择与差集）", () => {
 		}
 	});
 });
+
+describe("createMuslClientArchive（Task 4）", () => {
+	it("musl zip 只含 Client 角色、只注入 frpc，清单与签名自洽", async () => {
+		const { createMuslClientArchive, selectDeltaBaselines } = await packRelease;
+		const dirs = makeDirs();
+		try {
+			const manifest = {
+				version: "0.24.0",
+				nodeVersion: ">=24",
+				launcherMinVersion: "0.0.0",
+				sha256: "",
+				launcher: { dir: "launcher", entry: "dist/main.js" },
+				artifacts: {
+					server: { dir: "server", entry: "dist/main.js" },
+					client: { dir: "client", entry: "dist/index.js" },
+				},
+				protocolVersion: 2,
+				files: [],
+			};
+			writeStageFile(dirs.staging, "manifest.json", JSON.stringify(manifest, null, 2));
+			writeStageFile(dirs.staging, "client/dist/index.js", "client");
+			writeStageFile(dirs.staging, "launcher/dist/main.js", "launcher");
+			writeStageFile(dirs.staging, "server/dist/main.js", "server");
+			writeStageFile(dirs.staging, "client/a.exe", "exe");
+			mkdirSync(join(dirs.staging, "client/dist/frp/linux-x64"), {
+				recursive: true,
+			});
+			fsWriteFileSync(
+				join(dirs.staging, "client/dist/frp/linux-x64/frpc.gz"),
+				gzipSync(Buffer.from("FRPC-BINARY")),
+			);
+			await withPrivateKeyEnv(privateKeyPem, undefined, async () => {
+				const zipPath = await createMuslClientArchive(
+					dirs.staging,
+					"0.24.0",
+					dirs.outputRel,
+				);
+				assert.equal(
+					zipPath,
+					join(
+						process.cwd(),
+						dirs.outputRel,
+						"vcpdeck-0.24.0-linux-x64-musl.zip",
+					),
+				);
+				const entries = readZipEntries(zipPath);
+				const names = [...entries.keys()].filter((n) => !n.endsWith("/")).sort();
+				assert.deepEqual(names, [
+					"client/dist/frp/linux-x64/frpc",
+					"client/dist/index.js",
+					"client/release-target.json",
+					"launcher/dist/main.js",
+					"manifest.json",
+					"manifest.json.sig",
+				]);
+				assert.equal(
+					entries.get("client/dist/frp/linux-x64/frpc")?.toString(),
+					"FRPC-BINARY",
+				);
+				const packedManifest = JSON.parse(
+					entries.get("manifest.json")?.toString("utf8") ?? "{}",
+				) as {
+					artifacts: Record<string, unknown>;
+					files: Array<{ path: string; sha256: string }>;
+				};
+				assert.deepEqual(Object.keys(packedManifest.artifacts), ["client"]);
+				assert.equal(
+					packedManifest.files.some((f) => f.path.startsWith("server/")),
+					false,
+				);
+				const descriptorContent =
+					entries.get("client/release-target.json")?.toString("utf8") ?? "";
+				const descriptor = packedManifest.files.find(
+					(f) => f.path === "client/release-target.json",
+				);
+				assert.equal(
+					descriptor?.sha256,
+					createHash("sha256").update(descriptorContent).digest("hex"),
+				);
+				// 描达文件只能描述 musl Client，不得被旧平台包复用。
+				const parsedDescriptor = JSON.parse(descriptorContent) as {
+					platform: string;
+					role: string;
+				};
+				assert.equal(parsedDescriptor.platform, "linux-x64-musl");
+				assert.equal(parsedDescriptor.role, "client");
+				const signature = Buffer.from(
+					entries.get("manifest.json.sig")?.toString("utf8") ?? "",
+					"base64",
+				);
+				assert.equal(
+					verify(
+						null,
+						Buffer.from(canonicalReleaseManifestJson(packedManifest), "utf8"),
+						publicKey,
+						signature,
+					),
+					true,
+				);
+				const sidecar = JSON.parse(
+					fsReadFileSync(
+						join(
+							process.cwd(),
+							dirs.outputRel,
+							"vcpdeck-0.24.0-linux-x64-musl.manifest.json",
+						),
+						"utf8",
+					),
+				) as { files: unknown[] };
+				assert.deepEqual(sidecar.files, packedManifest.files);
+				// musl sidecar 不能成为双平台 delta 的基线。
+				assert.deepEqual(
+					selectDeltaBaselines(
+						["vcpdeck-0.24.0-linux-x64-musl.manifest.json"],
+						"0.25.0",
+						"linux-x64",
+					),
+					[],
+				);
+			});
+		} finally {
+			dirs.cleanup();
+		}
+	});
+});

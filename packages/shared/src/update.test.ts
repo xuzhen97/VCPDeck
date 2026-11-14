@@ -434,3 +434,79 @@ describe("齐备判据覆盖声明的 delta 基线（ADR-0063:28 / ADR-0051 连�
 		expect(hasAllReleaseArchives(release())).toBe(true);
 	});
 });
+
+describe("可选 musl 构件与旧双平台齐备规则（ADR-0065）", () => {
+	const archive = { sha256: "a".repeat(64), size: 1, fileName: "x.zip" };
+	const makeRelease = (archives: ReleaseInfo["archives"]): ReleaseInfo => ({
+		version: "0.24.0",
+		archives,
+		status: ReleaseStatus.DONE,
+		createdAt: "2026-11-14T00:00:00.000Z",
+		updatedAt: "2026-11-14T00:00:00.000Z",
+		clientStates: {},
+	});
+
+	it("上传会话 parser 接受 musl 平台，仍拒绝拼错值", () => {
+		expect(
+			parseReleaseUploadCreateInput({
+				version: "0.24.0",
+				platform: "linux-x64-musl",
+				sha256: "a".repeat(64),
+				size: 1,
+			}).platform,
+		).toBe("linux-x64-musl");
+		expect(() =>
+			parseReleaseUploadCreateInput({
+				version: "0.24.0",
+				platform: "linux-arm64-musl",
+				sha256: "a".repeat(64),
+				size: 1,
+			}),
+		).toThrow();
+	});
+
+	it("musl 是可选附加：缺 musl 仍齐备，只有 musl 不齐备", () => {
+		expect(
+			hasAllReleaseArchives(
+				makeRelease({ "win-x64": { ...archive }, "linux-x64": { ...archive } }),
+			),
+		).toBe(true);
+		expect(
+			hasAllReleaseArchives(
+				makeRelease({
+					"win-x64": { ...archive },
+					"linux-x64": { ...archive },
+					"linux-x64-musl": { ...archive },
+				}),
+			),
+		).toBe(true);
+		expect(
+			hasAllReleaseArchives(makeRelease({ "linux-x64-musl": { ...archive } })),
+		).toBe(false);
+	});
+
+	it("musl 上传会话拒绝增量与基线列表，只接受全量", () => {
+		const base = {
+			version: "0.24.0",
+			platform: "linux-x64-musl" as const,
+			sha256: "a".repeat(64),
+			size: 1,
+		};
+		expect(() =>
+			parseReleaseUploadCreateInput({ ...base, artifactKind: "delta" }),
+		).toThrow(/只接受完整构件/);
+		expect(() =>
+			parseReleaseUploadCreateInput({ ...base, fromVersion: "0.23.0" }),
+		).toThrow(/只接受完整构件/);
+		expect(() =>
+			parseReleaseUploadCreateInput({
+				...base,
+				expectedFromVersions: ["0.23.0"],
+			}),
+		).toThrow(/只接受完整构件/);
+		expect(
+			parseReleaseUploadCreateInput({ ...base, artifactKind: "full" })
+				.artifactKind,
+		).toBe("full");
+	});
+});

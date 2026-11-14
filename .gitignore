@@ -39,3 +39,6 @@ packages/client/data/
 
 # 架构图工具的本地工作区（仅本地生成，不入库）
 .archify/
+
+# 本机运维凭据（iStoreOS SSH），不得提交
+istoreos.txt

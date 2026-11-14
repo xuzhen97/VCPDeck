@@ -45,6 +45,8 @@ import {
 	bundleServer,
 } from "./bundle-apps.js";
 import { copyInstallerAsset } from "./release-installer-assets.js";
+import { includeInMuslClientArchive } from "./client-musl-layout.js";
+import { MUSL_INPUT_LOCK_PATH, loadMuslInputLock } from "./musl-inputs.js";
 import {
 	buildFileList,
 	derivePublicKeyPem,
@@ -59,6 +61,8 @@ interface Args {
 	version: string;
 	output: string;
 	nodeConstraint: string;
+	/** 显式开启可选的 linux-x64-musl Client 构件（ADR-0065）；默认不要求 musl 环境。 */
+	includeMuslClient: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -77,7 +81,12 @@ function parseArgs(argv: string[]): Args {
 	if (!/^>=\d+$/.test(nodeConstraint)) {
 		throw new Error(`--node-constraint 格式应为 >=数字: ${nodeConstraint}`);
 	}
-	return { version, output, nodeConstraint };
+	return {
+		version,
+		output,
+		nodeConstraint,
+		includeMuslClient: argv.includes("--include-musl-client"),
+	};
 }
 
 /** 以 argv 数组执行命令（无 shell 拼接）。Windows 下 pnpm/npx 等 shell 包装脚本需经 .cmd。 */
@@ -217,6 +226,13 @@ const stageRequire = createRequire(import.meta.url);
 
 
 /** 组装单个构件的生产部署目录（esbuild 单文件 + frp + 外部依赖精简安装） */
+/** 安装资产源路径：musl 输入锁在 scripts/build/，其余在 scripts/ 根。 */
+export function installerAssetSource(name: string): string {
+	return name === "musl-inputs.lock.json"
+		? join(ROOT, MUSL_INPUT_LOCK_PATH)
+		: join(ROOT, "scripts", name);
+}
+
 async function stagePackage(
 	pkgName: "server" | "client",
 	stagingDir: string,
@@ -297,12 +313,21 @@ async function stagePackage(
 			"install-client.cjs",
 			"install-client-linux.cjs",
 			"install.cjs",
+			"client-procd-layout.cjs",
+			"client-procd-lifecycle.cjs",
+			"procd-archive.cjs",
+			"vcpdeck-client.procd",
+			"install-client-procd.cjs",
+			"uninstall-client-procd.cjs",
+			"upgrade-launcher-procd.cjs",
+			"install-client-procd-bootstrap.sh",
+			"musl-inputs.lock.json",
 			"uninstall-client-bootstrap.sh",
 			"uninstall-client-bootstrap.ps1",
 			"uninstall-client.cjs",
 			"uninstall-client-linux.cjs",
 		]) {
-			copyInstallerAsset(join(ROOT, "scripts", name), join(installerDir, name));
+			copyInstallerAsset(installerAssetSource(name), join(installerDir, name));
 		}
 	}
 
@@ -554,6 +579,138 @@ export async function createArchive(
 		archive.append(signature, { name: "manifest.json.sig" });
 		void archive.finalize();
 	});
+}
+
+/**
+ * 生成 musl Client-only 全量包（ADR-0065）。
+ *
+ * 与双平台包的区别：只保留 client/launcher/installers 三个根，只注入 frpc（不含 frps）；
+ * artifacts 只声明 client；不产出 delta（跨 libc 不可增量）。
+ */
+export async function createMuslClientArchive(
+	stagingDir: string,
+	version: string,
+	output: string,
+): Promise<string> {
+	const baseManifest = JSON.parse(
+		readFileSync(join(stagingDir, "manifest.json"), "utf8"),
+	) as Record<string, unknown>;
+	const privateKeyPem = readReleasePrivateKeyPem();
+
+	const packedFiles = collectFiles(stagingDir, []).filter(
+		(f) =>
+			f.name !== "manifest.json" &&
+			f.name !== "client/release-target.json" &&
+			includeInMuslClientArchive(f.name),
+	);
+	// 描述文件只写入 musl 包与对应签名清单，旧平台包内容保持不变。
+	const descriptorBytes = Buffer.from(
+		`${JSON.stringify(loadMuslInputLock(join(ROOT, MUSL_INPUT_LOCK_PATH)), null, 2)}\n`,
+		"utf8",
+	);
+	const descriptorEntry: ReleaseFileEntry = {
+		path: "client/release-target.json",
+		sha256: createHash("sha256").update(descriptorBytes).digest("hex"),
+		size: descriptorBytes.length,
+		mode: 0o644,
+	};
+	const frpc = gunzipSync(
+		readFileSync(
+			join(stagingDir, "client", "dist", "frp", "linux-x64", "frpc.gz"),
+		),
+	);
+	const frpcEntry: ReleaseFileEntry = {
+		path: "client/dist/frp/linux-x64/frpc",
+		sha256: createHash("sha256").update(frpc).digest("hex"),
+		size: frpc.length,
+		mode: 0o755,
+	};
+	const files: ReleaseFileEntry[] = [
+		...packedFiles.map((f) => ({
+			path: f.name,
+			sha256: f.sha256,
+			size: f.size,
+			mode: f.mode,
+		})),
+		frpcEntry,
+		descriptorEntry,
+	].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+
+	// 先验 musl pty.node 的来源证据，再进清单：缺 build-meta 或 SHA 不符时不允许产出包。
+	assertMuslPtyProvenance(stagingDir, files);
+	const manifest: Record<string, unknown> = {
+		...baseManifest,
+		artifacts: {
+			client: (baseManifest.artifacts as Record<string, unknown>).client,
+		},
+		files,
+	};
+	const manifestJson = JSON.stringify(manifest, null, 2);
+	const signature = signManifest(manifest, privateKeyPem);
+
+	const archivePath = join(ROOT, output, `vcpdeck-${version}-linux-x64-musl.zip`);
+	mkdirSync(join(ROOT, output), { recursive: true });
+	if (existsSync(archivePath)) rmSync(archivePath, { force: true });
+	// 同版本 sidecar：不匹配双平台 SIDECAR_PATTERN，因此永远不会被选为 delta 基线。
+	writeFileSync(
+		join(ROOT, output, `vcpdeck-${version}-linux-x64-musl.manifest.json`),
+		manifestJson,
+	);
+
+	return new Promise((resolvePromise, reject) => {
+		const out = createWriteStream(archivePath);
+		const archive = new ZipArchive({ zlib: { level: 6 } });
+		out.on("close", () => resolvePromise(archivePath));
+		out.on("error", reject);
+		archive.on("error", reject);
+		archive.pipe(out);
+		for (const f of packedFiles) archive.file(f.abs, { name: f.name });
+		archive.append(frpc, { name: frpcEntry.path, mode: 0o755 });
+		archive.append(descriptorBytes, {
+			name: descriptorEntry.path,
+			mode: descriptorEntry.mode,
+		});
+		archive.append(manifestJson, { name: "manifest.json" });
+		archive.append(signature, { name: "manifest.json.sig" });
+		void archive.finalize();
+	});
+}
+
+/**
+ * 校对 musl 包内 pty.node 的来源证据。
+ *
+ * `scripts/build/build-musl-pty.sh` 在真实 musl 环境编译后会在同名目录写出 `build-meta.json`；
+ * 若打包时没有这份证据、平台不符或 SHA-256 不一致，说明它可能是 glibc 产物，直接拒绍打包。
+ * 本地没有 musl 工具链时打包目录里根本不会有 `pty.node`，此处不伪造“已验证”。
+ */
+export function assertMuslPtyProvenance(
+	root: string,
+	entries: readonly Pick<ReleaseFileEntry, "path" | "sha256">[],
+): void {
+	for (const entry of entries) {
+		if (!entry.path.endsWith("prebuilds/linux-x64/pty.node")) continue;
+		const metaPath = join(root, dirname(entry.path), "build-meta.json");
+		let meta: Record<string, unknown>;
+		try {
+			meta = JSON.parse(readFileSync(metaPath, "utf8")) as Record<
+				string,
+				unknown
+			>;
+		} catch {
+			throw new Error(`MUSL_PTY_UNVERIFIED: ${entry.path} 缺少 build-meta.json`);
+		}
+		if (meta.platform !== "linux-x64-musl") {
+			throw new Error(
+				`MUSL_PTY_UNVERIFIED: ${entry.path} 的 build-meta 平台为 ${String(meta.platform)}`,
+			);
+		}
+		const expected = String(meta.ptySha256 ?? "").toLowerCase();
+		if (expected !== entry.sha256.toLowerCase()) {
+			throw new Error(
+				`MUSL_PTY_UNVERIFIED: ${entry.path} 与 build-meta 的 SHA-256 不一致`,
+			);
+		}
+	}
 }
 
 /** 同版本 sidecar 清单文件名：`vcpdeck-<version>-<variant>.manifest.json`。 */
@@ -817,7 +974,7 @@ async function main(): Promise<void> {
 		const results: Array<{
 			name: string;
 			sha256: string;
-			platform: ArchiveVariant;
+			platform: ArchiveVariant | "linux-x64-musl";
 		}> = [];
 		for (const variant of variants) {
 			const archivePath = await createArchive(
@@ -832,12 +989,31 @@ async function main(): Promise<void> {
 			results.push({ name: archivePath, sha256, platform: variant });
 		}
 
+		// 3.0 可选 musl Client-only 全量包：不参与 delta，不要求 Server 侧 musl。
+		if (args.includeMuslClient) {
+			const muslPath = await createMuslClientArchive(
+				stagingDir,
+				args.version,
+				args.output,
+			);
+			const sha256 = createHash("sha256")
+				.update(readFileSync(muslPath))
+				.digest("hex");
+			results.push({
+				name: muslPath,
+				sha256,
+				platform: "linux-x64-musl",
+			});
+		}
+
 		// 3.1 增量包：以输出目录里最近 3 个历史 sidecar 清单为基线求差集。
 		//     旧发布包 manifest 没有 files，不能当基线，所以首个新格式版本自然不产 delta。
 		const outputDir = join(ROOT, args.output);
 		const privateKeyPem = readReleasePrivateKeyPem();
 		const deltaPaths: string[] = [];
 		for (const { name: fullPath, platform } of results) {
+			// musl 不产 delta：跨 libc 的增量组装没有可信基线。
+			if (platform === "linux-x64-musl") continue;
 			deltaPaths.push(
 				...(await buildDeltas({
 					stagingDir,

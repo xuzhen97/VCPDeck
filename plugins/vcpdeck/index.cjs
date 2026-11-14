@@ -32,7 +32,7 @@ var require_version = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.VERSION = void 0;
-    exports2.VERSION = "0.23.19";
+    exports2.VERSION = "0.23.20";
   }
 });
 
@@ -241,9 +241,9 @@ var require_client_installer = __commonJS({
       CLIENT_NOT_FOUND: "CLIENT_INSTALLER_CLIENT_NOT_FOUND"
     };
     function parseClientInstallerPlatform(value) {
-      if (value === "win-x64" || value === "linux-x64")
+      if (value === "win-x64" || value === "linux-x64" || value === "linux-x64-musl")
         return value;
-      throw new Error("platform \u5FC5\u987B\u4E3A win-x64 \u6216 linux-x64");
+      throw new Error("platform \u5FC5\u987B\u4E3A win-x64\u3001linux-x64 \u6216 linux-x64-musl");
     }
     function parseClientInstallerConfigUpdate(value) {
       if (!isRecord3(value) || Object.keys(value).length !== 1 || typeof value.enabled !== "boolean") {
@@ -266,6 +266,114 @@ var require_client_installer = __commonJS({
   }
 });
 
+// ../shared/dist/release-target.js
+var require_release_target = __commonJS({
+  "../shared/dist/release-target.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.RELEASE_PLATFORMS = exports2.REQUIRED_RELEASE_PLATFORMS = void 0;
+    exports2.isReleasePlatform = isReleasePlatform;
+    exports2.parseReleasePlatform = parseReleasePlatform;
+    exports2.clientReleasePlatform = clientReleasePlatform;
+    exports2.parseMuslReleaseTarget = parseMuslReleaseTarget;
+    exports2.selectClientReleaseArchive = selectClientReleaseArchive;
+    var update_js_1 = require_update();
+    exports2.REQUIRED_RELEASE_PLATFORMS = [
+      "win-x64",
+      "linux-x64"
+    ];
+    exports2.RELEASE_PLATFORMS = [
+      "win-x64",
+      "linux-x64",
+      "linux-x64-musl"
+    ];
+    function isReleasePlatform(value) {
+      return typeof value === "string" && exports2.RELEASE_PLATFORMS.includes(value);
+    }
+    function parseReleasePlatform(value) {
+      if (!isReleasePlatform(value)) {
+        throw new Error("platform \u5FC5\u987B\u4E3A win-x64\u3001linux-x64 \u6216 linux-x64-musl");
+      }
+      return value;
+    }
+    function clientReleasePlatform(os, reported) {
+      if (reported !== void 0 && !isReleasePlatform(reported))
+        return void 0;
+      if (os.startsWith("win32")) {
+        return reported === void 0 || reported === "win-x64" ? "win-x64" : void 0;
+      }
+      if (os.startsWith("linux")) {
+        if (reported === void 0)
+          return "linux-x64";
+        return reported === "win-x64" ? void 0 : reported;
+      }
+      return void 0;
+    }
+    var MUSL_RUNTIME_HOSTS = ["nodejs.org", "unofficial-builds.nodejs.org"];
+    function isPlainRecord(value) {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    function requireExactKeys(value, keys, label) {
+      const actual = Object.keys(value).sort();
+      const expected = [...keys].sort();
+      if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+        throw new Error(`${label} \u5B57\u6BB5\u5FC5\u987B\u4E14\u53EA\u80FD\u662F ${keys.join("\u3001")}`);
+      }
+    }
+    function parseMuslReleaseTarget(value) {
+      if (!isPlainRecord(value))
+        throw new Error("release-target \u5FC5\u987B\u662F\u5BF9\u8C61");
+      requireExactKeys(value, ["schema", "platform", "role", "runtime"], "release-target");
+      if (value.schema !== 1)
+        throw new Error("release-target.schema \u5FC5\u987B\u4E3A 1");
+      if (value.platform !== "linux-x64-musl") {
+        throw new Error("release-target.platform \u5FC5\u987B\u4E3A linux-x64-musl");
+      }
+      if (value.role !== "client") {
+        throw new Error("release-target.role \u5FC5\u987B\u4E3A client");
+      }
+      if (!isPlainRecord(value.runtime)) {
+        throw new Error("release-target.runtime \u5FC5\u987B\u662F\u5BF9\u8C61");
+      }
+      requireExactKeys(value.runtime, ["version", "url", "sha256"], "release-target.runtime");
+      const { version, url, sha256 } = value.runtime;
+      if (typeof version !== "string" || !/^24\.\d+\.\d+$/.test(version)) {
+        throw new Error("release-target.runtime.version \u5FC5\u987B\u662F Node 24 \u7248\u672C\u53F7");
+      }
+      if (typeof url !== "string") {
+        throw new Error("release-target.runtime.url \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+      }
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(url);
+      } catch {
+        throw new Error("release-target.runtime.url \u4E0D\u662F\u5408\u6CD5 URL");
+      }
+      const approvedHost = MUSL_RUNTIME_HOSTS.some((host) => host === parsedUrl.hostname);
+      if (parsedUrl.protocol !== "https:" || !approvedHost) {
+        throw new Error(`release-target.runtime.url \u5FC5\u987B\u6765\u81EA https://${MUSL_RUNTIME_HOSTS.join(" \u6216 https://")} \u7684\u9501\u5B9A\u7248\u672C`);
+      }
+      if (parsedUrl.pathname.split("/").pop() !== `node-v${version}-linux-x64-musl.tar.gz`) {
+        throw new Error("release-target.runtime.url \u6587\u4EF6\u540D\u5FC5\u987B\u4E0E\u9501\u5B9A\u7248\u672C\u3001\u5E73\u53F0\u4E00\u81F4");
+      }
+      if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/.test(sha256)) {
+        throw new Error("release-target.runtime.sha256 \u5FC5\u987B\u662F 64 \u4F4D\u5C0F\u5199\u5341\u516D\u8FDB\u5236 SHA-256");
+      }
+      return {
+        schema: 1,
+        platform: "linux-x64-musl",
+        role: "client",
+        runtime: { version, url, sha256 }
+      };
+    }
+    function selectClientReleaseArchive(release, os, reported) {
+      const platform = clientReleasePlatform(os, reported);
+      const archive = platform ? release.archives?.[platform] : void 0;
+      return (0, update_js_1.isReleaseArchiveAvailable)(archive) ? archive : void 0;
+    }
+  }
+});
+
 // ../shared/dist/update.js
 var require_update = __commonJS({
   "../shared/dist/update.js"(exports2) {
@@ -284,6 +392,7 @@ var require_update = __commonJS({
     exports2.isCatchUpTarget = isCatchUpTarget;
     exports2.selectLatestCatchUpTarget = selectLatestCatchUpTarget;
     exports2.platformFromOs = platformFromOs;
+    var release_target_js_1 = require_release_target();
     exports2.CONTROL_PROTOCOL_VERSION = 2;
     exports2.MIN_UPDATE_PLAN_LAUNCHER_VERSION = "0.23.6";
     exports2.ReleaseArtifactErrorCode = {
@@ -343,9 +452,7 @@ var require_update = __commonJS({
       if (typeof value.version !== "string" || !/^\d+\.\d+\.\d+$/.test(value.version)) {
         throw new Error("version \u683C\u5F0F\u5E94\u4E3A x.y.z");
       }
-      if (value.platform !== "win-x64" && value.platform !== "linux-x64") {
-        throw new Error("platform \u5E94\u4E3A win-x64 \u6216 linux-x64");
-      }
+      const platform = (0, release_target_js_1.parseReleasePlatform)(value.platform);
       if (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)) {
         throw new Error("sha256 \u5E94\u4E3A 64 \u4F4D\u5C0F\u5199\u5341\u516D\u8FDB\u5236");
       }
@@ -354,7 +461,7 @@ var require_update = __commonJS({
       }
       const result = {
         version: value.version,
-        platform: value.platform,
+        platform,
         sha256: value.sha256,
         size: value.size
       };
@@ -378,6 +485,9 @@ var require_update = __commonJS({
           throw new Error("expectedFromVersions \u5E94\u4E3A\u81F3\u591A 3 \u4E2A\u4E0D\u91CD\u590D\u7684 x.y.z \u7248\u672C");
         }
         result.expectedFromVersions = list;
+      }
+      if (platform === "linux-x64-musl" && (result.artifactKind === "delta" || result.fromVersion !== void 0 && result.fromVersion !== "" || result.expectedFromVersions !== void 0 && result.expectedFromVersions.length > 0)) {
+        throw new Error("linux-x64-musl \u53EA\u63A5\u53D7\u5B8C\u6574\u6784\u4EF6\uFF0C\u4E0D\u63A5\u53D7\u589E\u91CF\u5305\u6216\u57FA\u7EBF\u5217\u8868");
       }
       return result;
     }
@@ -495,8 +605,7 @@ var require_update = __commonJS({
     }
     function hasAllReleaseArchives(release) {
       const archives = release.archives ?? {};
-      const platforms = ["win-x64", "linux-x64"];
-      return platforms.every((platform) => {
+      return release_target_js_1.REQUIRED_RELEASE_PLATFORMS.every((platform) => {
         const archive = archives[platform];
         if (!isReleaseArchiveAvailable(archive))
           return false;
@@ -2119,6 +2228,7 @@ var require_machine_register = __commonJS({
     exports2.getClientInstallationCompliance = getClientInstallationCompliance;
     exports2.parseMachineRegister = parseMachineRegister;
     var frp_runtime_js_1 = require_frp_runtime();
+    var release_target_js_1 = require_release_target();
     var git_ssh_js_1 = require_git_ssh();
     var tailnet_js_1 = require_tailnet();
     var MAX_CLIENT_ID = 128;
@@ -2132,12 +2242,16 @@ var require_machine_register = __commonJS({
     var MAX_RUN_AS_USER = 256;
     exports2.MachineInstallationMode = {
       SYSTEMD_ROOT_EQUIVALENT: "systemd-root-equivalent",
+      /** ADR-0065：iStoreOS/AX 等 procd 发行版，由 /etc/init.d 启动，进程本身就是 root。 */
+      PROCD_ROOT: "procd-root",
       WINDOWS_SYSTEM_TASK: "windows-system-task",
       LEGACY_PM2: "legacy-pm2"
     };
     exports2.PrivilegedCapabilityMode = {
       SUDO_ALL: "sudo-all",
       WINDOWS_SYSTEM: "windows-system",
+      /** ADR-0065：服务本身就以 root 运行，不需要 sudo 提权。 */
+      DIRECT_ROOT: "direct-root",
       UNAVAILABLE: "unavailable"
     };
     var RETIRED_DETAIL_KEYS = /* @__PURE__ */ new Set(["pi", "p2pTunnel"]);
@@ -2203,6 +2317,7 @@ var require_machine_register = __commonJS({
       const valid = [
         exports2.MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT,
         exports2.MachineInstallationMode.WINDOWS_SYSTEM_TASK,
+        exports2.MachineInstallationMode.PROCD_ROOT,
         exports2.MachineInstallationMode.LEGACY_PM2
       ];
       if (!valid.includes(value.mode)) {
@@ -2218,12 +2333,15 @@ var require_machine_register = __commonJS({
       if (typeof available !== "boolean" || typeof nonInteractive !== "boolean") {
         throw new Error("privileged.available \u4E0E privileged.nonInteractive \u5FC5\u987B\u4E3A boolean");
       }
-      if (mode !== exports2.PrivilegedCapabilityMode.SUDO_ALL && mode !== exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM && mode !== exports2.PrivilegedCapabilityMode.UNAVAILABLE) {
-        throw new Error("privileged.mode \u5FC5\u987B\u4E3A sudo-all\u3001windows-system \u6216 unavailable");
+      if (mode !== exports2.PrivilegedCapabilityMode.SUDO_ALL && mode !== exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM && mode !== exports2.PrivilegedCapabilityMode.DIRECT_ROOT && mode !== exports2.PrivilegedCapabilityMode.UNAVAILABLE) {
+        throw new Error("privileged.mode \u5FC5\u987B\u4E3A sudo-all\u3001direct-root\u3001windows-system \u6216 unavailable");
       }
       const user = requireString(runAsUser, "privileged.runAsUser", MAX_RUN_AS_USER);
-      if ((mode === exports2.PrivilegedCapabilityMode.SUDO_ALL || mode === exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM) && (available !== true || nonInteractive !== true)) {
+      if ((mode === exports2.PrivilegedCapabilityMode.SUDO_ALL || mode === exports2.PrivilegedCapabilityMode.DIRECT_ROOT || mode === exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM) && (available !== true || nonInteractive !== true)) {
         throw new Error(`privileged.mode=${mode} \u5FC5\u987B available=true \u4E14 nonInteractive=true`);
+      }
+      if (mode === exports2.PrivilegedCapabilityMode.DIRECT_ROOT && user !== "root") {
+        throw new Error("privileged.mode=direct-root \u5FC5\u987B runAsUser=root");
       }
       if (mode === exports2.PrivilegedCapabilityMode.UNAVAILABLE && nonInteractive !== false) {
         throw new Error("privileged.mode=unavailable \u5FC5\u987B nonInteractive=false");
@@ -2255,12 +2373,15 @@ var require_machine_register = __commonJS({
       if (!isWin && !isLinux) {
         return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PLATFORM_UNSUPPORTED };
       }
-      const expected = isWin ? exports2.MachineInstallationMode.WINDOWS_SYSTEM_TASK : exports2.MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT;
-      if (mode !== expected) {
+      const modeMatches = isWin ? mode === exports2.MachineInstallationMode.WINDOWS_SYSTEM_TASK : mode === exports2.MachineInstallationMode.SYSTEMD_ROOT_EQUIVALENT || mode === exports2.MachineInstallationMode.PROCD_ROOT;
+      if (!modeMatches) {
+        return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PLATFORM_MODE_MISMATCH };
+      }
+      if (client.releasePlatform === "linux-x64-musl" && (!isLinux || mode !== exports2.MachineInstallationMode.PROCD_ROOT)) {
         return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PLATFORM_MODE_MISMATCH };
       }
       const privileged = client.capabilityDetails?.privileged;
-      const expectedPrivilege = isWin ? exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM : exports2.PrivilegedCapabilityMode.SUDO_ALL;
+      const expectedPrivilege = isWin ? exports2.PrivilegedCapabilityMode.WINDOWS_SYSTEM : mode === exports2.MachineInstallationMode.PROCD_ROOT ? exports2.PrivilegedCapabilityMode.DIRECT_ROOT : exports2.PrivilegedCapabilityMode.SUDO_ALL;
       if (privileged === void 0 || privileged.mode !== expectedPrivilege || privileged.available !== true || privileged.nonInteractive !== true) {
         return { compliant: false, reason: exports2.ClientInstallationComplianceReason.PRIVILEGE_NONCOMPLIANT };
       }
@@ -2334,6 +2455,9 @@ var require_machine_register = __commonJS({
           parsedDetails.tailnet = (0, tailnet_js_1.parseTailnetCapability)(details.tailnet);
         }
         result.capabilityDetails = parsedDetails;
+      }
+      if (value.releasePlatform !== void 0) {
+        result.releasePlatform = (0, release_target_js_1.parseReleasePlatform)(value.releasePlatform);
       }
       if (value.installation !== void 0) {
         result.installation = parseMachineInstallation(value.installation);
@@ -3857,6 +3981,7 @@ var require_dist = __commonJS({
       return client_installer_js_1.parseClientInstallerPlatform;
     } });
     __exportStar(require_update(), exports2);
+    __exportStar(require_release_target(), exports2);
     var git_ssh_js_1 = require_git_ssh();
     Object.defineProperty(exports2, "GIT_SSH_FAILURE_CODES", { enumerable: true, get: function() {
       return git_ssh_js_1.GIT_SSH_FAILURE_CODES;

@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "platform": "linux-x64-musl",
+  "role": "client",
+  "runtime": {
+    "version": "24.22.3",
+    "url": "https://nodejs.org/dist/v24.22.3/node-v24.22.3-linux-x64-musl.tar.gz",
+    "sha256": "5499b663f62c72093715da98f4aea6f83427ad8bab9cf9c75f0924e0e456ce14"
+  }
+}

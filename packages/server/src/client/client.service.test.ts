@@ -717,3 +717,83 @@ describe("ClientService 操作者注解", () => {
 		});
 	});
 });
+
+describe("ClientService iStoreOS musl/procd 投影（ADR-0065）", () => {
+	it("register 持久化 releasePlatform 与 procd-root 安装模式", async () => {
+		const prisma = prismaMock() as never;
+		const service = new ClientService(prisma);
+
+		await service.register(
+			{
+				...registerDto,
+				os: "linux 6.6.144",
+				releasePlatform: "linux-x64-musl",
+				installation: { mode: "procd-root" },
+				capabilityDetails: {
+					privileged: {
+						available: true,
+						mode: "direct-root",
+						nonInteractive: true,
+						runAsUser: "root",
+					},
+				},
+			},
+			"socket-1",
+		);
+
+		const upsert = (prisma as { client: { upsert: ReturnType<typeof vi.fn> } })
+			.client.upsert;
+		const args = upsert.mock.calls[0]?.[0] as {
+			create: { capabilityDetails: string };
+		};
+		const stored = JSON.parse(args.create.capabilityDetails) as Record<
+			string,
+			unknown
+		>;
+		expect(stored.releasePlatform).toBe("linux-x64-musl");
+		expect(stored.installation).toEqual({ mode: "procd-root" });
+	});
+
+	it("listAll 投影已持久化的 releasePlatform（旧记录不推断）", async () => {
+		const findMany = vi.fn().mockResolvedValue([
+			{
+				...clientRow,
+				capabilityDetails: JSON.stringify({ releasePlatform: "linux-x64-musl" }),
+			},
+			{ ...clientRow, id: "c2", capabilityDetails: "{}" },
+		]);
+		const service = new ClientService(prismaMock({ findMany }) as never);
+
+		const clients = await service.listAll();
+
+		expect(clients[0]?.releasePlatform).toBe("linux-x64-musl");
+		expect(clients[1]?.releasePlatform).toBeUndefined();
+	});
+
+	it("getInstallerStatus 对 direct-root 报通用特权，sudo 字段保持 null", async () => {
+		const findUnique = vi.fn().mockResolvedValue({
+			...clientRow,
+			name: "nas",
+			capabilityDetails: JSON.stringify({
+				privileged: {
+					available: true,
+					mode: "direct-root",
+					nonInteractive: true,
+					runAsUser: "root",
+				},
+				installation: { mode: "procd-root" },
+				releasePlatform: "linux-x64-musl",
+			}),
+		});
+		const service = new ClientService(prismaMock({ findUnique }) as never);
+
+		const status = await service.getInstallerStatus("c1");
+
+		expect(status.installationMode).toBe("procd-root");
+		expect(status.privilegedMode).toBe("direct-root");
+		expect(status.privilegedAvailable).toBe(true);
+		expect(status.privilegedNonInteractive).toBe(true);
+		expect(status.nonInteractiveSudo).toBeNull();
+		expect(status.releasePlatform).toBe("linux-x64-musl");
+	});
+});

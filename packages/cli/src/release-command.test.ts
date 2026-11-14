@@ -173,10 +173,22 @@ describe("release command", () => {
 			});
 			expect(f.sessions[0]).toMatchObject({
 				platform: "win-x64",
-				artifactKind: "full",
-				fromVersion: "",
-				expectedFromVersions: ["1.2.2"],
+				artifactKind: "delta",
+				fromVersion: "1.2.2",
 			});
+			// 上传顺序：增量先行，双平台 full 最后（服务端在双平台齐备后才启动更新）。
+			expect(f.sessions.slice(2)).toEqual([
+				expect.objectContaining({
+					platform: "win-x64",
+					artifactKind: "full",
+					expectedFromVersions: ["1.2.2"],
+				}),
+				expect.objectContaining({
+					platform: "linux-x64",
+					artifactKind: "full",
+					fromVersion: "",
+				}),
+			]);
 			expect(deltas.every((s) => !("expectedFromVersions" in s))).toBe(true);
 		});
 
@@ -197,6 +209,30 @@ describe("release command", () => {
 			).toMatchObject({
 				artifactKind: "full",
 				expectedFromVersions: ["1.2.0", "1.2.1", "1.2.2"],
+			});
+		});
+
+		it("validateArchives 接受可选 musl 全量包，并优先上传 musl 构件", async () => {
+			const f = await uploadSessionsFixture([
+				full("linux-x64"),
+				full("win-x64"),
+				full("linux-x64-musl"),
+			]);
+
+			await runUploadFixture(f);
+
+			expect(f.sessions).toHaveLength(3);
+			expect(f.sessions[0]).toMatchObject({
+				platform: "linux-x64-musl",
+				artifactKind: "full",
+			});
+			const withExpected = f.sessions.filter(
+				(s) => "expectedFromVersions" in s,
+			);
+			expect(withExpected).toHaveLength(1);
+			expect(withExpected[0]).toMatchObject({
+				platform: "linux-x64",
+				expectedFromVersions: [],
 			});
 		});
 
@@ -420,6 +456,25 @@ describe("release command", () => {
 				name: "拒绝重复文件名",
 				names: [full("win-x64"), full("win-x64"), full("linux-x64")],
 				message: "构件文件名不得重复",
+			},
+			{
+				name: "拒绝 musl 增量包",
+				names: [
+					full("win-x64"),
+					full("linux-x64"),
+					delta("linux-x64-musl", "1.2.2"),
+				],
+				message: "linux-x64-musl 只接受 full 构件",
+			},
+			{
+				name: "拒绝重复的 musl 全量包",
+				names: [
+					full("win-x64"),
+					full("linux-x64"),
+					full("linux-x64-musl"),
+					"vcpdeck-1.2.3-linux-x64-musl-delta-1.2.2.zip",
+				],
+				message: "linux-x64-musl 最多只能提供一个构件",
 			},
 		];
 		for (const { name, names, message } of rejectCases) {

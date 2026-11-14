@@ -12,10 +12,13 @@ import {
 	ReleaseRetryErrorCode,
 	ReleaseStatus,
 	VERSION,
+	clientReleasePlatform,
 	platformFromOs,
 	isReleaseArchiveAvailable,
+	selectClientReleaseArchive,
 	type ReleaseClientEntry,
 	type ReleaseInfo,
+	type ReleasePlatform,
 	type ServerShutdownNotice,
 	type UpdateRequest,
 } from "@vcpdeck/shared";
@@ -67,7 +70,13 @@ import { ReleaseCleanupService } from "./release-cleanup.service.js";
 export interface ClientUpdateChannel {
 	/** 在线客户端及其版本与注册 os（用于选择对应平台的更新包） */
 	listOnlineClients(): Promise<
-		Array<{ clientId: string; clientVersion: string; os: string }>
+		Array<{
+			clientId: string;
+			clientVersion: string;
+			os: string;
+			/** Client 自报的真实运行平台（ADR-0065）；旧 Client 缺省 */
+			releasePlatform?: ReleasePlatform;
+		}>
 	>;
 	sendUpdateRequest(clientId: string, req: UpdateRequest): void;
 	broadcastShutdown(notice: ServerShutdownNotice): void;
@@ -486,17 +495,29 @@ export class ReleaseOrchestrator {
 	private async updateOneClient(
 		version: string,
 		release: ReleaseInfo,
-		client: { clientId: string; clientVersion: string; os: string },
+		client: {
+			clientId: string;
+			clientVersion: string;
+			os: string;
+			releasePlatform?: ReleasePlatform;
+		},
 	): Promise<void> {
 		if (!release) return;
-		const platform = platformFromOs(client.os);
-		const clientArchive = platform ? release.archives[platform] : undefined;
-		if (!platform || !isReleaseArchiveAvailable(clientArchive)) {
+		// 旧 Client 未上报平台时按 os 推导；显式 musl 绝不回落到 glibc 包。
+		const platform = clientReleasePlatform(client.os, client.releasePlatform);
+		const clientArchive = selectClientReleaseArchive(
+			release,
+			client.os,
+			client.releasePlatform,
+		);
+		if (!platform || !clientArchive) {
 			await this.releases.markClientState(
 				version,
 				client.clientId,
 				ReleaseClientState.FAILED,
-				`平台不受支持或构件缺失: ${client.os || "unknown"}`,
+				client.releasePlatform === "linux-x64-musl"
+					? "缺少 linux-x64-musl 构件，拒绝下发跨 libc 更新包"
+					: `平台不受支持或构件缺失: ${client.os || "unknown"}`,
 				{ kind: "permanent" },
 			);
 			return;
