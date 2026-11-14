@@ -264,20 +264,61 @@ function installFileSync(source: string, target: string, mode: string): void {
 	});
 }
 
+/**
+ * 从官方 unit 里取 tailscaled 的绝对路径。
+ *
+ * 官方 tarball 的 unit 写死 `ExecStart=/usr/sbin/tailscaled`，落盘位置必须跟着它走，
+ * 否则 systemd 报 203/EXEC；解析不到绝对路径时按 1.104.5 的布局回退。
+ */
+export function tailscaledDaemonPath(unitText: string): string {
+	const match = /^ExecStart=\s*(\S+)/m.exec(unitText);
+	const candidate = match?.[1];
+	return candidate?.startsWith("/") ? candidate : "/usr/sbin/tailscaled";
+}
+
+/** Linux 落盘计划：source 相对解压后的材料根目录，target 为系统绝对路径。 */
+export function linuxInstallPlan(
+	unitText: string,
+): { source: string; target: string; mode: string }[] {
+	return [
+		{
+			source: "tailscaled",
+			target: tailscaledDaemonPath(unitText),
+			mode: "0755",
+		},
+		{ source: "tailscale", target: "/usr/local/bin/tailscale", mode: "0755" },
+		{
+			source: "systemd/tailscaled.service",
+			target: "/etc/systemd/system/tailscaled.service",
+			mode: "0644",
+		},
+		{
+			source: "systemd/tailscaled.defaults",
+			target: "/etc/default/tailscaled",
+			mode: "0644",
+		},
+	];
+}
+
 async function placeLinuxFiles(extractDir: string): Promise<void> {
 	const entries = await fs.readdir(extractDir, { withFileTypes: true });
 	const root = entries.find(
 		(entry) => entry.isDirectory() && entry.name.startsWith("tailscale_"),
 	);
 	const base = root ? join(extractDir, root.name) : extractDir;
-	for (const binary of ["tailscale", "tailscaled"]) {
-		installFileSync(join(base, binary), join("/usr/local/bin", binary), "0755");
+	const unitSource = join(base, "systemd", "tailscaled.service");
+	const unitText = await fs.readFile(unitSource, "utf8");
+	// unit 既按 ExecStart 的绝对路径查找二进制，又依赖
+	// EnvironmentFile=/etc/default/tailscaled（无 `-` 前缀，缺文件即拒绝启动），
+	// 两者缺一 systemctl 都会失败。
+	try {
+		await fs.access(join(base, "systemd", "tailscaled.defaults"));
+	} catch {
+		throw installError("TAILNET_INSTALL_FAILED", "安装包缺少 tailscaled.defaults");
 	}
-	installFileSync(
-		join(base, "systemd", "tailscaled.service"),
-		"/etc/systemd/system/tailscaled.service",
-		"0644",
-	);
+	for (const file of linuxInstallPlan(unitText)) {
+		installFileSync(join(base, file.source), file.target, file.mode);
+	}
 }
 
 /** 生产默认依赖。 */

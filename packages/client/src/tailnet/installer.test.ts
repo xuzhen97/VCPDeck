@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import { privileged } from "../privileged-command.js";
 import {
 	installTailnet,
+	linuxInstallPlan,
+	tailscaledDaemonPath,
 	TAILNET_ARTIFACT_SHA256,
 	type TailnetInstallDeps,
 	type TailnetInstallRunResult,
@@ -174,5 +176,68 @@ describe("Tailnet 安装器", () => {
 			command: "sudo",
 			args: ["-n", "systemctl", "enable", "--now", "tailscaled"],
 		});
+	});
+});
+
+describe("Linux 落盘计划", () => {
+	/** 1.104.5 官方 tarball 内 tailscaled.service 的关键内容。 */
+	const OFFICIAL_UNIT = `[Unit]
+Description=Tailscale node agent
+
+[Service]
+EnvironmentFile=/etc/default/tailscaled
+ExecStart=/usr/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=\${PORT} $FLAGS
+ExecStopPost=/usr/sbin/tailscaled --cleanup
+
+[Install]
+WantedBy=multi-user.target
+`;
+
+	it("守护进程按 unit 的 ExecStart 路径落盘，而不是一律放进 /usr/local/bin", () => {
+		expect(tailscaledDaemonPath(OFFICIAL_UNIT)).toBe("/usr/sbin/tailscaled");
+		const daemon = linuxInstallPlan(OFFICIAL_UNIT).find(
+			(file) => file.source === "tailscaled",
+		);
+		expect(daemon).toEqual({
+			source: "tailscaled",
+			target: "/usr/sbin/tailscaled",
+			mode: "0755",
+		});
+	});
+
+	it("落盘路径与 unit 的 ExecStart、ExecStopPost 保持一致", () => {
+		const target =
+			linuxInstallPlan(OFFICIAL_UNIT).find((file) => file.source === "tailscaled")
+				?.target ?? "";
+		expect(OFFICIAL_UNIT).toContain(`ExecStart=${target} `);
+		expect(OFFICIAL_UNIT).toContain(`ExecStopPost=${target} `);
+	});
+
+	it("补齐 EnvironmentFile 指向的 /etc/default/tailscaled", () => {
+		expect(OFFICIAL_UNIT).toContain("EnvironmentFile=/etc/default/tailscaled");
+		expect(linuxInstallPlan(OFFICIAL_UNIT)).toContainEqual({
+			source: "systemd/tailscaled.defaults",
+			target: "/etc/default/tailscaled",
+			mode: "0644",
+		});
+	});
+
+	it("固定落盘目标覆盖 CLI、unit 与 defaults", () => {
+		expect(linuxInstallPlan(OFFICIAL_UNIT).map((file) => file.target)).toEqual([
+			"/usr/sbin/tailscaled",
+			"/usr/local/bin/tailscale",
+			"/etc/systemd/system/tailscaled.service",
+			"/etc/default/tailscaled",
+		]);
+	});
+
+	it("unit 换路径时跟随，解析不到绝对路径时按官方布局回退", () => {
+		expect(
+			tailscaledDaemonPath("[Service]\nExecStart=/opt/ts/tailscaled --cleanup\n"),
+		).toBe("/opt/ts/tailscaled");
+		expect(tailscaledDaemonPath("[Service]\nExecStart=tailscaled\n")).toBe(
+			"/usr/sbin/tailscaled",
+		);
+		expect(tailscaledDaemonPath("")).toBe("/usr/sbin/tailscaled");
 	});
 });
